@@ -1275,3 +1275,117 @@ fn cached_artifacts_are_owner_only() {
     );
     assert_eq!(module_mode, 0o600, "module artifact mode");
 }
+
+// ── Cache-root contract (#7066, #7067) ──────────────────────────────────────
+
+fn absolute_cache_path(unix: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!(
+            r"C:\{}",
+            unix.trim_start_matches('/').replace('/', r"\")
+        ))
+    } else {
+        PathBuf::from(unix)
+    }
+}
+
+/// An explicitly configured cache directory is honored verbatim, and its
+/// `packs` family lives beneath it. That asymmetry with a discovered root is
+/// deliberate: collapsing them would move every existing bytecode cache.
+#[test]
+fn an_absolute_override_is_the_bytecode_directory_itself() {
+    let override_path = absolute_cache_path("/tmp/harn-cache");
+    let root = cache_root_from(Some(override_path.clone()), None, None)
+        .expect("an absolute override is valid")
+        .expect("a root resolves");
+    assert_eq!(root.bytecode_dir(), override_path);
+    assert_eq!(root.packs_dir(), override_path.join("packs"));
+}
+
+/// A discovered root is a `harn` cache home; each family gets a subdirectory.
+#[test]
+fn a_discovered_root_gives_each_family_a_subdirectory() {
+    let xdg = absolute_cache_path("/xdg");
+    let from_xdg = cache_root_from(None, Some(xdg.clone()), None)
+        .expect("valid")
+        .expect("a root resolves");
+    assert_eq!(from_xdg.bytecode_dir(), xdg.join("harn").join("bytecode"));
+    assert_eq!(from_xdg.packs_dir(), xdg.join("harn").join("packs"));
+
+    let home = absolute_cache_path("/home/someone");
+    let from_home = cache_root_from(None, None, Some(home.clone()))
+        .expect("valid")
+        .expect("a root resolves");
+    assert_eq!(
+        from_home.bytecode_dir(),
+        home.join(".cache").join("harn").join("bytecode")
+    );
+}
+
+/// #7066: an override the operator set but Harn cannot honor is a hard error,
+/// never a silent downgrade. Empty previously resolved the cache to the empty
+/// path while the adjacent `XDG_CACHE_HOME` branch correctly fell through.
+#[test]
+fn an_empty_override_is_rejected() {
+    assert_eq!(
+        cache_root_from(
+            Some(PathBuf::new()),
+            None,
+            Some(absolute_cache_path("/home/someone"))
+        ),
+        Err(CacheDirError::Empty),
+        "an empty override must not fall through to the default root"
+    );
+}
+
+/// #7067: a relative override would make the cache location follow the working
+/// directory, so the same process run from two directories would keep two
+/// unrelated caches.
+#[test]
+fn a_relative_override_is_rejected() {
+    let error = cache_root_from(
+        Some(PathBuf::from("relative/cache")),
+        None,
+        Some(absolute_cache_path("/home/someone")),
+    )
+    .expect_err("a relative override must be rejected");
+    assert_eq!(
+        error,
+        CacheDirError::Relative(PathBuf::from("relative/cache"))
+    );
+    // The message names the variable and the offending value so an operator
+    // can act on it without reading the source.
+    let rendered = error.to_string();
+    assert!(rendered.contains(CACHE_DIR_ENV), "message: {rendered}");
+    assert!(rendered.contains("relative/cache"), "message: {rendered}");
+}
+
+/// `XDG_CACHE_HOME` is not Harn's own knob: the XDG spec says a relative value
+/// is ignored, so an unusable one falls through instead of failing the process.
+#[test]
+fn an_unusable_xdg_value_falls_through_rather_than_failing() {
+    let home = absolute_cache_path("/home/someone");
+    for unusable in [PathBuf::new(), PathBuf::from("relative/cache")] {
+        let root = cache_root_from(None, Some(unusable.clone()), Some(home.clone()))
+            .expect("an unusable XDG value must not fail the process")
+            .expect("the home root still resolves");
+        assert_eq!(
+            root.bytecode_dir(),
+            home.join(".cache").join("harn").join("bytecode"),
+            "unusable XDG value {unusable:?} should have fallen through"
+        );
+    }
+}
+
+/// #7067: with nothing configured and no home directory, there is no cache
+/// location. The old code fell back to a working-directory-relative path, so
+/// compiled bytecode was read from and written to whatever directory the
+/// process happened to be in. Caching is off instead.
+#[test]
+fn no_resolvable_root_disables_the_cache_rather_than_using_the_working_directory() {
+    assert_eq!(
+        cache_root_from(None, None, None).expect("not an operator error"),
+        None,
+        "nothing configured and no home must not fall back to a relative path"
+    );
+}

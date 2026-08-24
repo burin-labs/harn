@@ -364,10 +364,12 @@ fn intern_diag_str(value: &str) -> Option<&'static str> {
     })
 }
 
-fn cache_path(key: &[u8; 32]) -> PathBuf {
-    bytecode_cache::cache_dir()
-        .join("check")
-        .join(format!("{}.harncheck", hex(key)))
+fn cache_path(key: &[u8; 32]) -> Option<PathBuf> {
+    Some(
+        bytecode_cache::cache_dir()?
+            .join("check")
+            .join(format!("{}.harncheck", hex(key))),
+    )
 }
 
 // ── Load / store ────────────────────────────────────────────────────────────
@@ -383,7 +385,7 @@ pub(super) fn load(
     if !enabled() {
         return None;
     }
-    let bytes = std::fs::read(cache_path(key)).ok()?;
+    let bytes = std::fs::read(cache_path(key)?).ok()?;
     let cached: CachedCheckResult = serde_json::from_slice(&bytes).ok()?;
     if cached.schema != RESULT_CACHE_SCHEMA {
         return None;
@@ -453,7 +455,9 @@ pub(super) fn store(key: &[u8; 32], checked: &CheckedFile, probes: Vec<Probe>) {
         rendered_text: checked.text.rendered.clone(),
         probes,
     };
-    let path = cache_path(key);
+    let Some(path) = cache_path(key) else {
+        return;
+    };
     let Some(parent) = path.parent() else {
         return;
     };

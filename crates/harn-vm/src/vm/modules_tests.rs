@@ -1377,7 +1377,9 @@ fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
     );
     for path in [
         bytecode_cache::adjacent_module_cache_path(&dep).unwrap(),
-        bytecode_cache::cache_dir().join(key.module_filename()),
+        bytecode_cache::cache_dir()
+            .expect("cache dir resolves in tests")
+            .join(key.module_filename()),
     ] {
         match std::fs::remove_file(&path) {
             Ok(()) => {}

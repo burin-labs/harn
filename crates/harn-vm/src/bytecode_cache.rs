@@ -279,58 +279,168 @@ impl CacheKey {
     }
 }
 
-/// Returns the directory the shared cache lives in. Honors
-/// `$HARN_CACHE_DIR`, then `$XDG_CACHE_HOME/harn/bytecode`, then
-/// `$HOME/.cache/harn/bytecode`. The directory is *not* created here —
-/// [`store`] creates it lazily on write so read-only environments don't
-/// pay an mkdir cost.
-pub fn cache_dir() -> PathBuf {
-    if let Some(custom) = std::env::var_os(CACHE_DIR_ENV) {
-        return PathBuf::from(custom);
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-        let xdg = PathBuf::from(xdg);
-        if !xdg.as_os_str().is_empty() {
-            return xdg.join("harn").join("bytecode");
+/// Why a configured cache root cannot be used.
+///
+/// Only ever produced for an *explicitly configured* `$HARN_CACHE_DIR`. A
+/// value the operator set and Harn cannot honor is an error, never a silent
+/// downgrade.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheDirError {
+    /// `$HARN_CACHE_DIR` is set to an empty value.
+    Empty,
+    /// `$HARN_CACHE_DIR` is relative, so the cache location would change with
+    /// the working directory.
+    Relative(PathBuf),
+}
+
+impl std::fmt::Display for CacheDirError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(
+                formatter,
+                "{CACHE_DIR_ENV} is set but empty; unset it to use the default cache location, \
+                 or set it to an absolute path"
+            ),
+            Self::Relative(path) => write!(
+                formatter,
+                "{CACHE_DIR_ENV} must be an absolute path, got {}; a relative cache directory \
+                 moves with the working directory, so the same process run from two directories \
+                 would keep two unrelated caches",
+                path.display()
+            ),
         }
     }
-    if let Some(home) = crate::user_dirs::home_dir() {
-        return home.join(".cache").join("harn").join("bytecode");
+}
+
+impl std::error::Error for CacheDirError {}
+
+/// A validated location for this user's Harn caches.
+///
+/// The two shapes are not interchangeable, and the difference is load-bearing:
+/// `$HARN_CACHE_DIR` *is* the bytecode directory (its `packs` sibling lives
+/// beneath it), while a discovered root is a `harn` cache home whose families
+/// each get a named subdirectory. Collapsing them would move every existing
+/// bytecode cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CacheRoot {
+    Explicit(PathBuf),
+    Discovered(PathBuf),
+}
+
+impl CacheRoot {
+    fn bytecode_dir(&self) -> PathBuf {
+        match self {
+            Self::Explicit(path) => path.clone(),
+            Self::Discovered(path) => path.join("bytecode"),
+        }
     }
-    // Final fallback: a directory beside the binary's working dir. Mostly
-    // hit in tests that scrub HOME from the environment.
-    PathBuf::from(".harn-cache").join("bytecode")
+
+    fn packs_dir(&self) -> PathBuf {
+        match self {
+            Self::Explicit(path) | Self::Discovered(path) => path.join("packs"),
+        }
+    }
+}
+
+/// The one owner of where this user's bytecode and pack caches live.
+///
+/// `Ok(None)` means no root resolves at all — no override, no `XDG_CACHE_HOME`,
+/// no home directory — in which case caching is off for this process. It is
+/// deliberately not a working-directory-relative fallback: that made the cache
+/// location depend on where the process happened to be started, so the same
+/// process kept two unrelated caches and neither warmed the other, and it read
+/// and wrote compiled bytecode in a directory that may not be under the
+/// operator's control.
+///
+/// [`cache_dir`] and [`packs_cache_dir`] both derive from this and neither
+/// reads the environment again.
+fn cache_root() -> Result<Option<CacheRoot>, CacheDirError> {
+    cache_root_from(
+        std::env::var_os(CACHE_DIR_ENV).map(PathBuf::from),
+        std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
+        crate::user_dirs::home_dir(),
+    )
+}
+
+/// The deterministic core of [`cache_root`], with the three inputs supplied.
+///
+/// Split out so the contract is testable without mutating process environment
+/// state that parallel tests share.
+fn cache_root_from(
+    explicit: Option<PathBuf>,
+    xdg: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<Option<CacheRoot>, CacheDirError> {
+    if let Some(custom) = explicit {
+        if custom.as_os_str().is_empty() {
+            return Err(CacheDirError::Empty);
+        }
+        if !custom.is_absolute() {
+            return Err(CacheDirError::Relative(custom));
+        }
+        return Ok(Some(CacheRoot::Explicit(custom)));
+    }
+    if let Some(xdg) = xdg {
+        // Unlike `$HARN_CACHE_DIR` this is not Harn's own knob, and the XDG
+        // spec says a relative value must be ignored rather than rejected, so
+        // an unusable value falls through to the home directory instead of
+        // failing the process.
+        if !xdg.as_os_str().is_empty() && xdg.is_absolute() {
+            return Ok(Some(CacheRoot::Discovered(xdg.join("harn"))));
+        }
+    }
+    if let Some(home) = home {
+        return Ok(Some(CacheRoot::Discovered(
+            home.join(".cache").join("harn"),
+        )));
+    }
+    Ok(None)
+}
+
+/// Validate the cache configuration once, at process startup.
+///
+/// Returns `Ok(None)` when the cache is usable, or `Ok(Some(reason))` when no
+/// root resolves and caching is therefore off — the caller emits that reason
+/// as a single warning line. An `Err` is an operator-configured value Harn
+/// cannot honor and should stop the process.
+pub fn check_cache_config() -> Result<Option<&'static str>, CacheDirError> {
+    Ok(cache_root()?.is_none().then_some(
+        "no cache directory resolves (no HARN_CACHE_DIR, no XDG_CACHE_HOME, no home \
+         directory); compiled bytecode will not be cached for this run",
+    ))
+}
+
+/// Returns the directory the shared cache lives in, or `None` when no cache
+/// location resolves. Honors `$HARN_CACHE_DIR`, then `$XDG_CACHE_HOME/harn/bytecode`,
+/// then `$HOME/.cache/harn/bytecode`. The directory is *not* created here —
+/// [`store`] creates it lazily on write so read-only environments don't
+/// pay an mkdir cost.
+pub fn cache_dir() -> Option<PathBuf> {
+    cache_root().ok().flatten().map(|root| root.bytecode_dir())
 }
 
 /// Root for `.harnpack` archives unpacked by `harn run <bundle.harnpack>`.
 /// Each verified bundle is replayed into `<root>/<sanitized-bundle-hash>/`
 /// so re-runs reuse the unpacked tree. Honors `$HARN_CACHE_DIR/packs`
 /// when set, otherwise XDG / `$HOME/.cache/harn/packs`.
-pub fn packs_cache_dir() -> PathBuf {
-    if let Some(custom) = std::env::var_os(CACHE_DIR_ENV) {
-        return PathBuf::from(custom).join("packs");
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-        let xdg = PathBuf::from(xdg);
-        if !xdg.as_os_str().is_empty() {
-            return xdg.join("harn").join("packs");
-        }
-    }
-    if let Some(home) = crate::user_dirs::home_dir() {
-        return home.join(".cache").join("harn").join("packs");
-    }
-    PathBuf::from(".harn-cache").join("packs")
+pub fn packs_cache_dir() -> Option<PathBuf> {
+    cache_root().ok().flatten().map(|root| root.packs_dir())
 }
 
 /// True when the cache is enabled by the current environment.
+///
+/// A cache with nowhere to live is off, not "on, writing somewhere arbitrary".
+/// That is the state a missing cache root degrades into, so every read and
+/// write path already routes around it through the checks they had.
 pub fn cache_enabled() -> bool {
-    match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
+    let switched_on = match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
         Some(value) => !matches!(
             value.to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         ),
         None => true,
-    }
+    };
+    switched_on && matches!(cache_root(), Ok(Some(_)))
 }
 
 /// Try to load a cached chunk for `source_path` whose contents are
@@ -363,7 +473,9 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
     if let Some(adjacent) = adjacent_cache_path(source_path) {
         candidates.push((adjacent, true));
     }
-    candidates.push((cache_dir().join(key.filename()), false));
+    if let Some(dir) = cache_dir() {
+        candidates.push((dir.join(key.filename()), false));
+    }
 
     // Candidates are found by entry source hash alone, so a candidate may have
     // been written by a *different* entry with byte-identical source. Its
@@ -502,7 +614,11 @@ pub fn store(key: &CacheKey, chunk: &Chunk, manifest: Option<&ContextManifest>) 
     if !cache_enabled() {
         return Ok(());
     }
-    let dir = cache_dir();
+    // `cache_enabled` is false when no root resolves, so this is reachable
+    // only with a directory in hand.
+    let Some(dir) = cache_dir() else {
+        return Ok(());
+    };
     fs::create_dir_all(&dir)?;
     write_atomic_chunk(&dir.join(key.filename()), key, chunk, manifest)
 }
@@ -546,7 +662,9 @@ pub fn load_module_for_key(source_path: &Path, key: CacheKey) -> ModuleLookupOut
     if let Some(adjacent) = adjacent_module_cache_path(source_path) {
         candidates.push(adjacent);
     }
-    candidates.push(cache_dir().join(key.module_filename()));
+    if let Some(dir) = cache_dir() {
+        candidates.push(dir.join(key.module_filename()));
+    }
     for path in candidates {
         match read_module_if_matches(&path, &key, source_path) {
             Ok(Some(artifact)) => {
@@ -571,7 +689,9 @@ pub fn store_module(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()>
     if !cache_enabled() {
         return Ok(());
     }
-    let dir = cache_dir();
+    let Some(dir) = cache_dir() else {
+        return Ok(());
+    };
     fs::create_dir_all(&dir)?;
     write_atomic_module(&dir.join(key.module_filename()), key, artifact)
 }
