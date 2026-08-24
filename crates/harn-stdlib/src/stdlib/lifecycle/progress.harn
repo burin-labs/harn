@@ -1,0 +1,154 @@
+/**
+ * std/lifecycle/progress — throttled progress reporting for long workflows.
+ *
+ * A healthy long workflow that prints nothing is indistinguishable from a
+ * stuck one, and an operator should not need `ps` and `ls` to tell them apart.
+ * This is the shared shape for saying so: a start line, a heartbeat about once
+ * a minute, an immediate line whenever the observed state actually changes, and
+ * exactly one terminal line.
+ *
+ * A reporter is a value, not a registered object. Each call returns the next
+ * reporter, so parallel stages keep separate identities by construction — two
+ * stages simply hold two reporters, and neither can throttle the other.
+ *
+ * Time comes from `harness.clock.now_ms()`, so `mock_time` / `advance_time`
+ * drive throttling deterministically in tests without a second clock seam.
+ *
+ * Import:
+ *   import { progress_start, progress_tick, progress_finish } from "std/lifecycle/progress"
+ */
+
+/** Default heartbeat spacing: often enough to show life, rare enough not to flood a pipe. */
+pub const PROGRESS_DEFAULT_INTERVAL_MS = 60000
+
+fn __progress_duration(ms) -> string {
+  if ms < 1000 {
+    return to_string(ms) + "ms"
+  }
+  const total_seconds = ms / 1000
+  const minutes = total_seconds / 60
+  const seconds = total_seconds % 60
+  if minutes == 0 {
+    return to_string(seconds) + "s"
+  }
+  return to_string(minutes) + "m" + to_string(seconds) + "s"
+}
+
+fn __progress_emit(harness: Harness, line) {
+  harness.stdio.log(line)
+}
+
+/**
+ * progress_start.
+ *
+ * Announce a stage and return its reporter. `options.interval_ms` overrides the
+ * heartbeat spacing; `options.limit_ms` states the time this stage is expected
+ * to stay within, which the start line reports so an operator knows when
+ * silence has become too long.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: const p = progress_start(harness, "indexing", {limit_ms: 300000})
+ */
+pub fn progress_start(harness: Harness, stage, options = nil) -> dict {
+  const now = harness.clock.now_ms()
+  const interval = options?.interval_ms ?? PROGRESS_DEFAULT_INTERVAL_MS
+  const limit = options?.limit_ms
+  const name = to_string(stage)
+  if limit == nil {
+    __progress_emit(harness, name + ": started")
+  } else {
+    __progress_emit(harness, name + ": started (limit " + __progress_duration(limit) + ")")
+  }
+  return {
+    _type: "progress_reporter",
+    stage: name,
+    interval_ms: interval,
+    limit_ms: limit,
+    started_ms: now,
+    last_emit_ms: now,
+    state: nil,
+    finished: false,
+  }
+}
+
+/**
+ * progress_tick.
+ *
+ * Report where the stage is now. A `state` that differs from the last reported
+ * one prints immediately — a state change is news, and throttling news is how
+ * an operator ends up watching a stale line. Otherwise this prints at most once
+ * per `interval_ms` and is silent in between.
+ *
+ * Returns the next reporter; a finished reporter is returned unchanged.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: p = progress_tick(harness, p, "412/900 files")
+ */
+pub fn progress_tick(harness: Harness, reporter, state = nil) -> dict {
+  if reporter?.finished ?? false {
+    return reporter
+  }
+  const now = harness.clock.now_ms()
+  const elapsed = now - (reporter?.started_ms ?? now)
+  const changed = state != nil && state != reporter?.state
+  const interval = reporter?.interval_ms ?? PROGRESS_DEFAULT_INTERVAL_MS
+  const since_last = now - (reporter?.last_emit_ms ?? now)
+  const due = since_last >= interval
+  if !changed && !due {
+    return reporter
+  }
+  const stage = to_string(reporter?.stage ?? "")
+  const shown = state ?? reporter?.state
+  if shown == nil {
+    __progress_emit(harness, stage + ": running " + __progress_duration(elapsed))
+  } else {
+    __progress_emit(
+      harness,
+      stage + ": running " + __progress_duration(elapsed) + " - " + to_string(shown),
+    )
+  }
+  return reporter + {last_emit_ms: now, state: shown}
+}
+
+/**
+ * progress_finish.
+ *
+ * Close the stage with exactly one terminal line. `outcome` is `"ok"`,
+ * `"failed"`, or `"cancelled"`; anything else is reported verbatim so an
+ * unexpected outcome is visible rather than silently rounded to success.
+ *
+ * Calling this twice prints once: a stage that fails inside a `defer` should
+ * not have to know whether the error path already closed it.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: progress_finish(harness, p, "ok")
+ */
+pub fn progress_finish(harness: Harness, reporter, outcome, detail = nil) -> dict {
+  if reporter?.finished ?? false {
+    return reporter
+  }
+  const now = harness.clock.now_ms()
+  const elapsed = __progress_duration(now - (reporter?.started_ms ?? now))
+  const stage = to_string(reporter?.stage ?? "")
+  const verdict = to_string(outcome)
+  let line = if verdict == "ok" {
+    stage + ": done in " + elapsed
+  } else if verdict == "cancelled" {
+    stage + ": cancelled after " + elapsed
+  } else if verdict == "failed" {
+    stage + ": failed after " + elapsed
+  } else {
+    stage + ": " + verdict + " after " + elapsed
+  }
+  if detail != nil {
+    line = line + " - " + to_string(detail)
+  }
+  __progress_emit(harness, line)
+  return reporter + {finished: true, last_emit_ms: now, outcome: verdict}
+}

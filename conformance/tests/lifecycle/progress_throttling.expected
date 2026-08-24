@@ -1,0 +1,14 @@
+[harn] index: started (limit 5m0s)
+[harn] index: running 1m0s
+[harn] index: running 1m1s - 412/900 files
+[harn] index: done in 1m2s
+[harn] publish: started
+[harn] publish: failed after 5s - registry rejected the tag
+[harn] upload: started
+[harn] upload: cancelled after 2s
+[harn] alpha: started
+[harn] beta: started
+[harn] alpha: running 10s - a-state
+[harn] beta: running 1m0s - b-state
+[harn] alpha: done in 1m0s
+[harn] beta: done in 1m0s

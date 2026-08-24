@@ -1,0 +1,72 @@
+// std/lifecycle/progress under a fake clock.
+//
+// Every line below is the issue's own closing condition: throttling, immediate
+// state-change updates, exactly one terminal message, parallel stages keeping
+// separate identities, and cancellation still emitting a terminal update.
+//
+// The clock is driven through `harness.testing`, so "about once a minute" is asserted rather than waited
+// for, and a silent tick is proved by the absence of a line between two lines
+// that are present.
+import {
+  progress_finish,
+  progress_start,
+  progress_tick,
+} from "std/lifecycle/progress"
+
+pipeline main(harness: Harness, task) {
+  harness.testing.clock_set(0)
+
+  // --- throttling: only the due tick prints -------------------------------
+  let p = progress_start(harness, "index", {interval_ms: 60000, limit_ms: 300000})
+  harness.testing.clock_advance(30000)
+  // Half an interval in, with nothing new to say. Silent.
+  p = progress_tick(harness, p)
+  harness.testing.clock_advance(30000)
+  // The interval has now elapsed, so the heartbeat is due.
+  p = progress_tick(harness, p)
+
+  // --- a state change is news, and is not throttled ------------------------
+  harness.testing.clock_advance(1000)
+  // One second after the heartbeat: far inside the interval, but the state
+  // changed, so this prints anyway.
+  p = progress_tick(harness, p, "412/900 files")
+  harness.testing.clock_advance(1000)
+  // Same state, still inside the interval. Silent.
+  p = progress_tick(harness, p, "412/900 files")
+  progress_finish(harness, p, "ok")
+
+  // --- exactly one terminal message ----------------------------------------
+  harness.testing.clock_set(0)
+  let q = progress_start(harness, "publish")
+  harness.testing.clock_advance(5000)
+  const finished = progress_finish(harness, q, "failed", "registry rejected the tag")
+  // A second close prints nothing, so a `defer` that closes an already-closed
+  // stage cannot double-report.
+  progress_finish(harness, finished, "ok")
+  // Nor can a tick reopen it.
+  progress_tick(harness, finished, "should not appear")
+
+  // --- cancellation still emits a terminal update --------------------------
+  harness.testing.clock_set(0)
+  const c = progress_start(harness, "upload")
+  harness.testing.clock_advance(2000)
+  progress_finish(harness, c, "cancelled")
+
+  // --- parallel stages keep separate identities ----------------------------
+  // Two reporters, interleaved. Advancing time past one stage's interval must
+  // not make the other's tick due, and neither may report the other's state.
+  harness.testing.clock_set(0)
+  let a = progress_start(harness, "alpha", {interval_ms: 10000})
+  let b = progress_start(harness, "beta", {interval_ms: 60000})
+  harness.testing.clock_advance(10000)
+  // alpha is due, beta is not.
+  a = progress_tick(harness, a, "a-state")
+  b = progress_tick(harness, b)
+  harness.testing.clock_advance(50000)
+  // Now beta is due too, and reports only its own elapsed time.
+  b = progress_tick(harness, b, "b-state")
+  progress_finish(harness, a, "ok")
+  progress_finish(harness, b, "ok")
+
+  harness.testing.clock_reset()
+}
