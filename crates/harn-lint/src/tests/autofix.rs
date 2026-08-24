@@ -1,22 +1,10 @@
-//! Cross-rule autofix behavior: multiple fixes in one source, and
-//! graceful no-op when source is unavailable.
+//! Cross-rule autofix behavior: graceful no-op when source is unavailable.
+//!
+//! Multi-fix application is covered by the per-rule suites, which assert a
+//! real before/after delta — see `formatting.rs`, `imports.rs`,
+//! `nil_coalesce.rs`, and `empty_blocks.rs`.
 
 use super::*;
-
-#[test]
-fn test_fix_multiple_fixes_applied() {
-    let source = "pipeline default(task) {\n  const x = 10\n  const y = x == true\n  log(y)\n}";
-    let diags = lint_source(source);
-    let result = apply_fixes(source, &diags);
-    assert!(
-        result.contains("const x = 10"),
-        "let should be fixed to let, got: {result}"
-    );
-    assert!(
-        result.contains("const y = x"),
-        "comparison should be simplified, got: {result}"
-    );
-}
 
 #[test]
 fn test_no_fix_when_source_unavailable() {
