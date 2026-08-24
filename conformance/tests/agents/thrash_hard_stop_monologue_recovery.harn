@@ -36,7 +36,7 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("I should inspect app/Models/Entry.php before editing."),
-      llm_text("I still need to read the Entry model, but I am only narrating."),
+      llm_text("I should inspect APP models Entry PHP before editing!"),
       look_call("look_after_monologue"),
       llm_text("Read the Entry model. ##DONE##"),
     ],
@@ -78,6 +78,47 @@ pipeline default(harness: Harness) {
       harness.stdio.println(receipts[0].checkpoint.warning.pattern)
       harness.stdio.println(receipts[0].checkpoint.tool_count)
       harness.stdio.println(len(decisions))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First I will inspect the Entry model."),
+      llm_text("The controller determines which fields are written."),
+      look_call("look_after_distinct_monologues"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    { ->
+      const session = "distinct-monologue-conformance-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 1,
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the model and controller.", nil, opts) },
+      )
+      const warnings = events_of(captured.events, "agent_loop_stall_warning").filter(
+        { event -> event.pattern == "no_progress_monologue" },
+      )
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(contains(captured.result.tools.successful, "look"))
+      harness.stdio.println(len(warnings))
     },
   )
 }
