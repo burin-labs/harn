@@ -31,6 +31,7 @@ async fn boundary_failure_reaches_acp_as_ext_event() {
     assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
     let params = &notification["params"];
     assert_eq!(params["kind"], "boundary_failure");
+    assert_eq!(params["failureKind"], "unrecognized");
     assert_eq!(params["sessionId"], "session-1");
     assert_eq!(params["boundary"], "text_tool_parse");
     assert_eq!(params["owner"], "harness");
@@ -65,6 +66,7 @@ async fn boundary_failure_omits_an_absent_excerpt() {
 
     let params = &actual[0]["params"];
     assert_eq!(params["kind"], "boundary_failure");
+    assert_eq!(params["failureKind"], "capped");
     assert_eq!(params["boundary"], "provider_admission_gate");
     assert_eq!(params["owner"], "policy");
     assert!(params["excerpt"].is_null());
