@@ -238,7 +238,10 @@ pub mod windows_path;
 pub mod workspace_anchor;
 pub mod workspace_path;
 
-pub use persistent_state::{register_persistent_state_builtins_at_root, PersistentStateRoot};
+pub use persistent_state::{
+    register_persistent_state_builtins_at_root, scope_persistent_state_root, PersistentStateRoot,
+    ScopedPersistentStateRoot,
+};
 pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
 
 pub use actor_chain::{

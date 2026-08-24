@@ -253,6 +253,9 @@ async fn execute_compiled(
                 .tempdir()
                 .map_err(|error| format!("failed to create test state directory: {error}"))?;
             let state_root = test_state.path().join(".harn");
+            let _persistent_state_root_guard = harn_vm::scope_persistent_state_root(
+                harn_vm::PersistentStateRoot::new(&state_root),
+            );
             #[cfg(feature = "hostlib")]
             let _conditional_replace_lock_root =
                 harn_hostlib::fs::scope_conditional_replace_lock_root(

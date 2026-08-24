@@ -33,6 +33,9 @@ fn resolve_root_value(base_dir: &Path, env_value: Option<&str>, default_relative
 }
 
 pub fn state_root(base_dir: &Path) -> PathBuf {
+    if let Some(root) = crate::persistent_state::current_persistent_state_root() {
+        return root;
+    }
     let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
     state_root_value(
         base_dir,
@@ -43,6 +46,9 @@ pub fn state_root(base_dir: &Path) -> PathBuf {
 
 /// Resolve the state root for a path stored in a portable record.
 pub fn state_root_reference(base_dir: &Path) -> PathBuf {
+    if let Some(root) = crate::persistent_state::current_persistent_state_root() {
+        return root;
+    }
     let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
     root_reference_value(
         base_dir,
@@ -100,6 +106,14 @@ fn worktree_root_value(
 pub fn worktree_root(base_dir: &Path) -> PathBuf {
     let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
     let worktree_env_value = std::env::var(HARN_WORKTREE_DIR_ENV).ok();
+    if worktree_env_value
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        if let Some(root) = crate::persistent_state::current_persistent_state_root() {
+            return root.join("worktrees");
+        }
+    }
     worktree_root_value(
         base_dir,
         state_env_value.as_deref(),
