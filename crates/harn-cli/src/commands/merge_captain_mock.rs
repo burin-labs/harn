@@ -569,7 +569,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use harn_vm::orchestration::playground::{self, ScenarioManifest};
+    use harn_vm::orchestration::playground;
     use tower::ServiceExt;
 
     fn make_state() -> ServerState {
@@ -593,8 +593,6 @@ mod tests {
         let dir = tempdir.keep();
         ServerState::new(dir, state)
     }
-
-    fn assert_yaml_manifest_round_trip(_: &ScenarioManifest) {}
 
     #[tokio::test]
     async fn list_pulls_returns_open_prs() {
@@ -707,7 +705,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let _: () =
-            assert_yaml_manifest_round_trip(&playground::load_builtin("single_green").unwrap());
     }
 }
