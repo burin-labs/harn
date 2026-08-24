@@ -140,7 +140,7 @@ Dev-friendly: prints one JSON line per span to stderr. Pipe to `jq` or
 ### `"noop"`
 
 Discards spans. Useful when telemetry is conditionally disabled (e.g.
-`with_telemetry(env_bool("HARN_TELEMETRY", true) ? "langfuse" : "noop")`).
+`with_telemetry(env_bool("APP_TELEMETRY", true) ? "langfuse" : "noop")`).
 
 ## Custom sinks
 
