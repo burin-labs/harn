@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const text = "compression round trip: hello, Harn"
   const bytes = bytes_from_hex("000102fffefd")
   assert_eq(bytes_to_string(gzip_decode(gzip_encode(text))), text)

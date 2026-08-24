@@ -1,5 +1,5 @@
 /** Smoke test: minimal agent_loop call against local llama.cpp. */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let registry = tool_registry()
   registry = tool_define(
     registry,

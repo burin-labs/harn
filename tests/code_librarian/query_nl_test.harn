@@ -22,7 +22,7 @@ fn _ensure_index(code_index: HarnessCodeIndex) {
   return code_index.rebuild({root: CORPUS_ROOT})
 }
 
-fn _row_value(row, key) {
+fn _row_value(row: any, key: any) {
   if type_of(row) != "dict" {
     return ""
   }
@@ -33,7 +33,7 @@ fn _row_value(row, key) {
   return to_string(v)
 }
 
-fn _recall(result, expected, match_key) {
+fn _recall(result: dict, expected: list, match_key: any) {
   const rows = result?.rows ?? []
   let found_count = 0
   for want in expected {
@@ -52,7 +52,7 @@ fn _recall(result, expected, match_key) {
   return found_count
 }
 
-pipeline test_query_pass_through(harness: Harness, task) {
+pipeline test_query_pass_through(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   const result = code_librarian_query(
     harness.code_index,
@@ -63,7 +63,7 @@ pipeline test_query_pass_through(harness: Harness, task) {
   assert_eq(_row_value(rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_compile_path(harness: Harness, task) {
+pipeline test_query_nl_compile_path(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   harness.llm.mock_push_scope()
   harness.llm.mock_enqueue(
@@ -74,7 +74,7 @@ pipeline test_query_nl_compile_path(harness: Harness, task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl(harness, harness.code_index, "Which file defines formatDate?")
+  const r = code_librarian_query_nl(harness, "Which file defines formatDate?")
   harness.llm.mock_pop_scope()
   assert_eq(r.path, "compile")
   assert(!r.cache_hit)
@@ -83,7 +83,7 @@ pipeline test_query_nl_compile_path(harness: Harness, task) {
   assert_eq(_row_value(r.rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_cache_hit_inside_5_minutes(harness: Harness, task) {
+pipeline test_query_nl_cache_hit_inside_5_minutes(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   harness.llm.mock_push_scope()
   harness.llm.mock_enqueue(
@@ -94,15 +94,15 @@ pipeline test_query_nl_cache_hit_inside_5_minutes(harness: Harness, task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path\"}",
     },
   )
-  const r1 = code_librarian_query_nl(harness, harness.code_index, "Where is parseQuery defined?")
-  const r2 = code_librarian_query_nl(harness, harness.code_index, "Where is parseQuery defined?")
+  const r1 = code_librarian_query_nl(harness, "Where is parseQuery defined?")
+  const r2 = code_librarian_query_nl(harness, "Where is parseQuery defined?")
   harness.llm.mock_pop_scope()
   assert(!r1.cache_hit)
   assert(r2.cache_hit)
   assert_eq(_row_value(r2.rows[0], "path"), "src/util.ts")
 }
 
-pipeline test_query_nl_mcts_fallback_when_compile_empty(harness: Harness, task) {
+pipeline test_query_nl_mcts_fallback_when_compile_empty(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   harness.llm.mock_push_scope()
   // Mock a cypher whose execution returns zero rows. The library must
@@ -116,11 +116,7 @@ pipeline test_query_nl_mcts_fallback_when_compile_empty(harness: Harness, task) 
       text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl(
-    harness,
-    harness.code_index,
-    "Where is the formatDate function defined?",
-  )
+  const r = code_librarian_query_nl(harness, "Where is the formatDate function defined?")
   harness.llm.mock_pop_scope()
   assert_eq(r.path, "mcts")
   // MCTS expansion cap is 200; the actual count must be in (0, 200].
@@ -137,7 +133,7 @@ pipeline test_query_nl_mcts_fallback_when_compile_empty(harness: Harness, task) 
   assert(found_util)
 }
 
-pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task) {
+pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   harness.llm.mock_push_scope()
   harness.llm.mock_enqueue(
@@ -150,7 +146,6 @@ pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task) {
   )
   const r = code_librarian_query_nl(
     harness,
-    harness.code_index,
     "Find any function or type containing the word main",
     {mcts_depth_max: 2, mcts_expansions_max: 10},
   )
@@ -160,7 +155,7 @@ pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task) {
   assert(r.mcts_depth <= 2)
 }
 
-pipeline test_query_nl_recall_at_least_80_percent(harness: Harness, task) {
+pipeline test_query_nl_recall_at_least_80_percent(harness: Harness, task: unknown) {
   const _ = _ensure_index(harness.code_index)
   const fixture = _load_fixture(harness.fs)
   const questions = fixture.questions

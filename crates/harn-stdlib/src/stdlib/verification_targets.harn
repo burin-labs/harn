@@ -14,7 +14,7 @@ import { regex_first_capture, truncate_text } from "std/text"
 import "std/verification_core"
 import "std/verification_types"
 
-pub fn __verification_clean_path(value) -> string {
+pub fn __verification_clean_path(value: string?) -> string {
   let path = regex_replace("\\\\", "/", trim(to_string(value ?? "")))
   while starts_with(path, "./") {
     path = substring(path, 2)
@@ -22,7 +22,7 @@ pub fn __verification_clean_path(value) -> string {
   return path
 }
 
-pub fn __verification_path_under(root_value, path_value) -> bool {
+pub fn __verification_path_under(root_value: string?, path_value: string?) -> bool {
   const root = __verification_clean_path(root_value)
   const path = __verification_clean_path(path_value)
   if path == "" {
@@ -34,7 +34,7 @@ pub fn __verification_path_under(root_value, path_value) -> bool {
   return path == root || starts_with(path, root + "/")
 }
 
-pub fn __verification_shell_join(values) -> string {
+pub fn __verification_shell_join(values: list?) -> string {
   let quoted = []
   for value in values ?? [] {
     quoted = quoted + [shell_quote(to_string(value))]
@@ -42,7 +42,7 @@ pub fn __verification_shell_join(values) -> string {
   return join(quoted, " ")
 }
 
-pub fn __verification_render_adapter_value(fs: HarnessFs, value, ctx) {
+pub fn __verification_render_adapter_value(fs: HarnessFs, value: any, ctx: any) {
   if type_of(value) == "string" {
     return fs.render_template(value, ctx)
   }
@@ -63,7 +63,7 @@ pub fn __verification_render_adapter_value(fs: HarnessFs, value, ctx) {
   return value
 }
 
-pub fn __verification_adapter_spec(fs: HarnessFs, row, changed_paths, opts) {
+pub fn __verification_adapter_spec(fs: HarnessFs, row: dict, changed_paths: list?, opts: dict) {
   const spec = row?.spec ?? row?.command
   if spec == nil {
     return nil
@@ -79,21 +79,26 @@ pub fn __verification_adapter_spec(fs: HarnessFs, row, changed_paths, opts) {
   return __verification_render_adapter_value(fs, spec, ctx)
 }
 
-pub fn __verification_adapter_command_options(row, opts) {
+pub fn __verification_adapter_command_options(row: dict, opts: dict) {
   return (opts?.command_options ?? {}) + (row?.command_options ?? {})
 }
 
-pub fn __verification_adapter_id(row, index: int) -> string {
+pub fn __verification_adapter_id(row: dict, index: int) -> string {
   const id = trim(to_string(row?.id ?? row?.name ?? ""))
   return id == "" ? "adapter/" + to_string(index) : id
 }
 
-pub fn __verification_parser_id(row) -> string {
+pub fn __verification_parser_id(row: dict) -> string {
   const parser = trim(to_string(row?.parser_id ?? row?.parser ?? "harn.targets_json.v1"))
   return parser == "" ? "harn.targets_json.v1" : parser
 }
 
-pub fn __verification_target_from_value(value, adapter_id: string, default_kind: string, files) {
+pub fn __verification_target_from_value(
+  value: any,
+  adapter_id: string,
+  default_kind: string,
+  files: any,
+) {
   const base = if type_of(value) == "dict" {
     value
   } else {
@@ -116,7 +121,7 @@ pub fn __verification_target_from_value(value, adapter_id: string, default_kind:
   return out
 }
 
-pub fn __verification_push_target(targets, target) {
+pub fn __verification_push_target(targets: list, target: dict) {
   if target == nil {
     return targets
   }
@@ -132,7 +137,7 @@ pub fn __verification_push_target(targets, target) {
   return targets + [target]
 }
 
-pub fn __verification_json_target_values(data) {
+pub fn __verification_json_target_values(data: dict) {
   if type_of(data) == "list" {
     return data
   }
@@ -145,7 +150,7 @@ pub fn __verification_json_target_values(data) {
   return []
 }
 
-pub fn __verification_parse_json_targets(adapter_id: string, data, changed_paths) {
+pub fn __verification_parse_json_targets(adapter_id: string, data: dict, changed_paths: list) {
   let targets = []
   for item in __verification_json_target_values(data) {
     targets = __verification_push_target(
@@ -156,7 +161,7 @@ pub fn __verification_parse_json_targets(adapter_id: string, data, changed_paths
   return targets
 }
 
-pub fn __verification_parse_line_targets(adapter_id: string, text: string, changed_paths) {
+pub fn __verification_parse_line_targets(adapter_id: string, text: string, changed_paths: list) {
   let targets = []
   for line in text.split("\n") {
     const id = trim(line)
@@ -170,7 +175,7 @@ pub fn __verification_parse_line_targets(adapter_id: string, text: string, chang
   return targets
 }
 
-pub fn __verification_cargo_package_files(package, changed_paths) -> list<string> {
+pub fn __verification_cargo_package_files(package: dict, changed_paths: list) -> list<string> {
   const manifest = __verification_clean_path(package?.manifest_path ?? "")
   const root = dirname(manifest)
   let files: list<string> = []
@@ -182,7 +187,7 @@ pub fn __verification_cargo_package_files(package, changed_paths) -> list<string
   return files
 }
 
-pub fn __verification_cargo_target_names(package) -> list<string> {
+pub fn __verification_cargo_target_names(package: dict) -> list<string> {
   let names: list<string> = []
   for target in package?.targets ?? [] {
     const name = trim(to_string(target?.name ?? target))
@@ -193,7 +198,7 @@ pub fn __verification_cargo_target_names(package) -> list<string> {
   return names
 }
 
-pub fn __verification_parse_cargo_metadata(adapter_id: string, data, changed_paths) {
+pub fn __verification_parse_cargo_metadata(adapter_id: string, data: dict, changed_paths: list) {
   let targets = []
   for package in data?.packages ?? [] {
     const files = __verification_cargo_package_files(package, changed_paths)
@@ -221,7 +226,7 @@ pub fn __verification_parse_cargo_metadata(adapter_id: string, data, changed_pat
   return targets
 }
 
-pub fn __verification_project_targets(project) -> list<string> {
+pub fn __verification_project_targets(project: dict) -> list<string> {
   const raw = project?.targets ?? project?.tasks ?? []
   if type_of(raw) == "dict" {
     return raw.keys().sorted()
@@ -236,7 +241,7 @@ pub fn __verification_project_targets(project) -> list<string> {
   return names.sorted()
 }
 
-pub fn __verification_project_rows(data) {
+pub fn __verification_project_rows(data: dict) {
   const raw = data?.projects ?? data?.workspaces ?? data
   let rows = []
   if type_of(raw) == "dict" {
@@ -251,7 +256,11 @@ pub fn __verification_project_rows(data) {
   return []
 }
 
-pub fn __verification_parse_js_workspace_graph(adapter_id: string, data, changed_paths) {
+pub fn __verification_parse_js_workspace_graph(
+  adapter_id: string,
+  data: dict,
+  changed_paths: list,
+) {
   let targets = []
   for project in __verification_project_rows(data) {
     const root = project?.root ?? project?.sourceRoot ?? project?.source_root ?? ""
@@ -286,11 +295,11 @@ pub fn __verification_parse_js_workspace_graph(adapter_id: string, data, changed
 }
 
 pub fn __verification_parse_adapter_targets(
-  row,
+  row: unknown,
   adapter_id: string,
   parser_id: string,
-  result,
-  changed_paths,
+  result: dict,
+  changed_paths: list,
 ) {
   if parser_id == "harn.targets_lines.v1" || parser_id == "lines.v1" {
     return __verification_parse_line_targets(adapter_id, result?.stdout ?? "", changed_paths)
@@ -308,7 +317,11 @@ pub fn __verification_parse_adapter_targets(
   throw "verification_affected_targets: unsupported parser_id `" + parser_id + "`"
 }
 
-pub fn __verification_code_index_fallback(code_index: HarnessCodeIndex, changed_paths, opts) {
+pub fn __verification_code_index_fallback(
+  code_index: HarnessCodeIndex,
+  changed_paths: list,
+  opts: dict,
+) {
   if opts?.fallback == false {
     return {enabled: false, available: false, targets: []}
   }

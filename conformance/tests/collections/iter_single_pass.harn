@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Iters are single-pass, fused: consuming twice yields [] the second time.
   const it = iter([1, 2, 3])
   harness.stdio.log(it.to_list())

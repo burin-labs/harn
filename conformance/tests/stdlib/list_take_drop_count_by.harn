@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // take_while stops at the first falsy predicate result.
   const xs = [1, 2, 3, 4, 5, 6]
   const taken = xs.take_while({ x -> x < 4 })

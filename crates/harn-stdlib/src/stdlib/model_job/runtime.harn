@@ -29,7 +29,12 @@ pub type ModelJobRunOptions = {
 
 type ModelJobIo = {fs: HarnessFs, net: HarnessNet}
 
-fn __model_job_event(job: ModelJob, kind, at_ms: int, options = {}) -> ModelJobEvent {
+fn __model_job_event(
+  job: ModelJob,
+  kind: string,
+  at_ms: int,
+  options: dict? = {},
+) -> ModelJobEvent {
   const opts = options ?? {}
   let event: ModelJobEvent = {
     schema: "harn.model_job_event.v1",
@@ -284,7 +289,7 @@ fn __model_job_emit_failure(
 fn __model_job_backend_call_result(
   backend: string,
   action: string,
-  call,
+  call: unknown,
 ) -> Result<unknown, ModelJobError> {
   const attempted = try {
     // Keep a backend's returned Result as data so `try` catches only throws.

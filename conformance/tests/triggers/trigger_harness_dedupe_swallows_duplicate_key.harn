@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = harness.runtime.trigger_test_harness("dedupe_swallows_duplicate_key")
   harness.stdio.println(result.ok)
   harness.stdio.println(len(result.emitted) == 1)

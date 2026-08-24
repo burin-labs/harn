@@ -47,7 +47,7 @@ fn receipt_contract(expected_version: int) -> SchemaContract<Receipt> {
   return schema_contract(shape, [matches_context, consistent_fields], true)
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const contract = receipt_contract(2)
   const valid = unwrap(
     schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, contract),

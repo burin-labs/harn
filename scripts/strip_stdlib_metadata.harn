@@ -30,7 +30,7 @@ import {
 } from "./backfill_stdlib_metadata.harn"
 
 /** Inner content of a doc-block line: text after the leading `*`. */
-fn _block_line_content(line) -> string {
+fn _block_line_content(line: string) -> string {
   let s = strip_ws(line)
   if s.starts_with("/**") {
     s = lstrip_ws(s.substring(3, s.len()))
@@ -47,7 +47,7 @@ fn _block_line_content(line) -> string {
  * with only bare identifier arguments. Anything richer (literals,
  * nested calls, multiple statements) is a real example and survives.
  */
-pub fn is_trivial_example(value, name) -> bool {
+pub fn is_trivial_example(value: any, name: any) -> bool {
   const ident = "[A-Za-z_][A-Za-z0-9_]*"
   const args = "(?:${ident}(?:,\\s*${ident})*)?"
   const pattern = "^(?:(?:const|let) ${ident} = )?${name}\\(${args}\\)$"
@@ -58,7 +58,7 @@ pub fn is_trivial_example(value, name) -> bool {
  * Rewrite one multi-line doc block for the shrunk metadata contract.
  * Single-line doc blocks pass through untouched. Returns {lines, stats}.
  */
-pub fn strip_block(block, fn_name) -> dict {
+pub fn strip_block(block: any, fn_name: any) -> dict {
   let allocation_removed = 0
   let stability_removed = 0
   let example_removed = 0
@@ -147,7 +147,7 @@ pub fn strip_block(block, fn_name) -> dict {
 }
 
 /** Pure transform: text + path -> {text, stats}. */
-pub fn process_file(text, path) -> dict {
+pub fn process_file(text: string, path: unknown) -> dict {
   let allocation_removed = 0
   let stability_removed = 0
   let example_removed = 0
@@ -193,7 +193,7 @@ pub fn process_file(text, path) -> dict {
   }
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const stdlib = "crates/harn-stdlib/src/stdlib"
   let allocation_removed = 0
   let stability_removed = 0

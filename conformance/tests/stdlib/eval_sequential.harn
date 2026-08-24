@@ -317,7 +317,7 @@ fn test_anytime_valid_null_and_broken_control(stdio: HarnessStdio) {
   require broken_rate > delta, "known-broken repeated-look racer must visibly inflate false winners"
 }
 
-pipeline test(harness: Harness, _task) {
+pipeline test(harness: Harness, _task: unknown) {
   test_sequential_primitives()
   test_endpoint_streams_keep_accumulated_evidence()
   test_sequential_decision_contract()

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // host_bridge tools are dispatched by the host shell, never the VM,
   // so attaching a handler is contradictory.
   const r = tool_registry()

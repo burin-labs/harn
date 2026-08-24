@@ -1,5 +1,5 @@
 /** Test that date_parse validates month/day ranges */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Valid date should work
   const ts = date_parse("2024-06-15")
   harness.stdio.println(ts > 0)

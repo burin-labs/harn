@@ -842,7 +842,7 @@ fn load_files(fs: HarnessFs, rels: list<string>) -> list {
   return out
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let test_rels: list<string> = []
   let runtime_rels: list<string> = []
   for g in harness.fs.glob("crates/**/*.rs") {

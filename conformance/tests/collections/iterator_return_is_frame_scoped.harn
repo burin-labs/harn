@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn first_match() {
     for pattern in ["a", "b"] {
       return pattern

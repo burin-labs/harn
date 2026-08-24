@@ -1,6 +1,6 @@
 import "std/eval/agreement"
 
-fn near(value, expected: float) -> bool {
+fn near(value: any, expected: float) -> bool {
   const actual = to_float(value) ?? 0.0
   return abs(actual - expected) < 0.0001
 }
@@ -21,7 +21,7 @@ fn weak(id: string, verdict: string) -> dict {
   return evaluator_verdict(id, verdict, false, "artifact/substring")
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // --- agreement_decision: two execution signals concur -> PASS ---
   const two = agreement_decision([e1(verdict_pass()), e2(verdict_pass())])
   assert(two.evaluator_agreement, "2-of-2 execution concurrence -> PASS")

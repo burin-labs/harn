@@ -21,17 +21,17 @@ pub fn all_states() {
 }
 
 /** True when state is one of the canonical states. */
-pub fn is_state(state) {
+pub fn is_state(state: string) {
   return all_states().contains(state)
 }
 
 /** Terminal states do not transition further within a sweep. */
-pub fn is_terminal(state) {
+pub fn is_terminal(state: string) {
   return state == "merged" || state == "closed"
 }
 
 /** Active states still consume scheduler attention. */
-pub fn is_active(state) {
+pub fn is_active(state: string) {
   return !is_terminal(state)
 }
 
@@ -58,7 +58,7 @@ pub fn all_actions() {
 }
 
 /** True when the action mutates remote state. */
-pub fn action_is_mutating(action) {
+pub fn action_is_mutating(action: any) {
   const read_only = ["noop", "wait", "comment"]
   return !read_only.contains(action)
 }
@@ -98,7 +98,7 @@ fn _transitions() {
 }
 
 /** Returns true when prior -> next is a permitted edge. */
-pub fn is_valid_transition(prior, next) {
+pub fn is_valid_transition(prior: any, next: any) {
   if prior == next {
     return true
   }
@@ -111,7 +111,7 @@ pub fn is_valid_transition(prior, next) {
 }
 
 /** Returns the allowed next-states from prior. */
-pub fn allowed_next(prior) {
+pub fn allowed_next(prior: any) {
   const table = _transitions()
   return table[prior] ?? []
 }

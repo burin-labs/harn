@@ -1,6 +1,6 @@
 import { cheap_classify_then_escalate } from "std/personas/prelude"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const opts = {
     persona: "triage_captain",
     step: "classify",

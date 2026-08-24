@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `parallel` is fail-fast: the first branch error aborts in-flight
   // siblings, so the slow branch never reaches its atomic_set. Use
   // `parallel settle` when every branch must run regardless of failures.

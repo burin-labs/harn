@@ -1,5 +1,5 @@
-pipeline default(harness: Harness, task) {
-  fn fib(n) {
+pipeline default(harness: Harness, task: unknown) {
+  fn fib(n: int) {
     if n <= 1 {
       return n
     }

@@ -202,7 +202,7 @@ fn parse_rows(lines: &[String]) -> Vec<Row> {
 /// options. `ok_caller(marker)` captures `marker` so each child returns its
 /// OWN response — the basis of the no-cross-talk check.
 const PRELUDE: &str = r#"
-fn ok_caller(marker) {
+fn ok_caller(marker: string) {
   return { call ->
     return {
       ok: true,
@@ -217,7 +217,7 @@ fn ok_caller(marker) {
   }
 }
 
-fn fail_caller(marker) {
+fn fail_caller(marker: string) {
   return { call ->
     // Throw so the child's agent_loop unwinds and execute_sub_agent wraps it
     // as an `ok: false` sub-agent envelope with a non-nil error. (A graceful
@@ -226,7 +226,7 @@ fn fail_caller(marker) {
   }
 }
 
-fn base_opts(caller) {
+fn base_opts<Caller>(caller: Caller) {
   return {
     provider: "mock",
     model: "fanout-model",
@@ -239,7 +239,7 @@ fn base_opts(caller) {
   }
 }
 
-fn emit_rows(stdio: HarnessStdio, results) {
+fn emit_rows(stdio: HarnessStdio, results: list<dict>) {
   for r in results {
     const summary = to_string(r?.result?.summary ?? "")
     const err_present = to_string(r?.error != nil)
@@ -256,7 +256,7 @@ fn fanout_preserves_order_labels_and_isolates_children() {
     // Six requests, distinct labels + distinct markers, default max_parallel.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const labels = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
   let reqs = []
   let i = 0
@@ -314,7 +314,7 @@ fn fanout_isolates_a_single_child_failure() {
     // Five children; index 2 ("charlie") fails cleanly, the rest succeed.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const labels = ["alpha", "bravo", "charlie", "delta", "echo"]
   let reqs = []
   let i = 0
@@ -385,7 +385,7 @@ fn fanout_runs_all_waves_without_dropping_or_reordering() {
     // come back, in input order, each with its own marker.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const labels = ["w0", "w1", "w2", "w3", "w4"]
   let reqs = []
   let i = 0
@@ -439,7 +439,7 @@ fn fanout_child_write_inherits_parent_workspace_anchor_for_scope() {
 
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const registry = tool_registry()
   const tools = tool_define(
     registry,
@@ -552,7 +552,7 @@ fn fanout_isolates_a_spawn_time_throw() {
     // their own markers in input order.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const labels = ["alpha", "bravo", "charlie"]
   let reqs = []
   let i = 0
@@ -638,7 +638,7 @@ fn fanout_spawn_throw_in_first_wave_does_not_drop_later_waves() {
     // with only index 0 marked failed.
     let source = format!(
         r#"{PRELUDE}
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const labels = ["w0", "w1", "w2", "w3"]
   let reqs = []
   let i = 0

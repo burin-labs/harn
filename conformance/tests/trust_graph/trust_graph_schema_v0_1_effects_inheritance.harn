@@ -7,7 +7,7 @@ import "std/triggers"
  * through the stdlib `trust_graph_record` / `trust_query` surface, and
  * the effect plus actor-chain inheritance invariants hold.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const parent_grant = [

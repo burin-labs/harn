@@ -19,6 +19,7 @@ mod coalesce;
 mod enum_construct;
 mod exhaustiveness;
 mod harness_capabilities;
+mod implicit_any_parameters;
 mod imports;
 mod interfaces;
 mod lexical_capture;
@@ -40,12 +41,26 @@ mod tuples;
 mod typing;
 mod value_calls;
 
-pub(super) fn check_source(source: &str) -> Vec<TypeDiagnostic> {
+pub(super) fn check_source_raw(source: &str) -> Vec<TypeDiagnostic> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
     TypeChecker::new().check(&program)
+}
+
+pub(super) fn check_source(source: &str) -> Vec<TypeDiagnostic> {
+    without_implicit_parameter_errors(check_source_raw(source))
+}
+
+/// Keep pre-existing typechecker tests scoped to the semantic contract they
+/// name. The dedicated `implicit_any_parameters` module uses the raw checker
+/// output and owns exact coverage for HARN-TYP-028.
+fn without_implicit_parameter_errors(diagnostics: Vec<TypeDiagnostic>) -> Vec<TypeDiagnostic> {
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code != Code::ImplicitAnyParameter)
+        .collect()
 }
 
 pub(super) fn diagnostics_with_code(
@@ -65,9 +80,11 @@ pub(super) fn check_source_with_imports(source: &str, imported: &[&str]) -> Vec<
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
     let imports: HashSet<String> = imported.iter().map(|s| s.to_string()).collect();
-    TypeChecker::new()
-        .with_imported_names(imports)
-        .check(&program)
+    without_implicit_parameter_errors(
+        TypeChecker::new()
+            .with_imported_names(imports)
+            .check(&program),
+    )
 }
 
 pub(super) fn errors(source: &str) -> Vec<String> {
@@ -105,7 +122,7 @@ pub(super) fn check_source_with_source(source: &str) -> Vec<TypeDiagnostic> {
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    TypeChecker::new().check_with_source(&program, source)
+    without_implicit_parameter_errors(TypeChecker::new().check_with_source(&program, source))
 }
 
 pub(super) fn check_source_strict(source: &str) -> Vec<TypeDiagnostic> {
@@ -113,7 +130,7 @@ pub(super) fn check_source_strict(source: &str) -> Vec<TypeDiagnostic> {
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    TypeChecker::with_strict_types(true).check(&program)
+    without_implicit_parameter_errors(TypeChecker::with_strict_types(true).check(&program))
 }
 
 pub(super) fn strict_errors(source: &str) -> Vec<String> {

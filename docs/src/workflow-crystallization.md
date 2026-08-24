@@ -154,8 +154,8 @@ fixture, unedited:
  * Capabilities: cargo.package, fs.write, git.write
  * Required secrets: none
  */
-pipeline crystallized_version_bump(harness: Harness, branch_name, path, release_target, repo_path, version) {
-  let review_warnings = []
+pipeline crystallized_version_bump(harness: Harness, branch_name: unknown, path: unknown, release_target: unknown, repo_path: unknown, version: unknown) {
+  const review_warnings = []
   // Step 1: tool_call git.checkout_branch
   // side_effect: git_ref release-branch
   harness.obs.log("crystallized step 1: git.checkout_branch")

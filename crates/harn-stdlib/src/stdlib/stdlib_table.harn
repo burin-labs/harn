@@ -12,7 +12,7 @@ type TableOptions = {
   empty?: string,
 }
 
-fn __table_text(value) -> string {
+fn __table_text(value: any) -> string {
   if value == nil {
     return ""
   }
@@ -23,7 +23,7 @@ fn __table_text(value) -> string {
   return to_string(value)
 }
 
-fn __table_cell(value, max_width) -> string {
+fn __table_cell(value: any, max_width: int?) -> string {
   const normalized = replace(replace(__table_text(value), "\r", " "), "\n", "\\n")
   if max_width != nil && max_width > 0 {
     return ansi_truncate(normalized, max_width)
@@ -31,7 +31,7 @@ fn __table_cell(value, max_width) -> string {
   return normalized
 }
 
-fn __table_column_from(raw, idx, headers) {
+fn __table_column_from(raw: dict?, idx: int, headers: any) {
   if type_of(raw) == "string" {
     return {key: raw, header: raw, align: "left", index: idx}
   }
@@ -48,7 +48,7 @@ fn __table_column_from(raw, idx, headers) {
   }
 }
 
-fn __table_columns(rows, opts) {
+fn __table_columns(rows: any, opts: any) {
   const options = opts ?? {}
   const headers = options?.headers ?? []
   let cols = []
@@ -85,7 +85,7 @@ fn __table_columns(rows, opts) {
   return cols
 }
 
-fn __table_value(row, col) {
+fn __table_value(row: any, col: dict) {
   if type_of(row) == "dict" {
     return row[col.key]
   }
@@ -98,7 +98,7 @@ fn __table_value(row, col) {
   return nil
 }
 
-fn __table_matrix(rows, cols, opts) {
+fn __table_matrix(rows: list?, cols: list, opts: dict) {
   const default_max = opts?.max_cell_width
   let matrix = []
   for row in rows ?? [] {
@@ -112,7 +112,7 @@ fn __table_matrix(rows, cols, opts) {
   return matrix
 }
 
-fn __table_widths(cols, matrix) {
+fn __table_widths(cols: any, matrix: list) {
   let widths = []
   let i = 0
   while i < len(cols) {
@@ -132,7 +132,7 @@ fn __table_widths(cols, matrix) {
   return widths
 }
 
-fn __table_pad(value, width, align) -> string {
+fn __table_pad(value: string?, width: any, align: string) -> string {
   const text = value ?? ""
   const missing = width - ansi_visible_len(text)
   if missing <= 0 {
@@ -149,7 +149,7 @@ fn __table_pad(value, width, align) -> string {
   return text + " ".repeat(missing)
 }
 
-fn __table_render_row(cells, cols, widths) -> string {
+fn __table_render_row(cells: any, cols: any, widths: list) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
@@ -159,7 +159,7 @@ fn __table_render_row(cells, cols, widths) -> string {
   return join(out, " | ")
 }
 
-fn __table_plain_separator(widths) -> string {
+fn __table_plain_separator(widths: list) -> string {
   let parts = []
   for width in widths {
     parts = parts.appending("-".repeat(max(width, 3)))
@@ -167,11 +167,11 @@ fn __table_plain_separator(widths) -> string {
   return join(parts, "-+-")
 }
 
-fn __table_markdown_escape(value) -> string {
+fn __table_markdown_escape(value: string?) -> string {
   return replace(value ?? "", "|", "\\|")
 }
 
-fn __table_markdown_row(cells, cols, widths) -> string {
+fn __table_markdown_row(cells: any, cols: any, widths: any) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
@@ -183,7 +183,7 @@ fn __table_markdown_row(cells, cols, widths) -> string {
   return "| " + join(out, " | ") + " |"
 }
 
-fn __table_markdown_separator(cols, widths) -> string {
+fn __table_markdown_separator(cols: any, widths: any) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
@@ -202,7 +202,7 @@ fn __table_markdown_separator(cols, widths) -> string {
   return "| " + join(out, " | ") + " |"
 }
 
-fn __table_render_plain(cols, matrix, widths, show_header) -> string {
+fn __table_render_plain(cols: any, matrix: list, widths: list, show_header: any) -> string {
   let lines = []
   if show_header {
     const header_cells = cols.map({ col -> col?.header ?? col?.key ?? "" })
@@ -215,7 +215,7 @@ fn __table_render_plain(cols, matrix, widths, show_header) -> string {
   return join(lines, "\n")
 }
 
-fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
+fn __table_render_markdown(cols: any, matrix: list, widths: any, show_header: any) -> string {
   let lines = []
   const header_cells = if show_header {
     cols.map({ col -> col?.header ?? col?.key ?? "" })

@@ -59,7 +59,7 @@ fn edit_tools() {
  * both sides of a comparison share a loop shape; installing a `done_judge`
  * changes the call count, so the judge cases must not assert on a position.
  */
-fn injected_anywhere(calls, marker) {
+fn injected_anywhere(calls: list?, marker: string) {
   for call in calls ?? [] {
     for message in call.messages {
       if contains(to_string(message?.content ?? ""), marker) {
@@ -70,7 +70,7 @@ fn injected_anywhere(calls, marker) {
   return false
 }
 
-fn injected_kind_in(calls, idx, marker) {
+fn injected_kind_in(calls: any, idx: int, marker: string) {
   if idx >= len(calls) {
     return false
   }

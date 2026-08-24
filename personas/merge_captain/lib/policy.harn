@@ -24,7 +24,7 @@ pub fn defaults() {
 }
 
 /** Merge a parsed policy on top of the defaults. */
-pub fn with_defaults(policy) {
+pub fn with_defaults(policy: dict) {
   const base = defaults()
   return {
     repo: policy.repo,
@@ -46,7 +46,7 @@ pub fn with_defaults(policy) {
 }
 
 /** Validate a policy. Returns nil on success or a string error. */
-pub fn validate(policy) {
+pub fn validate(policy: dict) {
   if policy.repo == nil || len(to_string(policy.repo)) == 0 {
     return "policy.repo is required"
   }
@@ -73,7 +73,7 @@ pub fn validate(policy) {
 }
 
 /** Parse + default + validate. Returns {ok: true, policy} or {ok: false, error}. */
-pub fn load_policy(json_text) {
+pub fn load_policy(json_text: any) {
   const parsed_result = try {
     json_parse(json_text)
   }
@@ -90,11 +90,11 @@ pub fn load_policy(json_text) {
 }
 
 /** Returns true when a state is on the per-repo autopilot list. */
-pub fn autopilot_for(policy, state) {
+pub fn autopilot_for(policy: dict, state: any) {
   return policy.autopilot_states.contains(state)
 }
 
 /** Returns true when a state requires a human-in-the-loop step. */
-pub fn requires_human(policy, state) {
+pub fn requires_human(policy: dict, state: any) {
   return policy.require_human_for.contains(state)
 }

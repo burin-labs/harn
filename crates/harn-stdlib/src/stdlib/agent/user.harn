@@ -7,28 +7,28 @@ import { agent_report_truncation } from "std/agent/truncation"
 import { pick_keys } from "std/collections"
 import { JsonParseFailure } from "std/json"
 
-fn __sim_user_string(value) {
+fn __sim_user_string(value: any) {
   if value == nil {
     return ""
   }
   return to_string(value)
 }
 
-fn __sim_user_int(value, fallback) {
+fn __sim_user_int(value: any, fallback: int) {
   if type_of(value) == "int" {
     return value
   }
   return fallback
 }
 
-fn __sim_user_bool(value, fallback) {
+fn __sim_user_bool(value: any, fallback: bool) {
   if type_of(value) == "bool" {
     return value
   }
   return fallback
 }
 
-fn __sim_user_truncate(agent: HarnessAgent, text, max_chars) {
+fn __sim_user_truncate(agent: HarnessAgent, text: string, max_chars: int) {
   const value = __sim_user_string(text)
   if max_chars == nil || max_chars <= 0 || len(value) <= max_chars {
     return value
@@ -47,7 +47,7 @@ fn __sim_user_truncate(agent: HarnessAgent, text, max_chars) {
   return retained + "\n...[truncated]"
 }
 
-fn __sim_user_reply(message, reason = nil, metadata = nil) {
+fn __sim_user_reply(message: any, reason: any = nil, metadata: dict? = nil) {
   return {
     action: "reply",
     message: __sim_user_string(message),
@@ -56,11 +56,11 @@ fn __sim_user_reply(message, reason = nil, metadata = nil) {
   }
 }
 
-fn __sim_user_stop(reason = nil, metadata = nil) {
+fn __sim_user_stop(reason: string? = nil, metadata: dict? = nil) {
   return {action: "stop", reason: reason ?? "no_reply_needed", metadata: metadata ?? {}}
 }
 
-fn __sim_user_fail(reason = nil, message = nil, metadata = nil) {
+fn __sim_user_fail(reason: string? = nil, message: string? = nil, metadata: dict? = nil) {
   return {
     action: "fail",
     reason: reason ?? "simulated_user_failed",
@@ -69,7 +69,7 @@ fn __sim_user_fail(reason = nil, message = nil, metadata = nil) {
   }
 }
 
-fn __sim_user_action(value) {
+fn __sim_user_action(value: any) {
   const action = lowercase(trim(__sim_user_string(value)))
   if action == "" {
     return "reply"
@@ -86,7 +86,7 @@ fn __sim_user_action(value) {
   return "reply"
 }
 
-fn __sim_user_normalize_decision(raw) {
+fn __sim_user_normalize_decision(raw: unknown) {
   if raw == nil {
     return __sim_user_stop("empty_decision")
   }
@@ -114,7 +114,7 @@ fn __sim_user_normalize_decision(raw) {
   return __sim_user_reply(message, raw?.reason, raw?.metadata)
 }
 
-fn __sim_user_set(runtime: HarnessRuntime, answerer, key, value) {
+fn __sim_user_set(runtime: HarnessRuntime, answerer: dict, key: string, value: any) {
   const state = answerer?.state ?? {}
   const cell = state[key]
   if type_of(cell) == "atomic" {
@@ -129,7 +129,7 @@ fn __sim_user_set(runtime: HarnessRuntime, answerer, key, value) {
   return __sim_user_state(runtime, answerer) + {[key]: value}
 }
 
-fn __sim_user_state(runtime: HarnessRuntime, answerer) {
+fn __sim_user_state(runtime: HarnessRuntime, answerer: dict) {
   const state = answerer?.state ?? {}
   if type_of(state) != "dict" {
     return {}
@@ -151,7 +151,7 @@ fn __sim_user_state(runtime: HarnessRuntime, answerer) {
   return out
 }
 
-fn __sim_user_atomic_state(runtime: HarnessRuntime, raw) {
+fn __sim_user_atomic_state(runtime: HarnessRuntime, raw: dict?) {
   const state = raw ?? {}
   return {
     index: runtime.atomic(__sim_user_int(state?.index, 0)),
@@ -161,21 +161,21 @@ fn __sim_user_atomic_state(runtime: HarnessRuntime, raw) {
   }
 }
 
-fn __sim_user_state_int(runtime: HarnessRuntime, answerer, key, fallback) {
+fn __sim_user_state_int(runtime: HarnessRuntime, answerer: dict, key: string, fallback: int) {
   return __sim_user_int(__sim_user_state(runtime, answerer)[key], fallback)
 }
 
-fn __sim_user_increment(runtime: HarnessRuntime, answerer, key, amount = 1) {
+fn __sim_user_increment(runtime: HarnessRuntime, answerer: dict, key: string, amount: int = 1) {
   const next = __sim_user_state_int(runtime, answerer, key, 0) + amount
   __sim_user_set(runtime, answerer, key, next)
   return next
 }
 
-fn __sim_user_mark_stopped(runtime: HarnessRuntime, answerer) {
+fn __sim_user_mark_stopped(runtime: HarnessRuntime, answerer: dict) {
   __sim_user_set(runtime, answerer, "stopped", true)
 }
 
-fn __sim_user_budget_stop(runtime: HarnessRuntime, answerer, reason) {
+fn __sim_user_budget_stop(runtime: HarnessRuntime, answerer: dict, reason: string?) {
   __sim_user_mark_stopped(runtime, answerer)
   return __sim_user_stop(
     reason,
@@ -186,7 +186,7 @@ fn __sim_user_budget_stop(runtime: HarnessRuntime, answerer, reason) {
   )
 }
 
-fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
+fn __sim_user_preflight(runtime: HarnessRuntime, answerer: dict) {
   const state = __sim_user_state(runtime, answerer)
   if state?.stopped ?? false {
     if answerer?.max_replies != nil
@@ -216,7 +216,7 @@ fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
   return nil
 }
 
-fn __sim_user_record_decision(runtime: HarnessRuntime, answerer, decision) {
+fn __sim_user_record_decision(runtime: HarnessRuntime, answerer: dict, decision: dict) {
   if decision.action == "reply" {
     __sim_user_increment(runtime, answerer, "replies")
   } else {
@@ -225,7 +225,12 @@ fn __sim_user_record_decision(runtime: HarnessRuntime, answerer, decision) {
   return decision
 }
 
-fn __sim_user_event_payload(runtime: HarnessRuntime, answerer, payload, decision) {
+fn __sim_user_event_payload(
+  runtime: HarnessRuntime,
+  answerer: dict,
+  payload: dict,
+  decision: dict,
+) {
   return {
     id: answerer?.id,
     kind: answerer?.kind,
@@ -241,10 +246,10 @@ fn __sim_user_event_payload(runtime: HarnessRuntime, answerer, payload, decision
 fn __sim_user_emit(
   agent: HarnessAgent,
   runtime: HarnessRuntime,
-  answerer,
-  event_type,
-  payload,
-  decision,
+  answerer: dict,
+  event_type: string,
+  payload: dict,
+  decision: dict,
 ) {
   const session_id = agent.current_id()
   if session_id == nil {
@@ -273,9 +278,9 @@ fn __sim_user_emit(
 fn __sim_user_emit_decision(
   agent: HarnessAgent,
   runtime: HarnessRuntime,
-  answerer,
-  payload,
-  decision,
+  answerer: dict,
+  payload: dict,
+  decision: dict,
 ) {
   if decision.action == "reply" {
     return __sim_user_emit(agent, runtime, answerer, "simulated_user_reply", payload, decision)
@@ -286,7 +291,7 @@ fn __sim_user_emit_decision(
   return __sim_user_emit(agent, runtime, answerer, "simulated_user_failed", payload, decision)
 }
 
-fn __sim_user_extract_question(payload) {
+fn __sim_user_extract_question(payload: unknown) -> string {
   if type_of(payload) == "string" {
     return payload
   }
@@ -296,14 +301,14 @@ fn __sim_user_extract_question(payload) {
   return payload?.question ?? payload?.prompt ?? payload?.message ?? payload?.text ?? ""
 }
 
-fn __sim_user_payload_context(payload) {
+fn __sim_user_payload_context(payload: unknown) -> string {
   if type_of(payload) != "dict" {
     return ""
   }
   return payload?.context ?? payload?.background ?? payload?.visible_text ?? payload?.text ?? ""
 }
 
-fn __sim_user_contains_glob(text, pattern) {
+fn __sim_user_contains_glob(text: string, pattern: string) -> bool {
   const needle = __sim_user_string(pattern)
   if needle == "" || needle == "*" {
     return true
@@ -339,7 +344,7 @@ fn __sim_user_contains_glob(text, pattern) {
   return true
 }
 
-fn __sim_user_matches(payload, matcher) {
+fn __sim_user_matches(payload: dict, matcher: unknown) -> bool {
   if matcher == nil {
     return true
   }
@@ -361,7 +366,7 @@ fn __sim_user_matches(payload, matcher) {
   return false
 }
 
-fn __scripted_entry_decision(entry) {
+fn __scripted_entry_decision(entry: unknown) {
   if type_of(entry) == "string" {
     return __sim_user_reply(entry)
   }
@@ -382,7 +387,7 @@ fn __scripted_entry_decision(entry) {
   )
 }
 
-fn __scripted_exhausted(answerer) {
+fn __scripted_exhausted(answerer: dict) {
   const on_exhausted = answerer?.on_exhausted ?? "stop"
   if on_exhausted == "fail" {
     return __sim_user_fail("script_exhausted")
@@ -393,7 +398,12 @@ fn __scripted_exhausted(answerer) {
   return __sim_user_stop("script_exhausted")
 }
 
-fn __scripted_user_respond(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload = nil) {
+fn __scripted_user_respond(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer: dict,
+  payload: any = nil,
+) {
   const preflight = __sim_user_preflight(runtime, answerer)
   if preflight != nil {
     __sim_user_emit(agent, runtime, answerer, "simulated_user_budget_exhausted", payload, preflight)
@@ -433,7 +443,7 @@ fn __scripted_user_respond(agent: HarnessAgent, runtime: HarnessRuntime, answere
   return exhausted
 }
 
-fn __sim_user_config(task_or_config, behavior, tools, model, options) {
+fn __sim_user_config(task_or_config: any, behavior: any, tools: any, model: any, options: dict?) {
   if type_of(task_or_config) == "dict" && behavior == nil && tools == nil && model == nil
     && options
       == nil {
@@ -443,7 +453,7 @@ fn __sim_user_config(task_or_config, behavior, tools, model, options) {
   return opts + {task: task_or_config, behavior: behavior, tools: tools, model: model}
 }
 
-fn __sim_user_json_object_text(raw) {
+fn __sim_user_json_object_text(raw: unknown) {
   const text = trim(__sim_user_string(raw))
   if text.starts_with("```") {
     const first_newline = text.index_of("\n")
@@ -460,7 +470,7 @@ fn __sim_user_json_object_text(raw) {
   return text
 }
 
-fn __agentic_user_parse(raw) {
+fn __agentic_user_parse(raw: unknown) {
   const parsed: Result<unknown, JsonParseFailure> = try {
     json_parse(__sim_user_json_object_text(raw))
   }
@@ -470,7 +480,7 @@ fn __agentic_user_parse(raw) {
   return __sim_user_normalize_decision(raw)
 }
 
-fn __sim_user_session_tail(agent: HarnessAgent, session_id, max_chars) {
+fn __sim_user_session_tail(agent: HarnessAgent, session_id: string?, max_chars: int) {
   if session_id == nil || session_id == "" || max_chars == 0 {
     return ""
   }
@@ -489,7 +499,12 @@ fn __sim_user_session_tail(agent: HarnessAgent, session_id, max_chars) {
   return __sim_user_truncate(agent, out, max_chars)
 }
 
-fn __agentic_user_bindings(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload) {
+fn __agentic_user_bindings(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer: dict,
+  payload: dict,
+) {
   const question = __sim_user_extract_question(payload)
   const context = __sim_user_payload_context(payload)
   const transcript = __sim_user_session_tail(
@@ -508,7 +523,7 @@ fn __agentic_user_bindings(agent: HarnessAgent, runtime: HarnessRuntime, answere
   }
 }
 
-fn __agentic_user_prompt(harness: Harness, answerer, payload) {
+fn __agentic_user_prompt(harness: Harness, answerer: dict, payload: dict) {
   const bindings = __agentic_user_bindings(harness.agent, harness.runtime, answerer, payload)
   const system = answerer?.system_prompt
     ?? render_agent_prompt(harness.fs, "agentic_user_system.harn.prompt", bindings)
@@ -517,7 +532,7 @@ fn __agentic_user_prompt(harness: Harness, answerer, payload) {
   return {system: system, prompt: prompt}
 }
 
-fn __agentic_user_base_llm_options(answerer) {
+fn __agentic_user_base_llm_options(answerer: dict) {
   const opts = answerer?.llm_options ?? {}
   return opts + pick_keys(answerer, __agentic_user_llm_option_keys(), {drop_nil: true})
 }
@@ -526,7 +541,7 @@ fn __agentic_user_llm_option_keys() {
   return __llm_call_option_registry().keys
 }
 
-fn __agentic_user_remaining_llm_calls(runtime: HarnessRuntime, answerer) {
+fn __agentic_user_remaining_llm_calls(runtime: HarnessRuntime, answerer: dict) {
   const max_llm_calls = answerer?.max_llm_calls
   if max_llm_calls == nil {
     return answerer?.max_iterations ?? 4
@@ -535,13 +550,18 @@ fn __agentic_user_remaining_llm_calls(runtime: HarnessRuntime, answerer) {
   return remaining > 0 ? remaining : 0
 }
 
-fn __agentic_user_call_once(llm: HarnessLlm, runtime: HarnessRuntime, answerer, prompts) {
+fn __agentic_user_call_once(
+  llm: HarnessLlm,
+  runtime: HarnessRuntime,
+  answerer: dict,
+  prompts: dict,
+) {
   const result = llm.call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
   __sim_user_increment(runtime, answerer, "llm_calls")
   return result.text ?? result?.raw_text ?? json_stringify(result)
 }
 
-fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
+fn __agentic_user_call_loop(harness: Harness, answerer: dict, prompts: dict) {
   const remaining = __agentic_user_remaining_llm_calls(harness.runtime, answerer)
   const max_iterations = __sim_user_int(answerer?.max_iterations, 4)
   const iteration_limit = if remaining > 0 && remaining < max_iterations {
@@ -564,7 +584,7 @@ fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
   return result?.visible_text ?? result?.text ?? result?.raw_text ?? json_stringify(result)
 }
 
-fn __agentic_user_respond(harness: Harness, answerer, payload = nil) {
+fn __agentic_user_respond(harness: Harness, answerer: dict, payload: any = nil) {
   const preflight = __sim_user_preflight(harness.runtime, answerer)
   if preflight != nil {
     __sim_user_emit(
@@ -603,7 +623,7 @@ fn __agentic_user_respond(harness: Harness, answerer, payload = nil) {
   return decision
 }
 
-fn __sim_user_should_answer_post_turn(payload, options) {
+fn __sim_user_should_answer_post_turn(payload: dict, options: dict) {
   if payload?.has_tool_calls ?? false {
     return false
   }
@@ -628,11 +648,11 @@ fn __sim_user_should_answer_post_turn(payload, options) {
  */
 pub fn agentic_user(
   harness: Harness,
-  task_or_config,
-  behavior = nil,
-  tools = nil,
-  model = nil,
-  options = nil,
+  task_or_config: any,
+  behavior: any = nil,
+  tools: any = nil,
+  model: any = nil,
+  options: dict? = nil,
 ) {
   const config = __sim_user_config(task_or_config, behavior, tools, model, options)
   const state = __sim_user_atomic_state(harness.runtime, config?.state)
@@ -667,7 +687,7 @@ pub fn agentic_user(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn scripted_user(harness: Harness, script, options = nil) {
+pub fn scripted_user(harness: Harness, script: list<unknown>?, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const state = __sim_user_atomic_state(harness.runtime, opts?.state)
   let answerer = {
@@ -692,7 +712,7 @@ pub fn scripted_user(harness: Harness, script, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn fixture_user(harness: Harness, script, options = nil) {
+pub fn fixture_user(harness: Harness, script: list<unknown>?, options: dict? = nil) -> dict {
   return scripted_user(harness, script, options)
 }
 
@@ -703,7 +723,7 @@ pub fn fixture_user(harness: Harness, script, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn simulated_user_respond(answerer, payload = nil) {
+pub fn simulated_user_respond(answerer: dict, payload: any = nil) {
   if type_of(answerer) == "string" {
     return __sim_user_reply(answerer)
   }
@@ -727,7 +747,7 @@ pub fn simulated_user_respond(answerer, payload = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn simulated_user_status(runtime: HarnessRuntime, answerer) {
+pub fn simulated_user_status(runtime: HarnessRuntime, answerer: dict) {
   if type_of(answerer) != "dict" {
     return {}
   }
@@ -747,7 +767,11 @@ pub fn simulated_user_status(runtime: HarnessRuntime, answerer) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn user_tools(answerer, registry = nil, options = nil) {
+pub fn user_tools(
+  answerer: dict,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const tools = registry ?? tool_registry()
   const name = opts?.name ?? answerer?.tool_name ?? "ask_user"
@@ -798,7 +822,7 @@ pub fn user_tools(answerer, registry = nil, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn simulated_user_post_turn(answerer, options = nil) {
+pub fn simulated_user_post_turn(answerer: dict, options: dict? = nil) {
   const opts = options ?? {}
   return { payload ->
     if !__sim_user_should_answer_post_turn(payload, opts) {
@@ -835,8 +859,8 @@ pub fn simulated_user_post_turn(answerer, options = nil) {
 pub fn simulated_user_read_tools(
   fs: HarnessFs,
   tools: HarnessTools,
-  registry = nil,
-  options = nil,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
 ) {
   return agent_read_tools(fs, tools, registry, options)
 }

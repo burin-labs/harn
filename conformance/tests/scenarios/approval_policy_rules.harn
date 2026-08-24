@@ -62,7 +62,7 @@ fn capability_policy() {
   }
 }
 
-fn one_call(harness: Harness, name, args, approval_policy) {
+fn one_call(harness: Harness, name: string, args: dict, approval_policy: dict) {
   return with_llm_script(
     harness.llm,
     [{tool_calls: [{id: "call_1", name: name, arguments: args}]}],

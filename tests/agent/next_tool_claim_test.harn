@@ -22,21 +22,21 @@ const LOOK_CALL = "```tool\n{\"name\": \"look\", \"args\": {}}\n```"
 
 const VERIFY_CALL = "{\"name\": \"verify\", \"args\": {}}"
 
-fn _bump(runtime: HarnessRuntime, cell) {
+fn _bump(runtime: HarnessRuntime, cell: any) {
   const snap = runtime.shared_snapshot(cell)
   runtime.shared_cas(cell, snap, snap.value + 1)
 }
 
-fn _record(runtime: HarnessRuntime, cell, value: string) {
+fn _record(runtime: HarnessRuntime, cell: any, value: string) {
   const snap = runtime.shared_snapshot(cell)
   runtime.shared_cas(cell, snap, snap.value.appending(value))
 }
 
-fn _claimed_name(options) -> string {
+fn _claimed_name(options: dict) -> string {
   return options?.output?.schema?.properties?.name?.enum?.[0] ?? ""
 }
 
-fn _tool_names(registry) -> list<string> {
+fn _tool_names(registry: dict) -> list<string> {
   return (registry?.tools ?? []).map(fn(entry) { return entry?.name ?? "" }).to_list()
 }
 
@@ -51,7 +51,7 @@ fn _ordinary_tool_result(format: string, name: string, id: string) -> dict {
   return base + {text: "```tool\n{\"name\": \"" + name + "\", \"args\": {}}\n```"}
 }
 
-fn _assistant_history(messages) -> string {
+fn _assistant_history(messages: list?) -> string {
   let joined = ""
   for message in messages ?? [] {
     if to_string(message?.role ?? "") == "assistant" {
@@ -61,7 +61,7 @@ fn _assistant_history(messages) -> string {
   return joined
 }
 
-fn _claim_receipts(events) -> list {
+fn _claim_receipts(events: list?) -> list {
   let receipts = []
   for event in events ?? [] {
     if event.type == "typed_checkpoint"
@@ -73,11 +73,11 @@ fn _claim_receipts(events) -> list {
   return receipts
 }
 
-fn _event_types(events) -> list<string> {
+fn _event_types(events: list?) -> list<string> {
   return (events ?? []).map(fn(event) { return to_string(event?.type ?? "") }).to_list()
 }
 
-fn _has_feedback_kind(events, kind: string) -> bool {
+fn _has_feedback_kind(events: list?, kind: string) -> bool {
   for event in events ?? [] {
     if event?.type == "feedback_injected" && event?.kind == kind {
       return true
@@ -86,7 +86,7 @@ fn _has_feedback_kind(events, kind: string) -> bool {
   return false
 }
 
-fn _normalized_calls(raw_calls) -> list {
+fn _normalized_calls(raw_calls: list?) -> list {
   let calls = []
   for call in raw_calls ?? [] {
     const raw_args = call?.arguments ?? call?.tool_args ?? call?.function?.arguments ?? {}
@@ -102,7 +102,7 @@ fn _normalized_calls(raw_calls) -> list {
   return calls
 }
 
-fn _history_calls(messages) -> list {
+fn _history_calls(messages: list?) -> list {
   let calls = []
   for message in messages ?? [] {
     if to_string(message?.role ?? "") == "assistant" {
@@ -113,7 +113,7 @@ fn _history_calls(messages) -> list {
   return calls
 }
 
-fn _tools(runtime: HarnessRuntime, calls = nil) {
+fn _tools(runtime: HarnessRuntime, calls: any = nil) {
   const tools = tool_define(
     tool_registry(),
     "look",
@@ -144,7 +144,7 @@ fn _tools(runtime: HarnessRuntime, calls = nil) {
   )
 }
 
-pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness, task) {
+pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness, task: unknown) {
   const calls = harness.runtime.shared_cell(
     {scope: "task_group", key: "next-tool-calls-" + harness.random.uuid(), initial: []},
   )
@@ -237,7 +237,10 @@ pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness
   assert_eq(captured.result.status, "done")
 }
 
-pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness: Harness, task) {
+pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(
+  harness: Harness,
+  task: unknown,
+) {
   for format in ["json", "text", "native"] {
     const suffix = format + "-" + harness.random.uuid()
     const calls = harness.runtime.shared_cell(
@@ -373,7 +376,7 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
   }
 }
 
-pipeline test_stopping_verdict_outranks_and_clears_claim(harness: Harness, task) {
+pipeline test_stopping_verdict_outranks_and_clears_claim(harness: Harness, task: unknown) {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "next-tool-stop-turns-" + harness.random.uuid(), initial: 0},
   )
@@ -418,7 +421,7 @@ pipeline test_stopping_verdict_outranks_and_clears_claim(harness: Harness, task)
   assert_eq(len(receipts), 0)
 }
 
-pipeline test_unavailable_next_tool_claim_fails_at_typed_boundary(harness: Harness, task) {
+pipeline test_unavailable_next_tool_claim_fails_at_typed_boundary(harness: Harness, task: unknown) {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "next-tool-invalid-turns-" + harness.random.uuid(), initial: 0},
   )
@@ -464,7 +467,10 @@ pipeline test_unavailable_next_tool_claim_fails_at_typed_boundary(harness: Harne
   assert_eq(harness.runtime.shared_snapshot(turns).value, 2)
 }
 
-pipeline test_policy_denied_next_tool_claim_fails_at_typed_boundary(harness: Harness, task) {
+pipeline test_policy_denied_next_tool_claim_fails_at_typed_boundary(
+  harness: Harness,
+  task: unknown,
+) {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "next-tool-policy-turns-" + harness.random.uuid(), initial: 0},
   )
@@ -503,7 +509,7 @@ pipeline test_policy_denied_next_tool_claim_fails_at_typed_boundary(harness: Har
   assert_eq(harness.runtime.shared_snapshot(turns).value, 1)
 }
 
-pipeline test_guardrail_stop_emits_no_request_applied_receipt(harness: Harness, task) {
+pipeline test_guardrail_stop_emits_no_request_applied_receipt(harness: Harness, task: unknown) {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "next-tool-guardrail-turns-" + harness.random.uuid(), initial: 0},
   )
@@ -543,7 +549,10 @@ pipeline test_guardrail_stop_emits_no_request_applied_receipt(harness: Harness, 
   assert_eq(captured.result.status, "input_guardrail")
 }
 
-pipeline test_all_tool_formats_share_registry_derived_claim_schema(harness: Harness, task) {
+pipeline test_all_tool_formats_share_registry_derived_claim_schema(
+  harness: Harness,
+  task: unknown,
+) {
   const tools = _tools(harness.runtime)
   for format in ["json", "text", "native"] {
     const narrowed = agent_apply_tool_surface_narrowing(
@@ -569,7 +578,7 @@ pipeline test_all_tool_formats_share_registry_derived_claim_schema(harness: Harn
   }
 }
 
-pipeline test_composed_post_turn_preserves_one_claim(harness: Harness, task) {
+pipeline test_composed_post_turn_preserves_one_claim(harness: Harness, task: unknown) {
   const callback = compose_post_turn(
     [
       { _payload -> return {next_tool_claim: {tool_name: "verify"}} },

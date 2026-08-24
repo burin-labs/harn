@@ -123,6 +123,8 @@ pub import {
   agent_reset_tool_surface_narrowing,
 } from "std/agent/tool_surface"
 pub import {
+  AgentAwaitResumptionRequest,
+  __agent_await_resumption_from_tool,
   agent_await_resumption,
   agent_lifecycle_tools,
   list_agents,
@@ -137,7 +139,7 @@ pub import {
 import { exact_tool_call_output_schema } from "std/llm/structural_validator"
 pub import { env_bool } from "std/os"
 
-pub fn __agent_loop_llm_overrides(opts) {
+pub fn __agent_loop_llm_overrides(opts: dict) {
   const overrides = opts?.llm_options
   if type_of(overrides) == "dict" {
     return overrides
@@ -147,7 +149,7 @@ pub fn __agent_loop_llm_overrides(opts) {
 
 pub type AgentLoopOutputContract = {schema: any?}
 
-pub fn __agent_loop_output_contract(opts) -> AgentLoopOutputContract? {
+pub fn __agent_loop_output_contract(opts: dict) -> AgentLoopOutputContract? {
   const output = opts?.output
   if output == nil || output == "text" {
     return nil
@@ -164,11 +166,11 @@ pub fn __agent_loop_output_contract(opts) -> AgentLoopOutputContract? {
   return nil
 }
 
-pub fn __agent_loop_has_terminal_output_contract(opts) -> bool {
+pub fn __agent_loop_has_terminal_output_contract(opts: dict) -> bool {
   return __agent_loop_output_contract(opts) != nil
 }
 
-pub fn __agent_loop_ordinary_turn_llm_options(opts) {
+pub fn __agent_loop_ordinary_turn_llm_options(opts: dict) {
   // `output` constrains the final answer, not intermediate tool-calling turns.
   if !__agent_loop_has_terminal_output_contract(opts) {
     return opts
@@ -176,7 +178,7 @@ pub fn __agent_loop_ordinary_turn_llm_options(opts) {
   return omit(opts, ["output"])
 }
 
-pub fn __agent_loop_next_tool_output_contract(opts) -> any? {
+pub fn __agent_loop_next_tool_output_contract(opts: dict) -> any? {
   const claim = opts?._next_tool_claim
   if claim == nil {
     return nil
@@ -205,9 +207,9 @@ pub fn __agent_loop_next_tool_output_contract(opts) -> any? {
 
 pub fn __agent_loop_next_tool_claim_receipt(
   agent: HarnessAgent,
-  session_id,
-  opts,
-  iteration_index,
+  session_id: any,
+  opts: dict,
+  iteration_index: int,
 ) -> nil {
   if !(opts?._next_tool_claim_applied ?? false) {
     return nil
@@ -229,11 +231,11 @@ pub fn __agent_loop_next_tool_claim_receipt(
   )
 }
 
-pub fn __turn_llm_opts(harness: Harness, session, opts, iteration_index) -> dict {
+pub fn __turn_llm_opts(harness: Harness, session: dict, opts: dict?, iteration_index: int) -> dict {
   return __agent_loop_effective_llm_options(harness.llm, opts)
 }
 
-pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
+pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts: dict?) {
   const base = opts ?? {}
   let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
   const claim_schema = __agent_loop_next_tool_output_contract(merged)
@@ -268,7 +270,7 @@ pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
     }
 }
 
-pub fn __agent_loop_route_options(provider, model, tool_format) {
+pub fn __agent_loop_route_options(provider: string?, model: string?, tool_format: string?) {
   return {
     provider: to_string(provider ?? ""),
     model: to_string(model ?? ""),
@@ -277,10 +279,10 @@ pub fn __agent_loop_route_options(provider, model, tool_format) {
 }
 
 pub fn __agent_loop_enable_equivalent_failover(
-  llm_opts,
-  primary_provider,
-  primary_model,
-  loop_opts,
+  llm_opts: dict,
+  primary_provider: string,
+  primary_model: string,
+  loop_opts: dict,
 ) {
   const provider = to_string(llm_opts?.provider ?? "")
   const model = to_string(llm_opts?.model ?? "")
@@ -297,7 +299,7 @@ pub fn __agent_loop_enable_equivalent_failover(
   return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }
 
-pub fn __agent_loop_finalize_failed(agent: HarnessAgent, session, iteration) {
+pub fn __agent_loop_finalize_failed(agent: HarnessAgent, session: dict, iteration: int) {
   try {
     agent_session_finalize(
       agent,
@@ -322,14 +324,14 @@ pub fn __agent_loop_current_worker(agents: HarnessAgent, runtime: HarnessRuntime
   return nil
 }
 
-pub fn __agent_loop_suspend_reminder_body(reason) {
+pub fn __agent_loop_suspend_reminder_body(reason: string) {
   if type_of(reason) == "string" && reason != "" {
     return "Worker suspended before the next turn: " + reason
   }
   return "Worker suspended before the next turn."
 }
 
-pub fn __agent_loop_suspend_initiator(value) {
+pub fn __agent_loop_suspend_initiator(value: string?) {
   let text = to_string(value ?? "operator")
   if text == "self_initiated" {
     return "self"
@@ -340,8 +342,8 @@ pub fn __agent_loop_suspend_initiator(value) {
 pub fn __agent_loop_suspend_checkpoint(
   agent: HarnessAgent,
   runtime: HarnessRuntime,
-  session,
-  iteration,
+  session: dict,
+  iteration: int,
 ) {
   const worker = __agent_loop_current_worker(agent, runtime)
   if worker == nil || worker?.status != "suspended" {
@@ -377,7 +379,7 @@ pub fn __agent_loop_suspend_checkpoint(
   return payload
 }
 
-pub fn __agent_loop_with_llm_render_context(harness: Harness, opts, render) {
+pub fn __agent_loop_with_llm_render_context(harness: Harness, opts: dict?, render: unknown) {
   const effective = __agent_loop_effective_llm_options(harness.llm, opts)
   const provider = to_string(effective?.provider ?? "")
   const model = to_string(effective?.model ?? "")
@@ -390,7 +392,12 @@ pub fn __agent_loop_with_llm_render_context(harness: Harness, opts, render) {
   return render(harness, effective)
 }
 
-pub fn __agent_loop_build_turn_prompt(harness: Harness, session, opts, iteration) {
+pub fn __agent_loop_build_turn_prompt(
+  harness: Harness,
+  session: dict,
+  opts: dict?,
+  iteration: int,
+) {
   const append_only = if type_of(opts?.reminders) == "dict"
     && opts.reminders?.append_only != nil {
     opts.reminders.append_only

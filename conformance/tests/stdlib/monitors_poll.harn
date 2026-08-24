@@ -1,6 +1,6 @@
 import { wait_for } from "std/monitors"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = wait_for(
     harness.runtime,
     {

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Basic capture groups
   const caps = regex_captures("(\\w+)@(\\w+)", "user@host admin@server")
   harness.stdio.log(len(caps))

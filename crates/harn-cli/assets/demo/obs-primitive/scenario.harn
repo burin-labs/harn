@@ -53,7 +53,7 @@ fn record_session_put(obs: HarnessObs) {
   end_span(obs, handle)
 }
 
-fn count_by_kind(events) {
+fn count_by_kind(events: list) {
   let span_end = 0
   let metric = 0
   let log_count = 0

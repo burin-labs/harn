@@ -104,7 +104,7 @@ pub fn render_keywords_js(keywords: list<string>) -> string {
   return lines.join("\n") + "\n"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if !harness.fs.exists(TOKEN_RS) {
     harness.stdio.eprintln("error: missing ${TOKEN_RS}")
     return 1

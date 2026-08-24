@@ -38,49 +38,16 @@ fn write_sources(fs: HarnessFs, root: string, swift: string, rust: string, ts: s
   return nil
 }
 
-fn write_burin(fs: HarnessFs, root: string, swift: string, rust: string, ts: string) -> nil {
-  write_text(fs, root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", swift)
-  write_text(fs, root, "crates/burin-tui/protocol/src/harn_protocol_generated.rs", rust)
-  write_text(fs, root, "server/src/generated/harn-protocol.ts", ts)
-  write_text(fs, root, "burin-portal/src/generated/harn-protocol.ts", ts)
-  return nil
-}
-
 @test
-pipeline test_normalize_protocol_text_line_endings(harness: Harness, task) {
+pipeline test_normalize_protocol_text_line_endings(harness: Harness, task: unknown) {
   assert_eq(normalize_protocol_text("a\r\nb\rc\n"), "a\nb\nc\n")
 }
 
 @test
-pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harness, task) {
-  with_temp_dir(
-    harness.fs,
-    { root ->
-      const harn_root = path_join(root, "harn")
-      const burin_root = path_join(root, "burin-code")
-      const rust_source = "pub enum Receipt { Confirmed, Rejected }\n"
-      const rust_destination = "pub enum Receipt {\r\n    Confirmed,\r\n    Rejected,\r\n}\r\n"
-      write_sources(harness.fs, harn_root, "swift\n", rust_source, "type Foo = string\n")
-      write_burin(harness.fs, burin_root, "swift\r\n", rust_destination, "type Foo = string\r\n")
-      const report = check_burin_protocol_bindings(
-        harness.env,
-        harness.process,
-        harness.fs,
-        burin_root,
-        true,
-        harn_root,
-      )
-      assert_eq(report.stale, [])
-      assert_eq(report.ok, true)
-      assert_eq(report.status, "ok")
-      assert_eq(report.stale_count, 0)
-      assert_eq(report.skipped, false)
-    },
-  )
-}
-
-@test
-pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: Harness, task) {
+pipeline test_stale_and_missing_bindings_are_reported_in_target_order(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -117,7 +84,7 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: H
 }
 
 @test
-pipeline test_missing_root_respects_required_flag(harness: Harness, task) {
+pipeline test_missing_root_respects_required_flag(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->

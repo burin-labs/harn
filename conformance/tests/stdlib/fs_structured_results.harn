@@ -108,7 +108,7 @@ fn format_typed_read_failure(failure: TypedReadFailure) -> string {
   return failure.format + ":" + failure.kind + ":" + to_string(failure.path != "")
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-fs-structured-results-" + harness.random.uuid_v7(),

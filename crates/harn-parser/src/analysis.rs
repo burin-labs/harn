@@ -254,6 +254,16 @@ impl AnalysisDatabase {
         self.stats.clone()
     }
 
+    /// Evict one source and every cached projection derived from it.
+    ///
+    /// Long-running batch consumers that retain their own compact projection
+    /// of a parsed program should release the database entry as soon as that
+    /// projection is built. Otherwise tokens, the cached AST, type-check
+    /// diagnostics, and the consumer's projection all stay live together.
+    pub fn remove_source(&mut self, id: &SourceId) -> bool {
+        self.entries.remove(id).is_some()
+    }
+
     pub fn set_source(
         &mut self,
         id: SourceId,

@@ -83,7 +83,7 @@ fn run_text_turn(harness: Harness, session_id: string, reply: string) {
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // 1. The #5142 case. `<tool>` is not in the grammar, so the turn produces no
   //    calls. It must not produce silence either.
   const unknown_session = "loud-boundary-unknown-" + harness.random.uuid()

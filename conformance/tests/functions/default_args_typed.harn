@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn repeat_text(text: string, count: int = 3) -> string {
     return text.repeat(count)
   }

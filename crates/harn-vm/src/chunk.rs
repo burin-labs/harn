@@ -452,7 +452,12 @@ impl CompiledFunction {
 
     #[cfg(test)]
     pub(crate) fn has_runtime_type_checks_for_params(params: &[ParamSlot]) -> bool {
-        params.iter().any(|param| param.type_expr.is_some())
+        params.iter().any(|param| {
+            param
+                .type_expr
+                .as_ref()
+                .is_some_and(harn_kernel::type_contract::requires_runtime_type_check)
+        })
     }
 
     /// Returns just the parameter names — convenience for code paths that

@@ -6,7 +6,7 @@ const README = "# Settings\n\nThe default timeout is 30 seconds.\n"
 
 const SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
 
-fn result(calls, text: string) {
+fn result(calls: list, text: string) {
   return {visible_text: text, tools: {calls: calls}}
 }
 

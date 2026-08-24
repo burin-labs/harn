@@ -16,7 +16,6 @@
 //! disabled = ["unused-import"]
 //! require_file_header = false
 //! require_docstrings = false
-//! require_public_api_types = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
 //! template_variant_branch_threshold = 3
@@ -67,10 +66,6 @@ pub struct LintConfig {
     /// Off by default — out of the box, `pub fn` needs no docs.
     #[serde(default, alias = "require-docstrings")]
     pub require_docstrings: Option<bool>,
-    /// Require explicit parameter and return annotations on every public
-    /// function and pipeline.
-    #[serde(default, alias = "require-public-api-types")]
-    pub require_public_api_types: Option<bool>,
     /// Override the default cyclomatic-complexity warning threshold
     /// (see `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`). Accept both
     /// snake_case and kebab-case for consistency with the other keys.
@@ -231,7 +226,6 @@ mod tests {
         assert!(cfg.lint.disabled.is_none());
         assert!(cfg.lint.require_file_header.is_none());
         assert!(cfg.lint.require_docstrings.is_none());
-        assert!(cfg.lint.require_public_api_types.is_none());
     }
 
     #[test]
@@ -249,10 +243,9 @@ separator_width = 60
 disabled = ["unused-import", "missing-harndoc"]
 require_file_header = true
 require_docstrings = true
-require_public_api_types = true
 
 [lint.severity]
-missing-public-api-type = "ERROR"
+missing-harndoc = "ERROR"
 unused-import = "warn"
 "#,
         );
@@ -266,11 +259,10 @@ unused-import = "warn"
         );
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
-        assert_eq!(cfg.lint.require_public_api_types, Some(true));
         assert_eq!(
             cfg.lint.severity,
             std::collections::HashMap::from([
-                ("missing-public-api-type".to_string(), LintSeverity::Error,),
+                ("missing-harndoc".to_string(), LintSeverity::Error,),
                 ("unused-import".to_string(), LintSeverity::Warning),
             ])
         );
@@ -315,7 +307,7 @@ line_width = 80
         write_file(
             tmp.path(),
             "harn.toml",
-            "[lint.severity]\nmissing-public-api-type = \"urgent\"\n",
+            "[lint.severity]\nmissing-harndoc = \"urgent\"\n",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
         let error = load_for_path(&harn_file).expect_err("unknown severity must fail closed");
@@ -366,7 +358,6 @@ separator-width = 72
 [lint]
 require-file-header = true
 require-docstrings = true
-require-public-api-types = true
 ",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -375,7 +366,6 @@ require-public-api-types = true
         assert_eq!(cfg.fmt.separator_width, Some(72));
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
-        assert_eq!(cfg.lint.require_public_api_types, Some(true));
     }
 
     #[test]

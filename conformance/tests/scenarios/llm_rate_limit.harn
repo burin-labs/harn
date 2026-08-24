@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Query with no limit configured -> nil
   const none = harness.llm.rate_limit("test_provider_xyz")
   harness.stdio.log(none)

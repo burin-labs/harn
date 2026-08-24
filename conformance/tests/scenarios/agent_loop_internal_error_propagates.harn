@@ -32,11 +32,11 @@ fn one_tool() {
 }
 
 /** Tool middleware that fails before dispatch with the given error category. */
-fn throwing_caller(category) {
+fn throwing_caller(category: string) {
   return { call, next -> throw_error("boom from tool caller", category) }
 }
 
-fn run_with_caller(harness: Harness, category, cap, calls) {
+fn run_with_caller(harness: Harness, category: string, cap: int, calls: list) {
   return with_llm_script(
     harness.llm,
     [{tool_calls: calls}, llm_text("##DONE##")],

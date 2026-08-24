@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const fixture = multipart_form_data(
     [
       {name: "title", content: "Quarterly report"},

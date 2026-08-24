@@ -1,6 +1,6 @@
 import "std/waitpoint"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const p0: Waitpoint = create(harness.runtime, "fan-out-1")
   const p1: Waitpoint = create(harness.runtime, "fan-out-2")
   const p2: Waitpoint = create(harness.runtime, "fan-out-3")

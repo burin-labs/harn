@@ -406,10 +406,12 @@ impl WireProgram {
                     budget.type_expr(type_expr, 1)?;
                 }
             }
-            let carries_runtime_types = function
-                .params
-                .iter()
-                .any(|param| param.type_expr.is_some());
+            let carries_runtime_types = function.params.iter().any(|param| {
+                param
+                    .type_expr
+                    .as_ref()
+                    .is_some_and(crate::type_contract::requires_runtime_type_check)
+            });
             if function.has_runtime_type_checks != carries_runtime_types {
                 return Err(Diagnostic::artifact(
                     "artifact_runtime_type_metadata",

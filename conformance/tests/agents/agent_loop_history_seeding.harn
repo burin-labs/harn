@@ -10,7 +10,7 @@ import { agent_loop } from "std/agent/loop"
 // request and the resulting transcript.
 import { agent_session_messages } from "std/agent/state"
 
-fn summarize(messages) {
+fn summarize(messages: list) {
   let out = []
   for msg in messages {
     out = out.appending(to_string(msg?.role ?? "") + "=" + to_string(msg?.content ?? ""))

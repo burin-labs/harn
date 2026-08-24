@@ -1,5 +1,5 @@
 /** Deterministic replay conformance fixture entrypoint. */
-pub fn main(input) {
+pub fn main(input: dict) {
   const stamped = {message: input?.message ?? "", verdict: "approved"}
   return stamped
 }

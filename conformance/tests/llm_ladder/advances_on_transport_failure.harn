@@ -6,7 +6,7 @@ import { with_llm_script } from "std/testing"
  * escalates and the frontier rung serves the answer. The result envelope
  * reflects the step-2 model and both attempts show on the routing trace.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

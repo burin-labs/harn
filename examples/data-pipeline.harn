@@ -7,7 +7,7 @@
  * Demonstrates a small data transformation pipeline with parallel fan-out
  * and a machine-readable summary report.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.log("Starting data pipeline")
   const raw = """
 [

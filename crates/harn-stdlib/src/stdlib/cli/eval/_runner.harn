@@ -25,7 +25,7 @@
  * `nil` or a different shape than expected — the renderers prefer
  * graceful degradation over hard crashes.
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
@@ -36,7 +36,7 @@ fn __safe_string(value, fallback: string) -> string {
  * Coerce a JSON value to a list, returning `[]` when the value is
  * `nil` or a non-list shape.
  */
-fn __safe_list(value) -> list {
+fn __safe_list(value: list) -> list {
   if type_of(value) == "list" {
     return value
   }
@@ -47,7 +47,7 @@ fn __safe_list(value) -> list {
  * Coerce a JSON value to a dict, returning `{}` when the value is
  * `nil` or a non-dict shape.
  */
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -60,7 +60,7 @@ fn __safe_dict(value) -> dict {
  * and padding behavior so rendered terminal/markdown output stays
  * byte-identical with the host formatter.
  */
-fn __format_float_n(value, decimals: int) -> string {
+fn __format_float_n(value: any, decimals: int) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {

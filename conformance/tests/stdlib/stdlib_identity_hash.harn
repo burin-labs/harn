@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Structural equality vs identity
   const a = [1, 2, 3]
   const b = [1, 2, 3]

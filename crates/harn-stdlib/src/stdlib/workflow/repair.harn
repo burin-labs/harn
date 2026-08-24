@@ -22,40 +22,40 @@ import { workflow_execute_options } from "std/workflow/options"
 import { workflow_repair_stage_graph } from "std/workflow/patterns"
 import { workflow_evaluate_verification } from "std/workflow/stage"
 
-fn __repair_dict(value) {
+fn __repair_dict(value: ValidateRepairConfig) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __repair_list(value) {
+fn __repair_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __repair_string(value, fallback) {
+fn __repair_string(value: any, fallback: any) {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __repair_bool(value, fallback) {
+fn __repair_bool(value: any, fallback: bool) {
   if type_of(value) == "bool" {
     return value
   }
   return fallback
 }
 
-fn __repair_is_callable(value) -> bool {
+fn __repair_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __repair_int(value) {
+fn __repair_int(value: any) {
   if type_of(value) == "int" {
     return value
   }
@@ -63,7 +63,7 @@ fn __repair_int(value) {
 }
 
 /** Findings extracted from a settled verification verdict (fn or composite). */
-fn __repair_verification_findings(verification) {
+fn __repair_verification_findings(verification: dict?) {
   if type_of(verification) != "dict" {
     return []
   }
@@ -87,7 +87,7 @@ fn __repair_verification_findings(verification) {
  * closure. A string command runs through the shell; a list runs argv-direct.
  * The exit status gates the verdict; combined output becomes the finding.
  */
-fn __repair_command_verifier(tools: HarnessTools, spec) {
+fn __repair_command_verifier(tools: HarnessTools, spec: dict) {
   return { _result ->
     const cmd = spec?.command
     const run_spec = if type_of(cmd) == "list" {
@@ -120,7 +120,7 @@ fn __repair_command_verifier(tools: HarnessTools, spec) {
  * gate on the assertions and retry — the dict path alone only gates a
  * `kind: "verify"` node.
  */
-fn __repair_assertion_verifier(spec) {
+fn __repair_assertion_verifier(spec: dict) {
   return { result -> return workflow_evaluate_verification({verify: spec, result: result}) }
 }
 
@@ -129,7 +129,7 @@ fn __repair_assertion_verifier(spec) {
  * into a single fn-verify closure the attempt loop can gate on. `nil` verify
  * means "no validation" (the stage settles on its own status).
  */
-fn __repair_resolve_verify(tools: HarnessTools, verify) {
+fn __repair_resolve_verify(tools: HarnessTools, verify: any) {
   if verify == nil {
     return nil
   }

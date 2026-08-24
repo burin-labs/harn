@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Exactness: the canonical float-rounding counterexample.
   harness.stdio.log(decimal("0.1") + decimal("0.2"))
   // Scale is preserved through addition/subtraction.

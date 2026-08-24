@@ -309,7 +309,7 @@ impl LocalSession {
             options.push(format!("timeout_ms: {}", duration_millis(timeout)));
         }
         Ok(format!(
-            "pipeline local_sandbox_exec(harness: Harness, task) {{ return harness.process.run({{{}}}) }}",
+            "pipeline local_sandbox_exec(harness: Harness, task: unknown) {{ return harness.process.run({{{}}}) }}",
             options.join(", "),
         ))
     }

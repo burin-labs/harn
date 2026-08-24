@@ -1,5 +1,5 @@
 /** Test error category builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // throw_error and error_category
   try {
     throw_error("request timed out", "timeout")

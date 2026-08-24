@@ -114,7 +114,7 @@ fn __disclosure_error(
 }
 
 fn __disclosure_text(
-  value,
+  value: string?,
   field: string,
   maximum: int,
 ) -> Result<string, ExternalActionDisclosureError> {
@@ -198,7 +198,10 @@ pub fn external_action_disclosure_plan_result(
  * @effects: []
  * @errors: [invalid_intent]
  */
-pub fn external_action_disclosure_request(intent, grant) -> ExternalActionDisclosureRequest {
+pub fn external_action_disclosure_request(
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+) -> ExternalActionDisclosureRequest {
   const plan = intent.protected_disclosure
   require plan != nil, "external_action_disclosure_request: action has no disclosure plan"
   return {
@@ -236,16 +239,16 @@ fn __disclosure_has(values: ExternalActionProtectedValues, field_class: string) 
   return values.travel_documents != nil
 }
 
-fn __protected_text_is_valid(value, maximum: int) -> bool {
+fn __protected_text_is_valid(value: string?, maximum: int) -> bool {
   const text = trim(to_string(value ?? ""))
   return text != "" && len(text) <= maximum && !text.contains("\n")
 }
 
-fn __protected_date_is_valid(value) -> bool {
+fn __protected_date_is_valid(value: string?) -> bool {
   return regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", to_string(value ?? "")) != nil
 }
 
-fn __protected_country_is_valid(value) -> bool {
+fn __protected_country_is_valid(value: string?) -> bool {
   return regex_match("^[A-Z]{2}$", to_string(value ?? "")) != nil
 }
 
@@ -360,7 +363,7 @@ fn __disclosure_binding_error(field: string) -> ExternalActionDisclosureError {
  * @errors: []
  */
 pub fn external_action_disclosure_result(
-  intent,
+  intent: ExternalActionIntent,
   raw: unknown,
 ) -> Result<ExternalActionDisclosure, ExternalActionDisclosureError> {
   if !schema_is(raw, schema_of(ExternalActionDisclosure)) {

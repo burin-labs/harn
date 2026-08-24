@@ -18,7 +18,7 @@ pub fn prompt_ids() {
 }
 
 /** True when `id` names a prompt in this pack. */
-pub fn is_prompt_id(id) {
+pub fn is_prompt_id(id: any) {
   return prompt_ids().contains(id)
 }
 
@@ -30,12 +30,12 @@ fn _string_array_schema() {
   return {type: "array", items: {type: "string"}}
 }
 
-fn _strict(required, properties) {
+fn _strict(required: list, properties: dict) {
   return {type: "object", additionalProperties: false, required: required, properties: properties}
 }
 
 /** Strict JSON schema for one prompt's model recommendation. */
-pub fn schema_for(id) {
+pub fn schema_for(id: string) {
   if id == "classify_pr" {
     return _strict(
       ["state", "confidence", "reason", "evidence_keys", "missing_context"],
@@ -181,7 +181,7 @@ pub fn side_effect_policy() {
 }
 
 /** Prompt text for one narrow decision. */
-pub fn prompt_text(id) {
+pub fn prompt_text(id: string) {
   const shared = side_effect_policy()
   if id == "classify_pr" {
     return "${shared}\nClassify exactly one pull request from the compact observation. Use only the provided evidence keys. Return JSON matching merge_captain.prompt_pack.classify_pr.v1."
@@ -205,7 +205,7 @@ pub fn prompt_text(id) {
 }
 
 /** Context budgets are intentionally small for Gemma-class/value models. */
-pub fn context_budget_for(id) {
+pub fn context_budget_for(id: string) {
   if id == "classify_pr" {
     return {
       max_input_tokens: 900,
@@ -281,7 +281,7 @@ pub fn context_budget_for(id) {
   }
 }
 
-fn _take(items, count) {
+fn _take(items: string | bytes | list | dict | set | range | nil, count: int) {
   if items == nil {
     return []
   }
@@ -292,7 +292,7 @@ fn _take(items, count) {
 }
 
 /** Assemble the compact context the prompt is allowed to see. */
-pub fn assemble_context(id, evidence) {
+pub fn assemble_context(id: string, evidence: dict) {
   const budget = context_budget_for(id)
   const selected_log_spans = _take(evidence?.selected_log_spans ?? [], budget.max_log_spans ?? 0)
   const commits = _take(evidence?.commits ?? [], budget.max_commits ?? 0)
@@ -317,7 +317,7 @@ pub fn assemble_context(id, evidence) {
 }
 
 /** Verify context assembly did not leak raw logs or exceed simple count budgets. */
-pub fn validate_context(context) {
+pub fn validate_context(context: dict) {
   let errors = []
   if context.raw_logs_included {
     errors = errors + ["raw logs must not enter prompt context"]
@@ -333,12 +333,12 @@ pub fn validate_context(context) {
   return {ok: len(errors) == 0, errors: errors}
 }
 
-fn _allowed_keys(schema) {
+fn _allowed_keys(schema: dict) {
   return schema.properties.keys()
 }
 
 /** Lightweight schema validator for golden fixtures and mock value-model outputs. */
-pub fn validate_output(id, output) {
+pub fn validate_output(id: string, output: dict) {
   const schema = schema_for(id)
   if schema == nil {
     return {ok: false, errors: ["unknown prompt id '${id}'"]}
@@ -360,7 +360,7 @@ pub fn validate_output(id, output) {
   return {ok: len(errors) == 0, errors: errors}
 }
 
-fn _ids(items) {
+fn _ids(items: list?) {
   let ids = []
   for item in items ?? [] {
     if item?.id != nil {
@@ -373,7 +373,7 @@ fn _ids(items) {
   return ids
 }
 
-fn _classify_pr_errors(output) {
+fn _classify_pr_errors(output: dict) {
   let errors = []
   if output.confidence < 0.7 && len(output.missing_context ?? []) == 0 {
     errors = errors + ["low-confidence PR classifications must name missing_context"]
@@ -384,7 +384,7 @@ fn _classify_pr_errors(output) {
   return errors
 }
 
-fn _next_action_errors(output) {
+fn _next_action_errors(output: dict) {
   let errors = []
   if output.action != "wait" && len(output.deterministic_inputs ?? []) == 0 {
     errors = errors + ["non-wait actions must cite deterministic_inputs"]
@@ -396,7 +396,7 @@ fn _next_action_errors(output) {
   return errors
 }
 
-fn _ci_category_errors(context, output) {
+fn _ci_category_errors(context: dict, output: dict) {
   let errors = []
   const allowed_spans = _ids(context.selected_log_spans)
   if ["deterministic_failure", "flaky_test", "infra_failure"].contains(output.category)
@@ -415,7 +415,7 @@ fn _ci_category_errors(context, output) {
   return errors
 }
 
-fn _release_audit_errors(context, output) {
+fn _release_audit_errors(context: dict, output: dict) {
   let errors = []
   if len(output.evidence_checked ?? []) == 0 {
     errors = errors + ["release/changelog audits must list evidence_checked"]
@@ -434,7 +434,7 @@ fn _release_audit_errors(context, output) {
   return errors
 }
 
-fn _approval_errors(output) {
+fn _approval_errors(output: dict) {
   let errors = []
   if output.ask_approval && len(output.action_kinds ?? []) == 0 {
     errors = errors + ["approval requests must list action_kinds"]
@@ -445,14 +445,14 @@ fn _approval_errors(output) {
   return errors
 }
 
-fn _repair_summary_errors(output) {
+fn _repair_summary_errors(output: dict) {
   if output.status == "completed" && len(output.tests ?? []) == 0 {
     return ["completed repair summaries must list tests"]
   }
   return []
 }
 
-fn _field_errors(id, context, output) {
+fn _field_errors(id: string, context: dict, output: dict) {
   if id == "classify_pr" {
     return _classify_pr_errors(output)
   }
@@ -474,7 +474,7 @@ fn _field_errors(id, context, output) {
   return []
 }
 
-fn _checkpoint_validator(id, context, extra_validator) {
+fn _checkpoint_validator(id: string, context: dict, extra_validator: any) {
   return fn(output) {
     let errors = []
     const schema_validation = validate_output(id, output)
@@ -511,10 +511,10 @@ fn _checkpoint_validator(id, context, extra_validator) {
 pub fn typed_prompt_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  id,
-  evidence,
-  options = nil,
-  validator = nil,
+  id: string,
+  evidence: dict,
+  options: dict? = nil,
+  validator: any = nil,
 ) {
   const schema = schema_for(id)
   if schema == nil {
@@ -570,11 +570,11 @@ pub fn typed_prompt_checkpoint(
 pub fn choose_next_action_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  classification,
-  policy,
-  dry_run,
-  approval_state,
-  options = nil,
+  classification: dict,
+  policy: dict,
+  dry_run: bool,
+  approval_state: dict,
+  options: dict? = nil,
 ) {
   return typed_prompt_checkpoint(
     agent,
@@ -594,14 +594,19 @@ pub fn choose_next_action_checkpoint(
 pub fn diagnose_ci_failure_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  evidence,
-  options = nil,
+  evidence: dict,
+  options: dict? = nil,
 ) {
   return typed_prompt_checkpoint(agent, llm, "diagnose_ci_category", evidence, options)
 }
 
 /** Checkpoint flaky-test categorization from selected deterministic log spans. */
-pub fn classify_flake_checkpoint(agent: HarnessAgent, llm: HarnessLlm, evidence, options = nil) {
+pub fn classify_flake_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  evidence: dict,
+  options: dict? = nil,
+) {
   return typed_prompt_checkpoint(
     agent,
     llm,
@@ -626,8 +631,8 @@ pub fn classify_flake_checkpoint(agent: HarnessAgent, llm: HarnessLlm, evidence,
 pub fn audit_release_changelog_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  evidence,
-  options = nil,
+  evidence: dict,
+  options: dict? = nil,
 ) {
   return typed_prompt_checkpoint(agent, llm, "audit_release_changelog", evidence, options)
 }
@@ -650,7 +655,7 @@ pub fn known_failure_modes() {
 }
 
 /** Golden examples double as cheap-model calibration fixtures. */
-pub fn golden_examples_for(id) {
+pub fn golden_examples_for(id: string) {
   if id == "classify_pr" {
     return [
       {
@@ -831,7 +836,7 @@ pub fn pack_manifest() {
 }
 
 /** Prompt used by the repair checkpoint while preserving repair_output validation. */
-pub fn repair_checkpoint_prompt(kind) {
+pub fn repair_checkpoint_prompt(kind: string) {
   if kind == "release_audit" {
     const prompt = prompt_text("audit_release_changelog")
     return "${prompt}\nAfter the audit recommendation, fill the universal merge_captain.repair_output v1 JSON object, including release_outputs. Keep blockers and uncertainty visible."

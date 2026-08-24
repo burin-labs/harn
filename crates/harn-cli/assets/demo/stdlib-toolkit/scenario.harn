@@ -49,7 +49,7 @@ fn task_overrides() {
   }
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   // 1. Decouple shared defaults from per-task mutation so a future
   //    multi-task scheduler can run several `default` pipelines in
   //    parallel against the same defaults binding without

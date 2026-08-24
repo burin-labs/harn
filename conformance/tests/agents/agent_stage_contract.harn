@@ -7,7 +7,7 @@ fn known_stage(stage: AgentStage) -> AgentStage {
   return stage
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session_id = "agent-stage-contract-" + harness.random.uuid_v7()
   with_llm_script(
     harness.llm,

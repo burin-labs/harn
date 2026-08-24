@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test llm_cost builtin with known model pricing. `llm_cost` returns an
   // exact `decimal` (money), so it is compared against decimal literals —
   // decimals form a clean island and never compare equal/ordered against

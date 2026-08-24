@@ -94,7 +94,7 @@ const UI_MAX_STROKE_POINTS = 4096
 
 const UI_MAX_DOCUMENT_POINTS = 65536
 
-fn __ui_app_text(value) -> string {
+fn __ui_app_text(value: string?) -> string {
   return trim(to_string(value ?? ""))
 }
 
@@ -151,7 +151,7 @@ fn __ui_effect_kind(kind: string) -> UiEffectKind {
   throw "std/ui: unsupported effect kind " + kind
 }
 
-fn __ui_point(raw) -> UiPoint {
+fn __ui_point(raw: dict) -> UiPoint {
   const x = to_float(raw?.x)
   const y = to_float(raw?.y)
   if x == nil
@@ -169,7 +169,7 @@ fn __ui_point(raw) -> UiPoint {
   return {x: x, y: y}
 }
 
-fn __ui_strokes(raw) -> list<UiStroke> {
+fn __ui_strokes(raw: list?) -> list<UiStroke> {
   let checked: list<UiStroke> = []
   let point_count = 0
   let ids = []
@@ -201,7 +201,7 @@ fn __ui_strokes(raw) -> list<UiStroke> {
   return checked
 }
 
-fn __ui_element(raw) -> UiElement {
+fn __ui_element(raw: dict) -> UiElement {
   return {
     id: __ui_app_text(raw?.id),
     kind: __ui_element_kind(__ui_app_text(raw?.kind)),
@@ -230,7 +230,7 @@ fn __ui_element(raw) -> UiElement {
  * @effects: []
  * @errors: [invalid_argument]
  */
-pub fn document(title: string, revision: int, elements) -> UiDocument {
+pub fn document(title: string, revision: int, elements: list?) -> UiDocument {
   if __ui_app_text(title) == "" {
     throw "std/ui: document title is required"
   }
@@ -327,7 +327,7 @@ pub fn event(raw: dict) -> UiEvent {
  * @effects: []
  * @errors: [invalid_argument]
  */
-pub fn update(document: UiDocument, effects = []) -> UiUpdate {
+pub fn update(document: UiDocument, effects: list? = []) -> UiUpdate {
   let checked_effects: list<UiEffect> = []
   for raw in effects ?? [] {
     let effect: UiEffect = {kind: __ui_effect_kind(__ui_app_text(raw?.kind))}

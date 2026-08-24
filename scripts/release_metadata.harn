@@ -74,7 +74,7 @@ fn distribution_version(fs: HarnessFs, root: string, version: string) -> string 
   return release_distribution_version(load_release_withdrawals(fs, path), version)
 }
 
-pub fn workspace_version_from_doc(doc) -> string {
+pub fn workspace_version_from_doc(doc: dict) -> string {
   const value = doc?.workspace?.package?.version ?? doc?.workspace?.version
   if type_of(value) != "string" || to_string(value) == "" {
     throw "missing workspace version"
@@ -122,7 +122,7 @@ pub fn stable_version_from_development(version: string) -> string {
     + to_string(parsed.patch)
 }
 
-fn workspace_entries(doc, key: string) -> list<string> {
+fn workspace_entries(doc: dict, key: string) -> list<string> {
   const raw = doc?.workspace?.get(key)
   if raw == nil && key == "exclude" {
     return []

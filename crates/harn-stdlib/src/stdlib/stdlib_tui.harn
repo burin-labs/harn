@@ -52,7 +52,7 @@ pub fn page(opts: PageOptions) -> PageResult {
  * @effects: []
  * @errors: []
  */
-pub fn terminal_width(term: HarnessTerm, default_width = 80) -> int {
+pub fn terminal_width(term: HarnessTerm, default_width: int = 80) -> int {
   return term.terminal_width(default_width)
 }
 
@@ -62,7 +62,7 @@ pub fn terminal_width(term: HarnessTerm, default_width = 80) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn rule(term: HarnessTerm, char = "─", width = nil) -> string {
+pub fn rule(term: HarnessTerm, char: any = "─", width: any = nil) -> string {
   const mark = if type_of(char) == "string" && len(char) > 0 {
     substring(char, 0, 1)
   } else {
@@ -89,19 +89,19 @@ const __TUI_CANCEL_TOKENS = ["q", "quit", "/quit", "exit", "/exit", "/cancel"]
 
 const __TUI_LINE_SEP = "\t"
 
-fn __tui_is_callable(value) -> bool {
+fn __tui_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __tui_to_string(value) -> string {
+fn __tui_to_string(value: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return to_string(value)
 }
 
-fn __tui_default_display(item) -> string {
+fn __tui_default_display(item: any) -> string {
   if type_of(item) == "dict" {
     for key in ["label", "title", "name", "headline"] {
       if item[key] != nil {
@@ -120,7 +120,7 @@ fn __tui_sanitize(text: string) -> string {
   return replace(no_lf, __TUI_LINE_SEP, " ")
 }
 
-fn __tui_render_label(item, display_fn) -> string {
+fn __tui_render_label(item: unknown, display_fn: any) -> string {
   const raw = if display_fn != nil && __tui_is_callable(display_fn) {
     display_fn(item)
   } else {
@@ -129,7 +129,7 @@ fn __tui_render_label(item, display_fn) -> string {
   return __tui_sanitize(__tui_to_string(raw))
 }
 
-fn __tui_render_preview(item, preview_fn) -> string {
+fn __tui_render_preview(item: any, preview_fn: any) -> string {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return ""
   }
@@ -140,19 +140,19 @@ fn __tui_render_preview(item, preview_fn) -> string {
   return __tui_to_string(raw)
 }
 
-fn __tui_result(ok, value, status) -> dict {
+fn __tui_result(ok: bool, value: any, status: string) -> dict {
   return {ok: ok, value: value, status: status}
 }
 
-fn __tui_cancelled(opts) -> dict {
+fn __tui_cancelled(opts: dict) -> dict {
   return __tui_result(false, opts?.cancel_value, "cancelled")
 }
 
-fn __tui_eof(opts) -> dict {
+fn __tui_eof(opts: dict) -> dict {
   return __tui_result(false, opts?.cancel_value, "eof")
 }
 
-fn __tui_error(opts, message: string) -> dict {
+fn __tui_error(opts: dict, message: string) -> dict {
   return {ok: false, value: opts?.cancel_value, status: "error", error: message}
 }
 
@@ -222,7 +222,12 @@ fn __tui_parse_multi(line: string, len_items: int) -> any {
   return selected
 }
 
-fn __tui_print_menu(stdio: HarnessStdio, items, labels: list<string>, opts) {
+fn __tui_print_menu(
+  stdio: HarnessStdio,
+  items: string | bytes | list | dict | set | range | nil,
+  labels: list<string>,
+  opts: dict,
+) {
   const prompt = opts?.prompt ?? "Select"
   const header = opts?.header
   if header != nil && trim(__tui_to_string(header)) != "" {
@@ -248,7 +253,7 @@ fn __tui_print_menu(stdio: HarnessStdio, items, labels: list<string>, opts) {
   stdio.print(__tui_to_string(prompt) + hint + "> ")
 }
 
-fn __tui_numbered_pick(stdio: HarnessStdio, items, labels, opts) -> dict {
+fn __tui_numbered_pick(stdio: HarnessStdio, items: any, labels: any, opts: dict) -> dict {
   __tui_print_menu(stdio, items, labels, opts)
   const line_result = stdio.read_line({})
   if !line_result.ok {
@@ -302,7 +307,7 @@ fn __tui_join_stdin(labels: list<string>) -> string {
   return join(lines, "\n") + "\n"
 }
 
-fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
+fn __tui_preview_setup(harness: Harness, items: list, preview_fn: any) -> dict {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return {dir: nil, args: []}
   }
@@ -326,7 +331,7 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   return {dir: dir, args: ["--preview", reader + " " + dir + "/{1}.txt"]}
 }
 
-fn __tui_preview_cleanup(fs: HarnessFs, dir) {
+fn __tui_preview_cleanup(fs: HarnessFs, dir: any) {
   if dir == nil {
     return
   }
@@ -335,7 +340,7 @@ fn __tui_preview_cleanup(fs: HarnessFs, dir) {
   }
 }
 
-fn __tui_lookup_by_index(items, label_line: string) -> any {
+fn __tui_lookup_by_index(items: any, label_line: string) -> any {
   const parts = split(label_line, __TUI_LINE_SEP)
   if len(parts) < 1 {
     return nil
@@ -347,7 +352,7 @@ fn __tui_lookup_by_index(items, label_line: string) -> any {
   return items[idx]
 }
 
-fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
+fn __tui_fzf_decode(items: any, body: string, multi: bool, opts: dict) -> dict {
   const lines = split(body, "\n")
   if multi {
     let picked = []
@@ -369,7 +374,7 @@ fn __tui_fzf_decode(items, body: string, multi: bool, opts) -> dict {
   return __tui_result(true, chosen, "selected")
 }
 
-fn __tui_fzf_pick(harness: Harness, items, labels, opts) -> dict {
+fn __tui_fzf_pick(harness: Harness, items: list, labels: any, opts: dict) -> dict {
   const stdin = __tui_join_stdin(labels)
   const prompt = __tui_to_string(opts?.prompt ?? "Select> ")
   const header = opts?.header
@@ -409,7 +414,7 @@ fn __tui_fzf_pick(harness: Harness, items, labels, opts) -> dict {
   return __tui_fzf_decode(items, body, multi, opts)
 }
 
-fn __tui_gum_pick(tools: HarnessTools, items, labels, opts) -> dict {
+fn __tui_gum_pick(tools: HarnessTools, items: list, labels: list, opts: dict) -> dict {
   const stdin = join(labels, "\n") + "\n"
   const header = __tui_to_string(opts?.header ?? opts?.prompt ?? "Select")
   let argv = ["gum", "choose", "--header", header]

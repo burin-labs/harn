@@ -6,7 +6,16 @@
  * row, and decide whether a `light` row may skip the LLM confirmation. They
  * touch no judge state, so the judge imports them rather than owning them.
  */
-fn __agent_completion_review(llm, opts) -> dict {
+import { JudgeConfig } from "std/agent/options_types"
+
+pub type CompletionReview = {scrutiny: string, max_judge_calls?: int, evidence?: unknown}
+
+/** The completion-judge fields consumed when resolving its invocation cap. */
+pub type CompletionReviewJudgePolicy = {max_judge_calls?: int}
+
+type CompletionJudgeConfig = bool | JudgeConfig | nil
+
+fn __agent_completion_review(llm: HarnessLlm, opts: dict) -> CompletionReview {
   const model = trim(to_string(opts?.model ?? ""))
   if model == "" {
     return {scrutiny: "standard"}
@@ -39,7 +48,7 @@ fn __agent_completion_review(llm, opts) -> dict {
  * @api_stability: experimental
  * @example: agent_completion_review(harness.llm, opts)
  */
-pub fn agent_completion_review(llm, opts) -> dict {
+pub fn agent_completion_review(llm: HarnessLlm, opts: dict) -> CompletionReview {
   return __agent_completion_review(llm, opts)
 }
 
@@ -55,8 +64,12 @@ pub fn agent_completion_review(llm, opts) -> dict {
  * @api_stability: experimental
  * @example: agent_completion_review_should_skip_llm(review, evaluation, payload)
  */
-pub fn agent_completion_review_should_skip_llm(review, evaluation, payload) -> bool {
-  if to_string(review?.scrutiny ?? "standard") != "light" {
+pub fn agent_completion_review_should_skip_llm(
+  review: CompletionReview,
+  evaluation: dict,
+  payload: dict,
+) -> bool {
+  if review.scrutiny != "light" {
     return false
   }
   if !(evaluation?.invoked?.deterministic ?? false) {
@@ -77,13 +90,16 @@ pub fn agent_completion_review_should_skip_llm(review, evaluation, payload) -> b
 // `0`.
 pub const COMPLETION_JUDGE_DEFAULT_CAP = 5
 
-fn __verify_completion_judge_cap(judge_cfg, review = {}) -> int? {
+fn __verify_completion_judge_cap(
+  judge_cfg: CompletionJudgeConfig,
+  review: CompletionReviewJudgePolicy = {},
+) -> int? {
   const configured = if type_of(judge_cfg) == "dict" {
     judge_cfg?.max_invocations
   } else {
     nil
   }
-  const catalog_cap = review?.max_judge_calls
+  const catalog_cap = review.max_judge_calls
   const cap = configured ?? catalog_cap ?? COMPLETION_JUDGE_DEFAULT_CAP
   if cap <= 0 {
     return nil
@@ -97,7 +113,7 @@ fn __verify_completion_judge_cap(judge_cfg, review = {}) -> int? {
  * judge may fire up to the cap, then the loop finalizes instead of silently
  * continuing until the iteration budget expires.
  */
-fn __done_judge_cap(judge_cfg) -> int? {
+fn __done_judge_cap(judge_cfg: CompletionJudgeConfig) -> int? {
   if type_of(judge_cfg) != "dict" {
     return nil
   }
@@ -119,7 +135,7 @@ fn __done_judge_cap(judge_cfg) -> int? {
  * @api_stability: experimental
  * @example: agent_done_judge_cap(opts?.done_judge)
  */
-pub fn agent_done_judge_cap(judge_cfg) -> int? {
+pub fn agent_done_judge_cap(judge_cfg: CompletionJudgeConfig) -> int? {
   return __done_judge_cap(judge_cfg)
 }
 
@@ -137,6 +153,9 @@ pub fn agent_done_judge_cap(judge_cfg) -> int? {
  *
  * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge, review)
  */
-pub fn agent_verify_completion_judge_cap(judge_cfg, review = {}) -> int? {
+pub fn agent_verify_completion_judge_cap(
+  judge_cfg: CompletionJudgeConfig,
+  review: CompletionReviewJudgePolicy = {},
+) -> int? {
   return __verify_completion_judge_cap(judge_cfg, review)
 }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test tool_define builtin for ergonomic tool registration.
   let registry = tool_registry()
   registry = tool_define(

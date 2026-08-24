@@ -21,7 +21,7 @@ fn list_tools() {
   return tools
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.tools.register_hook({pattern: "list_directory", deny: "listing disabled"})
   const denied = agent_loop(
     harness,

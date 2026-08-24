@@ -27,7 +27,7 @@ import {
   command_capture_rewrite,
 } from "std/agent/command_capture"
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   harness.stdio.println("=== command-capture demo ===")
   harness.stdio.println("")
   // 1. Rewrites: a `tee` is woven in just before the final consume-all

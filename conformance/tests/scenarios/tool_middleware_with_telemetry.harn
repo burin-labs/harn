@@ -55,7 +55,7 @@ fn scope_violation_next() {
   }
 }
 
-fn envelope(name, call_id, session_id) {
+fn envelope(name: string, call_id: string, session_id: string) {
   return {
     tool_name: name,
     tool_args: {q: "evidence"},

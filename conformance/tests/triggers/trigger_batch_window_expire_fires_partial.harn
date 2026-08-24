@@ -7,7 +7,7 @@ import "std/triggers"
  * thread-local mock clock so the buffer is observed as expired during
  * the next `harness.channels.flush_aggregations()` call.
  */
-fn handle_batch(harness: Harness, event) {
+fn handle_batch(harness: Harness, event: dict) {
   const batch_len = if event.batch == nil {
     0
   } else {
@@ -16,7 +16,7 @@ fn handle_batch(harness: Harness, event) {
   harness.channels.append("batch.window.fired", {batch_size: batch_len})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1000000)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

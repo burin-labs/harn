@@ -215,7 +215,7 @@ pub fn probe_failure_report(base: string, failures: list<dict>) -> string {
   return (lines + tail).join("\n")
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const base = resolve_base_ref(
     harness.env,
     harness.process,

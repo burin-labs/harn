@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test that return inside try-finally runs the finally block
   // and correctly returns the value.
   fn get_value() {

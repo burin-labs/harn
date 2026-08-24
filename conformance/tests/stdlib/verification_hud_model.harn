@@ -4,7 +4,7 @@ import {
   verification_snapshot_staleness,
 } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const fresh = verification_snapshot_staleness({"src/a.tx": "h1"}, {"src/a.tx": "h1"})
   assert_eq(fresh.status, "bound_fresh")
   assert_eq(fresh.fresh, true)

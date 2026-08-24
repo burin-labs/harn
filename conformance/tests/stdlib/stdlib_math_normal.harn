@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const pdf0 = normal_pdf(0)
   assert(pdf0 > 0.3989)
   assert(pdf0 < 0.399)

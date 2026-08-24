@@ -127,6 +127,193 @@ fn code_selector_does_not_defer_to_an_unselected_whole_program_pass() {
     );
 }
 
+#[test]
+fn parameter_annotation_selector_skips_unselected_capability_planning() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("factory.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn factory(options) {\n",
+            "  return {\n",
+            "    first: fn(harness) { harness.fs.read_text(\"a\") },\n",
+            "    second: fn(_harness) { _harness.fs.read_text(\"b\") },\n",
+            "  }\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    let plan = build_plan_with_options_at(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        &FixOptions {
+            codes: BTreeSet::from([Code::ImplicitAnyParameter]),
+            ..FixOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.repairs.len(), 1, "{:#?}", plan.repairs);
+    assert_eq!(
+        plan.repairs[0].diagnostic_code,
+        Code::ImplicitAnyParameter.as_str()
+    );
+}
+
+#[test]
+fn parameter_annotation_repair_infers_mixed_evidence_and_reports_residue() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("mixed-parameters.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn from_call_site(value) { return value }\n",
+            "fn typed_sink(value: string) {}\n",
+            "fn forwarded(value) { typed_sink(value) }\n",
+            "fn iterated(items) { for item in items { item } }\n",
+            "fn receiver(text) { return text.upper() }\n",
+            "fn clock_default(harness: Harness, now_ms = nil) {\n",
+            "  return now_ms ?? harness.clock.now_ms()\n",
+            "}\n",
+            "fn optional_config(options = nil) {\n",
+            "  if options == nil { return nil }\n",
+            "  return options.get(\"enabled\")\n",
+            "}\n",
+            "fn config(value) {\n",
+            "  if value == nil { return {} }\n",
+            "  if type_of(value) == \"bool\" { return {} }\n",
+            "  if type_of(value) != \"dict\" { throw \"bad config\" }\n",
+            "  return {enabled: value.enabled}\n",
+            "}\n",
+            "fn optional_int(value) {\n",
+            "  if value == nil { return 0 }\n",
+            "  if type_of(value) != \"int\" { throw \"bad count\" }\n",
+            "  return value + 1\n",
+            "}\n",
+            "fn unresolved(value) { return 1 }\n",
+            "fn caller() { from_call_site(\"hello\") }\n",
+        ),
+    )
+    .unwrap();
+    let options = FixOptions {
+        codes: BTreeSet::from([Code::ImplicitAnyParameter]),
+        ..FixOptions::default()
+    };
+
+    let plan =
+        build_plan_with_options_at(&script, Some(RepairSafety::SurfaceChanging), &options).unwrap();
+    let summary = plan
+        .parameter_annotations
+        .as_ref()
+        .unwrap_or_else(|| panic!("annotation summary must be present: {plan:#?}"));
+    assert_eq!(summary.total, 9);
+    assert_eq!(summary.inferred, 7);
+    assert_eq!(summary.unresolved, 2);
+    assert_eq!(summary.unresolved_share, 0.2222);
+    let replacements = plan
+        .repairs
+        .iter()
+        .flat_map(|repair| repair.edits.iter())
+        .map(|edit| edit.replacement.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        replacements,
+        vec![
+            ": string",
+            ": string",
+            ": list",
+            ": string",
+            ": int?",
+            ": dict?",
+            ": unknown",
+            ": int?",
+            ": unknown"
+        ]
+    );
+
+    let result =
+        apply_repairs_with_options_at(&script, RepairSafety::SurfaceChanging, false, options)
+            .unwrap();
+    assert_eq!(result.applied.len(), 9, "{result:#?}");
+    let rewritten = fs::read_to_string(&script).unwrap();
+    assert!(rewritten.contains("fn from_call_site(value: string)"));
+    assert!(rewritten.contains("fn forwarded(value: string)"));
+    assert!(rewritten.contains("fn iterated(items: list)"));
+    assert!(rewritten.contains("fn receiver(text: string)"));
+    assert!(rewritten.contains("fn config(value: unknown)"));
+    assert!(rewritten.contains("fn optional_int(value: int?)"));
+    assert!(rewritten.contains("fn unresolved(value: unknown)"));
+}
+
+#[test]
+fn parameter_annotation_repair_infers_nullable_callback_from_calls() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("optional-callback.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn notify(callback = nil) {\n",
+            "  if callback != nil { callback() }\n",
+            "}\n",
+            "fn caller() { notify({ -> nil }) }\n",
+        ),
+    )
+    .unwrap();
+
+    let plan = build_plan_with_options_at(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        &FixOptions {
+            codes: BTreeSet::from([Code::ImplicitAnyParameter]),
+            ..FixOptions::default()
+        },
+    )
+    .unwrap();
+
+    let replacements = plan
+        .repairs
+        .iter()
+        .flat_map(|repair| repair.edits.iter())
+        .map(|edit| edit.replacement.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(replacements, vec![": closure?"]);
+}
+
+#[test]
+fn parameter_annotation_repair_does_not_treat_nil_guard_as_the_value_domain() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("nil-guard.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn render(value) {\n",
+            "  if value == nil { return \"missing\" }\n",
+            "  return to_string(value)\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    let plan = build_plan_with_options_at(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        &FixOptions {
+            codes: BTreeSet::from([Code::ImplicitAnyParameter]),
+            ..FixOptions::default()
+        },
+    )
+    .unwrap();
+
+    let replacements = plan
+        .repairs
+        .iter()
+        .flat_map(|repair| repair.edits.iter())
+        .map(|edit| edit.replacement.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(replacements, vec![": unknown"]);
+}
+
 /// A file `harn fmt` would rewrite must come back exactly as its author keeps
 /// it, apart from the repair. Formatting every edited file would turn a
 /// three-line repair into a whole-file diff for any project that does not run

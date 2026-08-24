@@ -1,7 +1,7 @@
 import { agent_sitrep, agent_sitrep_append, agent_sitrep_preferred_routes } from "std/agent/sitrep"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Default route list is non-empty and contains anthropic+haiku at the head.
   const routes = agent_sitrep_preferred_routes(harness.llm)
   harness.stdio.println(len(routes) > 0)

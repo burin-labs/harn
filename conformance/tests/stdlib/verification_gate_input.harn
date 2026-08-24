@@ -1,6 +1,6 @@
 import { verification_gate_input } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const old_red = {
     rung: "R2",
     rowId: "zig/test",

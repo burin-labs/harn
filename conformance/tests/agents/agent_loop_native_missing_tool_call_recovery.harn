@@ -40,7 +40,7 @@ fn intended_edit_classifier() {
   }
 }
 
-fn injected_kind_in(calls, idx, marker) {
+fn injected_kind_in(calls: any, idx: int, marker: string) {
   if idx >= len(calls) {
     return false
   }

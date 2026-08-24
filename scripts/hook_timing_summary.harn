@@ -87,7 +87,7 @@ pub fn default_hook_timing_path(home: string) -> string {
   return path_join(home, ".burin/hook-timings.ndjson")
 }
 
-fn normalize_hook_phases(value) -> dict<string, int>? {
+fn normalize_hook_phases(value: dict?) -> dict<string, int>? {
   if value == nil {
     return {}
   }
@@ -110,7 +110,7 @@ fn hook_phase_total(phases: dict<string, int>) -> int {
   return phases.values().to_list().sum()
 }
 
-pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
+pub fn hook_timing_event_from_json(value: dict) -> HookTimingEvent? {
   const repo = to_string(value?.repo ?? "")
   const repository = to_string(value?.repository ?? repo)
   const hook = to_string(value?.hook ?? "")

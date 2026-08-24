@@ -14,21 +14,21 @@
  * (rates set to 0 in `[llm.providers.<name>]`, e.g. `ollama`, `local`,
  * `llamacpp`, `mlx`, `vllm`, `tgi`).
  */
-fn __coerce_to_str(value) {
+fn __coerce_to_str(value: any) {
   if value == nil {
     return ""
   }
   return to_string(value)
 }
 
-fn __ensure_dict(opts, label) {
+fn __ensure_dict(opts: dict, label: string) {
   if type_of(opts) != "dict" {
     throw label + ": opts must be a dict"
   }
   return opts
 }
 
-fn __resolve_pricing_selector(provider, model) {
+fn __resolve_pricing_selector(provider: any, model: any) {
   // Three call shapes:
   //   pricing_for(model_id)            → provider inferred from catalog
   //   pricing_for({provider, model})   → explicit dict
@@ -53,28 +53,28 @@ fn __resolve_pricing_selector(provider, model) {
   return llm_pricing({provider: __coerce_to_str(provider), model: model_str})
 }
 
-fn __int_or(value, fallback) {
+fn __int_or(value: any, fallback: int) {
   if value == nil {
     return fallback
   }
   return to_int(value)
 }
 
-fn __cache_read_rate_or_nil(pricing) {
+fn __cache_read_rate_or_nil(pricing: dict) {
   if pricing?.cache_read_per_mtok != nil {
     return pricing.cache_read_per_mtok / 1000000.0
   }
   return nil
 }
 
-fn __cache_write_rate_or_nil(pricing) {
+fn __cache_write_rate_or_nil(pricing: dict) {
   if pricing?.cache_write_per_mtok != nil {
     return pricing.cache_write_per_mtok / 1000000.0
   }
   return nil
 }
 
-fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
+fn __billable_input(input_tokens: any, cache_read_tokens: any, cache_write_tokens: any) {
   const raw = input_tokens - cache_read_tokens - cache_write_tokens
   if raw < 0 {
     return 0
@@ -92,7 +92,7 @@ fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
  * @effects: []
  * @errors: []
  */
-pub fn pricing_for(provider, model = nil) {
+pub fn pricing_for(provider: string | dict, model: any = nil) {
   return __resolve_pricing_selector(provider, model)
 }
 
@@ -111,7 +111,7 @@ pub fn pricing_for(provider, model = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn estimate_call_cost(opts) {
+pub fn estimate_call_cost(opts: dict) {
   __ensure_dict(opts, "estimate_call_cost")
   const model = __coerce_to_str(opts?.model)
   if model == "" {
@@ -190,7 +190,7 @@ pub fn estimate_call_cost(opts) {
   }
 }
 
-fn __aggregate_key(provider, model) {
+fn __aggregate_key(provider: any, model: any) {
   const p = if provider == nil {
     ""
   } else {
@@ -214,7 +214,7 @@ fn __aggregate_key(provider, model) {
  * @effects: []
  * @errors: []
  */
-pub fn estimate_session_cost(usage) {
+pub fn estimate_session_cost(usage: list) {
   if type_of(usage) != "list" {
     throw "estimate_session_cost: usage must be a list of call dicts"
   }
@@ -281,7 +281,7 @@ pub fn estimate_session_cost(usage) {
  * @effects: []
  * @errors: []
  */
-pub fn compare_model_costs(candidates, opts) {
+pub fn compare_model_costs(candidates: list, opts: dict) {
   __ensure_dict(opts, "compare_model_costs")
   return llm_compare_costs(candidates, opts)
 }
@@ -301,7 +301,7 @@ pub fn compare_model_costs(candidates, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn cache_break_even(opts) {
+pub fn cache_break_even(opts: dict) {
   __ensure_dict(opts, "cache_break_even")
   const model = __coerce_to_str(opts?.model)
   if model == "" {
@@ -384,7 +384,7 @@ pub fn cache_break_even(opts) {
  * @effects: []
  * @errors: []
  */
-pub fn volume_cost(opts) {
+pub fn volume_cost(opts: dict) {
   __ensure_dict(opts, "volume_cost")
   const calls_per_period = __int_or(opts?.calls_per_period, 0)
   if calls_per_period <= 0 {
@@ -433,7 +433,7 @@ pub fn volume_cost(opts) {
  * @effects: []
  * @errors: []
  */
-pub fn format_usd(amount, options = nil) {
+pub fn format_usd(amount: decimal | float | int, options: any = nil) {
   if options == nil {
     return llm_format_usd(amount)
   }

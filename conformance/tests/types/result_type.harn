@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Ok and Err constructors
   const ok_val = Ok(42)
   const err_val = Err("something failed")

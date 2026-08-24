@@ -1,10 +1,10 @@
 /** Greet by name. */
-pub fn greet(name) {
+pub fn greet(name: string) {
   return "Hello, " + name + "!"
 }
 
 /** add. */
-pub fn add(a, b) {
+pub fn add(a: int, b: int) {
   return a + b
 }
 

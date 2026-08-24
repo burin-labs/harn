@@ -55,7 +55,7 @@
  * which returns a list of matches or nil; this helper collapses the
  * two cases into a clean predicate for catalogue rules.
  */
-fn __cat_re(pattern, text) -> bool {
+fn __cat_re(pattern: any, text: any) -> bool {
   return regex_match(pattern, text) != nil
 }
 
@@ -64,7 +64,7 @@ fn __cat_re(pattern, text) -> bool {
  * naive concat is sufficient because rewrites flow through
  * `__preset_invoke_rewrite`, which forwards the final string to `inner`.
  */
-fn __cat_append_flag(command, flag) -> string {
+fn __cat_append_flag(command: any, flag: string) -> string {
   if contains(command, flag) {
     return command
   }
@@ -77,7 +77,7 @@ fn __cat_append_flag(command, flag) -> string {
  * catalogues to stay DRY. Falls back to an untyped `rg --files` when no
  * extension is detected so the rewrite is still safe to dispatch.
  */
-fn __cat_find_to_rg(command, file_type) -> string {
+fn __cat_find_to_rg(command: any, file_type: string) -> string {
   // The ripgrep equivalent only needs the type tag, since `rg --files`
   // walks the cwd by default and respects `.gitignore`. The original
   // `command` is intentionally discarded — `find .` callers rarely
@@ -95,7 +95,7 @@ fn __cat_find_to_rg(command, file_type) -> string {
  * rule list. Each catalogue advertises `source: "harn-canon"` so audit
  * consumers know the provenance even after JSON round-trip.
  */
-fn __cat_build(id, stack, rules) {
+fn __cat_build(id: string, stack: string, rules: list) {
   return catalogue({id: id, stack: stack, version: "0.1.0", source: "harn-canon", rules: rules})
 }
 
@@ -104,7 +104,7 @@ fn __cat_build(id, stack, rules) {
  * `tool_hooks_filter`, so universal denies fire regardless of which
  * `stacks: [...]` the caller opted into.
  */
-fn __cat_build_universal(id, rules) {
+fn __cat_build_universal(id: string, rules: list) {
   // priority: 100 places deny-rules ahead of stack-specific rewrites
   // on ambiguous commands during the linear sweep in tool_hooks_match.
   return catalogue({id: id, version: "0.1.0", source: "harn-canon", priority: 100, rules: rules})
@@ -119,7 +119,7 @@ fn __cat_build_universal(id, rules) {
  * command. Used by every stack catalogue with a "trigger on bare X, but
  * skip when the user already supplied the corrected flag" shape.
  */
-fn __cat_pred_prefix(prefix_re, suppress_markers) {
+fn __cat_pred_prefix(prefix_re: string, suppress_markers: list) {
   return { command, _context ->
     if !__cat_re(prefix_re, command) {
       return false
@@ -140,7 +140,7 @@ fn __cat_pred_prefix(prefix_re, suppress_markers) {
  * anchor keeps grep-style `find` invocations in other contexts from
  * tripping.
  */
-fn __cat_pred_find_for_ext(extensions) {
+fn __cat_pred_find_for_ext(extensions: list) {
   const ext_re = "(?:" + join(extensions, "|") + ")"
   // The trailing `(?:[\"']|\\s|$)` is essential: without an anchor on
   // the extension's right side, `*.js` would match `*.json` because
@@ -161,7 +161,7 @@ fn __cat_pred_find_for_ext(extensions) {
  *   4. The escape-hatch env var HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH is not
  *      "1" / "true". Read via `env_or` so test contexts can opt out.
  */
-fn __cat_pred_force_push_main(env: HarnessEnv, command, _context) -> bool {
+fn __cat_pred_force_push_main(env: HarnessEnv, command: string | list, _context: unknown) -> bool {
   if !__cat_re("^git push\\b", command) {
     return false
   }
@@ -201,7 +201,7 @@ fn __cat_pred_force_push_main(env: HarnessEnv, command, _context) -> bool {
  * by anchoring on the path token itself with optional surrounding
  * quotes/whitespace.
  */
-fn __cat_pred_rm_rf_root(command, _context) -> bool {
+fn __cat_pred_rm_rf_root(command: string, _context: unknown) -> bool {
   if !__cat_re("^rm\\b", command) {
     return false
   }
@@ -654,7 +654,7 @@ pub fn tool_hooks_catalogue_universal(env: HarnessEnv) {
  * stacks so the seeder can silently skip them — callers may legitimately
  * pass stacks that have no shipped catalogue yet.
  */
-fn __cat_for_stack(stack) {
+fn __cat_for_stack(stack: string) {
   if stack == "rust" {
     return tool_hooks_catalogue_rust()
   }
@@ -687,7 +687,7 @@ fn __cat_for_stack(stack) {
  * @api_stability: experimental
  * @example: tool_hooks_seed_registry(harness, ["rust", "python"])
  */
-pub fn tool_hooks_seed_registry(env: HarnessEnv, tools: HarnessTools, stacks = nil) {
+pub fn tool_hooks_seed_registry(env: HarnessEnv, tools: HarnessTools, stacks: any = nil) {
   const opt_in = if type_of(stacks) == "list" {
     stacks
   } else {

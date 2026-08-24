@@ -2,7 +2,7 @@
  * Explicit lexical blocks create a lifetime boundary without inventing a
  * helper function or pretending there is a control-flow condition.
  */
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   let events = []
   const value: string = "outer"
   block {

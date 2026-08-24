@@ -10,7 +10,7 @@ import { wait_for } from "std/monitors"
 
 let linear_connector_config = {}
 
-pub fn configure(config) {
+pub fn configure(config: dict?) {
   linear_connector_config = filter_nil(config ?? {})
   return linear_connector_config
 }
@@ -19,7 +19,7 @@ pub fn reset() {
   linear_connector_config = {}
 }
 
-fn __call(net: HarnessNet, method, params = {}) {
+fn __call(net: HarnessNet, method: string, params: dict? = {}) {
   return net.connector_call(
     "linear",
     method,
@@ -27,11 +27,11 @@ fn __call(net: HarnessNet, method, params = {}) {
   )
 }
 
-pub fn operation(name, document, options = nil) {
+pub fn operation(name: string, document: string, options: any = nil) {
   return graphql_operation(name, document, options)
 }
 
-pub fn execute(net: HarnessNet, operation, variables = nil, options = nil) {
+pub fn execute(net: HarnessNet, operation: dict, variables: any = nil, options: dict? = nil) {
   const raw = graphql(
     net,
     operation.document,
@@ -84,7 +84,7 @@ fn __search_issues_operation() {
   )
 }
 
-pub fn list_issues(net: HarnessNet, filter = nil, options = nil) {
+pub fn list_issues(net: HarnessNet, filter: any = nil, options: dict? = nil) {
   const variables = filter_nil(
     {
       filter: filter,
@@ -97,11 +97,11 @@ pub fn list_issues(net: HarnessNet, filter = nil, options = nil) {
   return merge(connection, {page: graphql_page_info(connection)})
 }
 
-pub fn update_issue(net: HarnessNet, id, changes, options = nil) {
+pub fn update_issue(net: HarnessNet, id: any, changes: any, options: dict? = nil) {
   return execute(net, __update_issue_operation(), {id: id, input: changes}, options).result
 }
 
-pub fn create_comment(net: HarnessNet, issue_id, body, options = nil) {
+pub fn create_comment(net: HarnessNet, issue_id: any, body: any, options: dict? = nil) {
   return execute(
     net,
     __create_comment_operation(),
@@ -110,31 +110,31 @@ pub fn create_comment(net: HarnessNet, issue_id, body, options = nil) {
   ).result
 }
 
-pub fn search(net: HarnessNet, query, options = nil) {
+pub fn search(net: HarnessNet, query: any, options: dict? = nil) {
   return execute(net, __search_issues_operation(), {query: query, first: options?.first}, options)
     .result
 }
 
-pub fn graphql(net: HarnessNet, query, variables = nil, options = nil) {
+pub fn graphql(net: HarnessNet, query: any, variables: any = nil, options: dict? = nil) {
   return __call(net, "graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
 }
 
-fn __linear_event(log_event) {
+fn __linear_event(log_event: dict) {
   return log_event?.payload?.event
 }
 
-fn __linear_payload(log_event) {
+fn __linear_payload(log_event: dict) {
   return __linear_event(log_event)?.provider_payload
 }
 
-fn __linear_issue_matches(payload, issue_id) {
+fn __linear_issue_matches(payload: dict, issue_id: any) {
   return issue_id == nil
     || payload?.issue?.id == issue_id
     || payload?.issue?.identifier == issue_id
     || payload?.issue?.number == issue_id
 }
 
-fn __linear_state_matches(issue, target_state) {
+fn __linear_state_matches(issue: dict, target_state: string?) {
   return target_state == nil
     || issue?.state?.id == target_state
     || issue?.state?.name == target_state
@@ -147,7 +147,12 @@ fn __linear_state_matches(issue, target_state) {
  * @effects: []
  * @errors: []
  */
-pub fn issue_state_source(net: HarnessNet, issue_id, target_state = nil, options = nil) {
+pub fn issue_state_source(
+  net: HarnessNet,
+  issue_id: any,
+  target_state: string? = nil,
+  options: dict? = nil,
+) {
   return {
     label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
     prefers_push: true,
@@ -195,9 +200,9 @@ pub fn issue_state_source(net: HarnessNet, issue_id, target_state = nil, options
 pub fn wait_until_issue_state(
   net: HarnessNet,
   runtime: HarnessRuntime,
-  issue_id,
-  target_state,
-  options = nil,
+  issue_id: any,
+  target_state: string?,
+  options: any = nil,
 ) {
   return wait_for(
     runtime,

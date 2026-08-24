@@ -120,7 +120,7 @@ fn selector_is_local(selector: dict) -> bool {
  * self-contained and re-readable as a unit). Kept byte-identical with
  * the copy in `_runner.harn`; dispatch tests catch any drift.
  */
-fn __safe_string_local(value, fallback: string) -> string {
+fn __safe_string_local(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }

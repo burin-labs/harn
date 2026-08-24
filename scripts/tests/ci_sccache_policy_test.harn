@@ -345,12 +345,15 @@ fn windows_cache_pair() {
 }
 
 @test
-pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(harness: Harness, task) {
+pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }
 
 @test
-pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task) {
+pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task: unknown) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -366,7 +369,10 @@ pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task)
 }
 
 @test
-pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(harness: Harness, task) {
+pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
+  harness: Harness,
+  task: unknown,
+) {
   const valid = workflow()
   const refresh = valid.jobs["rust-cache-refresh"]
   const invalid_steps = refresh.steps.map(
@@ -408,7 +414,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(harness: 
 }
 
 @test
-pipeline test_rejects_incomplete_workspace_cache_generation(harness: Harness, task) {
+pipeline test_rejects_incomplete_workspace_cache_generation(harness: Harness, task: unknown) {
   const valid = workflow()
   const audit = valid.jobs["package-audit"]
   const steps = audit.steps.map(
@@ -429,7 +435,7 @@ pipeline test_rejects_incomplete_workspace_cache_generation(harness: Harness, ta
 }
 
 @test
-pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task) {
+pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task: unknown) {
   const valid = workflow()
   let jobs = {}
   for {key: name, value: job} in valid.jobs {
@@ -443,7 +449,7 @@ pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task) 
 }
 
 @test
-pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task) {
+pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task: unknown) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -472,7 +478,7 @@ pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task
 }
 
 @test
-pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task) {
+pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task: unknown) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -521,7 +527,7 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
 }
 
 @test
-pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
+pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: unknown) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const walltime_report = valid.jobs["ci-walltime-report"]
@@ -573,7 +579,10 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(harness: Harness, task) {
+pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(
+  harness: Harness,
+  task: unknown,
+) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -597,7 +606,7 @@ pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(harness:
 }
 
 @test
-pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, task) {
+pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, task: unknown) {
   const valid = workflow()
   const audit = valid.jobs["harn-audit"]
   const invalid = {
@@ -619,7 +628,7 @@ pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, ta
 }
 
 @test
-pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) {
+pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task: unknown) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
@@ -649,7 +658,7 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) 
 }
 
 @test
-pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task) {
+pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task: unknown) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
@@ -685,7 +694,10 @@ pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task)
 }
 
 @test
-pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(harness: Harness, task) {
+pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(
+  harness: Harness,
+  task: unknown,
+) {
   const valid = workflow()
   const policy_job = valid.jobs["audit-scripts"]
   const without_early_policy = policy_job.steps.filter(
@@ -727,7 +739,7 @@ pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(harness: Harn
 }
 
 @test
-pipeline test_rejects_unowned_runner_routing(harness: Harness, task) {
+pipeline test_rejects_unowned_runner_routing(harness: Harness, task: unknown) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
   const invalid = {
@@ -755,7 +767,10 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(harness: Harness, task) {
+pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
+  harness: Harness,
+  task: unknown,
+) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -792,7 +807,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(harne
 }
 
 @test
-pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task) {
+pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: unknown) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const security = valid.jobs["rust-security"]
@@ -836,7 +851,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task) 
 }
 
 @test
-pipeline test_rejects_unbounded_or_wrong_tier_cache(harness: Harness, task) {
+pipeline test_rejects_unbounded_or_wrong_tier_cache(harness: Harness, task: unknown) {
   const valid = workflow()
   const audit = valid.jobs["package-audit"]
   const steps = audit.steps.map(
@@ -865,7 +880,7 @@ pipeline test_rejects_unbounded_or_wrong_tier_cache(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_persistent_sccache_outside_owned_lanes(harness: Harness, task) {
+pipeline test_rejects_persistent_sccache_outside_owned_lanes(harness: Harness, task: unknown) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -877,20 +892,20 @@ pipeline test_rejects_persistent_sccache_outside_owned_lanes(harness: Harness, t
 
 /** Every compile lane must be present; a missing one is not a silent pass. */
 @test
-pipeline test_rejects_a_missing_compile_lane(harness: Harness, task) {
+pipeline test_rejects_a_missing_compile_lane(harness: Harness, task: unknown) {
   const errors = ci_linux_lane_policy_errors({jobs: {}})
   assert(errors.contains("ci.yml:rust-check-inputs must define the persistent Linux compile lane"))
   assert(errors.contains("ci.yml:package-audit must define the hosted Linux compile lane"))
 }
 
 @test
-pipeline test_accepts_plain_rustc_windows_cache_pair(harness: Harness, task) {
+pipeline test_accepts_plain_rustc_windows_cache_pair(harness: Harness, task: unknown) {
   const pair = windows_cache_pair()
   assert_eq(windows_shared_cache_errors(pair.consumer, pair.producer), [])
 }
 
 @test
-pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task) {
+pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task: unknown) {
   const pair = windows_cache_pair()
   const producer = {
     ...pair.producer,
@@ -919,7 +934,7 @@ pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task) {
+pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task: unknown) {
   const pair = windows_cache_pair()
   const producer = {
     ...pair.producer,
@@ -933,7 +948,7 @@ pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task) {
+pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task: unknown) {
   const pair = windows_cache_pair()
   const producer_cache = pair.producer.jobs.nextest.steps[2]
   const producer = {
@@ -967,7 +982,7 @@ pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task) 
 }
 
 @test
-pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness, task) {
+pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness, task: unknown) {
   const pair = windows_cache_pair()
   const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
   const consumer_cache = pair.consumer.jobs.windows.steps[2]

@@ -35,7 +35,7 @@ import { agent_session_messages } from "std/agent/state"
  * @errors: []
  * @example: strip_think_blocks("<think>reasoning</think>The answer is 4")
  */
-pub fn strip_think_blocks(text) {
+pub fn strip_think_blocks(text: string?) {
   const raw = to_string(text ?? "")
   const no_think = regex_replace("(?s)<think>.*?</think>", "", raw)
   const no_thinking = regex_replace("(?s)<thinking>.*?</thinking>", "", no_think)
@@ -55,7 +55,7 @@ pub fn strip_think_blocks(text) {
  * @errors: []
  * @example: strip_code_fences("```md\n# Title\n```")
  */
-pub fn strip_code_fences(text) {
+pub fn strip_code_fences(text: string?) {
   const raw = to_string(text ?? "")
   let out = []
   for line in raw.split("\n") {
@@ -98,7 +98,7 @@ pub fn strip_code_fences(text) {
  * emoji / accented text LLM salvage frequently sees. Char indices returned here
  * line up with `substring`, which is likewise char-indexed.
  */
-fn __first_balanced_span(raw, openers) {
+fn __first_balanced_span(raw: string, openers: any) {
   const cs = raw.chars()
   const n = len(cs)
   let i = 0
@@ -156,7 +156,7 @@ fn __first_balanced_span(raw, openers) {
  * @errors: []
  * @example: extract_first_json_object("Sure! {\"a\": 1} hope that helps")
  */
-pub fn extract_first_json_object(text) {
+pub fn extract_first_json_object(text: string?) {
   const raw = to_string(text ?? "")
   const span = __first_balanced_span(raw, ["{"])
   if span == nil {
@@ -175,7 +175,7 @@ pub fn extract_first_json_object(text) {
  * @errors: []
  * @example: extract_first_json_value("rows: [1, 2, 3] (3 total)")
  */
-pub fn extract_first_json_value(text) {
+pub fn extract_first_json_value(text: string?) {
   const raw = to_string(text ?? "")
   const span = __first_balanced_span(raw, ["{", "["])
   if span == nil {
@@ -198,7 +198,7 @@ pub fn extract_first_json_value(text) {
  * @errors: []
  * @example: parse_first_json("```json\n{\"ok\": true}\n```")
  */
-pub fn parse_first_json(text) {
+pub fn parse_first_json(text: string?) {
   let rest = strip_code_fences(to_string(text ?? ""))
   while rest != "" {
     const span = __first_balanced_span(rest, ["{", "["])
@@ -238,7 +238,7 @@ pub fn parse_first_json(text) {
  * @effects: []
  * @errors: []
  */
-pub fn __wrap_llm_result(result) {
+pub fn __wrap_llm_result(result: any) {
   if !is_err(result) {
     return {ok: true, value: unwrap(result)}
   }
@@ -291,7 +291,7 @@ pub fn __wrap_llm_result(result) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn safe_call(llm: HarnessLlm, prompt, system, options) {
+pub fn safe_call(llm: HarnessLlm, prompt: any, system: any, options: any) {
   return __wrap_llm_result(
     try {
       llm.call(prompt, system, options)
@@ -305,7 +305,7 @@ pub fn safe_call(llm: HarnessLlm, prompt, system, options) {
  * @effects: []
  * @errors: []
  */
-pub fn dict_get_ci(d, key) {
+pub fn dict_get_ci(d: unknown, key: any) {
   if type_of(d) != "dict" {
     return nil
   }
@@ -318,7 +318,7 @@ pub fn dict_get_ci(d, key) {
   return nil
 }
 
-fn __value_is_present(value) {
+fn __value_is_present(value: string | bytes | list | dict | set | range | nil) {
   if value == nil {
     return false
   }
@@ -342,7 +342,7 @@ fn __value_is_present(value) {
  * @effects: []
  * @errors: []
  */
-pub fn safe_field(envelope, names, default) {
+pub fn safe_field(envelope: dict, names: list, default: any) {
   if type_of(envelope) != "dict" {
     return default
   }
@@ -365,7 +365,7 @@ pub fn safe_field(envelope, names, default) {
  * @effects: []
  * @errors: []
  */
-pub fn with_case_insensitive_keys(envelope) {
+pub fn with_case_insensitive_keys(envelope: unknown) {
   if type_of(envelope) == "dict" {
     let out = {}
     for k in envelope.keys() {
@@ -391,7 +391,7 @@ pub fn with_case_insensitive_keys(envelope) {
  * @effects: []
  * @errors: []
  */
-pub fn structured_envelope_or_default(envelope, defaults) {
+pub fn structured_envelope_or_default(envelope: dict, defaults: any) {
   const base = if type_of(defaults) == "dict" {
     defaults
   } else {
@@ -414,7 +414,7 @@ pub fn structured_envelope_or_default(envelope, defaults) {
   return envelope + {data: base + data}
 }
 
-fn __unique_names(names) {
+fn __unique_names(names: list) {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
@@ -424,7 +424,7 @@ fn __unique_names(names) {
   return unique
 }
 
-fn __session_tool_names(messages) {
+fn __session_tool_names(messages: list) {
   let names = []
   for message in messages {
     if message?.role == "tool" {
@@ -443,7 +443,14 @@ fn __session_tool_names(messages) {
  * @effects: []
  * @errors: []
  */
-pub fn judge_payload(agent: HarnessAgent, session, _opts, stop_reason, text, iteration) {
+pub fn judge_payload(
+  agent: HarnessAgent,
+  session: dict,
+  _opts: unknown,
+  stop_reason: any,
+  text: any,
+  iteration: any,
+) {
   const session_id = session?.session_id ?? ""
   const messages = if session_id != "" {
     let m = try {
@@ -480,7 +487,10 @@ pub fn judge_payload(agent: HarnessAgent, session, _opts, stop_reason, text, ite
  * @effects: []
  * @errors: []
  */
-pub fn verdict_normalize(text, alias_groups) {
+pub fn verdict_normalize(
+  text: string?,
+  alias_groups: string | bytes | list | dict | set | range | nil,
+) {
   const normalized = lowercase(trim(to_string(text ?? "")))
   if alias_groups == nil || type_of(alias_groups) != "list" || len(alias_groups) == 0 {
     return normalized
@@ -502,7 +512,7 @@ pub fn verdict_normalize(text, alias_groups) {
  * @effects: []
  * @errors: []
  */
-pub fn schema_retry_nudge_for(schema, hint) {
+pub fn schema_retry_nudge_for(schema: dict, hint: any) {
   const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
     schema.required
   } else {
@@ -573,7 +583,7 @@ pub fn schema_retry_nudge_for(schema, hint) {
  * @effects: []
  * @errors: []
  */
-pub fn safe_structured_call(llm: HarnessLlm, prompt, schema, options) {
+pub fn safe_structured_call(llm: HarnessLlm, prompt: any, schema: dict, options: any) {
   const user_options = if type_of(options) == "dict" {
     options
   } else {
@@ -629,7 +639,7 @@ const STRUCTURED_MAX_MAX_TOKENS = 32768
  * fallback when the resolved `thinking` dict carries no explicit `budget_tokens`
  * (e.g. an `effort`-mode route, which exposes `{mode, level}` but no budget).
  */
-fn __reasoning_effort_budget(llm: HarnessLlm, level) {
+fn __reasoning_effort_budget(llm: HarnessLlm, level: string?) {
   return llm.reasoning_effort_budget(to_string(level ?? ""))
 }
 
@@ -642,7 +652,7 @@ fn __reasoning_effort_budget(llm: HarnessLlm, level) {
  * explicit `effort` is honored directly since the policy passes such
  * opts through untouched.
  */
-fn __structured_reasoning_budget(llm: HarnessLlm, options) {
+fn __structured_reasoning_budget(llm: HarnessLlm, options: any) {
   const opts = if type_of(options) == "dict" {
     options
   } else {
@@ -697,7 +707,7 @@ fn __structured_reasoning_budget(llm: HarnessLlm, options) {
  * @effects: []
  * @errors: []
  */
-pub fn structured_min_max_tokens(llm: HarnessLlm, options) {
+pub fn structured_min_max_tokens(llm: HarnessLlm, options: any) {
   const reasoning_budget = __structured_reasoning_budget(llm, options)
   if reasoning_budget <= 0 {
     return STRUCTURED_MIN_MAX_TOKENS
@@ -727,7 +737,7 @@ pub fn structured_min_max_tokens(llm: HarnessLlm, options) {
  * @effects: []
  * @errors: []
  */
-pub fn repair_min_max_tokens(llm: HarnessLlm, options) {
+pub fn repair_min_max_tokens(llm: HarnessLlm, options: any) {
   const floor = structured_min_max_tokens(llm, options)
   if floor > REPAIR_MIN_MAX_TOKENS {
     return floor
@@ -735,7 +745,7 @@ pub fn repair_min_max_tokens(llm: HarnessLlm, options) {
   return REPAIR_MIN_MAX_TOKENS
 }
 
-fn __apply_judge_defaults(llm: HarnessLlm, schema, options) {
+fn __apply_judge_defaults(llm: HarnessLlm, schema: dict, options: any) {
   let resolved = options
   const requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
   const floor = structured_min_max_tokens(llm, resolved)
@@ -786,7 +796,7 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema, options) {
  * an unsupported request remains a typed error. Unknown and unresolved routes
  * preserve the historical open-world behavior.
  */
-fn __temperature_default_supported(llm: HarnessLlm, options) -> bool {
+fn __temperature_default_supported(llm: HarnessLlm, options: dict) -> bool {
   const model = trim(to_string(options?.model ?? ""))
   if model == "" {
     return true
@@ -828,7 +838,7 @@ fn __temperature_default_supported(llm: HarnessLlm, options) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn is_context_overflow_error(err) {
+pub fn is_context_overflow_error(err: unknown) {
   if type_of(err) == "dict" {
     const reason = to_string(err?.reason ?? "")
     if reason == "context_overflow" {
@@ -844,7 +854,7 @@ pub fn is_context_overflow_error(err) {
   return contains(to_string(err), "[context_overflow]")
 }
 
-fn __augment_envelope(envelope) {
+fn __augment_envelope(envelope: dict) {
   if type_of(envelope) != "dict" {
     const exc_status = if is_context_overflow_error(envelope) {
       "context_overflow"

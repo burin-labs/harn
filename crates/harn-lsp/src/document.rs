@@ -253,7 +253,6 @@ impl DocumentState {
             require_file_header: project_lint.require_file_header.unwrap_or(false),
             require_docstrings: project_lint.require_docstrings.unwrap_or(false),
             require_stdlib_metadata: is_stdlib_source,
-            require_public_api_types: project_lint.require_public_api_types.unwrap_or(false),
             complexity_threshold: project_lint.complexity_threshold,
             persona_step_allowlist: &project_lint.persona_step_allowlist,
             severity_overrides: project_lint.severity.clone(),
@@ -477,14 +476,10 @@ fn handler(fs: HarnessFs) {
     }
 
     #[test]
-    fn project_public_api_type_policy_surfaces_as_lsp_diagnostics() {
+    fn implicit_any_parameter_surfaces_as_lsp_error() {
         let temp = tempfile::tempdir().unwrap();
-        write(
-            &temp.path().join("harn.toml"),
-            "[lint]\nrequire_public_api_types = true\n\n[lint.severity]\nmissing-public-api-type = \"error\"\n",
-        );
-        let path = temp.path().join("src/main.harn");
-        let source = "pub pipeline ship(task) {\n  return task\n}\n";
+        let path = temp.path().join("main.harn");
+        let source = "fn unchecked(raw) { return raw.email }\n";
         write(&path, source);
         let workspace = RuleWorkspace::from_root(temp.path());
         let uri = Url::from_file_path(&path).unwrap();
@@ -495,48 +490,23 @@ fn handler(fs: HarnessFs) {
             &workspace,
         );
 
-        let diagnostics = state
+        let diagnostic = state
             .diagnostics
             .iter()
-            .map(|diagnostic| {
-                (
-                    diagnostic.code.clone(),
-                    diagnostic.severity,
-                    diagnostic.source.clone(),
-                    diagnostic.message.clone(),
-                    diagnostic.range,
+            .find(|diagnostic| {
+                matches!(
+                    diagnostic.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code))
+                        if code == "HARN-TYP-028"
                 )
             })
-            .collect::<Vec<_>>();
+            .expect("HARN-TYP-028 must reach the LSP");
         assert_eq!(
-            diagnostics,
-            vec![
-                (
-                    Some(tower_lsp::lsp_types::NumberOrString::String(
-                        "HARN-LNT-067".to_string(),
-                    )),
-                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
-                    Some("harn-lint".to_string()),
-                    "[missing-public-api-type] public pipeline `ship` parameter `task` is missing an explicit type".to_string(),
-                    tower_lsp::lsp_types::Range::new(
-                        tower_lsp::lsp_types::Position::new(0, 18),
-                        tower_lsp::lsp_types::Position::new(0, 19),
-                    ),
-                ),
-                (
-                    Some(tower_lsp::lsp_types::NumberOrString::String(
-                        "HARN-LNT-067".to_string(),
-                    )),
-                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
-                    Some("harn-lint".to_string()),
-                    "[missing-public-api-type] public pipeline `ship` is missing an explicit return type".to_string(),
-                    tower_lsp::lsp_types::Range::new(
-                        tower_lsp::lsp_types::Position::new(0, 13),
-                        tower_lsp::lsp_types::Position::new(0, 14),
-                    ),
-                ),
-            ]
+            diagnostic.severity,
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR)
         );
+        assert_eq!(diagnostic.source.as_deref(), Some("harn-typecheck"));
+        assert!(diagnostic.message.contains("parameter `raw`"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(iter([1, 2]).chain([3, 4]).to_list())
   harness.stdio.log(iter([]).chain([1, 2, 3]).to_list())
   harness.stdio.log(iter([1, 2, 3]).chain([]).to_list())

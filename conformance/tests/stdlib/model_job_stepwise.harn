@@ -14,7 +14,7 @@ import {
   model_job_submit_result,
 } from "std/model_job"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const task_kind: ModelTask = "image.generate"
   const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}
   const request: ModelJobRequest = {

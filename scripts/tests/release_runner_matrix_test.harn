@@ -1,6 +1,6 @@
 import "std/schema"
 
-fn run_matrix(fs: HarnessFs, process: HarnessProcess, args) {
+fn run_matrix(fs: HarnessFs, process: HarnessProcess, args: string) {
   const root = dirname(dirname(fs.runtime_paths().asset_root))
   return process.shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
 }
@@ -9,8 +9,8 @@ fn run_matrix_with_policy(
   fs: HarnessFs,
   process: HarnessProcess,
   random: HarnessRandom,
-  policy,
-  args,
+  policy: dict,
+  args: string,
 ) {
   const root = dirname(dirname(fs.runtime_paths().asset_root))
   const path = path_join(
@@ -24,7 +24,7 @@ fn run_matrix_with_policy(
   )
 }
 
-fn matrix(fs: HarnessFs, process: HarnessProcess, args) {
+fn matrix(fs: HarnessFs, process: HarnessProcess, args: string) {
   const result = run_matrix(fs, process, args)
   if !result.success {
     throw result.stderr
@@ -41,19 +41,19 @@ fn matrix_with_env(fs: HarnessFs, process: HarnessProcess, env: string, args: st
   return json_parse(result.stdout)
 }
 
-fn runners(rows) {
+fn runners(rows: any) {
   return rows.map({ row -> row.target + "=" + row.runner })
 }
 
-fn cache_prefixes(rows) {
+fn cache_prefixes(rows: any) {
   return rows.map({ row -> row.target + "=" + row.rust_cache_broad_restore_prefix })
 }
 
-fn codegen_units(rows) {
+fn codegen_units(rows: any) {
   return rows.map({ row -> row.target + "=" + to_string(row.release_codegen_units) })
 }
 
-pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
+pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unknown) {
   const standard = [
     "x86_64-apple-darwin=macos-15-intel",
     "aarch64-apple-darwin=macos-latest",
@@ -102,7 +102,10 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
   )
 }
 
-pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harness, task) {
+pipeline test_release_runner_policy_selects_targeted_fast_capacity(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(
     matrix(
       harness.fs,
@@ -133,7 +136,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
   )
 }
 
-pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, task) {
+pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, task: unknown) {
   const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
   assert_eq(
     run_matrix(harness.fs, harness.process, "--mode benchmark --profile policy").success,

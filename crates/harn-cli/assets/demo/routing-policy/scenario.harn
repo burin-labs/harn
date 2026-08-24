@@ -43,7 +43,7 @@ fn tasks() {
   ]
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   // Single routing policy reused across all three tasks. The chain
   // covers both failure-mode dimensions the v0.8.40 primitive handles:
   // status-based failover plus verifier-signal escalation.

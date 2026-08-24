@@ -5,7 +5,7 @@
  * historically collapsed the unordered case into "equal" and wrongly
  * returned true for `NaN <= x` / `NaN >= x`.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const nan = sqrt(-1.0)
   const nan2 = sqrt(-2.0)
   // Ordered comparisons against a plain float: all false.

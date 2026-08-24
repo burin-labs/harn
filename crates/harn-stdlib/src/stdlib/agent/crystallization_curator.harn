@@ -18,7 +18,7 @@ const CURATOR_SCHEMA = "harn.crystallization.curator.v1"
 
 const CURATOR_VALIDATION_TIMEOUT_MS: int = 120000
 
-fn cc_text(value) -> string {
+fn cc_text(value: string?) -> string {
   return regex_replace(r"\s+", " ", to_string(value ?? "").trim())
     ?? to_string(value ?? "").trim()
 }
@@ -29,7 +29,7 @@ fn cc_text(value) -> string {
  * and launch-cwd checks while avoiding an unsupported nested macOS sandbox-exec
  * around the fixed Harn argv. Candidate effects remain capability mediated.
  */
-fn cc_toolchain_command_options(overrides = nil) -> dict {
+fn cc_toolchain_command_options(overrides: dict? = nil) -> dict {
   const cwd = cc_text(overrides?.cwd)
   const isolated_runtime = if cwd == "" {
     {LANG: "en_US.UTF-8", TERM: "dumb"}
@@ -46,7 +46,7 @@ fn cc_toolchain_command_options(overrides = nil) -> dict {
       ?? {})
 }
 
-fn cc_recent_evidence(harness: Harness, options = nil) -> list {
+fn cc_recent_evidence(harness: Harness, options: any = nil) -> list {
   const supplied = options?.evidence
   const all = if type_of(supplied) == "list" {
     supplied
@@ -132,7 +132,7 @@ fn cc_allowed_session(args: dict, allowed: list) -> string {
   return id
 }
 
-fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict {
+fn cc_validate_artifact(harness: Harness, artifact: dict, options: any = nil) -> dict {
   const source = to_string(artifact?.source ?? "")
   const test_source = to_string(artifact?.test_source ?? "")
   const entrypoint = cc_text(artifact?.entrypoint)
@@ -217,14 +217,14 @@ fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict
   }
 }
 
-fn cc_harn_binary(env: HarnessEnv, options = nil) -> string {
+fn cc_harn_binary(env: HarnessEnv, options: any = nil) -> string {
   return options?.harn_binary ?? env.get("HARN_BIN") ?? "harn"
 }
 
 fn cc_lookup_skill(
   capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
-  raw_name,
-  options = nil,
+  raw_name: string?,
+  options: any = nil,
 ) -> dict {
   const name = cc_text(raw_name)
   const allowed = [
@@ -263,9 +263,9 @@ fn cc_lookup_skill(
 
 fn cc_scaffold_tool(
   capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
-  raw_name,
-  raw_description,
-  options = nil,
+  raw_name: string?,
+  raw_description: string?,
+  options: any = nil,
 ) -> dict {
   const name = regex_replace(r"[^a-zA-Z0-9_-]+", "-", cc_text(raw_name)) ?? "capability"
   const description = cc_text(raw_description)
@@ -316,8 +316,8 @@ fn cc_scaffold_tool(
 
 fn cc_search_builtins(
   capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
-  raw_query,
-  options = nil,
+  raw_query: string?,
+  options: any = nil,
 ) -> dict {
   const query = lowercase(cc_text(raw_query))
   const terms = query.split(" ").filter({ term -> len(term) >= 2 }).to_list()
@@ -385,7 +385,7 @@ fn cc_search_builtins(
   return {success: true, query: query, matches: matches}
 }
 
-fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options = nil) -> list {
+fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options: any = nil) -> list {
   let prepared = []
   for proposal in proposals ?? [] {
     if proposal?.kind == "skill" {
@@ -402,7 +402,7 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options = nil) 
   return prepared
 }
 
-fn cc_tools(harness: Harness, evidence: list, options = nil) {
+fn cc_tools(harness: Harness, evidence: list, options: any = nil) {
   const allowed_sessions = cc_session_ids(evidence)
   return tool_registry_from(
     [
@@ -566,7 +566,7 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
+pub fn crystallization_curate(harness: Harness, options: any = nil) -> dict {
   const session_import = pattern_learning_import_session_records(harness, options)
   const evidence = cc_recent_evidence(harness, options)
   if len(evidence) == 0 {

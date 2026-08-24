@@ -37,11 +37,11 @@ fn __canon_manifest_schema() -> Schema<CanonManifest> {
   )
 }
 
-fn __canon_text(value) -> string {
+fn __canon_text(value: unknown) -> string {
   return trim(to_string(value ?? ""))
 }
 
-fn __canon_path(root, rel) -> string {
+fn __canon_path(root: string?, rel: string?) -> string {
   const raw = __canon_text(rel)
   if raw == "" {
     return ""
@@ -52,7 +52,7 @@ fn __canon_path(root, rel) -> string {
   return path_join(__canon_text(root), raw)
 }
 
-fn __canon_manifest_path(root) -> string {
+fn __canon_manifest_path(root: string?) -> string {
   const text = __canon_text(root)
   if text == "" {
     return ""
@@ -60,7 +60,7 @@ fn __canon_manifest_path(root) -> string {
   return path_join(text, "canon-packs.json")
 }
 
-fn __canon_root_with_manifest(fs: HarnessFs, root) -> string {
+fn __canon_root_with_manifest(fs: HarnessFs, root: string?) -> string {
   const text = __canon_text(root)
   if text == "" {
     return ""
@@ -71,7 +71,7 @@ fn __canon_root_with_manifest(fs: HarnessFs, root) -> string {
   return ""
 }
 
-fn __canon_push_unique(items, value) {
+fn __canon_push_unique(items: list<string>, value: string?) {
   const text = __canon_text(value)
   if text == "" || contains(items, text) {
     return items
@@ -79,7 +79,7 @@ fn __canon_push_unique(items, value) {
   return items.appending(text)
 }
 
-fn __canon_manifest_has_routing(manifest) -> bool {
+fn __canon_manifest_has_routing(manifest: dict?) -> bool {
   for pack in manifest?.packs ?? [] {
     if len(pack?.extensions ?? []) > 0 || len(pack?.file_names ?? []) > 0 {
       return true
@@ -88,7 +88,7 @@ fn __canon_manifest_has_routing(manifest) -> bool {
   return false
 }
 
-fn __canon_selector_matches(values, wanted) -> bool {
+fn __canon_selector_matches(values: list?, wanted: string?) -> bool {
   const target = lowercase(__canon_text(wanted))
   if target == "" {
     return false
@@ -101,7 +101,7 @@ fn __canon_selector_matches(values, wanted) -> bool {
   return false
 }
 
-fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
+fn __canon_pack_ids_for_path_from_manifest(path: string?, manifest: dict?) -> list<string> {
   const raw = __canon_text(path)
   if raw == "" {
     return []
@@ -136,7 +136,7 @@ fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_resolve_root(env: HarnessEnv, fs: HarnessFs, options = nil) -> string {
+pub fn canon_resolve_root(env: HarnessEnv, fs: HarnessFs, options: dict? = nil) -> string {
   const opts = options ?? {}
   const explicit = __canon_text(opts?.canon_root)
   if explicit != "" {
@@ -166,7 +166,7 @@ pub fn canon_resolve_root(env: HarnessEnv, fs: HarnessFs, options = nil) -> stri
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
+pub fn canon_pack_ids_for_path(path: string?, manifest: any = nil) -> list<string> {
   const raw = __canon_text(path)
   if raw == "" {
     return []
@@ -188,7 +188,7 @@ pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_pack_ids_for_files(files, manifest = nil) -> list<string> {
+pub fn canon_pack_ids_for_files(files: list?, manifest: any = nil) -> list<string> {
   let ids = []
   for file in files ?? [] {
     const path = __canon_text(file?.path ?? file?.name)
@@ -206,7 +206,7 @@ pub fn canon_pack_ids_for_files(files, manifest = nil) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_slice_from_files(files, metadata = nil) -> dict {
+pub fn canon_slice_from_files(files: list?, metadata: dict? = nil) -> dict {
   let normalized = []
   for file in files ?? [] {
     const path = __canon_text(file?.path ?? file?.name)
@@ -231,7 +231,7 @@ pub fn canon_slice_from_files(files, metadata = nil) -> dict {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_slice_from_paths(fs: HarnessFs, paths, options = nil) -> dict {
+pub fn canon_slice_from_paths(fs: HarnessFs, paths: list?, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const root = opts?.root ?? opts?.workspace_root
   let files = []
@@ -270,7 +270,7 @@ pub fn canon_load_manifest(fs: HarnessFs, canon_root: string) -> CanonManifest {
   return read_json_typed<CanonManifest>(fs, path, __canon_manifest_schema())
 }
 
-fn __canon_manifest_pack(manifest, id) {
+fn __canon_manifest_pack(manifest: dict?, id: string?) {
   const wanted = __canon_text(id)
   for pack in manifest?.packs ?? [] {
     if __canon_text(pack?.id) == wanted {
@@ -280,7 +280,7 @@ fn __canon_manifest_pack(manifest, id) {
   return nil
 }
 
-fn __canon_requested_needs_manifest(items) -> bool {
+fn __canon_requested_needs_manifest(items: list?) -> bool {
   for item in items ?? [] {
     if type_of(item) == "string" {
       return true
@@ -289,11 +289,11 @@ fn __canon_requested_needs_manifest(items) -> bool {
   return false
 }
 
-fn __canon_item_file_names(item) {
+fn __canon_item_file_names(item: dict) {
   return item?.file_names ?? item?.fileNames ?? item?.["file-names"] ?? []
 }
 
-fn __canon_append_manifest_packs(packs, base_dir, manifest) {
+fn __canon_append_manifest_packs(packs: list, base_dir: string, manifest: dict?) {
   if manifest == nil {
     return packs
   }
@@ -318,7 +318,11 @@ fn __canon_append_manifest_packs(packs, base_dir, manifest) {
   return out
 }
 
-fn __canon_manifest_path_for_contribution(fs: HarnessFs, package_dir, contribution) -> string {
+fn __canon_manifest_path_for_contribution(
+  fs: HarnessFs,
+  package_dir: string,
+  contribution: dict,
+) -> string {
   const explicit = __canon_text(
     contribution?.manifest ?? contribution?.canon_packs ?? contribution?.canonPacks,
   )
@@ -336,7 +340,7 @@ fn __canon_manifest_path_for_contribution(fs: HarnessFs, package_dir, contributi
   return ""
 }
 
-fn __canon_manifest_from_installed_packages(fs: HarnessFs, project_root_value) -> dict? {
+fn __canon_manifest_from_installed_packages(fs: HarnessFs, project_root_value: string?) -> dict? {
   const root = __canon_text(project_root_value)
   if root == "" {
     return nil
@@ -411,7 +415,7 @@ fn __canon_manifest_from_installed_packages(fs: HarnessFs, project_root_value) -
   return {schema_version: 1, packs: packs.sorted_by({ pack -> pack.id })}
 }
 
-fn __canon_merge_manifest_packs(primary, secondary) -> dict? {
+fn __canon_merge_manifest_packs(primary: dict?, secondary: dict?) -> dict? {
   if primary == nil {
     return secondary
   }
@@ -432,7 +436,7 @@ fn __canon_merge_manifest_packs(primary, secondary) -> dict? {
   return {schema_version: primary?.schema_version ?? secondary?.schema_version ?? 1, packs: packs}
 }
 
-fn __canon_pack_from_item(item, manifest, canon_root) {
+fn __canon_pack_from_item(item: unknown, manifest: dict?, canon_root: any) {
   if type_of(item) == "string" {
     const id = __canon_text(item)
     const found = __canon_manifest_pack(manifest, id)
@@ -487,7 +491,7 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options = nil) -> list<dict> {
+pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options: dict? = nil) -> list<dict> {
   const opts = options ?? {}
   const project = __canon_text(opts?.project_root ?? fs.project_root() ?? fs.cwd() ?? "")
   const explicit_root = __canon_text(opts?.canon_root)
@@ -547,7 +551,7 @@ pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options = nil) -> lis
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_evaluate_slice(harness: Harness, slice, options = nil) -> dict {
+pub fn canon_evaluate_slice(harness: Harness, slice: dict, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const packs = canon_resolve_packs(harness.env, harness.fs, opts + {slice: slice})
   let reports = []
@@ -595,7 +599,7 @@ pub fn canon_evaluate_slice(harness: Harness, slice, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_feedback_text(result, options = nil) -> string {
+pub fn canon_feedback_text(result: dict, options: dict? = nil) -> string {
   const opts = options ?? {}
   let sections = []
   for pack in result?.packs ?? [] {
@@ -622,7 +626,12 @@ pub fn canon_feedback_text(result, options = nil) -> string {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, options = nil) -> dict {
+pub fn canon_inject_feedback(
+  harness: Harness,
+  session_id: string,
+  slice: dict,
+  options: dict? = nil,
+) -> dict {
   const opts = options ?? {}
   const result = canon_evaluate_slice(harness, slice, opts)
   const feedback = canon_feedback_text(result, opts)
@@ -672,15 +681,15 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
 pub fn canon_inject_paths_feedback(
   harness: Harness,
   session_id: string,
-  paths,
-  options = nil,
+  paths: list?,
+  options: dict? = nil,
 ) -> dict {
   const opts = options ?? {}
   const slice = canon_slice_from_paths(harness.fs, paths, opts)
   return canon_inject_feedback(harness, session_id, slice, opts + {files: slice.files})
 }
 
-fn __canon_event_path(item) -> string {
+fn __canon_event_path(item: unknown) -> string {
   const kind = type_of(item)
   if kind == "string" {
     return __canon_text(item)
@@ -700,7 +709,7 @@ fn __canon_event_path(item) -> string {
   )
 }
 
-fn __canon_event_push_path(items, value) {
+fn __canon_event_push_path(items: list<string>, value: unknown) {
   const path = __canon_event_path(value)
   if path == "" || contains(items, path) {
     return items
@@ -708,7 +717,7 @@ fn __canon_event_push_path(items, value) {
   return items.appending(path)
 }
 
-fn __canon_event_push_path_bucket(items, bucket) {
+fn __canon_event_push_path_bucket(items: list, bucket: unknown) {
   if bucket == nil {
     return items
   }
@@ -722,7 +731,7 @@ fn __canon_event_push_path_bucket(items, bucket) {
   return out
 }
 
-fn __canon_event_strip_path_token(raw) -> string {
+fn __canon_event_strip_path_token(raw: unknown) -> string {
   let token = __canon_text(raw)
   while starts_with(token, "`") || starts_with(token, "'") || starts_with(token, "\"")
     || starts_with(token, "(")
@@ -751,7 +760,7 @@ fn __canon_event_strip_path_token(raw) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_event_write_path_from_result(result) -> string {
+pub fn canon_event_write_path_from_result(result: dict) -> string {
   if type_of(result) != "dict" {
     return ""
   }
@@ -797,7 +806,7 @@ pub fn canon_event_write_path_from_result(result) -> string {
   return ""
 }
 
-fn __canon_event_result_ok(result) -> bool {
+fn __canon_event_result_ok(result: dict) -> bool {
   if result?.ok != nil {
     return result.ok ? true : false
   }
@@ -811,7 +820,7 @@ fn __canon_event_result_ok(result) -> bool {
   return !(result?.rejected ?? false)
 }
 
-fn __canon_event_push_tool_result_paths(items, result) {
+fn __canon_event_push_tool_result_paths(items: list, result: unknown) {
   if type_of(result) != "dict" {
     return items
   }
@@ -834,7 +843,7 @@ fn __canon_event_push_tool_result_paths(items, result) {
   return out
 }
 
-fn __canon_event_push_tool_results_paths(items, bucket) {
+fn __canon_event_push_tool_results_paths(items: list, bucket: unknown) {
   if type_of(bucket) != "list" {
     return __canon_event_push_tool_result_paths(items, bucket)
   }
@@ -845,14 +854,14 @@ fn __canon_event_push_tool_results_paths(items, bucket) {
   return out
 }
 
-fn __canon_event_observation_field(item, key) -> string {
+fn __canon_event_observation_field(item: unknown, key: string) -> string {
   if type_of(item) != "dict" {
     return ""
   }
   return __canon_text(item[key])
 }
 
-fn __canon_event_observation_explicit(item) -> bool {
+fn __canon_event_observation_explicit(item: unknown) -> bool {
   if type_of(item) != "dict" {
     return false
   }
@@ -870,7 +879,7 @@ fn __canon_event_observation_explicit(item) -> bool {
     || mode == "observe_output"
 }
 
-fn __canon_event_symbol(value) -> string {
+fn __canon_event_symbol(value: unknown) -> string {
   const kind = type_of(value)
   if kind == "string" {
     return __canon_text(value)
@@ -899,7 +908,7 @@ fn __canon_event_symbol(value) -> string {
   return ""
 }
 
-fn __canon_event_push_symbol(items, value) {
+fn __canon_event_push_symbol(items: list, value: unknown) {
   const symbol = __canon_event_symbol(value)
   if symbol == "" || contains(items, symbol) {
     return items
@@ -907,7 +916,7 @@ fn __canon_event_push_symbol(items, value) {
   return items.appending(symbol)
 }
 
-fn __canon_event_push_symbol_bucket(items, bucket) {
+fn __canon_event_push_symbol_bucket(items: list, bucket: unknown) {
   if bucket == nil {
     return items
   }
@@ -921,7 +930,7 @@ fn __canon_event_push_symbol_bucket(items, bucket) {
   return out
 }
 
-fn __canon_event_push_tool_result_symbols(items, bucket) {
+fn __canon_event_push_tool_result_symbols(items: list, bucket: unknown) {
   if type_of(bucket) != "list" {
     return items
   }
@@ -954,7 +963,7 @@ fn __canon_event_push_tool_result_symbols(items, bucket) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_event_paths(event) -> list<string> {
+pub fn canon_event_paths(event: dict) -> list<string> {
   let paths = []
   for bucket in [
     event?.changed_paths ?? [],
@@ -986,7 +995,7 @@ pub fn canon_event_paths(event) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_event_observed_symbols(event) -> list<string> {
+pub fn canon_event_observed_symbols(event: dict) -> list<string> {
   let symbols = []
   for bucket in [
     event?.observed_symbols ?? event?.observedSymbols,
@@ -1003,7 +1012,7 @@ pub fn canon_event_observed_symbols(event) -> list<string> {
   return __canon_event_push_tool_result_symbols(symbols, event?.tool_results ?? event?.toolResults)
 }
 
-fn __canon_event_state_key(session_id: string, suffix: string, options = nil) -> string {
+fn __canon_event_state_key(session_id: string, suffix: string, options: dict? = nil) -> string {
   const opts = options ?? {}
   const prefix = __canon_text(opts?.state_key_prefix ?? "harn.canon_feedback")
   return prefix + "." + __canon_text(session_id) + "." + suffix
@@ -1012,7 +1021,7 @@ fn __canon_event_state_key(session_id: string, suffix: string, options = nil) ->
 fn __canon_event_stored_observed_symbols(
   runtime: HarnessRuntime,
   session_id: string,
-  options = nil,
+  options: dict? = nil,
 ) -> list {
   const raw = runtime.store_get(__canon_event_state_key(session_id, "observed_symbols", options))
   if type_of(raw) == "list" {
@@ -1031,8 +1040,8 @@ fn __canon_event_stored_observed_symbols(
 pub fn canon_event_record_observed_symbols(
   runtime: HarnessRuntime,
   session_id: string,
-  event,
-  options = nil,
+  event: dict?,
+  options: dict? = nil,
 ) -> list<string> {
   const sid = __canon_text(session_id)
   const event_symbols = canon_event_observed_symbols(event ?? {})
@@ -1047,14 +1056,14 @@ pub fn canon_event_record_observed_symbols(
   return merged
 }
 
-fn __canon_event_provider_paths(provider) {
+fn __canon_event_provider_paths(provider: unknown) {
   if type_of(provider) == "closure" {
     return provider()
   }
   return provider
 }
 
-fn __canon_event_fallback_paths(options = nil) -> list {
+fn __canon_event_fallback_paths(options: dict? = nil) -> list {
   const opts = options ?? {}
   const provider = opts?.changed_paths_provider ?? opts?.changedPathsProvider ?? opts?.changed_paths
     ?? opts?.changedPaths
@@ -1065,7 +1074,7 @@ fn __canon_event_fallback_paths(options = nil) -> list {
   return paths
 }
 
-fn __canon_event_options_with_ctx(options, observed_symbols) {
+fn __canon_event_options_with_ctx(options: dict?, observed_symbols: list?) {
   const opts = options ?? {}
   const existing = opts?.ctx ?? opts?.predicate_ctx ?? {}
   const ctx = if type_of(existing) == "dict" {
@@ -1076,7 +1085,7 @@ fn __canon_event_options_with_ctx(options, observed_symbols) {
   return opts + {ctx: ctx + {observed_symbols: observed_symbols ?? []}}
 }
 
-fn __canon_event_is_iteration_end(event) -> bool {
+fn __canon_event_is_iteration_end(event: dict) -> bool {
   const event_type = lowercase(__canon_text(event?.type ?? event?.kind))
   return event_type == "iteration_end"
     || event_type == "iteration-end"
@@ -1100,7 +1109,12 @@ fn __canon_event_is_iteration_end(event) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_event_router(harness: Harness, session_id: string, event, options = nil) {
+pub fn canon_event_router(
+  harness: Harness,
+  session_id: string,
+  event: dict?,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   if !(opts?.enabled ?? opts?.active ?? true) {
     return nil
@@ -1152,7 +1166,11 @@ pub fn canon_event_router(harness: Harness, session_id: string, event, options =
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_install_feedback_sink(harness: Harness, session_id: string, options = nil) -> nil {
+pub fn canon_install_feedback_sink(
+  harness: Harness,
+  session_id: string,
+  options: dict? = nil,
+) -> nil {
   const opts = options ?? {}
   if !(opts?.enabled ?? opts?.active ?? true) {
     return nil

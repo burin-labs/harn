@@ -41,7 +41,7 @@ fn _tools() {
   )
 }
 
-fn _bump(harness: Harness, cell) {
+fn _bump(harness: Harness, cell: any) {
   const snap = harness.runtime.shared_snapshot(cell)
   harness.runtime.shared_cas(cell, snap, snap.value + 1)
 }
@@ -62,7 +62,7 @@ fn _remembered_history(
   session: string,
   tool_format: string,
   first_text: string,
-  first_native = nil,
+  first_native: any = nil,
 ) -> dict {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "hc-turns-" + session, initial: 0},
@@ -111,7 +111,10 @@ fn _remembered_history(
   return {result: result, history: harness.runtime.shared_snapshot(history).value}
 }
 
-pipeline test_a_drifted_tagged_call_is_remembered_as_the_json_dialect(harness: Harness, task) {
+pipeline test_a_drifted_tagged_call_is_remembered_as_the_json_dialect(
+  harness: Harness,
+  task: unknown,
+) {
   const run = _remembered_history(harness, "hc-json-" + harness.random.uuid(), "json", TAGGED_CALL)
   // The drifted call really was read as a call, so this arm is about what the
   // transcript kept, not about a turn that parsed to nothing.
@@ -127,7 +130,10 @@ pipeline test_a_drifted_tagged_call_is_remembered_as_the_json_dialect(harness: H
   assert(contains(run.history, "2"), "the remembered call keeps its arguments")
 }
 
-pipeline test_a_drifted_fenced_call_is_remembered_as_the_text_dialect(harness: Harness, task) {
+pipeline test_a_drifted_fenced_call_is_remembered_as_the_text_dialect(
+  harness: Harness,
+  task: unknown,
+) {
   const run = _remembered_history(harness, "hc-text-" + harness.random.uuid(), "text", FENCED_CALL)
   assert_eq(contains(run.result.tools.successful, "add"), true)
   assert(trim(run.history) != "", "the second request carried assistant history")
@@ -136,7 +142,7 @@ pipeline test_a_drifted_fenced_call_is_remembered_as_the_text_dialect(harness: H
   assert(contains(run.history, "add"), "the remembered call names the tool")
 }
 
-pipeline test_a_turn_with_no_calls_is_remembered_verbatim(harness: Harness, task) {
+pipeline test_a_turn_with_no_calls_is_remembered_verbatim(harness: Harness, task: unknown) {
   // Nothing was parsed out of this turn, so there is nothing to rewrite it
   // into. A rewrite that fired here would be replacing the model's words with
   // a rendering of an empty call list.
@@ -153,7 +159,7 @@ pipeline test_a_turn_with_no_calls_is_remembered_verbatim(harness: Harness, task
   assert(!contains(run.history, "```tool"), "a call-free turn invents no call")
 }
 
-pipeline test_a_provider_native_call_is_rewritten_exactly_once(harness: Harness, task) {
+pipeline test_a_provider_native_call_is_rewritten_exactly_once(harness: Harness, task: unknown) {
   // The calls came down the provider's tool channel while the route reads
   // text, and the session store already rewrites that shape into canonical
   // text history from the same call list. A second rewrite here would render

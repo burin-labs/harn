@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const self_ref = {"$ref": "#"}
   const from_json = try {
     schema_from_json_schema(self_ref)

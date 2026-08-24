@@ -1,6 +1,6 @@
 import { page, rule, terminal_width } from "std/tui"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(rule(harness.term, "=", 5))
   harness.stdio.println(rule(harness.term, "ab", 3))
   harness.stdio.println(terminal_width(harness.term, 1) > 0)

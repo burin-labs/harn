@@ -11,7 +11,7 @@ pub fn __agent_loop_clock_now_ms(clock: HarnessClock) {
   return clock.monotonic_ms()
 }
 
-pub fn __agent_loop_clock_sleep_ms(clock: HarnessClock, delay_ms) {
+pub fn __agent_loop_clock_sleep_ms(clock: HarnessClock, delay_ms: any) {
   clock.sleep_ms(delay_ms)
 }
 
@@ -97,7 +97,7 @@ pub const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_ca
 
 // -------------------------------------------------------------------------------------------------
 
-pub fn __autocontinue_max_continuations(llm_opts) {
+pub fn __autocontinue_max_continuations(llm_opts: dict) {
   const configured = llm_opts?.truncation_auto_continue_max
   if type_of(configured) == "int" && configured >= 0 {
     return configured
@@ -114,7 +114,7 @@ pub fn __autocontinue_max_continuations(llm_opts) {
  * @effects: []
  * @errors: []
  */
-pub fn __autocontinue_raised_cap(current, llm_opts) {
+pub fn __autocontinue_raised_cap(current: int, llm_opts: dict) {
   const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
     && llm_opts.truncation_auto_continue_base
       > 0 {
@@ -140,12 +140,12 @@ pub fn __autocontinue_raised_cap(current, llm_opts) {
   return raised
 }
 
-pub fn __autocontinue_is_length_stop(stop_reason) {
+pub fn __autocontinue_is_length_stop(stop_reason: string?) {
   const normalized = lowercase(trim(to_string(stop_reason ?? "")))
   return normalized == "length" || normalized == "max_tokens"
 }
 
-pub fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
+pub fn __autocontinue_hidden_reasoning_truncated(llm_result: dict, tool_call_count: int) {
   if !__autocontinue_is_length_stop(llm_result?.stop_reason) {
     return false
   }
@@ -171,7 +171,7 @@ pub fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
  * @effects: [host]
  * @errors: []
  */
-pub fn __autocontinue_should_continue(agent: HarnessAgent, call, turn_opts) {
+pub fn __autocontinue_should_continue(agent: HarnessAgent, call: dict, turn_opts: dict) {
   if !(call?.ok ?? false) {
     return false
   }
@@ -205,12 +205,12 @@ pub fn __autocontinue_should_continue(agent: HarnessAgent, call, turn_opts) {
  */
 pub fn __invoke_llm_with_autocontinue(
   harness: Harness,
-  message,
-  turn_system,
-  llm_opts,
-  turn_opts,
-  session_id,
-  iteration_index,
+  message: any,
+  turn_system: any,
+  llm_opts: dict,
+  turn_opts: dict,
+  session_id: any,
+  iteration_index: int,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
   agent_session_flush(harness.agent, session_id)
@@ -258,12 +258,12 @@ pub fn __invoke_llm_with_autocontinue(
  */
 pub fn __agent_loop_invoke_main_request(
   harness: Harness,
-  message,
-  turn_system,
-  llm_opts,
-  turn_opts,
-  session_id,
-  iteration_index,
+  message: any,
+  turn_system: any,
+  llm_opts: dict,
+  turn_opts: dict,
+  session_id: any,
+  iteration_index: int,
 ) -> dict {
   __agent_loop_next_tool_claim_receipt(harness.agent, session_id, llm_opts, iteration_index)
   return __invoke_llm_with_autocontinue(
@@ -297,7 +297,7 @@ pub fn __agent_loop_invoke_main_request(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_is_context_overflow(error) {
+pub fn __agent_loop_is_context_overflow(error: unknown) {
   if type_of(error) != "dict" {
     return false
   }
@@ -312,7 +312,7 @@ pub fn __agent_loop_is_context_overflow(error) {
   return contains(message, "[context_overflow]")
 }
 
-pub fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
+pub fn __agent_loop_context_overflow_max_recoveries(llm_opts: dict) {
   const configured = llm_opts?.context_overflow_recover_max
   if type_of(configured) == "int" && configured >= 0 {
     return configured
@@ -331,13 +331,13 @@ pub fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
  */
 pub fn __agent_loop_recover_context_overflow(
   harness: Harness,
-  call,
-  message,
-  turn_system,
-  llm_opts,
-  turn_opts,
-  session,
-  iteration_index,
+  call: any,
+  message: any,
+  turn_system: unknown,
+  llm_opts: any,
+  turn_opts: dict,
+  session: dict,
+  iteration_index: int,
 ) {
   const max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
   let current = call

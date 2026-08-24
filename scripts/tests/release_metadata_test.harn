@@ -29,7 +29,7 @@ fn dependency_schema() -> Schema<DependencyProjection> {
 }
 
 @test
-pipeline test_development_version_contract_is_exact(harness: Harness, task) {
+pipeline test_development_version_contract_is_exact(harness: Harness, task: unknown) {
   assert_eq(development_version_from_stable("1.2.3"), "1.2.4-dev")
   assert_eq(stable_version_from_development("1.2.4-dev"), "1.2.4")
   assert_throws_eq(
@@ -89,7 +89,7 @@ fn agent_projection(text: string) -> AgentProjection {
   return schema_expect(json_parse(text), schema)
 }
 
-fn assert_throws_eq(body, expected: string) -> nil {
+fn assert_throws_eq(body: unknown, expected: string) -> nil {
   let error_text = ""
   try {
     body()
@@ -205,7 +205,7 @@ version = "1.2.3"
 }
 
 @test
-pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task) {
+pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -223,7 +223,10 @@ pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task
 }
 
 @test
-pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(harness: Harness, task) {
+pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -257,7 +260,7 @@ pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(harness: 
 }
 
 @test
-pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task) {
+pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -296,7 +299,10 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
 }
 
 @test
-pipeline test_development_then_release_preserves_distribution_boundary(harness: Harness, task) {
+pipeline test_development_then_release_preserves_distribution_boundary(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -332,7 +338,10 @@ pipeline test_development_then_release_preserves_distribution_boundary(harness: 
 }
 
 @test
-pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness: Harness, task) {
+pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -375,7 +384,10 @@ pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness
 }
 
 @test
-pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: Harness, task) {
+pipeline test_apply_advances_install_projection_from_withdrawn_version(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -431,7 +443,10 @@ pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: 
 }
 
 @test
-pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harness, task) {
+pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -491,7 +506,7 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
 }
 
 @test
-pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, task) {
+pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, task: unknown) {
   assert_eq(
     rewrite_local_dependency_versions(
       "member-a = { path = \"crates/member-a\" }\n",
@@ -503,7 +518,7 @@ pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, 
 }
 
 @test
-pipeline test_changelog_top_validation(harness: Harness, task) {
+pipeline test_changelog_top_validation(harness: Harness, task: unknown) {
   verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
   verify_changelog_top("# Changelog\n\n## v1.2.4-rc.0\n\n- notes\n", "1.2.4-rc.0")
   assert_throws_eq(

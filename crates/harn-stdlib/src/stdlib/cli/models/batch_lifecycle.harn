@@ -112,7 +112,7 @@ pub fn __count_jobs_with_status(jobs: list, status: string) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn __provider_batch_status(raw_status) -> BatchLifecycleState {
+pub fn __provider_batch_status(raw_status: string?) -> BatchLifecycleState {
   const status = lowercase(trim(to_string(raw_status ?? "")))
   if status == "" {
     return "unknown"
@@ -172,7 +172,7 @@ pub fn __provider_batch_status(raw_status) -> BatchLifecycleState {
  * @effects: []
  * @errors: []
  */
-pub fn __batch_lifecycle_state(raw_status) -> BatchLifecycleState {
+pub fn __batch_lifecycle_state(raw_status: string?) -> BatchLifecycleState {
   const status = lowercase(trim(to_string(raw_status ?? "")))
   if __has_string(
     [

@@ -1,4 +1,4 @@
-pub fn __as_string_list(value) -> list<string> {
+pub fn __as_string_list(value: list) -> list<string> {
   if value == nil {
     return []
   }

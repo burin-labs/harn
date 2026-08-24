@@ -2,7 +2,7 @@ import "std/schema"
 
 type Payload = {x: string}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const dict_schema = {type: "dict", required: ["x"], properties: {x: {type: "string"}}}
   const checked = try {
     schema_check({x: "ok"}, dict_schema)

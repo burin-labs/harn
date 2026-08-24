@@ -3,7 +3,7 @@ import { with_retry } from "std/llm/handlers"
 import { llm_arm_one_shot_prefill } from "std/llm/options"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn call(options) {
+fn call(options: any) {
   return {
     prompt: "continue",
     system: "",

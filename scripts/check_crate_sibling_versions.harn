@@ -189,7 +189,7 @@ fn unpublished_workspace_package_names(fs: HarnessFs, paths: list<string>) -> li
   return names.sorted()
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
   const paths = checked_manifest_paths(harness.fs)
   const unpublished_sibling_names = unpublished_workspace_package_names(harness.fs, paths)

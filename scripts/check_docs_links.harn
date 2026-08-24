@@ -412,7 +412,7 @@ pub fn sort_by_start(links: list) -> list {
   return out
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const globbed = harness.fs.glob("${DOCS_DIR}/**/*.md")
   let repo_root = ""
   for g in globbed {

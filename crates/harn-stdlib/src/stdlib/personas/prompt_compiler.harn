@@ -104,7 +104,7 @@ fn __persona_prompt_blueprint_schema() -> dict {
   )
 }
 
-fn __persona_prompt_catalog(providers) -> list<PersonaPromptCatalogEntry> {
+fn __persona_prompt_catalog(providers: list) -> list<PersonaPromptCatalogEntry> {
   let catalog: list<PersonaPromptCatalogEntry> = []
   for provider in providers {
     const transports = provider.kinds.map({ kind -> to_string(kind) }).sorted_by({ kind -> kind })
@@ -120,7 +120,7 @@ fn __persona_prompt_catalog(providers) -> list<PersonaPromptCatalogEntry> {
   return catalog.sorted_by({ entry -> entry.provider })
 }
 
-fn __persona_prompt_digest(value) -> string {
+fn __persona_prompt_digest(value: any) -> string {
   return "sha256:" + sha256(json_stringify(value))
 }
 
@@ -166,7 +166,7 @@ fn __persona_prompt_candidate_blueprint(
   return blueprint
 }
 
-fn __persona_prompt_usage(checkpoint) -> PersonaPromptCompileUsage {
+fn __persona_prompt_usage(checkpoint: dict) -> PersonaPromptCompileUsage {
   const raw = checkpoint.usage ?? {}
   const input_tokens = to_int(raw?.input_tokens ?? raw?.prompt_tokens) ?? 0
   const output_tokens = to_int(raw?.output_tokens ?? raw?.completion_tokens) ?? 0
@@ -179,7 +179,7 @@ fn __persona_prompt_usage(checkpoint) -> PersonaPromptCompileUsage {
   }
 }
 
-fn __persona_prompt_checkpoint_receipt(checkpoint) -> PersonaPromptCheckpointReceipt {
+fn __persona_prompt_checkpoint_receipt(checkpoint: dict) -> PersonaPromptCheckpointReceipt {
   const status = if checkpoint.status == "accepted" {
     "accepted"
   } else if checkpoint.status == "validator_rejected" {
@@ -267,7 +267,7 @@ pub fn persona_compile_prompt(
   llm: HarnessLlm,
   prompt: string,
   options: PersonaPromptCompileOptions? = nil,
-  providers = nil,
+  providers: any = nil,
 ) -> PersonaPromptCompileReceipt {
   const opts: PersonaPromptCompileOptions = options ?? {}
   const live_providers = providers ?? list_providers(llm)

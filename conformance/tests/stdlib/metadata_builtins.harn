@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // metadata_get on empty store returns nil
   const result = harness.project.metadata_get({dir: ".", namespace: "test_ns"})
   assert_eq(result, nil)

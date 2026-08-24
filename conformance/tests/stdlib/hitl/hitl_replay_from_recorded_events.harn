@@ -22,7 +22,7 @@ pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond("interaction", "question_response", {answer: {verdict: "approved"}})
   harness.testing.respond(

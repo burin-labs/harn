@@ -28,7 +28,7 @@ fn agent_tools() {
   return tools
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test agent() and agent_config() builtins.
   const classifier = agent(
     "classifier",

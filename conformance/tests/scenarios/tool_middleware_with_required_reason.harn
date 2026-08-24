@@ -27,7 +27,7 @@ fn synthetic_next() {
   }
 }
 
-fn envelope(name, args) {
+fn envelope(name: string, args: dict) {
   return {
     tool_name: name,
     tool_args: args,

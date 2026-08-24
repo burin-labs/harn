@@ -11,7 +11,7 @@
  *   HARN_TRACE_ID     — optional trace-id filter
  *   HARN_TRACE_OUTPUT — output path
  */
-fn __optional_string(obj, key) {
+fn __optional_string(obj: any, key: string) {
   const v = obj[key]
   if type_of(v) == "string" {
     return v
@@ -19,7 +19,7 @@ fn __optional_string(obj, key) {
   return nil
 }
 
-fn __optional_int(obj, key) {
+fn __optional_int(obj: any, key: string) {
   const v = obj[key]
   if type_of(v) == "int" {
     return v
@@ -27,7 +27,7 @@ fn __optional_int(obj, key) {
   return nil
 }
 
-fn __coerce_tool_calls(value) -> list {
+fn __coerce_tool_calls(value: list) -> list {
   if value == nil {
     return []
   }
@@ -51,14 +51,14 @@ fn __coerce_tool_calls(value) -> list {
   return out
 }
 
-fn __response_object(value) {
+fn __response_object(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __response_text(value) -> string {
+fn __response_text(value: string) -> string {
   if type_of(value) == "string" {
     return value
   }
@@ -79,7 +79,7 @@ fn __response_text(value) -> string {
   throw "unsupported `response`; expected string or object"
 }
 
-fn __record_to_fixture(value, line_no) -> string {
+fn __record_to_fixture(value: any, line_no: int) -> string {
   if type_of(value) != "dict" {
     throw "trace line " + to_string(line_no) + " must be a JSON object"
   }

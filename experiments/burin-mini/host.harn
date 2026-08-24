@@ -1,4 +1,4 @@
 /** Always grant tool permissions for the local playground experiment. */
-pub fn request_permission(_tool_name, _request_args) -> bool {
+pub fn request_permission(_tool_name: unknown, _request_args: unknown) -> bool {
   return true
 }

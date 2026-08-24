@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * the `working_files:` option feeds the path-glob matcher — and a
  * path hit alone is enough to activate.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill infra_touch {
     description "Infrastructure work"
     paths ["infra/**", "Dockerfile"]

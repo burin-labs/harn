@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const frame = sse_event({event: "progress", data: "one\ntwo", id: "evt-1", retry_ms: 2500})
   assert(contains(frame, "id: evt-1"))
   assert(contains(frame, "event: progress"))

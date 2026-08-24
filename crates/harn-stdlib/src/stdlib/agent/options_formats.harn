@@ -12,7 +12,7 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-pub fn __profile_defaults(profile) {
+pub fn __profile_defaults(profile: string) {
   if profile == "tool_using" {
     return {max_iterations: 50, max_nudges: 8, tool_retries: 0, schema_retries: 0}
   }
@@ -34,7 +34,7 @@ pub fn __profile_defaults(profile) {
  * @effects: []
  * @errors: []
  */
-pub fn __normalize_judge_config(value) -> JudgeConfig? {
+pub fn __normalize_judge_config(value: JudgeConfig | bool | nil) -> JudgeConfig? {
   if value == nil {
     return nil
   }
@@ -57,7 +57,11 @@ pub fn __normalize_judge_config(value) -> JudgeConfig? {
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn __normalize_completion_judge_config(fs: HarnessFs, value, opts) -> JudgeConfig? {
+pub fn __normalize_completion_judge_config(
+  fs: HarnessFs,
+  value: JudgeConfig | bool | nil,
+  opts: dict,
+) -> JudgeConfig? {
   const config = __normalize_judge_config(value)
   if config == nil {
     return nil
@@ -73,11 +77,11 @@ pub fn __normalize_completion_judge_config(fs: HarnessFs, value, opts) -> JudgeC
   }
 }
 
-pub fn __has_key(opts, key) {
+pub fn __has_key(opts: dict, key: string) {
   return contains(opts.keys(), key)
 }
 
-pub fn __client_tool_search_requested(value) {
+pub fn __client_tool_search_requested(value: dict?) -> bool {
   return type_of(value) == "dict" && value?.mode == "client"
 }
 
@@ -91,7 +95,7 @@ pub fn __fallback_tool_format() {
   return "json"
 }
 
-fn __tool_format_auto(value) {
+fn __tool_format_auto(value: any) {
   if value == nil {
     return true
   }
@@ -99,14 +103,14 @@ fn __tool_format_auto(value) {
   return text == "" || text == "auto"
 }
 
-pub fn __explicit_tool_format(opts) {
+pub fn __explicit_tool_format(opts: dict) {
   if !__has_key(opts, "tool_format") || __tool_format_auto(opts?.tool_format) {
     return nil
   }
   return lowercase(trim(to_string(opts.tool_format)))
 }
 
-fn __explicit_provider(opts) {
+fn __explicit_provider(opts: dict) {
   const provider = trim(to_string(opts?.provider ?? ""))
   if provider == "" || lowercase(provider) == "auto" {
     return nil
@@ -114,7 +118,7 @@ fn __explicit_provider(opts) {
   return provider
 }
 
-fn __resolved_model_id(llm: HarnessLlm, model) -> string {
+fn __resolved_model_id(llm: HarnessLlm, model: any) -> string {
   const resolved = try {
     llm.resolve_model(model)
   }
@@ -126,7 +130,7 @@ fn __resolved_model_id(llm: HarnessLlm, model) -> string {
 
 fn __tool_format_route(
   llm: HarnessLlm,
-  opts,
+  opts: dict,
 ) -> {pair: {provider: string, model: string}?, unresolved_reason: string?} {
   const raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
@@ -157,7 +161,7 @@ fn __tool_format_route(
   return {pair: {provider: inferred_provider, model: model}, unresolved_reason: nil}
 }
 
-fn __valid_tool_format(value) {
+fn __valid_tool_format(value: string?) {
   const format = lowercase(trim(to_string(value ?? "")))
   if format == "native" || format == "text" || format == "json" {
     return format
@@ -174,7 +178,7 @@ fn __valid_tool_format(value) {
  * This is the single source of truth for that classification on the harn side,
  * mirroring `llm_config::tool_format_channel` in the runtime.
  */
-fn __tool_format_is_text_channel(format) {
+fn __tool_format_is_text_channel(format: string) {
   return format == "text" || format == "json"
 }
 
@@ -193,7 +197,7 @@ fn __tool_format_is_text_channel(format) {
  * @errors: [agent_loop_invalid_tool_format]
  * @api_stability: experimental
  */
-fn __validate_explicit_tool_format(value) {
+fn __validate_explicit_tool_format(value: string?) {
   if __valid_tool_format(value) == nil {
     throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
       + to_string(value)
@@ -218,7 +222,7 @@ fn __validate_explicit_tool_format(value) {
  * @errors: [agent_loop_unsupported_tool_format]
  * @api_stability: experimental
  */
-fn __validate_tool_format_parity(pair, requested, parity, override_reason) {
+fn __validate_tool_format_parity(pair: any, requested: string?, parity: any, override_reason: any) {
   const requested_format = __valid_tool_format(requested)
   if requested_format == nil || pair == nil {
     return
@@ -247,7 +251,7 @@ fn __validate_tool_format_parity(pair, requested, parity, override_reason) {
   }
 }
 
-fn __optional_text(value) {
+fn __optional_text(value: any) {
   if value == nil {
     return nil
   }
@@ -258,7 +262,7 @@ fn __optional_text(value) {
   return text
 }
 
-fn __catalog_parity(value) {
+fn __catalog_parity(value: any) {
   const text = __optional_text(value)
   if text == nil {
     return "unknown"
@@ -266,7 +270,7 @@ fn __catalog_parity(value) {
   return lowercase(text)
 }
 
-fn __parity_recommended_tool_format(parity) {
+fn __parity_recommended_tool_format(parity: string) {
   if parity == "native_unreliable" || parity == "text_only" {
     return "text"
   }
@@ -285,7 +289,7 @@ fn __parity_recommended_tool_format(parity) {
  * channel). Keeping these two implementations in lockstep is what guarantees
  * the loop's prompt and the provider wire request agree on the tool dialect.
  */
-fn __steer_tool_format(parity, preferred) {
+fn __steer_tool_format(parity: string, preferred: any) {
   const recommended_channel = __parity_recommended_tool_format(parity)
   if recommended_channel == nil {
     return nil
@@ -301,7 +305,7 @@ fn __steer_tool_format(parity, preferred) {
   }
 }
 
-fn __parity_conflicts_with_requested(parity, requested) {
+fn __parity_conflicts_with_requested(parity: string, requested: string) {
   if parity == "native_unreliable" {
     return requested == "native"
   }
@@ -344,11 +348,17 @@ fn __parity_conflicts_with_requested(parity, requested) {
  * Cross-channel requests stay governed by `tool_mode_parity` above, so a route
  * that merely prefers one channel does not lose the other.
  */
-fn __grammar_conflicts_with_requested(preferred, requested) {
+fn __grammar_conflicts_with_requested(preferred: any, requested: string) {
   return preferred == "text" && requested == "json"
 }
 
-fn __tool_format_override_event(pair, requested, preferred, parity, override_reason) {
+fn __tool_format_override_event(
+  pair: any,
+  requested: string?,
+  preferred: any,
+  parity: any,
+  override_reason: any,
+) {
   if pair == nil {
     return nil
   }
@@ -379,7 +389,7 @@ fn __tool_format_override_event(pair, requested, preferred, parity, override_rea
   return event
 }
 
-fn __stamp_tool_format_override_event(event, applied, steered) {
+fn __stamp_tool_format_override_event(event: dict?, applied: string, steered: bool) {
   if event == nil {
     return nil
   }
@@ -393,7 +403,7 @@ fn __stamp_tool_format_override_event(event, applied, steered) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format_override_warning_text(event) {
+pub fn agent_tool_format_override_warning_text(event: dict?) {
   if event == nil {
     return nil
   }
@@ -430,7 +440,23 @@ pub fn agent_tool_format_override_warning_text(event) {
   return line
 }
 
-fn __capability_gap_event(pair, opts, fallback, reason) {
+/**
+ * Render the first `tool_format_override` event in an event list, if present.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_first_tool_format_override_warning_text(events: list) {
+  for event in events {
+    if event?.kind == "tool_format_override" || event?.type == "tool_format_override" {
+      return agent_tool_format_override_warning_text(event)
+    }
+  }
+  return nil
+}
+
+fn __capability_gap_event(pair: any, opts: dict, fallback: any, reason: string) {
   const provider = pair?.provider ?? __explicit_provider(opts) ?? "unknown"
   const model = trim(to_string(pair?.model ?? opts?.model ?? ""))
   const message = if reason == "missing_model" {
@@ -468,7 +494,7 @@ fn __capability_gap_event(pair, opts, fallback, reason) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
+pub fn agent_tool_format_resolution(llm: HarnessLlm, options: dict? = nil) {
   const opts = options ?? {}
   const explicit = __explicit_tool_format(opts)
   if explicit != nil {
@@ -598,7 +624,7 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_format(llm: HarnessLlm, options = nil) {
+pub fn agent_tool_format(llm: HarnessLlm, options: dict? = nil) {
   const resolved = agent_tool_format_resolution(llm, options)
   if resolved.tool_format != nil {
     return resolved.tool_format

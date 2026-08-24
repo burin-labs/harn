@@ -1,14 +1,14 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // A default expression is evaluated at call time and may reference the
   // enclosing scope — including a binding with the same name as the parameter.
   const n = 7
-  fn double_default(n = n * 2) {
+  fn double_default(n: int = n * 2) {
     return n
   }
   harness.stdio.log(double_default())
   harness.stdio.log(double_default(100))
   // A default may also reference an *earlier* parameter.
-  fn sum_default(a, b = a + 1) {
+  fn sum_default(a: int, b: int = a + 1) {
     return a + b
   }
   harness.stdio.log(sum_default(10))

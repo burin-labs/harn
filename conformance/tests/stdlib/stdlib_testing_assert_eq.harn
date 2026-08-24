@@ -4,7 +4,7 @@
 // the state this surface exists to leave behind.
 import { assert_approx, assert_eq, assert_matches, assert_ne, value_diff } from "std/testing"
 
-fn failure_of(body) -> string {
+fn failure_of(body: unknown) -> string {
   const caught = try {
     body()
     "UNREACHABLE: the assertion passed when it should have failed"
@@ -14,7 +14,7 @@ fn failure_of(body) -> string {
   return to_string(caught)
 }
 
-pipeline test_assert_eq(harness: Harness, task) {
+pipeline test_assert_eq(harness: Harness, task: unknown) {
   // === importable from std/testing, not just as a bare global ===
   // The import at the top of this file is itself the assertion: before these
   // builtins were re-exported it resolved at `harn check` and died at runtime.

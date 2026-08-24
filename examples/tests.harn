@@ -1,6 +1,6 @@
 /** Example test file — run with: harn test examples/tests.harn */
-pipeline test_addition(harness: Harness, task) {
-  fn add(a, b) {
+pipeline test_addition(harness: Harness, task: unknown) {
+  fn add(a: int, b: int) {
     return a + b
   }
   assert_eq(add(2, 3), 5)
@@ -8,8 +8,8 @@ pipeline test_addition(harness: Harness, task) {
   assert_eq(add(0, 0), 0)
 }
 
-pipeline test_string_operations(harness: Harness, task) {
-  fn greet(name) {
+pipeline test_string_operations(harness: Harness, task: unknown) {
+  fn greet(name: string) {
     return "hello " + name
   }
   assert_eq(greet("world"), "hello world")
@@ -18,7 +18,7 @@ pipeline test_string_operations(harness: Harness, task) {
   assert_eq("hello".count, 5)
 }
 
-pipeline test_list_operations(harness: Harness, task) {
+pipeline test_list_operations(harness: Harness, task: unknown) {
   const nums = [3, 1, 4, 1, 5]
   assert_eq(nums.count, 5)
   assert_eq(nums.first, 3)
@@ -27,14 +27,14 @@ pipeline test_list_operations(harness: Harness, task) {
   assert(nums.all({ n -> n > 0 }))
 }
 
-pipeline test_dict_operations(harness: Harness, task) {
+pipeline test_dict_operations(harness: Harness, task: unknown) {
   const user = {name: "Alice", age: 30}
   assert_eq(user.name, "Alice")
   assert(user.has("name"))
   assert(!user.has("email"))
 }
 
-pipeline test_control_flow(harness: Harness, task) {
+pipeline test_control_flow(harness: Harness, task: unknown) {
   let sum = 0
   for i in [1, 2, 3, 4, 5] {
     sum = sum + i
@@ -42,7 +42,7 @@ pipeline test_control_flow(harness: Harness, task) {
   assert_eq(sum, 15)
 }
 
-pipeline test_error_handling(harness: Harness, task) {
+pipeline test_error_handling(harness: Harness, task: unknown) {
   let caught = false
   try {
     throw "test error"
@@ -53,7 +53,7 @@ pipeline test_error_handling(harness: Harness, task) {
   assert(caught)
 }
 
-pipeline test_closures(harness: Harness, task) {
+pipeline test_closures(harness: Harness, task: unknown) {
   const double = { x -> x * 2 }
   const add_fn = { a, b -> a + b }
   assert_eq(double(5), 10)
@@ -61,6 +61,6 @@ pipeline test_closures(harness: Harness, task) {
 }
 
 /** This pipeline is NOT a test (no test_ prefix) — should be ignored */
-pipeline helper(harness: Harness, task) {
+pipeline helper(harness: Harness, task: unknown) {
   harness.stdio.log("I should not run during tests")
 }

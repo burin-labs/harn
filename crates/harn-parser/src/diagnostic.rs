@@ -705,6 +705,9 @@ fn type_diagnostic_primary_label(diag: &crate::typechecker::TypeDiagnostic) -> O
         Some(crate::typechecker::DiagnosticDetails::TypeMismatch { .. }) => {
             Some("found this type".to_string())
         }
+        Some(crate::typechecker::DiagnosticDetails::ImplicitAnyParameter { .. }) => {
+            Some("needs a type".to_string())
+        }
         _ => None,
     }
 }

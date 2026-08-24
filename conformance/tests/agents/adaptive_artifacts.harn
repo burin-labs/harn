@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const selected = select_artifacts_adaptive(
     [
       artifact({id: "a1", kind: "summary", text: "same content", relevance: 0.9}),

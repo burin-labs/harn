@@ -9,7 +9,7 @@
  */
 pub type LlmCallerTransport = {forwards_assistant_prefill?: bool}
 
-pub fn __validate_llm_caller(value) -> nil {
+pub fn __validate_llm_caller(value: any) -> nil {
   if value == nil {
     return
   }
@@ -18,7 +18,7 @@ pub fn __validate_llm_caller(value) -> nil {
   }
 }
 
-pub fn __normalize_llm_caller_transport(value) -> LlmCallerTransport {
+pub fn __normalize_llm_caller_transport(value: any) -> LlmCallerTransport {
   if value == nil {
     return {forwards_assistant_prefill: false}
   }

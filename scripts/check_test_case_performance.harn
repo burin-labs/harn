@@ -11,11 +11,11 @@ const CASES_PER_SUITE = 16
 
 const WORKLOAD_VERSION = 1
 
-fn number(value) -> float {
+fn number(value: any) -> float {
   return to_float(value) ?? 0.0
 }
 
-fn int_number(value) -> int {
+fn int_number(value: any) -> int {
   return to_int(value) ?? 0
 }
 
@@ -535,7 +535,7 @@ fn measure_round(harness: Harness, platform: string) -> dict {
 // spike clears on re-measure, while a real regression breaches every round.
 const MAX_MEASUREMENT_ROUNDS = 3
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const platform = platform_name(harness.process)
   if platform != "macos" && platform != "linux" {
     harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")

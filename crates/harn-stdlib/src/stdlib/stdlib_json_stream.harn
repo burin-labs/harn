@@ -29,7 +29,7 @@ type JsonStreamValidator = {
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validator(runtime: HarnessRuntime, schema) -> JsonStreamValidator {
+pub fn stream_validator(runtime: HarnessRuntime, schema: any) -> JsonStreamValidator {
   const handle = runtime.json_stream_validator(schema)
   return {
     _namespace: "json_stream_validator",
@@ -40,7 +40,7 @@ pub fn stream_validator(runtime: HarnessRuntime, schema) -> JsonStreamValidator 
   }
 }
 
-fn __stream_object_text(chunk) -> string {
+fn __stream_object_text(chunk: string) -> string {
   if type_of(chunk) == "string" {
     return chunk
   }
@@ -73,9 +73,9 @@ fn __stream_object_text(chunk) -> string {
  */
 pub gen fn stream_object(
   runtime: HarnessRuntime,
-  source,
-  schema = nil,
-  options = nil,
+  source: list,
+  schema: dict? = nil,
+  options: dict? = nil,
 ) -> Stream<any> {
   const dedupe = (options ?? {})?.dedupe ?? true
   const validator = stream_validator(runtime, schema ?? {})
@@ -136,7 +136,7 @@ pub gen fn stream_object(
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validate_create(runtime: HarnessRuntime, schema) -> resource {
+pub fn stream_validate_create(runtime: HarnessRuntime, schema: any) -> resource {
   return runtime.json_stream_validate_create(schema)
 }
 
@@ -147,7 +147,7 @@ pub fn stream_validate_create(runtime: HarnessRuntime, schema) -> resource {
  * @effects: []
  * @errors: []
  */
-pub fn stream_validate_chunk(handle, chunk) -> dict {
+pub fn stream_validate_chunk(handle: resource, chunk: string | bytes) -> dict {
   return __json_stream_validate_chunk(handle, chunk)
 }
 
@@ -159,7 +159,7 @@ pub fn stream_validate_chunk(handle, chunk) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn stream_validate_finalize(handle) -> dict {
+pub fn stream_validate_finalize(handle: resource) -> dict {
   return __json_stream_validate_finalize(handle)
 }
 

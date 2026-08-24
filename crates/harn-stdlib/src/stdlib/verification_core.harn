@@ -21,7 +21,7 @@ pub fn verification_file_hash_snapshot(
   return code_index.file_hash_snapshot({paths: paths})
 }
 
-pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
+pub fn verification_snapshot_staleness(bound_snapshot: dict, current_hashes: dict) -> dict {
   const bound = __verification_snapshot_map(bound_snapshot)
   if type_of(bound) != "dict" || len(keys(bound)) == 0 {
     return {
@@ -59,11 +59,11 @@ pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
   }
 }
 
-pub fn __verification_opts(options) {
+pub fn __verification_opts(options: dict?) {
   return options ?? {}
 }
 
-pub fn __verification_result_ok(result) -> bool {
+pub fn __verification_result_ok(result: any) -> bool {
   if result?.ok != nil {
     return result.ok ? true : false
   }
@@ -75,7 +75,7 @@ pub fn __verification_result_ok(result) -> bool {
   return status == "completed" && exit == 0 && !(result?.timed_out ?? false)
 }
 
-pub fn __verification_duration_ms(result, opts) {
+pub fn __verification_duration_ms(result: CommandResult, opts: dict) {
   if opts?.duration_ms != nil {
     return to_int(opts.duration_ms)
   }
@@ -88,7 +88,7 @@ pub fn __verification_duration_ms(result, opts) {
   return nil
 }
 
-pub fn __verification_exit(result, opts) {
+pub fn __verification_exit(result: any, opts: dict) {
   if opts?.exit != nil {
     return to_int(opts.exit)
   }
@@ -104,7 +104,7 @@ pub fn __verification_exit(result, opts) {
   return nil
 }
 
-pub fn __verification_warm(opts) -> bool {
+pub fn __verification_warm(opts: dict) -> bool {
   if opts?.warm != nil {
     return opts.warm ? true : false
   }
@@ -114,7 +114,7 @@ pub fn __verification_warm(opts) -> bool {
   return true
 }
 
-pub fn __verification_snapshot_map(value) {
+pub fn __verification_snapshot_map(value: unknown) {
   if value == nil {
     return nil
   }
@@ -124,7 +124,7 @@ pub fn __verification_snapshot_map(value) {
   return value
 }
 
-pub fn __verification_capture_snapshot(code_index: HarnessCodeIndex, opts) {
+pub fn __verification_capture_snapshot(code_index: HarnessCodeIndex, opts: dict) {
   let snapshot_fact = nil
   let snapshot = __verification_snapshot_map(opts?.snapshot)
   if opts?.snapshot_paths != nil {
@@ -134,7 +134,7 @@ pub fn __verification_capture_snapshot(code_index: HarnessCodeIndex, opts) {
   return {fact: snapshot_fact, snapshot: snapshot}
 }
 
-pub fn __verification_result_text(result, source: string) -> string {
+pub fn __verification_result_text(result: CommandResult, source: string) -> string {
   if source == "stderr" {
     return result?.stderr ?? ""
   }
@@ -147,7 +147,7 @@ pub fn __verification_result_text(result, source: string) -> string {
   return ""
 }
 
-pub fn __verification_failure_signature(agent: HarnessAgent, result, opts) {
+pub fn __verification_failure_signature(agent: HarnessAgent, result: any, opts: dict) {
   if opts?.failure_signature != nil {
     const explicit = to_string(opts.failure_signature)
     return trim(explicit) == "" ? nil : explicit
@@ -174,7 +174,7 @@ pub fn __verification_failure_signature(agent: HarnessAgent, result, opts) {
   return "check " + to_string(status) + " exit=" + to_string(exit)
 }
 
-pub fn __verification_row_id(row, index: int) -> string {
+pub fn __verification_row_id(row: dict, index: int) -> string {
   const id = trim(to_string(row?.id ?? row?.name ?? ""))
   if id != "" {
     return id
@@ -182,12 +182,12 @@ pub fn __verification_row_id(row, index: int) -> string {
   return "toolchain/" + to_string(index)
 }
 
-pub fn __verification_toolchain_name(row, id: string) -> string {
+pub fn __verification_toolchain_name(row: dict, id: string) -> string {
   const name = trim(to_string(row?.name ?? ""))
   return name == "" ? id : name
 }
 
-pub fn __verification_toolchain_probe(row) {
+pub fn __verification_toolchain_probe(row: dict) {
   const probe = row?.versionProbe ?? row?.probe
   if probe == nil {
     return nil
@@ -198,12 +198,12 @@ pub fn __verification_toolchain_probe(row) {
   return probe
 }
 
-pub fn __verification_toolchain_probe_options(row, opts) {
+pub fn __verification_toolchain_probe_options(row: dict, opts: dict) {
   const probe = row?.versionProbe ?? row?.probe ?? {}
   return (opts?.command_options ?? {}) + (probe?.command_options ?? row?.command_options ?? {})
 }
 
-pub fn __verification_toolchain_version_pattern(row, opts) -> string {
+pub fn __verification_toolchain_version_pattern(row: dict, opts: dict) -> string {
   const probe = row?.versionProbe ?? row?.probe ?? {}
   return to_string(
     probe?.versionPattern
@@ -215,7 +215,7 @@ pub fn __verification_toolchain_version_pattern(row, opts) -> string {
   )
 }
 
-pub fn __verification_toolchain_raw_version(result) -> string {
+pub fn __verification_toolchain_raw_version(result: dict) -> string {
   const stdout = trim(result?.stdout ?? "")
   if stdout != "" {
     return stdout
@@ -223,11 +223,11 @@ pub fn __verification_toolchain_raw_version(result) -> string {
   return trim(result?.stderr ?? "")
 }
 
-pub fn __verification_toolchain_cache_identity(row, opts) -> dict {
+pub fn __verification_toolchain_cache_identity(row: dict, opts: dict) -> dict {
   return (opts?.cache_identity ?? {}) + (row?.cacheIdentity ?? row?.cache_identity ?? {})
 }
 
-pub fn __verification_warm_state_mode(row) {
+pub fn __verification_warm_state_mode(row: dict) {
   const mode = row?.warmMode ?? row?.warm_mode ?? row?.warmState ?? row?.warm_state
   if mode == nil {
     return nil
@@ -238,7 +238,7 @@ pub fn __verification_warm_state_mode(row) {
   return {warm: mode ? true : false}
 }
 
-pub fn __verification_warm_state_id(row, index: int) -> string {
+pub fn __verification_warm_state_id(row: dict, index: int) -> string {
   const mode = __verification_warm_state_mode(row) ?? {}
   const id = trim(to_string(mode?.id ?? row?.row_id ?? row?.id ?? row?.name ?? ""))
   if id != "" {
@@ -247,13 +247,13 @@ pub fn __verification_warm_state_id(row, index: int) -> string {
   return "warm-state/" + to_string(index)
 }
 
-pub fn __verification_warm_state_name(row, id: string) -> string {
+pub fn __verification_warm_state_name(row: dict, id: string) -> string {
   const mode = __verification_warm_state_mode(row) ?? {}
   const name = trim(to_string(mode?.name ?? row?.name ?? ""))
   return name == "" ? id : name
 }
 
-pub fn __verification_warm_state_probe(row) {
+pub fn __verification_warm_state_probe(row: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe
     ?? mode?.readiness_probe
@@ -272,7 +272,7 @@ pub fn __verification_warm_state_probe(row) {
   return probe
 }
 
-pub fn __verification_warm_state_start_spec(row) {
+pub fn __verification_warm_state_start_spec(row: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const start = mode?.startCommand
     ?? mode?.start_command
@@ -292,7 +292,7 @@ pub fn __verification_warm_state_start_spec(row) {
   return start
 }
 
-pub fn __verification_warm_state_teardown_spec(row) {
+pub fn __verification_warm_state_teardown_spec(row: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const stop = mode?.teardownCommand
     ?? mode?.teardown_command
@@ -311,7 +311,7 @@ pub fn __verification_warm_state_teardown_spec(row) {
   return stop
 }
 
-pub fn __verification_warm_state_probe_options(row, opts) {
+pub fn __verification_warm_state_probe_options(row: dict, opts: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe
     ?? mode?.readiness_probe
@@ -328,7 +328,7 @@ pub fn __verification_warm_state_probe_options(row, opts) {
       ?? {})
 }
 
-pub fn __verification_warm_state_start_options(row, opts) {
+pub fn __verification_warm_state_start_options(row: dict, opts: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const start = mode?.startCommand
     ?? mode?.start_command
@@ -346,7 +346,7 @@ pub fn __verification_warm_state_start_options(row, opts) {
       ?? {})
 }
 
-pub fn __verification_warm_state_teardown_options(row, opts) {
+pub fn __verification_warm_state_teardown_options(row: dict, opts: dict) {
   const mode = __verification_warm_state_mode(row) ?? {}
   const stop = mode?.teardownCommand
     ?? mode?.teardown_command
@@ -363,7 +363,7 @@ pub fn __verification_warm_state_teardown_options(row, opts) {
       ?? {})
 }
 
-pub fn __verification_warm_state_cache_identity(row, opts) -> dict {
+pub fn __verification_warm_state_cache_identity(row: dict, opts: dict) -> dict {
   const mode = __verification_warm_state_mode(row) ?? {}
   return (opts?.cache_identity ?? {})
     + (row?.cacheIdentity ?? row?.cache_identity ?? {})
@@ -371,7 +371,7 @@ pub fn __verification_warm_state_cache_identity(row, opts) -> dict {
       ?? {})
 }
 
-pub fn __verification_warm_state_expected_delta_ms(row, mode) {
+pub fn __verification_warm_state_expected_delta_ms(row: dict, mode: dict) {
   return to_int(
     mode?.expectedWarmDeltaMs
       ?? mode?.expected_warm_delta_ms
@@ -380,7 +380,7 @@ pub fn __verification_warm_state_expected_delta_ms(row, mode) {
   )
 }
 
-pub fn __verification_warm_state_timings(row, mode) {
+pub fn __verification_warm_state_timings(row: dict, mode: dict) {
   const timings = row?.timings ?? mode?.timings ?? {}
   const warm_ms = to_int(
     mode?.warmMs ?? mode?.warm_ms ?? timings?.warmMs?.p95 ?? timings?.warm_ms?.p95,
@@ -391,13 +391,13 @@ pub fn __verification_warm_state_timings(row, mode) {
   return {warm_ms: warm_ms, cold_ms: cold_ms}
 }
 
-pub fn __verification_warm_state_mode_name(mode) -> string {
+pub fn __verification_warm_state_mode_name(mode: dict) -> string {
   const raw = mode?.mode ?? mode?.kind ?? mode?.type ?? "probe"
   const value = lowercase(trim(to_string(raw)))
   return value == "" ? "probe" : value
 }
 
-pub fn __verification_warm_state_probe_receipt(result) -> dict {
+pub fn __verification_warm_state_probe_receipt(result: any) -> dict {
   return {
     status: result?.status ?? "not_configured",
     exit: result == nil ? nil : __verification_exit(result, {}),
@@ -407,12 +407,12 @@ pub fn __verification_warm_state_probe_receipt(result) -> dict {
   }
 }
 
-pub fn __verification_warm_state_first_fact(tools: HarnessTools, row, opts) {
+pub fn __verification_warm_state_first_fact(tools: HarnessTools, row: any, opts: dict?) {
   const facts = verification_warm_state_facts(tools, [row], opts)
   return len(facts) == 0 ? nil : facts[0]
 }
 
-pub fn __verification_warm_state_receipt_handle(value) {
+pub fn __verification_warm_state_receipt_handle(value: dict) {
   if value == nil {
     return nil
   }
@@ -427,7 +427,7 @@ pub fn __verification_warm_state_receipt_handle(value) {
   return nil
 }
 
-pub fn __verification_warm_state_cancel_options(opts) -> dict {
+pub fn __verification_warm_state_cancel_options(opts: dict) -> dict {
   let out = {}
   if opts?.wait_result_ms != nil {
     out = out + {wait_result_ms: opts.wait_result_ms}
@@ -440,7 +440,7 @@ pub fn __verification_warm_state_cancel_options(opts) -> dict {
   return out
 }
 
-pub fn __verification_string_list(value) -> list<string> {
+pub fn __verification_string_list(value: any) -> list<string> {
   if value == nil {
     return []
   }
@@ -455,11 +455,11 @@ pub fn __verification_string_list(value) -> list<string> {
   return out
 }
 
-pub fn __verification_delta_config_dict(value) -> dict {
+pub fn __verification_delta_config_dict(value: any) -> dict {
   return type_of(value) == "dict" ? value : {}
 }
 
-pub fn __verification_delta_known_options(value) -> dict {
+pub fn __verification_delta_known_options(value: unknown) -> dict {
   if type_of(value) != "dict" {
     return {}
   }
@@ -486,7 +486,7 @@ pub fn __verification_delta_known_options(value) -> dict {
   return out
 }
 
-pub fn __verification_delta_normalization(options) -> dict {
+pub fn __verification_delta_normalization(options: dict?) -> dict {
   const opts = __verification_opts(options)
   const row = __verification_delta_config_dict(opts?.row ?? opts?.profile_row)
   const check = __verification_delta_config_dict(row?.check)
@@ -522,7 +522,7 @@ pub fn __verification_delta_normalization(options) -> dict {
     + direct
 }
 
-pub fn __verification_delta_raw_text(value) -> string {
+pub fn __verification_delta_raw_text(value: any) -> string {
   if value == nil {
     return ""
   }
@@ -543,7 +543,7 @@ pub fn __verification_delta_raw_text(value) -> string {
   return trim(to_string(raw ?? ""))
 }
 
-pub fn __verification_delta_status(value) -> string {
+pub fn __verification_delta_status(value: unknown) -> string {
   const direct = lowercase(trim(to_string(value?.status ?? "")))
   if direct != "" {
     return direct
@@ -553,7 +553,7 @@ pub fn __verification_delta_status(value) -> string {
   )
 }
 
-pub fn __verification_delta_feeds_gates(value) -> bool {
+pub fn __verification_delta_feeds_gates(value: unknown) -> bool {
   if value == nil {
     return true
   }
@@ -579,7 +579,7 @@ pub fn __verification_delta_feeds_gates(value) -> bool {
   return !["advisory", "bound_stale", "stale", "unbound"].contains(status)
 }
 
-pub fn __verification_delta_explicit_success(value) -> bool {
+pub fn __verification_delta_explicit_success(value: unknown) -> bool {
   if value == nil {
     return false
   }
@@ -597,7 +597,7 @@ pub fn __verification_delta_explicit_success(value) -> bool {
   return ["pass", "passed", "success", "succeeded"].contains(status)
 }
 
-pub fn __verification_delta_explicit_failure(value) -> bool {
+pub fn __verification_delta_explicit_failure(value: any) -> bool {
   if value == nil {
     return false
   }
@@ -615,11 +615,11 @@ pub fn __verification_delta_explicit_failure(value) -> bool {
   return ["error", "fail", "failed", "failure", "timed_out", "timeout"].contains(status)
 }
 
-pub fn __verification_delta_has_collection(value) -> bool {
+pub fn __verification_delta_has_collection(value: unknown) -> bool {
   return type_of(value?.diagnostics) == "list" || type_of(value?.errors) == "list"
 }
 
-pub fn __verification_delta_synthetic_failure(value) -> dict {
+pub fn __verification_delta_synthetic_failure(value: any) -> dict {
   const status = __verification_delta_status(value)
   const exit = to_int(value?.exit ?? value?.exit_code)
   const status_text = status == "" ? "failed" : status
@@ -627,7 +627,7 @@ pub fn __verification_delta_synthetic_failure(value) -> dict {
   return {message: "check " + status_text + exit_text, code: status_text}
 }
 
-pub fn __verification_delta_raw_entries(value) -> list {
+pub fn __verification_delta_raw_entries(value: any) -> list {
   if value == nil {
     return []
   }
@@ -659,7 +659,7 @@ pub fn __verification_delta_raw_entries(value) -> list {
   return []
 }
 
-pub fn __verification_delta_location(value) -> string {
+pub fn __verification_delta_location(value: dict) -> string {
   if type_of(value) != "dict" {
     return ""
   }
@@ -675,21 +675,21 @@ pub fn __verification_delta_location(value) -> string {
   return path
 }
 
-pub fn __verification_delta_path(value) -> string {
+pub fn __verification_delta_path(value: dict) -> string {
   if type_of(value) != "dict" {
     return ""
   }
   return trim(to_string(value?.path ?? value?.file ?? value?.filename ?? value?.uri ?? ""))
 }
 
-pub fn __verification_delta_replacement_pattern(entry) -> string {
+pub fn __verification_delta_replacement_pattern(entry: unknown) -> string {
   if type_of(entry) == "dict" {
     return trim(to_string(entry?.pattern ?? entry?.regex ?? ""))
   }
   return trim(to_string(entry ?? ""))
 }
 
-pub fn __verification_delta_replacement_text(entry) -> string {
+pub fn __verification_delta_replacement_text(entry: unknown) -> string {
   if type_of(entry) == "dict" {
     return to_string(entry?.replacement ?? entry?.with ?? " ")
   }
@@ -736,7 +736,7 @@ pub fn __verification_delta_normalize_text(agent: HarnessAgent, text: string, cf
   return out
 }
 
-pub fn __verification_delta_signature(agent: HarnessAgent, value, cfg: dict) -> string {
+pub fn __verification_delta_signature(agent: HarnessAgent, value: unknown, cfg: dict) -> string {
   let parts: list<string> = []
   if type_of(value) == "dict" {
     if cfg?.include_path == true {
@@ -778,14 +778,14 @@ pub fn __verification_delta_ignored(signature: string, cfg: dict) -> bool {
   return false
 }
 
-pub fn __verification_delta_direct_count(value) {
+pub fn __verification_delta_direct_count(value: unknown) {
   return to_int(
     value?.error_count ?? value?.diagnostic_count ?? value?.diagnostics_count
       ?? value?.failure_count,
   )
 }
 
-pub fn __verification_delta_info(agent: HarnessAgent, value, cfg: dict) -> dict {
+pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict) -> dict {
   const entries = __verification_delta_raw_entries(value)
   let normalized: list<string> = []
   for entry in entries {
@@ -885,19 +885,19 @@ pub fn __verification_delta_result(
   return out
 }
 
-pub fn __verification_gate_hashes(value) -> dict {
+pub fn __verification_gate_hashes(value: unknown) -> dict {
   const snapshot = __verification_snapshot_map(value)
   return type_of(snapshot) == "dict" ? snapshot : {}
 }
 
-pub fn __verification_gate_hashes_available(value) -> bool {
+pub fn __verification_gate_hashes_available(value: unknown) -> bool {
   if value == nil {
     return false
   }
   return type_of(__verification_snapshot_map(value)) == "dict"
 }
 
-pub fn __verification_gate_embedded_classification(value) {
+pub fn __verification_gate_embedded_classification(value: dict) {
   if type_of(value) != "dict" {
     return nil
   }
@@ -911,7 +911,7 @@ pub fn __verification_gate_embedded_classification(value) {
   return nil
 }
 
-pub fn __verification_gate_unclassified(value) -> dict {
+pub fn __verification_gate_unclassified(value: dict) -> dict {
   const status = __verification_delta_status(value)
   const feeds_gates = __verification_delta_feeds_gates(value)
   return {
@@ -927,7 +927,7 @@ pub fn __verification_gate_unclassified(value) -> dict {
 }
 
 pub fn __verification_gate_classification(
-  value,
+  value: dict,
   current_hashes: dict,
   hashes_available: bool,
 ) -> dict {
@@ -942,7 +942,7 @@ pub fn __verification_gate_classification(
   return verification_diagnostic_classify(envelope, current_hashes)
 }
 
-pub fn __verification_gate_delta_value(value, classification: dict) -> dict {
+pub fn __verification_gate_delta_value(value: dict, classification: dict) -> dict {
   const base = if type_of(value) == "dict" {
     value
   } else if value == nil {
@@ -978,7 +978,7 @@ pub fn __verification_gate_reason(delta: dict, classification: dict) -> string {
 pub fn verification_warm_state_facts(
   tools: HarnessTools,
   rows: list<dict>,
-  options = nil,
+  options: dict? = nil,
 ) -> list<VerificationWarmStateFact> {
   const opts = __verification_opts(options)
   let facts = []

@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(dot([1, 2, 3], [4, 5, 6]), 32.0)
   assert_eq(vector_norm([3, 4]), 5.0)
   const unit = vector_normalize([3, 4])

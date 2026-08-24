@@ -43,7 +43,7 @@ pub fn shell_command_from_argv_impl(argv: list) -> string {
   return join(values.map({ arg -> shell_quote(arg) }), " ").trim()
 }
 
-fn __command_shell_command_from_field(value) {
+fn __command_shell_command_from_field(value: any) {
   if type_of(value) == "string" {
     return to_string(value ?? "").trim()
   }
@@ -61,7 +61,7 @@ fn __command_shell_command_from_field(value) {
  * @effects: []
  * @errors: []
  */
-pub fn shell_command_from_value_impl(value) -> string {
+pub fn shell_command_from_value_impl(value: string | list<string> | dict) -> string {
   const direct = __command_shell_command_from_field(value)
   if direct != nil {
     return direct

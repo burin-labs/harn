@@ -1,7 +1,7 @@
 import * as portable from "std/portable"
 import * as ui from "std/ui"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const source = """
 fn reduce(input: {count: int, delta: int}) -> {count: int} {
   return {count: input.count + input.delta}

@@ -1,6 +1,6 @@
 import "std/schema"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const user_schema = schema_closed_object(
     {
       name: schema_field(schema_string() + {min_length: 2}),

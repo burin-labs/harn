@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * Metadata skill matching lives in Harn and uses exact normalized tokens.
  * It should not activate skills from substring matches or stop words.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill disk_cleanup {
     description "Clean disk space by deleting caches"
     when_to_use "Use when the user asks to reclaim disk space"

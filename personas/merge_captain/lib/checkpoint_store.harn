@@ -14,18 +14,18 @@ import {
 } from "std/agent_state"
 
 /** Open or resume the agent_state session used to persist checkpoints. */
-pub fn open_checkpoints(agent: HarnessAgent, root, session_id, writer_id) {
+pub fn open_checkpoints(agent: HarnessAgent, root: any, session_id: any, writer_id: any) {
   const options = {writer_id: writer_id, session_id: session_id, conflict_policy: "error"}
   return agent_state_init(agent, root, options)
 }
 
 /** Open in resume mode (errors if the session does not exist). */
-pub fn resume_checkpoints(agent: HarnessAgent, root, session_id, writer_id) {
+pub fn resume_checkpoints(agent: HarnessAgent, root: any, session_id: any, writer_id: any) {
   const options = {writer_id: writer_id, conflict_policy: "error"}
   return agent_state_resume(agent, root, session_id, options)
 }
 
-fn _key(repo, number) {
+fn _key(repo: string, number: any) {
   const safe_repo = repo.replace("/", "__")
   return "pr/${safe_repo}/${to_string(number)}.json"
 }
@@ -34,10 +34,10 @@ fn _key(repo, number) {
 pub fn save_checkpoint(
   agent: HarnessAgent,
   clock: HarnessClock,
-  handle,
-  sweep_id,
-  observation,
-  classification,
+  handle: any,
+  sweep_id: any,
+  observation: dict,
+  classification: dict,
 ) {
   const envelope = {
     _type: "merge_captain_pr_checkpoint",
@@ -71,7 +71,7 @@ pub fn save_checkpoint(
 }
 
 /** Load the saved checkpoint for a PR, or nil. */
-pub fn load_checkpoint(agent: HarnessAgent, handle, repo, number) {
+pub fn load_checkpoint(agent: HarnessAgent, handle: any, repo: string, number: any) {
   const raw = agent_state_read(agent, handle, _key(repo, number))
   if raw == nil {
     return nil
@@ -86,7 +86,7 @@ pub fn load_checkpoint(agent: HarnessAgent, handle, repo, number) {
 }
 
 /** List all checkpoints currently held by the session. */
-pub fn list_all_checkpoints(agent: HarnessAgent, handle) {
+pub fn list_all_checkpoints(agent: HarnessAgent, handle: any) {
   const keys = agent_state_list(agent, handle)
   return keys.filter({ k -> k.starts_with("pr/") }).map(
     { k ->
@@ -105,12 +105,12 @@ pub fn list_all_checkpoints(agent: HarnessAgent, handle) {
 }
 
 /** Drop a harness.runtime.checkpoint(e.g. for a merged or closed PR we no longer track). */
-pub fn forget_checkpoint(agent: HarnessAgent, handle, repo, number) {
+pub fn forget_checkpoint(agent: HarnessAgent, handle: any, repo: string, number: any) {
   agent_state_delete(agent, handle, _key(repo, number))
 }
 
 /** Snapshot the prior state for a PR, defaulting to "discovered". */
-pub fn prior_state_for(agent: HarnessAgent, handle, repo, number) {
+pub fn prior_state_for(agent: HarnessAgent, handle: any, repo: string, number: any) {
   const env = load_checkpoint(agent, handle, repo, number)
   if env == nil {
     return "discovered"

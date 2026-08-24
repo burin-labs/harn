@@ -7,7 +7,7 @@ import "std/triggers"
  * matches, and emits a `triggers.reminder_inject.audit` lifecycle audit
  * entry recording the outcome.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const target_session = harness.agent.open("trigger-reminder-inject-concrete")
   harness.agent.reset(target_session)

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   /** Generic constraint with container type: where T: Interface works inside list<T> */
   interface Printable {
     fn label(self) -> string

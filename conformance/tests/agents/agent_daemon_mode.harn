@@ -1,6 +1,6 @@
 import { agent_loop } from "std/agent/loop"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const dir = path_join(harness.fs.workspace_temp_dir(), "harn-agent-daemon-" + unique)

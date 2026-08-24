@@ -7,7 +7,7 @@ import {
   agent_session_inject_reminder,
 } from "std/agent/state"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.reset(s)
   const id = agent_session_inject_reminder(

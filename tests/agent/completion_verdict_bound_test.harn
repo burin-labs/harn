@@ -48,7 +48,7 @@ const CHARS_PER_TOKEN = 2
  * Worst-case serialized size the schema admits, in characters. Returns nil
  * for an unbounded schema — the condition this file exists to reject.
  */
-fn _max_serialized_chars(schema) -> int? {
+fn _max_serialized_chars(schema: dict) -> int? {
   const kind = to_string(schema?.type ?? "")
   if kind == "object" {
     const properties = schema?.properties ?? {}
@@ -86,7 +86,7 @@ fn _max_serialized_chars(schema) -> int? {
   return nil
 }
 
-pipeline test_verdict_schema_admits_no_unbounded_field(harness: Harness, task) {
+pipeline test_verdict_schema_admits_no_unbounded_field(harness: Harness, task: unknown) {
   const schema = __judge_completion_verdict_schema()
   const properties = schema?.properties ?? {}
   assert_eq(len(properties.keys()) > 0, true)
@@ -99,7 +99,7 @@ pipeline test_verdict_schema_admits_no_unbounded_field(harness: Harness, task) {
   assert_eq(schema?.additionalProperties, false)
 }
 
-pipeline test_verdict_schema_worst_case_fits_the_output_envelope(harness: Harness, task) {
+pipeline test_verdict_schema_worst_case_fits_the_output_envelope(harness: Harness, task: unknown) {
   const worst_case = _max_serialized_chars(__judge_completion_verdict_schema())
   assert_eq(worst_case != nil, true)
   const budget = RELIABLE_OUTPUT_TOKENS * CHARS_PER_TOKEN
@@ -108,7 +108,10 @@ pipeline test_verdict_schema_worst_case_fits_the_output_envelope(harness: Harnes
   assert_eq(["worst_case_within_budget", worst_case <= budget], ["worst_case_within_budget", true])
 }
 
-pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(harness: Harness, task) {
+pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(
+  harness: Harness,
+  task: unknown,
+) {
   const schema = __judge_completion_verdict_schema()
   assert_eq(schema.required.sorted(), ["detail", "verdict"])
   assert_eq(schema.properties.verdict.enum.sorted(), ["continue", "done"])
@@ -118,7 +121,10 @@ pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(harness: Ha
   assert_eq(schema.properties.detail.minLength, 1)
 }
 
-pipeline test_verdict_schema_bounds_the_gap_class_without_requiring_it(harness: Harness, task) {
+pipeline test_verdict_schema_bounds_the_gap_class_without_requiring_it(
+  harness: Harness,
+  task: unknown,
+) {
   const schema = __judge_completion_verdict_schema()
   assert_eq(
     schema.properties.gap_class.enum.sorted(),
@@ -137,7 +143,7 @@ pipeline test_verdict_schema_bounds_the_gap_class_without_requiring_it(harness: 
   assert_eq(contains(schema.required, "gap_class"), false)
 }
 
-pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, task) {
+pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, task: unknown) {
   const approved = __judge_completion_verdict_read(
     {verdict: "done", detail: "The targeted verifier ran and passed on the changed file."},
   )
@@ -153,7 +159,7 @@ pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, 
   assert_eq(vetoed.detail, "Deletion behavior is never exercised; add a test that removes a row.")
 }
 
-pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task) {
+pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task: unknown) {
   // Cached and replayed judge responses outlive the schema that produced
   // them. A veto that decoded as an absent verdict would read as a non-veto
   // and let an unfinished task finish, so the old shape has to keep meaning
@@ -176,7 +182,7 @@ pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task
   assert_eq(approved.detail, "Write and verification are sufficient.")
 }
 
-pipeline test_decoded_detail_is_clamped_to_the_contract(harness: Harness, task) {
+pipeline test_decoded_detail_is_clamped_to_the_contract(harness: Harness, task: unknown) {
   const schema = __judge_completion_verdict_schema()
   const limit = schema.properties.detail.maxLength
   // A response that arrived before the ceiling existed, or from a provider
@@ -210,7 +216,7 @@ fn _judge_prompt_surface(harness: Harness) -> list<string> {
   ]
 }
 
-pipeline test_completion_judge_prompts_disclaim_wire_format(harness: Harness, task) {
+pipeline test_completion_judge_prompts_disclaim_wire_format(harness: Harness, task: unknown) {
   const surface = _judge_prompt_surface(harness)
   assert_eq(len(surface), 3)
   for prompt in surface {
@@ -221,7 +227,7 @@ pipeline test_completion_judge_prompts_disclaim_wire_format(harness: Harness, ta
   }
 }
 
-pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harness, task) {
+pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harness, task: unknown) {
   const schema = __judge_completion_verdict_schema()
   const user = completion_judge_user_prompt(
     harness.fs,
@@ -238,7 +244,7 @@ pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harne
   }
 }
 
-pipeline test_out_of_contract_verdict_is_preserved_verbatim(harness: Harness, task) {
+pipeline test_out_of_contract_verdict_is_preserved_verbatim(harness: Harness, task: unknown) {
   // The caller treats anything that is not `continue` as a non-veto. Keeping
   // the raw token is what lets telemetry show a judge that went off contract
   // instead of showing a clean approval.

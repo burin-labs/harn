@@ -34,7 +34,7 @@ pub type AgentIterationInfo = {
  * @effects: [agent]
  * @errors: [agent_loop]
  */
-pub fn __agent_loop_completed_dispatch_stall(args) -> AgentLoopCompletedDispatchStall {
+pub fn __agent_loop_completed_dispatch_stall(args: dict) -> AgentLoopCompletedDispatchStall {
   const results = __dispatch_results_list(args.dispatch)
   const completed = agent_stall_observe_completed_dispatch(
     args.harness.agent,
@@ -66,7 +66,7 @@ pub fn __agent_loop_completed_dispatch_stall(args) -> AgentLoopCompletedDispatch
   return {state: state, no_information_gain: completed.no_information_gain}
 }
 
-pub fn __sync_tool_search_state(opts, turn_opts) {
+pub fn __sync_tool_search_state(opts: any, turn_opts: dict) {
   let synced = opts
   if turn_opts?._tool_search_client != nil {
     synced = synced + {_tool_search_client: turn_opts._tool_search_client}
@@ -80,7 +80,7 @@ pub fn __sync_tool_search_state(opts, turn_opts) {
 // A successful annotated workspace mutation advances the repair write epoch.
 pub const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
-pub fn __turn_made_edit(dispatch, tools) -> bool {
+pub fn __turn_made_edit(dispatch: AgentToolDispatch?, tools: any) -> bool {
   if dispatch == nil {
     return false
   }
@@ -97,16 +97,16 @@ pub fn __turn_made_edit(dispatch, tools) -> bool {
   return false
 }
 
-pub fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
+pub fn __agent_loop_verify_closure_exists(turn_opts: dict) -> bool {
   return turn_opts?.verify_completion != nil || turn_opts?.verify_completion_judge != nil
 }
 
 pub fn __agent_loop_post_edit_reverify_mandated(
-  repair_cfg,
-  turn_opts,
-  stall_state,
-  dispatch,
-  tools,
+  repair_cfg: dict,
+  turn_opts: dict,
+  stall_state: dict,
+  dispatch: AgentToolDispatch,
+  tools: dict,
 ) -> bool {
   const has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
   return repair_cfg.post_edit_reverify
@@ -152,7 +152,7 @@ pub const __RESERVED_VERIFY_TERMINAL_STATUSES = ["budget_exhausted", "stuck"]
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_sealed_stop_reason(stop_reason, final_status) -> string {
+pub fn __agent_loop_sealed_stop_reason(stop_reason: string?, final_status: string?) -> string {
   const explicit = to_string(stop_reason ?? "")
   if explicit != "" {
     return explicit
@@ -164,9 +164,9 @@ pub fn __agent_loop_sealed_stop_reason(stop_reason, final_status) -> string {
 }
 
 pub fn __agent_loop_should_spend_reserve(
-  repair_cfg,
-  turn_opts,
-  final_status,
+  repair_cfg: dict,
+  turn_opts: dict,
+  final_status: any,
   write_unverified: bool,
   made_source_write: bool,
   verify_allowed: bool,
@@ -186,7 +186,7 @@ pub fn __agent_loop_should_spend_reserve(
   return terminal && verify_allowed && closure && (write_path || zero_write_path)
 }
 
-pub fn __merge_tool_names(existing, additions) {
+pub fn __merge_tool_names(existing: list?, additions: list?) {
   let merged = existing ?? []
   const values = additions ?? []
   for name in values {
@@ -197,7 +197,7 @@ pub fn __merge_tool_names(existing, additions) {
   return merged
 }
 
-pub fn __merge_hook_dict(base, patch, label) {
+pub fn __merge_hook_dict(base: any, patch: any, label: string) {
   if patch == nil {
     return base
   }
@@ -207,7 +207,7 @@ pub fn __merge_hook_dict(base, patch, label) {
   return base + patch
 }
 
-pub fn __strip_internal_keys(patch) {
+pub fn __strip_internal_keys(patch: unknown) {
   if patch == nil {
     return patch
   }
@@ -223,7 +223,7 @@ pub fn __strip_internal_keys(patch) {
   return clean
 }
 
-pub fn __apply_post_turn_options(opts, outcome) {
+pub fn __apply_post_turn_options(opts: any, outcome: dict) {
   let updated = opts
   const next_patch = __strip_internal_keys(outcome?.next_options)
   updated = __merge_hook_dict(updated, next_patch, "next_options")
@@ -259,7 +259,7 @@ pub fn __apply_post_turn_options(opts, outcome) {
   return updated
 }
 
-pub fn __next_text_only_count(tool_count, consecutive_text_only) {
+pub fn __next_text_only_count(tool_count: int, consecutive_text_only: int) {
   if tool_count == 0 {
     return consecutive_text_only + 1
   }
@@ -279,7 +279,7 @@ pub fn __next_text_only_count(tool_count, consecutive_text_only) {
  * @effects: []
  * @errors: []
  */
-pub fn __next_progress_count(made_progress, turns_since_progress) {
+pub fn __next_progress_count(made_progress: any, turns_since_progress: int) {
   if made_progress {
     return if turns_since_progress > 0 {
       turns_since_progress - 1
@@ -303,7 +303,12 @@ pub fn __next_progress_count(made_progress, turns_since_progress) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
+pub fn __loop_progress_nudge_text(
+  depth: int,
+  has_tools: any,
+  paradigm: dict,
+  made_tool_calls: bool = false,
+) {
   const action = if has_tools {
     "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
       + paradigm.final_answer
@@ -352,10 +357,10 @@ pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = 
  * @errors: []
  */
 pub fn __iteration_info_payload(
-  llm_result,
+  llm_result: dict,
   tool_count: int,
   visible_text: string,
-  aggregates = nil,
+  aggregates: dict? = nil,
 ) -> AgentIterationInfo {
   const telemetry = llm_result?.usage?.provider_telemetry ?? {}
   const thinking = llm_result?.thinking ?? ""
@@ -391,7 +396,7 @@ pub fn __iteration_info_payload(
     + extra
 }
 
-pub fn __agent_loop_elapsed_ms(clock: HarnessClock, start_ms) {
+pub fn __agent_loop_elapsed_ms(clock: HarnessClock, start_ms: any) {
   const elapsed = __agent_loop_clock_now_ms(clock) - start_ms
   if elapsed < 0 {
     return 0
@@ -399,7 +404,7 @@ pub fn __agent_loop_elapsed_ms(clock: HarnessClock, start_ms) {
   return elapsed
 }
 
-pub fn __agent_loop_cost_usd(totals) {
+pub fn __agent_loop_cost_usd(totals: dict) {
   const value = to_float(totals?.cost_usd ?? 0.0)
   if value == nil {
     return 0.0
@@ -410,9 +415,9 @@ pub fn __agent_loop_cost_usd(totals) {
 pub fn __agent_loop_budget_aggregates(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  totals,
-  loop_start_ms,
+  session_id: any,
+  totals: any,
+  loop_start_ms: any,
 ) {
   const resolved_totals = totals ?? agent_session_totals(agent, session_id)
   return {
@@ -427,12 +432,12 @@ pub fn __agent_loop_budget_aggregates(
 pub fn __agent_loop_iteration_info(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  llm_result,
-  tool_count,
-  visible_text,
-  totals,
-  loop_start_ms,
+  session_id: any,
+  llm_result: dict,
+  tool_count: int,
+  visible_text: string,
+  totals: any,
+  loop_start_ms: any,
 ) {
   return __iteration_info_payload(
     llm_result,
@@ -445,12 +450,12 @@ pub fn __agent_loop_iteration_info(
 pub fn __agent_loop_budget_exhaustion(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  budget,
-  iteration,
-  totals,
-  loop_start_ms,
-  max_iterations,
+  session_id: any,
+  budget: dict,
+  iteration: any,
+  totals: any,
+  loop_start_ms: any,
+  max_iterations: any,
 ) {
   const aggregates = __agent_loop_budget_aggregates(agent, clock, session_id, totals, loop_start_ms)
   if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
@@ -470,9 +475,9 @@ pub fn __agent_loop_budget_exhaustion(
 
 pub fn __agent_loop_emit_budget_exhausted(
   agent: HarnessAgent,
-  session_id,
-  exhaustion,
-  projection = {},
+  session_id: any,
+  exhaustion: dict,
+  projection: dict = {},
 ) {
   agent_emit_event(
     agent,
@@ -496,7 +501,7 @@ pub fn __agent_loop_emit_budget_exhausted(
  * @effects: []
  * @errors: []
  */
-pub fn __agent_loop_budget_error_projection(error) -> dict {
+pub fn __agent_loop_budget_error_projection(error: unknown) -> dict {
   if type_of(error) != "dict" {
     return {}
   }
@@ -521,7 +526,12 @@ pub fn __agent_loop_budget_error_projection(error) -> dict {
   }
 }
 
-pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
+pub fn __agent_loop_record_budget_stop(
+  decisions: list,
+  iteration: any,
+  current_max: any,
+  reason: any,
+) {
   return decisions.appending(
     {
       iteration: iteration,
@@ -534,7 +544,11 @@ pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason
   )
 }
 
-pub fn __stall_judge_opts(turn_opts, completion_judge_invocations, done_judge_invocations) -> dict {
+pub fn __stall_judge_opts(
+  turn_opts: dict,
+  completion_judge_invocations: int,
+  done_judge_invocations: int,
+) -> dict {
   return turn_opts
     + {
       _done_judge_due: true,
@@ -546,14 +560,14 @@ pub fn __stall_judge_opts(turn_opts, completion_judge_invocations, done_judge_in
     }
 }
 
-pub fn __done_judge_hit(verdict) -> int {
+pub fn __done_judge_hit(verdict: dict) -> int {
   if verdict?.receipt?.invoked?.done_judge ?? false {
     return 1
   }
   return 0
 }
 
-pub fn __completion_judge_hit(verdict) -> int {
+pub fn __completion_judge_hit(verdict: dict) -> int {
   if verdict?.receipt?.invoked?.verify_completion_judge ?? false {
     return 1
   }
@@ -577,21 +591,26 @@ pub fn __completion_judge_hit(verdict) -> int {
  * @api_stability: experimental
  * @example: __completion_directive_adjudicated(verdict)
  */
-pub fn __completion_directive_adjudicated(verdict) -> bool {
+pub fn __completion_directive_adjudicated(verdict: dict) -> bool {
   const invoked = verdict?.receipt?.invoked
   return (invoked?.deterministic ?? false)
     || (invoked?.verify_completion_judge ?? false)
     || (invoked?.done_judge ?? false)
 }
 
-pub fn __completion_stop_reason(verdict) -> string {
+pub fn __completion_stop_reason(verdict: dict) -> string {
   if verdict?.action == "stop_unverified" {
     return to_string(verdict?.receipt?.reason ?? "completion_unverified")
   }
   return ""
 }
 
-pub fn __close_stall_calls(agent: HarnessAgent, session_id, tool_calls, reason) -> nil {
+pub fn __close_stall_calls(
+  agent: HarnessAgent,
+  session_id: any,
+  tool_calls: any,
+  reason: string,
+) -> nil {
   agent_session_record_undispatched_tool_results(
     agent,
     session_id,
@@ -605,17 +624,17 @@ pub fn __close_stall_calls(agent: HarnessAgent, session_id, tool_calls, reason) 
 pub fn __agent_loop_apply_stall_judge_veto(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  tool_calls,
-  stall_verdict,
-  stall_observation,
-  stall_warning,
-  stall_state,
-  llm_result,
-  visible_text,
-  turn_llm_opts,
-  iteration,
-  loop_start_ms,
+  session_id: any,
+  tool_calls: any,
+  stall_verdict: dict,
+  stall_observation: dict,
+  stall_warning: any,
+  stall_state: any,
+  llm_result: dict,
+  visible_text: string,
+  turn_llm_opts: any,
+  iteration: any,
+  loop_start_ms: any,
 ) -> AgentStallState {
   const recovery = trim(to_string(stall_verdict?.feedback ?? ""))
   if len(tool_calls) > 0 {
@@ -675,7 +694,12 @@ pub fn __agent_loop_apply_stall_judge_veto(
   return next_stall_state
 }
 
-pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
+pub fn __agent_loop_record_terminal_callback_continue(
+  decisions: list,
+  iteration: any,
+  old_limit: any,
+  new_limit: any,
+) {
   return decisions.appending(
     {
       iteration: iteration,
@@ -691,11 +715,11 @@ pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_
 pub fn __agent_loop_state_budget_fields(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  totals,
-  loop_start_ms,
-  budget,
-  consecutive_failure_count,
+  session_id: any,
+  totals: any,
+  loop_start_ms: any,
+  budget: dict,
+  consecutive_failure_count: any,
 ) {
   const aggregates = __agent_loop_budget_aggregates(agent, clock, session_id, totals, loop_start_ms)
   const failure_config = __agent_loop_consecutive_failure_config(budget)
@@ -709,7 +733,7 @@ pub fn __agent_loop_state_budget_fields(
   }
 }
 
-pub fn __agent_loop_failure_matches_kind(error, wanted) {
+pub fn __agent_loop_failure_matches_kind(error: unknown, wanted: string) {
   const category = to_string(error?.category ?? "")
   const reason = to_string(error?.reason ?? "")
   const kind = to_string(error?.kind ?? "")
@@ -734,7 +758,7 @@ pub fn __agent_loop_failure_matches_kind(error, wanted) {
   return category == wanted || reason == wanted || kind == wanted
 }
 
-pub fn __agent_loop_consecutive_failure_config(budget) {
+pub fn __agent_loop_consecutive_failure_config(budget: dict) {
   const config = budget?.consecutive_failures
   if type_of(config) != "dict" {
     return nil
@@ -742,7 +766,7 @@ pub fn __agent_loop_consecutive_failure_config(budget) {
   return config
 }
 
-pub fn __agent_loop_tracks_failure(error, config) {
+pub fn __agent_loop_tracks_failure(error: unknown, config: dict?) {
   if config == nil {
     return false
   }
@@ -754,7 +778,7 @@ pub fn __agent_loop_tracks_failure(error, config) {
   return false
 }
 
-pub fn __agent_loop_is_escalation_transport_failure(error) {
+pub fn __agent_loop_is_escalation_transport_failure(error: unknown) {
   const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
   if status >= 400 && status < 500 && status != 429 {
     return false
@@ -770,7 +794,7 @@ pub fn __agent_loop_is_escalation_transport_failure(error) {
     || __agent_loop_failure_matches_kind(error, "provider_5xx")
 }
 
-pub fn __agent_loop_transport_abort_error(error) {
+pub fn __agent_loop_transport_abort_error(error: unknown) {
   if type_of(error) == "dict" {
     return error + {escalation_aborted_provider_transport: true}
   }
@@ -791,13 +815,13 @@ pub fn __agent_loop_transport_abort_error(error) {
 pub fn __agent_loop_emit_provider_error(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session_id,
-  iteration_index,
-  call,
-  llm_opts,
-  loop_start_ms,
-  escalation_fallback,
-  skip_reason_override,
+  session_id: string,
+  iteration_index: int,
+  call: dict,
+  llm_opts: dict,
+  loop_start_ms: any,
+  escalation_fallback: any,
+  skip_reason_override: string,
 ) {
   const aggregates = __agent_loop_budget_aggregates(agent, clock, session_id, nil, loop_start_ms)
   const skip_reason = if skip_reason_override != "" {
@@ -1057,7 +1081,7 @@ pub fn agent_stage(
   }
 }
 
-pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session, opts) {
+pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session: dict, opts: dict) {
   const payload = opts?._resume_continuity
   if type_of(payload) != "dict" {
     return opts
@@ -1085,7 +1109,12 @@ pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session, opts) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn agent_direct_llm_options(turn_llm_opts, turn_prompt, session_id, iteration) -> dict {
+pub fn agent_direct_llm_options(
+  turn_llm_opts: dict,
+  turn_prompt: dict,
+  session_id: any,
+  iteration: any,
+) -> dict {
   return turn_llm_opts
     + {
       messages: turn_prompt.messages,

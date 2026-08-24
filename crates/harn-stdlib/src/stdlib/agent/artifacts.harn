@@ -427,7 +427,7 @@ pub type TranscriptEvent = SystemPromptEvent \
   | ProviderCallResponseEvent \
   | ResolvedDispatchEvent
 
-fn __event_family(tag, id, schema) -> EventFamily {
+fn __event_family(tag: string, id: string, schema: any) -> EventFamily {
   return {
     tag: tag,
     versioned: versioned_contract(
@@ -540,7 +540,7 @@ pub fn transcript_context_contract() -> VersionedContract<TranscriptContext> {
   )
 }
 
-fn __context_ingest(context: TranscriptContext, event) -> TranscriptContext {
+fn __context_ingest(context: TranscriptContext, event: dict) -> TranscriptContext {
   if !event.recognized {
     return context + {unknown_count: context.unknown_count + 1}
   }
@@ -640,6 +640,6 @@ pub fn read_transcript_context_result(
  * @errors: [validation]
  * @example: read_transcript_events_page_result(harness.fs, agent_transcript_path(run))
  */
-pub fn agent_transcript_path(run, name: string = "agent-llm") -> string {
+pub fn agent_transcript_path(run: any, name: string = "agent-llm") -> string {
   return run_artifact_transcript_path(run, name)
 }

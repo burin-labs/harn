@@ -5,7 +5,7 @@
 // missing-auth HTTP 401.
 import { require_policy } from "std/harness/policy"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // kinds clause: an anonymous principal can never satisfy a non-empty
   // allow-set, so it is denied before kind details are considered.
   const kind_denial = require_policy(

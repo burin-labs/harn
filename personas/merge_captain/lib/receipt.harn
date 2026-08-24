@@ -9,7 +9,7 @@ import { autopilot_for, requires_human } from "policy"
 import { action_is_mutating } from "states"
 
 /** Build the per-PR merge receipt. */
-pub fn build_receipt(args) {
+pub fn build_receipt(args: dict) {
   const policy = args.policy
   const observation = args.observation
   const classification = args.classification
@@ -62,7 +62,7 @@ pub fn build_receipt(args) {
  * agent_loop summary, and the validation outcome — enough for an
  * auditor to retrace the checkpoint without dumping the whole prompt.
  */
-pub fn summarize_repair_run(run) {
+pub fn summarize_repair_run(run: dict) {
   if run == nil {
     return nil
   }
@@ -97,7 +97,7 @@ pub fn summarize_repair_run(run) {
 }
 
 /** Decide approval state given policy and dry-run posture. */
-pub fn approval_state(policy, classification, dry_run) {
+pub fn approval_state(policy: dict, classification: dict, dry_run: any) {
   if requires_human(policy, classification.state) {
     return "needs_human"
   }
@@ -114,7 +114,7 @@ pub fn approval_state(policy, classification, dry_run) {
 }
 
 /** Evidence payload mixed into the receipt. */
-pub fn evidence_payload(observation, classification) {
+pub fn evidence_payload(observation: dict, classification: dict) {
   const extras = classification.evidence ?? {}
   return {
     classifier: extras,
@@ -136,7 +136,7 @@ pub fn evidence_payload(observation, classification) {
 }
 
 /** Roll up per-PR receipts into a sweep-level summary. */
-pub fn summarize_sweep(receipts, sweep_id, started_at, finished_at) {
+pub fn summarize_sweep(receipts: any, sweep_id: any, started_at: any, finished_at: any) {
   let by_state = {}
   let by_action = {}
   let by_repo = {}

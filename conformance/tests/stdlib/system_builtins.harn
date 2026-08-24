@@ -1,5 +1,5 @@
 /** Test system attribute builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // username should return a non-empty string
   const user = harness.system.identity().username
   harness.stdio.println(len(user) > 0)

@@ -104,7 +104,7 @@ pub fn count_errs(results: list) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn map_settled(results: list, on_ok, on_err) -> list {
+pub fn map_settled(results: list, on_ok: unknown, on_err: unknown) -> list {
   let out = []
   let i = 0
   for r in results {
@@ -126,7 +126,7 @@ pub fn map_settled(results: list, on_ok, on_err) -> list {
  * @effects: []
  * @errors: []
  */
-pub fn tally_by(results: list, classifier) -> dict<string, int> {
+pub fn tally_by(results: list, classifier: any) -> dict<string, int> {
   let counts = {}
   for r in results {
     const label = if classifier == nil {

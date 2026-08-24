@@ -5,7 +5,7 @@ fn group(patterns: list<string>, excludes: list<string> = [], updates: list<stri
 }
 
 /** One update entry, the unit `ecosystem_errors` checks. */
-fn entry(ecosystem: string, groups, directories: list<string> = ["/"]) -> EcosystemGroups {
+fn entry(ecosystem: string, groups: any, directories: list<string> = ["/"]) -> EcosystemGroups {
   return {ecosystem: ecosystem, directories: directories, groups: groups}
 }
 
@@ -49,7 +49,7 @@ fn valid_groups() {
 }
 
 @test
-pipeline test_actual_dependabot_document(harness: Harness, task) {
+pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
   const text = harness.fs.read_text("../../.github/dependabot.yml")
   const entries = groups_from_text(text)
   assert_eq(group_errors(entries), [])
@@ -73,7 +73,7 @@ pipeline test_actual_dependabot_document(harness: Harness, task) {
 }
 
 @test
-pipeline test_wildcard_positions(harness: Harness, task) {
+pipeline test_wildcard_positions(harness: Harness, task: unknown) {
   assert_eq(dependabot_pattern_matches("wasmtime*", "wasmtime-wasi"), true)
   assert_eq(dependabot_pattern_matches("*-wasi", "wasmtime-wasi"), true)
   assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime-wasi"), true)
@@ -81,7 +81,7 @@ pipeline test_wildcard_positions(harness: Harness, task) {
 }
 
 @test
-pipeline test_overlap_is_rejected(harness: Harness, task) {
+pipeline test_overlap_is_rejected(harness: Harness, task: unknown) {
   const groups = valid_groups() + {wasi: group(["*-wasi"])}
   const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
@@ -100,7 +100,7 @@ pipeline test_overlap_is_rejected(harness: Harness, task) {
 }
 
 @test
-pipeline test_missing_group_is_rejected(harness: Harness, task) {
+pipeline test_missing_group_is_rejected(harness: Harness, task: unknown) {
   const errors = ecosystem_errors(
     entry("cargo", {cranelift: valid_groups().cranelift}),
     cargo_policy(),
@@ -117,7 +117,7 @@ pipeline test_missing_group_is_rejected(harness: Harness, task) {
  * Regression for #6015.
  */
 @test
-pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task) {
+pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task: unknown) {
   const all = valid_groups()
   const groups = {
     cranelift: all.cranelift,
@@ -145,7 +145,7 @@ pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task) {
  * routine bumps, so the batch could not be reviewed or reverted as one unit.
  */
 @test
-pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task) {
+pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task: unknown) {
   const groups = valid_groups()
     + {"cargo-minor-patch": group(["*"], [], ["major", "minor", "patch"])}
   const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
@@ -164,7 +164,7 @@ pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task) 
  * indistinguishable here from one that swallows them.
  */
 @test
-pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task) {
+pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task: unknown) {
   const groups = valid_groups() + {"cargo-minor-patch": group(["*"], [], ["minor", "patch"])}
   const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
@@ -177,7 +177,7 @@ pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task) {
 
 /** A new ecosystem must declare its policy rather than inherit silence. */
 @test
-pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task) {
+pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task: unknown) {
   const errors = group_errors([entry("pip", {})], {cargo: cargo_policy()})
   assert_eq(
     errors,
@@ -196,7 +196,7 @@ pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task) {
 
 /** Action majors are runner-baseline bumps, so that catch-all takes them too. */
 @test
-pipeline test_github_actions_groups_majors_too(harness: Harness, task) {
+pipeline test_github_actions_groups_majors_too(harness: Harness, task: unknown) {
   const policy = {families: {}, catch_all_update_types: []}
   assert_eq(ecosystem_errors(entry("github-actions", {actions: group(["*"])}), policy), [])
   assert_eq(
@@ -208,7 +208,7 @@ pipeline test_github_actions_groups_majors_too(harness: Harness, task) {
 }
 
 @test
-pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
+pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task: unknown) {
   const invalid = yaml(
     [
       "version: 2",
@@ -237,7 +237,7 @@ pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
  * unrepresentable.
  */
 @test
-pipeline test_one_ecosystem_may_repeat_across_directories(harness: Harness, task) {
+pipeline test_one_ecosystem_may_repeat_across_directories(harness: Harness, task: unknown) {
   const text = yaml(
     [
       "version: 2",
@@ -294,7 +294,7 @@ pipeline test_one_ecosystem_may_repeat_across_directories(harness: Harness, task
 
 /** Two entries claiming one directory leave no answer for who governs it. */
 @test
-pipeline test_two_entries_for_one_directory_are_rejected(harness: Harness, task) {
+pipeline test_two_entries_for_one_directory_are_rejected(harness: Harness, task: unknown) {
   const duplicated = yaml(
     [
       "version: 2",
@@ -327,7 +327,7 @@ pipeline test_two_entries_for_one_directory_are_rejected(harness: Harness, task)
 
 /** An entry has to say what it covers, in exactly one of the two spellings. */
 @test
-pipeline test_an_entry_must_name_its_directories(harness: Harness, task) {
+pipeline test_an_entry_must_name_its_directories(harness: Harness, task: unknown) {
   const missing = yaml(["version: 2", "updates:", "  - package-ecosystem: cargo"])
   assert_eq(
     is_err(

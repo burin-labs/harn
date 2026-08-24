@@ -47,7 +47,7 @@ pub fn detect(current: string, target: string) -> "patch" {
   return "patch"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   try {
     const current = read_cargo_version(harness.fs)
     const target = read_changelog_top_version(harness.fs)

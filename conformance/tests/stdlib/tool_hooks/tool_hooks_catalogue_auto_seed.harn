@@ -7,7 +7,7 @@ import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/t
  * catalogue is always registered so cross-cutting denies (force-push
  * to main, `rm -rf /`) fire regardless of stack opt-in.
  */
-fn run(stdio: HarnessStdio, wrapper, cmd) {
+fn run(stdio: HarnessStdio, wrapper: unknown, cmd: string) {
   const result = wrapper({command: cmd})
   const rid = result?.rule_id ?? ""
   stdio.println(result.action + " " + rid)

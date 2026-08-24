@@ -52,7 +52,7 @@ fn green_background_verify_then_done_closes_once_despite_terminal_replay() {
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "terminal-ledger-" + harness.random.uuid()
   const llm_calls = harness.runtime.shared_cell(
     {scope: "task_group", key: session + "/llm_calls", initial: 0},

@@ -62,7 +62,7 @@ fn handle_instr(i: Instr) -> string {
   }
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(handle_msg({kind: "ping", ttl: 30}))
   harness.stdio.println(handle_msg({kind: "pong", latency_ms: 12}))
   harness.stdio.println(handle_msg_if({kind: "ping", ttl: 1}))

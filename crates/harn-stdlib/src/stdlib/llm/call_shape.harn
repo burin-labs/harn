@@ -95,7 +95,7 @@ const __TEXT_SHAPE: ToolCallShape = {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_call_shape(tool_format) -> ToolCallShape {
+pub fn tool_call_shape(tool_format: string?) -> ToolCallShape {
   const format = to_string(tool_format ?? "")
   if format == "native" {
     return __NATIVE_SHAPE
@@ -119,7 +119,7 @@ pub fn tool_call_shape(tool_format) -> ToolCallShape {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_call_syntax_named(tool_format, name) -> string {
+pub fn tool_call_syntax_named(tool_format: string?, name: string?) -> string {
   const shape = tool_call_shape(tool_format)
   const called = to_string(name ?? "")
   if called == "" {
@@ -164,7 +164,7 @@ pub fn tool_call_syntax_named(tool_format, name) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_call_history_text(tool_format, prose, calls) -> string {
+pub fn tool_call_history_text(tool_format: string?, prose: string?, calls: list?) -> string {
   const turn_calls = calls ?? []
   if len(turn_calls) == 0 {
     return ""

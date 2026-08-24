@@ -1,7 +1,7 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test that defaults work when called through method dispatch
   const items = [1, 2, 3]
-  fn transform(x, multiplier = 10) {
+  fn transform(x: int, multiplier: int = 10) {
     return x * multiplier
   }
   harness.stdio.log(items.map({ x -> transform(x) }))

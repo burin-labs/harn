@@ -286,8 +286,8 @@ mod tests {
     #[test]
     fn fail_fast_stops_claiming_and_progress_is_event_driven() {
         let source = Arc::new(
-            "pipeline test_one(task) { assert(true) }\n\
-             pipeline test_two(task) { assert(true) }\n"
+            "pipeline test_one(task: unknown) { assert(true) }\n\
+             pipeline test_two(task: unknown) { assert(true) }\n"
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());

@@ -7,7 +7,7 @@ fn alias_report_user_name(user: AliasReportUser) {
   return user.name
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const user_schema = schema_object(
     {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
     {additional_properties: false},

@@ -1,6 +1,6 @@
 import "std/project"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(harness.fs.workspace_temp_dir(), "project_deep_scan_ignore")
   const namespace = "ambient-${harness.random.uuid()}"
   harness.fs.mkdir(path_join(root, "app/src"))

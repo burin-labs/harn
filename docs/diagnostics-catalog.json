@@ -4,7 +4,7 @@
     {
       "id": "TYP",
       "title": "Type checker",
-      "count": 27
+      "count": 28
     },
     {
       "id": "PAR",
@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 73
+      "count": 72
     },
     {
       "id": "FMT",
@@ -458,6 +458,21 @@
       "category": "TYP",
       "summary": "constant tuple index is outside the fixed arity",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-028",
+      "category": "TYP",
+      "summary": "declared parameter has no type annotation",
+      "repairs": [
+        {
+          "id": "types/annotate-parameter",
+          "safety": "surface-changing",
+          "summary": "Annotate the parameter with the inferred type, or `unknown` and narrow it at the dynamic boundary"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -2383,15 +2398,6 @@
       "code": "HARN-LNT-066",
       "category": "LNT",
       "summary": "the result of a pure collection method is discarded, so the call has no effect on the receiver",
-      "repairs": [],
-      "related": [],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
-      "code": "HARN-LNT-067",
-      "category": "LNT",
-      "summary": "public callable parameter or return is missing an explicit type",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

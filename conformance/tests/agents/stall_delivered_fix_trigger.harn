@@ -10,11 +10,11 @@ import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/a
  * reproduces today's stuck nudge exactly — and (b) LIVE-SHAPE — the callback
  * fires, receives the active failure signature, and changes the decision.
  */
-fn fail_dispatch(error_text) {
+fn fail_dispatch(error_text: string) {
   return [{tool_name: "run", ok: false, error: error_text}]
 }
 
-fn observe(agent: HarnessAgent, config, state, prev_dispatch) {
+fn observe(agent: HarnessAgent, config: any, state: any, prev_dispatch: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "seam3-delivered",

@@ -25,7 +25,7 @@ fn pipeline_input() -> dict? {
   return {path: "src/main.harn", retries: 3}
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   harness.stdio.println("=== destructure-with-defaults demo ===")
   harness.stdio.println("")
   // BEFORE: capture the optional input, then one `let` per field — each line

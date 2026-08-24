@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn count_values(values: list<int>) -> int {
     return len(values)
   }

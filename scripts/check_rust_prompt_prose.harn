@@ -415,7 +415,7 @@ pub fn sort_by_path_parts(paths: list<string>) -> list<string> {
   return out
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if argv.contains("--self-test") {
     return run_self_test(harness.stdio)
   }

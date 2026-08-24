@@ -1,3 +1,12 @@
+pub import {
+  __audit_flushes_from_result,
+  __callable,
+  __collect_audit_flushes,
+  __drain_audit_flushes,
+  __spawn_audit_flushes,
+  __strip_internal_dispatch,
+  __strip_internal_tool_result,
+} from "std/agent/loop_audit_flushes"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
@@ -68,7 +77,7 @@ pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
  * @effects: []
  * @errors: []
  */
-fn __agent_loop_exempt_claimed_bare_envelope(parsed, turn_options) {
+fn __agent_loop_exempt_claimed_bare_envelope(parsed: dict, turn_options: dict) {
   if turn_options?._next_tool_claim == nil {
     return parsed
   }
@@ -82,7 +91,7 @@ fn __agent_loop_exempt_claimed_bare_envelope(parsed, turn_options) {
 
 pub fn __agent_loop_project_result(
   agent: HarnessAgent,
-  result,
+  result: dict,
   context: AgentLoopLlmProjectionContext,
 ) -> AgentLoopLlmResultProjection {
   const request_tool_format = result?._effective_tool_format
@@ -117,7 +126,7 @@ pub fn __agent_loop_project_result(
   }
 }
 
-pub fn __tool_registry_entry(tools, tool_name) {
+pub fn __tool_registry_entry(tools: dict, tool_name: any) {
   if tools == nil {
     return nil
   }
@@ -146,11 +155,11 @@ pub fn __tool_registry_entry(tools, tool_name) {
   return nil
 }
 
-pub fn __tool_resource_annotations(entry, policy, tool_name) {
+pub fn __tool_resource_annotations(entry: any, policy: any, tool_name: string) {
   return agent_tool_annotations(entry, policy, tool_name)
 }
 
-pub fn __tool_envelope(random: HarnessRandom, call, tools, options) {
+pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: dict) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const tool_args_raw = call?.arguments ?? call?.tool_args
   const tool_args = if type_of(tool_args_raw) == "dict" {
@@ -224,10 +233,10 @@ pub fn __tool_envelope(random: HarnessRandom, call, tools, options) {
 
 pub fn __default_invoke_tool(
   tool_runtime: HarnessTools,
-  envelope,
-  original_call,
-  registry,
-  options,
+  envelope: dict,
+  original_call: dict,
+  registry: dict,
+  options: dict,
 ) {
   const next_call = original_call
     + {
@@ -240,7 +249,7 @@ pub fn __default_invoke_tool(
   return agent_dispatch_tool_call(tool_runtime, next_call, registry, options)
 }
 
-pub fn __validate_tool_caller_result(r) {
+pub fn __validate_tool_caller_result(r: dict) {
   if type_of(r) != "dict" {
     throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
   }
@@ -262,7 +271,7 @@ pub fn __validate_tool_caller_result(r) {
   }
 }
 
-pub fn __middleware_exception_result(envelope, err) {
+pub fn __middleware_exception_result(envelope: dict, err: any) {
   const err_text = to_string(err)
   const observation = "[error from " + envelope.tool_name + "]\n" + err_text
     + "\n[end of "
@@ -287,7 +296,7 @@ pub fn __structural_validator_tool_name() -> string {
   return "__structural_validator_turn__"
 }
 
-pub fn __structural_validator_pass_result(envelope) {
+pub fn __structural_validator_pass_result(envelope: dict) {
   return {
     ok: true,
     status: "ok",
@@ -304,16 +313,16 @@ pub fn __structural_validator_pass_result(envelope) {
 }
 
 pub fn __run_structural_validator(
-  caller,
-  session_id,
-  llm_result,
-  tool_calls,
-  parsed,
-  llm_opts,
-  turn_opts,
-  prior_successful_tools,
-  prior_rejected_tools,
-  attempts,
+  caller: any,
+  session_id: any,
+  llm_result: dict,
+  tool_calls: any,
+  parsed: dict,
+  llm_opts: dict,
+  turn_opts: dict,
+  prior_successful_tools: list,
+  prior_rejected_tools: list,
+  attempts: int,
 ) {
   if caller == nil {
     return {configured: false, vetoed: false, skipped: true, reason: "not_configured"}
@@ -378,11 +387,11 @@ pub fn __run_structural_validator(
   }
 }
 
-pub fn __tool_lifecycle_session_id(envelope) -> string {
+pub fn __tool_lifecycle_session_id(envelope: dict) -> string {
   return to_string(envelope?.turn?.session_id ?? "")
 }
 
-pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope) {
+pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope: dict) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
@@ -412,7 +421,7 @@ pub fn __emit_tool_lifecycle_start(agent: HarnessAgent, envelope) {
   )
 }
 
-pub fn __tool_terminal_status(result) -> string {
+pub fn __tool_terminal_status(result: dict) -> string {
   if __tool_result_product_error(result) {
     return "failed"
   }
@@ -426,7 +435,7 @@ pub fn __tool_terminal_status(result) -> string {
   return "failed"
 }
 
-pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope, result) {
+pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope: dict, result: dict) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
@@ -479,10 +488,10 @@ pub fn __emit_tool_lifecycle_finish(agent: HarnessAgent, envelope, result) {
 pub fn __emit_synthetic_tool_lifecycle_finish(
   agent: HarnessAgent,
   random: HarnessRandom,
-  call,
-  result,
-  tools,
-  options,
+  call: dict,
+  result: dict,
+  tools: dict,
+  options: dict,
 ) {
   const envelope = __tool_envelope(random, call, tools, options)
   __emit_tool_lifecycle_finish(agent, envelope, result)
@@ -502,12 +511,12 @@ pub fn __emit_synthetic_tool_lifecycle_finish(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_error_must_propagate(err) -> bool {
+pub fn __agent_error_must_propagate(err: any) -> bool {
   const category = error_category(err)
   return category == "cancelled" || category == "internal"
 }
 
-pub fn __invoke_tool(harness: Harness, call, tools, options) {
+pub fn __invoke_tool(harness: Harness, call: dict, tools: dict, options: dict) {
   const caller = options?._tool_caller
   const envelope = __tool_envelope(harness.random, call, tools, options)
   __emit_tool_lifecycle_start(harness.agent, envelope)
@@ -547,7 +556,13 @@ pub fn __invoke_tool(harness: Harness, call, tools, options) {
   return r
 }
 
-pub fn __maybe_emit_tool_audit(agent: HarnessAgent, session_id, envelope, audit, receipt = nil) {
+pub fn __maybe_emit_tool_audit(
+  agent: HarnessAgent,
+  session_id: string,
+  envelope: dict,
+  audit: dict?,
+  receipt: any = nil,
+) {
   if audit == nil && receipt == nil {
     return
   }
@@ -569,77 +584,7 @@ pub fn __maybe_emit_tool_audit(agent: HarnessAgent, session_id, envelope, audit,
   }
 }
 
-pub fn __callable(value) {
-  const kind = type_of(value)
-  return kind == "closure" || kind == "function" || kind == "fn"
-}
-
-pub fn __audit_flushes_from_result(result) {
-  let flushes = []
-  const single = result?._audit_flush
-  if __callable(single) {
-    flushes = flushes.appending(single)
-  }
-  const many = result?._audit_flushes
-  if type_of(many) == "list" {
-    for flush in many {
-      if __callable(flush) {
-        flushes = flushes.appending(flush)
-      }
-    }
-  }
-  return flushes
-}
-
-pub fn __collect_audit_flushes(dispatch) {
-  let flushes = []
-  for result in __dispatch_results_list(dispatch) {
-    for flush in __audit_flushes_from_result(result) {
-      flushes = flushes.appending(flush)
-    }
-  }
-  return flushes
-}
-
-pub fn __strip_internal_tool_result(result) {
-  if type_of(result) != "dict" {
-    return result
-  }
-  let clean = {}
-  for key in result.keys() {
-    if !starts_with(key, "_") {
-      clean = clean + {[key]: result[key]}
-    }
-  }
-  return clean
-}
-
-pub fn __strip_internal_dispatch(dispatch: list) -> list {
-  let clean_results = []
-  for result in dispatch {
-    clean_results = clean_results.appending(__strip_internal_tool_result(result))
-  }
-  return clean_results
-}
-
-pub fn __spawn_audit_flushes(tasks, flushes) {
-  let out = tasks
-  for flush in flushes {
-    const task = spawn {
-      flush()
-    }
-    out = out.appending(task)
-  }
-  return out
-}
-
-pub fn __drain_audit_flushes(tasks) {
-  for task in tasks {
-    await(task)
-  }
-}
-
-pub fn __visible_text(parsed, raw_text) {
+pub fn __visible_text(parsed: dict, raw_text: any) {
   let text = raw_text
   if parsed?.user_response != nil && parsed.user_response != "" {
     text = parsed.user_response
@@ -649,7 +594,7 @@ pub fn __visible_text(parsed, raw_text) {
   return __strip_internal_verdict_json(text)
 }
 
-pub fn __internal_verdict_object(value) -> bool {
+pub fn __internal_verdict_object(value: dict) -> bool {
   if type_of(value) != "dict" {
     return false
   }
@@ -683,7 +628,7 @@ pub fn __internal_verdict_object(value) -> bool {
   return true
 }
 
-pub fn __dict_has_any(value, keys) -> bool {
+pub fn __dict_has_any(value: dict, keys: list) -> bool {
   for key in keys {
     if value[key] != nil {
       return true
@@ -692,7 +637,7 @@ pub fn __dict_has_any(value, keys) -> bool {
   return false
 }
 
-pub fn __internal_verdict_json(text) -> bool {
+pub fn __internal_verdict_json(text: string?) -> bool {
   const parsed = try {
     json_parse(trim(to_string(text ?? "")))
   }
@@ -702,7 +647,7 @@ pub fn __internal_verdict_json(text) -> bool {
   return __internal_verdict_object(unwrap(parsed))
 }
 
-pub fn __strip_internal_verdict_json(text) {
+pub fn __strip_internal_verdict_json(text: string?) {
   const raw = to_string(text ?? "")
   if __internal_verdict_json(raw) {
     return ""
@@ -719,7 +664,7 @@ pub fn __strip_internal_verdict_json(text) {
   return trim(trimmed[0:start])
 }
 
-pub fn __agent_await_resumption_call(tool_calls) {
+pub fn __agent_await_resumption_call(tool_calls: list) {
   for call in tool_calls {
     if __tool_call_name(call) == "agent_await_resumption" {
       return call
@@ -728,9 +673,12 @@ pub fn __agent_await_resumption_call(tool_calls) {
   return nil
 }
 
-pub fn __agent_await_resumption_args(agents: HarnessAgent, call) {
+pub fn __agent_await_resumption_args(
+  agent: HarnessAgent,
+  call: dict,
+) -> AgentAwaitResumptionRequest {
   const args = __tool_call_args(call)
-  return agent_await_resumption(agents, args?.reason ?? "", args?.conditions, args?.resume_by)
+  return __agent_await_resumption_from_tool(agent, args)
 }
 
 /**
@@ -745,10 +693,10 @@ pub fn __agent_await_resumption_args(agents: HarnessAgent, call) {
  */
 pub fn __agent_loop_record_await_tool_results(
   agent: HarnessAgent,
-  session,
-  await_call,
-  tool_calls,
-  reason,
+  session: dict,
+  await_call: dict,
+  tool_calls: list?,
+  reason: string,
 ) {
   const await_reason = if type_of(reason) == "string" && reason != "" {
     "agent suspended awaiting resumption: " + reason
@@ -781,11 +729,11 @@ pub fn __agent_loop_record_await_tool_results(
 pub fn __agent_loop_await_resumption(
   agent: HarnessAgent,
   runtime: HarnessRuntime,
-  session,
-  iteration,
-  call,
-  parsed,
-  opts,
+  session: dict,
+  iteration: int,
+  call: dict,
+  parsed: dict,
+  opts: any,
 ) {
   const worker = __agent_loop_current_worker(agent, runtime)
   if worker == nil {
@@ -818,11 +766,11 @@ pub fn __agent_loop_await_resumption(
 
 pub fn __agent_loop_await_resumption_top_level(
   agent: HarnessAgent,
-  session,
-  iteration,
-  call,
-  parsed,
-  opts,
+  session: dict,
+  iteration: int,
+  call: dict,
+  parsed: dict,
+  opts: any,
 ) {
   agent.inject(
     session.session_id,
@@ -876,7 +824,7 @@ pub fn __agent_loop_await_resumption_top_level(
   }
 }
 
-pub fn __agent_loop_invalid_await_resumption_feedback(error) {
+pub fn __agent_loop_invalid_await_resumption_feedback(error: any) {
   return "Invalid agent_await_resumption call: "
     + to_string(error)
     + "\n\nThis lifecycle tool is only for parking until external input or a valid resume condition. "
@@ -885,7 +833,7 @@ pub fn __agent_loop_invalid_await_resumption_feedback(error) {
     + "use `conditions.on_event` for an event-topic string."
 }
 
-pub fn __native_fallback_feedback(fs: HarnessFs, policy, fallback_index) {
+pub fn __native_fallback_feedback(fs: HarnessFs, policy: any, fallback_index: any) {
   return native_tool_contract_feedback_prompt(fs, {policy: policy, fallback_index: fallback_index})
 }
 
@@ -910,12 +858,12 @@ pub fn __native_fallback_feedback(fs: HarnessFs, policy, fallback_index) {
  */
 pub fn __inject_feedback_with_tool_repair(
   agent: HarnessAgent,
-  session_id,
-  kind,
-  content,
-  source = nil,
-  reason = nil,
-  context = nil,
+  session_id: any,
+  kind: any,
+  content: any,
+  source: any = nil,
+  reason: any = nil,
+  context: any = nil,
 ) {
   let _ = agent_session_pair_orphaned_tool_use(agent, session_id, content)
   return agent_feedback_emit(
@@ -934,21 +882,21 @@ pub fn __inject_feedback_with_tool_repair(
   )
 }
 
-pub fn __parse_feedback_tool_annotations(entry) {
+pub fn __parse_feedback_tool_annotations(entry: any) {
   return agent_tool_entry_annotations(entry)
 }
 
-pub fn __parse_feedback_annotation_enabled(value) -> bool {
+pub fn __parse_feedback_annotation_enabled(value: any) -> bool {
   return type_of(value) == "bool" && value
 }
 
-pub fn __parse_feedback_tool_is_structural(entry) -> bool {
+pub fn __parse_feedback_tool_is_structural(entry: any) -> bool {
   const annotations = __parse_feedback_tool_annotations(entry)
   return __parse_feedback_annotation_enabled(annotations?.structural)
     || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
 }
 
-pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
+pub fn __parse_feedback_has_non_structural_tools(turn_opts: dict) -> bool {
   const entries = turn_opts?.tools?.tools ?? []
   for entry in entries {
     if type_of(entry) == "dict" && !__parse_feedback_tool_is_structural(entry) {
@@ -993,7 +941,7 @@ pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn __parse_feedback_protocol_violations(llm: HarnessLlm, parsed, turn_opts) {
+pub fn __parse_feedback_protocol_violations(llm: HarnessLlm, parsed: dict, turn_opts: dict) {
   if !__parse_feedback_has_non_structural_tools(turn_opts) {
     return []
   }
@@ -1004,17 +952,22 @@ pub fn __parse_feedback_protocol_violations(llm: HarnessLlm, parsed, turn_opts) 
   return violations.filter(violation_reports_lost_call)
 }
 
-pub fn __parse_feedback_diagnostics(llm: HarnessLlm, parsed, turn_opts) {
+pub fn __parse_feedback_diagnostics(llm: HarnessLlm, parsed: dict, turn_opts: dict) {
   const parse_errors = parsed?.tool_parse_errors ?? []
   const protocol_violations = __parse_feedback_protocol_violations(llm, parsed, turn_opts)
   return parse_errors + protocol_violation_messages(protocol_violations)
 }
 
-pub fn __recovered_text_call_dispatch_cap(_turn_opts) -> int {
+pub fn __recovered_text_call_dispatch_cap(_turn_opts: dict) -> int {
   return 1
 }
 
-pub fn __unsafe_recovered_text_batch_feedback(llm: HarnessLlm, parsed, tool_calls, turn_opts) {
+pub fn __unsafe_recovered_text_batch_feedback(
+  llm: HarnessLlm,
+  parsed: dict,
+  tool_calls: string | bytes | list | dict | set | range | nil,
+  turn_opts: dict,
+) {
   if agent_tool_call_paradigm(llm, turn_opts).kind != "text" {
     return nil
   }
@@ -1036,7 +989,12 @@ pub fn __unsafe_recovered_text_batch_feedback(llm: HarnessLlm, parsed, tool_call
   }
 }
 
-pub fn __drop_unsafe_recovered_text_batch(llm: HarnessLlm, parsed, tool_calls, turn_opts) {
+pub fn __drop_unsafe_recovered_text_batch(
+  llm: HarnessLlm,
+  parsed: dict,
+  tool_calls: string | bytes | list | dict | set | range | nil,
+  turn_opts: dict,
+) {
   const feedback = __unsafe_recovered_text_batch_feedback(llm, parsed, tool_calls, turn_opts)
   if feedback == nil {
     return {tool_calls: tool_calls, feedback: nil}
@@ -1059,7 +1017,12 @@ pub fn __drop_unsafe_recovered_text_batch(llm: HarnessLlm, parsed, tool_calls, t
  * @effects: [agent]
  * @errors: []
  */
-fn __report_parse_boundary_loss(agent: HarnessAgent, session_id, parsed, turn_opts) {
+fn __report_parse_boundary_loss(
+  agent: HarnessAgent,
+  session_id: any,
+  parsed: dict,
+  turn_opts: dict,
+) {
   if to_string(session_id) == "" {
     return
   }
@@ -1096,11 +1059,11 @@ fn __report_parse_boundary_loss(agent: HarnessAgent, session_id, parsed, turn_op
 
 pub fn __maybe_inject_parse_error_feedback(
   harness: Harness,
-  session_id,
-  parsed,
-  tool_calls,
-  turn_opts,
-  feedback_override = nil,
+  session_id: any,
+  parsed: dict,
+  tool_calls: string | bytes | list | dict | set | range | nil,
+  turn_opts: dict,
+  feedback_override: any = nil,
 ) -> bool {
   __report_parse_boundary_loss(harness.agent, session_id, parsed, turn_opts)
   const diagnostics = __parse_feedback_diagnostics(harness.llm, parsed, turn_opts)
@@ -1153,7 +1116,7 @@ pub fn __maybe_inject_parse_error_feedback(
  * @effects: []
  * @errors: []
  */
-pub fn __blank_name_dropped_count(llm_result, parsed) -> int {
+pub fn __blank_name_dropped_count(llm_result: dict, parsed: dict) -> int {
   const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
   const source = if len(native_calls) > 0 {
     native_calls
@@ -1175,11 +1138,11 @@ pub fn __blank_name_dropped_count(llm_result, parsed) -> int {
  */
 pub fn __maybe_inject_blank_name_feedback(
   harness: Harness,
-  session_id,
-  llm_result,
-  parsed,
-  dispatched_count,
-  turn_opts,
+  session_id: any,
+  llm_result: dict,
+  parsed: dict,
+  dispatched_count: int,
+  turn_opts: dict,
 ) -> bool {
   let dropped = __blank_name_dropped_count(llm_result, parsed)
   if dropped == 0 {
@@ -1252,7 +1215,7 @@ pub fn __maybe_inject_blank_name_feedback(
  * @effects: []
  * @errors: []
  */
-fn __agent_loop_history_text(normalized, parsed, tool_calls) -> string {
+fn __agent_loop_history_text(normalized: dict, parsed: dict, tool_calls: any) -> string {
   const visible = to_string(normalized?.text ?? "")
   if to_string(parsed?.user_response ?? "") != "" {
     return visible
@@ -1281,14 +1244,14 @@ fn __agent_loop_history_text(normalized, parsed, tool_calls) -> string {
  */
 pub fn __agent_loop_record_parse_feedback(
   harness: Harness,
-  session_id,
-  normalized,
-  fallback_outcome,
-  tool_calls,
-  parsed,
-  recovered_batch_feedback,
-  llm_result,
-  turn_opts,
+  session_id: any,
+  normalized: dict,
+  fallback_outcome: dict,
+  tool_calls: string | bytes | list | dict | set | range | nil,
+  parsed: dict,
+  recovered_batch_feedback: dict?,
+  llm_result: dict,
+  turn_opts: dict,
 ) -> dict {
   const claimed_native_projection = normalized?._agent_next_tool_claim_contract_applied
     == true
@@ -1340,12 +1303,12 @@ pub fn __agent_loop_record_parse_feedback(
 pub fn __detect_native_fallback(
   agent: HarnessAgent,
   fs: HarnessFs,
-  llm_result,
-  parsed,
-  turn_opts,
-  fallback_index,
-  session_id,
-  iteration_index,
+  llm_result: dict,
+  parsed: dict,
+  turn_opts: dict,
+  fallback_index: int,
+  session_id: any,
+  iteration_index: int,
 ) {
   const native_calls = llm_result?.native_tool_calls ?? []
   const parsed_calls = parsed?.calls ?? []

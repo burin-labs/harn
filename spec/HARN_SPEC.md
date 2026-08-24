@@ -1059,9 +1059,9 @@ If the pipeline parameter list includes `task`, it is bound to `context.task`.
 If it includes `project`, it is bound to `context.projectRoot`.
 A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
 
-Pipeline parameters accept the same optional `name: TypeExpr` annotations as
-function parameters. The type checker uses declared types in the pipeline body
-and at local or imported call sites:
+Pipeline parameters use the same required `name: TypeExpr` annotations as
+function parameters. The type checker uses those types in the pipeline body and
+at local or imported call sites:
 
 ```harn
 pub pipeline deploy(config: DeployConfig, dry_run: bool) -> bool {
@@ -1069,11 +1069,9 @@ pub pipeline deploy(config: DeployConfig, dry_run: bool) -> bool {
 }
 ```
 
-Legacy untyped parameters remain valid syntax. Packages can require complete
-annotations on public functions and pipelines with
-`[lint] require_public_api_types = true`. Pipeline default values and rest
-parameters are rejected because pipeline invocation does not define those
-runtime semantics.
+An unannotated pipeline parameter is `HARN-TYP-028` under plain `harn check`.
+Pipeline default values and rest parameters are rejected because pipeline
+invocation does not define those runtime semantics.
 
 ### Pipeline return type
 
@@ -1081,7 +1079,7 @@ Pipelines may declare a return type with the same `-> TypeExpr` syntax
 as functions:
 
 ```harn
-pipeline ghost_text(harness: Harness, task) -> {text: string, code: int} {
+pipeline ghost_text(harness: Harness, task: dict) -> {text: string, code: int} {
   return {text: "hello", code: 0}
 }
 ```
@@ -1094,9 +1092,8 @@ A declared return type is the typed contract that a host or bridge
 (ACP, A2A) can rely on when consuming the pipeline's output.
 
 Public pipelines (`pub pipeline`) without an explicit return type emit the
-`pipeline-return-type` lint warning by default. When
-`require_public_api_types` is enabled, `missing-public-api-type` owns both
-parameter and return completeness without duplicate diagnostics.
+`pipeline-return-type` lint warning by default. Return types remain inferable,
+so this is a public-contract lint rather than a checker error.
 
 ### Pipeline inheritance
 
@@ -4429,12 +4426,20 @@ ignored — code still compiles.
 
 ## Type annotations
 
-Harn has an optional, gradual type system. Omitting annotations is always valid.
+Harn has a gradual type system. Every declared function, generator, pipeline,
+tool, interface method, and implementation method parameter needs a type.
+Local bindings and return types remain inferable.
 
-A type annotation you *do* write is checked twice: statically at compile time, and
-again at runtime against the value it describes. Parameter, `let` / `const`, and
-struct-field sites behave the same way — a declared type is checked against the
+A type annotation is checked twice: statically at compile time, and again at
+runtime against the value it describes. Parameter, `let` / `const`, and
+struct-field sites behave the same way: a declared type is checked against the
 value where it is written. See [Runtime enforcement](#runtime-enforcement).
+
+An unannotated declared parameter is `HARN-TYP-028`, even when it has a default
+value. Use `harn fix --apply --safety surface-changing --code HARN-TYP-028
+<path>` to infer annotations from body usage and call sites. The command reports
+every parameter it could not infer. Contextually typed closure parameters do not
+need annotations because their call position supplies the type.
 
 ### Basic types
 
@@ -4489,7 +4494,7 @@ const s: string = passthrough("hello")  // any → string, no narrowing required
 const n: int    = passthrough(42)
 ```
 
-Use `any` deliberately, when you want to opt out of checking — for
+Use `any` deliberately when you want to opt out of checking, for
 example, a generic dispatcher that forwards values through a runtime
 protocol you don't want to describe statically. Prefer `unknown` (see
 below) for values from untrusted boundaries where callers should be
@@ -4545,13 +4550,11 @@ Interop between `any` and `unknown`:
 
 **When to pick which:**
 
-- **No annotation** — "I haven't annotated this." Callers get no
-  checking. Use for internal, unstable code.
-- **`unknown`** — "this value could be anything; narrow before use."
+- **`unknown`** means "this value could be anything; narrow before use."
   Use at untrusted boundaries and in APIs that hand back open-ended
   data. This is the preferred annotation for LLM / JSON / dynamic
   dict values.
-- **`any`** — "stop checking." A last-resort escape hatch. Prefer
+- **`any`** means "stop checking." It is the explicit escape hatch. Prefer
   `unknown` unless you have a specific reason to defeat checking
   bidirectionally.
 
@@ -4705,14 +4708,14 @@ fn handle(m: Msg) -> string {
 Such a `match` must cover every variant or include a wildcard `_` arm
 — non-exhaustive `match` is a hard error.
 
-#### Distributive generic instantiation
+#### Variance-aware generic instantiation
 
-Generic type aliases distribute over closed-union arguments. Writing
-`Container<A | B>` is equivalent to `Container<A> | Container<B>` so
-each instantiation independently fixes the type parameter. This is what
-keeps `processCreate: fn("create") -> nil` flowing into a `list<
-ActionContainer<Action>>` element instead of getting rejected by the
-contravariance of the function-parameter slot:
+Invariant and contravariant generic type aliases distribute over closed-union
+arguments. For those parameters, writing `Container<A | B>` is equivalent to
+`Container<A> | Container<B>` so each instantiation independently fixes the
+type parameter. This is what keeps `processCreate: fn("create") -> nil`
+flowing into a `list<ActionContainer<Action>>` element instead of getting
+rejected by the contravariance of the function-parameter slot:
 
 ```harn
 type Action = "create" | "edit"
@@ -4722,6 +4725,18 @@ type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 `ActionContainer<Action>` resolves to `ActionContainer<"create"> |
 ActionContainer<"edit">`, and a literal-tagged shape on the right flows
 into the matching branch.
+
+Covariant parameters preserve a union argument intact. A producer of `A | B`
+is one producer whose result may be either member, not a union of two producers
+that each promise one member:
+
+```harn
+type Producer<out T> = fn() -> T
+
+fn make_producer(flag: bool) -> Producer<string | int> {
+  return { -> if flag { "ok" } else { 42 } }
+}
+```
 
 ### Intersection types
 
@@ -6321,13 +6336,13 @@ pipelines.
 ```harn,check
 import { checkpoint_stage } from "std/checkpoint"
 
-fn fetch_dataset(url) { url }
+fn fetch_dataset(url: string) -> string { return url }
 
-fn clean(data) { data }
+fn clean(data: string) -> string { return data }
 
-fn run_model(cleaned) { cleaned }
+fn run_model(cleaned: string) -> string { return cleaned }
 
-fn upload(result) { result }
+fn upload(result: string) -> string { return result }
 
 pipeline process(harness: Harness) {
   const url = "https://example.com/data.csv"
@@ -6390,7 +6405,7 @@ retries are never needed on resume.
 ```harn,check
 import { checkpoint_stage_retry } from "std/checkpoint"
 
-fn fetch_with_timeout(url) { url }
+fn fetch_with_timeout(url: string) -> string { return url }
 
 fn main(harness: Harness) {
   const url = "https://example.com/data.csv"
@@ -7760,7 +7775,6 @@ guide for harn-canon rules is in
 disabled = ["unused-import"]
 require_file_header = false
 require_docstrings = false
-require_public_api_types = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -7774,11 +7788,6 @@ persona_step_allowlist = ["legacy_helper"]
   default — out of the box, `pub fn` needs no docs, and editor
   tooling derives a usage example from the type signature. Embedded
   stdlib sources enforce docstrings regardless of this flag.
-- `require_public_api_types` opts into `missing-public-api-type`, which
-  requires explicit parameter and return annotations on every public function
-  and pipeline. Private callables remain inferable, and explicit `unknown` or
-  `any` satisfies the declaration contract. The same policy is available for
-  a focused migration with `harn lint --require-public-api-types`.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * timeout errors with exponential backoff, then returns the successful
  * response. backoff_ms: 1 keeps the test fast.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

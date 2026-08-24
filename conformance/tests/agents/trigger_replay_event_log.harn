@@ -17,7 +17,7 @@ fn flaky_handler(harness: Harness, event: TriggerEvent) -> dict {
   return {kind: event.kind, provider: event.provider, replayed: event.id}
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const delivery = "evt-replay-" + unique

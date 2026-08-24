@@ -47,18 +47,18 @@ pipeline default(harness: Harness) {
   const signer = permissive_data.data.key_id
   const signers = path_join(root, "signers")
   harness.fs.mkdir(signers)
-  harness.stdio.println(
-    harness.process.exec_at(
-      root,
-      "openssl",
-      "pkey",
-      "-in",
-      path_join(root, "release-key.pem"),
-      "-pubout",
-      "-out",
-      path_join(signers, signer + ".pub"),
-    ).success,
+  const public_key = harness.process.exec_at(
+    root,
+    "openssl",
+    "pkey",
+    "-in",
+    path_join(root, "release-key.pem"),
+    "-pubout",
+    "-out",
+    path_join(signers, signer + ".pub"),
   )
+  harness.stdio.println(public_key.success)
+  require public_key.success, "failed to derive fixture public key: " + public_key.stderr
   harness.fs.write_text(
     path_join(root, "trust-policy.json"),
     json_stringify({signer_registry_url: signers, trusted_signers: ["not-the-real-signer"]}),

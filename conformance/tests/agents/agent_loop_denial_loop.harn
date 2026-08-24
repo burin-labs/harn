@@ -10,7 +10,7 @@ import { with_llm_script } from "std/testing"
  * instead of letting the agent burn turns retrying a denied call (#2780,
  * #6865).
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 

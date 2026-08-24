@@ -41,7 +41,7 @@ pub fn unsettled_state(harness: Harness) {
  * @errors: []
  * @example: if is_empty(state) { return return_value }
  */
-pub fn is_empty(state) {
+pub fn is_empty(state: dict) {
   return len(state?.suspended_subagents ?? []) == 0
     && len(state?.queued_triggers ?? []) == 0
     && len(state?.partial_handoffs ?? []) == 0
@@ -57,7 +57,7 @@ pub fn is_empty(state) {
  * @errors: []
  * @example: counts(state).partial
  */
-pub fn counts(state) {
+pub fn counts(state: dict) {
   return {
     suspended: len(state?.suspended_subagents ?? []),
     queued: len(state?.queued_triggers ?? []),
@@ -75,7 +75,7 @@ pub fn counts(state) {
  * @errors: []
  * @example: harness.emit_audit("snapshot", {summary: summary(state)})
  */
-pub fn summary(state) {
+pub fn summary(state: dict) {
   const c = counts(state)
   if c.suspended == 0 && c.queued == 0 && c.partial == 0 && c.in_flight == 0
     && c.pool_pending == 0 {
@@ -106,7 +106,7 @@ pub fn summary(state) {
  * @errors: []
  * @example: harness.agent.pipeline_on_finish(on_finish_abandon)
  */
-pub fn on_finish_abandon(harness: Harness, return_value) {
+pub fn on_finish_abandon(harness: Harness, return_value: any) {
   const unsettled = harness.unsettled_state()
   if !is_empty(unsettled) {
     harness.emit_audit(
@@ -133,7 +133,7 @@ pub fn on_finish_abandon(harness: Harness, return_value) {
  * @errors: []
  * @example: harness.agent.pipeline_on_finish(on_finish_drain)
  */
-pub fn on_finish_drain(harness: Harness, return_value) {
+pub fn on_finish_drain(harness: Harness, return_value: any) {
   const unsettled = harness.unsettled_state()
   if is_empty(unsettled) {
     harness.emit_audit("pipeline_finalized", {reason: "no_unsettled"})
@@ -157,7 +157,7 @@ pub fn on_finish_drain(harness: Harness, return_value) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(on_finish_block_until_settled(30s))
  */
-pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
+pub fn on_finish_block_until_settled(timeout: any = 30s, fallback: any = nil) {
   return { harness, return_value ->
     const result = harness.wait_for_any_settlement(timeout)
     if result?.status == "settled" {
@@ -188,7 +188,7 @@ pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
  */
-pub fn on_finish_handoff_to(target_pipeline, options = nil) {
+pub fn on_finish_handoff_to(target_pipeline: any, options: dict? = nil) {
   return { harness, return_value ->
     const unsettled = harness.unsettled_state()
     if is_empty(unsettled) {

@@ -10,11 +10,11 @@ import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/a
  * the same action succeeding again with a VARYING observation and NO intervening
  * mutating action, and rides the existing feedback + hard-stop ladder.
  */
-fn ok_dispatch(output) {
+fn ok_dispatch(output: string) {
   return [{tool_name: "run", ok: true, output: output}]
 }
 
-fn observe(agent: HarnessAgent, config, state, prev_dispatch, made_edit) {
+fn observe(agent: HarnessAgent, config: dict, state: any, prev_dispatch: any, made_edit: bool) {
   return agent_stall_observe_tool_calls(
     agent,
     "success-repeat",

@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 27 |
+| [`TYP`](#typ--type-checker) | Type checker | 28 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 73 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 72 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -90,6 +90,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-025`](#harn-typ-025) | optional access is invalid for the receiver type | — | — |
 | [`HARN-TYP-026`](#harn-typ-026) | thrown value type is not covered by the callable's declared throws set | — | — |
 | [`HARN-TYP-027`](#harn-typ-027) | constant tuple index is outside the fixed arity | — | — |
+| [`HARN-TYP-028`](#harn-typ-028) | declared parameter has no type annotation | `types/annotate-parameter` | `surface-changing` |
 
 ## PAR — Parser / lexer
 
@@ -317,7 +318,6 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
 | [`HARN-LNT-065`](#harn-lnt-065) | nil coalesce fallback repeats the left identifier | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
-| [`HARN-LNT-067`](#harn-lnt-067) | public callable parameter or return is missing an explicit type | — | — |
 | [`HARN-LNT-068`](#harn-lnt-068) | prompt template names a filter the engine does not implement | — | — |
 | [`HARN-LNT-069`](#harn-lnt-069) | helper accepts root Harness but uses only narrow capability handles | `bindings/attenuate-harness` | `surface-changing` |
 | [`HARN-LNT-070`](#harn-lnt-070) | public API has too many same-typed positional parameters | — | — |
@@ -721,6 +721,52 @@ spelling (`-1` is the final position).
 
 Use an in-bounds index, destructure the tuple, or widen it to a `list<T>` when
 the collection is intentionally variable-length.
+
+### `HARN-TYP-028`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+declared parameter has no type annotation
+
+- **Repair:** `types/annotate-parameter` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Annotate the parameter with the inferred type, or `unknown` and narrow it at the dynamic boundary
+
+A parameter with no type annotation is unchecked in both directions. The body
+may reach for any member on it, and every caller may pass any value. Nothing
+recovers the type later, so the mistake shows up at run time as a failed member
+access instead of at check time with a code and a repair.
+
+The rule covers named declarations: `fn`, `pub fn`, `gen fn`, `pipeline`,
+`tool`, methods in an `impl` block, and signatures in an `interface` block. A
+default value does not exempt a parameter, because the default constrains only
+the call that omits the argument.
+
+Closure and lambda parameters are not covered. The checker types those from the
+position the literal appears in, so they are inferred rather than implicit.
+
+#### Fix it
+
+Annotate the parameter:
+
+```harn
+fn greet(user: {name: string}) -> string { return "hi ${user.name}" }
+```
+
+When a value really is unconstrained, say so:
+
+```harn
+fn passthrough<T>(value: T) -> T { return value }
+```
+
+Use a generic when input and output have the same shape. Use `unknown` at a
+genuine dynamic boundary, then narrow or validate it before use.
+
+#### Migrate a codebase
+
+`harn fix --apply --code HARN-TYP-028 <path>` infers each parameter's type from
+how the body uses it and from the arguments at every call site in the module
+graph, writes the annotation, and reports how many parameters it could not
+prove anything about. Those fall back to `unknown` for a human to refine.
 
 ### `HARN-PAR-001`
 
@@ -3623,58 +3669,6 @@ lint does not fire. Prefer a `for` loop over `map` when you want effects.
 - A receiver rooted at `harness`, whose methods exist for their effects.
 - A method name the file also declares in an `impl` block, which may be a
   user-defined method with effects of its own.
-
-### `HARN-LNT-067`
-
-**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
-
-public callable parameter or return is missing an explicit type
-
-A public function or pipeline parameter or return has no explicit type while
-the package enables complete public API contracts.
-
-Untyped private callables remain inferable. Public callables cross a module
-boundary, so their contract must be visible without inspecting the body or a
-particular caller.
-
-```harn
-pub fn load(path) {                  // warning: parameter and return are untyped
-  return {path: path}
-}
-
-pub pipeline deploy(config) {        // warning: parameter and return are untyped
-  return true
-}
-```
-
-#### How to fix
-
-Annotate every public parameter and return:
-
-```harn
-pub fn load(path: string) -> {path: string} {
-  return {path: path}
-}
-
-pub pipeline deploy(config: DeployConfig) -> bool {
-  return true
-}
-```
-
-Use `unknown` or `any` when the boundary is intentionally dynamic. Those are
-explicit contracts; omitting the annotation is not.
-
-Enable this policy for a package with:
-
-```toml
-[lint]
-require_public_api_types = true
-```
-
-or for one lint invocation with `harn lint --require-public-api-types`.
-
-The rule does not choose or insert a type automatically because selecting a
-public contract is an API-design decision.
 
 ### `HARN-LNT-068`
 

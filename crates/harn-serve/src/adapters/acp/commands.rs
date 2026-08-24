@@ -128,12 +128,12 @@ mod tests {
     fn discover_commands_finds_attributed_pipelines() {
         let source = r#"
             @command(name: "review", description: "Run a code review", hint: "focus area")
-            pipeline review_branch(harness: Harness, task) { harness.stdio.println("review") }
+            pipeline review_branch(harness: Harness, task: unknown) { harness.stdio.println("review") }
 
-            pipeline default(harness: Harness, task) { harness.stdio.println("default") }
+            pipeline default(harness: Harness, task: unknown) { harness.stdio.println("default") }
 
             @command(description: "Plan the work")
-            pipeline plan(harness: Harness, task) { harness.stdio.println("plan") }
+            pipeline plan(harness: Harness, task: unknown) { harness.stdio.println("plan") }
         "#;
         let commands = discover_commands(source);
         assert_eq!(commands.len(), 2);
@@ -156,10 +156,10 @@ mod tests {
     fn discover_commands_dedupes_by_advertised_name() {
         let source = r#"
             @command(name: "foo")
-            pipeline first(task) { 1 }
+            pipeline first(task: unknown) { 1 }
 
             @command(name: "foo")
-            pipeline second(task) { 2 }
+            pipeline second(task: unknown) { 2 }
         "#;
         let commands = discover_commands(source);
         assert_eq!(commands.len(), 1);
@@ -168,7 +168,8 @@ mod tests {
 
     #[test]
     fn discover_commands_returns_empty_when_no_attribute_present() {
-        let source = "pipeline main(harness: Harness, task) { harness.stdio.println(\"hi\") }";
+        let source =
+            "pipeline main(harness: Harness, task: unknown) { harness.stdio.println(\"hi\") }";
         assert!(discover_commands(source).is_empty());
     }
 

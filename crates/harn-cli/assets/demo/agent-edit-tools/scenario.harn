@@ -26,7 +26,7 @@ import {
   with_consent,
 } from "std/llm/tool_middleware"
 
-fn dispatch(harness_tools: HarnessTools, tools, name, args) {
+fn dispatch(harness_tools: HarnessTools, tools: any, name: string, args: any) {
   return agent_dispatch_tool_call(
     harness_tools,
     {id: name + "-call", name: name, arguments: args},
@@ -34,7 +34,7 @@ fn dispatch(harness_tools: HarnessTools, tools, name, args) {
   )
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   harness.stdio.println("=== agent-edit-tools demo ===")
   harness.stdio.println("")
   const root = path_join(

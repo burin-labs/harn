@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.tools.synthesis_clear()
   const calendar = harness.tools.synthesize(
     {

@@ -12,7 +12,7 @@ import "std/triggers"
  * identical hash sequences, even when intermediate aggregation logic
  * sits between the emits and the handler.
  */
-fn handle_batch(harness: Harness, event) {
+fn handle_batch(harness: Harness, event: dict) {
   const batch_len = if event.batch == nil {
     0
   } else {

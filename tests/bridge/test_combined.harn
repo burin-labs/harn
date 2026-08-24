@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Test multiple bridge calls in sequence
   const file_content = harness.fs.read_text("README.md")
   harness.stdio.log("File: ${file_content}")

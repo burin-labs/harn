@@ -50,21 +50,21 @@
  * Error envelopes stay in the Rust shim because extraction failures happen
  * before a `GraphReport` exists.
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_list(value) -> list {
+fn __safe_list(value: list) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }

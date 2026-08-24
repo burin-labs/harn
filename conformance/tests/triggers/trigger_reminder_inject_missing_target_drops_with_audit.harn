@@ -8,7 +8,7 @@ import "std/triggers"
  * rather than failing the dispatch. The trigger remains active for future
  * dispatches.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

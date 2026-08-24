@@ -8,32 +8,32 @@ const EXPECTED_HEADER =
   "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
 
 @test
-pipeline test_render_mirror_starts_with_header(harness: Harness, task) {
+pipeline test_render_mirror_starts_with_header(harness: Harness, task: unknown) {
   const rendered = render_mirror_from("hello\n")
   assert(rendered.starts_with(EXPECTED_HEADER))
 }
 
 @test
-pipeline test_render_mirror_preserves_body(harness: Harness, task) {
+pipeline test_render_mirror_preserves_body(harness: Harness, task: unknown) {
   const body = "## Title\n\nbody line\n"
   const rendered = render_mirror_from(body)
   assert(rendered.ends_with(body))
 }
 
 @test
-pipeline test_render_mirror_empty_body(harness: Harness, task) {
+pipeline test_render_mirror_empty_body(harness: Harness, task: unknown) {
   const rendered = render_mirror_from("")
   assert_eq(rendered, EXPECTED_HEADER)
 }
 
 @test
-pipeline test_markdown_heading_anchor_matches_rehype_slug(harness: Harness, task) {
+pipeline test_markdown_heading_anchor_matches_rehype_slug(harness: Harness, task: unknown) {
   assert_eq(markdown_heading_anchor("### The `never` type"), "the-never-type")
   assert_eq(markdown_heading_anchor("### try/catch/finally"), "trycatchfinally")
 }
 
 @test
-pipeline test_cross_chapter_links_follow_anchor_owner(harness: Harness, task) {
+pipeline test_cross_chapter_links_follow_anchor_owner(harness: Harness, task: unknown) {
   const owners = {ambiguous: "", local: "01-first", "shared-target": "02-second"}
   const source = "[local](#local), [ambiguous](#ambiguous), and [remote](#shared-target)"
   assert_eq(
@@ -56,7 +56,7 @@ const GENERATED_BLOCK_LINES = [
 ]
 
 @test
-pipeline test_summary_block_parent_is_the_preceding_entry(harness: Harness, task) {
+pipeline test_summary_block_parent_is_the_preceding_entry(harness: Harness, task: unknown) {
   const lines = ["- [Runtime context](./runtime-context.md)", SPEC_ENTRY]
   const summary = (lines + GENERATED_BLOCK_LINES).join("\n")
   assert_eq(summary_block_parent(summary), SPEC_ENTRY)
@@ -67,19 +67,19 @@ pipeline test_summary_block_parent_is_the_preceding_entry(harness: Harness, task
 // child, and the spliced text stays byte-identical, so the staleness check
 // alone reports a clean file.
 @test
-pipeline test_summary_block_parent_sees_an_entry_above_the_marker(harness: Harness, task) {
+pipeline test_summary_block_parent_sees_an_entry_above_the_marker(harness: Harness, task: unknown) {
   const lines = [SPEC_ENTRY, PLATFORM_ENTRY]
   const summary = (lines + GENERATED_BLOCK_LINES).join("\n")
   assert_eq(summary_block_parent(summary), PLATFORM_ENTRY)
 }
 
 @test
-pipeline test_summary_block_parent_skips_blank_lines(harness: Harness, task) {
+pipeline test_summary_block_parent_skips_blank_lines(harness: Harness, task: unknown) {
   const summary = ([SPEC_ENTRY, ""] + GENERATED_BLOCK_LINES).join("\n")
   assert_eq(summary_block_parent(summary), SPEC_ENTRY)
 }
 
 @test
-pipeline test_summary_block_parent_is_empty_without_the_marker(harness: Harness, task) {
+pipeline test_summary_block_parent_is_empty_without_the_marker(harness: Harness, task: unknown) {
   assert_eq(summary_block_parent(SPEC_ENTRY), "")
 }

@@ -170,7 +170,19 @@ impl TypeChecker {
                     .iter()
                     .filter(|param| Self::contains_type_param(param, type_params))
                     .collect();
-                if generic_members.len() == 1 {
+                let compatible_members: Vec<_> = generic_members
+                    .iter()
+                    .copied()
+                    .filter(|param| Self::binding_shapes_compatible(param, actual, type_params))
+                    .collect();
+                if compatible_members.len() == 1 {
+                    Self::extract_type_bindings(
+                        compatible_members[0],
+                        actual,
+                        type_params,
+                        bindings,
+                    )?;
+                } else if generic_members.len() == 1 {
                     Self::extract_type_bindings(generic_members[0], actual, type_params, bindings)?;
                 }
                 Ok(())
@@ -293,6 +305,42 @@ impl TypeChecker {
                 Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
             }
             _ => Ok(()),
+        }
+    }
+
+    /// Return whether two types have compatible outer structure for generic
+    /// binding. This is intentionally weaker than subtyping: it only
+    /// disambiguates generic-bearing union arms before ordinary compatibility
+    /// checking. For example, `fn() -> T | fn(nil) -> T` against a nullary
+    /// closure has exactly one viable arm.
+    fn binding_shapes_compatible(
+        param: &TypeExpr,
+        actual: &TypeExpr,
+        type_params: &BTreeSet<String>,
+    ) -> bool {
+        match (param, actual) {
+            (TypeExpr::Named(name), _) if type_params.contains(name) => true,
+            (TypeExpr::FnType { params: left, .. }, TypeExpr::FnType { params: right, .. }) => {
+                left.len() == right.len()
+            }
+            (TypeExpr::List(_), TypeExpr::List(_))
+            | (TypeExpr::DictType(_, _), TypeExpr::DictType(_, _))
+            | (TypeExpr::Shape(_), TypeExpr::Shape(_)) => true,
+            (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => left.len() == right.len(),
+            (
+                TypeExpr::Applied {
+                    name: left,
+                    args: left_args,
+                },
+                TypeExpr::Applied {
+                    name: right,
+                    args: right_args,
+                },
+            ) => left == right && left_args.len() == right_args.len(),
+            (TypeExpr::Union(members), actual) => members
+                .iter()
+                .any(|member| Self::binding_shapes_compatible(member, actual, type_params)),
+            (left, right) => left == right,
         }
     }
 

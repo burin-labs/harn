@@ -4,7 +4,7 @@
  * `xs.filter(...).to_list()` round-trips uniformly whether `filter`
  * stayed eager (`list` → `list`) or went lazy (`iter` → `iter`).
  */
-pipeline test(harness: Harness, _task) {
+pipeline test(harness: Harness, _task: unknown) {
   const xs = [1, 2, 3, 4]
   const allowed = [2, 4]
   const filtered = xs.filter({ x -> allowed.contains(x) }).to_list()

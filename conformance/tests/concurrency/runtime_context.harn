@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.runtime.context()
   assert_eq(root.task_id, "task_root")
   assert_eq(root.parent_task_id, nil)

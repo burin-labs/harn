@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const items = [1, 3, 5, 7, 9, 11, 13, 15]
   let i = 0
   let hits = 0

@@ -1,7 +1,7 @@
 import "../bench_cli_cold_start.harn"
 
 @test
-pipeline test_load_budgets_defaults_and_command_override(harness: Harness, task) {
+pipeline test_load_budgets_defaults_and_command_override(harness: Harness, task: unknown) {
   const budgets = load_budgets_text(
     """
 [defaults]
@@ -22,12 +22,12 @@ regression_x = 1.1
 }
 
 @test
-pipeline test_load_baseline_blank_is_empty(harness: Harness, task) {
+pipeline test_load_baseline_blank_is_empty(harness: Harness, task: unknown) {
   assert_eq(load_baseline_text(" \n"), {})
 }
 
 @test
-pipeline test_most_recent_baseline_skips_current_sha(harness: Harness, task) {
+pipeline test_most_recent_baseline_skips_current_sha(harness: Harness, task: unknown) {
   const payload = {
     current: {captured_at: "2026-01-03T00:00:00Z", commands: {version: {cold_ms: 1.0}}},
     old: {captured_at: "2026-01-01T00:00:00Z", commands: {version: {cold_ms: 10.0}}},
@@ -39,14 +39,14 @@ pipeline test_most_recent_baseline_skips_current_sha(harness: Harness, task) {
 }
 
 @test
-pipeline test_most_recent_baseline_missing(harness: Harness, task) {
+pipeline test_most_recent_baseline_missing(harness: Harness, task: unknown) {
   const found = most_recent_baseline_for({}, "version", "sha")
   assert_eq(found.sha, nil)
   assert_eq(found.cold_ms, nil)
 }
 
 @test
-pipeline test_build_invocation_expands_trace_paths(harness: Harness, task) {
+pipeline test_build_invocation_expands_trace_paths(harness: Harness, task: unknown) {
   const dir = harness.fs.workspace_temp_dir() + "/harn-cold-start-test-" + harness.random.uuid_v7()
   harness.fs.mkdir(dir)
   defer {
@@ -63,7 +63,7 @@ pipeline test_build_invocation_expands_trace_paths(harness: Harness, task) {
 }
 
 @test
-pipeline test_select_commands_filter(harness: Harness, task) {
+pipeline test_select_commands_filter(harness: Harness, task: unknown) {
   const selected = select_commands("version")
   assert_eq(selected.ok, true)
   assert_eq(selected.commands.count, 1)
@@ -74,7 +74,7 @@ pipeline test_select_commands_filter(harness: Harness, task) {
 }
 
 @test
-pipeline test_failure_reasons_cover_budget_and_baseline(harness: Harness, task) {
+pipeline test_failure_reasons_cover_budget_and_baseline(harness: Harness, task: unknown) {
   const reasons = failure_reasons(
     151.0,
     {cold_ms: 100.0, regression_x: 1.25},
@@ -86,7 +86,7 @@ pipeline test_failure_reasons_cover_budget_and_baseline(harness: Harness, task) 
 }
 
 @test
-pipeline test_merge_baseline_append_only_without_update(harness: Harness, task) {
+pipeline test_merge_baseline_append_only_without_update(harness: Harness, task: unknown) {
   const merged = merge_baseline(
     {
       payload: {
@@ -113,7 +113,7 @@ pipeline test_merge_baseline_append_only_without_update(harness: Harness, task) 
 }
 
 @test
-pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, task) {
+pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, task: unknown) {
   const merged = merge_baseline(
     {
       payload: {sha: {commands: {version: {cold_ms: 10.0}}}},
@@ -129,7 +129,7 @@ pipeline test_merge_baseline_update_overwrites_current_slot(harness: Harness, ta
 }
 
 @test
-pipeline test_parse_positive_int(harness: Harness, task) {
+pipeline test_parse_positive_int(harness: Harness, task: unknown) {
   assert_eq(parse_positive_int("N", "3").value, 3)
   assert_eq(parse_positive_int("N", "0").ok, false)
   assert_eq(parse_positive_int("N", "wat").error, "N must be an integer, got 'wat'")

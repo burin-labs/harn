@@ -6,7 +6,7 @@ fn workspace_member_ids(meta: dict) -> list<string> {
   return (meta?.workspace_members ?? []).map({ id -> to_string(id) }).to_list()
 }
 
-fn require_string(value, field: string) -> string {
+fn require_string(value: string?, field: string) -> string {
   const out = to_string(value ?? "")
   if out == "" {
     throw "cargo metadata is missing " + field

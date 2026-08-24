@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const string_schema = {type: "string"}
   const x: string | int | nil = "hello"
   if schema_is(x, string_schema) {

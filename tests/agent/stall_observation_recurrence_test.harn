@@ -28,7 +28,7 @@ const READ_ONLY_TOOLS = {
   ],
 }
 
-fn _observe(agent: HarnessAgent, state, iteration, query, result) {
+fn _observe(agent: HarnessAgent, state: any, iteration: any, query: any, result: any) {
   const call_id = "search-" + to_string(iteration)
   return agent_stall_observe_completed_dispatch(
     agent,
@@ -42,7 +42,10 @@ fn _observe(agent: HarnessAgent, state, iteration, query, result) {
   )
 }
 
-pipeline test_identical_dead_observation_accrues_across_interleaved_calls(harness: Harness, task) {
+pipeline test_identical_dead_observation_accrues_across_interleaved_calls(
+  harness: Harness,
+  task: unknown,
+) {
   let state = agent_stall_initial_state()
   let last = nil
   let iteration = 0
@@ -78,7 +81,7 @@ pipeline test_identical_dead_observation_accrues_across_interleaved_calls(harnes
   assert(fourth.no_information_gain, "later exact recurrences remain no-information turns")
 }
 
-pipeline test_changing_poll_observations_do_not_accrue(harness: Harness, task) {
+pipeline test_changing_poll_observations_do_not_accrue(harness: Harness, task: unknown) {
   let state = agent_stall_initial_state()
   let last = nil
   for version in [1, 2, 3, 4] {
@@ -89,7 +92,10 @@ pipeline test_changing_poll_observations_do_not_accrue(harness: Harness, task) {
   }
 }
 
-pipeline test_mixed_turn_requires_every_observation_to_be_repeated(harness: Harness, task) {
+pipeline test_mixed_turn_requires_every_observation_to_be_repeated(
+  harness: Harness,
+  task: unknown,
+) {
   const first = _observe(
     harness.agent,
     agent_stall_initial_state(),
@@ -128,7 +134,10 @@ pipeline test_mixed_turn_requires_every_observation_to_be_repeated(harness: Harn
   assert(!mixed.no_information_gain, "one novel observation keeps the mixed turn productive")
 }
 
-pipeline test_unknown_or_failed_call_fails_closed_to_progress_credit(harness: Harness, task) {
+pipeline test_unknown_or_failed_call_fails_closed_to_progress_credit(
+  harness: Harness,
+  task: unknown,
+) {
   const state = agent_stall_initial_state()
   const call = {id: "unknown", name: "search", arguments: {query: "dead"}}
   const result = [{tool_call_id: "unknown", tool_name: "search", ok: true, result: {matches: []}}]
@@ -181,7 +190,11 @@ fn _search_tools() {
   return tools
 }
 
-fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected_warnings: int) {
+fn _assert_agent_loop_budget_guard(
+  harness: Harness,
+  stall_diagnostics: any,
+  expected_warnings: int,
+) {
   with_llm_script(
     harness.llm,
     [
@@ -233,7 +246,10 @@ fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected
   )
 }
 
-pipeline test_agent_loop_withholds_extension_for_repeated_only_boundary(harness: Harness, task) {
+pipeline test_agent_loop_withholds_extension_for_repeated_only_boundary(
+  harness: Harness,
+  task: unknown,
+) {
   _assert_agent_loop_budget_guard(
     harness,
     {
@@ -250,6 +266,9 @@ pipeline test_agent_loop_withholds_extension_for_repeated_only_boundary(harness:
   )
 }
 
-pipeline test_budget_guard_remains_on_when_stall_feedback_is_disabled(harness: Harness, task) {
+pipeline test_budget_guard_remains_on_when_stall_feedback_is_disabled(
+  harness: Harness,
+  task: unknown,
+) {
   _assert_agent_loop_budget_guard(harness, false, 0)
 }

@@ -18,7 +18,7 @@ fn unwrap_int(value: int?) -> int {
   return 0
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Plain optional values.
   const a: int? = nil
   const b: int? = 7

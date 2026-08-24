@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // require with true condition passes silently
   require true, "this should not throw"
   harness.stdio.log("passed")

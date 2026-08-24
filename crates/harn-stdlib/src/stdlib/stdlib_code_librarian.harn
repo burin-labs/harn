@@ -119,11 +119,11 @@ fn __code_librarian_cypher_literal(value: string) -> string {
   return replace(replace(value, "\\", "\\\\"), "'", "\\'")
 }
 
-fn __code_librarian_int(value) -> int {
+fn __code_librarian_int(value: int?) -> int {
   return to_int(value ?? 0) ?? 0
 }
 
-fn __code_librarian_optional_string(value) -> string? {
+fn __code_librarian_optional_string(value: any) -> string? {
   if value == nil {
     return nil
   }
@@ -566,27 +566,21 @@ const __DEFAULT_LLM_OPTIONS = {
  * @api_stability: experimental
  * @example: code_librarian_query_nl(harness, "which file defines formatDate?")
  */
-pub fn code_librarian_query_nl(
-  harness: Harness,
-  code_index: HarnessCodeIndex,
-  clock: HarnessClock,
-  text: string,
-  options = nil,
-) -> dict {
+pub fn code_librarian_query_nl(harness: Harness, text: string, options: dict? = nil) -> dict {
   const opts = options ?? {}
-  const started_ms = clock.monotonic_ms()
+  const started_ms = harness.clock.monotonic_ms()
   const cache_key = "v1:" + lowercase(trim(text))
   const envelope = with_cache_envelope(
     harness,
     cache_key,
-    { -> __nl_resolve(harness.agent, harness.llm, code_index, text, opts) },
+    { -> __nl_resolve(harness.agent, harness.llm, harness.code_index, text, opts) },
     {store: {backend: "mem", namespace: __NL_CACHE_NAMESPACE}, ttl_seconds: __NL_CACHE_TTL_SECONDS},
   )
   const result = envelope.value
   return {
     cache_hit: envelope.hit,
     cypher: result?.cypher,
-    elapsed_ms: clock.monotonic_ms() - started_ms,
+    elapsed_ms: harness.clock.monotonic_ms() - started_ms,
     mcts_depth: to_int(result?.mcts_depth ?? 0),
     mcts_expansions: to_int(result?.mcts_expansions ?? 0),
     path: result.path,
@@ -598,8 +592,8 @@ fn __nl_resolve(
   agent: HarnessAgent,
   llm: HarnessLlm,
   code_index: HarnessCodeIndex,
-  text,
-  opts,
+  text: string,
+  opts: dict,
 ) -> dict {
   const compiled = __nl_compile(llm, text, opts)
   if compiled.ok {
@@ -631,7 +625,13 @@ fn __nl_resolve(
   }
 }
 
-fn __nl_emit_fallback(agent: HarnessAgent, opts, text, attempted_cypher, mcts) {
+fn __nl_emit_fallback(
+  agent: HarnessAgent,
+  opts: dict,
+  text: string,
+  attempted_cypher: any,
+  mcts: dict,
+) {
   const session_id = to_string(opts?.session_id ?? "")
   if session_id == "" {
     return
@@ -668,7 +668,7 @@ const __CYPHER_TEMPLATES = [
 const __CYPHER_PROMPT_PREAMBLE =
   "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
-fn __nl_compile(llm: HarnessLlm, text, opts) -> dict {
+fn __nl_compile(llm: HarnessLlm, text: string, opts: dict) -> dict {
   const prompt = __nl_compile_prompt(text)
   const schema = schema_object({cypher: schema_string()})
   const call_opts = __nl_llm_options(opts)
@@ -689,12 +689,12 @@ fn __nl_compile(llm: HarnessLlm, text, opts) -> dict {
   return {cypher: stripped, ok: true}
 }
 
-fn __nl_compile_prompt(text) -> string {
+fn __nl_compile_prompt(text: string) -> string {
   const templates = join(__CYPHER_TEMPLATES, "\n")
   return __CYPHER_PROMPT_PREAMBLE + templates + "\n\nQuestion: " + text + "\nCypher:"
 }
 
-fn __nl_llm_options(opts) -> dict {
+fn __nl_llm_options(opts: dict) -> dict {
   const overrides = if type_of(opts?.llm) == "dict" {
     opts.llm
   } else {
@@ -724,7 +724,7 @@ fn __nl_llm_options(opts) -> dict {
  * the precision tool. Bounded, deterministic exploration with a token-
  * overlap heuristic suffices for the 30-question NL fixture.
  */
-fn __nl_mcts(code_index: HarnessCodeIndex, text, opts) -> dict {
+fn __nl_mcts(code_index: HarnessCodeIndex, text: any, opts: dict) -> dict {
   const depth_cap = to_int(opts?.mcts_depth_max ?? __MCTS_DEPTH_MAX_DEFAULT)
   const expansion_cap = to_int(opts?.mcts_expansions_max ?? __MCTS_EXPANSIONS_MAX_DEFAULT)
   const terms = __nl_terms(text)
@@ -764,7 +764,14 @@ fn __nl_mcts(code_index: HarnessCodeIndex, text, opts) -> dict {
   }
 }
 
-fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, budget, seen) -> dict {
+fn __nl_mcts_probe(
+  code_index: HarnessCodeIndex,
+  term: string,
+  all_terms: list,
+  depth_cap: int,
+  budget: int,
+  seen: dict,
+) -> dict {
   if budget <= 0 {
     return {candidates: [], depth_reached: 0, expansions: 0, seen: seen}
   }
@@ -869,12 +876,12 @@ fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, bud
   }
 }
 
-fn __nl_node_key(row) -> string {
+fn __nl_node_key(row: dict) -> string {
   return to_string(row?.kind ?? "") + ":" + to_string(row?.path ?? "") + ":"
     + to_string(row?.name ?? "")
 }
 
-fn __nl_dedupe_candidates(cands) -> list {
+fn __nl_dedupe_candidates(cands: list) -> list {
   let seen = {}
   let out = []
   for c in cands {
@@ -887,7 +894,7 @@ fn __nl_dedupe_candidates(cands) -> list {
   return out
 }
 
-fn __nl_score(row, terms) -> int {
+fn __nl_score(row: dict, terms: list) -> int {
   const blob = lowercase(
     to_string(row?.name ?? "") + " " + to_string(row?.path ?? "") + " "
       + to_string(row?.kind ?? ""),
@@ -908,7 +915,7 @@ fn __nl_score(row, terms) -> int {
  * non-identifier punctuation, drops stop words via a lowercased copy,
  * and dedupes.
  */
-fn __nl_terms(text) -> list {
+fn __nl_terms(text: string?) -> list {
   const cleaned = regex_replace("[^A-Za-z0-9_/.]+", " ", text)
   const raw = split(cleaned, " ")
   let seen = {}
@@ -995,7 +1002,7 @@ const __NL_STOP_WORDS = [
   "with",
 ]
 
-fn __nl_is_stop_word(w) -> bool {
+fn __nl_is_stop_word(w: string) -> bool {
   return __NL_STOP_WORDS.contains(w)
 }
 
@@ -1004,6 +1011,6 @@ fn __nl_is_stop_word(w) -> bool {
  * `'...'` literals and supports `\'` as an escape (see `unescape` in
  * `code_index/cypher.rs`).
  */
-fn __nl_escape(s) -> string {
+fn __nl_escape(s: string) -> string {
   return __code_librarian_cypher_literal(s)
 }

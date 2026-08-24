@@ -36,7 +36,7 @@ import { llm_call_options } from "std/llm/options"
  * @effects: []
  * @errors: []
  */
-pub fn checkpoint_stage(runtime: HarnessRuntime, name, f) {
+pub fn checkpoint_stage(runtime: HarnessRuntime, name: any, f: unknown) {
   if runtime.checkpoint_exists(name) {
     return runtime.checkpoint_get(name)
   }
@@ -94,7 +94,7 @@ pub fn checkpoint_stage_keyed(
   runtime: HarnessRuntime,
   name: string,
   identity: unknown,
-  f,
+  f: unknown,
 ) -> unknown {
   const fingerprint = __checkpoint_stage_fingerprint(identity)
   const cached = __checkpoint_stage_keyed_record(runtime, name, fingerprint)
@@ -120,7 +120,7 @@ pub fn checkpoint_stage_keyed(
  * @effects: []
  * @errors: []
  */
-pub fn checkpoint_stage_retry(runtime: HarnessRuntime, name, max_retries, f) {
+pub fn checkpoint_stage_retry(runtime: HarnessRuntime, name: any, max_retries: int, f: unknown) {
   if runtime.checkpoint_exists(name) {
     return runtime.checkpoint_get(name)
   }
@@ -153,7 +153,7 @@ pub fn checkpoint_stage_keyed_retry(
   name: string,
   identity: unknown,
   max_retries: int,
-  f,
+  f: unknown,
 ) -> unknown {
   const fingerprint = __checkpoint_stage_fingerprint(identity)
   const cached = __checkpoint_stage_keyed_record(runtime, name, fingerprint)
@@ -180,7 +180,7 @@ pub fn checkpoint_stage_keyed_retry(
     + last_err
 }
 
-fn __typed_checkpoint_options(options) {
+fn __typed_checkpoint_options(options: dict?) {
   const opts = options ?? {}
   let llm_opts = opts?.llm_options ?? opts
   if llm_opts?.schema_retries == nil {
@@ -195,7 +195,7 @@ fn __typed_checkpoint_options(options) {
   return llm_call_options(llm_opts)
 }
 
-fn __typed_checkpoint_string_list(value) {
+fn __typed_checkpoint_string_list(value: any) {
   if value == nil {
     return []
   }
@@ -205,7 +205,7 @@ fn __typed_checkpoint_string_list(value) {
   return [to_string(value)]
 }
 
-fn __typed_checkpoint_validator_errors(value) {
+fn __typed_checkpoint_validator_errors(value: unknown) {
   if value == nil {
     return []
   }
@@ -241,7 +241,7 @@ fn __typed_checkpoint_validator_errors(value) {
   return ["validator returned unsupported result type " + type_of(value)]
 }
 
-fn __typed_checkpoint_validate(data, validator) {
+fn __typed_checkpoint_validate(data: any, validator: any) {
   if validator == nil {
     return []
   }
@@ -249,7 +249,7 @@ fn __typed_checkpoint_validate(data, validator) {
   return __typed_checkpoint_validator_errors(result)
 }
 
-fn __typed_checkpoint_failure_lists(result) {
+fn __typed_checkpoint_failure_lists(result: dict) {
   const category = result?.error_category ?? "unknown"
   const error = result?.error ?? "structured output failed"
   if category == "missing_json" {
@@ -258,7 +258,7 @@ fn __typed_checkpoint_failure_lists(result) {
   return {parse_failures: [], schema_failures: [error]}
 }
 
-fn __typed_checkpoint_attempt_record(index, result, validator_errors) {
+fn __typed_checkpoint_attempt_record(index: int, result: dict, validator_errors: any) {
   return {
     attempt: index,
     ok: result.ok,
@@ -271,14 +271,14 @@ fn __typed_checkpoint_attempt_record(index, result, validator_errors) {
   }
 }
 
-fn __typed_checkpoint_correction_prompt(name, prompt, errors) {
+fn __typed_checkpoint_correction_prompt(name: any, prompt: string, errors: list) {
   return prompt + "\n\nTyped-output checkpoint '" + name
     + "' rejected the previous JSON after parsing. Return a corrected JSON object only.\n"
     + "Validator correction messages:\n- "
     + errors.join("\n- ")
 }
 
-fn __typed_checkpoint_status(ok, category) {
+fn __typed_checkpoint_status(ok: any, category: any) {
   if ok {
     return "accepted"
   }
@@ -288,7 +288,7 @@ fn __typed_checkpoint_status(ok, category) {
   return "schema_rejected"
 }
 
-fn __typed_checkpoint_emit(agent: HarnessAgent, options, envelope) {
+fn __typed_checkpoint_emit(agent: HarnessAgent, options: dict, envelope: any) {
   try {
     __host_typed_checkpoint_trace(envelope)
   } catch (e) {
@@ -302,7 +302,7 @@ fn __typed_checkpoint_emit(agent: HarnessAgent, options, envelope) {
   }
 }
 
-fn __typed_checkpoint_envelope(args) {
+fn __typed_checkpoint_envelope(args: dict) {
   const ok = args.ok
   const checkpoint_attempts = args.checkpoint_attempts ?? 0
   const category = if ok {
@@ -368,11 +368,11 @@ fn __typed_checkpoint_envelope(args) {
 pub fn typed_output_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  name,
-  prompt,
-  schema,
-  options = nil,
-  validator = nil,
+  name: any,
+  prompt: string,
+  schema: any,
+  options: dict? = nil,
+  validator: any = nil,
 ) {
   const opts = options ?? {}
   const max_validator_retries = opts?.validator_retries ?? 1
@@ -488,7 +488,7 @@ pub fn typed_output_checkpoint(
   return envelope
 }
 
-fn __typed_checkpoint_text_repair_prompt(name, raw_text, errors) {
+fn __typed_checkpoint_text_repair_prompt(name: string, raw_text: any, errors: list) {
   return "Typed-output checkpoint '" + name + "' rejected an already-produced JSON summary.\n"
     + "Do not describe new actions or claim new side effects. Repair only the summary below.\n"
     + "Validator correction messages:\n- "
@@ -510,11 +510,11 @@ fn __typed_checkpoint_text_repair_prompt(name, raw_text, errors) {
 pub fn typed_output_checkpoint_from_text(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  name,
-  raw_text,
-  schema,
-  options = nil,
-  validator = nil,
+  name: string,
+  raw_text: any,
+  schema: any,
+  options: dict? = nil,
+  validator: any = nil,
 ) {
   const opts = options ?? {}
   const max_validator_retries = opts?.validator_retries ?? 1

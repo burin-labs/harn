@@ -30,11 +30,11 @@ import {
 /** One exact registry tool claimed for the immediately following model turn. */
 pub type AgentNextToolClaim = {tool_name: string}
 
-fn __default_done_sentinel(opts) {
+fn __default_done_sentinel(opts: any) {
   return opts?.done_sentinel
 }
 
-fn __sentinel_hit(text, sentinel, parsed_done_marker) {
+fn __sentinel_hit(text: string | list, sentinel: any, parsed_done_marker: string | list) {
   if sentinel == nil {
     return false
   }
@@ -44,7 +44,7 @@ fn __sentinel_hit(text, sentinel, parsed_done_marker) {
   return contains(text, sentinel)
 }
 
-fn __post_turn_callback_verdict(opts, payload) {
+fn __post_turn_callback_verdict(opts: dict?, payload: dict) {
   const cb = opts?.post_turn_callback
   if cb == nil {
     return {kind: "none"}
@@ -53,7 +53,7 @@ fn __post_turn_callback_verdict(opts, payload) {
   return __interpret_verdict(verdict, opts)
 }
 
-fn __callback_feedback_kind(verdict) -> string? {
+fn __callback_feedback_kind(verdict: dict) -> string? {
   const feedback_kind = verdict?.feedback_kind
   if feedback_kind == nil {
     return nil
@@ -69,7 +69,7 @@ fn __callback_feedback_kind(verdict) -> string? {
   return normalized
 }
 
-fn __next_tool_claim(verdict, opts) -> AgentNextToolClaim? {
+fn __next_tool_claim(verdict: dict, opts: dict) -> AgentNextToolClaim? {
   const raw = verdict?.next_tool_claim
   if raw == nil {
     return nil
@@ -94,7 +94,7 @@ fn __next_tool_claim(verdict, opts) -> AgentNextToolClaim? {
   return {tool_name: tool_name}
 }
 
-fn __interpret_verdict(verdict, opts) {
+fn __interpret_verdict(verdict: any, opts: any) {
   if verdict == nil || verdict == "" {
     return {kind: "none"}
   }
@@ -142,14 +142,14 @@ fn __interpret_verdict(verdict, opts) {
   return {kind: "none"}
 }
 
-fn __post_turn_stop_needs_verify(verdict) {
+fn __post_turn_stop_needs_verify(verdict: dict) {
   if verdict?.needs_verify == nil {
     return false
   }
   return verdict.needs_verify ? true : false
 }
 
-fn __terminal_callback_verdict(opts, payload) {
+fn __terminal_callback_verdict(opts: dict, payload: dict) {
   const cb = opts?.terminal_callback
   if cb == nil {
     return {kind: "none"}
@@ -166,7 +166,7 @@ fn __rejected_tool_names(dispatch: AgentToolDispatch) -> list<string> {
   return __tool_names_by_status(dispatch, false)
 }
 
-fn __stop_after_successful_tools(opts, dispatch: AgentToolDispatch) -> bool {
+fn __stop_after_successful_tools(opts: dict?, dispatch: AgentToolDispatch) -> bool {
   const names = opts?.stop_after_successful_tools
   if names == nil || len(names) == 0 {
     return false
@@ -186,7 +186,7 @@ fn __stop_after_successful_tools(opts, dispatch: AgentToolDispatch) -> bool {
  * non-empty visible text without tool_calls. Shared between the
  * completion check and the nudge-injection check so they cannot drift.
  */
-fn __native_completion_context(opts, has_tool_calls, text) {
+fn __native_completion_context(opts: dict, has_tool_calls: any, text: string?) {
   if !(opts?.loop_until_done ?? false) || opts?.daemon {
     return false
   }
@@ -214,7 +214,7 @@ fn __native_completion_context(opts, has_tool_calls, text) {
  * subsequent prose-only turns are legitimate final-answer signals
  * and the classic behavior applies.
  */
-fn __zero_tool_completion_context(opts, has_tool_calls, text) {
+fn __zero_tool_completion_context(opts: dict, has_tool_calls: any, text: string?) {
   if !__native_completion_context(opts, has_tool_calls, text) {
     return false
   }
@@ -233,7 +233,7 @@ fn __zero_tool_completion_context(opts, has_tool_calls, text) {
  * resetting the counter) or confirms (raising it to 2, which we
  * accept). The outer loop's `max_nudges` budget still caps the loop.
  */
-fn __native_tool_text_completion(opts, has_tool_calls, text) {
+fn __native_tool_text_completion(opts: any, has_tool_calls: bool, text: string?) {
   if !__native_completion_context(opts, has_tool_calls, text) {
     return false
   }
@@ -264,11 +264,11 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
  */
 fn __maybe_inject_completion_confirmation(
   agent: HarnessAgent,
-  session,
-  opts,
-  has_tool_calls,
-  text,
-  iteration,
+  session: dict,
+  opts: any,
+  has_tool_calls: any,
+  text: string?,
+  iteration: int,
 ) {
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
     return false
@@ -291,7 +291,7 @@ fn __maybe_inject_completion_confirmation(
   return true
 }
 
-fn __required_tools_text_completion(opts, has_tool_calls, text) {
+fn __required_tools_text_completion(opts: dict?, has_tool_calls: bool, text: string?) {
   if has_tool_calls || trim(text) == "" || opts?.require_successful_tools == nil {
     return false
   }
@@ -309,7 +309,7 @@ fn __required_tools_text_completion(opts, has_tool_calls, text) {
  * text parser, so both need the same toolless recovery; the corrective wording
  * renders per active tool_format from `agent_tool_call_paradigm`.
  */
-fn __text_family_toolless_turn(opts, has_tool_calls, text) {
+fn __text_family_toolless_turn(opts: dict, has_tool_calls: bool, text: string?) {
   if opts?.daemon {
     return false
   }
@@ -330,7 +330,7 @@ fn __text_family_toolless_turn(opts, has_tool_calls, text) {
  * call. Generalizable — conditioned on the observed fence opener, not on
  * any model name. Returns the offending fence language or nil.
  */
-fn __detect_fenced_call_attempt(text) {
+fn __detect_fenced_call_attempt(text: string?) {
   const lowered = lowercase(to_string(text ?? ""))
   // Ask the dialect vocabulary before the heuristics below. A fence carrying
   // the label the model was TAUGHT to use is the likeliest attempt of all, and
@@ -367,7 +367,7 @@ fn __detect_fenced_call_attempt(text) {
  * Extract the bound tool names from the agent `tools` registry value.
  * The registry carries a `.tools` list of entries each with a `.name`.
  */
-fn __agent_bound_tool_names(tools) {
+fn __agent_bound_tool_names(tools: dict) {
   const entries = tools?.tools ?? []
   let names = []
   for entry in entries {
@@ -385,7 +385,7 @@ fn __agent_bound_tool_names(tools) {
  * `name(key: ...)` form so missing-call recovery does not run on a turn that
  * already contains call syntax.
  */
-fn __text_has_call_shape(text) {
+fn __text_has_call_shape(text: string?) {
   const body = to_string(text ?? "")
   if regex_match("[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*\\{", body) != nil {
     return true
@@ -396,7 +396,7 @@ fn __text_has_call_shape(text) {
   return false
 }
 
-fn __missing_tool_call_recovery_config(opts) {
+fn __missing_tool_call_recovery_config(opts: dict) {
   const raw = opts?.missing_tool_call_recovery
   if type_of(raw) == "bool" && !raw {
     return {enabled: false, options: {}}
@@ -418,7 +418,7 @@ fn __missing_tool_call_recovery_config(opts) {
   return {enabled: true, options: options}
 }
 
-fn __missing_tool_call_recovery_classifier(agent: HarnessAgent, llm: HarnessLlm, opts) {
+fn __missing_tool_call_recovery_classifier(agent: HarnessAgent, llm: HarnessLlm, opts: dict) {
   const recovery = __missing_tool_call_recovery_config(opts)
   if !recovery.enabled {
     return nil
@@ -450,10 +450,10 @@ fn __tool_name_in_list(name: string, names: list<string>) -> bool {
 fn __classify_missing_tool_call(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  text,
-  opts,
-  iteration,
+  session: dict,
+  text: string?,
+  opts: dict,
+  iteration: int,
 ) {
   if __text_has_call_shape(text) {
     return nil
@@ -567,7 +567,7 @@ fn __required_argument_sentence(tool_name: string, names: list<string>) -> strin
  * A marker quoted mid-sentence, or carried inside a call's own arguments, does
  * not count. Returns the offending marker, or nil.
  */
-fn __closing_tool_marker(candidate) -> string? {
+fn __closing_tool_marker(candidate: string?) -> string? {
   const line = trim(to_string(candidate ?? ""))
   if !starts_with(line, "</") || !ends_with(line, ">") {
     return nil
@@ -583,7 +583,7 @@ fn __closing_tool_marker(candidate) -> string? {
 // block whose contents the parser rejected is a parse rejection, and that path
 // already answers the turn — claiming it here would put two owners on one turn,
 // which is the contradiction that stalls a loop.
-fn __has_opening_tool_marker(text, marker) -> bool {
+fn __has_opening_tool_marker(text: string, marker: any) -> bool {
   const inner = trim(substring(marker, 2, len(marker) - 1))
   if inner == "" {
     return false
@@ -591,7 +591,7 @@ fn __has_opening_tool_marker(text, marker) -> bool {
   return contains(lowercase(to_string(text)), "<" + lowercase(inner))
 }
 
-fn __detect_malformed_call_markup(text) -> string? {
+fn __detect_malformed_call_markup(text: string?) -> string? {
   const trimmed = trim(to_string(text ?? ""))
   if trimmed == "" {
     return nil
@@ -603,7 +603,7 @@ fn __detect_malformed_call_markup(text) -> string? {
   return dangling
 }
 
-fn __dangling_tool_marker(trimmed) -> string? {
+fn __dangling_tool_marker(trimmed: any) -> string? {
   const lines = split(trimmed, "\n")
   // A marker occupying a whole line is unambiguous.
   for line in lines {
@@ -628,12 +628,12 @@ fn __dangling_tool_marker(trimmed) -> string? {
 fn __maybe_inject_action_nudge(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  opts,
-  has_tool_calls,
-  text,
-  iteration,
-  classifier_only = false,
+  session: dict,
+  opts: any,
+  has_tool_calls: bool,
+  text: any,
+  iteration: int,
+  classifier_only: bool = false,
 ) {
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
@@ -770,11 +770,11 @@ fn __repair_claimed_result(claimed_tool: string?) -> dict {
   return base + {next_tool_claim: {tool_name: tool_name, source: "missing_tool_call_recovery"}}
 }
 
-fn __done_judge_config(opts) {
+fn __done_judge_config(opts: dict) {
   return agent_judge_config(opts?.done_judge)
 }
 
-fn __done_judge_cadence(opts) {
+fn __done_judge_cadence(opts: dict) {
   const judge = __done_judge_config(opts)
   if judge == nil {
     return nil
@@ -786,14 +786,14 @@ fn __done_judge_cadence(opts) {
   return {}
 }
 
-fn __done_judge_loop_state(opts, completion_proposed) {
+fn __done_judge_loop_state(opts: dict, completion_proposed: bool) {
   const state = opts?._done_judge_loop_state ?? {}
   const base_completion = state?.completion ?? {}
   const completion = base_completion + {proposed: completion_proposed}
   return state + {completion: completion}
 }
 
-fn __done_judge_when_due(opts, cadence, state) {
+fn __done_judge_when_due(opts: dict, cadence: dict, state: dict) {
   const when = cadence?.when ?? "always"
   if type_of(when) == "closure" {
     return when(state) ? true : false
@@ -809,7 +809,7 @@ fn __done_judge_when_due(opts, cadence, state) {
   return false
 }
 
-fn __done_judge_every_due(cadence, turn_number) {
+fn __done_judge_every_due(cadence: dict, turn_number: any) {
   const every = cadence?.every
   if every == nil {
     return true
@@ -817,7 +817,7 @@ fn __done_judge_every_due(cadence, turn_number) {
   return turn_number % every == 0
 }
 
-fn __done_judge_past_warmup(cadence, turn_number) {
+fn __done_judge_past_warmup(cadence: dict, turn_number: any) {
   const min_iterations = cadence?.min_iterations_before_first
   if min_iterations == nil {
     return true
@@ -825,7 +825,7 @@ fn __done_judge_past_warmup(cadence, turn_number) {
   return turn_number > min_iterations
 }
 
-fn __done_judge_under_cap(opts, cadence) {
+fn __done_judge_under_cap(opts: dict, cadence: dict) {
   const max_invocations = cadence?.max_invocations
   if max_invocations == nil {
     return true
@@ -834,7 +834,7 @@ fn __done_judge_under_cap(opts, cadence) {
   return invocations < max_invocations
 }
 
-fn __done_judge_due(opts, payload, completion_proposed) {
+fn __done_judge_due(opts: dict, payload: dict, completion_proposed: bool) {
   const cadence = __done_judge_cadence(opts)
   if cadence == nil {
     return false
@@ -848,7 +848,7 @@ fn __done_judge_due(opts, payload, completion_proposed) {
     && __done_judge_when_due(opts, cadence, state)
 }
 
-fn __completion_result(opts, payload, stop_reason) {
+fn __completion_result(opts: any, payload: dict, stop_reason: string) {
   const batch_state = opts?._tool_batch_dependency_state
   const deferred = batch_state?.deferred_signatures ?? []
   if len(deferred) > 0 {
@@ -867,10 +867,10 @@ fn __completion_result(opts, payload, stop_reason) {
 
 fn __post_turn_verdict_result(
   agent: HarnessAgent,
-  session,
-  _opts,
-  verdict,
-  feedback_kind = "post_turn",
+  session: dict,
+  _opts: any,
+  verdict: dict,
+  feedback_kind: string = "post_turn",
 ) {
   if verdict.kind == "stop" {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: false}
@@ -924,7 +924,7 @@ fn __post_turn_verdict_result(
   return nil
 }
 
-fn __post_turn_with_narrowing(outcome, narrowing) {
+fn __post_turn_with_narrowing(outcome: any, narrowing: any) {
   if narrowing == nil {
     return outcome
   }
@@ -938,7 +938,7 @@ fn __post_turn_with_narrowing(outcome, narrowing) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_extract_tool_calls(agent: HarnessAgent, llm_result, opts) {
+pub fn agent_extract_tool_calls(agent: HarnessAgent, llm_result: dict, opts: dict) {
   if len(llm_result?.tool_calls ?? []) > 0 {
     return llm_result.tool_calls
   }
@@ -967,7 +967,7 @@ pub fn agent_extract_tool_calls(agent: HarnessAgent, llm_result, opts) {
  * `next_options` and `llm_options` are parameters for the next turn, not
  * directives to the model, so they survive on a turn whose message is held.
  */
-fn __verdict_option_changes(verdict) -> dict {
+fn __verdict_option_changes(verdict: dict) -> dict {
   let out = {}
   if verdict?.next_options != nil {
     out = out + {next_options: verdict.next_options}
@@ -1009,12 +1009,12 @@ fn __verdict_option_changes(verdict) -> dict {
 fn __arbitrate_stalled_toolless_turn(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  opts,
-  payload,
-  verdict,
-  text,
-  iteration,
+  session: dict,
+  opts: any,
+  payload: dict,
+  verdict: dict,
+  text: string?,
+  iteration: int,
 ) {
   const verdict_stops = verdict?.kind == "stop"
     || (verdict?.kind == "rich" && (verdict?.stop ?? false))
@@ -1076,11 +1076,11 @@ fn __arbitrate_stalled_toolless_turn(
 pub fn agent_compute_post_turn(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  llm_result,
+  session: dict,
+  llm_result: any,
   dispatch: AgentToolDispatch,
-  opts,
-  iteration,
+  opts: any,
+  iteration: int,
 ) {
   const sentinel = __default_done_sentinel(opts)
   const text = llm_result?.text ?? ""
@@ -1201,7 +1201,12 @@ pub fn agent_compute_post_turn(
  * @effects: [host]
  * @errors: []
  */
-pub fn agent_compute_terminal_callback(agent: HarnessAgent, session, opts, terminal) {
+pub fn agent_compute_terminal_callback(
+  agent: HarnessAgent,
+  session: dict,
+  opts: dict,
+  terminal: dict,
+) {
   const payload = {
     session_id: session.session_id,
     session: {id: session.session_id},
@@ -1239,7 +1244,7 @@ pub fn agent_compute_terminal_callback(agent: HarnessAgent, session, opts, termi
   return {kind: "none"}
 }
 
-fn visible_text_excerpt(text) {
+fn visible_text_excerpt(text: string?) {
   const trimmed = trim(text ?? "")
   if len(trimmed) <= 160 {
     return trimmed

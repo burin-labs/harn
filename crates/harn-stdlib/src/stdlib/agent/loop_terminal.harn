@@ -8,7 +8,7 @@ import "std/agent/loop_turn_scope"
  * receive an explicit `action` instead of smuggling `continue`/`break` across
  * a module boundary.
  */
-pub fn __agent_loop_terminal_boundary(harness: Harness, session, state) -> dict {
+pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: dict) -> dict {
   let opts = state.opts
   let final_status = state.final_status
   let stop_reason = state.stop_reason

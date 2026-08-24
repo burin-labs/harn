@@ -908,7 +908,7 @@ mod tests {
             r###"
 import {{ agent_loop }} from "std/agent/loop"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "live-call", name: "noop", arguments: {{}}}}]}})
   harness.llm.mock_enqueue({{text: "##DONE##"}})
   let tools = tool_registry()

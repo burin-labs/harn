@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * scripts can assert that structured output, hosted tools, remote MCP, and
  * conversation controls survive option extraction without live credentials.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("{\"ok\":true}")],

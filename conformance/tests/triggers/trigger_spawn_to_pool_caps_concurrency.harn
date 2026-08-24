@@ -7,7 +7,7 @@ import "std/triggers"
  * the named pool via its task_factory, and the pool's max_concurrent cap
  * bounds in-flight closures regardless of the inbound event rate.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1700000000000)
   const bp = Backpressure()
   const gate = harness.runtime.channel(nil, 8)

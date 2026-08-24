@@ -1,4 +1,4 @@
-pub fn greet(name) {
+pub fn greet(name: string) {
   return "hello " + name
 }
 

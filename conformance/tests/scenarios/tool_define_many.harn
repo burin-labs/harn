@@ -1,6 +1,6 @@
 import { ToolDefinitionSpec, ToolRegistry, tool_define_many, tool_registry_from } from "std/tools"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const specs: list<ToolDefinitionSpec> = [
     {
       name: "search_code",

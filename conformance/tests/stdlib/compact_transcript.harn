@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const base = transcript_from_messages(
     [
       {role: "user", content: "Investigate parser drift."},

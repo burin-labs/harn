@@ -3,7 +3,7 @@
  * the model ID, matching the pre-refactor hardcoded dispatch. Test
  * both paths round-trip through `capabilities::lookup`.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const as_claude = harness.llm.provider_capabilities("mock", "claude-opus-4-7")
   assert(as_claude.defer_loading, "mock+claude routes to anthropic row")
   assert(as_claude.tool_search[0] == "bm25", "mock+claude gets anthropic variants")

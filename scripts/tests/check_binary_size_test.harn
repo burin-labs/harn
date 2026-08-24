@@ -202,7 +202,7 @@ fn measurement(bytes: int) -> ReleaseBinarySizeMeasurement {
 
 // --- parse_args -------------------------------------------------------------
 @test
-pipeline test_parse_args_defaults(harness: Harness, task) {
+pipeline test_parse_args_defaults(harness: Harness, task: unknown) {
   const res = parse_args([], defaults())
   assert_eq(res.ok, true)
   assert_eq(res.opts.build_release, true)
@@ -214,7 +214,7 @@ pipeline test_parse_args_defaults(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_flags(harness: Harness, task) {
+pipeline test_parse_args_flags(harness: Harness, task: unknown) {
   const res = parse_args(
     ["--no-build", "--target", "x86_64-unknown-linux-gnu", "--skip-bloat", "--fuse-mb", "50"],
     defaults(),
@@ -228,14 +228,14 @@ pipeline test_parse_args_flags(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_bin_and_report_dir(harness: Harness, task) {
+pipeline test_parse_args_bin_and_report_dir(harness: Harness, task: unknown) {
   const res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
   assert_eq(res.opts.harn_bin, "/x/harn")
   assert_eq(res.opts.report_dir, "out")
 }
 
 @test
-pipeline test_parse_args_missing_value(harness: Harness, task) {
+pipeline test_parse_args_missing_value(harness: Harness, task: unknown) {
   const res = parse_args(["--target"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: --target requires a value")
@@ -243,13 +243,13 @@ pipeline test_parse_args_missing_value(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_missing_path_noun(harness: Harness, task) {
+pipeline test_parse_args_missing_path_noun(harness: Harness, task: unknown) {
   assert_eq(parse_args(["--bin"], defaults()).message, "error: --bin requires a path")
   assert_eq(parse_args(["--report-dir"], defaults()).message, "error: --report-dir requires a path")
 }
 
 @test
-pipeline test_parse_args_unknown_flag_shows_usage(harness: Harness, task) {
+pipeline test_parse_args_unknown_flag_shows_usage(harness: Harness, task: unknown) {
   const res = parse_args(["--wat"], defaults())
   assert_eq(res.ok, false)
   assert_eq(res.message, "error: unknown argument: --wat")
@@ -257,27 +257,27 @@ pipeline test_parse_args_unknown_flag_shows_usage(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_help(harness: Harness, task) {
+pipeline test_parse_args_help(harness: Harness, task: unknown) {
   assert_eq(parse_args(["-h"], defaults()).opts.help, true)
   assert_eq(parse_args(["--help"], defaults()).opts.help, true)
 }
 
 // --- parse_fuse_mb / fuse_bytes_of --------------------------------------
 @test
-pipeline test_fuse_parse_valid(harness: Harness, task) {
+pipeline test_fuse_parse_valid(harness: Harness, task: unknown) {
   assert_eq(parse_fuse_mb("219.00"), 219.0)
   assert_eq(parse_fuse_mb("1.2"), 1.2)
 }
 
 @test
-pipeline test_fuse_parse_invalid(harness: Harness, task) {
+pipeline test_fuse_parse_invalid(harness: Harness, task: unknown) {
   assert_eq(parse_fuse_mb("0"), nil)
   assert_eq(parse_fuse_mb("-5"), nil)
   assert_eq(parse_fuse_mb("abc"), nil)
 }
 
 @test
-pipeline test_positive_integer_fuse_parse(harness: Harness, task) {
+pipeline test_positive_integer_fuse_parse(harness: Harness, task: unknown) {
   assert_eq(parse_positive_int("230686720"), 230686720)
   assert_eq(parse_positive_int("0"), nil)
   assert_eq(parse_positive_int("1.5"), nil)
@@ -285,7 +285,7 @@ pipeline test_positive_integer_fuse_parse(harness: Harness, task) {
 }
 
 @test
-pipeline test_fuse_bytes_rounding(harness: Harness, task) {
+pipeline test_fuse_bytes_rounding(harness: Harness, task: unknown) {
   assert_eq(fuse_bytes_of(192.0), 201326592)
   // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
   assert_eq(fuse_bytes_of(1.2), 1258291)
@@ -294,7 +294,7 @@ pipeline test_fuse_bytes_rounding(harness: Harness, task) {
 @test
 pipeline test_fuse_resolution_preserves_exact_bytes_and_override_precedence(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const policy = valid_policy()
   assert_eq(
@@ -342,7 +342,10 @@ pipeline test_fuse_resolution_preserves_exact_bytes_and_override_precedence(
 }
 
 @test
-pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(harness: Harness, task) {
+pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
+  harness: Harness,
+  task: unknown,
+) {
   const result = read_release_binary_size_policy_result(
     harness.fs,
     "../../.github/release-binary-size-policy.json",
@@ -379,7 +382,7 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(harnes
 }
 
 @test
-pipeline test_binary_size_policy_rejects_invalid_topology(harness: Harness, task) {
+pipeline test_binary_size_policy_rejects_invalid_topology(harness: Harness, task: unknown) {
   const target = valid_target_policy()
   assert_eq(
     release_binary_size_policy_errors({schema_version: 1, default_target: "missing", targets: []}),
@@ -398,7 +401,10 @@ pipeline test_binary_size_policy_rejects_invalid_topology(harness: Harness, task
 }
 
 @test
-pipeline test_binary_size_policy_rejects_every_invalid_baseline_field(harness: Harness, task) {
+pipeline test_binary_size_policy_rejects_every_invalid_baseline_field(
+  harness: Harness,
+  task: unknown,
+) {
   const target = valid_target_policy()
   assert_eq(
     release_binary_size_policy_errors(
@@ -428,7 +434,7 @@ pipeline test_binary_size_policy_rejects_every_invalid_baseline_field(harness: H
 }
 
 @test
-pipeline test_binary_size_policy_enforces_a_fuse_shaped_ceiling(harness: Harness, task) {
+pipeline test_binary_size_policy_enforces_a_fuse_shaped_ceiling(harness: Harness, task: unknown) {
   const target = valid_target_policy()
   // 228819544 * 1.10 and * 1.15, the exact boundary the contract states.
   const min_fuse = 251701498
@@ -469,7 +475,7 @@ pipeline test_binary_size_policy_enforces_a_fuse_shaped_ceiling(harness: Harness
  * stops it, and a stale acceptance silently blesses growth nobody decided on.
  */
 @test
-pipeline test_accepted_growth_must_name_the_current_baseline(harness: Harness, task) {
+pipeline test_accepted_growth_must_name_the_current_baseline(harness: Harness, task: unknown) {
   const target = valid_target_policy()
   const current = {
     against_baseline_sha: target.baseline.source_sha,
@@ -509,7 +515,7 @@ pipeline test_accepted_growth_must_name_the_current_baseline(harness: Harness, t
 }
 
 @test
-pipeline test_binary_size_policy_schema_is_closed(harness: Harness, task) {
+pipeline test_binary_size_policy_schema_is_closed(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -522,7 +528,7 @@ pipeline test_binary_size_policy_schema_is_closed(harness: Harness, task) {
 }
 
 @test
-pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, task) {
+pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -637,7 +643,7 @@ pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, ta
 }
 
 @test
-pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task) {
+pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task: unknown) {
   const workflow = release_workflow(harness.fs)
   assert_eq(
     workflow.jobs.setup.outputs.binary_size_fuse_bytes,
@@ -658,7 +664,7 @@ pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task)
 }
 
 @test
-pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness, task) {
+pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness, task: unknown) {
   const measured_target = "matrix.target == 'x86_64-unknown-linux-gnu'"
   const diagnostic_mode = measured_target
     + " && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_fuse.outcome == 'failure' || steps.binary_size_growth.outcome == 'failure')"
@@ -696,7 +702,10 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
 }
 
 @test
-pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harness, task) {
+pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(
+  harness: Harness,
+  task: unknown,
+) {
   const resolve = release_workflow_step(
     release_workflow(harness.fs).jobs.setup.steps,
     "Resolve release context",
@@ -710,7 +719,7 @@ pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harn
 @test
 pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const workflow = release_workflow(harness.fs)
   const checkout = workflow.jobs.prepare_cli_aot.steps[0]
@@ -739,7 +748,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
 }
 
 @test
-pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harness, task) {
+pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harness, task: unknown) {
   const action = harness.fs.read_text(
     "../../.github/actions/download-artifact-with-retry/action.yml",
   )
@@ -766,7 +775,7 @@ pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harnes
 
 // --- format_mib -------------------------------------------------------------
 @test
-pipeline test_format_mib_two_decimals(harness: Harness, task) {
+pipeline test_format_mib_two_decimals(harness: Harness, task: unknown) {
   assert_eq(format_mib(1536000), "1.46")
   assert_eq(format_mib(2097152), "2.00")
   assert_eq(format_mib(1258291), "1.20")
@@ -775,12 +784,12 @@ pipeline test_format_mib_two_decimals(harness: Harness, task) {
 
 // --- default_bin_path -------------------------------------------------------
 @test
-pipeline test_default_bin_path_host(harness: Harness, task) {
+pipeline test_default_bin_path_host(harness: Harness, task: unknown) {
   assert_eq(default_bin_path("/r/target", ""), "/r/target/release/harn")
 }
 
 @test
-pipeline test_default_bin_path_target_triple(harness: Harness, task) {
+pipeline test_default_bin_path_target_triple(harness: Harness, task: unknown) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-unknown-linux-gnu"),
     "/r/target/x86_64-unknown-linux-gnu/release/harn",
@@ -788,7 +797,7 @@ pipeline test_default_bin_path_target_triple(harness: Harness, task) {
 }
 
 @test
-pipeline test_default_bin_path_windows_exe(harness: Harness, task) {
+pipeline test_default_bin_path_windows_exe(harness: Harness, task: unknown) {
   assert_eq(
     default_bin_path("/r/target", "x86_64-pc-windows-msvc"),
     "/r/target/x86_64-pc-windows-msvc/release/harn.exe",
@@ -797,7 +806,7 @@ pipeline test_default_bin_path_windows_exe(harness: Harness, task) {
 
 // --- report_lines -----------------------------------------------------------
 @test
-pipeline test_report_lines_shape(harness: Harness, task) {
+pipeline test_report_lines_shape(harness: Harness, task: unknown) {
   const lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
   assert_eq(
     lines,
@@ -815,7 +824,7 @@ pipeline test_report_lines_shape(harness: Harness, task) {
 }
 
 @test
-pipeline test_report_lines_named_target(harness: Harness, task) {
+pipeline test_report_lines_named_target(harness: Harness, task: unknown) {
   const lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
   assert_eq(lines[3], "target: aarch64-apple-darwin")
 }
@@ -827,7 +836,7 @@ pipeline test_report_lines_named_target(harness: Harness, task) {
  * produced it.
  */
 @test
-pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness, task) {
+pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness, task: unknown) {
   const entry = valid_target_policy()
   const over = measurement(entry.distribution_fuse_bytes + 1)
   const verdict = evaluate_release_binary_size(entry, over)
@@ -857,7 +866,7 @@ pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness
  * and a large ratio on a small one is not a distribution concern.
  */
 @test
-pipeline test_the_growth_signal_needs_both_thresholds(harness: Harness, task) {
+pipeline test_the_growth_signal_needs_both_thresholds(harness: Harness, task: unknown) {
   const entry = valid_target_policy()
   const baseline = entry.baseline.bytes
   // 4 MiB is 1.83% of this baseline: over the byte floor, under the ratio.
@@ -883,7 +892,7 @@ pipeline test_the_growth_signal_needs_both_thresholds(harness: Harness, task) {
 @test
 pipeline test_the_growth_signal_is_withheld_when_the_build_is_not_comparable(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const entry = valid_target_policy()
   const grown = measurement(entry.baseline.bytes + 8407168)
@@ -909,7 +918,10 @@ pipeline test_the_growth_signal_is_withheld_when_the_build_is_not_comparable(
 
 /** A crossing is a decision, and the decision is written down. */
 @test
-pipeline test_an_accepted_growth_clears_the_signal_and_names_its_reason(harness: Harness, task) {
+pipeline test_an_accepted_growth_clears_the_signal_and_names_its_reason(
+  harness: Harness,
+  task: unknown,
+) {
   const entry = valid_target_policy()
   const grown = measurement(entry.baseline.bytes + 6000000)
   assert_eq(evaluate_release_binary_size(entry, grown).growth, "warn")
@@ -945,7 +957,10 @@ pipeline test_an_accepted_growth_clears_the_signal_and_names_its_reason(harness:
  * sizes here are only their carrier, since the two artifacts are not archived.
  */
 @test
-pipeline test_classify_growth_separates_codegen_layout_from_content(harness: Harness, task) {
+pipeline test_classify_growth_separates_codegen_layout_from_content(
+  harness: Harness,
+  task: unknown,
+) {
   const codegen_units_16_to_8 = [
     {name: ".text", before: 100000000, after: 100000000 - 6155200, delta: -6155200},
     {name: ".eh_frame", before: 20000000, after: 20000000 - 1053992, delta: -1053992},
@@ -969,7 +984,7 @@ pipeline test_classify_growth_separates_codegen_layout_from_content(harness: Har
 }
 
 @test
-pipeline test_parse_elf_sections_reads_the_size_table(harness: Harness, task) {
+pipeline test_parse_elf_sections_reads_the_size_table(harness: Harness, task: unknown) {
   const table = """
 harn  :
 section                size      addr
@@ -986,7 +1001,10 @@ Total             167772160
 }
 
 @test
-pipeline test_elf_section_deltas_rank_by_magnitude_and_drop_unchanged(harness: Harness, task) {
+pipeline test_elf_section_deltas_rank_by_magnitude_and_drop_unchanged(
+  harness: Harness,
+  task: unknown,
+) {
   const before = [
     {name: ".text", bytes: 100},
     {name: ".rodata", bytes: 50},
@@ -1011,7 +1029,7 @@ pipeline test_elf_section_deltas_rank_by_magnitude_and_drop_unchanged(harness: H
  * a second exact release build.
  */
 @test
-pipeline test_verdict_report_lines_carry_both_build_identities(harness: Harness, task) {
+pipeline test_verdict_report_lines_carry_both_build_identities(harness: Harness, task: unknown) {
   const entry = valid_target_policy()
   const grown = measurement(entry.baseline.bytes + 6000000)
   const lines = verdict_report_lines(evaluate_release_binary_size(entry, grown), entry, grown)
@@ -1038,7 +1056,7 @@ pipeline test_verdict_report_lines_carry_both_build_identities(harness: Harness,
  * them back into one step is the regression this contract exists to prevent.
  */
 @test
-pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harness, task) {
+pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harness, task: unknown) {
   const steps = release_workflow(harness.fs).jobs.build.steps
   const fuse = release_workflow_step(steps, "Check the distribution fuse")
   const growth = release_workflow_step(steps, "Evaluate the binary-size growth signal")
@@ -1068,7 +1086,10 @@ pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harne
  * fuse it just cleared is 250 MiB.
  */
 @test
-pipeline test_workflow_skips_the_growth_signal_for_pre_contract_sources(harness: Harness, task) {
+pipeline test_workflow_skips_the_growth_signal_for_pre_contract_sources(
+  harness: Harness,
+  task: unknown,
+) {
   const steps = release_workflow(harness.fs).jobs.build.steps
   const growth = release_workflow_step(steps, "Evaluate the binary-size growth signal")
   const run = growth.run ?? ""

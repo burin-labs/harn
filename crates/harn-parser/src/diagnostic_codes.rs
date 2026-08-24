@@ -196,6 +196,7 @@ diagnostic_codes! {
     InvalidOptionalAccess, "HARN-TYP-025", Typ, "optional access is invalid for the receiver type";
     ThrowsTypeMismatch, "HARN-TYP-026", Typ, "thrown value type is not covered by the callable's declared throws set";
     TupleIndexOutOfBounds, "HARN-TYP-027", Typ, "constant tuple index is outside the fixed arity";
+    ImplicitAnyParameter, "HARN-TYP-028", Typ, "declared parameter has no type annotation";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";
@@ -346,7 +347,6 @@ diagnostic_codes! {
     LintMutableCaptureAcrossParallel, "HARN-LNT-064", Lnt, "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race";
     LintNilCoalesceSelfFallback, "HARN-LNT-065", Lnt, "nil coalesce fallback repeats the left identifier";
     LintDiscardedPureResult, "HARN-LNT-066", Lnt, "the result of a pure collection method is discarded, so the call has no effect on the receiver";
-    LintMissingPublicApiType, "HARN-LNT-067", Lnt, "public callable parameter or return is missing an explicit type";
     LintTemplateUnknownFilter, "HARN-LNT-068", Lnt, "prompt template names a filter the engine does not implement";
     LintBroadHarnessParameter, "HARN-LNT-069", Lnt, "helper accepts root Harness but uses only narrow capability handles";
     LintHomogeneousPositionalApi, "HARN-LNT-070", Lnt, "public API has too many same-typed positional parameters";

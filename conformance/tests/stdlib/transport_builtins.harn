@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.transport_mock_clear()
   harness.testing.http_mock(

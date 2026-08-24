@@ -38,7 +38,7 @@ fn format_echo_caller() {
   }
 }
 
-fn run_format(harness: Harness, options) {
+fn run_format(harness: Harness, options: dict) {
   return agent_loop(
     harness,
     "Report the selected format.",
@@ -53,11 +53,11 @@ fn run_format(harness: Harness, options) {
   )
 }
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn transcript_events_of(result, kind) {
+fn transcript_events_of(result: dict, kind: string) {
   return transcript_events(result?.transcript).filter({ event -> event.kind == kind })
 }
 

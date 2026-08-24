@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const nums = [3, 1, 4, 1, 5, 9]
   harness.stdio.log(nums.sorted())
   harness.stdio.log(nums.reversed())

@@ -27,7 +27,7 @@ pub type OpenAiImageBackendOptions = {
   project?: string,
 }
 
-fn __openai_endpoint(endpoint) -> string {
+fn __openai_endpoint(endpoint: string?) -> string {
   const clean = trim(to_string(endpoint ?? "https://api.openai.com/v1"))
   if clean == "" {
     throw "std/model_job/openai: endpoint is required"
@@ -106,7 +106,7 @@ fn __openai_tool(request: ModelJobRequest, options: OpenAiImageBackendOptions) -
 }
 
 fn __openai_outputs_result(
-  response,
+  response: dict,
   format: OpenAiImageFormat,
 ) -> Result<list<ModelJobOutput>, ModelJobError> {
   let outputs: list<ModelJobOutput> = []

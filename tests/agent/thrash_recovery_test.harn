@@ -50,23 +50,23 @@ fn toolset() {
   return tools
 }
 
-fn run_call(id) {
+fn run_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "run", arguments: {command: "ls -R"}}]}
 }
 
-fn fail_call(id) {
+fn fail_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "fail", arguments: {command: "boom"}}]}
 }
 
-fn look_call(id) {
+fn look_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "app/Models/Entry.php"}}]}
 }
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, task) {
+pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -131,7 +131,10 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
   )
 }
 
-pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Harness, task) {
+pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [
@@ -206,7 +209,7 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
   )
 }
 
-pipeline test_distinct_monologues_do_not_fire_recovery(harness: Harness, task) {
+pipeline test_distinct_monologues_do_not_fire_recovery(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -250,7 +253,10 @@ pipeline test_distinct_monologues_do_not_fire_recovery(harness: Harness, task) {
   )
 }
 
-pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness: Harness, task) {
+pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [fail_call("f1"), fail_call("f2"), fail_call("f3")],
@@ -301,7 +307,7 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness:
   )
 }
 
-pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) {
+pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task: unknown) {
   let session = "wrapup-tool-skip-" + harness.random.uuid()
   let wrapup_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0},

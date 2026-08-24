@@ -27,7 +27,7 @@ fn diff_summary() {
   }
 }
 
-fn total_added(files) {
+fn total_added(files: list) {
   let total = 0
   for f in files {
     total = total + f.loc_added
@@ -35,7 +35,7 @@ fn total_added(files) {
   return total
 }
 
-fn render_review_prompt(fs: HarnessFs, diff) {
+fn render_review_prompt(fs: HarnessFs, diff: dict) {
   return fs.render_prompt(
     "review.harn.prompt",
     {
@@ -47,11 +47,11 @@ fn render_review_prompt(fs: HarnessFs, diff) {
   )
 }
 
-fn render_clarification_prompt(fs: HarnessFs, pr, answer) {
+fn render_clarification_prompt(fs: HarnessFs, pr: any, answer: string) {
   return fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const diff = diff_summary()
   const system = "You are review_captain, a thorough code reviewer."
   const review_prompt = render_review_prompt(harness.fs, diff)

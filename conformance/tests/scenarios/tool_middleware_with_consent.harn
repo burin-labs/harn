@@ -22,7 +22,7 @@ fn synthetic_next() {
   }
 }
 
-fn envelope(name) {
+fn envelope(name: string) {
   return {
     tool_name: name,
     tool_args: {},

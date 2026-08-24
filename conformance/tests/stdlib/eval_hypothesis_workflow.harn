@@ -9,7 +9,7 @@ import {
   hypothesis_fixture_intent,
 } from "./hypothesis_fixture_lib.harn"
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const compiled = compile_experiment_intent(
     hypothesis_fixture_intent(),
     hypothesis_fixture_context(),

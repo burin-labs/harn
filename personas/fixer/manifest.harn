@@ -65,7 +65,7 @@ pub fn remediation_plan_for_demo() {
   return plan_for_atoms(atoms)
 }
 
-pub pipeline run(harness: Harness, task) -> dict {
+pub pipeline run(harness: Harness, task: unknown) -> dict {
   const manifest = fixer_manifest()
   const demo = remediation_plan_for_demo()
   harness.stdio.println(json_stringify({manifest: manifest, demo_plan: demo}))

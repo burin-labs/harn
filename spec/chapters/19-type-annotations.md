@@ -1,11 +1,19 @@
 ## Type annotations
 
-Harn has an optional, gradual type system. Omitting annotations is always valid.
+Harn has a gradual type system. Every declared function, generator, pipeline,
+tool, interface method, and implementation method parameter needs a type.
+Local bindings and return types remain inferable.
 
-A type annotation you *do* write is checked twice: statically at compile time, and
-again at runtime against the value it describes. Parameter, `let` / `const`, and
-struct-field sites behave the same way — a declared type is checked against the
+A type annotation is checked twice: statically at compile time, and again at
+runtime against the value it describes. Parameter, `let` / `const`, and
+struct-field sites behave the same way: a declared type is checked against the
 value where it is written. See [Runtime enforcement](#runtime-enforcement).
+
+An unannotated declared parameter is `HARN-TYP-028`, even when it has a default
+value. Use `harn fix --apply --safety surface-changing --code HARN-TYP-028
+<path>` to infer annotations from body usage and call sites. The command reports
+every parameter it could not infer. Contextually typed closure parameters do not
+need annotations because their call position supplies the type.
 
 ### Basic types
 
@@ -60,7 +68,7 @@ const s: string = passthrough("hello")  // any → string, no narrowing required
 const n: int    = passthrough(42)
 ```
 
-Use `any` deliberately, when you want to opt out of checking — for
+Use `any` deliberately when you want to opt out of checking, for
 example, a generic dispatcher that forwards values through a runtime
 protocol you don't want to describe statically. Prefer `unknown` (see
 below) for values from untrusted boundaries where callers should be
@@ -116,13 +124,11 @@ Interop between `any` and `unknown`:
 
 **When to pick which:**
 
-- **No annotation** — "I haven't annotated this." Callers get no
-  checking. Use for internal, unstable code.
-- **`unknown`** — "this value could be anything; narrow before use."
+- **`unknown`** means "this value could be anything; narrow before use."
   Use at untrusted boundaries and in APIs that hand back open-ended
   data. This is the preferred annotation for LLM / JSON / dynamic
   dict values.
-- **`any`** — "stop checking." A last-resort escape hatch. Prefer
+- **`any`** means "stop checking." It is the explicit escape hatch. Prefer
   `unknown` unless you have a specific reason to defeat checking
   bidirectionally.
 
@@ -276,14 +282,14 @@ fn handle(m: Msg) -> string {
 Such a `match` must cover every variant or include a wildcard `_` arm
 — non-exhaustive `match` is a hard error.
 
-#### Distributive generic instantiation
+#### Variance-aware generic instantiation
 
-Generic type aliases distribute over closed-union arguments. Writing
-`Container<A | B>` is equivalent to `Container<A> | Container<B>` so
-each instantiation independently fixes the type parameter. This is what
-keeps `processCreate: fn("create") -> nil` flowing into a `list<
-ActionContainer<Action>>` element instead of getting rejected by the
-contravariance of the function-parameter slot:
+Invariant and contravariant generic type aliases distribute over closed-union
+arguments. For those parameters, writing `Container<A | B>` is equivalent to
+`Container<A> | Container<B>` so each instantiation independently fixes the
+type parameter. This is what keeps `processCreate: fn("create") -> nil`
+flowing into a `list<ActionContainer<Action>>` element instead of getting
+rejected by the contravariance of the function-parameter slot:
 
 ```harn
 type Action = "create" | "edit"
@@ -293,6 +299,18 @@ type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 `ActionContainer<Action>` resolves to `ActionContainer<"create"> |
 ActionContainer<"edit">`, and a literal-tagged shape on the right flows
 into the matching branch.
+
+Covariant parameters preserve a union argument intact. A producer of `A | B`
+is one producer whose result may be either member, not a union of two producers
+that each promise one member:
+
+```harn
+type Producer<out T> = fn() -> T
+
+fn make_producer(flag: bool) -> Producer<string | int> {
+  return { -> if flag { "ok" } else { 42 } }
+}
+```
 
 ### Intersection types
 

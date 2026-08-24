@@ -12,15 +12,15 @@ import { assert_error_contains } from "std/testing"
 
 type CommandAudit = {execution: list<CommandStepReceipt>}
 
-fn json_runner(text) {
+fn json_runner(text: any) {
   return { _spec, _options -> return command_result_ok(text) }
 }
 
-fn fail_runner(code, stderr) {
+fn fail_runner(code: any, stderr: any) {
   return { _spec, _options -> return command_result_fail(code, stderr, {cwd: "/workspace"}) }
 }
 
-fn no_newline_echo(system: HarnessSystem, text) {
+fn no_newline_echo(system: HarnessSystem, text: any) {
   if system.platform().os == "windows" {
     return ["cmd", "/C", "echo|set /p=" + text]
   }

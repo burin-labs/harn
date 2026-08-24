@@ -41,13 +41,13 @@ pipelines.
 ```harn,check
 import { checkpoint_stage } from "std/checkpoint"
 
-fn fetch_dataset(url) { url }
+fn fetch_dataset(url: string) -> string { return url }
 
-fn clean(data) { data }
+fn clean(data: string) -> string { return data }
 
-fn run_model(cleaned) { cleaned }
+fn run_model(cleaned: string) -> string { return cleaned }
 
-fn upload(result) { result }
+fn upload(result: string) -> string { return result }
 
 pipeline process(harness: Harness) {
   const url = "https://example.com/data.csv"
@@ -110,7 +110,7 @@ retries are never needed on resume.
 ```harn,check
 import { checkpoint_stage_retry } from "std/checkpoint"
 
-fn fetch_with_timeout(url) { url }
+fn fetch_with_timeout(url: string) -> string { return url }
 
 fn main(harness: Harness) {
   const url = "https://example.com/data.csv"

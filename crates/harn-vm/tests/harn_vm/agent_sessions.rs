@@ -41,7 +41,7 @@ fn harn_string(value: &str) -> String {
 #[test]
 fn open_mints_and_is_idempotent() {
     let lines = out(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const a = harness.agent.open()
   const b = harness.agent.open(a)
   harness.stdio.log(a == b)
@@ -54,7 +54,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn inject_then_length_and_snapshot() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.inject(s, {role: "user", content: "hello"})
   harness.agent.inject(s, {role: "assistant", content: "hi"})
@@ -72,7 +72,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn reset_clears_history_preserves_id() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.inject(s, {role: "user", content: "a"})
   harness.agent.inject(s, {role: "user", content: "b"})
@@ -87,7 +87,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_format_contract_is_first_class_and_resettable() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open("tool-contract")
   harness.stdio.log(harness.agent.tool_format(s) == nil)
   harness.agent.claim_tool_format(s, "native")
@@ -108,7 +108,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn agent_loop_rejects_tool_format_switch_on_same_session() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.llm.mock_clear()
   harness.llm.mock_enqueue({text: "first ##DONE##"})
   const s = harness.agent.open("agent-loop-tool-contract")
@@ -136,7 +136,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn fork_is_independent_in_both_directions() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const src = harness.agent.open()
   harness.agent.inject(src, {role: "user", content: "shared"})
   const dst = harness.agent.fork(src)
@@ -163,7 +163,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn fork_carries_tool_format_contract() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const src = harness.agent.open("tool-fork-src")
   harness.agent.claim_tool_format(src, "native")
   const dst = harness.agent.fork(src, "tool-fork-dst")
@@ -180,7 +180,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn fork_at_records_branch_index_and_root_lineage() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const root = harness.agent.open("root")
   harness.agent.inject(root, {role: "user", content: "a"})
   harness.agent.inject(root, {role: "assistant", content: "b"})
@@ -200,7 +200,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn trim_retains_last_n() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.inject(s, {role: "user", content: "a"})
   harness.agent.inject(s, {role: "user", content: "b"})
@@ -220,7 +220,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn trim_clamps_to_available() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.inject(s, {role: "user", content: "only"})
   harness.stdio.log(harness.agent.trim(s, 100))
@@ -232,7 +232,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn close_removes_session() {
     let lines = out(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.close(s)
   harness.stdio.log(harness.agent.exists(s))
@@ -244,7 +244,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn inject_without_role_errors() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.inject(s, {content: "oops"})
 }
@@ -263,7 +263,7 @@ fn operations_on_unknown_session_error() {
         r#"harness.agent.inject("does-not-exist", {role: "user"})"#,
         r#"harness.agent.length("does-not-exist")"#,
     ] {
-        let src = format!("pipeline main(harness: Harness, task) {{ {op} }}");
+        let src = format!("pipeline main(harness: Harness, task: unknown) {{ {op} }}");
         let err = run(&src).unwrap_err();
         assert!(
             err.contains("does-not-exist") || err.to_lowercase().contains("unknown"),
@@ -275,7 +275,7 @@ fn operations_on_unknown_session_error() {
 #[test]
 fn exists_and_snapshot_on_unknown_are_safe() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(harness.agent.exists("nope"))
   const snap = harness.agent.snapshot("nope")
   harness.stdio.log(snap == nil)
@@ -295,7 +295,7 @@ const s = harness.agent.open()
 harness.agent.fork_at(s, -1)
 ",
     ] {
-        let src = format!("pipeline main(harness: Harness, task) {{ {op} }}");
+        let src = format!("pipeline main(harness: Harness, task: unknown) {{ {op} }}");
         let err = run(&src).unwrap_err();
         assert!(
             err.contains("does-not-exist")
@@ -326,7 +326,7 @@ fn lru_eviction_kicks_in_at_cap() {
 #[test]
 fn compact_unknown_key_errors() {
     let err = run(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.compact(s, {bogus: 1})
 }
@@ -338,7 +338,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn open_pins_workspace_anchor_and_surfaces_in_snapshot() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open(
     "anchor-open",
     {
@@ -369,7 +369,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn set_workspace_anchor_replaces_and_clears() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open("anchor-set")
   harness.stdio.log(harness.agent.workspace_anchor(s) == nil)
   const changed = harness.agent.set_workspace_anchor(s, {
@@ -404,7 +404,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn workspace_anchor_round_trips_through_fork() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const src = harness.agent.open("anchor-fork-src", {
     workspace_anchor: {
       primary: "/workspace/main",
@@ -427,7 +427,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn open_rejects_unknown_option_keys() {
     let err = run(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.agent.open(nil, {bogus: 1})
 }
 ")
@@ -438,7 +438,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn workspace_anchor_requires_primary() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.agent.open(nil, {workspace_anchor: {anchored_at: "2026-05-23T00:00:00Z"}})
 }
 "#)
@@ -449,7 +449,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn workspace_anchor_rejects_unknown_mount_mode() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.agent.open(nil, {
     workspace_anchor: {
       primary: "/workspace/main",
@@ -475,7 +475,7 @@ fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
     let mounted_literal = harn_string(&mounted_path);
     let lines = out(&format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const s = harness.agent.open("anchor-roots", {{
     workspace_policy: {{default_mount_mode: "extend"}},
     workspace_anchor: {{
@@ -541,7 +541,7 @@ fn add_root_reports_missing_directory_in_result_envelope() {
     let missing_literal = harn_string(&missing_path);
     let lines = out(&format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const s = harness.agent.open("anchor-roots-missing", {{
     workspace_anchor: {{
       primary: {primary_literal},

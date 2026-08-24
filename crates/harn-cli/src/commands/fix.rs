@@ -9,7 +9,7 @@ use crate::commands::check::collect_preflight_diagnostics_with_module_graph as p
 use crate::package::{self, CheckConfig, PreflightSeverity};
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
-use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
+use harn_parser::analysis::{AnalysisDatabase, AnalysisError, SourceId};
 use harn_parser::{
     visit, DiagnosticCode as Code, DiagnosticDetails, DiagnosticSeverity, Node, Repair,
     RepairSafety, SNode, TypeExpr,
@@ -43,6 +43,8 @@ use repair_synthesis::{
     synthesize_missing_zero_arg_capability_repair,
 };
 
+#[path = "fix/parameter_annotations.rs"]
+mod parameter_annotations;
 #[path = "fix/retired_testing.rs"]
 mod retired_testing;
 #[path = "fix/signature_threading.rs"]
@@ -156,10 +158,21 @@ impl FixOptions {
         }
     }
 
+    fn selects_code(&self, code: Code) -> bool {
+        self.codes.is_empty() || self.codes.contains(&code)
+    }
+
     /// Whether `--code` selected this candidate. An empty selector selects
     /// every code, which is the behavior every caller had before the flag.
     fn selects(&self, candidate: &RepairCandidate) -> bool {
-        self.codes.is_empty() || self.codes.contains(&candidate.code)
+        self.selects_code(candidate.code)
+    }
+
+    fn selects_capability_migration(&self, candidates: &[RepairCandidate]) -> bool {
+        self.codes.is_empty()
+            || candidates.iter().any(|candidate| {
+                self.selects(candidate) && is_capability_migration_repair(&candidate.repair)
+            })
     }
 }
 
@@ -447,7 +460,7 @@ fn build_plan_with_options(
                 candidates.push(candidate);
             }
         }
-        if let Err(skipped) = collect_file_candidates(
+        let collected = collect_file_candidates(
             &mut analysis,
             file,
             safety_ceiling,
@@ -461,7 +474,13 @@ fn build_plan_with_options(
                 manifest_handlers: manifest_host_entries.names_for(file),
                 frozen: &mut frozen_callables,
             },
-        ) {
+        );
+        // Candidate collection is complete for this file. Whole-program
+        // passes retain their own structural projections, so keeping the
+        // database's tokens, AST, and type-check output only multiplies peak
+        // memory on large migration corpora.
+        analysis.remove_source(&SourceId::path(file));
+        if let Err(skipped) = collected {
             if declares_expected_invalid(file) {
                 declared_invalid_files.push(skipped);
             } else {
@@ -489,14 +508,18 @@ fn build_plan_with_options(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let whole_program_repairs = whole_program_capabilities::plan(
-        &valid_files,
-        &module_graph,
-        &candidates,
-        referenced_by_value,
-        &manifest_host_entries,
-        &mut frozen_callables,
-    )?;
+    let whole_program_repairs = if options.selects_capability_migration(&candidates) {
+        whole_program_capabilities::plan(
+            &valid_files,
+            &module_graph,
+            &candidates,
+            referenced_by_value,
+            &manifest_host_entries,
+            &mut frozen_callables,
+        )?
+    } else {
+        Vec::new()
+    };
     if !whole_program_repairs.is_empty() {
         // `--code` narrows what this pass *does*, not what it *saw*: the plan
         // needs every capability diagnostic as context to choose a carrier,
@@ -531,6 +554,22 @@ fn build_plan_with_options(
         });
         candidates.extend(whole_program_repairs);
     }
+
+    let (annotation_repairs, annotation_residue) = if !options.capability_migrations_only
+        && options.selects_code(Code::ImplicitAnyParameter)
+    {
+        parameter_annotations::plan(&valid_files, &module_graph, &mut analysis)
+    } else {
+        (
+            Vec::new(),
+            parameter_annotations::AnnotationResidue::default(),
+        )
+    };
+    candidates.extend(
+        annotation_repairs
+            .into_iter()
+            .filter(|repair| options.selects(repair)),
+    );
 
     if options.capability_migrations_only {
         // This mode is consumed as an executable migration plan. A lint that
@@ -594,6 +633,8 @@ fn build_plan_with_options(
     Ok(RepairPlan {
         schema_version: FIX_PLAN_SCHEMA_VERSION,
         path: target_strings.join(" "),
+        parameter_annotations: (annotation_residue.total() > 0)
+            .then(|| ParameterAnnotationsWire::from(&annotation_residue)),
         diagnostics,
         repairs,
         skipped_files,
@@ -669,6 +710,13 @@ fn collect_file_candidates(
 
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
+            continue;
+        }
+        if diag.code == Code::ImplicitAnyParameter {
+            // The parameter-annotation pass owns this repair. It needs the
+            // whole module graph to infer a type, which a per-file candidate
+            // cannot do — and a second candidate here would plan the same
+            // insertion point twice and conflict with itself.
             continue;
         }
         let unresolved_name = match diag.details.as_ref() {

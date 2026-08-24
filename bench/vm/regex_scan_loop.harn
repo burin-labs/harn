@@ -5,7 +5,7 @@
  * (subject borrowing + the shared compiled-regex cache) without touching the
  * filesystem, so the fixture measures VM/builtin work only.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const lines = [
     "fn parse_config(path: string) -> Config {",
     "    let raw = read_text(path)  // TODO: cache reads",

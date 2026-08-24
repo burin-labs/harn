@@ -10,7 +10,7 @@ fn build_tools() -> dict {
   return registry
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const registry = build_tools()
   harness.stdio.log("--- with default sentinel ---")
   const r1 = agent_loop(

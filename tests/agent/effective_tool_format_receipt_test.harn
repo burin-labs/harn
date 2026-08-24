@@ -5,7 +5,7 @@
 // because capability admission would also accept it.
 import { __agent_loop_project_result } from "std/agent/loop_tool_calls"
 
-pipeline test_transaction_receipt_overrides_stale_text_grammar(harness: Harness, task) {
+pipeline test_transaction_receipt_overrides_stale_text_grammar(harness: Harness, task: unknown) {
   const tools = {
     tools: [
       {

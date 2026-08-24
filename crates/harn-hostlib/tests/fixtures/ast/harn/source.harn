@@ -23,16 +23,16 @@ impl Task {
   }
 }
 
-fn normalize(task) {
+fn normalize(task: dict) {
   return {id: task.id, title: task.title}
 }
 
-pipeline review(harness: Harness, task) {
+pipeline review(harness: Harness, task: dict) {
   const _ = normalize(task)
   return task?.title ?? "untitled"
 }
 
-tool _notify(message) {
+tool _notify(message: string) {
   description "Send a notification"
   return {ok: true, message: message}
 }

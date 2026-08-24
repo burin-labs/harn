@@ -1,24 +1,25 @@
 import {
-  agent_await_resumption,
+  __agent_await_resumption_from_tool,
+  __parse_resume_conditions_unchecked,
   agent_lifecycle_tools,
-  parse_resume_conditions,
   resume_agent,
 } from "std/agent/workers"
 
-fn has_code(result, code) {
+fn has_code(result: any, code: string) {
   return is_err(result) && contains(to_string(unwrap_err(result)), code)
 }
 
 pipeline main(harness: Harness) {
+  const invalid_trigger: any = {trigger: "not-a-trigger"}
   const bad_trigger_shape = try {
-    parse_resume_conditions(harness.agent, {trigger: "not-a-trigger"})
+    __parse_resume_conditions_unchecked(harness.agent, invalid_trigger)
   }
   harness.stdio.println(has_code(bad_trigger_shape, "HARN-SUS-002"))
+  const invalid_timeout: any = {timeout: {duration_minutes: 1, on_timeout: "explode"}}
   const bad_timeout_action = try {
-    agent_await_resumption(
+    __agent_await_resumption_from_tool(
       harness.agent,
-      "waiting on review",
-      {timeout: {duration_minutes: 1, on_timeout: "explode"}},
+      {reason: "waiting on review", conditions: invalid_timeout},
     )
   }
   harness.stdio.println(has_code(bad_timeout_action, "HARN-SUS-002"))

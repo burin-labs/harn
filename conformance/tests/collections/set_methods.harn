@@ -1,5 +1,5 @@
 /** Test set method syntax and new operations */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const a = set([1, 2, 3, 4])
   const b = set([3, 4, 5, 6])
   // Basic methods
