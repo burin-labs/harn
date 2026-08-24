@@ -295,18 +295,6 @@ hash_setup_inputs() {
   } | shasum -a 256 | awk '{print $1}'
 }
 
-cargo_setup_fingerprint() {
-  {
-    printf 'cargo-build-harn:v2-wrapper-locked\n'
-    find . \
-      \( -name target -o -name '.target-*' -o -name .codex -o -name .claude -o -name node_modules -o -name .git \) -prune \
-      -o \( -name Cargo.toml -o -name Cargo.lock -o -name build.rs \) -type f -print0 \
-      | sort -z \
-      | xargs -0 shasum -a 256
-    true
-  } | shasum -a 256 | awk '{print $1}'
-}
-
 setup_requirements_ready() {
   local required_path
   for required_path in "$@"; do
@@ -541,21 +529,11 @@ fi
 if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
   cargo_target_root="$(configured_cargo_target_dir)"
   cargo_target_root="${CARGO_TARGET_DIR:-${cargo_target_root:-$ROOT_DIR/target}}"
-  cargo_fp="$(cargo_setup_fingerprint)"
-  harn_binary_suffix=""
-  case "$(uname -s)" in
-    CYGWIN* | MINGW* | MSYS*) harn_binary_suffix=".exe" ;;
-  esac
-  harn_binary_path="${cargo_target_root}/debug/harn${harn_binary_suffix}"
-  cargo_builder=(cargo)
-  if [[ -x ./scripts/cargo_with_worktree_build_dir.sh ]]; then
-    cargo_builder=(./scripts/cargo_with_worktree_build_dir.sh)
-  fi
-  run_setup_step \
-    "Building the canonical Harn CLI" \
-    "${SETUP_STATE_DIR}/cargo-build-harn-${cargo_fp}.stamp" \
-    "executable:${harn_binary_path}" \
-    -- "${cargo_builder[@]}" build --locked -p harn-cli --bin harn
+  # The resolver owns both compilation and the dependency-identity fixed point.
+  # A separate setup build creates two producers for one artifact, releases the
+  # Rust-heavy lease between them, and lets the authoritative freshness build
+  # queue behind unrelated work after setup has already compiled the binary.
+  log "Building and proving the canonical Harn CLI"
   HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
   # Signing mutates the canonical artifact identity, so refresh the receipt
   # only after the final bytes are in place and before publishing a target seed.
