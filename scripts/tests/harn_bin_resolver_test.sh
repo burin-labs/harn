@@ -558,6 +558,87 @@ if [[ "$seen_cargo_authority" != 1 ]]; then
   exit 1
 fi
 
+# The Git configuration projection must ignore ordinary repository churn and
+# observe every setting that can change the reported source inventory.
+#
+# The regression this replaces: `.git/config` was hashed whole. It is shared by
+# every linked worktree and grows a `[branch ...]` section per tracked branch,
+# so one `git push -u` invalidated the build receipt in every worktree of the
+# repository. It was also blind to `core.excludesFile` in `~/.gitconfig`, which
+# changes the untracked-file inventory just as much.
+projection_repo="$tmp_root/git-config-projection-repo"
+projection_home="$tmp_root/git-config-projection-home"
+mkdir -p "$projection_repo" "$projection_home"
+git -C "$projection_repo" init -q
+printf '' > "$projection_home/gitconfig"
+
+projection_of() {
+  (
+    harn_repo_root() { printf '%s\n' "$projection_repo"; }
+    GIT_CONFIG_GLOBAL="$projection_home/gitconfig" \
+      harn_write_git_inventory_config_projection "$1"
+  )
+}
+
+projection_baseline="$tmp_root/git-config-projection-baseline"
+projection_current="$tmp_root/git-config-projection-current"
+projection_of "$projection_baseline"
+
+assert_projection() {
+  local label="$1" expectation="$2"
+  projection_of "$projection_current"
+  if cmp -s "$projection_baseline" "$projection_current"; then
+    if [[ "$expectation" != "same" ]]; then
+      echo "Git config projection ignored an inventory-relevant change: $label" >&2
+      exit 1
+    fi
+  elif [[ "$expectation" != "changed" ]]; then
+    echo "Git config projection reacted to irrelevant repository churn: $label" >&2
+    diff "$projection_baseline" "$projection_current" >&2 || true
+    exit 1
+  fi
+  cp "$projection_current" "$projection_baseline"
+}
+
+# Churn that cannot change which files Git reports, and must not invalidate a
+# build receipt. Branch tracking is the one that made this urgent.
+git -C "$projection_repo" config branch.topic.remote origin
+assert_projection "branch tracking entry" same
+git -C "$projection_repo" config remote.origin.url https://example.invalid/repo.git
+assert_projection "remote url" same
+git -C "$projection_repo" config user.email someone@example.com
+assert_projection "committer identity" same
+
+# Settings that do change the inventory or what its recorded content means.
+git -C "$projection_repo" config core.excludesFile "$tmp_root/repo-ignore"
+assert_projection "repository core.excludesFile" changed
+git -C "$projection_repo" config core.autocrlf true
+assert_projection "core.autocrlf" changed
+git -C "$projection_repo" config filter.demo.clean cat
+assert_projection "clean filter" changed
+
+# Global scope is the correctness half: hashing the repository file could never
+# see this, so an excludes file swapped in `~/.gitconfig` went unnoticed.
+printf '[core]\n\texcludesFile = %s/global-ignore\n' "$tmp_root" \
+  > "$projection_home/gitconfig"
+assert_projection "global core.excludesFile" changed
+
+# A valueless key and a value containing a newline must not desynchronize the
+# NUL-record parser. BSD awk silently yields nothing for RS="\0", which reads
+# exactly like "no relevant configuration is set", so parsing stays pure Bash.
+git -C "$projection_repo" config filter.demo.smudge "$(printf 'first\nsecond')"
+assert_projection "filter value containing a newline" changed
+if ! grep -q 'filter\.demo\.smudge=first\\nsecond' "$projection_baseline"; then
+  echo "Git config projection did not flatten an embedded newline" >&2
+  cat "$projection_baseline" >&2
+  exit 1
+fi
+if ! grep -q '^core\.excludesfile=' "$projection_baseline"; then
+  echo "Git config projection dropped core.excludesFile entirely" >&2
+  cat "$projection_baseline" >&2
+  exit 1
+fi
+
 # Canonical falsifier: let Cargo build a tiny CLI that embeds tracked and
 # ignored .harn inputs, then use the production resolver and Cargo's real
 # top-level dep-info. The target and source paths contain spaces so the typed

@@ -22,6 +22,10 @@ harn_binary_freshness_manifest_path() {
   printf '%s.freshness.manifest\n' "$1"
 }
 
+harn_binary_git_config_projection_path() {
+  printf '%s.freshness.gitconfig\n' "$1"
+}
+
 harn_cargo_freshness_checker_path() {
   local bin="$1"
   local suffix=""
@@ -94,8 +98,56 @@ harn_write_freshness_authority_path() {
   printf '%s\0' "$projected" >>"$output"
 }
 
+# Project the Git configuration that can change the reported source inventory.
+#
+# `.git/config` is not a sound manifest authority in either direction. It is
+# shared by every linked worktree and grows a `[branch ...]` section per tracked
+# branch, so an ordinary `git push -u` in one worktree invalidates the build
+# receipt in all of them. It is also not sufficient on its own: `core.excludesFile`
+# is exactly as load-bearing when it comes from `~/.gitconfig` or system config,
+# and hashing the repository file cannot see either.
+#
+# Hash the resolved values instead. That is narrower than the file, because
+# branch and remote churn cannot reach it, and wider than the file, because
+# `git config --list` resolves across system, global, local, and worktree scope.
+#
+# The listed keys are the ones that change which paths Git reports or what their
+# recorded content means. `filter.*` is included wholesale because a clean or
+# smudge filter rewrites content on checkout.
+harn_write_git_inventory_config_projection() {
+  local output="$1"
+  local repo_root=""
+
+  repo_root="$(harn_repo_root)" || return $?
+  {
+    printf 'harn-git-inventory-config-v1\n'
+    # One `git config` process: this runs on the unchanged hot path, which has
+    # a p95 budget, so per-key invocations are not affordable.
+    #
+    # Parsing is deliberately pure Bash. `git config --list -z` emits
+    # "key\nvalue" per NUL record, and a value may itself contain newlines, so
+    # records cannot be split on lines. The obvious `awk 'BEGIN{RS="\0"}'`
+    # silently produces nothing under the BSD awk on macOS, which is a failure
+    # mode that looks exactly like "no relevant configuration is set".
+    local record="" key="" value=""
+    while IFS= read -r -d '' record; do
+      key="${record%%$'\n'*}"
+      if [[ "$record" == *$'\n'* ]]; then value="${record#*$'\n'}"; else value=""; fi
+      case "$key" in
+        core.attributesfile | core.autocrlf | core.eol | core.excludesfile \
+          | core.filemode | core.ignorecase | core.precomposeunicode \
+          | core.safecrlf | core.symlinks | core.worktree | filter.*)
+          printf '%s=%s\n' "$key" "${value//$'\n'/\\n}"
+          ;;
+      esac
+    done < <(git -C "$repo_root" config --list -z 2>/dev/null) \
+      | LC_ALL=C sort
+  } >"$output"
+}
+
 harn_write_freshness_authority_list() {
   local output="$1"
+  local config_projection="${2:-}"
   local repo_root=""
   local path=""
   local head_ref=""
@@ -118,12 +170,15 @@ harn_write_freshness_authority_list() {
       fi
     fi
   fi
+  if [[ -n "$config_projection" ]]; then
+    harn_write_git_inventory_config_projection "$config_projection" || return $?
+  fi
   for path in \
     "$repo_root/.cargo" \
     "$repo_root/.cargo/config.toml" \
-    "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" \
+    "$config_projection" \
     "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"; do
-    if [[ -e "$path" ]]; then
+    if [[ -n "$path" && -e "$path" ]]; then
       harn_write_freshness_authority_path "$output" "$path" || return $?
     fi
   done
@@ -429,7 +484,8 @@ harn_record_binary_freshness() (
   authority_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-authorities.XXXXXX")" || return $?
   temporary_manifest="$(mktemp "${manifest}.tmp.XXXXXX")" || return $?
   worktree_hash="$(harn_worktree_content_fingerprint "$target_dir" "$git_covered_list")" || return $?
-  harn_write_freshness_authority_list "$authority_list" || return $?
+  harn_write_freshness_authority_list "$authority_list" \
+    "$(harn_binary_git_config_projection_path "$bin")" || return $?
   artifact_evidence="$(harn_collect_artifact_freshness_evidence \
     "$bin" "$git_covered_list" "$authority_list" "$temporary_manifest")" || return $?
   embedded_build_freshness="$(printf '%s\n' "$artifact_evidence" | sed -n '2s/^build-freshness=//p')"
@@ -489,6 +545,12 @@ harn_require_binary_freshness_receipt() (
     harn_print_binary_freshness_recovery
     return 1
   fi
+  # Regenerate the Git configuration projection before verifying. The manifest
+  # records its content hash, and the checker re-reads it like any other input,
+  # so leaving the producer's copy in place would compare that copy against
+  # itself and never observe a configuration change.
+  harn_write_git_inventory_config_projection \
+    "$(harn_binary_git_config_projection_path "$bin")" || return $?
   # One small typed process owns the unchanged hot path: it binds its own
   # signed artifact and the Harn executable to the receipt, then content-hashes
   # the versioned manifest's source inputs in bounded native batches. Platform
