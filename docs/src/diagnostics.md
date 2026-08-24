@@ -38,7 +38,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`TYP`](#typ--type-checker) | Type checker | 27 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
-| [`CAP`](#cap--capabilities) | Capabilities | 9 |
+| [`CAP`](#cap--capabilities) | Capabilities | 10 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
@@ -136,6 +136,7 @@ A host capability call (file I/O, network, HITL approval, tool host, etc.) faile
 | [`HARN-CAP-005`](#harn-cap-005) | host capability operation is not declared | — | — |
 | [`HARN-CAP-006`](#harn-cap-006) | host capability call must use a static operation name | — | — |
 | [`HARN-CAP-007`](#harn-cap-007) | tool host capability binding is invalid | `manual/review-capability-binding` | `needs-human` |
+| [`HARN-CAP-008`](#harn-cap-008) | declared host capability operation is not served | — | — |
 | [`HARN-CAP-201`](#harn-cap-201) | harness capability denied by active sandbox profile | — | — |
 | [`HARN-CAP-301`](#harn-cap-301) | child agent effect set exceeds the parent's declared effects | `policy/narrow-child-effects` | `surface-changing` |
 
@@ -1104,6 +1105,19 @@ tool host capability binding is invalid
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
+
+### `HARN-CAP-008`
+
+**Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
+
+declared host capability operation is not served
+
+Harn found a declared host operation that the target host does not serve.
+`harn check` reads the file named by `host_served_capabilities_path`. ACP checks
+the operations advertised by the connected host when a prompt starts.
+
+Add the operation to the host, remove the declaration, or list its exact name
+in `runtime_installed_host_operations` if its handler is added at runtime.
 
 ### `HARN-CAP-201`
 

@@ -264,3 +264,9 @@ Hosts should be prepared to answer these methods:
 If a host does not support a capability, return an empty capability response or
 the relevant JSON-RPC error. Harn times host callbacks out so an unresponsive
 host cannot block a prompt forever.
+
+Harn reads `host/capabilities` once when a prompt starts. If `harn.toml`
+declares host operations, Harn compares them with that response and sends a
+`HARN-CAP-008` log for each missing operation. Set
+`[check].require_declared_operations_served = true` to fail the prompt before
+the script runs. Exact names in `runtime_installed_host_operations` are exempt.

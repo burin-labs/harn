@@ -17,9 +17,15 @@ use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
 use super::{
-    async_builtin_cancel_token, audited_utc_now_rfc3339, optional_i64, optional_string,
-    optional_string_dict, optional_string_list, require_param,
+    audited_utc_now_rfc3339, optional_i64, optional_string, optional_string_dict,
+    optional_string_list, require_param,
 };
+
+pub(super) fn async_builtin_cancel_token(
+    ctx: Option<&AsyncBuiltinCtx>,
+) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
+}
 
 /// Apply the command-policy preflight (deny-patterns, approval gating,
 /// sandbox decisions) and then spawn the process non-blocking. Mirrors
@@ -65,6 +71,10 @@ pub(super) async fn dispatch_process_exec_after_policy(
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
+    // Workspace effects govern mutation and approval, not host resource cost.
+    // Read-only compilers and formatters still contend for the same process,
+    // CPU, and toolchain lanes as writers, so every spawned command participates.
+    let _process_admission = super::process_admission::acquire_process_admission(ctx).await?;
     let (tape_program, tape_args) = process_exec_argv(params)?;
     let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
     let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");

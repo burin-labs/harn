@@ -42,7 +42,7 @@ pub fn parse_diagnose_output(text: string) -> dict {
   let samples = []
   let failures = []
   const pattern =
-    r"(?m)^\[harn test diag\] (ok|FAIL) (.+) setup=(\d+)ms compile=(\d+)ms execute=(\d+)ms teardown=(\d+)ms(?: [^\n]*)? total=(\d+)ms$"
+    r"(?m)^\[harn test diag\] (ok|FAIL) (.+) setup=(\d+)ms compile=(\d+)ms(?: admission=\d+ms)? execute=(\d+)ms teardown=(\d+)ms(?: [^\n]*)? total=(\d+)ms$"
   for capture in regex_captures(pattern, text) {
     const groups = capture.groups
     const sample = {

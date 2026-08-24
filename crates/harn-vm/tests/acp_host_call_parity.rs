@@ -104,7 +104,7 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
                     sessions share that registry through canonical dispatch.",
     },
     CrossCuttingBehaviour {
-        callee: "async_builtin_cancel_token",
+        callee: "process_exec::async_builtin_cancel_token",
         owner: SemanticsOwner::Runtime,
         acp_observes: true,
         tracked_by: None,
