@@ -1,6 +1,9 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { agent_tool_format_resolution } from "std/agent/options"
+import {
+  agent_tool_format_override_warning_text,
+  agent_tool_format_resolution,
+} from "std/agent/options"
 import { agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 
@@ -215,4 +218,39 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(with_reason_events[0].metadata?.recommended_format)
   harness.stdio.println(with_reason_events[0].metadata?.catalog_parity)
   harness.stdio.println(with_reason_events[0].metadata?.override_reason)
+  // The emitted event carries what was actually applied, not just what was
+  // asked for. Asserted as presence and type rather than a fixed value so this
+  // does not encode a particular route's steering decision.
+  harness.stdio.println(missing_reason_events[0].metadata?.applied_format != nil)
+  harness.stdio.println(type_of(missing_reason_events[0].metadata?.steered))
+  // Both arms of the warning renderer the agent loop now writes to stderr.
+  // Steered: the recommendation won, and the line says so rather than
+  // reporting the request as if it had been honored.
+  harness.stdio.println(
+    agent_tool_format_override_warning_text(
+      {
+        provider: "testcatalog",
+        model: "native-unreliable-route",
+        requested_format: "native",
+        recommended_format: "text",
+        catalog_parity: "native_unreliable",
+        applied_format: "text",
+        steered: true,
+      },
+    ),
+  )
+  // Not steered: the request stands, so the older wording is still correct.
+  harness.stdio.println(
+    agent_tool_format_override_warning_text(
+      {
+        provider: "testcatalog",
+        model: "catalogued-native",
+        requested_format: "text",
+        recommended_format: "native",
+        catalog_parity: "interchangeable",
+        applied_format: "text",
+        steered: false,
+      },
+    ),
+  )
 }

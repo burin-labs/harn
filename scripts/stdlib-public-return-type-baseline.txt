@@ -33,7 +33,7 @@
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
-# count    9  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
+# count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   24  crates/harn-stdlib/src/stdlib/agent/options_public.harn
 # count   49  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/overlays.harn
@@ -404,7 +404,6 @@ crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__explicit_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__fallback_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__has_key
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__profile_defaults
-crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_first_tool_format_override_warning_text
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_override_warning_text
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_resolution

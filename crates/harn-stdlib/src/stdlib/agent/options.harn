@@ -1,7 +1,6 @@
 import { LlmCallerTransport } from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 pub import {
-  agent_first_tool_format_override_warning_text,
   agent_tool_format,
   agent_tool_format_override_warning_text,
   agent_tool_format_resolution,
