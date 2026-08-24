@@ -4,11 +4,11 @@
 //! still receives fresh closures, function registries, module state, and init
 //! execution; only the serialized-to-runtime bytecode conversion is reused.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use harn_modules::DefKind;
 use quick_cache::sync::{Cache, GuardResult};
@@ -182,6 +182,30 @@ pub struct PreparedModuleCacheStats {
 pub struct PreparedModuleCache {
     entries: Arc<PreparedArtifactCache>,
     counters: Arc<PreparedModuleCacheCounters>,
+    /// Imported interfaces already derived for a module's exact bytes.
+    ///
+    /// The interface is part of an entry's key, so it has to be in hand before
+    /// this cache can be asked whether it holds that entry — and deriving one
+    /// lexes and parses the module. That put a full parse of every module in
+    /// front of every lookup, which is most of what this cache exists to
+    /// avoid: a suite that prepares its import graph once then re-derives the
+    /// same interfaces for every VM that imports them.
+    ///
+    /// Keyed by the module's own bytes, so an edited module derives afresh.
+    /// It is scoped to this cache handle rather than the process, and
+    /// [`PreparedModuleCache::prepare_import_graph`] clears it before seeding
+    /// from a freshly walked graph, so a run that re-prepares its graph starts
+    /// from current interfaces rather than a previous generation's.
+    interfaces: Arc<Mutex<HashMap<InterfaceMemoKey, ModuleCompilationContext>>>,
+}
+
+/// One module's bytes under one authority — everything a derived interface is
+/// a function of, apart from its dependencies' bytes.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct InterfaceMemoKey {
+    canonical_path: PathBuf,
+    source_hash: [u8; 32],
+    provenance: ModuleProvenance,
 }
 
 impl Default for PreparedModuleCache {
@@ -208,7 +232,23 @@ impl PreparedModuleCache {
                 lifecycle,
             )),
             counters,
+            interfaces: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn remembered_interface(&self, key: &InterfaceMemoKey) -> Option<ModuleCompilationContext> {
+        self.interfaces
+            .lock()
+            .expect("interface memo lock poisoned")
+            .get(key)
+            .cloned()
+    }
+
+    fn remember_interface(&self, key: InterfaceMemoKey, context: &ModuleCompilationContext) {
+        self.interfaces
+            .lock()
+            .expect("interface memo lock poisoned")
+            .insert(key, context.clone());
     }
 
     pub fn stats(&self) -> PreparedModuleCacheStats {
@@ -251,6 +291,13 @@ impl PreparedModuleCache {
             return ModulePhaseStats::default();
         }
 
+        // This walk reads every reachable file, so the interfaces it derives
+        // supersede anything remembered from an earlier generation of the same
+        // tree.
+        self.interfaces
+            .lock()
+            .expect("interface memo lock poisoned")
+            .clear();
         let graph = harn_modules::build(roots);
         let root_paths = roots
             .iter()
@@ -416,9 +463,25 @@ impl PreparedModuleCache {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
             source.sha256()
         };
+        let memo_key = InterfaceMemoKey {
+            canonical_path: canonical_path.to_path_buf(),
+            source_hash,
+            provenance,
+        };
         let compilation_context = match compilation_context {
-            Some(context) => context.clone(),
-            None => module_compilation_context_for_source(source_path, source.as_str())?,
+            Some(context) => {
+                self.remember_interface(memo_key, context);
+                context.clone()
+            }
+            None => match self.remembered_interface(&memo_key) {
+                Some(context) => context,
+                None => {
+                    let context =
+                        module_compilation_context_for_source(source_path, source.as_str())?;
+                    self.remember_interface(memo_key, &context);
+                    context
+                }
+            },
         };
         let key = PreparedModuleCacheKey::with_context(
             canonical_path.to_path_buf(),

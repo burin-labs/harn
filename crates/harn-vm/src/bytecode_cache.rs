@@ -284,6 +284,36 @@ impl CacheKey {
         }
     }
 
+    /// Identity for an embedded stdlib module artifact, derived without
+    /// parsing the module.
+    ///
+    /// Every input to a stdlib module's imported interface is already part of
+    /// this key. Its own bytes arrive as `content_hash`, and the rest of the
+    /// closure it can import is the embedded stdlib table, whose
+    /// [`embedded_stdlib_digest`] is folded into the context hash for every
+    /// module key. The interface digest therefore adds no discriminating
+    /// power here, while deriving it costs a full lex and parse in front of
+    /// the lookup that exists to avoid one.
+    ///
+    /// User files keep the real interface digest: their dependencies are
+    /// mutable files on disk that no other field of the key can see, which is
+    /// the aliasing this field was added to prevent.
+    pub fn from_embedded_stdlib_module_content_hash(
+        content_hash: [u8; 32],
+        provenance: ModuleProvenance,
+    ) -> Self {
+        Self {
+            source_hash: content_hash,
+            context_hash: module_compilation_context_hash_fingerprinted(
+                CODEGEN_FINGERPRINT,
+                EMBEDDED_STDLIB_INTERFACE_DIGEST,
+            ),
+            harn_version: Cow::Borrowed(HARN_VERSION),
+            compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+            provenance,
+        }
+    }
+
     /// Entry-chunk filename for this key. We hash by source content
     /// alone so two invocations of the same source from different paths
     /// share a cache entry; the header's compilation-context hash still gates
@@ -1123,6 +1153,16 @@ fn embedded_stdlib_digest() -> &'static [u8; 32] {
 fn module_compilation_context_hash(compilation_context: &ModuleCompilationContext) -> [u8; 32] {
     module_compilation_context_hash_fingerprinted(CODEGEN_FINGERPRINT, compilation_context.digest())
 }
+
+/// Stands in for the imported-interface digest of an embedded stdlib module.
+///
+/// See [`CacheKey::from_embedded_stdlib_module_content_hash`] for why these
+/// modules need no interface digest. It is a fixed domain separator rather
+/// than a real digest so that a stdlib artifact can never land on the same
+/// identity as a user module that happens to share its bytes:
+/// [`ModuleCompilationContext::digest`] is a SHA-256 over the interface, and
+/// reproducing this value would take a preimage.
+const EMBEDDED_STDLIB_INTERFACE_DIGEST: [u8; 32] = *b"harn.embedded-stdlib.interface\0\0";
 
 fn module_compilation_context_hash_fingerprinted(
     codegen_fingerprint: &str,

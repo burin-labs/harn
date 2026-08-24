@@ -631,6 +631,60 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
 }
 
 #[test]
+fn warm_stdlib_disk_hit_resolves_no_imported_interface() {
+    // The regression this pins: deriving a stdlib module's cache identity used
+    // to require resolving its imported interface, which lexes and parses the
+    // module. That ran ahead of the lookup, so every warm process re-parsed the
+    // whole stdlib closure to compute the key for artifacts it then loaded from
+    // disk without parsing anything.
+    let _guard = cache_test_guard();
+    let cache = tempfile::tempdir().expect("temp cache dir");
+    let previous = std::env::var_os(crate::bytecode_cache::CACHE_DIR_ENV);
+    std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, cache.path());
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let load_once = || {
+        reset_stdlib_module_artifact_cache();
+        runtime.block_on(async {
+            Vm::new()
+                .load_module_exports_from_import("std/agent/prompts")
+                .await
+                .expect("stdlib import succeeds");
+        });
+    };
+    let resolutions_during = |load: &dyn Fn()| {
+        let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
+        load();
+        crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get) - before
+    };
+
+    // Cold: nothing is on disk yet, so the compile needs the interface. This
+    // arm is the counter's positive control — without it a seam that never
+    // increments would pass the warm assertion vacuously.
+    let cold = resolutions_during(&load_once);
+    assert!(
+        cold > 0,
+        "a cold stdlib load must resolve the interface it compiles against"
+    );
+
+    // Warm: same sources, same key, artifacts now on disk. Resetting the
+    // in-process artifact cache forces the lookup to go back to disk.
+    let warm = resolutions_during(&load_once);
+    assert_eq!(
+        warm, 0,
+        "a warm stdlib load must not parse the modules it loads from disk"
+    );
+
+    match previous {
+        Some(value) => std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, value),
+        None => std::env::remove_var(crate::bytecode_cache::CACHE_DIR_ENV),
+    }
+}
+
+#[test]
 fn stdlib_artifact_cache_singleflights_concurrent_exact_key() {
     const WORKERS: usize = 8;
 
