@@ -41,7 +41,7 @@ describe("documentation content contract", () => {
   })
 
   it("keeps the row label visible while wide comparison tables scroll", () => {
-    const featureMatrix = docs.pages.get("feature-matrix")
+    const featureMatrix = docs.pages.get("how-harn-compares")
     const precedence = docs.pages.get("spec/language/03-operator-precedence-table")
     expect(featureMatrix).toBeDefined()
     expect(precedence).toBeDefined()
@@ -52,7 +52,7 @@ describe("documentation content contract", () => {
 })
 
 describe("comparison matrix", () => {
-  const page = () => docs.pages.get("feature-matrix")!
+  const page = () => docs.pages.get("how-harn-compares")!
 
   it("expands the directive into a real Markdown table, not a literal", () => {
     expect(page().markdownSource).not.toContain("{{#comparison-matrix}}")
@@ -77,7 +77,7 @@ describe("comparison matrix", () => {
     for (const cap of CAPABILITIES) {
       expect(
         page().headings.some((h) => h.id === cap.id),
-        `capability "${cap.id}" has no matching heading in feature-matrix.md`,
+        `capability "${cap.id}" has no matching heading in how-harn-compares.md`,
       ).toBe(true)
     }
   })
@@ -131,6 +131,21 @@ describe("comparison matrix", () => {
       expect(cap.plan!.issue, `${cap.id} plan issue`).toBeGreaterThan(0)
       expect(block, `${cap.id} plan is not rendered`).toContain(cap.plan!.note)
       expect(block, `${cap.id} plan has no issue link`).toContain(`/issues/${cap.plan!.issue}`)
+    }
+  })
+
+  it("points every mapped system at its vocabulary section", () => {
+    // loadAllDocs already rejects a dangling anchor, so a renamed heading on
+    // sota-comparison.md fails the build. This guards the other direction:
+    // that the block is emitted at all, and that it names every mapped system.
+    const mapped = SYSTEMS.filter((s) => s.comingFrom)
+    expect(mapped.length).toBeGreaterThan(0)
+    const block = page().markdownSource.split("**Already using one of these?**")[1]
+    expect(block, "the generated cross-link block is missing").toBeDefined()
+    for (const system of mapped) {
+      expect(block, `${system.id} has no vocabulary link`).toContain(
+        `sota-comparison.md#${system.comingFrom}`,
+      )
     }
   })
 })

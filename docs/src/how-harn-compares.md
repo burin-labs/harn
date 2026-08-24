@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD013 -->
 
-# Feature matrix
+# How Harn compares
 
 This page is for a developer who runs agents on another system and is deciding
 whether to move them to Harn. Each row asks where a primitive lives and what the
@@ -216,6 +216,11 @@ Harn is pre-1.0, and surface-level breaking changes are possible between minor
 and patch releases. Temporal has years of at-scale production operation behind
 it. If you're putting revenue-critical work on an orchestrator this quarter,
 that difference is the whole decision.
+
+For a side project, an internal tool, or an experimental alpha, that same
+difference costs you very little. If that's the work you have, Harn is worth a
+try, and the rough edges you hit are the most useful thing you can send back:
+[open an issue](https://github.com/burin-labs/harn/issues/new).
 
 See the [changelog](https://github.com/burin-labs/harn/blob/main/CHANGELOG.md).
 

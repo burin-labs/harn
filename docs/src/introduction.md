@@ -55,7 +55,7 @@ shows the same task as a model call, an agent loop, and a workflow.
   Python and Harn.
 - [Coming from elsewhere](./concepts/sota-comparison.md) maps Harn terms to
   other agent tools and protocols.
-- The [feature matrix](./feature-matrix.md) compares runtime guarantees across
+- The [feature matrix](./how-harn-compares.md) compares runtime guarantees across
   Harn, Inngest, Temporal, LangGraph, and Cursor Automations.
 - The [mental model](./concepts/mental-model.md) shows how Harn's parts fit.
 - [Common tasks](./common-tasks.md) starts from a goal you want to complete.

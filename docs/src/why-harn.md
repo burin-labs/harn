@@ -24,7 +24,7 @@ Harn puts agent orchestration primitives in the language instead of leaving
 them to framework glue.
 
 For a capability-by-capability comparison with Inngest, Temporal, LangGraph,
-and Cursor Automations, see the [feature matrix](feature-matrix.md).
+and Cursor Automations, see the [capability comparison](how-harn-compares.md).
 
 In practice, Harn is the orchestration boundary between product code and
 provider/runtime code. Product integrations declare workflows, policies,

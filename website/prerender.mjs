@@ -229,6 +229,11 @@ export async function prerenderSite() {
     "docs/typed-tools.html": "/llm/tools.html",
     "providers.html": "/llm/providers.html",
     "docs/providers.html": "/llm/providers.html",
+    // "Feature matrix" named the artefact rather than the question a reader
+    // arrives with. Renamed to how-harn-compares; the old URL is already linked
+    // from outside the repository.
+    "feature-matrix.html": "/how-harn-compares.html",
+    "docs/feature-matrix.html": "/how-harn-compares.html",
   }
   for (const [from, to] of Object.entries(REDIRECTS)) {
     writeFile(

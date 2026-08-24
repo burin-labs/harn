@@ -160,16 +160,21 @@ function descriptionFromHtml(html: string, fallback: string): string {
 }
 
 // Maps SUMMARY.md parts (the `# Heading` groups) to the top-level section tabs.
-// Mirrors docs/theme/harn-docs-nav.js, plus a Migrations tab so that part — which
-// the old nav left orphaned — is reachable.
+//
+// "Internals" rather than the Diataxis label "Explanation": that part holds
+// architecture, protocol contributions, and ADRs, so it explains how Harn is
+// built rather than teaching a reader the concepts they need to use it. The
+// concept material has its own part, folded into Introduction.
+//
+// Migrations has no tab. Version-upgrade instructions are how-to material, and
+// they sit under How-to guides rather than claiming a seventh tab of their own.
 const SECTION_TABS: { id: string; title: string; parts: string[] }[] = [
   { id: "introduction", title: "Introduction", parts: ["Introduction", "Concepts"] },
   { id: "tutorials", title: "Tutorials", parts: ["Tutorials"] },
   { id: "guides", title: "Guides", parts: ["How-to guides"] },
   { id: "reference", title: "Reference", parts: ["Reference"] },
-  { id: "explanation", title: "Explanation", parts: ["Explanation"] },
-  { id: "operations", title: "Operations", parts: ["Operations"] },
-  { id: "migrations", title: "Migrations", parts: ["Migrations"] },
+  { id: "explanation", title: "Internals", parts: ["Internals"] },
+  { id: "operations", title: "Operating Harn", parts: ["Operating Harn"] },
 ]
 
 // ---------------------------------------------------------------------------
@@ -420,7 +425,28 @@ function resolveComparisonMatrix(raw: string): string {
       ].join("\n")
     : ""
 
-  return raw.replace(COMPARISON_MATRIX_RE, `<!--${COMPARISON_MARKER}-->\n\n${table}\n${plans}`)
+  // Systems whose vocabulary is mapped onto Harn's. These are the closest thing
+  // to a migration path, so the reader who has just decided the table is in
+  // their favour has somewhere to go next. Anchors are validated downstream:
+  // a renamed heading on that page fails the build rather than rotting here.
+  const mapped = SYSTEMS.filter((s) => s.comingFrom)
+  const coming = mapped.length
+    ? [
+        "",
+        "**Already using one of these?** These systems have a term-by-term map",
+        "onto Harn's vocabulary, which is the shortest way to read your own",
+        "workflow in Harn's terms.",
+        "",
+        ...mapped.map(
+          (s) => `- [Coming from ${s.name}](./concepts/sota-comparison.md#${s.comingFrom})`,
+        ),
+      ].join("\n")
+    : ""
+
+  return raw.replace(
+    COMPARISON_MATRIX_RE,
+    `<!--${COMPARISON_MARKER}-->\n\n${table}\n${plans}\n${coming}`,
+  )
 }
 
 /**

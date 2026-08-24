@@ -454,6 +454,19 @@ body {
   overflow-x: auto;
   margin-bottom: 1.25rem;
 }
+
+/* Terminal output wraps; source code does not.
+   Indentation and alignment carry meaning in a program, so a wrapped code line
+   reads as a different program and scrolling is the right trade. A pasted
+   command result has no such structure, and a reader who has to drag a
+   scrollbar to see the end of a sentence is being asked to work for nothing.
+   Of the 145 ```text blocks in docs/src, 36 overflow a normal column and 2 are
+   drawn diagrams; `pre-wrap` keeps every authored newline, so only the
+   overflow is affected. */
+.prose pre code.language-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .prose .table-scroll-wide table {
   min-width: 42rem;
 }
@@ -461,8 +474,39 @@ body {
 .prose .table-scroll-wide td:first-child {
   position: sticky;
   left: 0;
-  min-width: 10rem;
-  box-shadow: 1px 0 0 var(--color-border);
+  /* Narrow enough to leave room for comparison columns, wide enough that a
+     two-word label does not wrap to three lines. The label column already
+     wraps; capping it is what buys the density. */
+  min-width: 8.5rem;
+  max-width: 14rem;
+  /* The column behaves as an anchor while the rest scrolls, so it is drawn as
+     one: a heavier edge than an ordinary cell border, plus a short shadow that
+     reads as the scrolled content passing underneath. */
+  box-shadow:
+    1px 0 0 var(--color-border),
+    4px 0 6px -4px rgb(0 0 0 / 18%);
+}
+.prose .table-scroll-wide th {
+  /* Header cells wrap on words rather than mid-token, so a name like
+     "Inngest / AgentKit" breaks at the slash instead of splitting a word. */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+}
+/* Keep the scrollbar visible rather than letting the platform fade it out.
+   A table that can scroll but shows no affordance reads as one that is cut
+   off, which is the opposite of the intended message. */
+.prose .table-scroll-wide {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+.prose .table-scroll-wide::-webkit-scrollbar {
+  height: 0.5rem;
+}
+.prose .table-scroll-wide::-webkit-scrollbar-thumb {
+  border-radius: 0.25rem;
+  background-color: var(--color-border);
 }
 .prose .table-scroll-wide th:first-child {
   z-index: 2;
@@ -959,6 +1003,10 @@ body {
    it carries `hidden` until that hook runs, so a reader without JavaScript
    sees the complete table and no dead controls. */
 .cmp-legend {
+  /* Match the measure the prose above it wraps at. Without this the picker is
+     a full-width block sitting under a narrower paragraph, and the page reads
+     as though it has two different right margins. */
+  max-width: var(--prose-measure);
   margin: 1.5rem 0 0.75rem;
   padding: 0.875rem 1rem;
   border: 1px solid var(--color-border);
@@ -999,6 +1047,14 @@ body {
 .prose td[data-rating="yes"] {
   color: var(--color-accent-700);
   font-weight: 500;
+  /* Tints are mixed from existing tokens rather than written as fixed hues, so
+     they follow the theme instead of needing a second dark-mode definition.
+     Kept faint: the word is the signal, the wash only helps the eye group
+     columns while scanning a row. */
+  background-color: color-mix(in oklab, var(--color-accent-600) 8%, transparent);
+}
+.prose td[data-rating="partial"] {
+  background-color: color-mix(in oklab, var(--color-foreground-muted) 7%, transparent);
 }
 .prose td[data-rating="no"] {
   color: var(--color-foreground-muted);

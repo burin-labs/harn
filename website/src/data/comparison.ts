@@ -2,7 +2,7 @@
 // systems.
 //
 // Three surfaces read this file and nothing else: the `{{#comparison-matrix}}`
-// directive that renders the table into `docs/src/feature-matrix.md`, the
+// directive that renders the table into `docs/src/how-harn-compares.md`, the
 // legend that lets a reader pick columns, and the reference list at the foot of
 // that page. Before this file existed the roster of compared systems was kept
 // by hand in all three places and drifted between them.
@@ -28,10 +28,22 @@ export interface System {
    * Rendered on the page so a stale column is visible rather than implied.
    */
   verified: string
+  /**
+   * Anchor of this system's section in `concepts/sota-comparison.md`, where its
+   * vocabulary is mapped onto Harn's.
+   *
+   * That page and this table are not the same artifact and neither contains the
+   * other: it maps terminology for systems we never rate (OpenAI, Anthropic,
+   * Mastra, Cloudflare, Strands), and we rate systems it has no section for.
+   * So the roster is not unified here. What is owned here is the pointer, and
+   * the content plugin rejects a dangling anchor, which makes a renamed heading
+   * on that page a build failure rather than a dead link.
+   */
+  comingFrom?: string
 }
 
 export interface Capability {
-  /** Must match the `###` heading slug in feature-matrix.md. */
+  /** Must match the `###` heading slug in how-harn-compares.md. */
   id: string
   /** Row label in the table. */
   label: string
@@ -76,8 +88,9 @@ export const SYSTEMS: System[] = [
     name: "Inngest / AgentKit",
     href: "https://www.inngest.com/ai",
     summary: "Durable steps and flow control for SDK-defined AI workflows.",
-    shownByDefault: true,
+    shownByDefault: false,
     verified: "2026-08",
+    comingFrom: "inngest",
   },
   {
     id: "temporal",
@@ -94,6 +107,7 @@ export const SYSTEMS: System[] = [
     summary: "Graph-structured agent state machines with checkpointing.",
     shownByDefault: true,
     verified: "2026-08",
+    comingFrom: "langgraph",
   },
   {
     id: "baml",
@@ -102,6 +116,7 @@ export const SYSTEMS: System[] = [
     summary: "A language for typed LLM calls that generates clients for your codebase.",
     shownByDefault: true,
     verified: "2026-08",
+    comingFrom: "baml",
   },
   {
     id: "cursor",
@@ -118,6 +133,7 @@ export const SYSTEMS: System[] = [
     summary: "A TypeScript agent framework with a durable event stream.",
     shownByDefault: false,
     verified: "2026-08",
+    comingFrom: "flue",
   },
 ]
 
