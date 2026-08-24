@@ -1104,12 +1104,16 @@ pipeline test_a_sets_store_value(harness: Harness, task) {
   assert_eq(harness.project.metadata_get({dir: ".", namespace: "test"}).value, "from-a")
   harness.runtime.checkpoint("test-only-key", "from-a")
   assert_eq(harness.runtime.checkpoint_get("test-only-key"), "from-a")
+  harness.agent.session_store_append("test-only-session", {case: "from-a"})
+  assert_eq(len(harness.agent.session_store_events("test-only-session")), 1)
 }
 
 pipeline test_b_has_fresh_store(harness: Harness, task) {
   assert_eq(harness.runtime.store_get("test-only-key"), nil)
   assert_eq(harness.project.metadata_get({dir: ".", namespace: "test"}), nil)
   assert_eq(harness.runtime.checkpoint_get("test-only-key"), nil)
+  harness.agent.session_store_append("test-only-session", {case: "from-b"})
+  assert_eq(len(harness.agent.session_store_events("test-only-session")), 1)
 }
 "#,
         );
@@ -1149,6 +1153,10 @@ pipeline test_b_has_fresh_store(harness: Harness, task) {
     assert!(
         !ambient_state.path().join("checkpoints").exists(),
         "user tests must not write checkpoints to the ambient runtime state root"
+    );
+    assert!(
+        !ambient_state.path().join("session-store.sqlite").exists(),
+        "user tests must not write agent sessions to the ambient runtime state root"
     );
 }
 

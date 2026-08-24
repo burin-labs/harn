@@ -384,6 +384,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/persistent_state.rs"
+statics = ["SCOPED_PERSISTENT_STATE_ROOT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/redact/mod.rs"
 statics = ["REDACTION_POLICY_STACK"]
 category = "logical_task"
