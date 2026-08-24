@@ -219,6 +219,14 @@ pub(super) fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> V
         crate::value::intern_key("avoid_as_reviewer_for"),
         string_list_to_vm_value(model.avoid_as_reviewer_for.clone()),
     );
+    dict.insert(
+        crate::value::intern_key("completion_review"),
+        model
+            .completion_review
+            .as_ref()
+            .map(completion_review_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
     dict.put_str("availability", model.availability.as_str());
     dict.put_str("tier", llm_config::model_tier(id));
     dict.insert(
@@ -276,5 +284,19 @@ fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
+    VmValue::dict(dict)
+}
+
+fn completion_review_to_vm_value(review: &llm_config::CompletionReviewDef) -> VmValue {
+    let mut dict = crate::value::DictMap::new();
+    dict.put_str("scrutiny", review.scrutiny.as_str());
+    dict.insert(
+        crate::value::intern_key("max_judge_calls"),
+        review
+            .max_judge_calls
+            .map(|cap| VmValue::Int(i64::from(cap)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.put_str("evidence", review.evidence.as_str());
     VmValue::dict(dict)
 }

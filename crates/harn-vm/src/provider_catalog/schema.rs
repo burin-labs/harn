@@ -247,6 +247,7 @@ pub fn schema_value() -> Value {
                     "lineage": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
                     "complementary_with": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}},
                     "avoid_as_reviewer_for": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "completion_review": {"$ref": "#/$defs/completion_review"},
                     "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
                     "open_weight": {"type": "boolean"},
                     "strengths": {"type": "array", "items": {"type": "string"}},
@@ -258,6 +259,20 @@ pub fn schema_value() -> Value {
                     "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                     "row_kind": {"enum": ["snapshot", "selector"]},
                     "current_snapshot": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "completion_review": {
+                "type": "object",
+                "required": ["evidence"],
+                "properties": {
+                    "scrutiny": {"enum": ["standard", "light"]},
+                    // Minimum 1, not 0. Downstream, a cap of 0 or less means
+                    // "no cap" and grants unbounded judge calls — the exact
+                    // opposite of what a catalog row asking for a lower cap
+                    // intends, and the opposite of what the docs promise.
+                    "max_judge_calls": {"type": "integer", "minimum": 1},
+                    "evidence": {"type": "string", "minLength": 1}
                 },
                 "additionalProperties": false
             },

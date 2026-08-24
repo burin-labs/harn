@@ -507,6 +507,7 @@ preferred_tool_format = "native"
                     lineage: None,
                     complementary_with: Vec::new(),
                     avoid_as_reviewer_for: Vec::new(),
+                    completion_review: None,
                     released: None,
                     row_kind: None,
                     current_snapshot: None,

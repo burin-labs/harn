@@ -373,6 +373,73 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    {
+        let mut scrutiny_by_group: BTreeMap<&str, BTreeMap<&str, BTreeSet<&str>>> = BTreeMap::new();
+        for model in &artifact.models {
+            if let Some(review) = &model.completion_review {
+                if review.evidence.trim().is_empty() {
+                    result.errors.push(format!(
+                        "model {} completion_review.evidence must be a non-empty measurement pointer",
+                        model.id
+                    ));
+                }
+                if !matches!(review.scrutiny.as_str(), "standard" | "light") {
+                    result.errors.push(format!(
+                        "model {} completion_review.scrutiny must be standard or light, got {}",
+                        model.id, review.scrutiny
+                    ));
+                }
+                // A cap of zero reads downstream as "no cap", so a row asking
+                // for less scrutiny would silently grant unlimited judge calls.
+                if review.max_judge_calls == Some(0) {
+                    result.errors.push(format!(
+                        "model {} completion_review.max_judge_calls must be at least 1; \
+                         0 disables the cap instead of lowering it",
+                        model.id
+                    ));
+                }
+            }
+            if model.deprecation.status == DeprecationStatus::Deprecated {
+                continue;
+            }
+            let Some(group) = model.equivalence_group.as_deref() else {
+                continue;
+            };
+            if group.trim().is_empty() {
+                continue;
+            }
+            let scrutiny = model
+                .completion_review
+                .as_ref()
+                .map(|review| review.scrutiny.as_str())
+                .unwrap_or("standard");
+            scrutiny_by_group
+                .entry(group)
+                .or_default()
+                .entry(scrutiny)
+                .or_default()
+                .insert(model.id.as_str());
+        }
+        for (group, scrutinies) in &scrutiny_by_group {
+            if scrutinies.len() > 1 {
+                let detail = scrutinies
+                    .iter()
+                    .map(|(scrutiny, ids)| {
+                        format!(
+                            "{scrutiny} ({})",
+                            ids.iter().copied().collect::<Vec<_>>().join(", ")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                result.errors.push(format!(
+                    "equivalence_group {group} declares conflicting completion_review.scrutiny \
+                     across its provider rows: {detail}."
+                ));
+            }
+        }
+    }
+
     // GAMING GUARD (L3): within an equivalence_group, a LOCAL-runtime host row
     // must not be decorated with MORE strengths than the least-decorated host in
     // the group. `strengths` feeds the routing layer's "already capable, do not

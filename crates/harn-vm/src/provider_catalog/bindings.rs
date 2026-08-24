@@ -208,6 +208,7 @@ export interface HarnCatalogModel {
   lineage: string
   complementary_with?: string[]
   avoid_as_reviewer_for?: string[]
+  completion_review?: HarnCompletionReview
   tier: "small" | "mid" | "frontier" | "reasoning"
   open_weight?: boolean
   strengths?: string[]
@@ -324,6 +325,12 @@ export interface HarnLocalMemory {
   source_url?: string
   last_verified?: string
   notes?: string
+}
+
+export interface HarnCompletionReview {
+  scrutiny: "standard" | "light"
+  max_judge_calls?: number
+  evidence: string
 }
 
 export interface HarnModelServingTierRequest {
@@ -681,6 +688,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let lineage: String
     public let complementaryWith: [String]
     public let avoidAsReviewerFor: [String]
+    public let completionReview: HarnCompletionReview?
     /// Popular-consensus tier label: "small" | "mid" | "frontier" | "reasoning".
     public let tier: String
     /// True when weights are downloadable / self-hostable; nil when the
@@ -734,6 +742,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case lineage
         case complementaryWith = "complementary_with"
         case avoidAsReviewerFor = "avoid_as_reviewer_for"
+        case completionReview = "completion_review"
         case tier
         case openWeight = "open_weight"
         case strengths
@@ -780,6 +789,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         lineage = try container.decode(String.self, forKey: .lineage)
         complementaryWith = try container.decodeIfPresent([String].self, forKey: .complementaryWith) ?? []
         avoidAsReviewerFor = try container.decodeIfPresent([String].self, forKey: .avoidAsReviewerFor) ?? []
+        completionReview = try container.decodeIfPresent(HarnCompletionReview.self, forKey: .completionReview)
         tier = try container.decode(String.self, forKey: .tier)
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
@@ -1083,6 +1093,25 @@ public struct HarnModelDeprecation: Codable, Sendable, Equatable {
         case status
         case note
         case supersededBy = "superseded_by"
+    }
+}
+
+public struct HarnCompletionReview: Codable, Sendable, Equatable {
+    public let scrutiny: String
+    public let maxJudgeCalls: Int?
+    public let evidence: String
+
+    enum CodingKeys: String, CodingKey {
+        case scrutiny
+        case maxJudgeCalls = "max_judge_calls"
+        case evidence
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        scrutiny = try container.decodeIfPresent(String.self, forKey: .scrutiny) ?? "standard"
+        maxJudgeCalls = try container.decodeIfPresent(Int.self, forKey: .maxJudgeCalls)
+        evidence = try container.decode(String.self, forKey: .evidence)
     }
 }
 

@@ -436,6 +436,90 @@ fn validation_rejects_duplicate_and_dangling_aliases() {
 }
 
 #[test]
+fn live_catalog_has_no_light_completion_review() {
+    let catalog = artifact();
+    let light: Vec<&str> = catalog
+        .models
+        .iter()
+        .filter(|model| {
+            model
+                .completion_review
+                .as_ref()
+                .is_some_and(|review| review.scrutiny == "light")
+        })
+        .map(|model| model.id.as_str())
+        .collect();
+    assert!(
+        light.is_empty(),
+        "no catalog row may ship light completion_review until measured evidence lands: {light:?}"
+    );
+}
+
+#[test]
+fn validation_rejects_conflicting_completion_review_scrutiny() {
+    let mut catalog = artifact();
+    let group = catalog
+        .models
+        .iter()
+        .find(|model| {
+            model.deprecation.status != DeprecationStatus::Deprecated
+                && model
+                    .equivalence_group
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+        .and_then(|model| model.equivalence_group.clone())
+        .expect("catalog has at least one grouped model");
+    let victim = catalog
+        .models
+        .iter_mut()
+        .find(|model| {
+            model.deprecation.status != DeprecationStatus::Deprecated
+                && model.equivalence_group.as_deref() != Some(group.as_str())
+        })
+        .expect("catalog has a second non-deprecated model");
+    victim.equivalence_group = Some(group.clone());
+    victim.completion_review = Some(llm_config::CompletionReviewDef {
+        scrutiny: "light".to_string(),
+        max_judge_calls: None,
+        evidence: "crates/harn-vm/src/provider_catalog/tests.rs".to_string(),
+    });
+    let report = validate_artifact(&catalog);
+    assert!(
+        report.errors.iter().any(|message| {
+            message.contains("conflicting completion_review.scrutiny")
+                && message.contains(group.as_str())
+        }),
+        "expected an equivalence_group scrutiny conflict for {group}, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn validation_rejects_completion_review_without_evidence() {
+    let mut catalog = artifact();
+    let victim = catalog
+        .models
+        .iter_mut()
+        .find(|model| model.deprecation.status != DeprecationStatus::Deprecated)
+        .expect("catalog has an active model");
+    victim.completion_review = Some(llm_config::CompletionReviewDef {
+        scrutiny: "standard".to_string(),
+        max_judge_calls: None,
+        evidence: "   ".to_string(),
+    });
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("completion_review.evidence")),
+        "expected empty evidence to fail validation, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
 fn live_catalog_has_one_tier_per_equivalence_group() {
     // The shipping catalog must not tier the same logical model differently by
     // provider/runtime — that gives identical weights different escalation

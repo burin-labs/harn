@@ -174,6 +174,8 @@ pub struct CatalogModel {
     pub complementary_with: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub avoid_as_reviewer_for: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_review: Option<llm_config::CompletionReviewDef>,
     /// Popular-consensus tier label: "small" | "mid" | "frontier" |
     /// "reasoning". Self-declared on the model row; the rule-based path
     /// is a fallback only.

@@ -79,6 +79,15 @@ agent_loop(harness, task, system, judged_opts)
 stall diagnostics request a completion check from an observed signal instead
 of a fixed prompt.
 
+Provider catalog rows may set `completion_review` to name how much scrutiny
+that model's own terminal output needs. Omit it for `standard` (today's LLM
+confirmation). `light` may skip the verification-slot LLM judge only when the
+deterministic gate already passed and `stop_reason` is `sentinel`. The object
+requires `evidence` pointing at the measurement that justified the row.
+`max_judge_calls` optionally lowers the default verification-judge cap of 5
+unless the session sets `verify_completion_judge.max_invocations`. Equivalence
+groups must share one scrutiny. No shipping row is `light` yet.
+
 Implementation details and trace schemas live in
 [Agent plane ownership](../dev/agent-loops.md#completion-checkpoints).
 
