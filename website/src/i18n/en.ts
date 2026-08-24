@@ -237,7 +237,7 @@ export const en = {
           "The complete language, runtime, standard-library, protocol, and CLI reference.",
       },
       explanation: {
-        kicker: "Explanation",
+        kicker: "Internals",
         title: "Understand the design",
         description:
           "The reasoning behind the host boundary, sandboxing, and Harn's architectural decisions.",

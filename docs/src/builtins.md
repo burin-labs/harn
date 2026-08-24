@@ -1982,7 +1982,10 @@ harness.llm.mock_clear()
 LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
-1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local, llama.cpp)
+1. Built-in defaults for 44 providers, from hosted APIs (Anthropic, OpenAI,
+   Gemini, Bedrock, Azure OpenAI, Vertex) to local servers (Ollama,
+   llama.cpp, MLX, vLLM, TGI). See the
+   [provider capability matrix](./provider-matrix.md).
 2. `HARN_HOST_PROVIDERS_CONFIG` when supplied by an embedding host
 3. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
 4. The nearest project `harn.toml` `[llm]` table

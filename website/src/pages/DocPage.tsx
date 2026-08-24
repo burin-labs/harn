@@ -5,6 +5,8 @@ import type { PageData } from "../../vite-plugins/content"
 import { pageMetaForDoc } from "../lib/metadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
 import { useMermaid } from "../hooks/useMermaid"
+import { useComparisonMatrix } from "../hooks/useComparisonMatrix"
+import { useHeadingAnchors } from "../hooks/useHeadingAnchors"
 import { useMessages } from "../i18n"
 import { plainTitle, RichTitle } from "../components/docs/RichTitle"
 import { SectionTabs } from "../components/docs/SectionTabs"
@@ -21,6 +23,8 @@ export function DocPage({ slug }: { slug: string }) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useMermaid(contentRef, page?.slug ?? null)
+  useComparisonMatrix(contentRef, page?.slug ?? null)
+  useHeadingAnchors(contentRef, page?.slug ?? null)
 
   useEffect(() => {
     document.title = pageMetaForDoc(docMeta).title
@@ -78,7 +82,7 @@ export function DocPage({ slug }: { slug: string }) {
           onClick={() => setSidebarOpen(false)}
         >
           <div
-            className="docs-scroll h-full w-72 max-w-[80vw] overflow-y-auto border-r border-border bg-surface px-4 pt-6 pb-16 lg:sticky lg:top-[6.75rem] lg:h-[calc(100vh-6.75rem)] lg:w-64 lg:border-r-0 lg:bg-transparent lg:px-2"
+            className="docs-scroll h-full w-72 max-w-[80vw] overflow-y-auto border-r border-border bg-surface px-4 pt-6 pb-16 lg:sticky lg:top-[6.75rem] lg:h-[calc(100vh-6.75rem)] lg:w-64 lg:bg-transparent lg:px-2 lg:pr-4"
             onClick={(e) => e.stopPropagation()}
           >
             <SidebarNav section={section} currentSlug={slug} />
@@ -131,7 +135,7 @@ export function DocPage({ slug }: { slug: string }) {
                  so neither needs a card around it. */
               <nav
                 aria-label={t.docs.pagerAria}
-                className="mt-12 flex items-start justify-between gap-8 border-t border-border pt-4 text-sm"
+                className="mt-12 flex items-start justify-between gap-8 border-t border-border pt-6 text-sm"
               >
                 {page.prev ? (
                   <Link
@@ -142,7 +146,7 @@ export function DocPage({ slug }: { slug: string }) {
                     <span aria-hidden="true" className="text-foreground-muted transition-transform group-hover:-translate-x-0.5">
                       &larr;
                     </span>
-                    <span>
+                    <span className="link-underline">
                       <RichTitle text={page.prev.title} />
                     </span>
                   </Link>
@@ -155,7 +159,7 @@ export function DocPage({ slug }: { slug: string }) {
                     aria-label={`${t.docs.next}: ${plainTitle(page.next.title)}`}
                     className="group inline-flex max-w-[46%] items-baseline gap-1.5 text-right text-foreground-secondary transition-colors hover:text-accent-700 dark:hover:text-accent-300"
                   >
-                    <span>
+                    <span className="link-underline">
                       <RichTitle text={page.next.title} />
                     </span>
                     <span aria-hidden="true" className="text-foreground-muted transition-transform group-hover:translate-x-0.5">
@@ -166,7 +170,7 @@ export function DocPage({ slug }: { slug: string }) {
               </nav>
             )}
 
-            <div className="mt-10 border-t border-border pt-6 text-sm">
+            <div className="mt-6 border-t border-border pt-6 text-sm">
               <a
                 href={docMeta.editUrl}
                 target="_blank"

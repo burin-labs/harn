@@ -55,7 +55,7 @@ shows the same task as a model call, an agent loop, and a workflow.
   Python and Harn.
 - [Coming from elsewhere](./concepts/sota-comparison.md) maps Harn terms to
   other agent tools and protocols.
-- The [feature matrix](./feature-matrix.md) compares runtime guarantees across
+- The [feature matrix](./how-harn-compares.md) compares runtime guarantees across
   Harn, Inngest, Temporal, LangGraph, and Cursor Automations.
 - The [mental model](./concepts/mental-model.md) shows how Harn's parts fit.
 - [Common tasks](./common-tasks.md) starts from a goal you want to complete.
@@ -97,8 +97,8 @@ policy. [The host boundary](./host-boundary.md) explains the full split.
   <dd>MIT or Apache-2.0, at your option</dd>
   <dt>Maturity</dt>
   <dd>
-    Pre-1.0. Surface-level breaking changes are possible between minor
-    releases. See the
+    Pre-1.0. Surface-level breaking changes are possible between minor and
+    patch releases. See the
     <a href="https://github.com/burin-labs/harn/blob/main/CHANGELOG.md">changelog</a>.
   </dd>
 </dl>

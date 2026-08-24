@@ -11,6 +11,11 @@ import {
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
 import {
+  HEADING_ANCHOR_CLASS,
+  HEADING_LINKED_CLASS,
+} from "../src/lib/heading-markup.ts"
+import { SYSTEMS, CAPABILITIES, RATINGS } from "../src/data/comparison.ts"
+import {
   DIAGNOSTIC_DETAIL_CLASS,
   DIAGNOSTIC_FIGURE_CLASS,
   DIAGNOSTIC_REPAIR_CLASS,
@@ -40,13 +45,112 @@ describe("documentation content contract", () => {
   })
 
   it("keeps the row label visible while wide comparison tables scroll", () => {
-    const featureMatrix = docs.pages.get("feature-matrix")
+    const featureMatrix = docs.pages.get("how-harn-compares")
     const precedence = docs.pages.get("spec/language/03-operator-precedence-table")
     expect(featureMatrix).toBeDefined()
     expect(precedence).toBeDefined()
     expect(featureMatrix!.html).toContain('class="table-scroll table-scroll-wide"')
     expect(precedence!.html).toContain('class="table-scroll"')
     expect(precedence!.html).not.toContain("table-scroll-wide")
+  })
+})
+
+describe("comparison matrix", () => {
+  const page = () => docs.pages.get("how-harn-compares")!
+
+  it("expands the directive into a real Markdown table, not a literal", () => {
+    expect(page().markdownSource).not.toContain("{{#comparison-matrix}}")
+    // The agent projection has to be a Markdown table, not raw HTML: it is what
+    // an LLM reads and what the search index is built from.
+    for (const system of SYSTEMS) {
+      expect(page().markdownSource).toContain(`| ${system.name} |`)
+    }
+  })
+
+  it("ships every column in the HTML so the picker is only an enhancement", () => {
+    // A reader with JavaScript off, and the prerendered page a crawler sees,
+    // must get the whole comparison — the hook narrows it, it does not build it.
+    for (const system of SYSTEMS) {
+      expect(page().html, system.id).toContain(`data-system="${system.id}"`)
+    }
+  })
+
+  it("anchors every row at a heading that exists on the page", () => {
+    // The row label links to `#<capability id>`. If a heading is renamed
+    // without renaming the id, the link dies silently — this is that guard.
+    for (const cap of CAPABILITIES) {
+      expect(
+        page().headings.some((h) => h.id === cap.id),
+        `capability "${cap.id}" has no matching heading in how-harn-compares.md`,
+      ).toBe(true)
+    }
+  })
+
+  it("rates every system on every capability", () => {
+    for (const cap of CAPABILITIES) {
+      for (const system of SYSTEMS) {
+        expect(RATINGS[cap.id]?.[system.id], `${cap.id} × ${system.id}`).toBeDefined()
+      }
+    }
+  })
+
+  it("keeps rows Harn does not win, and labels exactly those", () => {
+    // A comparison published by Harn in which Harn wins every row is an
+    // advertisement. Guard the property, not the current row count.
+    const harnLoses = CAPABILITIES.filter((c) => RATINGS[c.id]?.harn?.rating !== "yes")
+    expect(harnLoses.length).toBeGreaterThanOrEqual(3)
+
+    // Bidirectional: upgrading Harn's rating without unmarking the row, or
+    // marking a row Harn actually wins, both fail here. A one-way check would
+    // let the page drift back to an all-Yes Harn column unnoticed.
+    expect(harnLoses.map((c) => c.id).sort()).toEqual(
+      CAPABILITIES.filter((c) => c.favorsOthers)
+        .map((c) => c.id)
+        .sort(),
+    )
+  })
+
+  it("keeps the rows Harn does not win contiguous at the end", () => {
+    // The page tells the reader the rows at the end are the ones Harn loses.
+    // If a new winning row is appended after them that sentence becomes false,
+    // and a reader skimming the bottom of the table is misled.
+    const flags = CAPABILITIES.map((c) => Boolean(c.favorsOthers))
+    expect(flags.indexOf(true), "no row is marked as favouring others").toBeGreaterThan(-1)
+    expect(flags.slice(flags.indexOf(true)).every(Boolean)).toBe(true)
+  })
+
+  it("publishes a plan only with an issue to check it against", () => {
+    // A promise on a comparison page has to be falsifiable by the reader.
+    //
+    // Asserting only that the issue number appears somewhere on the page is
+    // vacuous: the hand-written "Small install" section links #7175 too, so
+    // deleting the generated block entirely still passed. Anchor on the
+    // generated block's own heading, then require the link inside it.
+    const planned = CAPABILITIES.filter((c) => c.plan)
+    if (planned.length === 0) return
+
+    const block = page().markdownSource.split("**Tracked work.**")[1]
+    expect(block, "the generated tracked-work block is missing from the page").toBeDefined()
+    for (const cap of planned) {
+      expect(cap.plan!.issue, `${cap.id} plan issue`).toBeGreaterThan(0)
+      expect(block, `${cap.id} plan is not rendered`).toContain(cap.plan!.note)
+      expect(block, `${cap.id} plan has no issue link`).toContain(`/issues/${cap.plan!.issue}`)
+    }
+  })
+
+  it("points every mapped system at its vocabulary section", () => {
+    // loadAllDocs already rejects a dangling anchor, so a renamed heading on
+    // sota-comparison.md fails the build. This guards the other direction:
+    // that the block is emitted at all, and that it names every mapped system.
+    const mapped = SYSTEMS.filter((s) => s.comingFrom)
+    expect(mapped.length).toBeGreaterThan(0)
+    const block = page().markdownSource.split("**Already using one of these?**")[1]
+    expect(block, "the generated cross-link block is missing").toBeDefined()
+    for (const system of mapped) {
+      expect(block, `${system.id} has no vocabulary link`).toContain(
+        `sota-comparison.md#${system.comingFrom}`,
+      )
+    }
   })
 })
 
@@ -193,5 +297,52 @@ describe("syntax highlighting", () => {
 
   it("highlights jsonl blocks through the json alias", () => {
     expect(highlightedSample("jsonl")).not.toBeNull()
+  })
+})
+
+describe("heading permalinks", () => {
+  const languageBasics = () => docs.pages.get("language-basics")!
+
+  it("gives every collected heading a permalink to its own id", () => {
+    // The table of contents is built from `headings`, so anything listed there
+    // is something a reader can be pointed at and must be linkable.
+    const page = languageBasics()
+    for (const heading of page.headings) {
+      expect(
+        page.html,
+        `heading "${heading.id}" has no permalink`,
+      ).toContain(`href="#${heading.id}"`)
+    }
+    expect(page.headings.length).toBeGreaterThan(0)
+    expect(page.html).toContain(`class="${HEADING_ANCHOR_CLASS}"`)
+    expect(page.html).toContain(HEADING_LINKED_CLASS)
+  })
+
+  it("keeps the anchor glyph out of heading text and the search index", () => {
+    // The anchor is appended after headings and the title are collected. If it
+    // ran earlier, every table-of-contents entry and every indexed heading
+    // would carry a trailing "#".
+    const page = languageBasics()
+    for (const heading of page.headings) {
+      expect(heading.text.endsWith("#"), `heading "${heading.id}" text`).toBe(false)
+    }
+    const entry = docs.search.find((d) => d.slug === "language-basics")
+    expect(entry).toBeDefined()
+    for (const h of entry!.headings) expect(h.endsWith("#")).toBe(false)
+    // The page title is captured from h1, which never gets an anchor.
+    expect(page.title.endsWith("#")).toBe(false)
+  })
+
+  it("names the anchor for a screen reader rather than announcing a hash", () => {
+    expect(languageBasics().html).toMatch(/aria-label="Permalink to [^"]+"/)
+  })
+
+  it("does not put a permalink on the page title", () => {
+    // h1 is the page, not a section within it; a permalink there points at the
+    // page a reader is already on.
+    const html = languageBasics().html
+    const h1 = /<h1[^>]*>[\s\S]*?<\/h1>/.exec(html)?.[0]
+    expect(h1).toBeDefined()
+    expect(h1).not.toContain(HEADING_ANCHOR_CLASS)
   })
 })

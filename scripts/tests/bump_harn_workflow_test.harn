@@ -58,6 +58,12 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   if inputs?.get("refresh-command")?.type != "string" {
     errors = errors + ["refresh-command must remain a typed reusable-workflow input"]
   }
+  if inputs?.get("format-command")?.type != "string" {
+    errors = errors + ["format-command must remain a typed reusable-workflow input"]
+  }
+  if inputs?.get("format-command")?.default != "harn fmt ." {
+    errors = errors + ["format-command must retain the safe whole-repository default"]
+  }
   if inputs?.get("node-version")?.type != "string" {
     errors = errors + ["node-version must remain a typed reusable-workflow input"]
   }
@@ -107,6 +113,9 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
     errors = errors + ["refresh-command must flow into the orchestration environment"]
   }
+  if env?.HARN_BUMP_FORMAT_COMMAND != "$" + "{{ inputs.format-command }}" {
+    errors = errors + ["format-command must flow into the orchestration environment"]
+  }
   if !to_string(env?.HARN_BUMP_REFRESH_SENTINEL ?? "").contains("github.run_attempt") {
     errors = errors + ["refresh success sentinel must be unique per run attempt"]
   }
@@ -114,7 +123,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
   const safe_repairs = "harn fix --apply --safety behavior-preserving ."
   const caller_refresh = "eval \"$HARN_BUMP_REFRESH_COMMAND\""
-  const format_migration = "harn fmt ."
+  const format_migration = "eval \"$HARN_BUMP_FORMAT_COMMAND\""
   const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
   const refresh_pipeline = "$"
     + "{refresh_migrations}"
@@ -130,6 +139,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     migration,
     safe_repairs,
     caller_refresh,
+    "test -n \"$HARN_BUMP_FORMAT_COMMAND\"",
     format_migration,
     refresh_sentinel,
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",

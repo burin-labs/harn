@@ -1,6 +1,9 @@
 # Getting started
 
-Install Harn, create a project, and run a program without an API key.
+Install Harn, create a project, and run your first program. Harn can run a
+local model if your machine has room for one, mock a model while you write the
+program around it, or run ordinary code with no model at all, so you can get
+started before signing up for a provider.
 
 ## Install Harn
 
@@ -118,7 +121,7 @@ downloading anything. `harn local list` then shows every local runtime Harn
 knows about and which models each is serving, and `harn local switch <alias>`
 makes one of them the active local model.
 
-## Call a real provider
+## Call a hosted provider
 
 To use a cloud provider, set its API key in your shell and test the route:
 

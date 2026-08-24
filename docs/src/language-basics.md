@@ -98,7 +98,7 @@ does not replace a binding outside it:
 ```harn,check title="scope.harn"
 fn main(harness: Harness) {
   const status = "ready"
-  const detailed = harness.env.get("HARN_VERBOSE") == "1"
+  const detailed = harness.env.get("APP_VERBOSE") == "1"
 
   if detailed {
     const detail = "inputs checked"
