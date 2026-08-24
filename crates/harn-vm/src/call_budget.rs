@@ -13,28 +13,68 @@
 //! keeping nested dispatches (a handler that re-enters the dispatcher)
 //! from leaking a tighter budget outward or a wider one back into a
 //! finished inner scope.
+//!
+//! A ceiling and its running count travel together in one [`CallBudget`],
+//! and the count lives behind an `Arc`. That is what makes the ceiling hold
+//! when a dispatch fans out: `parallel each { mcp.call(..) }` charges the
+//! SAME counter the dispatcher installed, even though each branch runs on a
+//! different thread. A per-branch copy of the count would let every branch
+//! spend the whole ceiling.
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::LocalKey;
 
 use crate::value::{VmError, VmValue};
 
+/// One dispatch's ceiling plus the count spent against it.
+///
+/// Cloning shares the count. `AmbientExecutionScope` clones this into every
+/// subtask, so a fan-out spends one budget rather than one budget per branch.
+#[derive(Clone, Debug)]
+pub(crate) struct CallBudget {
+    max: u64,
+    spent: Arc<AtomicU64>,
+}
+
+impl CallBudget {
+    fn new(max: u64) -> Self {
+        Self {
+            max,
+            spent: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn spent(&self) -> u64 {
+        self.spent.load(Ordering::Relaxed)
+    }
+}
+
 thread_local! {
-    static MCP_CALL_BUDGET: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static MCP_CALL_COUNT: RefCell<u64> = const { RefCell::new(0) };
-    static PG_QUERY_BUDGET: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static PG_QUERY_COUNT: RefCell<u64> = const { RefCell::new(0) };
+    static MCP_CALL_BUDGET: RefCell<Option<CallBudget>> = const { RefCell::new(None) };
+    static PG_QUERY_BUDGET: RefCell<Option<CallBudget>> = const { RefCell::new(None) };
+}
+
+/// Swap the MCP call budget. Paired with `AmbientExecutionScope`'s per-poll
+/// swap.
+pub(crate) fn swap_mcp_call_budget(next: Option<CallBudget>) -> Option<CallBudget> {
+    MCP_CALL_BUDGET.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+/// Swap the Postgres query budget. Paired with `AmbientExecutionScope`'s
+/// per-poll swap.
+pub(crate) fn swap_pg_query_budget(next: Option<CallBudget>) -> Option<CallBudget> {
+    PG_QUERY_BUDGET.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
 /// Reset thread-local call-budget state. Call between test runs so a
 /// guard that outlived an unwinding test cannot leak a ceiling.
 pub(crate) fn reset_call_budget_state() {
     MCP_CALL_BUDGET.with(|b| *b.borrow_mut() = None);
-    MCP_CALL_COUNT.with(|c| *c.borrow_mut() = 0);
     PG_QUERY_BUDGET.with(|b| *b.borrow_mut() = None);
-    PG_QUERY_COUNT.with(|c| *c.borrow_mut() = 0);
 }
 
 /// The two call-count dimensions. Each names the `@budget(...)` field it
@@ -73,20 +113,18 @@ impl CallBudgetKind {
 /// charge. The counter only advances while a ceiling is present so
 /// budget-free dispatches stay zero-cost.
 fn charge(
-    budget: &'static LocalKey<RefCell<Option<u64>>>,
-    count: &'static LocalKey<RefCell<u64>>,
+    budget: &'static LocalKey<RefCell<Option<CallBudget>>>,
     kind: CallBudgetKind,
 ) -> Result<(), VmError> {
-    let Some(max) = budget.with(|b| *b.borrow()) else {
+    let Some(budget) = budget.with(|b| b.borrow().clone()) else {
         return Ok(());
     };
-    let spent = count.with(|c| {
-        let mut slot = c.borrow_mut();
-        *slot = slot.saturating_add(1);
-        *slot
-    });
-    if spent > max {
-        return Err(budget_exceeded_error(kind, spent, max));
+    let spent = budget
+        .spent
+        .fetch_add(1, Ordering::Relaxed)
+        .saturating_add(1);
+    if spent > budget.max {
+        return Err(budget_exceeded_error(kind, spent, budget.max));
     }
     Ok(())
 }
@@ -120,14 +158,12 @@ fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError 
 /// call ceiling and count on drop.
 #[must_use = "dropping the guard immediately restores the prior MCP call budget"]
 pub struct McpCallBudgetGuard {
-    previous_budget: Option<u64>,
-    previous_count: u64,
+    previous: Option<CallBudget>,
 }
 
 impl Drop for McpCallBudgetGuard {
     fn drop(&mut self) {
-        MCP_CALL_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
-        MCP_CALL_COUNT.with(|c| *c.borrow_mut() = self.previous_count);
+        MCP_CALL_BUDGET.with(|b| *b.borrow_mut() = self.previous.take());
     }
 }
 
@@ -136,34 +172,34 @@ impl Drop for McpCallBudgetGuard {
 /// `.harn` handlers in `harn-serve`; the `(max + 1)`-th call raises a
 /// `BudgetExceeded`-categorised error adapters render as HTTP 429.
 pub fn install_mcp_call_budget(max: u64) -> McpCallBudgetGuard {
-    let previous_budget = MCP_CALL_BUDGET.with(|b| *b.borrow());
-    let previous_count = MCP_CALL_COUNT.with(|c| *c.borrow());
-    MCP_CALL_BUDGET.with(|b| *b.borrow_mut() = Some(max));
-    MCP_CALL_COUNT.with(|c| *c.borrow_mut() = 0);
     McpCallBudgetGuard {
-        previous_budget,
-        previous_count,
+        previous: swap_mcp_call_budget(Some(CallBudget::new(max))),
     }
 }
 
 /// Charge one MCP tool call against the active `@budget(mcp_calls: …)`
 /// ceiling, if any. Called once per logical `mcp.call` dispatch.
 pub fn charge_mcp_call() -> Result<(), VmError> {
-    charge(&MCP_CALL_BUDGET, &MCP_CALL_COUNT, CallBudgetKind::McpCalls)
+    charge(&MCP_CALL_BUDGET, CallBudgetKind::McpCalls)
+}
+
+/// The MCP calls charged against the active ceiling, or `None` when no
+/// `@budget(mcp_calls: …)` is installed. Exists so a test can prove a
+/// subtask's charges reach its parent's counter.
+pub fn mcp_calls_spent() -> Option<u64> {
+    MCP_CALL_BUDGET.with(|b| b.borrow().as_ref().map(CallBudget::spent))
 }
 
 /// RAII guard for [`install_pg_query_budget`]. Restores the prior
 /// Postgres query ceiling and count on drop.
 #[must_use = "dropping the guard immediately restores the prior Postgres query budget"]
 pub struct PgQueryBudgetGuard {
-    previous_budget: Option<u64>,
-    previous_count: u64,
+    previous: Option<CallBudget>,
 }
 
 impl Drop for PgQueryBudgetGuard {
     fn drop(&mut self) {
-        PG_QUERY_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
-        PG_QUERY_COUNT.with(|c| *c.borrow_mut() = self.previous_count);
+        PG_QUERY_BUDGET.with(|b| *b.borrow_mut() = self.previous.take());
     }
 }
 
@@ -172,13 +208,8 @@ impl Drop for PgQueryBudgetGuard {
 /// `.harn` handlers in `harn-serve`; the `(max + 1)`-th query raises a
 /// `BudgetExceeded`-categorised error adapters render as HTTP 429.
 pub fn install_pg_query_budget(max: u64) -> PgQueryBudgetGuard {
-    let previous_budget = PG_QUERY_BUDGET.with(|b| *b.borrow());
-    let previous_count = PG_QUERY_COUNT.with(|c| *c.borrow());
-    PG_QUERY_BUDGET.with(|b| *b.borrow_mut() = Some(max));
-    PG_QUERY_COUNT.with(|c| *c.borrow_mut() = 0);
     PgQueryBudgetGuard {
-        previous_budget,
-        previous_count,
+        previous: swap_pg_query_budget(Some(CallBudget::new(max))),
     }
 }
 
@@ -186,7 +217,13 @@ pub fn install_pg_query_budget(max: u64) -> PgQueryBudgetGuard {
 /// ceiling, if any. Called once per `pg_query` / `pg_query_one` /
 /// `pg_execute` statement (including mock-pool statements).
 pub fn charge_pg_query() -> Result<(), VmError> {
-    charge(&PG_QUERY_BUDGET, &PG_QUERY_COUNT, CallBudgetKind::PgQueries)
+    charge(&PG_QUERY_BUDGET, CallBudgetKind::PgQueries)
+}
+
+/// The Postgres queries charged against the active ceiling, or `None` when no
+/// `@budget(pg_queries: …)` is installed.
+pub fn pg_queries_spent() -> Option<u64> {
+    PG_QUERY_BUDGET.with(|b| b.borrow().as_ref().map(CallBudget::spent))
 }
 
 #[cfg(test)]
@@ -201,9 +238,9 @@ mod tests {
             assert!(charge_mcp_call().is_ok());
             assert!(charge_pg_query().is_ok());
         }
-        // No guard installed → counters never advance.
-        assert_eq!(MCP_CALL_COUNT.with(|c| *c.borrow()), 0);
-        assert_eq!(PG_QUERY_COUNT.with(|c| *c.borrow()), 0);
+        // No guard installed → nothing to advance.
+        assert_eq!(mcp_calls_spent(), None);
+        assert_eq!(pg_queries_spent(), None);
     }
 
     #[test]
@@ -254,21 +291,24 @@ mod tests {
         reset_call_budget_state();
         let outer = install_mcp_call_budget(5);
         assert!(charge_mcp_call().is_ok());
-        assert_eq!(MCP_CALL_COUNT.with(|c| *c.borrow()), 1);
+        assert_eq!(mcp_calls_spent(), Some(1));
 
         {
             // Nested dispatch installs a tighter ceiling and starts fresh.
             let _inner = install_mcp_call_budget(1);
-            assert_eq!(MCP_CALL_COUNT.with(|c| *c.borrow()), 0);
+            assert_eq!(mcp_calls_spent(), Some(0));
             assert!(charge_mcp_call().is_ok());
             assert!(charge_mcp_call().is_err());
         }
 
         // Inner drop restores the outer ceiling and its accumulated count.
-        assert_eq!(MCP_CALL_BUDGET.with(|b| *b.borrow()), Some(5));
-        assert_eq!(MCP_CALL_COUNT.with(|c| *c.borrow()), 1);
+        assert_eq!(
+            MCP_CALL_BUDGET.with(|b| b.borrow().as_ref().map(|b| b.max)),
+            Some(5)
+        );
+        assert_eq!(mcp_calls_spent(), Some(1));
         drop(outer);
-        assert_eq!(MCP_CALL_BUDGET.with(|b| *b.borrow()), None);
+        assert_eq!(mcp_calls_spent(), None);
         reset_call_budget_state();
     }
 }

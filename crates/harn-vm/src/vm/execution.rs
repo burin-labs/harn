@@ -48,8 +48,7 @@ impl Vm {
     #[inline]
     pub(crate) fn scope_interrupts_clean(&self) -> bool {
         self.requested_process_exit().is_none()
-            && self.cancel_token.is_none()
-            && self.interrupt_signal_token.is_none()
+            && !self.is_cancel_requested()
             && self.pending_interrupt_signal.is_none()
             && self.interrupt_handler_deadline.is_none()
             && !self.execution_deadline.is_active()
@@ -973,6 +972,20 @@ mod tests {
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
         Compiler::new().compile(&program).unwrap()
+    }
+
+    #[test]
+    fn inactive_host_interrupt_handles_keep_the_dispatch_loop_clean() {
+        let mut vm = Vm::new();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = Arc::new(std::sync::Mutex::new(None));
+        vm.install_cancel_token(Arc::clone(&cancel));
+        vm.install_interrupt_signal_token(signal);
+
+        assert!(vm.scope_interrupts_clean());
+
+        cancel.store(true, Ordering::Release);
+        assert!(!vm.scope_interrupts_clean());
     }
 
     #[tokio::test(flavor = "current_thread")]

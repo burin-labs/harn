@@ -18,6 +18,7 @@ pub(crate) mod ops;
 mod scope;
 mod state;
 mod stdlib_artifact;
+pub mod subtask;
 mod tool_callable;
 
 #[cfg(test)]

@@ -141,6 +141,14 @@ pub fn clear_custom_patterns() {
     CUSTOM_PATTERNS.with(|cell| cell.borrow_mut().clear());
 }
 
+/// Swap the custom-pattern set. Paired with `AmbientExecutionScope`'s per-poll
+/// swap: `scan_secret_patterns` reads this set live, so an empty set on a
+/// worker thread means a subtask writes operator-registered secrets in the
+/// clear.
+pub(crate) fn swap_custom_patterns(next: Vec<NamedPattern>) -> Vec<NamedPattern> {
+    CUSTOM_PATTERNS.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
+}
+
 /// Return the names of every default pattern, in catalog order.
 pub fn default_pattern_names() -> Vec<&'static str> {
     compiled_default_secret_patterns()

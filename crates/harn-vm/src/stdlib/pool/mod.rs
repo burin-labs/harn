@@ -32,7 +32,7 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::{subtask, AsyncBuiltinCtx, Vm};
 use futures::FutureExt;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
@@ -2304,11 +2304,15 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     );
     dequeue_span.set_metadata("slot_index", serde_json::json!(dequeue_receipt.slot_index));
 
-    // Hand the dequeue receipt off to a Tokio task. Capture the active event
-    // log before crossing the work-stealing boundary so audit events stay on
-    // the submitter's log instead of binding to a worker thread default.
+    // Hand the dequeue receipt off to its own subtask. `ensure_pool_event_log`
+    // runs HERE, on the dispatching thread, so the log exists before the
+    // subtask seam captures the ambient scope that carries it. Without that,
+    // the receipt would bind to a worker thread's own default log.
     let event_log = ensure_pool_event_log();
-    tokio::spawn(emit_pool_dequeue_receipt(event_log, dequeue_receipt));
+    subtask::spawn_child(
+        pool_registry_for_ctx(context.as_ref()),
+        emit_pool_dequeue_receipt(event_log, dequeue_receipt),
+    );
 
     let Some(ctx) = context else {
         dequeue_span.end();
@@ -2329,7 +2333,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let registry = ctx.pool_registry();
     let task_group_id = pool_id_for_span;
     let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
-    spawn_pool_worker(registry, async move {
+    subtask::spawn_child(registry, async move {
         let _scheduled_activity = scheduled_activity;
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
@@ -2353,13 +2357,6 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         .unwrap_or_else(|payload| Err(pool_panic_error(payload)));
         finalize_task(&pool, &state, outcome);
     });
-}
-
-fn spawn_pool_worker<F>(registry: Arc<PoolRegistry>, future: F) -> tokio::task::JoinHandle<()>
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    tokio::spawn(with_pool_registry_scope(registry, future))
 }
 
 fn pool_panic_error(payload: Box<dyn Any + Send>) -> String {
