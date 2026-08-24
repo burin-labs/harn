@@ -854,14 +854,9 @@ pub async fn dispatch_host_operation_with_ctx(
 
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
-        // Serve exact turn-stable reads from the per-turn memo so context
-        // assembly pays one host round-trip per argument set instead of once
-        // per shard. Metadata writes invalidate on both sides of dispatch.
-        // harn#5190, harn#6914.
-        let dispatched = turn_cache::cached_or(capability, operation, params, || {
-            bridge.dispatch(capability, operation, params)
-        })
-        .await?;
+        // Turn-stable reads share a memo; metadata writes invalidate it on both
+        // sides of dispatch. harn#5190, harn#6914, harn#7172.
+        let dispatched = bridge::dispatch_cached(bridge, capability, operation, params).await?;
         if let Some(value) = dispatched {
             return Ok(value);
         }
