@@ -335,6 +335,7 @@ fn plan_only_trace(id: &str, suffix: &str) -> CrystallizationTrace {
                     ("team_key".to_string(), json!("HAR")),
                 ]),
                 capabilities: vec!["linear.read".to_string()],
+                side_effects_known: true,
                 deterministic: Some(true),
                 duration_ms: Some(15),
                 ..CrystallizationAction::default()
@@ -348,6 +349,7 @@ fn plan_only_trace(id: &str, suffix: &str) -> CrystallizationTrace {
                     ("kind".to_string(), json!("plan")),
                     ("summary".to_string(), json!(format!("plan only #{suffix}"))),
                 ]),
+                side_effects_known: true,
                 side_effects: vec![CrystallizationSideEffect {
                     kind: "receipt_write".to_string(),
                     target: "tenant_event_log".to_string(),
@@ -606,6 +608,24 @@ fn validate_rejects_unsupported_schema_version() {
 }
 
 #[test]
+fn validate_rejects_pre_completeness_bundle_schema() {
+    let traces = version_traces(3);
+    let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+    let mut bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    bundle.manifest.schema_version = BUNDLE_SCHEMA_VERSION - 1;
+    let dir = tempfile::tempdir().unwrap();
+    write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+    let validation = validate_crystallization_bundle(dir.path()).unwrap();
+    assert!(!validation.is_ok());
+    assert!(validation
+        .problems
+        .iter()
+        .any(|problem| problem.contains("schema_version")));
+}
+
+#[test]
 fn validate_rejects_raw_required_secret_values() {
     let traces = version_traces(3);
     let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
@@ -701,6 +721,64 @@ fn plan_only_fixture_yields_plan_only_kind() {
         build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
     assert_eq!(bundle.manifest.kind, BundleKind::PlanOnly);
     assert_eq!(bundle.manifest.risk_level, "low");
+}
+
+#[test]
+fn complete_external_side_effect_evidence_never_yields_plan_only_kind() {
+    let traces = (0..3)
+        .map(|idx| {
+            let mut trace = plan_only_trace(&format!("release_{idx}"), &format!("{idx}"));
+            trace.actions.push(CrystallizationAction {
+                id: format!("release_{idx}-push"),
+                kind: "release_step".to_string(),
+                name: "push_release_branch".to_string(),
+                side_effects_known: true,
+                side_effects: vec![CrystallizationSideEffect {
+                    kind: "remote_git_write".to_string(),
+                    target: "origin".to_string(),
+                    capability: Some("git.push".to_string()),
+                    mutation: Some("push".to_string()),
+                    ..CrystallizationSideEffect::default()
+                }],
+                deterministic: Some(true),
+                ..CrystallizationAction::default()
+            });
+            trace
+        })
+        .collect::<Vec<_>>();
+    let artifacts = crystallize_traces(
+        traces.clone(),
+        CrystallizeOptions {
+            workflow_name: Some("release_with_remote_mutation".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .unwrap();
+    let bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    assert_eq!(bundle.manifest.kind, BundleKind::Candidate);
+}
+
+#[test]
+fn incomplete_side_effect_evidence_never_yields_plan_only_kind() {
+    let traces = (0..3)
+        .map(|idx| {
+            let mut trace = plan_only_trace(&format!("unknown_{idx}"), &format!("{idx}"));
+            trace.actions[0].side_effects_known = false;
+            trace
+        })
+        .collect::<Vec<_>>();
+    let artifacts = crystallize_traces(
+        traces.clone(),
+        CrystallizeOptions {
+            workflow_name: Some("unknown_effects".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .unwrap();
+    let bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    assert_eq!(bundle.manifest.kind, BundleKind::Candidate);
 }
 
 #[test]

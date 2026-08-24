@@ -18,7 +18,7 @@ pub const BUNDLE_SCHEMA: &str = "harn.crystallization.candidate.bundle";
 /// Versioned schema number for the bundle manifest. Cloud importers and
 /// other consumers should refuse bundles whose `schema_version` is newer
 /// than the highest version they understand.
-pub const BUNDLE_SCHEMA_VERSION: u32 = 1;
+pub const BUNDLE_SCHEMA_VERSION: u32 = 2;
 /// Conventional file names inside a crystallization bundle directory.
 pub const BUNDLE_MANIFEST_FILE: &str = "candidate.json";
 pub const BUNDLE_REPORT_FILE: &str = "report.json";
@@ -75,6 +75,9 @@ pub struct CrystallizationAction {
     pub output: Option<JsonValue>,
     pub observed_output: Option<JsonValue>,
     pub parameters: BTreeMap<String, JsonValue>,
+    /// Whether `side_effects` is a complete account for this action. Missing
+    /// evidence is unknown, not proof that the action is side-effect-free.
+    pub side_effects_known: bool,
     pub side_effects: Vec<CrystallizationSideEffect>,
     pub capabilities: Vec<String>,
     pub required_secrets: Vec<String>,
@@ -156,6 +159,7 @@ pub struct WorkflowCandidateStep {
     pub parameter_refs: Vec<String>,
     pub constants: BTreeMap<String, JsonValue>,
     pub preconditions: Vec<String>,
+    pub side_effects_known: bool,
     pub side_effects: Vec<CrystallizationSideEffect>,
     pub capabilities: Vec<String>,
     pub required_secrets: Vec<String>,

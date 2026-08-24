@@ -97,6 +97,7 @@ pub struct BundleStep {
     pub name: String,
     pub segment: SegmentKind,
     pub parameter_refs: Vec<String>,
+    pub side_effects_known: bool,
     pub side_effects: Vec<CrystallizationSideEffect>,
     pub capabilities: Vec<String>,
     pub required_secrets: Vec<String>,
@@ -112,6 +113,7 @@ impl BundleStep {
             name: step.name.clone(),
             segment: step.segment.clone(),
             parameter_refs: step.parameter_refs.clone(),
+            side_effects_known: step.side_effects_known,
             side_effects: step.side_effects.clone(),
             capabilities: step.capabilities.clone(),
             required_secrets: step.required_secrets.clone(),
@@ -688,9 +690,9 @@ pub fn load_crystallization_bundle_manifest(
             BUNDLE_SCHEMA
         )));
     }
-    if manifest.schema_version > BUNDLE_SCHEMA_VERSION {
+    if manifest.schema_version != BUNDLE_SCHEMA_VERSION {
         return Err(VmError::Runtime(format!(
-            "bundle {} schema_version {} is newer than supported {}",
+            "bundle {} schema_version {} is unsupported (expected {})",
             bundle_dir.display(),
             manifest.schema_version,
             BUNDLE_SCHEMA_VERSION
@@ -1126,19 +1128,20 @@ fn side_effect_is_external(effect: &CrystallizationSideEffect) -> bool {
 }
 
 fn candidate_is_plan_only(candidate: &WorkflowCandidate) -> bool {
-    if candidate.steps.is_empty() {
+    if candidate.steps.is_empty() || candidate.steps.iter().any(|step| !step.side_effects_known) {
         return false;
     }
-    candidate.side_effects.iter().all(|effect| {
-        let kind = effect.kind.to_ascii_lowercase();
-        // Plan-only side effects stay inside Harn's own data plane: receipt
-        // writes, in-memory event-log appends, file-only mutations, etc.
-        kind.is_empty()
-            || kind.contains("receipt")
-            || kind.contains("event_log")
-            || kind.contains("memo")
-            || kind.contains("plan")
-            || (kind.contains("file") && !kind.contains("publish"))
+    candidate.steps.iter().all(|step| {
+        step.side_effects.iter().all(|effect| {
+            let kind = effect.kind.to_ascii_lowercase();
+            // Plan-only side effects stay inside Harn's own data plane: receipt
+            // writes, in-memory event-log appends, file-only mutations, etc.
+            kind.contains("receipt")
+                || kind.contains("event_log")
+                || kind.contains("memo")
+                || kind.contains("plan")
+                || (kind.contains("file") && !kind.contains("publish"))
+        })
     })
 }
 

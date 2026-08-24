@@ -1,7 +1,7 @@
 # release_harn Crystallization Input — sample
 
 This is a tiny self-contained fixture bundle in the same format
-(`release_harn.crystallization_input.v1`) that
+(`release_harn.crystallization_input.v3`) that
 [`release_harn.harn`](https://github.com/burin-labs/harn-bump-fleet/blob/main/release_harn.harn)
 emits at `${RUN_ROOT}/<run-id>/crystallization-input/`.
 

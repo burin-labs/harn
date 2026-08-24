@@ -1,7 +1,7 @@
 //! Release-harness fixture ingest.
 //!
 //! `release_harn.harn` (in `harn-bump-fleet`) emits a
-//! `release_harn.crystallization_input.v1` fixture bundle for every run:
+//! `release_harn.crystallization_input.v3` fixture bundle for every run:
 //!
 //! ```text
 //! crystallization-input/
@@ -42,7 +42,7 @@ use crate::value::VmError;
 /// fixtures with any other schema marker — bumping the suffix is how
 /// `release_harn.harn` signals a backwards-incompatible fixture shape
 /// change.
-pub const RELEASE_FIXTURE_SCHEMA: &str = "release_harn.crystallization_input.v1";
+pub const RELEASE_FIXTURE_SCHEMA: &str = "release_harn.crystallization_input.v3";
 
 const MANIFEST_FILE: &str = "manifest.json";
 const DETERMINISTIC_EVENTS_FILE: &str = "deterministic-events.jsonl";
@@ -369,6 +369,7 @@ fn deterministic_event_to_action(
             ]);
             action.inputs = json!({"command": command});
             action.observed_output = Some(json!({"status": status, "success": success}));
+            apply_side_effect_evidence(&mut action, data);
             if !success {
                 action.side_effects.push(CrystallizationSideEffect {
                     kind: "shell_failure".to_string(),
@@ -440,6 +441,7 @@ fn tool_observation_to_action(
         "status": data.get("status").cloned().unwrap_or(json!(0)),
         "success": success,
     }));
+    apply_side_effect_evidence(&mut action, data);
     if !success {
         action.side_effects.push(CrystallizationSideEffect {
             kind: "tool_failure".to_string(),
@@ -532,6 +534,23 @@ fn base_action_from_event(event: &ReleaseFixtureEvent) -> CrystallizationAction 
         id: stable_event_id(event),
         timestamp: event.timestamp.clone(),
         ..CrystallizationAction::default()
+    }
+}
+
+fn apply_side_effect_evidence(action: &mut CrystallizationAction, data: &JsonValue) {
+    let Some(side_effects) = data.get("side_effects").and_then(JsonValue::as_array) else {
+        return;
+    };
+    let parsed = side_effects
+        .iter()
+        .map(|effect| serde_json::from_value::<CrystallizationSideEffect>(effect.clone()))
+        .collect::<Result<Vec<_>, _>>();
+    if let Ok(side_effects) = parsed {
+        action.side_effects = side_effects;
+        action.side_effects_known = data
+            .get("side_effects_known")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
     }
 }
 

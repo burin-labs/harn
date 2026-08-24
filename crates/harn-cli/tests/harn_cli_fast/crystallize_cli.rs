@@ -15,7 +15,7 @@ use std::path::Path;
 use harn_vm::orchestration::{
     build_crystallization_bundle, crystallize_traces, ingest_release_fixture,
     load_crystallization_traces_from_dir, shadow_replay_bundle, validate_crystallization_bundle,
-    write_crystallization_artifacts, write_crystallization_bundle, BundleOptions,
+    write_crystallization_artifacts, write_crystallization_bundle, BundleKind, BundleOptions,
     CrystallizeOptions, PromotionStatus, BUNDLE_SKILL_DIR, BUNDLE_SKILL_FILE,
 };
 use harn_vm::skills::{FsSkillSource, Layer, LayeredDiscovery};
@@ -87,6 +87,7 @@ fn plan_only_trace(idx: usize) -> Value {
                     "team_key": "HAR"
                 },
                 "capabilities": ["linear.read"],
+                "side_effects_known": true,
                 "deterministic": true
             },
             {
@@ -94,6 +95,7 @@ fn plan_only_trace(idx: usize) -> Value {
                 "kind": "receipt_write",
                 "name": "emit_receipt",
                 "parameters": {"kind": "plan", "summary": format!("plan-only #{idx}")},
+                "side_effects_known": true,
                 "side_effects": [
                     {
                         "kind": "receipt_write",
@@ -195,7 +197,7 @@ fn crystallize_version_bump_emits_validatable_bundle() {
         manifest_json["schema"],
         Value::String("harn.crystallization.candidate.bundle".to_string())
     );
-    assert_eq!(manifest_json["schema_version"], json!(1));
+    assert_eq!(manifest_json["schema_version"], json!(2));
     assert_eq!(manifest_json["kind"], json!("candidate"));
     assert_eq!(manifest_json["external_key"], json!("version-bump"));
     let workflow = &manifest_json["workflow"];
@@ -488,6 +490,13 @@ fn ingest_release_fixture_emits_validatable_bundle_with_segment_and_recovery_sum
 
     // Trace contains every event-derived action and is sorted by timestamp.
     assert!(trace.actions.len() >= 8);
+    let successful_push = trace
+        .actions
+        .iter()
+        .find(|action| action.name == "push-no-verify-after-green-hook-budget")
+        .expect("successful release push action");
+    assert!(successful_push.side_effects_known);
+    assert_eq!(successful_push.side_effects[0].kind, "remote_git_write");
 
     // Candidate is selected and safe to propose.
     let candidate_id = artifacts
@@ -547,6 +556,7 @@ fn ingest_release_fixture_emits_validatable_bundle_with_segment_and_recovery_sum
     .expect("build bundle");
     let manifest = write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
     assert_eq!(manifest.candidate_id, candidate_id);
+    assert_eq!(manifest.kind, BundleKind::Candidate);
     assert_eq!(manifest.fixtures.len(), 1);
     assert!(manifest.fixtures[0].redacted);
 

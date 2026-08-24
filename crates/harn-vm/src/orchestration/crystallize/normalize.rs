@@ -248,6 +248,7 @@ pub(super) fn mine_candidates(
             parameter_refs: parameter_refs.into_iter().collect(),
             constants: constants_for_action(first),
             preconditions: preconditions_for_action(first),
+            side_effects_known: actions.iter().all(|action| action.side_effects_known),
             side_effects: first.side_effects.clone(),
             capabilities: sorted_strings(first.capabilities.iter().cloned()),
             required_secrets: sorted_strings(first.required_secrets.iter().cloned()),
