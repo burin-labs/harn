@@ -108,10 +108,21 @@ The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
 and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
-report schema v3 carries the same distribution, typed timeout metadata, and
-per-case phases. Conformance JSON schema v3 uses the same typed distribution
+report schema v4 carries the same distribution, typed timeout metadata,
+per-case phases, and named `std/timing` spans. Conformance JSON schema v3 uses the same typed distribution
 owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
+
+Timing-aware shards consume a complete, passing schema-v4 user-test receipt
+from an unsharded run. `--timing-environment` stamps the environment that owns
+the measurement; a later `--timing-baseline` run refuses a different stamp,
+an older report schema, a partial shard receipt, or a deleted or renamed case.
+Measured cases use `phases.execute_ms` as their LPT weight. New cases have no
+transferable observation yet and use count balancing until the enforcing
+environment produces another baseline. A single case heavier than the rest of
+the suite is assigned alone and named in the shard plan. The same baseline
+also enforces the absolute per-case regression threshold, so moving a slower
+case into a less-loaded shard cannot turn the regression green.
 
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/

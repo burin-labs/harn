@@ -10,24 +10,7 @@ fn test_shard_validation_rejects_invalid_selection() {
 
 #[test]
 fn select_shard_cases_balances_by_historical_duration() {
-    let source = Arc::new(String::new());
-    let program = Arc::new(Vec::new());
-    let mk = |name: &str| TestCase {
-        file: PathBuf::from("tests/a.harn"),
-        name: name.to_string(),
-        pipeline_name: name.to_string(),
-        source: Arc::clone(&source),
-        program: Arc::clone(&program),
-        imported_enum_candidates: Arc::new(Vec::new()),
-        serial_group: None,
-        weight: 1,
-        args: Vec::new(),
-        fixture: None,
-        file_fixture_value: None,
-        compiled_entry: None,
-        compiled_file_fixture_entry: None,
-        trusted_host_dispatch: false,
-    };
+    let mk = |name: &str| test_case(name);
     let mut timings = BTreeMap::new();
     timings.insert("tests/a.harn::test_big".to_string(), 100);
     timings.insert("tests/a.harn::test_mid".to_string(), 60);
@@ -44,10 +27,12 @@ fn select_shard_cases_balances_by_historical_duration() {
     let shard_two = select_shard_cases(cases, &timings, TestShard::new(2, 2).unwrap());
 
     let names_one = shard_one
+        .cases
         .iter()
         .map(|case| case.name.as_str())
         .collect::<Vec<_>>();
     let names_two = shard_two
+        .cases
         .iter()
         .map(|case| case.name.as_str())
         .collect::<Vec<_>>();
@@ -55,92 +40,97 @@ fn select_shard_cases_balances_by_historical_duration() {
     assert_eq!(names_two, vec!["test_mid", "test_small_a"]);
 }
 
-#[tokio::test]
-async fn parallel_scheduler_persists_timings_cache() {
-    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
-    let temp = TempTestDir::new();
-    temp.write(
-        "suite/test_timed.harn",
-        r"
-@test
-pipeline test_first(task) {}
+fn test_case(name: &str) -> TestCase {
+    let source = Arc::new(String::new());
+    let program = Arc::new(Vec::new());
+    TestCase {
+        file: PathBuf::from("tests/a.harn"),
+        name: name.to_string(),
+        pipeline_name: name.to_string(),
+        source: Arc::clone(&source),
+        program: Arc::clone(&program),
+        imported_enum_candidates: Arc::new(Vec::new()),
+        serial_group: None,
+        weight: 1,
+        args: Vec::new(),
+        fixture: None,
+        file_fixture_value: None,
+        compiled_entry: None,
+        compiled_file_fixture_entry: None,
+        trusted_host_dispatch: false,
+    }
+}
 
-@test
-pipeline test_second(task) {}
-",
-    );
+#[test]
+fn dominant_case_is_reserved_on_its_own_shard_and_reported() {
+    let cases = vec![
+        test_case("dominant"),
+        test_case("small_a"),
+        test_case("small_b"),
+    ];
+    let timings = BTreeMap::from([
+        ("tests/a.harn::dominant".to_string(), 500),
+        ("tests/a.harn::small_a".to_string(), 40),
+        ("tests/a.harn::small_b".to_string(), 30),
+    ]);
 
-    let opts = RunOptions {
-        parallel: true,
-        jobs: Some(2),
-        ..RunOptions::new(5_000)
-    };
-    let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
-    assert_eq!(summary.passed, 2);
-    let cache = temp.path().join("suite/.harn/test-timings.json");
-    assert!(cache.exists(), "expected timings cache at {cache:?}");
-    let stored: BTreeMap<String, u64> =
-        serde_json::from_str(&fs::read_to_string(&cache).unwrap()).unwrap();
-    assert!(
-        stored.keys().any(|key| key.contains("test_first")),
-        "expected timings for test_first in {stored:?}"
-    );
-    assert!(
-        stored.keys().any(|key| key.contains("test_second")),
-        "expected timings for test_second in {stored:?}"
+    let selection = select_shard_cases(cases, &timings, TestShard::new(1, 2).unwrap());
+
+    assert_eq!(selection.cases.len(), 1);
+    assert_eq!(selection.cases[0].name, "dominant");
+    assert_eq!(selection.plan.dominant_case.unwrap().name, "dominant");
+}
+
+#[test]
+fn unknown_cases_fall_back_to_count_first_partitioning() {
+    let mut heavy_unknown = test_case("unknown_heavy");
+    heavy_unknown.weight = 100;
+    let cases = vec![
+        test_case("known"),
+        heavy_unknown,
+        test_case("unknown_light"),
+    ];
+    let timings = BTreeMap::from([("tests/a.harn::known".to_string(), 100)]);
+
+    let shard_one = select_shard_cases(cases.clone(), &timings, TestShard::new(1, 2).unwrap());
+    let shard_two = select_shard_cases(cases, &timings, TestShard::new(2, 2).unwrap());
+
+    assert_eq!(shard_one.cases.len(), 2);
+    assert_eq!(shard_two.cases.len(), 1);
+    assert_eq!(
+        shard_one.plan.unknown_cases + shard_two.plan.unknown_cases,
+        2
     );
 }
 
-#[tokio::test]
-async fn sequential_shards_share_an_immutable_timing_snapshot() {
-    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
-    let temp = TempTestDir::new();
-    temp.write(
-        "suite/test_sharded.harn",
-        r"
-@test
-pipeline test_alpha(task) {}
+#[test]
+fn stale_baseline_case_fails_loudly() {
+    let baseline = TimingBaseline {
+        environment: "ci".to_string(),
+        weights_ms: BTreeMap::from([
+            ("tests/a.harn::present".to_string(), 10),
+            ("tests/a.harn::renamed".to_string(), 20),
+        ]),
+        max_regression_percent: 25,
+    };
 
-@test
-pipeline test_beta(task) {}
+    let error = stale_baseline_error(&[test_case("present")], &baseline).unwrap();
 
-@test
-pipeline test_gamma(task) {}
+    assert!(error.error.unwrap().contains("renamed"));
+}
 
-@test
-pipeline test_delta(task) {}
-",
-    );
+#[test]
+fn cost_regression_fails_case_even_when_absolute_budget_passes() {
+    let mut result = passing_result_with_timings(150, 140);
+    result.name = "test_budget".to_string();
+    let baseline = TimingBaseline {
+        environment: "ci".to_string(),
+        weights_ms: BTreeMap::from([("tests/test_budget.harn::test_budget".to_string(), 100)]),
+        max_regression_percent: 25,
+    };
 
-    let suite = temp.path().join("suite");
-    let cache = suite.join(".harn/test-timings.json");
-    let test_file = suite.join("test_sharded.harn").canonicalize().unwrap();
-    let snapshot = BTreeMap::from([
-        (timings_key(&test_file, "test_alpha"), 100),
-        (timings_key(&test_file, "test_beta"), 40),
-        (timings_key(&test_file, "test_gamma"), 20),
-        (timings_key(&test_file, "test_delta"), 10),
-    ]);
-    fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    fs::write(&cache, serde_json::to_string(&snapshot).unwrap()).unwrap();
+    let regressions = enforce_cost_regressions(std::slice::from_mut(&mut result), &baseline);
 
-    let mut selected = Vec::new();
-    // Deliberately invoke siblings out of index order: selection must depend
-    // only on the shared snapshot, not on which shard happened to finish first.
-    for index in [3, 1, 2] {
-        let opts = RunOptions {
-            shard: Some(TestShard::new(index, 3).unwrap()),
-            ..RunOptions::new(5_000)
-        };
-        let summary = run_tests_with_options(&suite, &opts).await;
-        assert_eq!(summary.failed, 0, "{:?}", summary.results);
-        selected.extend(summary.results.into_iter().map(|result| result.name));
-    }
-
-    selected.sort();
-    assert_eq!(
-        selected,
-        ["test_alpha", "test_beta", "test_delta", "test_gamma"]
-    );
-    assert_eq!(load_timings_cache(&cache), snapshot);
+    assert!(!result.passed);
+    assert_eq!(regressions[0].increase_percent, 40);
 }

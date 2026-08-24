@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 
-use super::{PhaseTimings, TestCase, TestPhase, TestResult, TestTimeout};
+use super::{PhaseTimings, TestCase, TestPhase, TestResult, TestTimeout, TestTimingSpan};
 
 /// Drain `harn-hostlib`'s process-global fs-snapshot sessions between test
 /// cases. A reused test worker would otherwise accumulate one bundle per case.
@@ -360,6 +360,15 @@ async fn execute_compiled(
     // then snapshot spans closed by task cancellation for this case.
     drop(local);
     drop(vm);
+    let timing_spans = harn_vm::tracing::take_spans()
+        .into_iter()
+        .filter(|span| span.kind == harn_vm::tracing::SpanKind::UserTiming)
+        .map(|span| TestTimingSpan {
+            name: span.name,
+            duration_ms: span.duration_ms,
+            attributes: span.metadata,
+        })
+        .collect();
     phases.modules = module_phase_recorder.snapshot();
     // Clear thread-locals so the next case scheduled onto this worker
     // sees a clean slate. Wall clock for this work lands in the
@@ -406,6 +415,7 @@ async fn execute_compiled(
             timeout,
             duration_ms,
             phases: Some(phases),
+            timing_spans,
         },
         value,
     }
@@ -430,5 +440,6 @@ fn compile_failure(
             compile_ms: compile_start.elapsed().as_millis() as u64,
             ..PhaseTimings::default()
         }),
+        timing_spans: Vec::new(),
     }
 }
