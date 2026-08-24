@@ -188,8 +188,10 @@ fn generate_file() -> String {
     out.push_str("    provider: \"channel\",\n");
     out.push_str("    match: {events: [\"channel:pr.merged\"]},\n");
     out.push_str("    handler: ReminderInject({\n");
-    out.push_str("      target: \"current\",                     // \"current\", \"parent\", a literal session id, or a closure\n");
-    out.push_str("      body: \"PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.\",\n");
+    out.push_str("      // \"current\", \"parent\", a literal session id, or a closure\n");
+    out.push_str("      target: \"current\",\n");
+    out.push_str("      body: \"PR {{ event.provider_payload.payload.number }} merged.\"\n");
+    out.push_str("        + \" Consider cutting a patch release.\",\n");
     out.push_str("      tags: [\"release_reminder\"],\n");
     out.push_str("      ttl_turns: 1,\n");
     out.push_str("      dedupe_key: \"release_reminder\",\n");
