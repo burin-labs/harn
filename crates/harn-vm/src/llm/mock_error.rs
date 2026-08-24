@@ -95,16 +95,8 @@ fn infer_mock_error_category(
     kind: Option<&str>,
     reason: Option<&str>,
 ) -> ErrorCategory {
-    if let Some(status) = status {
-        match status {
-            401 | 403 => return ErrorCategory::Auth,
-            404 | 410 => return ErrorCategory::NotFound,
-            408 | 504 | 522 | 524 => return ErrorCategory::Timeout,
-            429 => return ErrorCategory::RateLimit,
-            503 | 529 => return ErrorCategory::Overloaded,
-            500 | 502 => return ErrorCategory::ServerError,
-            _ => {}
-        }
+    if let Some(category) = status.and_then(crate::value::error_category_for_http_status) {
+        return category;
     }
     if let Some(reason) = reason {
         match reason {

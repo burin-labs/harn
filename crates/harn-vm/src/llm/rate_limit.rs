@@ -958,16 +958,10 @@ async fn acquire_permit_for(
                 reroute_on_timeout,
             )
             .await?;
-            // Catalog limits were charged durably above; a provider-discovered
-            // quota is live process state and must be charged here as well.
-            // Omitting this makes every post-receipt request compare against
-            // the same stale `used` snapshot and eventually rediscover 429.
-            {
-                let mut registry = registry().lock().expect("rate limiter mutex poisoned");
-                let now_ms = crate::clock_mock::instant_now().as_millis();
-                record_observed_quota_for_keys(&mut registry, &keys, request, now_ms);
-            }
-            return Ok(RateLimitPermit { _permits: permits });
+            return Ok(provider_quota::admit_after_durable(
+                provider, model, &keys, request, permits,
+            )
+            .await);
         }
     }
     loop {

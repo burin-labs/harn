@@ -1,4 +1,5 @@
 use std::time::Duration;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::RateLimitRequest;
 
@@ -43,6 +44,49 @@ pub(crate) fn observe_for_llm_call(
     for key in keys {
         super::limiter_for_key(&mut registry.limiters, &key).observe_token_quota(now_ms, receipt);
     }
+}
+
+/// Complete durable catalog admission against process-local provider feedback.
+///
+/// SQLite may await after the first local check. Another task can consume the
+/// learned quota in that interval, so the final check and charge share one
+/// registry lock. Waiting releases scarce concurrency permits, but never
+/// repeats the already-charged durable catalog admission.
+pub(super) async fn admit_after_durable(
+    provider: &str,
+    model: &str,
+    keys: &[String],
+    request: RateLimitRequest,
+    mut permits: Vec<OwnedSemaphorePermit>,
+) -> super::RateLimitPermit {
+    loop {
+        let wait = {
+            let mut registry = super::registry()
+                .lock()
+                .expect("rate limiter mutex poisoned");
+            let now_ms = crate::clock_mock::instant_now().as_millis();
+            check_and_record(&mut registry, keys, request, now_ms)
+        };
+        let Some(duration) = wait else {
+            return super::RateLimitPermit { _permits: permits };
+        };
+        drop(permits);
+        super::sleep_after_throttle(provider, model, duration).await;
+        permits = super::acquire_concurrency(keys).await;
+    }
+}
+
+fn check_and_record(
+    registry: &mut super::RateLimitRegistry,
+    keys: &[String],
+    request: RateLimitRequest,
+    now_ms: u128,
+) -> Option<Duration> {
+    let wait = super::check_wait_for_keys(registry, keys, request, now_ms);
+    if wait.is_none() {
+        super::record_observed_quota_for_keys(registry, keys, request, now_ms);
+    }
+    wait
 }
 
 /// Complete model-facing quota observation: provider state plus the request
@@ -138,5 +182,64 @@ impl ObservedTokenQuota {
             .saturating_add(self.charge(units))
             .min(self.limit);
         self.observed_at_ms = now_ms;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durable_post_wait_rechecks_observed_quota_before_charging() {
+        let key = "provider:quota".to_string();
+        let mut registry = super::super::RateLimitRegistry::default();
+        let mut limiter =
+            super::super::RouteLimiter::new(super::super::EffectiveRateLimits::default());
+        limiter.observe_token_quota(
+            0,
+            ProviderTokenQuotaReceipt {
+                limit: 200,
+                used: 150,
+                requested: 40,
+                window_ms: 60_000,
+            },
+        );
+        registry.limiters.insert(key.clone(), limiter);
+        let keys = [key];
+        let request = RateLimitRequest {
+            input_tokens: 40,
+            output_tokens: 0,
+        };
+
+        assert_eq!(
+            super::super::check_wait_for_keys(&mut registry, &keys, request, 0),
+            None,
+            "the pre-SQLite check admits from the observed snapshot"
+        );
+        super::super::record_observed_quota_for_keys(&mut registry, &keys, request, 0);
+
+        let wait = check_and_record(&mut registry, &keys, request, 0)
+            .expect("a competing charge during durable admission must force a recheck wait");
+        assert_eq!(wait, Duration::from_secs(9));
+        assert_eq!(
+            registry.limiters[&keys[0]]
+                .observed_token_quota
+                .expect("quota retained")
+                .usage_at(0),
+            190,
+            "a rejected post-wait admission must not clamp-record its overage"
+        );
+
+        assert_eq!(
+            check_and_record(&mut registry, &keys, request, wait.as_millis()),
+            None
+        );
+        assert_eq!(
+            registry.limiters[&keys[0]]
+                .observed_token_quota
+                .expect("quota retained")
+                .usage_at(wait.as_millis()),
+            200
+        );
     }
 }

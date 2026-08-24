@@ -212,19 +212,23 @@ pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
 
 fn provider_http_error_value(
     classified: LlmErrorInfo,
+    status: reqwest::StatusCode,
     retry_after: Option<&str>,
     quota: Option<ProviderTokenQuotaSnapshot>,
 ) -> VmError {
     use crate::value::VmDictExt;
 
-    let category = match classified.reason {
-        LlmErrorReason::RateLimit => ErrorCategory::RateLimit,
-        LlmErrorReason::ServerError => ErrorCategory::ServerError,
-        LlmErrorReason::NetworkError => ErrorCategory::TransientNetwork,
-        LlmErrorReason::Timeout => ErrorCategory::Timeout,
-        LlmErrorReason::AuthFailure => ErrorCategory::Auth,
-        _ => ErrorCategory::Generic,
-    };
+    let category = crate::value::error_category_for_http_status(status.as_u16()).unwrap_or(
+        match classified.reason {
+            LlmErrorReason::RateLimit => ErrorCategory::RateLimit,
+            LlmErrorReason::ServerError => ErrorCategory::ServerError,
+            LlmErrorReason::NetworkError => ErrorCategory::TransientNetwork,
+            LlmErrorReason::Timeout => ErrorCategory::Timeout,
+            LlmErrorReason::AuthFailure => ErrorCategory::Auth,
+            LlmErrorReason::ModelUnavailable => ErrorCategory::NotFound,
+            _ => ErrorCategory::Generic,
+        },
+    );
     let mut fields = std::collections::BTreeMap::new();
     fields.put_str("category", category.as_str());
     fields.put_str("kind", classified.kind.as_str());
@@ -270,6 +274,7 @@ pub(crate) fn provider_http_error(
     };
     provider_http_error_value(
         classified,
+        status,
         retry_after.as_deref(),
         provider_token_quota_snapshot(headers),
     )
@@ -1393,6 +1398,23 @@ mod tests {
         assert_eq!(
             quota.get("used").map(VmValue::display),
             Some("183249".into())
+        );
+    }
+
+    #[test]
+    fn typed_http_error_preserves_overload_category() {
+        let error = provider_http_error(
+            None,
+            "anthropic",
+            reqwest::StatusCode::from_u16(529).unwrap(),
+            &reqwest::header::HeaderMap::new(),
+            r#"{"type":"error","error":{"type":"overloaded_error"}}"#,
+        );
+
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            ErrorCategory::Overloaded,
+            "the typed envelope must retain the status-owned overload signal"
         );
     }
 }
