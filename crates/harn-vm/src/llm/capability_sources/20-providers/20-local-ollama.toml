@@ -47,6 +47,7 @@ thinking_block_style = "none"
 model_match = "llama3.2*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "Ollama llama3.2 packages are documented as exposing native tool calling. Vendor documentation, not a probe of this runtime. Ollama-runtime pin, not a sibling inherit. Roll back to preferred_tool_format=\"json\" if native tool_calls come back empty." }
 structured_output = "format_kw"
 recommended_endpoint = "/api/chat"
 text_tool_wire_format_supported = false
@@ -80,6 +81,7 @@ vision_supported = false
 # qwen rules). Without the transport field, JSON/schema requests were blocked.
 native_tools = false
 preferred_tool_format = "text"
+tool_format_justification = { assumed = "Ollama-published Gemma 4 12B quants are understood to drop the vision projector and ship text-only tools. No probe of this runtime is on file; confirm with `ollama show` before promoting to measured. Distinct from hosted gemma-4 native." }
 structured_output = "format_kw"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -97,6 +99,7 @@ vision_supported = true
 # qwen rules). Without the transport field, JSON/schema requests were blocked.
 native_tools = false
 preferred_tool_format = "text"
+tool_format_justification = { assumed = "Ollama Gemma 4 family is pinned text-only to match the 12B quant rule above; no probe of this runtime is on file. Distinct from the local OpenAI-compat gemma-4 native pin." }
 structured_output = "format_kw"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -110,6 +113,7 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = false
+tool_format_justification = { measured = "Ollama qwen3.6 text-channel pin: reserved <tool_call> token collapses the heredoc opener (#2978); fenced-JSON (global text default) swept 1.0/1.0/1.0 emission-fidelity on local-qwen3.6. Native is not claimed for this runtime." }
 # No `preferred_tool_format` pin: this text-channel route inherits the GLOBAL
 # default, which is now `json` (fenced-JSON). json is strictly better here than
 # heredoc — the json call opener is a ```tool fence, NOT the reserved
@@ -143,6 +147,7 @@ thinking_block_style = "inline"
 model_match = "qwen3*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "Ollama Qwen 3 / 3.5 packages are documented as exposing native tool calling; recommended_endpoint /api/generate-raw with server_parser ollama_qwen3coder. Vendor documentation, not a probe of this runtime. Distinct from the qwen3.6 text pin on this same runtime." }
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -175,6 +180,7 @@ model_match = "*qwen3.6*"
 # ASSEMBLY, which the model_match shares across the family, not in decoding,
 # which is the only place a quant could plausibly matter.
 native_tools = true
+tool_format_justification = { measured = "2026-08-19 CUDA receipt on llama-server; see tool_mode_parity_notes. Independent of Ollama/MLX/vLLM — this is a llama.cpp measurement." }
 # Moved to native, and NOT on completion, which is a tie this receipt refuses to
 # read as a win. Two things carry it instead.
 #
@@ -241,6 +247,7 @@ native_tools = false
 # <tool_call> token and is delimiter-safe vs heredoc. To pin heredoc, set
 # `preferred_tool_format = "text"`.
 preferred_tool_format = "json"
+tool_format_justification = { assumed = "llama.cpp broader Qwen3 routes stay on the fenced-JSON text contract until the exact runtime/model/template combination is probed. Conservative default, not a finding. Explicitly not inherited from the qwen3.6 native receipt on this same runtime." }
 structured_output = "native"
 # Qwen3 family reserves <tool_call>/</tool_call> as special tokens; see the
 # qwen3.6 rule above. Remapped to a non-special wire delimiter. Kept ON for the
@@ -271,6 +278,7 @@ native_tools = false
 # heredoc's `<<EOF` -> `line 0: <<` content leak. To pin heredoc, set
 # `preferred_tool_format = "text"`.
 preferred_tool_format = "json"
+tool_format_justification = { assumed = "llama.cpp Devstral remains on the text-tool contract until the exact runtime/template is probed. json is delimiter-safe vs heredoc `<<EOF` content leak. No reserved-token constraint. Conservative default, not a finding." }
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -287,13 +295,14 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "devstral-small-2*"
 native_tools = false
-# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default, matching the
-# llamacpp devstral sibling above (explicit pin keeps the catalog invariant
-# satisfied for the catalogued `devstral-small-2:24b` model + aliases). devstral
-# has NO reserved-token constraint, so there was no structural reason to stay on
-# heredoc; json is delimiter-safe and fixes heredoc's `<<EOF` content leak. To
-# pin heredoc, set `preferred_tool_format = "text"`.
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default (explicit pin
+# keeps the catalog invariant satisfied for the catalogued `devstral-small-2:24b`
+# model + aliases). devstral has NO reserved-token constraint, so there was no
+# structural reason to stay on heredoc; json is delimiter-safe and fixes
+# heredoc's `<<EOF` content leak. To pin heredoc, set
+# `preferred_tool_format = "text"`.
 preferred_tool_format = "json"
+tool_format_justification = { assumed = "Ollama Devstral-small-2 text pin: delimiter-safe json vs heredoc `<<EOF` content leak. No reserved-token constraint, so the pin rests on delimiter safety rather than a probe of this runtime. Not a llama.cpp inherit." }
 structured_output = "format_kw"
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -314,6 +323,7 @@ thinking_block_style = "none"
 model_match = "*qwen3.6*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "vLLM/SGLang OpenAI-compat tools wire plus chat_template_kwargs; no forced-format family sweep on this runtime. Distinct from llama.cpp and Ollama because the server, not the weights, owns tool-call handling. Roll back to preferred_tool_format=\"json\" if a tool probe returns empty tool_calls." }
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -335,6 +345,7 @@ thinking_block_style = "inline"
 model_match = "*qwen3*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "vLLM/SGLang OpenAI-compat tools wire; no forced-format family sweep. Same server-owned contract as the local qwen3.6 row, not a llama.cpp inherit. Roll back to preferred_tool_format=\"json\" if a tool probe returns empty tool_calls." }
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -360,6 +371,7 @@ model_match = "gemma-4*"
 # quant rule, which ships text-only tools.)
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "vLLM/SGLang OpenAI-compat surface is documented as exposing native function calling for Gemma 4. Vendor documentation, not a probe of this runtime. Distinct from the Ollama gemma4 text-only quant rule." }
 structured_output = "native"
 thinking_modes = ["enabled"]
 # Gemma 4 is genuinely multimodal (text+image) on every served surface, so the
@@ -389,16 +401,16 @@ thinking_block_style = "inline"
 # (shared equivalence_group), so the same tokenizer caveat applies:
 # `reserved_tool_call_token = true` because Qwen3.6 reserves
 # `<tool_call>`/`</tool_call>` as single special tokens — reusing them as
-# heredoc-text delimiters collapses the loop into opener repetition. native is
-# kept to mirror the probe-validated llama.cpp sibling
-# (`qwen3.6-35b-a3b-ud-q4-k-xl`, validated native on 2026-06-05); the MLX
-# runtime profile still requires a `tool_probe` before native is trusted, and if
-# mlx_lm.server's OpenAI tool_calls come back empty the safe pin is fenced-json
-# (`preferred_tool_format = "json"`), matching the generic `*qwen3.6*` routes.
+# heredoc-text delimiters collapses the loop into opener repetition. The
+# native/text pin is THIS runtime's decision. A prior comment cited the
+# 2026-06-05 llama.cpp probe as authority; that cross-cite is retired (#6829).
+# If mlx_lm.server's OpenAI tool_calls come back empty, the safe pin is
+# fenced-json (`preferred_tool_format = "json"`).
 [[provider.mlx]]
 model_match = "*qwen3.6*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "mlx_lm.server exposes the OpenAI tools wire and honors chat_template_kwargs; no forced-format family sweep on this runtime. The retired 2026-06-05 llama.cpp cross-cite is not evidence for mlx, and replacing it with a receipt this runtime never produced would repeat the same mistake. Roll back to preferred_tool_format=\"json\" if a tool probe returns empty tool_calls." }
 reserved_tool_call_token = true
 structured_output = "native"
 thinking_modes = ["enabled"]
@@ -421,6 +433,7 @@ thinking_block_style = "inline"
 model_match = "*qwen3*"
 native_tools = true
 preferred_tool_format = "native"
+tool_format_justification = { assumed = "mlx_lm.server OpenAI-compat tools wire; no forced-format family sweep. Same runtime as the mlx qwen3.6 row, not a llama.cpp inherit. Roll back to preferred_tool_format=\"json\" if a tool probe returns empty tool_calls." }
 vision = true
 structured_output = "native"
 thinking_modes = ["enabled"]

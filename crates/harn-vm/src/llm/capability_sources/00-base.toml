@@ -217,6 +217,23 @@
 #                     native_only, text_only, unknown.
 #   tool_mode_parity_notes:
 #                     short explanation for known non-interchangeable modes.
+#   tool_format_justification:
+#                     why this row chose native vs text tools. Required on
+#                     self-hosted rows that set `native_tools` or
+#                     `preferred_tool_format`. One of
+#                     `{ measured = "<receipt of THIS runtime>" }`,
+#                     `{ assumed = "<why the pin holds, and the rollback>" }`,
+#                     or
+#                     `{ mirrors = { provider = "...", model_match = "..." } }`.
+#                     A comment that cites a sibling is not a receipt. A
+#                     `mirrors` link must stay in sync with the cited row's
+#                     resolved native/text decision (#6829).
+#                     Use `measured` only when a probe of this runtime exists;
+#                     name what was run and when. Vendor documentation and
+#                     "no sweep has been run here" are `assumed`. The tier is
+#                     the whole value of the field: a table where `measured`
+#                     sometimes means "not measured" is the unfalsifiable
+#                     table #6829 was filed about.
 #   thinking_disable_directive:
 #                     in-prompt directive (e.g. "/no_think" for Qwen3 chat
 #                     templates) that disables the model's thinking mode.
