@@ -340,13 +340,9 @@ pub fn __agent_stall_warning_record(
   config: AgentStallConfig,
 ) -> AgentStallWarning {
   const args_text = json_stringify(input.args)
-  // A digest is evidence that something was digested. The monologue patterns
-  // carry no signature at all — the turn made no tool call to fingerprint — and
-  // hashing that empty string manufactures one constant every such record
-  // shares. A reader comparing signature digests across them finds them
-  // identical and concludes the same call repeated, which is the opposite of
-  // what happened. Report the absence as an absence, the way the token-runaway
-  // detector already writes it.
+  // A digest is evidence that something was digested. Empty signatures report
+  // absence rather than manufacturing one shared constant. Content-aware
+  // monologue observations carry an opaque normalized-text fingerprint.
   const signature_digest = if input.signature != "" {
     "sha256:" + sha256(input.signature)
   } else {
@@ -369,6 +365,93 @@ pub fn __agent_stall_warning_record(
     record = record + {arguments: input.args}
   }
   return record
+}
+
+// Narration scaffolding does not distinguish one plan from another. Removing
+// it lets punctuation/case changes and light rewrites compare on the concrete
+// subjects and actions they mention. If a message contains only scaffolding,
+// all of that generic status prose intentionally shares one token.
+const __AGENT_STALL_MONOLOGUE_SCAFFOLDING = [
+  "a",
+  "am",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "but",
+  "by",
+  "continue",
+  "continuing",
+  "for",
+  "from",
+  "going",
+  "i",
+  "ill",
+  "im",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "me",
+  "more",
+  "my",
+  "need",
+  "next",
+  "now",
+  "of",
+  "on",
+  "or",
+  "progress",
+  "should",
+  "so",
+  "still",
+  "that",
+  "the",
+  "then",
+  "this",
+  "to",
+  "we",
+  "will",
+  "with",
+  "work",
+  "working",
+]
+
+fn __agent_stall_monologue_tokens(text) -> list<string> {
+  const cleaned = trim(regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text))))
+  if cleaned == "" {
+    return ["generic_status"]
+  }
+  let tokens = []
+  for token in split(cleaned, " ") {
+    if token != ""
+      && !contains(__AGENT_STALL_MONOLOGUE_SCAFFOLDING, token)
+      && !contains(tokens, token) {
+      tokens = tokens.appending(token)
+    }
+  }
+  if len(tokens) == 0 {
+    return ["generic_status"]
+  }
+  return tokens
+}
+
+fn __agent_stall_monologue_similarity(left: list<string>, right: list<string>) -> float {
+  if len(left) == 0 || len(right) == 0 {
+    return 0.0
+  }
+  let overlap = 0
+  for token in left {
+    if contains(right, token) {
+      overlap += 1
+    }
+  }
+  const denominator = max(len(left), len(right))
+  return overlap * 1.0 / denominator
 }
 
 /**
@@ -564,11 +647,27 @@ pub fn __agent_stall_observe_no_progress(
   config: AgentStallConfig,
   state: AgentStallState,
   defer_feedback: bool,
+  turn_text = "",
   turn_stop_reason = "",
 ) -> AgentStallObservation {
   // An agent message breaks any action-repeat / ping-pong run.
   let next_state = __agent_stall_reset_action(state)
-  next_state = next_state + {no_progress_streak: next_state.no_progress_streak + 1}
+  const tokens = __agent_stall_monologue_tokens(turn_text)
+  const signature = "monologue:" + sha256(join(tokens, " "))
+  const similar = next_state.no_progress_streak > 0
+    && (next_state.last_no_progress_signature == signature
+      || __agent_stall_monologue_similarity(next_state.last_no_progress_tokens, tokens) >= 0.8)
+  const streak = if similar {
+    next_state.no_progress_streak + 1
+  } else {
+    1
+  }
+  next_state = next_state
+    + {
+      no_progress_streak: streak,
+      last_no_progress_signature: signature,
+      last_no_progress_tokens: tokens,
+    }
   if next_state.no_progress_streak < config.no_progress_messages {
     next_state = __agent_stall_register_recovery(next_state)
     return __agent_stall_observation(next_state, nil, config, false)
@@ -589,7 +688,7 @@ pub fn __agent_stall_observe_no_progress(
       iteration: iteration,
       tool_name: "",
       args: {},
-      signature: "",
+      signature: signature,
       pattern: pattern,
       count: next_state.no_progress_streak,
       consecutive_trips: next_state.consecutive_trips,
@@ -624,7 +723,13 @@ pub fn __agent_stall_observe_parse_rejection(
   defer_feedback: bool,
 ) -> AgentStallObservation {
   let next_state = __agent_stall_reset_action(state)
-  next_state = next_state + {parse_rejection_streak: next_state.parse_rejection_streak + 1}
+  next_state = next_state
+    + {
+      parse_rejection_streak: next_state.parse_rejection_streak + 1,
+      no_progress_streak: 0,
+      last_no_progress_signature: "",
+      last_no_progress_tokens: [],
+    }
   if next_state.parse_rejection_streak < config.repeat_parse_rejection {
     next_state = __agent_stall_register_recovery(next_state)
     return __agent_stall_observation(next_state, nil, config, false)
@@ -731,17 +836,26 @@ pub fn __agent_stall_observe_core(
         config,
         active_state,
         defer_feedback,
+        if to_string(turn_text) != "" {
+          turn_text
+        } else {
+          json_stringify(tool_calls)
+        },
         turn_stop_reason,
       )
     }
     return __agent_stall_observation(
-      __agent_stall_register_recovery(__agent_stall_reset_action(active_state)),
+      __agent_stall_register_recovery(
+        __agent_stall_reset_action(active_state)
+          + {no_progress_streak: 0, last_no_progress_signature: "", last_no_progress_tokens: []},
+      ),
       nil,
       config,
       false,
     )
   }
-  let next_state = active_state + {no_progress_streak: 0}
+  let next_state = active_state
+    + {no_progress_streak: 0, last_no_progress_signature: "", last_no_progress_tokens: []}
   let emitted_warning = nil
   let feedback_deferred = false
   for call in substantive_calls {

@@ -135,8 +135,8 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
   with_llm_script(
     harness.llm,
     [
-      llm_text("I should edit the target file after reading the Entry model."),
-      llm_text("I still need to inspect app/Models/Entry.php before editing."),
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("I should inspect APP models Entry PHP before editing!"),
       look_call("look_after_monologue"),
       llm_text("Read the Entry model. ##DONE##"),
     ],
@@ -187,14 +187,65 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
       assert_eq(receipt.action, "thrash_rescue")
       assert_eq(receipt.reason, "monologue_recovery_continue")
       assert_eq(receipt.warning.pattern, "no_progress_monologue")
+      assert(receipt.warning.signature != "", "monologue warning should carry a content signature")
       assert_eq(receipt.tool_count, 0)
       assert_eq(len(receipt.tool_names), 0)
       const calls = harness.llm.mock_calls()
       const recovery_prompt = json_stringify(calls[2].messages)
-      assert(contains(recovery_prompt, "<context-directives>"))
-      assert(!contains(recovery_prompt, "monologue_recovery"))
-      assert(contains(recovery_prompt, "emit exactly one concrete tool call"))
-      assert(contains(recovery_prompt, "inspect app/Models/Entry.php"))
+      assert(contains(recovery_prompt, "<context-directives>"), "recovery prompt should be scoped")
+      assert(!contains(recovery_prompt, "monologue_recovery"), "internal reason should stay hidden")
+      assert(
+        contains(recovery_prompt, "emit exactly one concrete tool call"),
+        "recovery prompt should demand one call",
+      )
+      assert(
+        contains(recovery_prompt, "inspect app/Models/Entry.php"),
+        "recovery prompt should preserve stated intent",
+      )
+    },
+  )
+}
+
+pipeline test_distinct_monologues_do_not_fire_recovery(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First I will inspect the Entry model."),
+      llm_text("The controller determines which fields are written."),
+      look_call("look_after_distinct_planning"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    { ->
+      const session = "distinct-monologues-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 1,
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the model and controller.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert(contains(captured.result.tools.successful, "look"))
+      const recoveries = events_of(captured.events, "loop_control_decision").filter(
+        { event -> event.reason == "monologue_recovery_continue" },
+      )
+      assert_eq(len(recoveries), 0)
     },
   )
 }
