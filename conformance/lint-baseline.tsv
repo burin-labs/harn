@@ -10,7 +10,6 @@
 1	agents/agent_loop_native_missing_tool_call_recovery.harn	HARN-LNT-018
 6	agents/agent_loop_options.harn	HARN-LNT-025
 4	agents/agent_path_scope_guard.harn	HARN-LNT-025
-16	agents/agent_path_scope_permissions.harn	HARN-LNT-025
 5	agents/agent_session_current_id.harn	HARN-LNT-025
 16	agents/agent_session_reanchor.harn	HARN-LNT-025
 15	agents/agent_session_workspace_anchor.harn	HARN-LNT-025
