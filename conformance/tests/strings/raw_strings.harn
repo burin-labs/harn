@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Raw strings have no escape processing
   const path = r"C:\Users\name\file.txt"
   harness.stdio.log(path)

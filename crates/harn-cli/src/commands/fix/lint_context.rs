@@ -24,7 +24,6 @@ impl FixLintContext {
             file_path: Some(path),
             require_file_header: self.lint.require_file_header,
             require_docstrings: self.lint.require_docstrings,
-            require_public_api_types: self.lint.require_public_api_types,
             complexity_threshold: self.lint.complexity_threshold,
             persona_step_allowlist: &self.lint.persona_step_allowlist,
             require_stdlib_metadata: check::path_is_stdlib_source(path),

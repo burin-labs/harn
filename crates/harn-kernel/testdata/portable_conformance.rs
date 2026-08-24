@@ -29,7 +29,9 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "closure-capture-and-control-flow",
         source: r"
-            fn transform(input) {
+            type TransformInput = {value: int, offset: int, enabled: bool}
+            type TransformResult = {value: int, enabled: bool}
+            fn transform(input: TransformInput) -> TransformResult {
               const offset = input.offset
               const add_offset = {value -> value + offset}
               if input.enabled {
@@ -81,7 +83,15 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "list-string-and-record-operations",
         source: r"
-            fn summarize(input) {
+            type SummaryInput = {
+              left: list<int>,
+              right: list<int>,
+              prefix: string,
+              name: string,
+              needle: int,
+              meta: dict<string, int>,
+            }
+            fn summarize(input: SummaryInput) {
               return {
                 items: input.left + input.right,
                 title: input.prefix + input.name,
@@ -97,7 +107,8 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "list-ordering-runtime-and-constant-folding",
         source: r"
-            fn compare_lists(input) {
+            type ListComparisonInput = {left: list<int>, right: list<int>}
+            fn compare_lists(input: ListComparisonInput) {
               return {
                 runtime_less: input.left < input.right,
                 runtime_equal: input.left <= input.left,
@@ -113,7 +124,7 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "mixed-type-equality-is-structural-not-ordering",
         source: r"
-            fn compare(input) {
+            fn compare(input: {value: string}) {
               return {
                 string_is_not_nil: input.value != nil,
                 string_is_not_int: input.value != 7,
@@ -129,7 +140,7 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "structured-throw-catch",
         source: r#"
-            fn validate(input) {
+            fn validate(input: {value: int}) {
               try {
                 if input.value < 0 {
                   throw {code: "negative", value: input.value}
@@ -147,7 +158,8 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "negative-index-and-slice",
         source: r"
-            fn choose(input) {
+            type ChoiceInput = {values: list<int>, text: string}
+            fn choose(input: ChoiceInput) {
               return {
                 last: input.values[-1],
                 middle: input.values[-4:-1],
@@ -163,7 +175,7 @@ pub const PURE_CASES: &[PureCase] = &[
         id: "module-capture-property-mutation",
         source: r"
             let state = {count: 0}
-            fn reduce(input) {
+            fn reduce(input: {count: int}) {
               state.count = input.count
               return {count: state.count}
             }
@@ -175,7 +187,9 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "iteration-and-copy-on-write-mutation",
         source: r#"
-            fn reduce(input) {
+            type IterationState = {count: int, tags: list<string>}
+            type IterationInput = {state: IterationState, values: list<int>}
+            fn reduce(input: IterationInput) -> IterationState {
               let state = input.state
               for value in input.values {
                 state.count = state.count + value
@@ -191,7 +205,8 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "renderer-string-and-option-primitives",
         source: r#"
-            fn reduce(input) {
+            type RenderInput = {name: string, validation?: dict<string, bool>}
+            fn reduce(input: RenderInput) {
               const options = {allow_network: false}.merging(input.validation ?? {})
               const name = trim(input.name)
               return {
@@ -226,7 +241,7 @@ pub const PURE_CASES: &[PureCase] = &[
     PureCase {
         id: "target-independent-path-joining",
         source: r#"
-            fn paths(input) {
+            fn paths(input: {root: string}) {
               return {
                 host: path_join(input.root, ".harn", "state.json"),
                 reset: path_join("ignored", "/absolute", "file"),
@@ -292,7 +307,9 @@ pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
         id: "int-param-rejects-float",
         source: r"
             fn takes_int(n: int) -> int { return n }
-            fn reduce(input) { return takes_int(input) }
+            // Deliberate unchecked host boundary: the failure belongs to the
+            // portable runtime parameter contract.
+            fn reduce(input: any) { return takes_int(input) }
         ",
         entry: "reduce",
         input_json: "2.5",

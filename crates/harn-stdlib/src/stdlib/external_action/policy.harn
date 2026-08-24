@@ -51,7 +51,7 @@ fn __external_action_policy_bool(raw: dict, field: string) -> Result<bool, Exter
 }
 
 fn __external_action_policy_assurance(
-  raw,
+  raw: string?,
 ) -> Result<ExternalActionAuthenticationAssurance, ExternalActionError> {
   const value = lowercase(trim(to_string(raw ?? "none")))
   if value == "none" || value == "session" || value == "biometric" || value == "managed" {
@@ -66,7 +66,7 @@ fn __external_action_policy_assurance(
 }
 
 fn __external_action_policy_text_list(
-  raw,
+  raw: string | bytes | list | dict | set | range | nil,
   field: string,
 ) -> Result<list<string>?, ExternalActionError> {
   if raw == nil {
@@ -96,7 +96,7 @@ fn __external_action_policy_text_list(
 }
 
 fn __external_action_policy_environments(
-  raw,
+  raw: string | bytes | list | dict | set | range | nil,
 ) -> Result<list<ExternalActionEnvironment>?, ExternalActionError> {
   const checked = __external_action_policy_text_list(raw, "allowed_environments")
   if !is_ok(checked) || unwrap(checked) == nil {
@@ -117,7 +117,9 @@ fn __external_action_policy_environments(
   return Ok(environments)
 }
 
-fn __external_action_policy_money(raw) -> Result<list<ExternalActionMoney>, ExternalActionError> {
+fn __external_action_policy_money(
+  raw: string | bytes | list | dict | set | range | nil,
+) -> Result<list<ExternalActionMoney>, ExternalActionError> {
   if raw == nil {
     return Ok([])
   }

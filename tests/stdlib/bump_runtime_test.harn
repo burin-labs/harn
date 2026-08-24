@@ -22,7 +22,7 @@ import { assert_eq, assert_throws } from "std/testing"
  * assert not just the receipt but the exact effect sequence (leased disarm,
  * atomic publication, PR upsert, auto-merge).
  */
-fn make_fake(config = {}) {
+fn make_fake(config: dict = {}) {
   let calls = []
   const record = fn(name, arg) { calls = calls + [{name: name, arg: arg}] }
   const cfg = {
@@ -124,15 +124,15 @@ fn make_fake(config = {}) {
   return {adapter: adapter, calls: fn() { return calls }}
 }
 
-fn call_names(calls) -> list<string> {
+fn call_names(calls: any) -> list<string> {
   return calls.map({ c -> c.name }).to_list()
 }
 
-fn opts(overrides = {}) -> BumpOptions {
+fn opts(overrides: dict = {}) -> BumpOptions {
   return bump_options({repo: "burin-labs/example"} + overrides)
 }
 
-pipeline test_pure_predicates_are_v_insensitive(harness: Harness, task) {
+pipeline test_pure_predicates_are_v_insensitive(harness: Harness, task: unknown) {
   assert_eq(bump_is_current("v0.10.30", "0.10.30"), true)
   assert_eq(bump_is_current("v0.10.29", "v0.10.30"), false)
   assert_eq(bump_is_current("", ""), false)
@@ -144,7 +144,7 @@ pipeline test_pure_predicates_are_v_insensitive(harness: Harness, task) {
 }
 
 /** 1. No-op: the pin already matches the target. Zero mutation. */
-pipeline test_already_current_is_a_clean_noop(harness: Harness, task) {
+pipeline test_already_current_is_a_clean_noop(harness: Harness, task: unknown) {
   const fake = make_fake({current: "v0.10.30", target: "v0.10.30"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "already_current")
@@ -154,7 +154,7 @@ pipeline test_already_current_is_a_clean_noop(harness: Harness, task) {
 }
 
 /** A stale target can never roll a consumer back from a newer release. */
-pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, task) {
+pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, task: unknown) {
   const fake = make_fake({current: "v0.10.85", target: "v0.10.84"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "already_current")
@@ -169,7 +169,7 @@ pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, tas
   assert_eq(call_names(fake.calls()), [])
 }
 
-pipeline test_invalid_current_pin_fails_closed_before_mutation(harness: Harness, task) {
+pipeline test_invalid_current_pin_fails_closed_before_mutation(harness: Harness, task: unknown) {
   const fake = make_fake({current: "latest", target: "v0.10.84"})
   assert_eq(
     assert_throws({ -> run_bump(opts(), fake.adapter) }),
@@ -179,7 +179,7 @@ pipeline test_invalid_current_pin_fails_closed_before_mutation(harness: Harness,
 }
 
 /** 2. Delayed asset publication: readiness gate stops before any change. */
-pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task) {
+pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task: unknown) {
   const fake = make_fake({ready: false, readiness_detail: "missing release assets: SHA256SUMS"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "not_ready")
@@ -193,7 +193,7 @@ pipeline test_release_not_ready_stops_before_mutation(harness: Harness, task) {
  * 3. Lockfile regeneration flows through to a created PR with the refreshed
  * files recorded on the receipt.
  */
-pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task) {
+pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task: unknown) {
   const fake = make_fake({refreshed: ["harn.lock", "generated/schema.json"]})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
@@ -209,7 +209,7 @@ pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task) {
 }
 
 /** 4. Refresh failure: fail closed before validation, commit, or PR mutation. */
-pipeline test_refresh_failure_blocks_validation_and_commit(harness: Harness, task) {
+pipeline test_refresh_failure_blocks_validation_and_commit(harness: Harness, task: unknown) {
   const fake = make_fake({apply_ok: false})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "refresh_failed")
@@ -220,7 +220,7 @@ pipeline test_refresh_failure_blocks_validation_and_commit(harness: Harness, tas
 }
 
 /** 5. Validation failure: no commit, no PR, ok=false. */
-pipeline test_validation_failure_blocks_commit(harness: Harness, task) {
+pipeline test_validation_failure_blocks_commit(harness: Harness, task: unknown) {
   const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "validation_failed")
@@ -230,7 +230,10 @@ pipeline test_validation_failure_blocks_commit(harness: Harness, task) {
 }
 
 /** Fleet repair opt-in publishes an exact lease but never arms auto-merge. */
-pipeline test_validation_failure_can_publish_repair_pr_without_auto_merge(harness: Harness, task) {
+pipeline test_validation_failure_can_publish_repair_pr_without_auto_merge(
+  harness: Harness,
+  task: unknown,
+) {
   const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
   const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
   assert_eq(receipt.outcome, "validation_failed")
@@ -246,7 +249,10 @@ pipeline test_validation_failure_can_publish_repair_pr_without_auto_merge(harnes
   )
 }
 
-pipeline test_validation_failure_opt_in_does_not_publish_an_empty_delta(harness: Harness, task) {
+pipeline test_validation_failure_opt_in_does_not_publish_an_empty_delta(
+  harness: Harness,
+  task: unknown,
+) {
   const fake = make_fake(
     {validation_ok: false, validation_detail: "harn check failed", additions: [], deletions: []},
   )
@@ -259,7 +265,7 @@ pipeline test_validation_failure_opt_in_does_not_publish_an_empty_delta(harness:
 
 pipeline test_validation_failure_opt_in_never_becomes_success_when_branch_matches_base(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const fake = make_fake(
     {validation_ok: false, validation_detail: "harn check failed", branch_matches: true},
@@ -273,7 +279,7 @@ pipeline test_validation_failure_opt_in_never_becomes_success_when_branch_matche
 
 pipeline test_refresh_failure_can_publish_repair_pr_without_validation_or_auto_merge(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const fake = make_fake({apply_ok: false})
   const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
@@ -288,7 +294,10 @@ pipeline test_refresh_failure_can_publish_repair_pr_without_validation_or_auto_m
   assert_eq(call_names(fake.calls()), ["apply_version", "publish_commit", "upsert_pr"])
 }
 
-pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(harness: Harness, task) {
+pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(
+  harness: Harness,
+  task: unknown,
+) {
   const fake = make_fake({apply_ok: false, apply_changed: false, additions: [], deletions: []})
   const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
   assert_eq(receipt.outcome, "refresh_failed")
@@ -301,7 +310,7 @@ pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(harness
  * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
  * BEFORE the branch and signed commit are atomically published. Order matters.
  */
-pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task) {
+pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task: unknown) {
   const stale: BumpPrState = {
     number: 71,
     head_oid: "stale99",
@@ -331,7 +340,7 @@ pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task)
   )
 }
 
-pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, task) {
+pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, task: unknown) {
   const stale: BumpPrState = {
     number: 72,
     head_oid: "stale100",
@@ -354,7 +363,7 @@ pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, tas
  * 7. Existing PR refresh: an open PR without armed auto-merge is edited in
  * place, not recreated, and NOT disarmed.
  */
-pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task) {
+pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task: unknown) {
   const open: BumpPrState = {
     number: 88,
     head_oid: "old123",
@@ -378,7 +387,7 @@ pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task) {
 }
 
 /** 8. Successful auto-merge: a fresh bump creates a PR and arms auto-merge. */
-pipeline test_successful_bump_arms_auto_merge(harness: Harness, task) {
+pipeline test_successful_bump_arms_auto_merge(harness: Harness, task: unknown) {
   const fake = make_fake({})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
@@ -394,7 +403,7 @@ pipeline test_successful_bump_arms_auto_merge(harness: Harness, task) {
  * of opening an empty one — the concurrency-safe "someone already landed it"
  * path.
  */
-pipeline test_branch_matching_base_closes_stale_pr(harness: Harness, task) {
+pipeline test_branch_matching_base_closes_stale_pr(harness: Harness, task: unknown) {
   const stale: BumpPrState = {
     number: 12,
     head_oid: "x",

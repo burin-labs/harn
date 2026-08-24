@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test model tier detection. Tier is now self-declared on each
   // catalog row (#2463); unknown model ids fall through to the
   // tier_defaults.default ("mid"), so look up models that exist in

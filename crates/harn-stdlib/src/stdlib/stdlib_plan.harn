@@ -111,7 +111,7 @@ pub type PlanDocument = {
  * @effects: []
  * @errors: []
  */
-pub fn plan_from(plan) -> PlanArtifact {
+pub fn plan_from(plan: any) -> PlanArtifact {
   return plan_artifact(plan)
 }
 
@@ -121,7 +121,7 @@ pub fn plan_from(plan) -> PlanArtifact {
  * @effects: []
  * @errors: []
  */
-pub fn plan_acp_entries(plan) {
+pub fn plan_acp_entries(plan: any) {
   return plan_entries(plan)
 }
 
@@ -131,7 +131,7 @@ pub fn plan_acp_entries(plan) {
  * @effects: []
  * @errors: []
  */
-pub fn emit_plan_tool(registry) {
+pub fn emit_plan_tool(registry: {_type: "tool_registry", tools: list} | closure) {
   return tool_define(
     registry,
     "emit_plan",
@@ -184,7 +184,7 @@ pub fn emit_plan_tool(registry) {
  * @effects: []
  * @errors: []
  */
-pub fn update_plan_tool(registry) {
+pub fn update_plan_tool(registry: {_type: "tool_registry", tools: list} | closure) {
   return tool_define(
     registry,
     "update_plan",
@@ -243,7 +243,7 @@ pub fn update_plan_tool(registry) {
  * @effects: []
  * @errors: []
  */
-pub fn plan_tools(registry = nil) {
+pub fn plan_tools(registry: {_type: "tool_registry", tools: list}? = nil) {
   let tools = registry ?? tool_registry()
   tools = emit_plan_tool(tools)
   tools = update_plan_tool(tools)
@@ -256,7 +256,7 @@ pub fn plan_tools(registry = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
+pub fn plan_approved(plan: any, approval: ApprovalRecord) -> PlanArtifact {
   const artifact = plan_from(plan)
   const state = if approval.approved {
     "approved"
@@ -280,7 +280,11 @@ pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
  * @effects: []
  * @errors: []
  */
-pub fn request_plan_approval(interaction: HarnessInteraction, plan, options = nil) -> PlanArtifact {
+pub fn request_plan_approval(
+  interaction: HarnessInteraction,
+  plan: any,
+  options: any = nil,
+) -> PlanArtifact {
   const artifact = plan_from(plan)
   const action = options?.action ?? "Approve plan"
   let approval_options = if options {

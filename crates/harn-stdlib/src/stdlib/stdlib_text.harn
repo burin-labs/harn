@@ -7,7 +7,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn int_to_string(value) {
+pub fn int_to_string(value: any) {
   const parsed = to_int(value)
   require parsed != nil, "int_to_string expects an integer-compatible value"
   return to_string(parsed)
@@ -20,7 +20,7 @@ pub fn int_to_string(value) {
  * @effects: []
  * @errors: []
  */
-pub fn float_to_string(value) {
+pub fn float_to_string(value: any) {
   const parsed = to_float(value)
   require parsed != nil, "float_to_string expects a float-compatible value"
   return to_string(parsed)
@@ -33,7 +33,7 @@ pub fn float_to_string(value) {
  * @effects: []
  * @errors: []
  */
-pub fn parse_int_or(value, fallback) {
+pub fn parse_int_or(value: any, fallback: any) {
   return to_int(value) ?? fallback
 }
 
@@ -44,7 +44,7 @@ pub fn parse_int_or(value, fallback) {
  * @effects: []
  * @errors: []
  */
-pub fn parse_float_or(value, fallback) {
+pub fn parse_float_or(value: any, fallback: any) {
   return to_float(value) ?? fallback
 }
 
@@ -57,7 +57,7 @@ pub fn parse_float_or(value, fallback) {
  * @effects: []
  * @errors: []
  */
-pub fn extract_paths(text) {
+pub fn extract_paths(text: string?) {
   const lines = split(text, "\n").filter(
     { line ->
       let t = trim(line)
@@ -115,7 +115,7 @@ pub fn extract_paths(text) {
  * @effects: []
  * @errors: []
  */
-pub fn parse_cells(response) {
+pub fn parse_cells(response: string?) {
   const lines = split(response, "\n")
   let cells = []
   let in_block = false
@@ -165,7 +165,7 @@ pub fn parse_cells(response) {
  * @effects: []
  * @errors: []
  */
-pub fn filter_test_cells(cells, target_file) {
+pub fn filter_test_cells(cells: any, target_file: any) {
   return cells.filter(
     { cell ->
       if cell.type == "call" && contains(cell.code, "write_file") {
@@ -186,7 +186,7 @@ pub fn filter_test_cells(cells, target_file) {
  * @effects: []
  * @errors: []
  */
-pub fn truncate_head_tail(text, n) {
+pub fn truncate_head_tail(text: string?, n: int) {
   const lines = split(text, "\n")
   if len(lines) <= n * 2 {
     return text
@@ -205,7 +205,7 @@ pub fn truncate_head_tail(text, n) {
  * @effects: []
  * @errors: []
  */
-pub fn truncate_text(text, max_chars = 4000, marker = nil) {
+pub fn truncate_text(text: string?, max_chars: int? = 4000, marker: any = nil) {
   const value = text ?? ""
   const limit = max_chars ?? 4000
   if limit <= 0 || len(value) <= limit {
@@ -221,7 +221,7 @@ pub fn truncate_text(text, max_chars = 4000, marker = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
+pub fn truncate_middle(text: string?, max_chars: int? = 4000, marker: string? = "...") {
   const value = text ?? ""
   const limit = max_chars ?? 4000
   if limit <= 0 || len(value) <= limit {
@@ -246,8 +246,14 @@ pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
  * @effects: []
  * @errors: []
  */
-pub fn single_line_or(value, fallback = "") {
-  const text = trim(value ?? "")
+pub fn single_line_or(value: unknown, fallback: string = "") {
+  const text = trim(
+    if value == nil {
+      ""
+    } else {
+      to_string(value)
+    },
+  )
   if text == "" {
     return fallback
   }
@@ -260,7 +266,7 @@ pub fn single_line_or(value, fallback = "") {
  * @effects: []
  * @errors: []
  */
-pub fn prefix_lines(text, prefix = "  ") {
+pub fn prefix_lines(text: string?, prefix: string? = "  ") {
   const p = prefix ?? ""
   return split(text ?? "", "\n").map({ line -> p + line }).join("\n")
 }
@@ -271,7 +277,7 @@ pub fn prefix_lines(text, prefix = "  ") {
  * @effects: []
  * @errors: []
  */
-pub fn indent(text, spaces = 2) {
+pub fn indent(text: string?, spaces: int? = 2) {
   return prefix_lines(text, " ".repeat(max(spaces ?? 0, 0)))
 }
 
@@ -283,7 +289,7 @@ pub fn indent(text, spaces = 2) {
  * @effects: []
  * @errors: []
  */
-pub fn detect_compile_error(output) {
+pub fn detect_compile_error(output: string | list) {
   return contains(output, "SyntaxError")
     || contains(output, "IndentationError")
     || contains(output, "ImportError")
@@ -300,7 +306,7 @@ pub fn detect_compile_error(output) {
  * @effects: []
  * @errors: []
  */
-pub fn has_got_want(output) {
+pub fn has_got_want(output: string | list) {
   const has_got = contains(output, "got:")
     || contains(output, "Got:")
     || contains(output, "actual:")
@@ -320,7 +326,7 @@ pub fn has_got_want(output) {
  * @effects: []
  * @errors: []
  */
-pub fn format_test_errors(output) {
+pub fn format_test_errors(output: string?) {
   const error_lines = split(output, "\n").filter(
     { line ->
       return contains(line, "FAIL")
@@ -347,7 +353,7 @@ pub fn format_test_errors(output) {
  * @errors: []
  * @example: pad_right("api", 6)
  */
-pub fn pad_right(value, width: int, fill: string = " ") -> string {
+pub fn pad_right(value: unknown, width: int, fill: string = " ") -> string {
   return to_string(value ?? "").pad_right(width, fill ?? " ")
 }
 
@@ -360,7 +366,7 @@ pub fn pad_right(value, width: int, fill: string = " ") -> string {
  * @errors: []
  * @example: pad_left(7, 4, "0")
  */
-pub fn pad_left(value, width: int, fill: string = " ") -> string {
+pub fn pad_left(value: unknown, width: int, fill: string = " ") -> string {
   return to_string(value ?? "").pad_left(width, fill ?? " ")
 }
 
@@ -373,7 +379,7 @@ pub fn pad_left(value, width: int, fill: string = " ") -> string {
  * @errors: []
  * @example: repeat_string("-", 5)
  */
-pub fn repeat_string(text, count: int) -> string {
+pub fn repeat_string(text: string?, count: int) -> string {
   if count == nil || count <= 0 {
     return ""
   }
@@ -391,7 +397,7 @@ pub fn repeat_string(text, count: int) -> string {
  * @errors: []
  * @example: regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", tag)
  */
-pub fn regex_first_capture(pattern: string, text) {
+pub fn regex_first_capture(pattern: string, text: string?) {
   const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
   if len(captures) == 0 {
     return nil
@@ -412,7 +418,7 @@ pub fn regex_first_capture(pattern: string, text) {
  * @errors: []
  * @example: regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")
  */
-pub fn regex_capture_groups(pattern: string, text) -> list {
+pub fn regex_capture_groups(pattern: string, text: string?) -> list {
   const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
   if len(captures) == 0 {
     return []
@@ -430,7 +436,7 @@ pub fn regex_capture_groups(pattern: string, text) -> list {
  * @errors: []
  * @example: regex_all_first_captures("#(\\d+)", "fixes #12 and #34")
  */
-pub fn regex_all_first_captures(pattern: string, text) -> list {
+pub fn regex_all_first_captures(pattern: string, text: string?) -> list {
   let out = []
   for capture in regex_captures(pattern, to_string(text ?? "")) ?? [] {
     const groups = capture?.groups ?? []

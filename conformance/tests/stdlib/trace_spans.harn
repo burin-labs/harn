@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // enable_tracing enables VM-level span collection
   harness.obs.enable_tracing(true)
   // trace_spans returns the list (may be empty since pipeline span

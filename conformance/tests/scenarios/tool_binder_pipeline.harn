@@ -43,7 +43,7 @@ fn synthetic_next() {
   }
 }
 
-fn envelope(name, args, schema) {
+fn envelope(name: string, args: dict, schema: any) {
   return {
     tool_name: name,
     tool_args: args,
@@ -63,7 +63,7 @@ fn file_schema() {
   }
 }
 
-fn error_contains(result, fragment) {
+fn error_contains(result: any, fragment: string) {
   return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
 }
 

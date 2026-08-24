@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * immediately even when later links would succeed — failover rules
  * own the predicate that determines retryable categories.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

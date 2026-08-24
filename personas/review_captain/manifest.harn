@@ -11,7 +11,7 @@ import { review_pr } from "lib/review"
 
 @persona(name: "review_captain", description: "Harn-native review captain. Runs deterministic secret/risk checks plus optional self_review LLM rounds and emits a structured review receipt.", tools: [github, mcp], autonomy: suggest, receipts: required, triggers: [github.review_requested, github.pull_request_synchronized, github.pull_request_opened])
 /** Static persona graph used by `harn persona inspect` to expose Review Captain's durable steps. */
-pub fn review_captain_persona(ctx) {
+pub fn review_captain_persona(ctx: any) {
   const input = resolve_review_input_step(ctx)
   const secret_scan_findings = scan_secrets_step(input)
   const risky_paths = classify_risky_paths_step(
@@ -30,32 +30,32 @@ pub fn review_captain_persona(ctx) {
 }
 
 @step(name: "resolve_review_input", receipt: audit, error_boundary: fail)
-fn resolve_review_input_step(ctx) {
+fn resolve_review_input_step(ctx: any) {
   return ctx
 }
 
 @step(name: "scan_secrets", receipt: audit, error_boundary: fail)
-fn scan_secrets_step(ctx) {
+fn scan_secrets_step(ctx: any) {
   return ctx
 }
 
 @step(name: "classify_risky_paths", receipt: audit, error_boundary: fail)
-fn classify_risky_paths_step(ctx) {
+fn classify_risky_paths_step(ctx: dict) {
   return ctx
 }
 
 @step(name: "run_self_review", model: "gpt-5.4-mini", receipt: audit, error_boundary: continue, retry: {max_attempts: 2})
-fn run_self_review_step(ctx) {
+fn run_self_review_step(ctx: dict) {
   return ctx
 }
 
 @step(name: "build_review_receipt", receipt: audit, error_boundary: fail)
-fn build_review_receipt_step(ctx) {
+fn build_review_receipt_step(ctx: dict) {
   return ctx
 }
 
 @step(name: "summarize_review", receipt: audit, error_boundary: fail)
-fn summarize_review_step(ctx) {
+fn summarize_review_step(ctx: any) {
   return ctx
 }
 
@@ -104,7 +104,7 @@ fn _try_runtime_input(runtime: HarnessRuntime) {
   return unwrap(attempt)
 }
 
-fn _merge_with_defaults(provided) {
+fn _merge_with_defaults(provided: dict) {
   const defaults = _default_request()
   return {
     repo: provided.repo ?? defaults.repo,
@@ -120,7 +120,7 @@ fn _merge_with_defaults(provided) {
   }
 }
 
-fn _resolve_policy(fs: HarnessFs, request) {
+fn _resolve_policy(fs: HarnessFs, request: dict) {
   const path = request.policy_path
   if path == nil || path == "" {
     return default_policy()
@@ -133,7 +133,7 @@ fn _resolve_policy(fs: HarnessFs, request) {
   return default_policy()
 }
 
-pub pipeline run(harness: Harness, task) -> dict {
+pub pipeline run(harness: Harness, task: unknown) -> dict {
   const request = _resolve_request(harness.stdio, harness.runtime)
   const policy = _resolve_policy(harness.fs, request)
   const receipt = review_pr(harness.agent, request, policy, nil)

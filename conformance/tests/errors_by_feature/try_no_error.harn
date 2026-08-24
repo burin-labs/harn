@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   try {
     harness.stdio.log("ok")
   } catch (e) {

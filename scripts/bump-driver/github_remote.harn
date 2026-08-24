@@ -44,7 +44,7 @@ fn __repo(value: string) -> GithubRepo {
   return {owner: parts[0], name: parts[1]}
 }
 
-fn __must(result, operation: string) {
+fn __must(result: any, operation: string) {
   if is_err(result) {
     throw "bump-driver: " + operation + " failed: " + json_stringify(unwrap_err(result))
   }

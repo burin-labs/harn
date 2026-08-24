@@ -6,7 +6,7 @@ import { with_llm_script } from "std/testing"
  * escalates to the next rung, which serves the answer. The policy label
  * comes from the catalog declaration.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

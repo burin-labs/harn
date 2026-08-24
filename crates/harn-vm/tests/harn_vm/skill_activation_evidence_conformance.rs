@@ -95,8 +95,9 @@ fn discovered_registry() -> VmValue {
 /// registry global and return the payload dict.
 fn evidence(registry: VmValue, options_src: &str) -> DictMap {
     harn_vm::reset_thread_local_state();
-    let source =
-        format!("pipeline t(task) {{ return skills_activation_evidence(skills, {options_src}) }}");
+    let source = format!(
+        "pipeline t(task: unknown) {{ return skills_activation_evidence(skills, {options_src}) }}"
+    );
     let chunk = harn_vm::compile_source(&source).expect("compile");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Suppress structured log output from trace_end
   harness.obs.set_level("error")
   // trace_id is nil when no active span

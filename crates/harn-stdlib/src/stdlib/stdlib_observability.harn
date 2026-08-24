@@ -122,7 +122,7 @@ pub fn end_span(obs: HarnessObs, span: ObsSpan) {
  * @api_stability: experimental
  * @example: span("review", {pr: 1915}, { -> work() })
  */
-pub fn span(obs: HarnessObs, name: string, attrs: dict = {}, callback = nil) {
+pub fn span(obs: HarnessObs, name: string, attrs: dict = {}, callback: any = nil) {
   const handle = start_span(obs, name, attrs)
   if callback == nil {
     return handle
@@ -157,7 +157,7 @@ pub fn log(obs: HarnessObs, message: string, level: string = "info", fields: dic
  * @api_stability: experimental
  * @example: metric("review_duration_ms", 42, {pr: 1915})
  */
-pub fn metric(obs: HarnessObs, name: string, value, fields: dict = {}) {
+pub fn metric(obs: HarnessObs, name: string, value: any, fields: dict = {}) {
   return obs.emit({kind: "metric", name: name, value: value, fields: fields})
 }
 
@@ -171,7 +171,7 @@ pub fn metric(obs: HarnessObs, name: string, value, fields: dict = {}) {
  * @api_stability: experimental
  * @example: counter("harn.session.put_total", 1, {"harn.session.outcome": "ok"})
  */
-pub fn counter(obs: HarnessObs, name: string, value = 1, attrs: dict = {}) {
+pub fn counter(obs: HarnessObs, name: string, value: int = 1, attrs: dict = {}) {
   return obs.counter(name, value, attrs)
 }
 
@@ -185,7 +185,7 @@ pub fn counter(obs: HarnessObs, name: string, value = 1, attrs: dict = {}) {
  * @api_stability: experimental
  * @example: histogram("harn.pg.duration_ms", 42, {"harn.pg.query_name": "users.by_id"})
  */
-pub fn histogram(obs: HarnessObs, name: string, value, attrs: dict = {}) {
+pub fn histogram(obs: HarnessObs, name: string, value: any, attrs: dict = {}) {
   return obs.histogram(name, value, attrs)
 }
 
@@ -199,7 +199,7 @@ pub fn histogram(obs: HarnessObs, name: string, value, attrs: dict = {}) {
  * @api_stability: experimental
  * @example: gauge("harn.mcp.restart_count", 3, {"harn.mcp.server": "fs"})
  */
-pub fn gauge(obs: HarnessObs, name: string, value, attrs: dict = {}) {
+pub fn gauge(obs: HarnessObs, name: string, value: any, attrs: dict = {}) {
   return obs.gauge(name, value, attrs)
 }
 

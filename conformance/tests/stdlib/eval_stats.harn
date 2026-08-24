@@ -1,6 +1,14 @@
 import "std/eval/stats"
 
-fn row(name, group, passes, trials, skips, timeouts, cost) {
+fn row(
+  name: string,
+  group: string,
+  passes: int,
+  trials: int,
+  skips: int,
+  timeouts: int,
+  cost: float,
+) {
   return {
     name: name,
     group: group,
@@ -13,7 +21,7 @@ fn row(name, group, passes, trials, skips, timeouts, cost) {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const rows = [
     row("py-a", "python", 4, 4, 0, 0, 1.0),
     row("py-b", "python", 1, 4, 0, 1, 2.0),

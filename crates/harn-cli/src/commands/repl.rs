@@ -332,9 +332,9 @@ impl ReplSession {
 
         let body_block = body_lines.join("\n");
         let source = if top_level_block.is_empty() {
-            format!("pipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
+            format!("pipeline repl(harness: Harness, task: any) {{\n{body_block}\n}}")
         } else {
-            format!("{top_level_block}\npipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
+            format!("{top_level_block}\npipeline repl(harness: Harness, task: any) {{\n{body_block}\n}}")
         };
 
         match execute(&source, None).await {
@@ -533,7 +533,7 @@ mod tests {
         let mut session = super::ReplSession::default();
         session.eval_line("let x = 40").await;
         assert_eq!(session.accumulated.len(), 1);
-        session.eval_line("fn inc(n) { return n + 1 }").await;
+        session.eval_line("fn inc(n: int) { return n + 1 }").await;
         assert_eq!(session.top_level.len(), 1);
         session.eval_line("inc(x) + 1").await;
         // Binding + bare expression are accumulated; the `fn` is top-level.

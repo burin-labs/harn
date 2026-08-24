@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test checkpoint builtins for resilient pipeline execution.
   // Initially no checkpoint exists
   const val = harness.runtime.checkpoint_get("step1")

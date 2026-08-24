@@ -13,7 +13,7 @@ import "./policy_core.harn"
  * outage, not a style nit. Keep this in step with ~/.local/bin/sccache and the
  * `sccache-server` systemd unit on the self-hosted Linux runners.
  */
-fn sccache_install_action_errors(install_action) -> list<string> {
+fn sccache_install_action_errors(install_action: dict) -> list<string> {
   guard install_action != nil else {
     return ["${SCCACHE_INSTALL_ACTION_PATH} must exist as the sole sccache install point"]
   }

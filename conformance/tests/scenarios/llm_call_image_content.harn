@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const png_path = path_join(harness.fs.workspace_temp_dir(), "vision_fixture.png")
   harness.fs.write_bytes(
     png_path,

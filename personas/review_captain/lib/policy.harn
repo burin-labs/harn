@@ -5,7 +5,7 @@
 // anything more elaborate belongs in the LLM rubric, not in
 // deterministic Harn code.
 /** load_policy_json(raw) -> {ok, policy?, error?}. */
-pub fn load_policy_json(raw) {
+pub fn load_policy_json(raw: string?) {
   const text = raw ?? ""
   if text == "" {
     return _default_policy_result()

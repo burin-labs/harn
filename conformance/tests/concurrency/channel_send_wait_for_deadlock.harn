@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const ch = harness.runtime.channel("full", 1)
   harness.runtime.send(ch, "buffered")
   parallel 1 { _ ->

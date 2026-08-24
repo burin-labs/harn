@@ -1,6 +1,6 @@
 import { verify_then_act } from "std/personas/prelude"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const receipt_options = {
     persona: "merge_captain",
     step: "merge_pr",
@@ -9,6 +9,7 @@ pipeline test(harness: Harness, task) {
     completed_at: "2026-05-03T00:00:00Z",
   }
   const accepted = verify_then_act(
+    harness.clock,
     fn() { return Ok({clean: true}) },
     fn() { return "merged" },
     receipt_options,
@@ -21,6 +22,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(accepted.receipt.status)
   harness.stdio.println(len(accepted.receipt.tool_calls))
   const blocked = verify_then_act(
+    harness.clock,
     fn() { return false },
     fn() {
       throw "actor should not run"

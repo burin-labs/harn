@@ -15,7 +15,7 @@
  * Import:
  *   import { Backpressure, pool_create, pool_get, pool_list, pool_wait, fifo } from "std/lifecycle/pool"
  */
-fn __queue_strategy(kind, options = nil) {
+fn __queue_strategy(kind: string, options: any = nil) {
   const base = {_type: "queue_strategy", kind: kind}
   if options == nil {
     return base
@@ -69,7 +69,7 @@ pub fn lifo() {
  * @api_stability: experimental
  * @example: pool_create(harness.agent, {queue: fair_round_robin("tenant_id")})
  */
-pub fn fair_round_robin(key = "key") {
+pub fn fair_round_robin(key: string = "key") {
   return __queue_strategy("fair_round_robin", {key: key})
 }
 
@@ -85,7 +85,7 @@ pub fn QueueStrategy() {
   return {fifo: fifo(), priority: priority(), lifo: lifo(), fair_round_robin: fair_round_robin}
 }
 
-fn __backpressure(kind, options = nil) {
+fn __backpressure(kind: string, options: any = nil) {
   const base = {_type: "backpressure", kind: kind}
   if options == nil {
     return base
@@ -104,7 +104,7 @@ fn __backpressure(kind, options = nil) {
  * @api_stability: experimental
  * @example: pool_create(harness.agent, {backpressure: backpressure_queue(100, "block_submitter")})
  */
-pub fn backpressure_queue(max_depth, on_full = "block_submitter") {
+pub fn backpressure_queue(max_depth: any, on_full: string = "block_submitter") {
   return __backpressure("queue", {max_depth: max_depth, on_full: on_full})
 }
 
@@ -130,7 +130,7 @@ pub fn fail_fast() {
  * @api_stability: experimental
  * @example: pool_create(harness.agent, {backpressure: ring_buffer(10)})
  */
-pub fn ring_buffer(capacity) {
+pub fn ring_buffer(capacity: any) {
   return __backpressure("ring_buffer", {capacity: capacity})
 }
 
@@ -146,7 +146,7 @@ pub fn Backpressure() {
   return {queue: backpressure_queue, fail_fast: fail_fast(), ring_buffer: ring_buffer}
 }
 
-fn __pool_attach_methods(snapshot) {
+fn __pool_attach_methods(snapshot: dict) {
   if type_of(snapshot) != "dict" {
     return snapshot
   }
@@ -168,7 +168,7 @@ fn __pool_attach_methods(snapshot) {
  * @api_stability: experimental
  * @example: pool_create(harness.agent, {name: "review", max_concurrent: 2})
  */
-pub fn pool_create(agents: HarnessAgent, options = nil) {
+pub fn pool_create(agents: HarnessAgent, options: any = nil) {
   return __pool_attach_methods(agents.pool_create(options))
 }
 
@@ -180,7 +180,7 @@ pub fn pool_create(agents: HarnessAgent, options = nil) {
  * @api_stability: experimental
  * @example: pool_get(harness.agent, "review")
  */
-pub fn pool_get(agents: HarnessAgent, name_or_id) {
+pub fn pool_get(agents: HarnessAgent, name_or_id: any) {
   const snapshot = agents.pool_get(name_or_id)
   if snapshot == nil {
     return nil
@@ -211,7 +211,7 @@ pub fn pool_list(agents: HarnessAgent) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pool_wait(agents: HarnessAgent, handle_or_handles) {
+pub fn pool_wait(agents: HarnessAgent, handle_or_handles: any) {
   return agents.pool_wait(handle_or_handles)
 }
 

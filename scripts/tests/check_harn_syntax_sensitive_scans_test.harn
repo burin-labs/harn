@@ -32,7 +32,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
 }
 
 @test
-pipeline test_line_detectors(harness: Harness, task) {
+pipeline test_line_detectors(harness: Harness, task: unknown) {
   assert_eq(line_has_let_only_harn_binding_regex("const pattern = \"let\\\\s+foo\""), true)
   assert_eq(
     line_has_let_only_harn_binding_regex("const pattern = \"(?:const|let)\\\\s+foo\""),
@@ -72,7 +72,7 @@ pipeline test_line_detectors(harness: Harness, task) {
 }
 
 @test
-pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
+pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task: unknown) {
   const retired = "long" + "_running"
   const findings = harn_syntax_sensitive_scan_text(
     "scripts/example.harn",
@@ -92,7 +92,7 @@ pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
 }
 
 @test
-pipeline test_candidate_text_requires_a_detector_literal(harness: Harness, task) {
+pipeline test_candidate_text_requires_a_detector_literal(harness: Harness, task: unknown) {
   assert_eq(text_has_syntax_sensitive_candidate("fn unrelated() { return nil }"), false)
   assert_eq(text_has_syntax_sensitive_candidate("const pattern = \"let\\\\s+name\""), true)
   assert_eq(text_has_syntax_sensitive_candidate("let registry = tool_registry()"), true)
@@ -100,7 +100,7 @@ pipeline test_candidate_text_requires_a_detector_literal(harness: Harness, task)
 }
 
 @test
-pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task) {
+pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -140,7 +140,7 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, t
 }
 
 @test
-pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
+pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -165,7 +165,10 @@ pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
 }
 
 @test
-pipeline test_llm_policy_guard_uses_syntax_and_owns_only_policy_files(harness: Harness, task) {
+pipeline test_llm_policy_guard_uses_syntax_and_owns_only_policy_files(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->

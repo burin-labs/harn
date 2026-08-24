@@ -5,7 +5,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * warns on `cargo run --bin harn` invocations missing `--quiet`. The
  * rewrite inserts `--quiet` so subsequent agent reads see clean stdout.
  */
-fn probe_with_rewrite(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+fn probe_with_rewrite(stdio: HarnessStdio, tools: HarnessTools, reg: any, cmd: string) {
   const m = tools.hooks_match(reg, cmd, {stacks: ["harn"]})
   if len(m) > 0 {
     const rewrite = m[0].rewrite

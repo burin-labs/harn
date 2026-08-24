@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // RFC 4231 test case 2.
   const mac = hmac_sha256("Jefe", "what do ya want for nothing?")
   harness.stdio.log(mac)

@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * the current-failure model. After a fail then a pass, no repair warning fires
  * and the loop completes done — the failure is resolved, not still tracked.
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 

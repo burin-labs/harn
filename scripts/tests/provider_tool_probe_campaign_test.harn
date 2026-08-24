@@ -32,7 +32,7 @@ fn verified_catalog() -> ProviderToolProbeCatalogReceipt {
 @test
 pipeline test_provider_tool_probe_campaign_selects_explicit_provider_config(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   assert_eq(
     provider_tool_probe_campaign_providers_config(
@@ -61,7 +61,7 @@ pipeline test_provider_tool_probe_campaign_selects_explicit_provider_config(
 @test
 pipeline test_provider_tool_probe_campaign_normalizes_verified_catalog_snapshot(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const catalog = {
     providers: [{id: "openrouter"}],
@@ -95,7 +95,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_catalog_snapshot(
 @test
 pipeline test_provider_tool_probe_campaign_rejects_unavailable_and_invalid_catalog_snapshots(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const unavailable = provider_tool_probe_campaign_catalog_snapshot(
     "missing-harn",
@@ -134,7 +134,7 @@ pipeline test_provider_tool_probe_campaign_rejects_unavailable_and_invalid_catal
 @test
 pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const receipt = provider_tool_probe_campaign_runtime_receipt(
     "/opt/harn",
@@ -186,7 +186,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(
 @test
 pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receipt(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const receipt = provider_tool_probe_campaign_runtime_receipt(
     "missing-harn",
@@ -217,7 +217,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receip
 @test
 pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const malformed = provider_tool_probe_campaign_runtime_receipt(
     "harn",
@@ -258,7 +258,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
 @test
 pipeline test_provider_tool_probe_campaign_env_file_is_explicit_and_portable(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   assert_eq(
     provider_tool_probe_campaign_env_file(" /explicit/.env ", "/configured/.env"),
@@ -269,7 +269,7 @@ pipeline test_provider_tool_probe_campaign_env_file_is_explicit_and_portable(
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_parses_explicit_routes(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_parses_explicit_routes(harness: Harness, task: unknown) {
   const routes = provider_tool_probe_campaign_routes(
     ["anthropic:claude-sonnet-5", "fireworks:accounts/fireworks/models/gpt-oss-120b"],
   )
@@ -286,7 +286,7 @@ pipeline test_provider_tool_probe_campaign_parses_explicit_routes(harness: Harne
 @test
 pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_behaviors(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const parsed = unwrap(
     provider_tool_probe_campaign_parse_args(
@@ -310,7 +310,10 @@ pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_beha
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(
     ["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"],
   )
@@ -323,7 +326,7 @@ pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(harness: Har
 @test
 pipeline test_provider_tool_probe_campaign_default_routes_are_cheap_by_default(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes = provider_tool_probe_campaign_default_routes(false)
   const ids = routes.map({ route -> route.id }).to_list()
@@ -337,7 +340,10 @@ pipeline test_provider_tool_probe_campaign_default_routes_are_cheap_by_default(
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_default_routes(true)
   const ids = routes.map({ route -> route.id }).to_list()
   assert_contains(ids, "xai-grok")
@@ -346,7 +352,7 @@ pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(harness: H
 @test
 pipeline test_provider_tool_probe_campaign_catalog_routes_use_catalog_metadata(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const catalog = {
     providers: [
@@ -383,7 +389,7 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_use_catalog_metadata(
 @test
 pipeline test_provider_tool_probe_campaign_catalog_routes_keep_cheap_hosted_models(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const catalog = {
     providers: [{id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}}],
@@ -411,7 +417,7 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_keep_cheap_hosted_mode
 @test
 pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog_shape(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const catalog = {
     providers: [{name: "anthropic", classification: "hosted", auth_envs: ["ANTHROPIC_API_KEY"]}],
@@ -433,7 +439,7 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog
 @test
 pipeline test_provider_tool_probe_campaign_catalog_routes_prefer_routing_routes(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const catalog = {
     providers: [
@@ -478,7 +484,10 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_prefer_routing_routes(
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(
+  harness: Harness,
+  task: unknown,
+) {
   const route: ProviderToolProbeRoute = {
     id: "moonshot-fixture",
     provider: "moonshot",
@@ -497,7 +506,7 @@ pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(harness:
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_modes_expand_both(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_modes_expand_both(harness: Harness, task: unknown) {
   assert_eq(provider_tool_probe_campaign_modes("both"), ["non-streaming", "streaming"])
   assert_eq(provider_tool_probe_campaign_modes("streaming"), ["streaming"])
   assert_eq(provider_tool_probe_campaign_modes("non-streaming"), ["non-streaming"])
@@ -507,7 +516,7 @@ pipeline test_provider_tool_probe_campaign_modes_expand_both(harness: Harness, t
 @test
 pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_runner(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const tool_calls = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
   const executable = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
@@ -520,7 +529,7 @@ pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_
 @test
 pipeline test_provider_tool_probe_campaign_mode_filter_keeps_matching_behaviors(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
   const streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "streaming")
@@ -538,7 +547,7 @@ pipeline test_provider_tool_probe_campaign_mode_filter_keeps_matching_behaviors(
 @test
 pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_formats(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
@@ -577,7 +586,7 @@ pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_fo
 @test
 pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_recipe(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes = provider_tool_probe_campaign_routes(
     ["fireworks:accounts/fireworks/models/gpt-oss-120b"],
@@ -617,7 +626,10 @@ pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_report_summarizes_cells(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_report_summarizes_cells(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
   const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
@@ -653,7 +665,10 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(harness: Harn
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_shard_slices_probe_units(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_shard_slices_probe_units(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(
     ["tool_calling_non_streaming", "tool_calling_streaming"],
@@ -684,7 +699,7 @@ pipeline test_provider_tool_probe_campaign_shard_slices_probe_units(harness: Har
 @test
 pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
@@ -727,7 +742,7 @@ pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(
 @test
 pipeline test_provider_tool_probe_campaign_live_spend_fails_closed_without_case_receipts(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
@@ -760,7 +775,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_fails_closed_without_case_
 @test
 pipeline test_provider_tool_probe_campaign_aggregates_priced_probe_telemetry(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const telemetry = provider_tool_probe_campaign_probe_telemetry(
     {
@@ -800,7 +815,7 @@ pipeline test_provider_tool_probe_campaign_aggregates_priced_probe_telemetry(
 @test
 pipeline test_provider_tool_probe_campaign_counts_retired_routes_apart_from_failures(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   // A dead catalog row and a rate-limited call are both `ok: false`. Counting
   // them together is why six unreachable rows survived in the shipped catalog
@@ -822,7 +837,7 @@ pipeline test_provider_tool_probe_campaign_counts_retired_routes_apart_from_fail
 @test
 pipeline test_provider_tool_probe_campaign_stops_after_unreceipted_child_attempt(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const route = unwrap(provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])[0])
   const behavior = unwrap(
@@ -855,7 +870,7 @@ pipeline test_provider_tool_probe_campaign_stops_after_unreceipted_child_attempt
 @test
 pipeline test_provider_tool_probe_campaign_uses_case_verdict_for_no_tool_fixtures(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const report = {
     cases: [{ok: true, classification: "direct_answer_no_tool", fallback_mode: "disabled"}],
@@ -877,7 +892,10 @@ pipeline test_provider_tool_probe_campaign_uses_case_verdict_for_no_tool_fixture
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
   const planned = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
@@ -918,7 +936,10 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(harne
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["stop_sequences"])
   const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
@@ -943,7 +964,10 @@ pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(harness
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(
+  harness: Harness,
+  task: unknown,
+) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["parallel_tool_calls"])
   const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
@@ -991,7 +1015,7 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(harness: 
 @test
 pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without_live_calls(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const routes: list<ProviderToolProbeRoute> = [
     {
@@ -1057,7 +1081,7 @@ pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without
 @test
 pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavior_case(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const route: ProviderToolProbeRoute = {
     id: "ollama-gemma4-e4b",
@@ -1093,7 +1117,7 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
 @test
 pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const env = provider_tool_probe_campaign_env_from_dotenv_text(
     "# ignored\nexport FIREWORKS_API_KEY=\"secret=value\"\nEMPTY=\nBAD LINE\nMOONSHOT_API_KEY='moon'\n",
@@ -1105,7 +1129,10 @@ pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(
+  harness: Harness,
+  task: unknown,
+) {
   const parsed = unwrap(
     provider_tool_probe_campaign_parse_args(
       [
@@ -1137,7 +1164,10 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(harness: Ha
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(harness: Harness, task) {
+pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(
+  harness: Harness,
+  task: unknown,
+) {
   const route: ProviderToolProbeRoute = {
     id: "fixture-route",
     provider: "mock",

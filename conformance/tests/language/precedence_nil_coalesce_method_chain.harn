@@ -7,7 +7,7 @@ fn entries() {
   ]
 }
 
-fn find_match(name) {
+fn find_match(name: string) {
   const normalized = name.lower()
   for entry in entries() {
     if (entry?.id ?? entry?.language ?? "").lower() == normalized {
@@ -17,7 +17,7 @@ fn find_match(name) {
   return "not found"
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(find_match("ts"))
   harness.stdio.log(find_match("python"))
   harness.stdio.log(find_match("go"))

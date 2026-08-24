@@ -17,7 +17,7 @@ import {
   ui_tool_result_validate,
 } from "std/ui_resource"
 
-fn render_review_html(item) {
+fn render_review_html(item: dict) {
   return "<!doctype html><html><head><style>"
     + ".form { font: 14px system-ui; max-width: 480px; padding: 16px; }"
     + ".step { display: none; } .step.active { display: block; }"

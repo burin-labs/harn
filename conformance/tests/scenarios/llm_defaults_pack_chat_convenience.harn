@@ -3,7 +3,7 @@
 // don't expect here).
 import { pack_chat, pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const a = pack_chat(harness.agent, harness.llm, "claude-sonnet-4-5")
   const b = pack_for(
     harness.agent,

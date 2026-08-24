@@ -224,6 +224,29 @@ fn test_generic_type_param_conflicting_candidates_join_to_union() {
 }
 
 #[test]
+fn test_generic_callback_union_selects_matching_arity() {
+    let errs = errors(
+        r#"type Nullary<out T> = fn() -> T
+type Unary<out T> = fn(nil) -> T
+type Scoped<T> = Nullary<T> | Unary<T>
+
+fn accept<T>(body: Scoped<T>) -> nil { return nil }
+fn accept_nullary<T>(body: Nullary<T>) -> nil { return nil }
+fn choose(flag: bool) -> bool | int | nil | dict {
+  return if flag { true } else { {ok: false} }
+}
+
+pipeline t(task) {
+  accept({ -> 42 })
+  accept({ _ -> "ok" })
+  let body: Nullary<bool | int | nil | dict> = { -> choose(true) }
+  accept_nullary(body)
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
 fn test_generic_list_binding_propagates_element_type() {
     // The element accessor is `-> T?` (index soundness): instantiating `T` to
     // `int` still surfaces the callsite mismatch against `string`.

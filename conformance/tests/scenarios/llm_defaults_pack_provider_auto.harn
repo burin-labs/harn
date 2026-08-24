@@ -3,7 +3,7 @@
 // the returned request.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // "auto" is treated as a normal user-supplied provider — the runtime
   // catalog overwrites it with the inferred openai entry. (We don't
   // hardcode a special-case for "auto" — resolved_options() just echoes

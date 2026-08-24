@@ -27,7 +27,7 @@ fn observe(
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const syntax_first = observe(
     harness.agent,
     nil,

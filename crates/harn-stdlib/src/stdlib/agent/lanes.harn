@@ -92,11 +92,11 @@ pub fn default_lane_rows() {
   ]
 }
 
-fn __lane_row_name(row) {
+fn __lane_row_name(row: dict) {
   return to_string(row?.name ?? "")
 }
 
-fn __lane_validate_rows(rows) {
+fn __lane_validate_rows(rows: string | bytes | list | dict | set | range | nil) {
   if type_of(rows) != "list" || len(rows) == 0 {
     throw "lane_policy: rows must be a non-empty list of lane rows"
   }
@@ -135,7 +135,7 @@ fn __lane_validate_rows(rows) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_lane_explicit_target_paths(task) {
+pub fn agent_lane_explicit_target_paths(task: string?) {
   const found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
   if type_of(found) != "list" {
     return []
@@ -149,7 +149,7 @@ pub fn agent_lane_explicit_target_paths(task) {
   return out
 }
 
-fn __lane_row_matches(row, task, task_lower) {
+fn __lane_row_matches(row: dict, task: string?, task_lower: any) {
   const match_spec = row?.match
   if type_of(match_spec) != "dict" {
     return false
@@ -185,7 +185,7 @@ fn __lane_row_matches(row, task, task_lower) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_lane_match(rows, task) {
+pub fn agent_lane_match(rows: list, task: string?) {
   const task_lower = lowercase(to_string(task ?? ""))
   let fallback = nil
   for row in rows {
@@ -200,7 +200,7 @@ pub fn agent_lane_match(rows, task) {
   return fallback ?? rows[0]
 }
 
-fn __lane_normalize_verdict(row, reason) {
+fn __lane_normalize_verdict(row: dict, reason: any) {
   return {lane: __lane_row_name(row), matched: true, reason: reason}
 }
 
@@ -214,7 +214,7 @@ fn __lane_normalize_verdict(row, reason) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_lane_classify(rows, task, options = nil) {
+pub fn agent_lane_classify(rows: any, task: string?, options: dict? = nil) {
   const opts = options ?? {}
   const classifier = opts?.classifier
   if classifier != nil {
@@ -242,7 +242,7 @@ pub fn agent_lane_classify(rows, task, options = nil) {
   )
 }
 
-fn __lane_registry_entries(registry) {
+fn __lane_registry_entries(registry: dict | list | nil) {
   if registry == nil {
     return []
   }
@@ -255,16 +255,16 @@ fn __lane_registry_entries(registry) {
   return []
 }
 
-fn __lane_entry_name(entry) {
+fn __lane_entry_name(entry: dict?) {
   return to_string(entry?.name ?? entry?.function?.name ?? "")
 }
 
-fn __lane_entry_kind(entry, policy) {
+fn __lane_entry_kind(entry: dict?, policy: dict?) {
   const annotations = agent_tool_annotations(entry, policy, __lane_entry_name(entry))
   return to_string(annotations?.kind ?? annotations?.tool_kind ?? "")
 }
 
-fn __lane_push_unique(names, value) {
+fn __lane_push_unique(names: list<string>, value: unknown) -> list<string> {
   const n = to_string(value)
   if n != "" && !contains(names, n) {
     return names.appending(n)
@@ -280,7 +280,7 @@ fn __lane_push_unique(names, value) {
  * non-narrowing lane into a restricted one. `lane_policy` unions `hard_keep`
  * only after confirming the lane actually narrows.
  */
-fn __lane_own_tool_names(row, registry, policy) {
+fn __lane_own_tool_names(row: dict, registry: dict | list | nil, policy: dict?) -> list<string> {
   let names = []
   const explicit = row?.tool_names
   if type_of(explicit) == "list" {
@@ -325,13 +325,14 @@ fn __lane_own_tool_names(row, registry, policy) {
  * @api_stability: stable
  * @example: agent_loop(harness, task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
  */
-pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
+pub fn lane_policy(
+  rows: string | bytes | list | dict | set | range | nil,
+  task: string?,
+  agent_options: dict? = nil,
+  options: dict? = nil,
+) {
   const validated = __lane_validate_rows(rows)
-  const opts = if type_of(agent_options) == "dict" {
-    agent_options
-  } else {
-    {}
-  }
+  const opts = agent_options ?? {}
   const extra = options ?? {}
   const hard_keep = extra?.hard_keep ?? []
   const verdict = agent_lane_classify(validated, task, extra)
@@ -383,7 +384,10 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
  * @api_stability: stable
  * @example: agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
  */
-pub fn lane_scope_classifier(rows, options = nil) {
+pub fn lane_scope_classifier(
+  rows: string | bytes | list | dict | set | range | nil,
+  options: dict? = nil,
+) {
   const validated = __lane_validate_rows(rows)
   const extra = options ?? {}
   const classifier = { payload ->
@@ -430,7 +434,7 @@ const __STAGE_GATE_PREFIX = "[lane_gate "
 // on `stage_gate_parse`, so `stage_gate_label` rejects it loudly instead.
 const __STAGE_GATE_DELIMITERS = [" ", "=", ",", "]"]
 
-fn __stage_gate_reject_delimiters(field, value) {
+fn __stage_gate_reject_delimiters(field: string, value: any) {
   for delimiter in __STAGE_GATE_DELIMITERS {
     if value.index_of(delimiter) >= 0 {
       throw "stage_gate_label: " + field + " may not contain the marker delimiter '"
@@ -442,7 +446,7 @@ fn __stage_gate_reject_delimiters(field, value) {
   }
 }
 
-fn __stage_gate_token_list(values) {
+fn __stage_gate_token_list(values: list?) {
   let out = []
   for value in values ?? [] {
     const rendered = to_string(value ?? "").trim()
@@ -453,7 +457,7 @@ fn __stage_gate_token_list(values) {
   return out
 }
 
-fn __stage_gate_token_string(values) {
+fn __stage_gate_token_string(values: list?) {
   const normalized = __stage_gate_token_list(values)
   if len(normalized) == 0 {
     return "-"
@@ -461,7 +465,7 @@ fn __stage_gate_token_string(values) {
   return join(normalized, ",")
 }
 
-fn __stage_gate_parse_token_list(raw) {
+fn __stage_gate_parse_token_list(raw: string?) {
   const normalized = to_string(raw ?? "").trim()
   if normalized == "" || normalized == "-" {
     return []
@@ -484,7 +488,7 @@ fn __stage_gate_parse_token_list(raw) {
  * space is deliberately NOT rejected even though it is a marker delimiter — it is
  * the required separator between the prefix and the first `key=value` token.
  */
-fn __stage_gate_prefix(options) -> string {
+fn __stage_gate_prefix(options: dict) -> string {
   const raw = options?.prefix
   if raw == nil {
     return __STAGE_GATE_PREFIX
@@ -511,12 +515,12 @@ fn __stage_gate_prefix(options) -> string {
   return prefix
 }
 
-fn __stage_gate_callable(value) {
+fn __stage_gate_callable(value: any) {
   const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
 }
 
-fn __stage_gate_validate_options(options) {
+fn __stage_gate_validate_options(options: dict) {
   const kind_of = options?.kind_of
   if kind_of != nil && !__stage_gate_callable(kind_of) {
     throw "stage_gate: `kind_of` must be a callable (tool_name) -> kind string"
@@ -528,7 +532,7 @@ fn __stage_gate_validate_options(options) {
   return options
 }
 
-fn __stage_gate_kind_of(options, tool_name) {
+fn __stage_gate_kind_of(options: dict, tool_name: any) {
   const resolver = options?.kind_of
   if resolver == nil {
     return ""
@@ -559,7 +563,7 @@ fn __stage_gate_kind_of(options, tool_name) {
  * @api_stability: stable
  * @example: stage_gate_label(task, {lane: "repair_local", stage: "repair", allowed_tools: ["edit", "look"]})
  */
-pub fn stage_gate_label(base_label, gate, options = nil) {
+pub fn stage_gate_label(base_label: string?, gate: any, options: dict? = nil) {
   const prefix = __stage_gate_prefix(options ?? {})
   const base = to_string(base_label ?? "").trim()
   const spec = if type_of(gate) == "dict" {
@@ -606,7 +610,7 @@ pub fn stage_gate_label(base_label, gate, options = nil) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_parse(text, options = nil) {
+pub fn stage_gate_parse(text: string?, options: dict? = nil) {
   const prefix = __stage_gate_prefix(options ?? {})
   // Scan with the SAME structural delimiter set the encoder rejects components
   // against (__STAGE_GATE_DELIMITERS = [space, "=", ",", "]"]), referenced by
@@ -657,7 +661,7 @@ pub fn stage_gate_parse(text, options = nil) {
   return {allowed_kinds: kinds, allowed_tools: tools, lane: lane, stage: stage}
 }
 
-fn __stage_gate_latest_user_prompt(messages) {
+fn __stage_gate_latest_user_prompt(messages: list?) {
   let prompt = ""
   for message in messages ?? [] {
     if to_string(message?.role ?? "") != "user" {
@@ -684,7 +688,7 @@ fn __stage_gate_latest_user_prompt(messages) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_from_session(agent: HarnessAgent, session_id, options = nil) {
+pub fn stage_gate_from_session(agent: HarnessAgent, session_id: string?, options: dict? = nil) {
   const sid = to_string(session_id ?? "").trim()
   if sid == "" {
     return {}
@@ -719,7 +723,7 @@ pub fn stage_gate_from_session(agent: HarnessAgent, session_id, options = nil) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn stage_gate_allows(gate, tool_name, options = nil) {
+pub fn stage_gate_allows(gate: any, tool_name: string?, options: dict? = nil) {
   const spec = if type_of(gate) == "dict" {
     gate
   } else {
@@ -745,7 +749,7 @@ pub fn stage_gate_allows(gate, tool_name, options = nil) {
   return contains(allowed_kinds, kind)
 }
 
-fn __stage_gate_render_allowed(gate) {
+fn __stage_gate_render_allowed(gate: dict) {
   const kinds = __stage_gate_token_list(gate?.allowed_kinds ?? [])
   const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
   let parts = []
@@ -761,7 +765,7 @@ fn __stage_gate_render_allowed(gate) {
   return join(parts, " ")
 }
 
-fn __stage_gate_default_suggestion(gate) {
+fn __stage_gate_default_suggestion(gate: dict) {
   const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
   if len(tools) > 0 {
     return "use " + join(tools, " or ")
@@ -773,7 +777,7 @@ fn __stage_gate_default_suggestion(gate) {
   return "use one of the declared tools for this stage"
 }
 
-fn __stage_gate_suggestion_text(gate, options) {
+fn __stage_gate_suggestion_text(gate: dict, options: dict) {
   const suggest_override = options?.suggest
   if type_of(suggest_override) == "string" && suggest_override != "" {
     return suggest_override
@@ -804,7 +808,7 @@ fn __stage_gate_suggestion_text(gate, options) {
  * @api_stability: stable
  * @example: stage_gate_denial(gate, "git", {kind_of: { name -> tool_kind(name) }})
  */
-pub fn stage_gate_denial(gate, tool_name, options = nil) {
+pub fn stage_gate_denial(gate: any, tool_name: string?, options: dict? = nil) {
   const spec = if type_of(gate) == "dict" {
     gate
   } else {

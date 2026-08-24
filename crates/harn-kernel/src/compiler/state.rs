@@ -42,6 +42,12 @@ impl Compiler {
         Self::with_options(CompilerOptions::runtime_owned_source())
     }
 
+    /// Compiler for Harn's embedder-owned stdlib sources.
+    #[doc(hidden)]
+    pub fn new_embedded_stdlib() -> Self {
+        Self::with_options(CompilerOptions::embedded_stdlib())
+    }
+
     /// Seed syntax-sensitive import metadata before compiling a source file.
     ///
     /// The parser intentionally keeps `Color.Ready(value)` ambiguous: it can

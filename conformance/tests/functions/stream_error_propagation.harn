@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   gen fn broken() -> Stream<int> {
     emit 1
     throw "stream failed"

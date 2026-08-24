@@ -1,9 +1,9 @@
-fn __llm_media_is_url(source) {
+fn __llm_media_is_url(source: string?) {
   return starts_with(source, "http://") || starts_with(source, "https://")
     || starts_with(source, "data:")
 }
 
-fn __llm_media_source_field(fs: HarnessFs, source, media_type) {
+fn __llm_media_source_field(fs: HarnessFs, source: any, media_type: any) {
   if __llm_media_is_url(source) {
     return {url: source}
   }
@@ -16,7 +16,7 @@ fn __llm_media_source_field(fs: HarnessFs, source, media_type) {
  * @effects: []
  * @errors: []
  */
-pub fn media_type_for_path(path, fallback = nil) {
+pub fn media_type_for_path(path: string?, fallback: string? = nil) {
   const ext = extname(path).lower()
   if ext == ".png" {
     return "image/png"
@@ -69,7 +69,7 @@ pub fn media_type_for_path(path, fallback = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn text_content(text) {
+pub fn text_content(text: any) {
   return {type: "text", text: text}
 }
 
@@ -79,7 +79,7 @@ pub fn text_content(text) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn image_content(fs: HarnessFs, source, options = nil) {
+pub fn image_content(fs: HarnessFs, source: string?, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -101,7 +101,7 @@ pub fn image_content(fs: HarnessFs, source, options = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn video_content(fs: HarnessFs, source, options = nil) {
+pub fn video_content(fs: HarnessFs, source: string?, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -120,7 +120,7 @@ pub fn video_content(fs: HarnessFs, source, options = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn document_content(fs: HarnessFs, source, options = nil) {
+pub fn document_content(fs: HarnessFs, source: string?, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -143,7 +143,7 @@ pub fn document_content(fs: HarnessFs, source, options = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn audio_content(fs: HarnessFs, source, options = nil) {
+pub fn audio_content(fs: HarnessFs, source: string?, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -165,7 +165,7 @@ pub fn audio_content(fs: HarnessFs, source, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn image_message(fs: HarnessFs, source, prompt = "", options = nil) {
+pub fn image_message(fs: HarnessFs, source: string?, prompt: string = "", options: dict? = nil) {
   const text = if prompt == nil || prompt == "" {
     "Analyze this image."
   } else {
@@ -180,7 +180,7 @@ pub fn image_message(fs: HarnessFs, source, prompt = "", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn video_message(fs: HarnessFs, source, prompt = "", options = nil) {
+pub fn video_message(fs: HarnessFs, source: string?, prompt: string = "", options: dict? = nil) {
   const text = if prompt == nil || prompt == "" {
     "Analyze this video."
   } else {
@@ -195,7 +195,12 @@ pub fn video_message(fs: HarnessFs, source, prompt = "", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn image_vision_context(fs: HarnessFs, system: HarnessSystem, source, options = nil) {
+pub fn image_vision_context(
+  fs: HarnessFs,
+  system: HarnessSystem,
+  source: any,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const image = image_content(fs, source, opts?.image ?? opts)
   const ocr_result = try {

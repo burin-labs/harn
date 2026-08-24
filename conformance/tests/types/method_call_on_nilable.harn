@@ -1,6 +1,6 @@
 // Calling a method on a `T | nil` receiver may hit nil at runtime. The
 // method may well exist on the non-nil arm — the problem is the nil arm.
-pipeline default(harness: Harness, _) {
+pipeline default(harness: Harness, _: unknown) {
   const s: string? = nil
   harness.stdio.println(s.upper())
 }

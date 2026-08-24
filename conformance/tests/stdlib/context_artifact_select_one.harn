@@ -1,6 +1,6 @@
 import "std/context"
 
-fn mk(id, dir, fresh) {
+fn mk(id: string, dir: string, fresh: string) {
   return context_artifact(
     {
       id: id,

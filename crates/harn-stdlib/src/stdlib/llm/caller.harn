@@ -69,7 +69,7 @@ pub fn default_llm_caller(agent: HarnessAgent, llm: HarnessLlm) -> LlmCaller {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn llm_caller(harness: Harness, opts = nil) -> LlmCaller {
+pub fn llm_caller(harness: Harness, opts: any = nil) -> LlmCaller {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -85,10 +85,10 @@ pub fn llm_caller(harness: Harness, opts = nil) -> LlmCaller {
  * extend (e.g. dispatch on `model_tier` if a future caller wants to
  * publish the context before resolution).
  */
-fn __default_caller_render_context_provider(call) -> string {
+fn __default_caller_render_context_provider(call: dict) -> string {
   return to_string(call?.opts?.provider ?? "")
 }
 
-fn __default_caller_render_context_model(call) -> string {
+fn __default_caller_render_context_model(call: dict) -> string {
   return to_string(call?.opts?.model ?? "")
 }

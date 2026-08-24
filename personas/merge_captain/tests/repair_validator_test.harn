@@ -11,7 +11,7 @@ import {
   validate_write_scope,
 } from "../lib/repair_validator"
 
-fn _bundle(overrides) {
+fn _bundle(overrides: dict?) {
   const base = {
     kind: "ci_failure",
     repo: "x/y",
@@ -36,34 +36,34 @@ fn _good_output() {
   }
 }
 
-pipeline test_path_matches_glob_plain_prefix(harness: Harness, task) {
+pipeline test_path_matches_glob_plain_prefix(harness: Harness, task: unknown) {
   assert(path_matches_glob("src/foo.rs", "src"))
   assert(path_matches_glob("src/foo/bar.rs", "src/foo"))
   assert(!path_matches_glob("srcs/foo.rs", "src"))
   assert(!path_matches_glob("other/foo.rs", "src"))
 }
 
-pipeline test_path_matches_glob_recursive(harness: Harness, task) {
+pipeline test_path_matches_glob_recursive(harness: Harness, task: unknown) {
   assert(path_matches_glob("src/foo.rs", "src/**"))
   assert(path_matches_glob("src/foo/bar/baz.rs", "src/**"))
   assert(path_matches_glob("src", "src/**"))
   assert(!path_matches_glob("other/foo.rs", "src/**"))
 }
 
-pipeline test_path_matches_glob_single_segment(harness: Harness, task) {
+pipeline test_path_matches_glob_single_segment(harness: Harness, task: unknown) {
   assert(path_matches_glob("src/foo.rs", "src/*"))
   assert(!path_matches_glob("src/foo/bar.rs", "src/*"))
   assert(!path_matches_glob("src", "src/*"))
 }
 
-pipeline test_path_matches_any_short_circuits(harness: Harness, task) {
+pipeline test_path_matches_any_short_circuits(harness: Harness, task: unknown) {
   const globs = ["src/**", "tests/**"]
   assert(path_matches_any("src/foo.rs", globs))
   assert(path_matches_any("tests/foo_test.rs", globs))
   assert(!path_matches_any("docs/foo.md", globs))
 }
 
-pipeline test_validate_shape_catches_missing_keys(harness: Harness, task) {
+pipeline test_validate_shape_catches_missing_keys(harness: Harness, task: unknown) {
   const bare = {diagnosis: "x"}
   const v = validate_shape(bare)
   assert(!v.ok)
@@ -73,13 +73,13 @@ pipeline test_validate_shape_catches_missing_keys(harness: Harness, task) {
   assert(err.contains("files_changed"))
 }
 
-pipeline test_validate_shape_passes_full(harness: Harness, task) {
+pipeline test_validate_shape_passes_full(harness: Harness, task: unknown) {
   const v = validate_shape(_good_output())
   assert(v.ok)
   assert_eq(len(v.errors), 0)
 }
 
-pipeline test_validate_tests_rejects_empty_when_required(harness: Harness, task) {
+pipeline test_validate_tests_rejects_empty_when_required(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output() + {tests_run: []}
   const v = validate_tests(bundle, bad)
@@ -87,7 +87,7 @@ pipeline test_validate_tests_rejects_empty_when_required(harness: Harness, task)
   assert(v.errors[0].contains("missing tests"))
 }
 
-pipeline test_validate_tests_rejects_missing_required_command(harness: Harness, task) {
+pipeline test_validate_tests_rejects_missing_required_command(harness: Harness, task: unknown) {
   const bundle = _bundle({required_verification: [{name: "lint", command: "make lint"}]})
   const bad = _good_output()
     + {tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}]}
@@ -97,7 +97,7 @@ pipeline test_validate_tests_rejects_missing_required_command(harness: Harness, 
   assert(v.errors[0].contains("lint"))
 }
 
-pipeline test_validate_tests_rejects_failing(harness: Harness, task) {
+pipeline test_validate_tests_rejects_failing(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}]}
@@ -106,7 +106,7 @@ pipeline test_validate_tests_rejects_failing(harness: Harness, task) {
   assert(v.errors[0].contains("failing tests"))
 }
 
-pipeline test_validate_write_scope_blocks_outside(harness: Harness, task) {
+pipeline test_validate_write_scope_blocks_outside(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {
@@ -121,13 +121,13 @@ pipeline test_validate_write_scope_blocks_outside(harness: Harness, task) {
   assert(v.errors[0].contains("secrets/key.pem"))
 }
 
-pipeline test_validate_write_scope_allows_inside(harness: Harness, task) {
+pipeline test_validate_write_scope_allows_inside(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const v = validate_write_scope(bundle, _good_output())
   assert(v.ok)
 }
 
-pipeline test_validate_write_scope_empty_scope_blocks_writes(harness: Harness, task) {
+pipeline test_validate_write_scope_empty_scope_blocks_writes(harness: Harness, task: unknown) {
   // build() requires at least one entry, so we forge a raw bundle.
   const bundle = {
     _type: "merge_captain.repair_bundle",
@@ -140,7 +140,7 @@ pipeline test_validate_write_scope_empty_scope_blocks_writes(harness: Harness, t
   assert(v.errors[0].contains("unexpected write scope"))
 }
 
-pipeline test_validate_pushed_requires_push_when_committed(harness: Harness, task) {
+pipeline test_validate_pushed_requires_push_when_committed(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output() + {push_result: {pushed: false, ref: "feat"}}
   const v = validate_pushed(bundle, bad)
@@ -148,7 +148,7 @@ pipeline test_validate_pushed_requires_push_when_committed(harness: Harness, tas
   assert(v.errors[0].contains("unpushed commits"))
 }
 
-pipeline test_validate_pushed_rejects_push_without_commits(harness: Harness, task) {
+pipeline test_validate_pushed_rejects_push_without_commits(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output() + {commits_created: [], push_result: {pushed: true, ref: "feat"}}
   const v = validate_pushed(bundle, bad)
@@ -156,7 +156,7 @@ pipeline test_validate_pushed_rejects_push_without_commits(harness: Harness, tas
   assert(v.errors[0].contains("push without commits"))
 }
 
-pipeline test_validate_pushed_rejects_target_mismatch(harness: Harness, task) {
+pipeline test_validate_pushed_rejects_target_mismatch(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output() + {push_result: {pushed: true, ref: "wrong-branch", sha: "abc"}}
   const v = validate_pushed(bundle, bad)
@@ -164,14 +164,14 @@ pipeline test_validate_pushed_rejects_target_mismatch(harness: Harness, task) {
   assert(v.errors[0].contains("push target mismatch"))
 }
 
-pipeline test_validate_pushed_accepts_qualified_ref(harness: Harness, task) {
+pipeline test_validate_pushed_accepts_qualified_ref(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const good = _good_output() + {push_result: {pushed: true, ref: "refs/heads/feat", sha: "abc"}}
   const v = validate_pushed(bundle, good)
   assert(v.ok)
 }
 
-pipeline test_validate_all_short_circuits_on_shape_failure(harness: Harness, task) {
+pipeline test_validate_all_short_circuits_on_shape_failure(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = {diagnosis: "x"}
   const v = validate_all(bundle, bad)
@@ -181,7 +181,7 @@ pipeline test_validate_all_short_circuits_on_shape_failure(harness: Harness, tas
   assert(v.errors[0].contains("malformed output"))
 }
 
-pipeline test_validate_all_aggregates_errors(harness: Harness, task) {
+pipeline test_validate_all_aggregates_errors(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {
@@ -195,21 +195,21 @@ pipeline test_validate_all_aggregates_errors(harness: Harness, task) {
   assert_eq(len(v.errors), 3)
 }
 
-pipeline test_validate_all_passes_clean(harness: Harness, task) {
+pipeline test_validate_all_passes_clean(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const v = validate_all(bundle, _good_output())
   assert(v.ok)
   assert_eq(len(v.errors), 0)
 }
 
-pipeline test_harness_validate_skipped_when_disabled(harness: Harness, task) {
+pipeline test_harness_validate_skipped_when_disabled(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const v = harness_validate(harness.process, bundle, _good_output(), {enabled: false})
   assert(v.ok)
   assert_eq(len(v.errors), 0)
 }
 
-pipeline test_harness_validate_rejects_unsafe_cwd(harness: Harness, task) {
+pipeline test_harness_validate_rejects_unsafe_cwd(harness: Harness, task: unknown) {
   const bundle = _bundle({})
   const v = harness_validate(
     harness.process,

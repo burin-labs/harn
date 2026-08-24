@@ -1,7 +1,7 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   with_llm_script(
     harness.llm,

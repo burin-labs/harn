@@ -44,7 +44,7 @@ fn pr_variants() {
 }
 
 @persona(name: "merge_captain")
-fn merge_captain(clock: HarnessClock, obs: HarnessObs, ctx) {
+fn merge_captain(clock: HarnessClock, obs: HarnessObs, ctx: dict) {
   const prs = fetch_open_prs(ctx)
   let merged = []
   let handoffs = []
@@ -62,12 +62,12 @@ fn merge_captain(clock: HarnessClock, obs: HarnessObs, ctx) {
 }
 
 @step(name: "fetch_open_prs")
-fn fetch_open_prs(ctx) {
+fn fetch_open_prs(ctx: dict) {
   return ctx.prs
 }
 
 @step(name: "classify_pr")
-fn classify_pr(pr) {
+fn classify_pr(pr: dict) {
   if pr.draft || pr.checks != "green" {
     return {action: "wait", reason: "not mergeable", number: pr.number}
   }
@@ -78,7 +78,7 @@ fn classify_pr(pr) {
 }
 
 @step(name: "admin_merge")
-fn admin_merge(clock: HarnessClock, pr) {
+fn admin_merge(clock: HarnessClock, pr: dict) {
   const wrapped = with_audit_receipt(
     clock,
     fn() { return {number: pr.number, method: "admin", side_effect: "planned"} },
@@ -88,7 +88,7 @@ fn admin_merge(clock: HarnessClock, pr) {
 }
 
 @step(name: "semantic_conflict_ticket")
-fn semantic_conflict_ticket(clock: HarnessClock, pr) {
+fn semantic_conflict_ticket(clock: HarnessClock, pr: dict) {
   return handoff_routed(
     clock,
     {
@@ -106,7 +106,7 @@ fn semantic_conflict_ticket(clock: HarnessClock, pr) {
 }
 
 @step(name: "finalize_merge_sweep")
-fn finalize_merge_sweep(obs: HarnessObs, handoffs) {
+fn finalize_merge_sweep(obs: HarnessObs, handoffs: list) {
   return workflow_result_run(
     obs,
     "merge captain steel thread",

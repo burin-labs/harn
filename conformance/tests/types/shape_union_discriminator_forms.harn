@@ -54,7 +54,7 @@ fn run_instr(i: Instr) -> int {
   }
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Pure-literal-union round trip
   harness.stdio.println(classify_verdict("pass"))
   harness.stdio.println(classify_verdict("fail"))

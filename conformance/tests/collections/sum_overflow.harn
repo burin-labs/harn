@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Ordinary integer sums stay integers.
   harness.stdio.log([100, 200, 300].sum())
   // Summing past i64::MAX promotes to float instead of silently wrapping to a

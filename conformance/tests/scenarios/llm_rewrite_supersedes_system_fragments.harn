@@ -9,7 +9,7 @@ import { default_llm_caller } from "std/llm/caller"
 import { with_prompt_rewrite } from "std/llm/handlers"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // The shape the agent loop hands a caller: a joined `system` string plus the
   // per-part `_system_fragments` list in opts.
   const call = {

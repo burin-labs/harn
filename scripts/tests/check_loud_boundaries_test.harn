@@ -57,7 +57,7 @@ fn kinds(findings: list) -> list<string> {
 }
 
 @test
-pipeline test_wire_strings_read_the_as_str_arms(harness: Harness, task) {
+pipeline test_wire_strings_read_the_as_str_arms(harness: Harness, task: unknown) {
   const parsed = boundary_wire_strings(FUNNEL)
   assert_eq(parsed["Alpha"], "alpha")
   assert_eq(parsed["Beta"], "beta")
@@ -65,7 +65,7 @@ pipeline test_wire_strings_read_the_as_str_arms(harness: Harness, task) {
 }
 
 @test
-pipeline test_wire_strings_ignore_a_different_impl_block(harness: Harness, task) {
+pipeline test_wire_strings_ignore_a_different_impl_block(harness: Harness, task: unknown) {
   // `BoundaryFailureKind` has an `as_str` too; only the BoundaryId one counts.
   const source = [
     "impl BoundaryFailureKind {",
@@ -85,13 +85,13 @@ pipeline test_wire_strings_ignore_a_different_impl_block(harness: Harness, task)
 }
 
 @test
-pipeline test_healthy_registry_produces_no_findings(harness: Harness, task) {
+pipeline test_healthy_registry_produces_no_findings(harness: Harness, task: unknown) {
   const h = healthy()
   assert_eq(evaluate(h.registry, wires(), h.sites, h.existing, h.contents).count, 0)
 }
 
 @test
-pipeline test_enum_variant_with_no_registry_entry_fails(harness: Harness, task) {
+pipeline test_enum_variant_with_no_registry_entry_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const registry = {boundary: [entry("alpha", "a.rs", "a_tests.rs")]}
   const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
@@ -99,7 +99,7 @@ pipeline test_enum_variant_with_no_registry_entry_fails(harness: Harness, task) 
 }
 
 @test
-pipeline test_registry_entry_with_no_enum_variant_fails(harness: Harness, task) {
+pipeline test_registry_entry_with_no_enum_variant_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const registry = {boundary: h.registry.boundary + [entry("gamma", "c.rs", "c_tests.rs")]}
   const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
@@ -107,7 +107,7 @@ pipeline test_registry_entry_with_no_enum_variant_fails(harness: Harness, task) 
 }
 
 @test
-pipeline test_missing_anchor_file_fails(harness: Harness, task) {
+pipeline test_missing_anchor_file_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const findings = evaluate(
     h.registry,
@@ -121,7 +121,7 @@ pipeline test_missing_anchor_file_fails(harness: Harness, task) {
 
 /** The stale half: reporting was deleted and the entry outlived it. */
 @test
-pipeline test_entry_with_no_live_construction_site_fails(harness: Harness, task) {
+pipeline test_entry_with_no_live_construction_site_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const findings = evaluate(
     h.registry,
@@ -135,7 +135,7 @@ pipeline test_entry_with_no_live_construction_site_fails(harness: Harness, task)
 
 /** The case the gate exists for: a drop path in a file nobody registered. */
 @test
-pipeline test_construction_site_outside_the_anchors_fails(harness: Harness, task) {
+pipeline test_construction_site_outside_the_anchors_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const sites = h.sites + [{path: "sneaky.rs", id: "alpha"}]
   const findings = evaluate(h.registry, wires(), sites, h.existing, h.contents)
@@ -146,7 +146,7 @@ pipeline test_construction_site_outside_the_anchors_fails(harness: Harness, task
 }
 
 @test
-pipeline test_site_naming_an_unknown_boundary_fails(harness: Harness, task) {
+pipeline test_site_naming_an_unknown_boundary_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const sites = h.sites + [{path: "b.harn", id: "invented"}]
   const findings = evaluate(h.registry, wires(), sites, h.existing, h.contents)
@@ -154,7 +154,7 @@ pipeline test_site_naming_an_unknown_boundary_fails(harness: Harness, task) {
 }
 
 @test
-pipeline test_missing_test_file_fails(harness: Harness, task) {
+pipeline test_missing_test_file_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const findings = evaluate(
     h.registry,
@@ -168,7 +168,7 @@ pipeline test_missing_test_file_fails(harness: Harness, task) {
 
 /** A test file that never names its boundary is not evidence of anything. */
 @test
-pipeline test_test_file_that_never_mentions_the_boundary_fails(harness: Harness, task) {
+pipeline test_test_file_that_never_mentions_the_boundary_fails(harness: Harness, task: unknown) {
   const h = healthy()
   const findings = evaluate(
     h.registry,
@@ -181,7 +181,7 @@ pipeline test_test_file_that_never_mentions_the_boundary_fails(harness: Harness,
 }
 
 @test
-pipeline test_duplicate_registry_ids_fail(harness: Harness, task) {
+pipeline test_duplicate_registry_ids_fail(harness: Harness, task: unknown) {
   const h = healthy()
   const registry = {boundary: h.registry.boundary + [entry("alpha", "a.rs", "a_tests.rs")]}
   const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
@@ -189,7 +189,7 @@ pipeline test_duplicate_registry_ids_fail(harness: Harness, task) {
 }
 
 @test
-pipeline test_audited_boundary_that_lost_its_event_fails(harness: Harness, task) {
+pipeline test_audited_boundary_that_lost_its_event_fails(harness: Harness, task: unknown) {
   const registry = {
     boundary: [],
     audited: [{id: "legacy", anchors: ["legacy.rs"], marker: "budget_exhausted"}],
@@ -208,7 +208,7 @@ pipeline test_audited_boundary_that_lost_its_event_fails(harness: Harness, task)
 }
 
 @test
-pipeline test_test_modules_are_exempt_construction_sites(harness: Harness, task) {
+pipeline test_test_modules_are_exempt_construction_sites(harness: Harness, task: unknown) {
   assert(is_exempt_site("crates/harn-vm/src/boundary.rs"), "the funnel itself")
   assert(is_exempt_site("crates/harn-vm/src/boundary/tests.rs"), "a tests.rs submodule")
   assert(
@@ -220,7 +220,7 @@ pipeline test_test_modules_are_exempt_construction_sites(harness: Harness, task)
 }
 
 @test
-pipeline test_rust_sites_map_variants_back_to_wire_ids(harness: Harness, task) {
+pipeline test_rust_sites_map_variants_back_to_wire_ids(harness: Harness, task: unknown) {
   const grep = [
     "a.rs:12:    BoundaryFailure::new(BoundaryId::Alpha, kind, detail)",
     "b.rs:3:use crate::boundary::BoundaryId::Beta;",
@@ -235,7 +235,7 @@ pipeline test_rust_sites_map_variants_back_to_wire_ids(harness: Harness, task) {
 }
 
 @test
-pipeline test_harn_sites_read_the_boundary_field(harness: Harness, task) {
+pipeline test_harn_sites_read_the_boundary_field(harness: Harness, task: unknown) {
   const grep = ["x.harn:44:        boundary: \"text_tool_parse\",", "y.harn:7:  const boundary = 1"]
     .join("\n")
   const sites = harn_sites(grep)

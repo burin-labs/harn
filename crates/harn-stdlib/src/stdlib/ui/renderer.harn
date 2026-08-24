@@ -587,14 +587,14 @@ pub fn renderer_html(tool_name: string) -> string {
   return __ui_renderer_html(name, nil)
 }
 
-fn __ui_script_json(value) -> string {
+fn __ui_script_json(value: any) -> string {
   let encoded = json_stringify(value)
   encoded = replace(encoded, "<", "\\u003c")
   encoded = replace(encoded, ">", "\\u003e")
   return replace(encoded, "&", "\\u0026")
 }
 
-fn __ui_renderer_html(tool_name: string, portable) -> string {
+fn __ui_renderer_html(tool_name: string, portable: dict?) -> string {
   const html = replace(UI_RENDERER_HTML, "__HARN_UI_TOOL__", __ui_script_json(tool_name))
   const portable_json = portable == nil ? "null" : __ui_script_json(portable)
   return replace(html, "__HARN_UI_PORTABLE__", portable_json)

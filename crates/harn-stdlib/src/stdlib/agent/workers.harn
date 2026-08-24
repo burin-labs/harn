@@ -1,23 +1,30 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_emit_event } from "std/agent/state"
 import { filter_nil, pick_keys } from "std/collections"
+import { ToolRegistry } from "std/tools"
 
-type ResumeTimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
+pub type ResumeTimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
 
-type ResumeTimeoutSpec = {duration_minutes: int, on_timeout: ResumeTimeoutAction?}
+pub type ResumeTimeoutSpec = {duration_minutes: int, on_timeout?: ResumeTimeoutAction}
 
-type ResumeConditions = {trigger: dict?, timeout: ResumeTimeoutSpec?, on_event: string?}
+pub type ResumeConditions = {trigger?: dict, timeout?: ResumeTimeoutSpec, on_event?: string}
 
-type ResumeByResult = {handled: bool, mechanism: string, reason?: string}
+pub type ResumeByResult = {handled: bool, mechanism: string, reason?: string}
 
-type ResumeByCallback = fn(Harness, dict) -> ResumeByResult | dict | nil
+pub type ResumeByCallback = fn(Harness, dict) -> ResumeByResult | dict | nil
 
-type AgentStopOptions = {graceful?: bool, reason?: string}
+pub type AgentStopOptions = {graceful?: bool, reason?: string}
 
-type AgentAwaitResumptionRequest = {
+pub type AgentLifecycleToolsOptions = {
+  subagents?: bool,
+  subagent_tools?: bool,
+  agent_await_resumption_enabled?: bool,
+}
+
+pub type AgentAwaitResumptionRequest = {
   reason: string,
   conditions: ResumeConditions?,
-  resume_by?: ResumeByCallback,
+  resume_by: ResumeByCallback?,
 }
 
 fn __agent_option_keys() {
@@ -44,7 +51,7 @@ fn __agent_option_keys() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent(name, config = nil) {
+pub fn agent(name: any, config: dict? = nil) {
   if type_of(name) != "string" {
     throw "agent: name must be a string"
   }
@@ -62,7 +69,7 @@ pub fn agent(name, config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_name(spec) {
+pub fn agent_name(spec: dict) {
   if type_of(spec) != "dict" {
     throw "agent_name: argument must be an agent"
   }
@@ -76,7 +83,7 @@ pub fn agent_name(spec) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_config(spec, prompt) {
+pub fn agent_config(spec: dict, prompt: any) {
   if type_of(spec) != "dict" || spec?._type != "agent" {
     throw "agent_config: first argument must be an agent (created with agent())"
   }
@@ -84,21 +91,21 @@ pub fn agent_config(spec, prompt) {
   return {prompt: prompt, system: spec?.system, options: options}
 }
 
-fn __worker_dict(value) {
+fn __worker_dict(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __worker_list(value) {
+fn __worker_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __worker_options(value, label) {
+fn __worker_options(value: any, label: string) {
   if value == nil {
     return {}
   }
@@ -108,7 +115,7 @@ fn __worker_options(value, label) {
   throw label + ": options must be a dict or nil"
 }
 
-fn __agent_stop_options(options, label) {
+fn __agent_stop_options(options: AgentStopOptions?, label: string) {
   const opts = __worker_options(options, label)
   const graceful = opts?.graceful ?? false
   if type_of(graceful) != "bool" {
@@ -121,14 +128,14 @@ fn __agent_stop_options(options, label) {
   return filter_nil({graceful: graceful, reason: reason == "" ? nil : reason})
 }
 
-fn __worker_resume_options(agents: HarnessAgent, options) {
+fn __worker_resume_options(agents: HarnessAgent, options: dict) {
   if options?.resume_when == nil {
     return options
   }
   return options + {resume_when: parse_resume_conditions(agents, options.resume_when)}
 }
 
-fn __agent_tool_entry_name(entry) {
+fn __agent_tool_entry_name(entry: dict) {
   if type_of(entry) != "dict" {
     return ""
   }
@@ -142,8 +149,8 @@ fn __agent_tool_entry_name(entry) {
   return ""
 }
 
-fn __agent_tool_registry_has(registry, name) {
-  const entries = registry?.tools ?? []
+fn __agent_tool_registry_has(registry: ToolRegistry, name: string) -> bool {
+  const entries = registry.tools
   if type_of(entries) != "list" {
     return false
   }
@@ -157,11 +164,11 @@ fn __agent_tool_registry_has(registry, name) {
 
 fn __agent_lifecycle_tool_audit(
   agent: HarnessAgent,
-  tool_name,
-  initiator,
-  reason,
-  handle = nil,
-  conditions = nil,
+  tool_name: string,
+  initiator: string,
+  reason: string,
+  handle: any = nil,
+  conditions: any = nil,
 ) {
   const session_id = agent.current_id()
   if session_id == nil || session_id == "" {
@@ -190,7 +197,7 @@ fn __agent_lifecycle_tool_audit(
   }
 }
 
-fn __subagent_pause_tool(agent: HarnessAgent, args) {
+fn __subagent_pause_tool(agent: HarnessAgent, args: dict) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_pause: handle is required"
@@ -203,7 +210,7 @@ fn __subagent_pause_tool(agent: HarnessAgent, args) {
   return suspend_agent(agent, handle, reason, {initiator: "parent"})
 }
 
-fn __subagent_resume_tool(agent: HarnessAgent, args) {
+fn __subagent_resume_tool(agent: HarnessAgent, args: dict) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_resume: handle is required"
@@ -216,7 +223,7 @@ fn __subagent_resume_tool(agent: HarnessAgent, args) {
   return resume_agent(agent, handle, args?.input, continue_transcript)
 }
 
-fn __subagent_stop_tool(agent: HarnessAgent, args) {
+fn __subagent_stop_tool(agent: HarnessAgent, args: dict) {
   const handle = args?.handle
   if handle == nil || trim(to_string(handle)) == "" {
     throw "subagent_stop: handle is required"
@@ -233,23 +240,26 @@ fn __subagent_stop_tool(agent: HarnessAgent, args) {
   return agent_stop(agent, handle, {graceful: graceful, reason: reason})
 }
 
-fn __agent_await_resumption_tool(_args) {
+fn __agent_await_resumption_tool(_args: unknown) {
   throw "HARN-SUS-005: agent_await_resumption is handled structurally by agent_loop and cannot be invoked directly"
 }
 
-fn __agent_lifecycle_has_subagent_capability(registry, opts) {
-  if opts?.subagents ?? false {
+fn __agent_lifecycle_has_subagent_capability(
+  registry: ToolRegistry,
+  opts: AgentLifecycleToolsOptions,
+) -> bool {
+  if opts.subagents ?? false {
     return true
   }
-  if opts?.subagent_tools ?? false {
+  if opts.subagent_tools ?? false {
     return true
   }
   return __agent_tool_registry_has(registry, "sub_agent_run")
     || __agent_tool_registry_has(registry, "spawn_agent")
 }
 
-fn __agent_lifecycle_await_enabled(opts) {
-  const value = opts?.agent_await_resumption_enabled
+fn __agent_lifecycle_await_enabled(opts: AgentLifecycleToolsOptions) -> bool {
+  const value = opts.agent_await_resumption_enabled
   if value == nil {
     return true
   }
@@ -259,7 +269,7 @@ fn __agent_lifecycle_await_enabled(opts) {
   return value
 }
 
-fn __agent_lifecycle_add_await_tool(registry) {
+fn __agent_lifecycle_add_await_tool(registry: ToolRegistry) -> ToolRegistry {
   if __agent_tool_registry_has(registry, "agent_await_resumption") {
     return registry
   }
@@ -292,7 +302,10 @@ fn __agent_lifecycle_add_await_tool(registry) {
  * with an arity error. The closure keeps the capability explicit while it
  * satisfies the registry's one-argument contract.
  */
-fn __agent_lifecycle_add_subagent_tools(agents: HarnessAgent, registry) {
+fn __agent_lifecycle_add_subagent_tools(
+  agents: HarnessAgent,
+  registry: ToolRegistry,
+) -> ToolRegistry {
   let tools = registry
   if !__agent_tool_registry_has(tools, "subagent_pause") {
     tools = tool_define(
@@ -373,8 +386,12 @@ fn __agent_lifecycle_add_subagent_tools(agents: HarnessAgent, registry) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_lifecycle_tools(agents: HarnessAgent, registry = nil, options = nil) {
-  const opts = __worker_options(options, "agent_lifecycle_tools")
+pub fn agent_lifecycle_tools(
+  agents: HarnessAgent,
+  registry: ToolRegistry? = nil,
+  options: AgentLifecycleToolsOptions? = nil,
+) -> ToolRegistry {
+  const opts: AgentLifecycleToolsOptions = options ?? {}
   const base = registry ?? tool_registry()
   let tools = if __agent_lifecycle_await_enabled(opts) {
     __agent_lifecycle_add_await_tool(base)
@@ -387,14 +404,14 @@ pub fn agent_lifecycle_tools(agents: HarnessAgent, registry = nil, options = nil
   return tools
 }
 
-fn __worker_mode(config) {
+fn __worker_mode(config: dict) {
   if config?.graph != nil {
     return "workflow"
   }
   return "stage"
 }
 
-fn __worker_workflow_config(agents: HarnessAgent, config) {
+fn __worker_workflow_config(agents: HarnessAgent, config: dict) {
   const options = __worker_resume_options(agents, __worker_dict(config?.options))
   return filter_nil(
     config
@@ -406,7 +423,7 @@ fn __worker_workflow_config(agents: HarnessAgent, config) {
   )
 }
 
-fn __worker_stage_config(agents: HarnessAgent, config) {
+fn __worker_stage_config(agents: HarnessAgent, config: dict) {
   return filter_nil(
     config
       + {
@@ -416,7 +433,7 @@ fn __worker_stage_config(agents: HarnessAgent, config) {
   )
 }
 
-fn __worker_config(agents: HarnessAgent, config) {
+fn __worker_config(agents: HarnessAgent, config: dict) -> dict {
   const cfg = __worker_dict(config)
   const mode = __worker_mode(cfg)
   if mode == "workflow" {
@@ -432,7 +449,7 @@ fn __worker_config(agents: HarnessAgent, config) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn spawn_agent(agents: HarnessAgent, config) {
+pub fn spawn_agent(agents: HarnessAgent, config: dict) -> unknown {
   return agents.worker_spawn(__worker_config(agents, config))
 }
 
@@ -449,7 +466,24 @@ pub fn spawn_agent(agents: HarnessAgent, config) {
  * @errors: [HARN-SUS-002]
  * @api_stability: experimental
  */
-pub fn parse_resume_conditions(agents: HarnessAgent, conditions = nil) -> ResumeConditions? {
+pub fn parse_resume_conditions(
+  agents: HarnessAgent,
+  conditions: ResumeConditions? = nil,
+) -> ResumeConditions? {
+  return __parse_resume_conditions_unchecked(agents, conditions)
+}
+
+/**
+ * Validate untrusted resume-condition wire data at the runtime boundary.
+ *
+ * @effects: [host]
+ * @errors: [HARN-SUS-002]
+ * @api_stability: internal
+ */
+pub fn __parse_resume_conditions_unchecked(
+  agents: HarnessAgent,
+  conditions: dict?,
+) -> ResumeConditions? {
   return agents.parse_resume_conditions(conditions)
 }
 
@@ -476,9 +510,18 @@ pub fn parse_resume_conditions(agents: HarnessAgent, conditions = nil) -> Resume
  */
 pub fn agent_await_resumption(
   agents: HarnessAgent,
-  reason,
-  conditions = nil,
-  resume_by = nil,
+  reason: string?,
+  conditions: ResumeConditions? = nil,
+  resume_by: ResumeByCallback? = nil,
+) -> AgentAwaitResumptionRequest {
+  return __agent_await_resumption_request(agents, reason, conditions, resume_by)
+}
+
+fn __agent_await_resumption_request(
+  agents: HarnessAgent,
+  reason: string?,
+  conditions: dict?,
+  resume_by: ResumeByCallback?,
 ) -> AgentAwaitResumptionRequest {
   const normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
@@ -486,9 +529,29 @@ pub fn agent_await_resumption(
   }
   return {
     reason: normalized_reason,
-    conditions: parse_resume_conditions(agents, conditions),
+    conditions: __parse_resume_conditions_unchecked(agents, conditions),
     resume_by: resume_by,
   }
+}
+
+/**
+ * Model tool arguments are untrusted wire data, so this adapter validates
+ * them at runtime before returning the same rigid request as the typed API.
+ *
+ * @effects: [host]
+ * @errors: [HARN-SUS-002, HARN-SUS-005]
+ * @api_stability: internal
+ */
+pub fn __agent_await_resumption_from_tool(
+  agents: HarnessAgent,
+  args: dict,
+) -> AgentAwaitResumptionRequest {
+  return __agent_await_resumption_request(
+    agents,
+    args?.reason ?? "",
+    args?.conditions,
+    args?.resume_by,
+  )
 }
 
 /**
@@ -498,7 +561,7 @@ pub fn agent_await_resumption(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn send_input(agents: HarnessAgent, worker, task) {
+pub fn send_input<TWorker>(agents: HarnessAgent, worker: TWorker, task: unknown) -> TWorker {
   return agents.worker_send_input(worker, task)
 }
 
@@ -509,11 +572,11 @@ pub fn send_input(agents: HarnessAgent, worker, task) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn worker_trigger(agents: HarnessAgent, worker, payload) {
+pub fn worker_trigger(agents: HarnessAgent, worker: unknown, payload: unknown) -> unknown {
   return agents.worker_trigger(worker, payload)
 }
 
-fn __is_pool_task(value) {
+fn __is_pool_task(value: unknown) {
   return type_of(value) == "dict" && value?._type == "pool_task"
 }
 
@@ -524,7 +587,7 @@ fn __is_pool_task(value) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn wait_agent(agents: HarnessAgent, worker_or_workers) {
+pub fn wait_agent<TWorker>(agents: HarnessAgent, worker_or_workers: TWorker) -> TWorker {
   if __is_pool_task(worker_or_workers) {
     return agents.worker_wait(worker_or_workers)
   }
@@ -550,7 +613,11 @@ pub fn wait_agent(agents: HarnessAgent, worker_or_workers) {
  * @api_stability: experimental
  * @example: agent_stop(worker, {graceful: true})
  */
-pub fn agent_stop(agents: HarnessAgent, worker, options: AgentStopOptions? = nil) {
+pub fn agent_stop(
+  agents: HarnessAgent,
+  worker: unknown,
+  options: AgentStopOptions? = nil,
+) -> unknown {
   return agents.worker_stop(worker, __agent_stop_options(options, "agent_stop"))
 }
 
@@ -561,7 +628,7 @@ pub fn agent_stop(agents: HarnessAgent, worker, options: AgentStopOptions? = nil
  * @errors: []
  * @api_stability: experimental
  */
-pub fn close_agent(agents: HarnessAgent, worker) {
+pub fn close_agent(agents: HarnessAgent, worker: unknown) -> unknown {
   return agents.worker_close(worker)
 }
 
@@ -576,7 +643,12 @@ pub fn close_agent(agents: HarnessAgent, worker) {
  * @errors: [HARN-SUS-001, HARN-SUS-002, HARN-SUS-007, HARN-SUS-008]
  * @api_stability: experimental
  */
-pub fn suspend_agent(agents: HarnessAgent, worker, reason = "", options = nil) {
+pub fn suspend_agent(
+  agents: HarnessAgent,
+  worker: unknown,
+  reason: string = "",
+  options: dict? = nil,
+) -> unknown {
   return agents.worker_suspend(worker, reason, options)
 }
 
@@ -595,10 +667,10 @@ pub fn suspend_agent(agents: HarnessAgent, worker, reason = "", options = nil) {
  */
 pub fn resume_agent(
   agents: HarnessAgent,
-  worker_or_snapshot,
-  resume_input = nil,
-  continue_transcript = true,
-) -> any {
+  worker_or_snapshot: unknown,
+  resume_input: unknown = nil,
+  continue_transcript: bool = true,
+) -> unknown {
   return agents.worker_resume(
     worker_or_snapshot,
     {input: resume_input, continue_transcript: continue_transcript},
@@ -616,7 +688,7 @@ pub fn list_agents(agents: HarnessAgent) {
   return agents.worker_list()
 }
 
-fn __sub_agent_string(value, fallback = "") {
+fn __sub_agent_string(value: string?, fallback: any = "") {
   if type_of(value) != "string" {
     return fallback
   }
@@ -627,7 +699,7 @@ fn __sub_agent_string(value, fallback = "") {
   return value
 }
 
-fn __sub_agent_string_list(value, label) {
+fn __sub_agent_string_list(value: list?, label: string) {
   if value == nil {
     return []
   }
@@ -647,14 +719,14 @@ fn __sub_agent_string_list(value, label) {
   return out
 }
 
-fn __sub_agent_base_tools(tools: HarnessTools, opts) {
+fn __sub_agent_base_tools(tools: HarnessTools, opts: dict) {
   if opts?.tools != nil {
     return opts.tools
   }
   return tools.current_registry()
 }
 
-fn __sub_agent_selected_tools(tools: HarnessTools, opts, allowed_tools) {
+fn __sub_agent_selected_tools(tools: HarnessTools, opts: dict, allowed_tools: any) {
   const base = __sub_agent_base_tools(tools, opts)
   if len(allowed_tools) == 0 {
     return base
@@ -665,7 +737,7 @@ fn __sub_agent_selected_tools(tools: HarnessTools, opts, allowed_tools) {
   return tool_select(base, allowed_tools)
 }
 
-fn __sub_agent_options(opts, session_id, selected_tools) {
+fn __sub_agent_options(opts: dict, session_id: any, selected_tools: any) {
   let out = {}
   const internal = [
     "background",
@@ -698,7 +770,7 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn sub_agent_request(harness: Harness, task, options = nil) {
+pub fn sub_agent_request(harness: Harness, task: string?, options: any = nil) -> dict {
   const task_text = __sub_agent_string(task)
   if task_text == "" {
     throw "sub_agent_run: task is required"
@@ -737,11 +809,11 @@ pub fn sub_agent_request(harness: Harness, task, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn sub_agent_run(harness: Harness, task, options = nil) {
+pub fn sub_agent_run(harness: Harness, task: string?, options: any = nil) -> dict {
   return __host_sub_agent_run(sub_agent_request(harness, task, options))
 }
 
-fn __fanout_options(options) {
+fn __fanout_options(options: any) {
   if options == nil {
     return {}
   }
@@ -751,7 +823,7 @@ fn __fanout_options(options) {
   throw "agent_fanout: options must be a dict or nil"
 }
 
-fn __fanout_max_parallel(options) {
+fn __fanout_max_parallel(options: dict) {
   const raw = options?.max_parallel
   if raw == nil {
     return 8
@@ -765,7 +837,7 @@ fn __fanout_max_parallel(options) {
   return raw
 }
 
-fn __fanout_normalize_request(entry, index) {
+fn __fanout_normalize_request(entry: string | dict, index: int) {
   const fallback_label = "unit-" + to_string(index + 1)
   if type_of(entry) == "string" {
     const task = trim(entry)
@@ -791,7 +863,7 @@ fn __fanout_normalize_request(entry, index) {
   return {task: task, options: __fanout_options(entry?.options), label: label}
 }
 
-fn __fanout_chunks(items, width) {
+fn __fanout_chunks(items: list, width: int) {
   const size = if width < 1 {
     1
   } else {
@@ -812,7 +884,7 @@ fn __fanout_chunks(items, width) {
   return chunks
 }
 
-fn __fanout_envelope(summary) {
+fn __fanout_envelope(summary: dict) {
   const result = summary?.result
   if type_of(result) == "dict" {
     return result
@@ -820,7 +892,7 @@ fn __fanout_envelope(summary) {
   return {}
 }
 
-fn __fanout_ok(summary) {
+fn __fanout_ok(summary: dict) {
   const envelope = __fanout_envelope(summary)
   if type_of(envelope?.ok) == "bool" {
     return envelope.ok
@@ -829,7 +901,7 @@ fn __fanout_ok(summary) {
   return contains(["completed", "done", "succeeded", "success"], status)
 }
 
-fn __fanout_error(summary) {
+fn __fanout_error(summary: dict) {
   const envelope_error = __fanout_envelope(summary)?.error
   if envelope_error != nil {
     return envelope_error
@@ -837,7 +909,7 @@ fn __fanout_error(summary) {
   return summary?.error
 }
 
-fn __fanout_result(request, index, summary) {
+fn __fanout_result(request: dict, index: any, summary: dict) {
   return {
     label: request.label,
     index: index,
@@ -859,7 +931,7 @@ fn __fanout_result(request, index, summary) {
  * @errors: []
  * @api_stability: experimental
  */
-fn __fanout_spawn_error_summary(error) {
+fn __fanout_spawn_error_summary(error: string?) {
   return {
     status: "failed",
     result: {ok: false, error: __sub_agent_string(error, "sub_agent_run: spawn failed")},
@@ -902,7 +974,7 @@ fn __fanout_spawn_error_summary(error) {
  * @api_stability: experimental
  * @example: agent_fanout(harness, [{task: "port a", options: child_opts, label: "a"}], {max_parallel: 4})
  */
-pub fn agent_fanout(harness: Harness, requests, options = nil) {
+pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
   if type_of(requests) != "list" {
     throw "agent_fanout: requests must be a list of {task, options?, label?}"
   }
@@ -930,7 +1002,7 @@ pub fn agent_fanout(harness: Harness, requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        let handle = sub_agent_run(
+        const handle = sub_agent_run(
           harness,
           request.task,
           request.options + {background: true, name: request.label},

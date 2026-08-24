@@ -8,7 +8,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn ext(path) {
+pub fn ext(path: string?) {
   const e = extname(path)
   if len(e) > 0 {
     return e.substring(1)
@@ -23,7 +23,7 @@ pub fn ext(path) {
  * @effects: []
  * @errors: []
  */
-pub fn stem(path) {
+pub fn stem(path: string?) {
   const base = basename(path)
   const dot = base.last_index_of(".")
   if dot <= 0 {
@@ -39,7 +39,7 @@ pub fn stem(path) {
  * @effects: []
  * @errors: []
  */
-pub fn normalize(path) {
+pub fn normalize(path: string) {
   return path.replace("\\", "/")
 }
 
@@ -50,7 +50,7 @@ pub fn normalize(path) {
  * @effects: []
  * @errors: []
  */
-pub fn is_absolute(path) {
+pub fn is_absolute(path: string) {
   const normalized = normalize(path)
   const windows_drive_root = len(normalized) >= 3 && normalized.substring(1, 2) == ":"
     && normalized.substring(2, 3)
@@ -65,7 +65,7 @@ pub fn is_absolute(path) {
  * @effects: []
  * @errors: []
  */
-pub fn workspace_info(fs: HarnessFs, path, workspace_root = nil) {
+pub fn workspace_info(fs: HarnessFs, path: any, workspace_root: any = nil) {
   return fs.workspace_info(path, workspace_root)
 }
 
@@ -76,7 +76,7 @@ pub fn workspace_info(fs: HarnessFs, path, workspace_root = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn workspace_normalize(path, workspace_root = nil) {
+pub fn workspace_normalize(path: string?, workspace_root: any = nil) {
   return path_workspace_normalize(path, workspace_root)
 }
 
@@ -103,7 +103,7 @@ pub fn workspace_canonicalize_existing(
  * @effects: []
  * @errors: []
  */
-pub fn list_files(fs: HarnessFs, dir) {
+pub fn list_files(fs: HarnessFs, dir: any) {
   const entries = fs.list_dir(dir)
   return entries.filter(
     { name ->
@@ -121,7 +121,7 @@ pub fn list_files(fs: HarnessFs, dir) {
  * @effects: []
  * @errors: []
  */
-pub fn list_dirs(fs: HarnessFs, dir) {
+pub fn list_dirs(fs: HarnessFs, dir: any) {
   const entries = fs.list_dir(dir)
   return entries.filter(
     { name ->

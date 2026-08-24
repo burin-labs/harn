@@ -1,7 +1,7 @@
 import { poll_until } from "std/poll"
 
 /** Shared conformance helper for fixtures that exec the built `harn` binary. */
-fn first_group(pattern, text) {
+fn first_group(pattern: any, text: string?) {
   const matches = regex_captures(pattern, text)
   if len(matches) == 0 {
     return nil
@@ -10,7 +10,7 @@ fn first_group(pattern, text) {
 }
 
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
-pub fn resolve_harn_bin(harness: Harness, repo_root) {
+pub fn resolve_harn_bin(harness: Harness, repo_root: any) {
   const conformance_bin = harness.env.get("HARN_CONFORMANCE_HARN_BIN")
   if conformance_bin && harness.fs.exists(conformance_bin) {
     return conformance_bin
@@ -42,13 +42,13 @@ pub fn resolve_harn_bin(harness: Harness, repo_root) {
 }
 
 /** Return whether a subprocess still exists according to the platform shell. */
-pub fn process_alive(process: HarnessProcess, pid) {
+pub fn process_alive(process: HarnessProcess, pid: string) {
   const probe = process.shell("kill -0 " + pid + " >/dev/null 2>&1")
   return probe.success
 }
 
 /** Poll a subprocess log for a regex match and return the first capture group. */
-pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
+pub fn wait_for_log_match(harness: Harness, log_path: string, pattern: any) {
   return poll_until(
     harness.clock,
     { ->
@@ -87,7 +87,7 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
  * timeout. Returns nil on timeout; callers that need the content as a hard
  * prereq should follow with a descriptive `require`.
  */
-pub fn wait_for_file_content(clock: HarnessClock, fs: HarnessFs, path, check) {
+pub fn wait_for_file_content(clock: HarnessClock, fs: HarnessFs, path: string, check: unknown) {
   return poll_until(
     clock,
     { ->
@@ -100,7 +100,7 @@ pub fn wait_for_file_content(clock: HarnessClock, fs: HarnessFs, path, check) {
   )
 }
 
-fn log_contains(fs: HarnessFs, process: HarnessProcess, log_path, needle) {
+fn log_contains(fs: HarnessFs, process: HarnessProcess, log_path: string, needle: string) {
   if fs.exists(log_path) {
     const log = process.exec("cat", log_path).stdout
     if contains(log, needle) {
@@ -124,7 +124,7 @@ fn log_contains(fs: HarnessFs, process: HarnessProcess, log_path, needle) {
  * isolation. Returns false on timeout; callers that need the readiness
  * signal as a hard prereq should fail with a descriptive `require`.
  */
-pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
+pub fn wait_for_log_contains(harness: Harness, log_path: string, needle: string) {
   return poll_until(
     harness.clock,
     { -> log_contains(harness.fs, harness.process, log_path, needle) },
@@ -134,12 +134,12 @@ pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
 }
 
 /** Wait for the orchestrator HTTP listener readiness line and return its URL. */
-pub fn wait_for_listener_url(harness: Harness, log_path) {
+pub fn wait_for_listener_url(harness: Harness, log_path: string) {
   return wait_for_log_match(harness, log_path, "\\[harn\\] HTTP listener ready on (\\S+)")
 }
 
 /** Wait for the A2A server readiness line and return its advertised URL. */
-pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
+pub fn wait_for_a2a_server_url(harness: Harness, log_path: string) {
   return wait_for_log_match(harness, log_path, "Harn A2A server listening on (\\S+)")
 }
 
@@ -154,7 +154,7 @@ pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
  * single-suite baseline. Returns false on timeout; callers that need the
  * process gone for subsequent steps should pair this with `kill -KILL`.
  */
-pub fn wait_for_exit(clock: HarnessClock, process: HarnessProcess, pid) {
+pub fn wait_for_exit(clock: HarnessClock, process: HarnessProcess, pid: string) {
   return poll_until(
     clock,
     { ->

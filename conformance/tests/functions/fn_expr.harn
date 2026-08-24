@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Anonymous function expression: fn(params) { body }
   const double = fn(x) { return x * 2 }
   assert(double(5) == 10, "fn expr basic")

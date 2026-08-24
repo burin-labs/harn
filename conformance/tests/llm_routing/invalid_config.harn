@@ -2,7 +2,7 @@
  * routing_policy validates the config dict and throws clear errors
  * when shape is wrong.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const r1 = try {
     harness.llm.routing_policy({chain: []})
     "no_error"

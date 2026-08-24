@@ -1,6 +1,6 @@
 import { task_plan_validate } from "std/agent/task_plan"
 
-fn codes_of(report) {
+fn codes_of(report: dict) {
   let out = []
   for err in report.errors {
     out = out + [err.code]

@@ -5,7 +5,7 @@ fn test_loaded_sources_reports_entry_program() {
     let mut dbg = Debugger::new();
     let (_dir, file) = write_temp_program(
         "loaded.harn",
-        "pipeline t(harness: Harness, task) { harness.stdio.log(\"hi\") }",
+        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(\"hi\") }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -29,7 +29,7 @@ fn test_modules_reports_entry_module() {
     let mut dbg = Debugger::new();
     let (_dir, file) = write_temp_program(
         "mods.harn",
-        "pipeline t(harness: Harness, task) { harness.stdio.log(\"hi\") }",
+        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(\"hi\") }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -55,7 +55,7 @@ fn test_modules_with_explicit_zero_module_count_returns_all() {
     let mut dbg = Debugger::new();
     let (_dir, file) = write_temp_program(
         "zerocount.harn",
-        "pipeline t(harness: Harness, task) { harness.stdio.log(\"hi\") }",
+        "pipeline t(harness: Harness, task: unknown) { harness.stdio.log(\"hi\") }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(

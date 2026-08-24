@@ -1,6 +1,6 @@
 import { argv_step, assert_error_contains, scripted_argv } from "std/testing"
 
-pipeline test_scripted_argv(harness: Harness, task) {
+pipeline test_scripted_argv(harness: Harness, task: unknown) {
   const commands = scripted_argv<dict>(
     [
       argv_step(["tool", "status"], {success: true, stdout: "ready"}),

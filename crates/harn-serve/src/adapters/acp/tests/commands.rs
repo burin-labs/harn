@@ -16,9 +16,9 @@ async fn acp_advertises_and_dispatches_slash_commands() {
                 &pipeline_path,
                 "@command(name: \"review\", description: \"Review the diff\", \
                      hint: \"focus area\")\n\
-                     pipeline review_branch(harness: Harness, task) {\n  \
+                     pipeline review_branch(harness: Harness, task: unknown) {\n  \
                        harness.stdio.println(\"REVIEW:\" + prompt)\n}\n\n\
-                     pipeline default(harness: Harness, task) {\n  \
+                     pipeline default(harness: Harness, task: unknown) {\n  \
                        harness.stdio.println(\"DEFAULT:\" + prompt)\n}\n",
             )
             .expect("write pipeline");
@@ -129,8 +129,8 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"known\", description: \"known\")\n\
-                     pipeline known(harness: Harness, task) { harness.stdio.println(\"KNOWN\") }\n\n\
-                     pipeline default(harness: Harness, task) { harness.stdio.println(\"DEFAULT:\" + prompt) }\n",
+                     pipeline known(harness: Harness, task: unknown) { harness.stdio.println(\"KNOWN\") }\n\n\
+                     pipeline default(harness: Harness, task: unknown) { harness.stdio.println(\"DEFAULT:\" + prompt) }\n",
             )
             .expect("write pipeline");
 
@@ -280,7 +280,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(harness: Harness, task) { harness.stdio.println(\"alpha\") }\n",
+                     pipeline alpha(harness: Harness, task: unknown) { harness.stdio.println(\"alpha\") }\n",
             )
             .expect("write initial pipeline");
 
@@ -315,9 +315,9 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(harness: Harness, task) { harness.stdio.println(\"alpha\") }\n\n\
+                     pipeline alpha(harness: Harness, task: unknown) { harness.stdio.println(\"alpha\") }\n\n\
                      @command(name: \"beta\", description: \"second\")\n\
-                     pipeline beta(harness: Harness, task) { harness.stdio.println(\"beta\") }\n",
+                     pipeline beta(harness: Harness, task: unknown) { harness.stdio.println(\"beta\") }\n",
             )
             .expect("rewrite pipeline");
 
@@ -397,7 +397,7 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
         &pipeline_path,
         format!(
             "import {{ agent_loop }} from \"std/agent/loop\"\n\
-             pipeline default(harness: Harness, task) {{\n{prompt_body}\n}}\n"
+             pipeline default(harness: Harness, task: unknown) {{\n{prompt_body}\n}}\n"
         ),
     )
     .expect("write agent-loop pipeline");

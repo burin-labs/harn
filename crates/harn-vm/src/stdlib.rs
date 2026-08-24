@@ -366,7 +366,10 @@ fn validate_builtin_contracts(defs: &[&macros::VmBuiltinDef]) {
         }
         if def.runtime_only {
             assert!(
-                matches!(def.contract.exposure, BuiltinExposure::RuntimeInternal),
+                matches!(
+                    def.contract.exposure,
+                    BuiltinExposure::StdlibInternal | BuiltinExposure::RuntimeInternal
+                ),
                 "runtime_only builtin `{}` must use runtime_internal exposure",
                 def.sig.name
             );
@@ -393,6 +396,7 @@ fn validate_builtin_contracts(defs: &[&macros::VmBuiltinDef]) {
             BuiltinExposure::PureGlobal
                 | BuiltinExposure::CapabilityFunction { .. }
                 | BuiltinExposure::PrivilegedWire
+                | BuiltinExposure::StdlibInternal
                 | BuiltinExposure::HarnessMethod { .. }
         ) {
             assert!(
@@ -597,6 +601,7 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
                 BuiltinExposure::CapabilityFunction { .. }
                     | BuiltinExposure::HarnessMethod { .. }
                     | BuiltinExposure::PrivilegedWire
+                    | BuiltinExposure::StdlibInternal
             ) && !entry.contract.effects.is_empty()
             {
                 recorded_effects_by_name.insert(entry.name, *entry);
@@ -836,6 +841,7 @@ pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure)
         | BuiltinExposure::Undeclared => true,
         BuiltinExposure::HarnessMethod { .. }
         | BuiltinExposure::PrivilegedWire
+        | BuiltinExposure::StdlibInternal
         | BuiltinExposure::RuntimeInternal => false,
     }
 }
@@ -1197,6 +1203,7 @@ fn main(harness: Harness) {
                 BuiltinExposure::CapabilityFunction { .. }
                     | BuiltinExposure::HarnessMethod { .. }
                     | BuiltinExposure::PrivilegedWire
+                    | BuiltinExposure::StdlibInternal
             ) && !entry.contract.effects.is_empty();
             assert_eq!(
                 recorded_effect_builtin_manifest_entry(entry.name).is_some(),

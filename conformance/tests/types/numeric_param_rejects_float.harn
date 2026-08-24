@@ -2,7 +2,7 @@ fn takes_int(n: int) -> string {
   return "int param ACCEPTED ${n}"
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Native parameters and the portable kernel must agree: a float does not
   // satisfy a declared int (harn#6267). Use a dynamic value so the static
   // checker cannot fold the call away.

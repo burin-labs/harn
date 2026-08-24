@@ -31,7 +31,7 @@ fn server_specs() {
   ]
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   // 1. Register both servers lazily — no eager connect, so the demo
   //    runs even without a network or a bundled MCP fixture.
   for spec in server_specs() {
@@ -74,7 +74,7 @@ pipeline default(harness: Harness, _task) {
  * Compact predicates so the receipt stays small. The status entry
  * shape is documented in `crates/harn-vm/src/mcp_host.rs::McpHostStatus`.
  */
-fn all_lazy(entries) {
+fn all_lazy(entries: list) {
   let ok = true
   for entry in entries {
     if !entry.lazy {
@@ -84,7 +84,7 @@ fn all_lazy(entries) {
   return ok
 }
 
-fn all_closed(entries) {
+fn all_closed(entries: list) {
   let ok = true
   for entry in entries {
     if entry.circuit != "closed" {

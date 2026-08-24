@@ -13,7 +13,7 @@ fn __shared_ledger_path(env: HarnessEnv) -> string {
   return ""
 }
 
-fn __selected_cases(manifest, split: string) -> list {
+fn __selected_cases(manifest: dict, split: string) -> list {
   if split == "all" {
     return manifest.cases
   }

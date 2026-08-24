@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `owned<channel>` auto-drops at lexical block exit.
   fn block_scope_drop() {
     const observable = harness.runtime.channel("obs", 4)

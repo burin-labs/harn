@@ -5,7 +5,7 @@
 // receipt builder agree on field names without depending on either I/O
 // path.
 /** Build a normalized observation from raw GitHub PR + checks data. */
-pub fn from_github(pr, checks, required_checks) {
+pub fn from_github(pr: dict, checks: list?, required_checks: list?) {
   const observed_checks = (checks ?? []).map(
     { check ->
       {
@@ -61,27 +61,27 @@ pub fn from_github(pr, checks, required_checks) {
 }
 
 /** Quick predicate helpers used by the classifier and tests. */
-pub fn is_merged(obs) {
+pub fn is_merged(obs: dict) {
   return obs.merged
 }
 
 /** True when the PR is closed without being merged. */
-pub fn is_closed(obs) {
+pub fn is_closed(obs: dict) {
   return obs.state == "closed" && !is_merged(obs)
 }
 
 /** True when the PR has merge conflicts. */
-pub fn is_dirty(obs) {
+pub fn is_dirty(obs: dict) {
   return obs.mergeable_state == "dirty" || !obs.mergeable
 }
 
 /** True when the branch is behind the base. */
-pub fn is_behind(obs) {
+pub fn is_behind(obs: dict) {
   return obs.behind_by > 0 || obs.mergeable_state == "behind"
 }
 
 /** True when any of the policy's blocking labels are on the PR. */
-pub fn is_blocked_by_label(obs, blocking_labels) {
+pub fn is_blocked_by_label(obs: dict, blocking_labels: any) {
   for label in obs.labels {
     if blocking_labels.contains(label) {
       return true
@@ -91,11 +91,11 @@ pub fn is_blocked_by_label(obs, blocking_labels) {
 }
 
 /** True when the PR has at least the required review count. */
-pub fn has_required_approvals(obs, required) {
+pub fn has_required_approvals(obs: dict, required: any) {
   return obs.approvals >= required
 }
 
 /** True when no required check is missing or failing. */
-pub fn checks_pass(obs) {
+pub fn checks_pass(obs: dict) {
   return len(obs.missing_required_checks) == 0 && len(obs.failed_required_checks) == 0
 }

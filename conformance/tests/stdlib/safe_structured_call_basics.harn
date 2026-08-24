@@ -3,7 +3,7 @@
 // envelope with `value` (lowercase keys) and `status` populated.
 import { safe_structured_call } from "std/llm/safe"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const schema = {
     type: "object",
     required: ["verdict", "bullets"],

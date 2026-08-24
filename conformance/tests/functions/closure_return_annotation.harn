@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const greet = fn(name: string) -> string { return "hello " + name }
   assert(greet("world") == "hello world", "annotated fn expression returns string")
   const no_args = fn() -> int { return 42 }

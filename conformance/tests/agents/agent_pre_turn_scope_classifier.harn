@@ -3,11 +3,11 @@ import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
 
-fn scope_events(events) {
+fn scope_events(events: any) {
   return events.filter({ event -> event.type == "scope_classifier_verdict" })
 }
 
-fn scope_reminders(result) {
+fn scope_reminders(result: dict) {
   return transcript_events_by_kind(result?.transcript, "system_reminder").filter(
     { event ->
       event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" })
@@ -15,7 +15,7 @@ fn scope_reminders(result) {
   )
 }
 
-fn heavy_caller(text) {
+fn heavy_caller(text: string) {
   return { call ->
     return {
       ok: true,
@@ -42,11 +42,11 @@ fn anchor_opts() {
   }
 }
 
-fn anchored_session(random: HarnessRandom, prefix) {
+fn anchored_session(random: HarnessRandom, prefix: string) {
   return prefix + "-" + random.uuid()
 }
 
-fn open_anchored_session(agent: HarnessAgent, session) {
+fn open_anchored_session(agent: HarnessAgent, session: any) {
   agent.open(session, anchor_opts())
 }
 

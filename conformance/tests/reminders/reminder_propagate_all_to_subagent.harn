@@ -6,7 +6,7 @@ fn child_tools() {
   return tool_registry()
 }
 
-fn parent_tools(harness: Harness, child_session) {
+fn parent_tools(harness: Harness, child_session: string) {
   let tools = tool_registry()
   tools = tool_define(
     tools,

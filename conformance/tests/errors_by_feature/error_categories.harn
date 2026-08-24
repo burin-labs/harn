@@ -1,5 +1,5 @@
 /** Test structured error categories */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // throw_error creates categorized errors
   const r1 = try {
     throw_error("connection timed out", "timeout")

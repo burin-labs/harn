@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // A declared type is checked where it is written, exactly as a declared
   // parameter type is checked where it is passed. `json_parse` returns a
   // payload nobody validated, so the annotation is the validation.

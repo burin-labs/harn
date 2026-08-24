@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const xs = [1, 2, 3, 4]
   harness.stdio.log(stream.collect(stream.map(xs, { x -> x * 10 })))
   harness.stdio.log(stream.collect(stream.filter(xs, { x -> x % 2 == 0 })))

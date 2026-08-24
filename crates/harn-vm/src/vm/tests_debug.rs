@@ -268,7 +268,7 @@ fn test_signal_cancel_unwinds_step_loop() {
     // instruction check throws VmError::Thrown with the
     // cancelled kind.
     let chunk = crate::compile_source(
-        "pipeline t(harness: Harness, task) { let i = 0\n while i < 1000000 { i = i + 1 } }\n",
+        "pipeline t(harness: Harness, task: unknown) { let i = 0\n while i < 1000000 { i = i + 1 } }\n",
     )
     .unwrap();
     vm.start(&chunk).unwrap();
@@ -298,7 +298,7 @@ fn test_function_breakpoint_stops_on_entry() {
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["do_work".to_string()]);
     let chunk = crate::compile_source(
-        "fn do_work(n: int) -> int { return n + 1 }\npipeline t(harness: Harness, task) { const x = do_work(41)\nharness.stdio.log(x) }\n",
+        "fn do_work(n: int) -> int { return n + 1 }\npipeline t(harness: Harness, task: unknown) { const x = do_work(41)\nharness.stdio.log(x) }\n",
     )
     .unwrap();
     run_until_paused(&mut vm, &chunk);
@@ -345,7 +345,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
     register_vm_stdlib(&mut vm);
     vm.set_function_breakpoints(vec!["nonexistent".to_string()]);
     let chunk = crate::compile_source(
-        "pipeline t(harness: Harness, task) { const x = 1\nharness.stdio.log(x) }\n",
+        "pipeline t(harness: Harness, task: unknown) { const x = 1\nharness.stdio.log(x) }\n",
     )
     .unwrap();
     // With no matching callee, the program runs to completion

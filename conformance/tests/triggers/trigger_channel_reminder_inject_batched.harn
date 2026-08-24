@@ -10,7 +10,7 @@ import "std/triggers"
  * Deterministic time control via `harness.testing.clock_set(...)` so the test never
  * depends on wall-clock behavior to close the aggregation window.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1000000)
   const target_session = harness.agent.open("trigger-channel-reminder-batched")
   harness.agent.reset(target_session)

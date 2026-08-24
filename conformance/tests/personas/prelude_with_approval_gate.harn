@@ -1,6 +1,6 @@
 import { with_approval_gate } from "std/personas/prelude"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const opts = {
     persona: "approval_captain",
     step: "merge",

@@ -35,7 +35,7 @@ type TriggerEvent = {
     );
     let program = parse_program(
         r#"
-pipeline t(task) {
+pipeline t(task: any) {
   const event: TriggerEvent = {
     provider_payload: {
       provider: "github",
@@ -90,7 +90,7 @@ fn use_header(header: HeaderRecord) {
   const value: string = header.value
 }
 
-pipeline t(task) {
+pipeline t(task: any) {
   return
 }
 ",
@@ -120,7 +120,7 @@ pub fn pick(options: PickOptions = {}) -> nil {
     );
     let program = parse_program(
         r"
-pipeline t(task) {
+pipeline t(task: any) {
   pick({dropnil: true})
 }
 ",
@@ -156,7 +156,7 @@ pub fn view(request: BranchRequest) -> string {
     );
     let program = parse_program(
         r#"
-pipeline t(task) {
+pipeline t(task: any) {
   view({owner: "octo", repo: "demo", branch: "main"})
   const request = {owner: "octo", repo: "demo", branch: "next"}
   view(request)
@@ -188,7 +188,7 @@ pub fn render(env: HarnessEnv, fs: HarnessFs, path: string, vars: dict = {}) -> 
     );
     let program = parse_program(
         r#"
-pipeline caller(task) {
+pipeline caller(task: any) {
   return render("prompt.md", {name: "Burin"})
 }
 "#,
@@ -225,7 +225,7 @@ pub pipeline publish(version: string, dry_run: bool) -> bool {
     );
     let program = parse_program(
         r"
-pipeline caller(task) {
+pipeline caller(task: any) {
   publish(42, false)
 }
 ",
@@ -380,7 +380,7 @@ fn namespace_import_rejects_unknown_members() {
 
     let program = parse_program(
         r"
-pipeline t(task) {
+pipeline t(task: any) {
   let value = lib.absent
   lib.missing()
 }
@@ -444,7 +444,7 @@ fn namespace_import_accepts_known_member_call() {
 
     let program = parse_program(
         r"
-pipeline t(task) {
+pipeline t(task: any) {
   lib.greet()
 }
 ",
@@ -489,7 +489,7 @@ fn namespace_member_call_checks_argument_types() {
 
     let program = parse_program(
         r#"
-pipeline t(task) {
+pipeline t(task: any) {
   lib.head("not-a-record")
 }
 "#,
@@ -551,7 +551,7 @@ fn namespace_member_without_a_signature_stays_gradual() {
 
     let program = parse_program(
         r"
-pipeline t(task) {
+pipeline t(task: any) {
   lib.pick(1, 2, 3)
 }
 ",

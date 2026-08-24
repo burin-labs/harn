@@ -14,7 +14,7 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-pub fn agent_merge_llm_options(base = nil, overrides = nil) {
+pub fn agent_merge_llm_options(base: dict? = nil, overrides: dict? = nil) {
   let merged = (base ?? {}) + (overrides ?? {})
   if __explicit_tool_format(overrides ?? {}) != nil {
     merged = merged + {_tool_format_source: "explicit"}
@@ -32,7 +32,7 @@ pub fn agent_merge_llm_options(base = nil, overrides = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_refresh_tool_format_for_route(llm: HarnessLlm, options = nil) {
+pub fn agent_refresh_tool_format_for_route(llm: HarnessLlm, options: dict? = nil) {
   let opts = options ?? {}
   if !__has_key(opts, "tool_format") && opts?.tools == nil {
     return opts
@@ -44,7 +44,7 @@ pub fn agent_refresh_tool_format_for_route(llm: HarnessLlm, options = nil) {
   return __with_resolved_tool_format(opts, resolution)
 }
 
-pub fn __normalize_iteration_budget(opts) {
+pub fn __normalize_iteration_budget(opts: dict) {
   const raw = opts?.iteration_budget
   const legacy = opts?.max_iterations
   if raw == nil && legacy == nil {
@@ -99,6 +99,7 @@ pub fn __normalize_iteration_budget(opts) {
     50
   }
   const max_cap = __positive_int_budget_field(user_budget?.max, max_default, "iteration_budget.max")
+    ?? max_default
   const initial_default = if mode == "adaptive" {
     const candidate = max_cap / 4
     if candidate < 1 {
@@ -154,7 +155,7 @@ pub fn __normalize_iteration_budget(opts) {
   }
 }
 
-pub fn __autonomy_tier(value) {
+pub fn __autonomy_tier(value: string?) {
   const tier = value ?? "act_auto"
   if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
     return tier
@@ -169,7 +170,7 @@ pub fn __autonomy_tier(value) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn autonomy_policy(tier = "act_auto", options = nil) {
+pub fn autonomy_policy(tier: string? = "act_auto", options: dict? = nil) {
   const opts = options ?? {}
   return {
     agent_id: opts?.agent_id ?? opts?.agent,
@@ -213,7 +214,7 @@ pub fn agent_options(options: AgentSpec = {}) -> AgentSpec {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop_options(harness: Harness, options = nil) {
+pub fn agent_loop_options(harness: Harness, options: any = nil) {
   let opts = options ?? {}
   __validate_removed_agent_loop_options(opts)
   __validate_agent_loop_completion_options(opts)
@@ -304,25 +305,25 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
 
 // -------------------------------------------------------------------------------------------------
 
-pub fn __stack_dict(value) {
+pub fn __stack_dict(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-pub fn __stack_list(value) {
+pub fn __stack_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-pub fn __stack_has_key(d, key) -> bool {
+pub fn __stack_has_key(d: any, key: any) -> bool {
   return type_of(d) == "dict" && contains(d.keys(), key)
 }
 
-pub fn __stack_non_empty_string(value) {
+pub fn __stack_non_empty_string(value: string?) {
   if type_of(value) != "string" {
     return nil
   }
@@ -333,7 +334,7 @@ pub fn __stack_non_empty_string(value) {
   return trimmed
 }
 
-pub fn __stack_env_token(value) -> string {
+pub fn __stack_env_token(value: string?) -> string {
   const text = __stack_non_empty_string(value)
   if text == nil {
     return ""
@@ -342,7 +343,7 @@ pub fn __stack_env_token(value) -> string {
   return uppercase(regex_replace("^_+|_+$", "", cleaned))
 }
 
-pub fn __stack_env_value(env: HarnessEnv, name) {
+pub fn __stack_env_value(env: HarnessEnv, name: string?) {
   const key = __stack_non_empty_string(name)
   if key == nil {
     return nil
@@ -351,7 +352,7 @@ pub fn __stack_env_value(env: HarnessEnv, name) {
   return __stack_non_empty_string(value)
 }
 
-pub fn __stack_first_non_empty(values) {
+pub fn __stack_first_non_empty(values: list) {
   for value in values {
     const text = __stack_non_empty_string(value)
     if text != nil {
@@ -361,7 +362,7 @@ pub fn __stack_first_non_empty(values) {
   return nil
 }
 
-pub fn __stack_env_prefixes(config, role) {
+pub fn __stack_env_prefixes(config: any, role: string?) {
   const cfg = __stack_dict(config)
   let prefixes = []
   const explicit = cfg?.env_prefixes ?? cfg?.env_prefix
@@ -394,7 +395,7 @@ pub fn __stack_env_prefixes(config, role) {
   return prefixes
 }
 
-pub fn __stack_first_env(env: HarnessEnv, prefixes, suffix) {
+pub fn __stack_first_env(env: HarnessEnv, prefixes: list, suffix: string) {
   for prefix in prefixes {
     const value = __stack_env_value(env, prefix + "_" + suffix)
     if value != nil {
@@ -404,7 +405,7 @@ pub fn __stack_first_env(env: HarnessEnv, prefixes, suffix) {
   return nil
 }
 
-pub fn __stack_provider_model_pair(llm: HarnessLlm, opts) {
+pub fn __stack_provider_model_pair(llm: HarnessLlm, opts: dict) {
   const provider = __stack_non_empty_string(opts?.provider)
   const model = __stack_non_empty_string(opts?.model)
   if provider != nil && model != nil {
@@ -425,7 +426,7 @@ pub fn __stack_provider_model_pair(llm: HarnessLlm, opts) {
   return nil
 }
 
-pub fn __stack_capabilities(llm: HarnessLlm, opts) {
+pub fn __stack_capabilities(llm: HarnessLlm, opts: dict) {
   const pair = __stack_provider_model_pair(llm, opts)
   if pair == nil {
     return nil
@@ -439,7 +440,7 @@ pub fn __stack_capabilities(llm: HarnessLlm, opts) {
   return unwrap(caps)
 }
 
-pub fn __stack_sanitize_mode(policy) {
+pub fn __stack_sanitize_mode(policy: any) {
   const raw = __stack_non_empty_string(__stack_dict(policy)?.mode)
   if raw == nil {
     return "request"
@@ -447,7 +448,7 @@ pub fn __stack_sanitize_mode(policy) {
   return lowercase(raw)
 }
 
-pub fn __stack_thinking_mode(value) {
+pub fn __stack_thinking_mode(value: any) {
   if value == nil {
     return "disabled"
   }
@@ -490,7 +491,7 @@ pub fn __stack_thinking_mode(value) {
   return "enabled"
 }
 
-pub fn __stack_thinking_supported(caps, thinking) {
+pub fn __stack_thinking_supported(caps: dict, thinking: unknown) {
   const mode = __stack_thinking_mode(thinking)
   if mode == "disabled" {
     return true
@@ -502,7 +503,7 @@ pub fn __stack_thinking_supported(caps, thinking) {
   return contains(modes, mode)
 }
 
-pub fn __stack_strip_option_keys(options, stripped, keys) {
+pub fn __stack_strip_option_keys(options: any, stripped: list, keys: list) {
   let out = options
   let removed = stripped
   for key in keys {
@@ -514,7 +515,7 @@ pub fn __stack_strip_option_keys(options, stripped, keys) {
   return {options: out, stripped: removed}
 }
 
-pub fn __stack_sanitize_result(llm: HarnessLlm, options, policy = nil) {
+pub fn __stack_sanitize_result(llm: HarnessLlm, options: any, policy: any = nil) {
   let out = __stack_dict(options)
   let stripped = []
   const mode = __stack_sanitize_mode(policy)
@@ -582,7 +583,7 @@ pub fn __stack_sanitize_result(llm: HarnessLlm, options, policy = nil) {
   return {options: out, stripped: stripped}
 }
 
-pub fn __stack_pack_options(agent: HarnessAgent, llm: HarnessLlm, base) {
+pub fn __stack_pack_options(agent: HarnessAgent, llm: HarnessLlm, base: any) {
   const opts = __stack_dict(base)
   if __stack_non_empty_string(opts?.model) == nil {
     return opts
@@ -596,7 +597,7 @@ pub fn __stack_pack_options(agent: HarnessAgent, llm: HarnessLlm, base) {
   return unwrap(packed)
 }
 
-pub fn __stack_configured_model_options(env: HarnessEnv, cfg, prefixes) {
+pub fn __stack_configured_model_options(env: HarnessEnv, cfg: dict, prefixes: list) {
   const defaults = __stack_dict(cfg?.defaults) + __stack_dict(cfg?.model_defaults)
   const user = __stack_dict(cfg?.options) + __stack_dict(cfg?.llm_options)
   const provider = __stack_first_non_empty(
@@ -671,7 +672,7 @@ pub fn __stack_configured_model_options(env: HarnessEnv, cfg, prefixes) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sanitize_model_options(llm: HarnessLlm, options = nil, policy = nil) {
+pub fn agent_sanitize_model_options(llm: HarnessLlm, options: any = nil, policy: any = nil) {
   return __stack_sanitize_result(llm, options, policy).options
 }
 
@@ -690,7 +691,7 @@ pub fn agent_sanitize_model_options(llm: HarnessLlm, options = nil, policy = nil
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_model_options(harness: Harness, config = nil) {
+pub fn agent_model_options(harness: Harness, config: any = nil) {
   const cfg = __stack_dict(config)
   const role = __stack_non_empty_string(cfg?.role) ?? "agent"
   const prefixes = __stack_env_prefixes(cfg, role)

@@ -111,7 +111,7 @@ fn write_fake_artifacts(
 }
 
 @test
-pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task) {
+pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task: unknown) {
   const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
   assert(args[1]?.contains("python bindings: OK"))
@@ -119,7 +119,7 @@ pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task) {
 }
 
 @test
-pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task) {
+pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -133,7 +133,7 @@ pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task) {
 }
 
 @test
-pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, task) {
+pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -147,7 +147,7 @@ pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, 
 }
 
 @test
-pipeline test_current_repo_python_binding_round_trips(harness: Harness, task) {
+pipeline test_current_repo_python_binding_round_trips(harness: Harness, task: unknown) {
   const report = check_python_protocol_bindings(harness.fs, harness.process)
   assert_eq(report.ok, true)
   assert_eq(report.stage, "ok")

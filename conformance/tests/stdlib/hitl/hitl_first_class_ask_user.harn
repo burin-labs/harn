@@ -3,7 +3,7 @@ import "std/hitl"
 
 type Choice = {answer: string}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond("interaction", "question_response", {answer: {answer: "Ada"}})
   const response: Choice = harness.interaction.ask_user(

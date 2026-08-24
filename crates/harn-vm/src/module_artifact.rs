@@ -959,7 +959,7 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source_with_context(
         context.enum_candidates(),
         context.source_callable_names(),
         ModuleProvenance::User,
-        crate::CompilerOptions::runtime_owned_source(),
+        crate::CompilerOptions::embedded_stdlib(),
     )
 }
 

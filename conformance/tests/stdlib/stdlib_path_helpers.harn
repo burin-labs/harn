@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(path_normalize("a/b/../c"))
   harness.stdio.log(path_normalize("/a/b/../c"))
   harness.stdio.log(path_normalize("a\\b\\c"))

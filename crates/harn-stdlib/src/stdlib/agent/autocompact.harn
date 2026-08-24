@@ -1,6 +1,6 @@
 import { agent_record_compaction, agent_reminder_providers_fire } from "std/agent/state"
 
-fn __compaction_strategy_label(value) {
+fn __compaction_strategy_label(value: unknown) {
   if type_of(value) == "string" {
     return value
   }
@@ -14,7 +14,7 @@ fn __compaction_strategy_label(value) {
   return ""
 }
 
-fn __compaction_engine_strategy(label) {
+fn __compaction_engine_strategy(label: string) {
   if label == "truncate" {
     return "truncate"
   }
@@ -30,7 +30,7 @@ fn __compaction_engine_strategy(label) {
   return "observation_mask"
 }
 
-fn __compaction_policy_list(value) {
+fn __compaction_policy_list(value: unknown) -> list {
   if type_of(value) == "list" {
     return value
   }
@@ -40,7 +40,7 @@ fn __compaction_policy_list(value) {
   return []
 }
 
-fn __has_compaction_policy(policy) {
+fn __has_compaction_policy(policy: dict?) {
   if type_of(policy) != "dict" {
     return false
   }
@@ -54,7 +54,7 @@ fn __has_compaction_policy(policy) {
     || policy?.author != nil
 }
 
-fn __compaction_policy_merge_fields(policy, fields) {
+fn __compaction_policy_merge_fields(policy: any, fields: dict?) {
   if type_of(fields) != "dict" {
     return policy
   }
@@ -83,7 +83,7 @@ fn __compaction_policy_merge_fields(policy, fields) {
   return merged
 }
 
-fn __compaction_policy_from_options(opts) {
+fn __compaction_policy_from_options(opts: dict) {
   if type_of(opts) != "dict" {
     return nil
   }
@@ -111,7 +111,7 @@ fn __compaction_policy_from_options(opts) {
   return policy
 }
 
-fn __compaction_instruction_mode(policy) {
+fn __compaction_instruction_mode(policy: dict?) {
   if type_of(policy) != "dict" {
     return "default"
   }
@@ -128,7 +128,7 @@ fn __compaction_instruction_mode(policy) {
   return "extend"
 }
 
-fn __compaction_policy_event_fields(policy) {
+fn __compaction_policy_event_fields(policy: dict?) {
   if type_of(policy) != "dict" {
     return {instruction_mode: "default"}
   }
@@ -147,7 +147,7 @@ fn __compaction_policy_event_fields(policy) {
   return fields
 }
 
-fn __compaction_keep_last(opts) {
+fn __compaction_keep_last(opts: dict) {
   const cfg = opts?.compaction
   if type_of(cfg) == "dict" {
     const keep = cfg?.keep_last_n ?? cfg?.keep_last
@@ -161,7 +161,7 @@ fn __compaction_keep_last(opts) {
   return nil
 }
 
-fn __compact_options(opts, engine_strategy, keep_last) {
+fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
   const auto_cfg = opts?.auto_compact
   let compact_opts = if type_of(auto_cfg) == "dict" {
     auto_cfg
@@ -199,7 +199,7 @@ fn __compact_options(opts, engine_strategy, keep_last) {
   return compact_opts
 }
 
-fn __compaction_enabled(opts) {
+fn __compaction_enabled(opts: dict) {
   const auto_cfg = opts?.auto_compact
   const policy_cfg = opts?.compaction
   if auto_cfg == nil && policy_cfg == nil && opts?.compact_threshold == nil {
@@ -234,7 +234,7 @@ fn __compaction_enabled(opts) {
  * @api_stability: experimental
  * @example: compaction_policy("Preserve failing tests.", {author: "host"})
  */
-pub fn compaction_policy(instructions = nil, opts = nil) {
+pub fn compaction_policy(instructions: any = nil, opts: any = nil) {
   let base = if type_of(instructions) == "dict" && opts == nil {
     instructions
   } else if type_of(opts) == "dict" {
@@ -263,7 +263,7 @@ pub fn compaction_policy(instructions = nil, opts = nil) {
  * @api_stability: experimental
  * @example: compact_for_bug_fix_resumption({author: "host"})
  */
-pub fn compact_for_bug_fix_resumption(opts = nil) {
+pub fn compact_for_bug_fix_resumption(opts: any = nil) {
   const base = if type_of(opts) == "dict" {
     opts
   } else {
@@ -299,7 +299,7 @@ pub fn compact_for_bug_fix_resumption(opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn compact_preserving_test_failures(opts = nil) {
+pub fn compact_preserving_test_failures(opts: any = nil) {
   const base = if type_of(opts) == "dict" {
     opts
   } else {
@@ -331,7 +331,7 @@ pub fn compact_preserving_test_failures(opts = nil) {
  * @api_stability: experimental
  * @example: compact_retaining_current_plan({author: "host"})
  */
-pub fn compact_retaining_current_plan(opts = nil) {
+pub fn compact_retaining_current_plan(opts: any = nil) {
   const base = if type_of(opts) == "dict" {
     opts
   } else {
@@ -368,7 +368,7 @@ pub fn compact_retaining_current_plan(opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_autocompact_if_needed(agent: HarnessAgent, session, opts) {
+pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any) {
   if !__compaction_enabled(opts) {
     return nil
   }
@@ -470,7 +470,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_emergency_compact(agent: HarnessAgent, session, opts, attempt) {
+pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, attempt: int) {
   const messages = agent.session_messages(session.session_id)
   // Shrink the preserved tail as attempts escalate: a longer tail is tried
   // first (least lossy), collapsing toward keeping only the latest user turn so

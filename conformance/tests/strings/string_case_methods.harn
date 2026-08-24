@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println("MiXeD".lower())
   harness.stdio.println("MiXeD".upper())
   harness.stdio.println("Title".to_lower())

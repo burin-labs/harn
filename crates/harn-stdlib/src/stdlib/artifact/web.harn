@@ -3,15 +3,15 @@
  */
 import { edit_apply_old_new_patch, edit_validate_changed_regions } from "std/edit"
 
-fn __web_sha256(text) {
+fn __web_sha256(text: string?) {
   return "sha256:" + sha256(text ?? "")
 }
 
-fn __web_matches(pattern, text) {
+fn __web_matches(pattern: string?, text: string?) {
   return regex_match(pattern, text ?? "") ?? []
 }
 
-fn __web_tag_fragments(html, tag) {
+fn __web_tag_fragments(html: string?, tag: string) {
   const pattern = "(?is)<" + tag + "\\b([^>]*)>(.*?)</" + tag + ">"
   let fragments = []
   let index = 0
@@ -31,7 +31,7 @@ fn __web_tag_fragments(html, tag) {
   return fragments
 }
 
-fn __web_tag_balance_errors(html, tag) {
+fn __web_tag_balance_errors(html: string?, tag: string) {
   const opens = len(__web_matches("(?is)<" + tag + "\\b", html))
   const closes = len(__web_matches("(?is)</" + tag + ">", html))
   if opens > closes {
@@ -57,7 +57,7 @@ fn __web_tag_balance_errors(html, tag) {
   return []
 }
 
-fn __web_unique_codes(items) {
+fn __web_unique_codes(items: list?) {
   let codes = []
   for item in items ?? [] {
     if item?.code != nil && !codes.contains(item.code) {
@@ -67,7 +67,7 @@ fn __web_unique_codes(items) {
   return codes
 }
 
-fn __web_error(code, message, fragment = nil, matches = nil) {
+fn __web_error(code: any, message: any, fragment: any = nil, matches: list? = nil) {
   return {
     severity: "error",
     code: code,
@@ -77,11 +77,11 @@ fn __web_error(code, message, fragment = nil, matches = nil) {
   }
 }
 
-fn __web_warning(code, message, fragment = nil) {
+fn __web_warning(code: string, message: string, fragment: any = nil) {
   return {severity: "warning", code: code, message: message, fragment: fragment}
 }
 
-fn __web_pattern_errors(text, patterns) {
+fn __web_pattern_errors(text: string?, patterns: list) {
   let errors = []
   for pattern in patterns {
     const matches = __web_matches(pattern.regex, text)
@@ -92,7 +92,7 @@ fn __web_pattern_errors(text, patterns) {
   return errors
 }
 
-fn __web_fragment_pattern_errors(fragments, patterns) {
+fn __web_fragment_pattern_errors(fragments: list?, patterns: list) {
   let errors = []
   for fragment in fragments ?? [] {
     for pattern in patterns {
@@ -113,7 +113,7 @@ fn __web_fragment_pattern_errors(fragments, patterns) {
   return errors
 }
 
-fn __web_secret_errors(html) {
+fn __web_secret_errors(html: string?) {
   let errors = []
   for finding in secret_scan(html ?? "") {
     const title = finding?.title ?? finding?.detector ?? "secret"
@@ -131,7 +131,7 @@ fn __web_secret_errors(html) {
   return errors
 }
 
-fn __web_fragment_kind(html, old_text) {
+fn __web_fragment_kind(html: string?, old_text: string?) {
   const extracted = web_artifact_extract(html)
   for style in extracted.styles {
     if contains(style.content, old_text ?? "") {
@@ -149,7 +149,7 @@ fn __web_fragment_kind(html, old_text) {
   return "html"
 }
 
-fn __web_annotate_regions(regions, kind) {
+fn __web_annotate_regions(regions: list?, kind: any) {
   return (regions ?? []).map({ region -> region.merging({kind: kind}) })
 }
 
@@ -159,7 +159,7 @@ fn __web_annotate_regions(regions, kind) {
  * @effects: []
  * @errors: []
  */
-pub fn web_artifact_extract(html) {
+pub fn web_artifact_extract(html: string?) {
   const source = html ?? ""
   const scripts = __web_tag_fragments(source, "script")
   const styles = __web_tag_fragments(source, "style")
@@ -198,7 +198,7 @@ pub fn web_artifact_extract(html) {
  * @effects: []
  * @errors: []
  */
-pub fn web_artifact_text_fallback(html, options = nil) {
+pub fn web_artifact_text_fallback(html: string?, options: any = nil) {
   const without_scripts = regex_replace("(?is)<script\\b[^>]*>.*?</script>", " ", html ?? "")
   const without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
   const without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
@@ -224,7 +224,7 @@ pub fn web_artifact_text_fallback(html, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn web_artifact_validate(html, options = nil) {
+pub fn web_artifact_validate(html: string?, options: dict? = nil) {
   const source = html ?? ""
   const opts = options ?? {}
   const extracted = web_artifact_extract(source)
@@ -421,7 +421,12 @@ pub fn web_artifact_validate(html, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
+pub fn web_artifact_apply_patch(
+  html: string?,
+  old_text: string?,
+  new_text: string?,
+  options: dict? = nil,
+) {
   const source = html ?? ""
   const opts = options ?? {}
   const patch_opts = opts?.patch ?? opts

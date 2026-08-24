@@ -114,13 +114,13 @@ fn profile_records_step_spans_and_attributes_llm_to_step() {
     fs::write(
         &script,
         r#"
-fn classify(llm: HarnessLlm, ctx) -> string {
+fn classify(llm: HarnessLlm, ctx: any) -> string {
   const r = llm.call("classify ${ctx}", nil, {provider: "mock"})
   return r.text
 }
 
 @step(name: "classify_step", model: "claude-haiku-4-5", error_boundary: fail)
-fn classify_step(llm: HarnessLlm, ctx) -> string {
+fn classify_step(llm: HarnessLlm, ctx: any) -> string {
   return classify(llm, ctx)
 }
 

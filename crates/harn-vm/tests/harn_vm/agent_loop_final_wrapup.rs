@@ -65,11 +65,11 @@ fn agent_loop_emits_llm_call_start_checkpoint_for_main_call() {
         r#"
 import { agent_capture_events } from "std/agent/events"
 
-fn llm_call_start_events(events) {
+fn llm_call_start_events(events: list<dict>) {
   return events.filter({ event -> event.type == "typed_checkpoint" && event.checkpoint?.kind == "llm_call_start" })
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "agent-loop-llm-call-start-" + harness.random.uuid()
   const caller = { call -> return {
     ok: true,
@@ -138,7 +138,7 @@ pipeline main(harness: Harness, task) {
 fn exhaustion_pipeline(session_id: &str, final_wrapup_opt: &str) -> String {
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,
@@ -208,7 +208,7 @@ fn unconsumed_wrapup_call_pipeline(session_id: &str, wrapup_response: &str) -> S
         r#"
 import {{ agent_capture_events }} from "std/agent/events"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const dispatch_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "wrapup-unconsumed-dispatch-{session_id}", initial: 0}},
   )
@@ -291,7 +291,7 @@ pipeline main(harness: Harness, task) {{
 fn clean_done_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const wrapup_counter = harness.runtime.shared_cell(
     {{scope: "task_group", key: "clean-done-wrapup-{session_id}", initial: 0}},
   )
@@ -490,7 +490,7 @@ fn clean_done_exit_does_not_fire_wrapup() {
 fn host_directive_capture_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,
@@ -567,7 +567,7 @@ pipeline main(harness: Harness, task) {{
 fn no_tool_terminal_pipeline(session_id: &str, wrapup_opts: &str) -> String {
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "nt-wc-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
@@ -616,7 +616,7 @@ pipeline main(harness: Harness, task) {{
 fn host_directive_degrade_pipeline(session_id: &str) -> String {
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   let registry = tool_registry()
   let tools = tool_define(
     registry,

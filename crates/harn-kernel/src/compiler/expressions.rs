@@ -228,16 +228,28 @@ impl Compiler {
                     ) && self.options.runtime_owned_source_authority())
                     || (matches!(
                         entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::StdlibInternal
+                    ) && self.options.stdlib_internal_authority())
+                    || (matches!(
+                        entry.contract.exposure,
                         harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
                             | harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                            | harn_builtin_meta::BuiltinExposure::StdlibInternal
                             | harn_builtin_meta::BuiltinExposure::RuntimeInternal
                     ) && self.options.legacy_ambient_capabilities())
             });
             if contract.is_some() && !callable {
+                let route = match contract.expect("checked above").contract.exposure {
+                    harn_builtin_meta::BuiltinExposure::StdlibInternal => {
+                        "call the public stdlib function that wraps it"
+                    }
+                    harn_builtin_meta::BuiltinExposure::RuntimeInternal => {
+                        "call the public runtime or capability API that wraps it"
+                    }
+                    _ => "route effects through a typed Harness capability",
+                };
                 return Err(CompileError {
-                    message: format!(
-                        "`{name}` is not callable source API; effects must flow through a typed Harness capability"
-                    ),
+                    message: format!("`{name}` is not callable source API; {route}"),
                     line: self.line,
                 });
             }

@@ -4,7 +4,7 @@
  * dict `+` operator and the per-iteration single-entry dict allocation that
  * helper pipelines pay on every option-merge call.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const base = {
     provider_id: "github",
     repo: "burin-labs/harn",

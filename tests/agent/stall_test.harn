@@ -7,6 +7,7 @@
 // rather than masquerade as activity. A turn that also makes a real tool call
 // is unaffected.
 import {
+  AgentStallState,
   agent_stall_apply_result,
   agent_stall_clear_current_failure,
   agent_stall_current_failure,
@@ -23,7 +24,7 @@ fn _progress_only() {
   return [{name: "agent_progress", arguments: {message: "still working"}}]
 }
 
-fn _observe(agent: HarnessAgent, state, calls, iteration) {
+fn _observe(agent: HarnessAgent, state: AgentStallState, calls: list, iteration: int) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit",
@@ -37,7 +38,7 @@ fn _observe(agent: HarnessAgent, state, calls, iteration) {
   )
 }
 
-pipeline test_agent_progress_spam_trips_no_progress(harness: Harness, task) {
+pipeline test_agent_progress_spam_trips_no_progress(harness: Harness, task: any) {
   // Three consecutive turns whose only call is agent_progress → trips at the
   // third (no_progress_messages = 3). Before the fix these were treated as real
   // tool calls and never tripped.
@@ -49,7 +50,7 @@ pipeline test_agent_progress_spam_trips_no_progress(harness: Harness, task) {
   assert(o3.warning != nil)
 }
 
-pipeline test_real_tool_calls_do_not_trip_no_progress(harness: Harness, task) {
+pipeline test_real_tool_calls_do_not_trip_no_progress(harness: Harness, task: any) {
   // Real (substantive) tool calls that make genuine progress are activity — no
   // no-progress trip. The calls must be DISTINCT: three byte-identical calls
   // with no dispatch outcome would (correctly) trip the signature-only
@@ -66,7 +67,7 @@ pipeline test_real_tool_calls_do_not_trip_no_progress(harness: Harness, task) {
   assert(o3.warning == nil)
 }
 
-pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task) {
+pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task: any) {
   // agent_progress alongside a real (distinct) edit is progress — the real call
   // carries the action stream, so the no-progress streak never accumulates.
   const o1 = _observe(
@@ -90,7 +91,7 @@ pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task) {
   assert(o3.warning == nil)
 }
 
-fn _observe_parse_error(agent: HarnessAgent, state, iteration) {
+fn _observe_parse_error(agent: HarnessAgent, state: AgentStallState, iteration: int) {
   // 0 tool calls + non-empty text, but the turn carried parser errors (the calls
   // were dropped). `had_parse_errors = true`.
   return agent_stall_observe_tool_calls(
@@ -107,7 +108,7 @@ fn _observe_parse_error(agent: HarnessAgent, state, iteration) {
   )
 }
 
-fn _observe_text(agent: HarnessAgent, state, iteration, text) {
+fn _observe_text(agent: HarnessAgent, state: AgentStallState, iteration: int, text: string) {
   // Same shape but a genuine no-progress monologue (no parser errors).
   return agent_stall_observe_tool_calls(
     agent,
@@ -123,11 +124,11 @@ fn _observe_text(agent: HarnessAgent, state, iteration, text) {
   )
 }
 
-fn _observe_text_only(agent: HarnessAgent, state, iteration) {
+fn _observe_text_only(agent: HarnessAgent, state: AgentStallState, iteration: int) {
   return _observe_text(agent, state, iteration, "I edited the file.")
 }
 
-pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, task) {
+pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, task: unknown) {
   // A turn whose calls were ALL dropped by the parser is a malformed-call turn,
   // not a no-progress monologue. It never accumulates the narration streak:
   // the first rejection remains parse-guidance-only, while repeated rejection
@@ -145,7 +146,7 @@ pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, 
   assert(o3.state.no_progress_streak == 0)
 }
 
-fn _observe_errored_no_call(agent: HarnessAgent, state, iteration) {
+fn _observe_errored_no_call(agent: HarnessAgent, state: any, iteration: any) {
   // 0 tool calls + narration text, turn ended with a PROVIDER ERROR
   // (turn_stop_reason = "error"): the cheap-model eval-meter failure class.
   return agent_stall_observe_tool_calls(
@@ -164,7 +165,7 @@ fn _observe_errored_no_call(agent: HarnessAgent, state, iteration) {
   )
 }
 
-pipeline test_errored_no_tool_call_gets_cause_specific_feedback(harness: Harness, task) {
+pipeline test_errored_no_tool_call_gets_cause_specific_feedback(harness: Harness, task: any) {
   // A turn that ended with a provider error and emitted no tool call gets the
   // cause-specific `errored_no_tool_call` warning (so the model is told its
   // turn errored and to re-emit the intended call), NOT the generic
@@ -178,7 +179,7 @@ pipeline test_errored_no_tool_call_gets_cause_specific_feedback(harness: Harness
   assert(o3.warning.pattern == "errored_no_tool_call")
 }
 
-pipeline test_text_only_turn_without_parse_errors_still_trips(harness: Harness, task) {
+pipeline test_text_only_turn_without_parse_errors_still_trips(harness: Harness, task: any) {
   // Control: the SAME 0-call + text turn WITHOUT parse errors is a real
   // no-progress monologue and must still trip at the threshold. Guards against
   // the parse-error gate accidentally disabling no-progress detection wholesale.
@@ -193,7 +194,7 @@ pipeline test_text_only_turn_without_parse_errors_still_trips(harness: Harness, 
   assert(o3.warning.signature_digest != "")
 }
 
-pipeline test_distinct_text_only_turns_restart_no_progress_streak(harness: Harness, task) {
+pipeline test_distinct_text_only_turns_restart_no_progress_streak(harness: Harness, task: unknown) {
   const o1 = _observe_text(
     harness.agent,
     agent_stall_initial_state(),
@@ -216,7 +217,7 @@ pipeline test_distinct_text_only_turns_restart_no_progress_streak(harness: Harne
   assert(o3.state.no_progress_streak == 1)
 }
 
-pipeline test_light_monologue_rewrites_share_a_content_streak(harness: Harness, task) {
+pipeline test_light_monologue_rewrites_share_a_content_streak(harness: Harness, task: unknown) {
   const o1 = _observe_text(
     harness.agent,
     agent_stall_initial_state(),
@@ -260,12 +261,12 @@ fn _run_call() {
   return [{name: "run", arguments: {cmd: "test"}}]
 }
 
-fn _fail_dispatch(error_text) {
+fn _fail_dispatch(error_text: any) {
   // A failing verification result for tool "run".
   return [{tool_name: "run", ok: false, error: error_text}]
 }
 
-fn _stale_dispatch(error_text) {
+fn _stale_dispatch(error_text: any) {
   return [{tool_name: "run", ok: false, status: "bound_stale", error: error_text}]
 }
 
@@ -277,7 +278,7 @@ fn _ok_dispatch() {
  * Fold one repair turn: observe a substantive "run" call, classifying
  * `prev_dispatch` (the prior turn's result) with `prior_made_edit`.
  */
-fn _fold(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
+fn _fold(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-repair",
@@ -293,7 +294,7 @@ fn _fold(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
   )
 }
 
-pipeline test_fold_first_failure_records_model(harness: Harness, task) {
+pipeline test_fold_first_failure_records_model(harness: Harness, task: any) {
   // First failing verification: class "fail", streak 1, epoch 0, no edit owed.
   const o = _fold(
     harness.agent,
@@ -309,7 +310,7 @@ pipeline test_fold_first_failure_records_model(harness: Harness, task) {
   assert(o.warning == nil)
 }
 
-pipeline test_fold_same_failure_no_edit_increments_streak(harness: Harness, task) {
+pipeline test_fold_same_failure_no_edit_increments_streak(harness: Harness, task: any) {
   // Same failure twice with no intervening edit => futile retry, streak grows.
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
@@ -324,7 +325,10 @@ pipeline test_fold_same_failure_no_edit_increments_streak(harness: Harness, task
   assert(o3.warning.diagnostic_snippet == "boom")
 }
 
-pipeline test_fold_location_shift_uses_verification_delta_normalization(harness: Harness, task) {
+pipeline test_fold_location_shift_uses_verification_delta_normalization(
+  harness: Harness,
+  task: any,
+) {
   const o1 = _fold(
     harness.agent,
     agent_stall_initial_state(),
@@ -341,7 +345,7 @@ pipeline test_fold_location_shift_uses_verification_delta_normalization(harness:
   assert(o2.state.last_diagnostic_delta_status == "unchanged")
 }
 
-pipeline test_fold_stale_diagnostic_does_not_feed_repair_gate(harness: Harness, task) {
+pipeline test_fold_stale_diagnostic_does_not_feed_repair_gate(harness: Harness, task: any) {
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   assert(o1.state.failing_verify_turns == 1)
@@ -355,7 +359,7 @@ pipeline test_fold_stale_diagnostic_does_not_feed_repair_gate(harness: Harness, 
   assert(fresh_again.warning == nil)
 }
 
-pipeline test_fold_stale_after_edit_keeps_reverify_owed(harness: Harness, task) {
+pipeline test_fold_stale_after_edit_keeps_reverify_owed(harness: Harness, task: any) {
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
   const stale = _fold(harness.agent, o1.state, _stale_dispatch("boom"), true)
   assert(stale.warning == nil)
@@ -364,7 +368,10 @@ pipeline test_fold_stale_after_edit_keeps_reverify_owed(harness: Harness, task) 
   assert(stale.state.reverify_owed)
 }
 
-pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(harness: Harness, task) {
+pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(
+  harness: Harness,
+  task: any,
+) {
   const config = {
     enabled: true,
     repair_aware: false,
@@ -399,7 +406,7 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(harnes
   assert(o2.state.same_observation_streak == 0)
 }
 
-pipeline test_fold_productive_edit_resets_streak(harness: Harness, task) {
+pipeline test_fold_productive_edit_resets_streak(harness: Harness, task: any) {
   // FALSE-POSITIVE PROOF (signature-keyed): the SIGNATURE is the progress
   // signal. fail(sigA), an edit bumps the epoch (no result yet, owes a
   // re-verify), then a DIFFERENT failure (sigB) => the productive edit changed
@@ -423,7 +430,7 @@ pipeline test_fold_productive_edit_resets_streak(harness: Harness, task) {
   assert(!of.state.reverify_owed)
 }
 
-pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(harness: Harness, task) {
+pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(harness: Harness, task: any) {
   const parsed = agent_stall_repair_config(
     {
       enabled: true,
@@ -449,7 +456,7 @@ pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(harness: H
   assert_eq(parsed.reserved_terminal_verify_iterations, 3)
 }
 
-pipeline test_repair_diagnostics_flat_fields_override_nested(harness: Harness, task) {
+pipeline test_repair_diagnostics_flat_fields_override_nested(harness: Harness, task: any) {
   const parsed = agent_stall_repair_config(
     {
       enabled: true,
@@ -468,7 +475,7 @@ pipeline test_repair_diagnostics_flat_fields_override_nested(harness: Harness, t
   assert(!parsed.reserved_terminal_verify)
 }
 
-pipeline test_fold_edit_retest_thrash_increments_streak(harness: Harness, task) {
+pipeline test_fold_edit_retest_thrash_increments_streak(harness: Harness, task: any) {
   // THRASH PROOF (the PRIMARY case): fail(sigA), edit, fail(sigA), edit,
   // fail(sigA) — separate turns, SAME failure signature across the edits. A
   // flailing edit that leaves the same error is real thrash, so the streak
@@ -494,7 +501,7 @@ pipeline test_fold_edit_retest_thrash_increments_streak(harness: Harness, task) 
   assert(o3.warning.pattern == "stuck_same_diagnostic")
 }
 
-pipeline test_fold_pass_clears_model(harness: Harness, task) {
+pipeline test_fold_pass_clears_model(harness: Harness, task: any) {
   // A passing verification clears the current-failure model entirely.
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
   const o2 = _fold(harness.agent, o1.state, _fail_dispatch("boom"), false)
@@ -507,7 +514,7 @@ pipeline test_fold_pass_clears_model(harness: Harness, task) {
   assert(op.warning == nil)
 }
 
-pipeline test_fold_different_failure_resets_streak(harness: Harness, task) {
+pipeline test_fold_different_failure_resets_streak(harness: Harness, task: any) {
   // A DIFFERENT failure signature is a different mistake, not a futile retry.
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom A"), false)
   const o2 = _fold(harness.agent, o1.state, _fail_dispatch("boom A"), false)
@@ -517,7 +524,7 @@ pipeline test_fold_different_failure_resets_streak(harness: Harness, task) {
   assert(o3.warning == nil)
 }
 
-pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness, task) {
+pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness, task: any) {
   // repair_aware:false disables the strategy-shift nudge, not the
   // current-failure model used by post-edit final verification.
   const off_config = {
@@ -563,7 +570,7 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
   assert(o2.state.same_diagnostic_streak == 2)
 }
 
-pipeline test_reset_action_preserves_failure_model(harness: Harness, task) {
+pipeline test_reset_action_preserves_failure_model(harness: Harness, task: any) {
   // The current-failure model must SURVIVE a tool-stream reset: a different
   // corrective action does not clear "same root failure". We force a reset by
   // observing an exempt tool after a recorded failure, and assert the repair
@@ -594,7 +601,7 @@ pipeline test_reset_action_preserves_failure_model(harness: Harness, task) {
   assert(o3.state.last_diagnostic_signature == o2.state.last_diagnostic_signature)
 }
 
-pipeline test_clear_current_failure_on_success(harness: Harness, task) {
+pipeline test_clear_current_failure_on_success(harness: Harness, task: any) {
   // FIX #2: a SUCCESSFUL terminal hand-back must not carry a stale failure. A
   // run can end (clean done / verify_completion pass) without ever folding a
   // passing result, leaving last_diagnostic_class == "fail". The loop clears
@@ -648,7 +655,7 @@ const STALE_GUARD_CONFIG = {
   ping_pong_cycles: 99,
 }
 
-fn _fold_guarded(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
+fn _fold_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-guard",
@@ -664,7 +671,7 @@ fn _fold_guarded(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
   )
 }
 
-fn _fold_stale_guarded(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
+fn _fold_stale_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-stale-guard",
@@ -680,7 +687,7 @@ fn _fold_stale_guarded(agent: HarnessAgent, state, prev_dispatch, prior_made_edi
   )
 }
 
-pipeline test_no_net_progress_default_off(harness: Harness, task) {
+pipeline test_no_net_progress_default_off(harness: Harness, task: any) {
   // (a)/(default) Guard OFF (REPAIR_CONFIG has no guard flag): even a long thrash
   // streak never reports no-net-progress => today's behavior is preserved.
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
@@ -690,7 +697,7 @@ pipeline test_no_net_progress_default_off(harness: Harness, task) {
   assert(!agent_stall_no_net_progress(REPAIR_CONFIG, o3.state))
 }
 
-pipeline test_no_net_progress_thrash_trips_once_armed(harness: Harness, task) {
+pipeline test_no_net_progress_thrash_trips_once_armed(harness: Harness, task: any) {
   // (a) Guard ON: a thrash (same failure recurring every turn, no draining)
   // crosses the threshold and IS reported as no-net-progress, so the loop stops
   // extending. Below threshold it is NOT reported (conservative).
@@ -710,7 +717,7 @@ pipeline test_no_net_progress_thrash_trips_once_armed(harness: Harness, task) {
   assert(agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
 }
 
-pipeline test_no_net_progress_productive_run_keeps_budget(harness: Harness, task) {
+pipeline test_no_net_progress_productive_run_keeps_budget(harness: Harness, task: any) {
   // (b) Guard ON: a genuinely-progressing run where each turn changes the error
   // (a productive edit shifts the signature => streak resets to 1) NEVER reports
   // no-net-progress, so its budget is preserved. Errors draining is progress.
@@ -726,7 +733,7 @@ pipeline test_no_net_progress_productive_run_keeps_budget(harness: Harness, task
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
 }
 
-pipeline test_no_net_progress_pass_keeps_budget(harness: Harness, task) {
+pipeline test_no_net_progress_pass_keeps_budget(harness: Harness, task: any) {
   // (b) Guard ON: a turn whose verification PASSES clears the failure model
   // (class != "fail") so it never reports no-net-progress even after a prior
   // thrash streak — a failing-then-passing run still progresses.
@@ -742,7 +749,7 @@ pipeline test_no_net_progress_pass_keeps_budget(harness: Harness, task) {
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, op.state))
 }
 
-pipeline test_no_net_progress_explore_turn_not_starved(harness: Harness, task) {
+pipeline test_no_net_progress_explore_turn_not_starved(harness: Harness, task: any) {
   // (c) Guard ON: a read-only / explore turn has no failing verification, so the
   // failure model is never armed (class stays "") and the guard NEVER reports
   // no-net-progress. Legitimately-exploring turns are not starved of budget.
@@ -756,7 +763,7 @@ pipeline test_no_net_progress_explore_turn_not_starved(harness: Harness, task) {
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o.state))
 }
 
-pipeline test_no_net_progress_ignores_stale_diagnostics(harness: Harness, task) {
+pipeline test_no_net_progress_ignores_stale_diagnostics(harness: Harness, task: any) {
   const o1 = _fold_stale_guarded(
     harness.agent,
     agent_stall_initial_state(),
@@ -794,7 +801,7 @@ const HARD_CAP_CONFIG = {
   ping_pong_cycles: 99,
 }
 
-fn _fold_hard_cap(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
+fn _fold_hard_cap(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-hard-cap",
@@ -810,7 +817,7 @@ fn _fold_hard_cap(agent: HarnessAgent, state, prev_dispatch, prior_made_edit) {
   )
 }
 
-pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(harness: Harness, task) {
+pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(harness: Harness, task: any) {
   // A slow-draining failing run can keep changing the error signature, so the
   // same-diagnostic streak never reaches the no-net threshold. The hard cap is
   // deliberately signature-agnostic: three failing verify turns without a clean
@@ -840,7 +847,7 @@ pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(harness: Harness
   assert(agent_stall_no_net_progress(HARD_CAP_CONFIG, o3.state))
 }
 
-pipeline test_no_net_progress_hard_cap_resets_only_on_clean_verify(harness: Harness, task) {
+pipeline test_no_net_progress_hard_cap_resets_only_on_clean_verify(harness: Harness, task: any) {
   const o1 = _fold_hard_cap(
     harness.agent,
     agent_stall_initial_state(),
@@ -863,7 +870,7 @@ pipeline test_no_net_progress_hard_cap_resets_only_on_clean_verify(harness: Harn
   assert(fail_after_pass.warning == nil)
 }
 
-pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Harness, task) {
+pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Harness, task: any) {
   // Edit success is not a clean verification. It should preserve the failing
   // verify counter so a model cannot evade the cap by interleaving successful
   // writes with still-red verifies.
@@ -889,7 +896,7 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Ha
 
 // -------------------------------------------------------------------------------------------------
 
-fn _observe_signal(agent: HarnessAgent, state, cfg, payload) {
+fn _observe_signal(agent: HarnessAgent, state: any, cfg: any, payload: any) {
   // Substantive "run" call with no prior dispatch: the core/repair paths never
   // trip on this turn, so any warning comes purely from the action_signal seam.
   return agent_stall_observe_tool_calls(
@@ -909,7 +916,7 @@ fn _observe_signal(agent: HarnessAgent, state, cfg, payload) {
   )
 }
 
-fn _observe_noprog_signal(agent: HarnessAgent, state, cfg, text, payload) {
+fn _observe_noprog_signal(agent: HarnessAgent, state: any, cfg: any, text: any, payload: any) {
   // No substantive tool call + narration text = a no-progress-monologue candidate,
   // used to prove the action_signal seam does not double-fire when the core already
   // tripped this turn.
@@ -930,7 +937,7 @@ fn _observe_noprog_signal(agent: HarnessAgent, state, cfg, text, payload) {
   )
 }
 
-pipeline test_action_signal_trips_on_single_flailing_action(harness: Harness, task) {
+pipeline test_action_signal_trips_on_single_flailing_action(harness: Harness, task: any) {
   // A truthy action_signal callback trips IMMEDIATELY on a single turn (no streak)
   // with the distinct `flailing_action` pattern, riding the existing warning event.
   const cfg = {
@@ -950,7 +957,7 @@ pipeline test_action_signal_trips_on_single_flailing_action(harness: Harness, ta
   assert_eq(o.state.consecutive_trips, 0)
 }
 
-pipeline test_action_signal_receives_payload_and_gates_on_return(harness: Harness, task) {
+pipeline test_action_signal_receives_payload_and_gates_on_return(harness: Harness, task: any) {
   // The callback receives the full post-turn payload; only a truthy return trips.
   const cfg = {enabled: true, action_signal: { p -> p?.flail == true }, post_edit_reverify: false}
   const trips = _observe_signal(harness.agent, agent_stall_initial_state(), cfg, {flail: true})
@@ -960,7 +967,7 @@ pipeline test_action_signal_receives_payload_and_gates_on_return(harness: Harnes
   assert(quiet.warning == nil)
 }
 
-pipeline test_action_signal_repeated_flailing_escalates_to_hard_stop(harness: Harness, task) {
+pipeline test_action_signal_repeated_flailing_escalates_to_hard_stop(harness: Harness, task: any) {
   // Repeated flailing accumulates the DEDICATED action-flail counter — independent of
   // the core `consecutive_trips`, which the core resets to 0 every non-tripping turn,
   // so an action_signal-only stream could otherwise never escalate — and reaches a
@@ -991,7 +998,7 @@ pipeline test_action_signal_repeated_flailing_escalates_to_hard_stop(harness: Ha
   assert(o3.hard_stop)
 }
 
-pipeline test_action_signal_non_flailing_turn_resets_streak(harness: Harness, task) {
+pipeline test_action_signal_non_flailing_turn_resets_streak(harness: Harness, task: any) {
   // A non-flailing turn breaks the consecutive-flail streak, so the hard stop fires
   // only on uninterrupted flailing. Core thresholds raised so the repeated `run`
   // call never trips a core warning.
@@ -1020,7 +1027,7 @@ pipeline test_action_signal_non_flailing_turn_resets_streak(harness: Harness, ta
   assert_eq(o4.state.action_flail_trips, 2)
 }
 
-pipeline test_action_flail_does_not_contaminate_core_trip_axis(harness: Harness, task) {
+pipeline test_action_flail_does_not_contaminate_core_trip_axis(harness: Harness, task: any) {
   // The flail accumulator must NOT write `consecutive_trips` (the core escalation
   // axis), or a later core trip at a flail->core-trip boundary would escalate one
   // step early. Regression guard: after a flail trip, the core counter stays 0.
@@ -1038,7 +1045,7 @@ pipeline test_action_flail_does_not_contaminate_core_trip_axis(harness: Harness,
   assert_eq(o1.state.consecutive_trips, 0)
 }
 
-pipeline test_action_signal_unset_is_inert(harness: Harness, task) {
+pipeline test_action_signal_unset_is_inert(harness: Harness, task: any) {
   // No action_signal callback: even a payload that WOULD flail produces no trip —
   // the seam is invisible by default.
   const cfg = {enabled: true, post_edit_reverify: false, repair_aware: false}
@@ -1046,7 +1053,7 @@ pipeline test_action_signal_unset_is_inert(harness: Harness, task) {
   assert(o.warning == nil)
 }
 
-pipeline test_action_signal_does_not_double_fire_when_core_tripped(harness: Harness, task) {
+pipeline test_action_signal_does_not_double_fire_when_core_tripped(harness: Harness, task: any) {
   // One warning per turn: when the core no-progress detector already tripped this
   // turn, a truthy action_signal is skipped (the core warning wins, no double-nudge).
   const cfg = {
@@ -1072,7 +1079,7 @@ pipeline test_action_signal_does_not_double_fire_when_core_tripped(harness: Harn
   assert(o3.warning.pattern == "no_progress_monologue")
 }
 
-pipeline test_action_signal_validated_loudly_at_config_time(harness: Harness, task) {
+pipeline test_action_signal_validated_loudly_at_config_time(harness: Harness, task: any) {
   // A mistyped action_signal fails loudly at config parse time, like the sibling seams.
   assert_throws(
     { ->
@@ -1098,7 +1105,13 @@ const FLOOR_CONFIG = {
   ping_pong_cycles: 99,
 }
 
-fn _fold_floor(agent: HarnessAgent, state, cfg, prev_dispatch, prior_made_edit) {
+fn _fold_floor(
+  agent: HarnessAgent,
+  state: any,
+  cfg: any,
+  prev_dispatch: any,
+  prior_made_edit: any,
+) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-floor",
@@ -1114,7 +1127,7 @@ fn _fold_floor(agent: HarnessAgent, state, cfg, prev_dispatch, prior_made_edit) 
   )
 }
 
-pipeline test_turns_since_clean_verify_floor_trips_on_elapsed_turns(harness: Harness, task) {
+pipeline test_turns_since_clean_verify_floor_trips_on_elapsed_turns(harness: Harness, task: any) {
   // The elapsed-turns floor counts EVERY folded turn since the last clean verify and
   // trips at the caller-set floor (4) — even mixing edits and reads that never build
   // the failing-verify counter. Here all four turns fail, so tscv climbs 1..4 and
@@ -1142,7 +1155,7 @@ pipeline test_turns_since_clean_verify_floor_trips_on_elapsed_turns(harness: Har
   assert(o4.hard_stop)
 }
 
-pipeline test_turns_since_clean_verify_floor_independent_of_repair(harness: Harness, task) {
+pipeline test_turns_since_clean_verify_floor_independent_of_repair(harness: Harness, task: any) {
   // The floor is a TRULY INDEPENDENT axis: it trips even when neither
   // post_edit_reverify nor repair_aware is set. Regression guard for the bug where
   // the counter + floor lived behind the repair gate (`apply_repair` early-returned
@@ -1177,7 +1190,7 @@ pipeline test_turns_since_clean_verify_floor_independent_of_repair(harness: Harn
   assert(o3.hard_stop)
 }
 
-pipeline test_turns_since_clean_verify_floor_resets_on_clean_pass(harness: Harness, task) {
+pipeline test_turns_since_clean_verify_floor_resets_on_clean_pass(harness: Harness, task: any) {
   // A clean passing verification resets the elapsed-turns counter, so the floor keys
   // on "turns since the LAST clean verify", not total run length.
   const o1 = _fold_floor(
@@ -1203,7 +1216,7 @@ pipeline test_turns_since_clean_verify_floor_resets_on_clean_pass(harness: Harne
   assert(after.warning == nil)
 }
 
-pipeline test_turns_since_clean_verify_floor_unset_is_inert(harness: Harness, task) {
+pipeline test_turns_since_clean_verify_floor_unset_is_inert(harness: Harness, task: any) {
   // With no floor knob the counter is still maintained (cheap) but NEVER trips — even
   // across many more turns than any set floor would allow.
   const cfg = FLOOR_CONFIG + {turns_since_clean_verify: nil}
@@ -1218,7 +1231,7 @@ pipeline test_turns_since_clean_verify_floor_unset_is_inert(harness: Harness, ta
   assert_eq(s.turns_since_clean_verify, 8)
 }
 
-pipeline test_turns_since_clean_verify_floor_validated_loudly(harness: Harness, task) {
+pipeline test_turns_since_clean_verify_floor_validated_loudly(harness: Harness, task: any) {
   // A non-positive / mistyped floor fails loudly at config time.
   assert_throws(
     { ->
@@ -1246,7 +1259,7 @@ pipeline test_turns_since_clean_verify_floor_validated_loudly(harness: Harness, 
   )
 }
 
-fn _parity_drive(agent: HarnessAgent, cfg) {
+fn _parity_drive(agent: HarnessAgent, cfg: any) {
   // Canonical edit-retest thrash: fail(boom), edit, fail(boom), edit, fail(boom).
   // Pre-seam behavior trips stuck_same_diagnostic exactly once, at streak 3.
   let s = agent_stall_initial_state()
@@ -1285,7 +1298,7 @@ fn _parity_drive(agent: HarnessAgent, cfg) {
   return {steps: out, final: s}
 }
 
-pipeline test_new_seams_unset_are_byte_identical(harness: Harness, task) {
+pipeline test_new_seams_unset_are_byte_identical(harness: Harness, task: any) {
   // ANTI-REGRESSION GATE. With the two new knobs UNSET, every decision must be
   // byte-identical to pre-seam behavior. Drive the canonical thrash sequence under
   // two configs — one that never mentions the new fields, one that sets them to their
@@ -1358,7 +1371,7 @@ const PRED_CONFIG = {
   ping_pong_cycles: 99,
 }
 
-fn _fold_pred(agent: HarnessAgent, state, cfg, made_edit) {
+fn _fold_pred(agent: HarnessAgent, state: any, cfg: any, made_edit: any) {
   // A substantive "run" call folding a failing verification, with the full post-turn
   // payload passed through to the progress_signal callback.
   return agent_stall_observe_tool_calls(
@@ -1378,20 +1391,20 @@ fn _fold_pred(agent: HarnessAgent, state, cfg, made_edit) {
   )
 }
 
-fn _drive_three_recurrences(agent: HarnessAgent, cfg) {
+fn _drive_three_recurrences(agent: HarnessAgent, cfg: any) {
   const o1 = _fold_pred(agent, agent_stall_initial_state(), cfg, false)
   const o2 = _fold_pred(agent, o1.state, cfg, false)
   const o3 = _fold_pred(agent, o2.state, cfg, false)
   return o3.state
 }
 
-pipeline test_no_net_progress_predicates_default_all_armed(harness: Harness, task) {
+pipeline test_no_net_progress_predicates_default_all_armed(harness: Harness, task: any) {
   // Default (no predicate overrides): the hard-recurrence branch trips at streak 3.
   const s = _drive_three_recurrences(harness.agent, PRED_CONFIG)
   assert(agent_stall_no_net_progress(PRED_CONFIG, s), "all-armed hard-recurrence trips")
 }
 
-pipeline test_no_net_progress_hard_recurrence_disarmable(harness: Harness, task) {
+pipeline test_no_net_progress_hard_recurrence_disarmable(harness: Harness, task: any) {
   // The burin adoption case: disarming hard_recurrence makes the SAME evidence not
   // trip, without clamping the fed streak. The other two predicates stay quiet here.
   const cfg = PRED_CONFIG + {no_net_progress_predicates: {hard_recurrence: false}}
@@ -1399,7 +1412,7 @@ pipeline test_no_net_progress_hard_recurrence_disarmable(harness: Harness, task)
   assert(!agent_stall_no_net_progress(cfg, s), "disarmed hard-recurrence does not trip")
 }
 
-pipeline test_no_net_progress_disarming_other_predicates_keeps_trip(harness: Harness, task) {
+pipeline test_no_net_progress_disarming_other_predicates_keeps_trip(harness: Harness, task: any) {
   // Predicates are INDEPENDENT: disarming long_stall + write_axis (neither of which
   // is armed by this evidence anyway) leaves the hard-recurrence trip intact.
   const cfg = PRED_CONFIG + {no_net_progress_predicates: {long_stall: false, write_axis: false}}
@@ -1410,7 +1423,7 @@ pipeline test_no_net_progress_disarming_other_predicates_keeps_trip(harness: Har
   )
 }
 
-pipeline test_no_net_progress_predicates_unknown_key_throws(harness: Harness, task) {
+pipeline test_no_net_progress_predicates_unknown_key_throws(harness: Harness, task: any) {
   // An unknown predicate key fails loudly at config parse time.
   assert_throws(
     { ->
@@ -1444,7 +1457,7 @@ const REMEDIATION_CONFIG = {
   ping_pong_cycles: 99,
 }
 
-fn _fold_remediation(agent: HarnessAgent, state, cb, prev_dispatch) {
+fn _fold_remediation(agent: HarnessAgent, state: any, cb: any, prev_dispatch: any) {
   return agent_stall_observe_tool_calls(
     agent,
     "unit-rem",
@@ -1460,7 +1473,7 @@ fn _fold_remediation(agent: HarnessAgent, state, cb, prev_dispatch) {
   )
 }
 
-pipeline test_remediation_bool_true_trips_each_qualifying_turn(harness: Harness, task) {
+pipeline test_remediation_bool_true_trips_each_qualifying_turn(harness: Harness, task: any) {
   // Bool path (unchanged): a truthy per-turn fact trips delivered_fix_not_landing on
   // EVERY qualifying turn (streak >= 2, advanced) — turns 2 and 3 both fire.
   const cb = { _ctx -> true }
@@ -1480,7 +1493,7 @@ pipeline test_remediation_bool_true_trips_each_qualifying_turn(harness: Harness,
   assert(o3.warning.pattern == "delivered_fix_not_landing")
 }
 
-pipeline test_remediation_count_trips_once_per_increase(harness: Harness, task) {
+pipeline test_remediation_count_trips_once_per_increase(harness: Harness, task: any) {
   // Count path: a CONSTANT cumulative count of 1 means one fix was delivered (when the
   // signature first went active) and none since. It parity-trips at turn 2 (0 -> 1
   // crossing) exactly like the bool true, but does NOT re-fire at turn 3 (1 -> 1 is no
@@ -1501,7 +1514,7 @@ pipeline test_remediation_count_trips_once_per_increase(harness: Harness, task) 
   assert(o3.warning == nil, "a flat cumulative count does not re-deliver")
 }
 
-pipeline test_remediation_count_zero_never_trips(harness: Harness, task) {
+pipeline test_remediation_count_zero_never_trips(harness: Harness, task: any) {
   // A cumulative count that never leaves 0 means no fix was delivered — no trip, even
   // though the streak qualifies. Distinguishes count intake from bool (0 is a real
   // count, not a falsy sentinel that a bool would otherwise treat identically).
@@ -1522,7 +1535,7 @@ pipeline test_remediation_count_zero_never_trips(harness: Harness, task) {
   assert(!contains(json_stringify(applied), "remediation_delivered_signature"))
 }
 
-pipeline test_remediation_count_baseline_resets_on_signature_change(harness: Harness, task) {
+pipeline test_remediation_count_baseline_resets_on_signature_change(harness: Harness, task: any) {
   // Reset-on-signature-change: the same cumulative count of 1 trips again for a NEW
   // failure signature, because the diff baseline resets when the active signature
   // changes (the count is "since this signature became active").
@@ -1545,7 +1558,7 @@ pipeline test_remediation_count_baseline_resets_on_signature_change(harness: Har
   assert(b2.warning.pattern == "delivered_fix_not_landing")
 }
 
-pipeline test_remediation_bad_return_throws(harness: Harness, task) {
+pipeline test_remediation_bad_return_throws(harness: Harness, task: any) {
   // A callback returning neither bool, int, nor nil fails loudly.
   const cb = { _ctx -> "not-a-count" }
   assert_throws(

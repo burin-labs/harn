@@ -165,8 +165,8 @@ pub fn schema_contract_check<T>(
  * @effects: []
  * @errors: []
  */
-pub fn schema_any() -> any {
-  return {type: "any"}
+pub fn schema_any() -> Schema<unknown> {
+  return __schema_any_witness()
 }
 
 /**
@@ -175,8 +175,8 @@ pub fn schema_any() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_string() -> any {
-  return {type: "string"}
+pub fn schema_string() -> Schema<string> {
+  return __schema_string_witness()
 }
 
 /**
@@ -185,8 +185,8 @@ pub fn schema_string() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_int() -> any {
-  return {type: "int"}
+pub fn schema_int() -> Schema<int> {
+  return __schema_int_witness()
 }
 
 /**
@@ -195,8 +195,8 @@ pub fn schema_int() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_float() -> any {
-  return {type: "float"}
+pub fn schema_float() -> Schema<float> {
+  return __schema_float_witness()
 }
 
 /**
@@ -205,8 +205,8 @@ pub fn schema_float() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_bool() -> any {
-  return {type: "bool"}
+pub fn schema_bool() -> Schema<bool> {
+  return __schema_bool_witness()
 }
 
 /**
@@ -215,8 +215,8 @@ pub fn schema_bool() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_nil() -> any {
-  return {type: "nil"}
+pub fn schema_nil() -> Schema<nil> {
+  return __schema_nil_witness()
 }
 
 /**
@@ -225,8 +225,21 @@ pub fn schema_nil() -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_literal(value: unknown) -> any {
-  return {const: value}
+pub fn schema_literal<T>(value: T) -> Schema<T> {
+  return __schema_literal_witness(value)
+}
+
+/**
+ * Narrow a typed schema with an additional runtime constraint.
+ *
+ * The resulting intersection can accept only values already admitted by
+ * `schema`, so it preserves the `Schema<T>` witness without an unchecked cast.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_refine<T>(schema: Schema<T>, constraint: dict) -> Schema<T> {
+  return __schema_refine_witness(schema, constraint)
 }
 
 /**
@@ -235,7 +248,7 @@ pub fn schema_literal(value: unknown) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_enum(values: list<unknown>) -> any {
+pub fn schema_enum(values: list<unknown>) -> dict {
   return {enum: values}
 }
 
@@ -245,7 +258,7 @@ pub fn schema_enum(values: list<unknown>) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_list(item_schema: unknown = nil, options: dict? = nil) -> any {
+pub fn schema_list(item_schema: unknown = nil, options: dict? = nil) -> dict {
   let out: dict = {type: "list"}
   if item_schema != nil {
     out = out + {items: item_schema}
@@ -262,7 +275,7 @@ pub fn schema_list(item_schema: unknown = nil, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_array(item_schema: unknown = nil, options: dict? = nil) -> any {
+pub fn schema_array(item_schema: unknown = nil, options: dict? = nil) -> dict {
   return schema_list(item_schema, options)
 }
 
@@ -272,7 +285,7 @@ pub fn schema_array(item_schema: unknown = nil, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_dict(value_schema: unknown = nil, options: dict? = nil) -> any {
+pub fn schema_dict(value_schema: unknown = nil, options: dict? = nil) -> dict {
   let out: dict = {type: "dict"}
   if value_schema != nil {
     out = out + {additional_properties: value_schema}
@@ -289,7 +302,7 @@ pub fn schema_dict(value_schema: unknown = nil, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_field(schema: dict, required: bool = true) -> any {
+pub fn schema_field(schema: dict, required: bool = true) -> dict {
   return schema + {required: required}
 }
 
@@ -300,7 +313,7 @@ pub fn schema_field(schema: dict, required: bool = true) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_object(fields: dict, options: dict? = nil) -> any {
+pub fn schema_object(fields: dict, options: dict? = nil) -> dict {
   let properties = {}
   let required = []
   for entry in fields {
@@ -332,7 +345,7 @@ pub fn schema_object(fields: dict, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_closed_object(fields: dict, options: dict? = nil) -> any {
+pub fn schema_closed_object(fields: dict, options: dict? = nil) -> dict {
   if options == nil {
     return schema_object(fields, {additional_properties: false})
   }
@@ -345,7 +358,7 @@ pub fn schema_closed_object(fields: dict, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_strict_object(fields: dict, options: dict? = nil) -> any {
+pub fn schema_strict_object(fields: dict, options: dict? = nil) -> dict {
   return schema_closed_object(fields, options)
 }
 
@@ -355,7 +368,7 @@ pub fn schema_strict_object(fields: dict, options: dict? = nil) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_union(branches: list<unknown>) -> any {
+pub fn schema_union(branches: list<unknown>) -> dict {
   return {union: branches}
 }
 
@@ -365,7 +378,7 @@ pub fn schema_union(branches: list<unknown>) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_all_of(branches: list<unknown>) -> any {
+pub fn schema_all_of(branches: list<unknown>) -> dict {
   return {all_of: branches}
 }
 
@@ -375,7 +388,7 @@ pub fn schema_all_of(branches: list<unknown>) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_nullable(schema: dict) -> any {
+pub fn schema_nullable(schema: dict) -> dict {
   return schema_extend(schema, {nullable: true})
 }
 
@@ -385,7 +398,7 @@ pub fn schema_nullable(schema: dict) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_default(schema: dict, value: unknown) -> any {
+pub fn schema_default(schema: dict, value: unknown) -> dict {
   return schema + {default: value, required: false}
 }
 
@@ -395,7 +408,7 @@ pub fn schema_default(schema: dict, value: unknown) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_pick_keys(schema: dict, keys: list<string>) -> any {
+pub fn schema_pick_keys(schema: dict, keys: list<string>) -> dict {
   return schema_pick(schema, keys)
 }
 
@@ -405,7 +418,7 @@ pub fn schema_pick_keys(schema: dict, keys: list<string>) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_omit_keys(schema: dict, keys: list<string>) -> any {
+pub fn schema_omit_keys(schema: dict, keys: list<string>) -> dict {
   return schema_omit(schema, keys)
 }
 
@@ -415,7 +428,7 @@ pub fn schema_omit_keys(schema: dict, keys: list<string>) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn schema_partial_deep(schema: dict) -> any {
+pub fn schema_partial_deep(schema: dict) -> dict {
   return schema_partial(schema)
 }
 
@@ -490,7 +503,7 @@ pub fn schema_validator<T>(
  * @effects: []
  * @errors: []
  */
-pub fn from_json_schema(schema: dict) -> any {
+pub fn from_json_schema(schema: dict) -> dict {
   return schema_from_json_schema(schema)
 }
 
@@ -500,7 +513,7 @@ pub fn from_json_schema(schema: dict) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn from_openapi_schema(schema: dict) -> any {
+pub fn from_openapi_schema(schema: dict) -> dict {
   return schema_from_openapi_schema(schema)
 }
 
@@ -654,6 +667,6 @@ pub fn expect_typed_value<T>(
  * @effects: []
  * @errors: []
  */
-pub fn is_type(value: unknown, schema: unknown) -> bool {
+pub fn is_type(value: unknown, schema: dict) -> bool {
   return schema_is(value, schema)
 }

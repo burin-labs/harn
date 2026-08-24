@@ -9,7 +9,7 @@ import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/a
 import { with_llm_script } from "std/testing"
 
 /** A canonical dispatch result list shaped like agent_dispatch_tool_batch output. */
-fn ok_dispatch(name: string, payload) {
+fn ok_dispatch(name: string, payload: any) {
   return [{tool_name: name, ok: true, status: "ok", result: payload}]
 }
 
@@ -17,7 +17,7 @@ fn err_dispatch(name: string, error_text: string) {
   return [{tool_name: name, ok: false, status: "error", error: error_text}]
 }
 
-fn call(name: string, args) {
+fn call(name: string, args: dict) {
   return [{name: name, arguments: args}]
 }
 
@@ -25,7 +25,7 @@ fn call(name: string, args) {
  * Feed a sequence of (tool_call, prev_dispatch) steps through the detector and
  * return the pattern of the FIRST warning emitted, or "" if none tripped.
  */
-fn run_actions(agent: HarnessAgent, config, steps) {
+fn run_actions(agent: HarnessAgent, config: dict, steps: list) {
   let state = agent_stall_initial_state()
   let first_pattern = ""
   let trip_count = 0

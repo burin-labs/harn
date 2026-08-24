@@ -28,21 +28,21 @@
  * Moving more of the evaluation pipeline into .harn is gated on G4
  * (#2297).
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_list(value) -> list {
+fn __safe_list(value: list) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -54,7 +54,7 @@ fn __safe_dict(value) -> dict {
  * Mirrors Rust's `format!("{:.4}", x)` exactly so the markdown body
  * stays byte-identical with the host formatter.
  */
-fn __format_float_4(value) -> string {
+fn __format_float_4(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -81,7 +81,7 @@ fn __format_float_4(value) -> string {
  * Format a float as `"X.YY"` (2 decimals, half-up padded). Used for
  * the one-line summary text `mean_correctness={:.2} mean_tool_quality={:.2}`.
  */
-fn __format_float_2(value) -> string {
+fn __format_float_2(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -108,7 +108,7 @@ fn __format_float_2(value) -> string {
  * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Used
  * for the `cost USD: {:.6}` line in summary.md.
  */
-fn __format_float_6(value) -> string {
+fn __format_float_6(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {

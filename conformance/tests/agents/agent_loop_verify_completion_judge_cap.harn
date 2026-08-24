@@ -11,11 +11,11 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn checkpoint_of(events, schema) {
+fn checkpoint_of(events: list, schema: string) {
   for event in events {
     if event?.type == "typed_checkpoint" && event?.checkpoint?.schema == schema {
       return event.checkpoint

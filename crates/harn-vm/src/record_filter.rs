@@ -21,7 +21,7 @@ impl CompiledRecordFilter {
         let normalized_expr = normalize_record_filter_expression(expr)?;
         let source = format!(
             r"
-fn {FILTER_FN_NAME}(record) {{
+fn {FILTER_FN_NAME}(record: dict) {{
   let event = record.event
   let binding = record.binding
   let attempt = record.attempt

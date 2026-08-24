@@ -22,14 +22,17 @@ type MemberManifestProjection = {dependencies: dict<string, DependencyProjection
 type AgentProjection = {version: string, distribution: {binary: {linux: {archive: string}}}}
 
 fn dependency_schema() -> Schema<DependencyProjection> {
-  return schema_object(
-    {path: schema_field(schema_string()), version: schema_field(schema_string())},
-    {additional_properties: true},
+  return schema_refine(
+    schema_of(DependencyProjection),
+    schema_object(
+      {path: schema_field(schema_string()), version: schema_field(schema_string())},
+      {additional_properties: true},
+    ),
   )
 }
 
 @test
-pipeline test_development_version_contract_is_exact(harness: Harness, task) {
+pipeline test_development_version_contract_is_exact(harness: Harness, task: unknown) {
   assert_eq(development_version_from_stable("1.2.3"), "1.2.4-dev")
   assert_eq(stable_version_from_development("1.2.4-dev"), "1.2.4")
   assert_throws_eq(
@@ -47,49 +50,58 @@ pipeline test_development_version_contract_is_exact(harness: Harness, task) {
 }
 
 fn root_manifest_projection(text: string) -> RootManifestProjection {
-  const schema: Schema<RootManifestProjection> = schema_object(
-    {
-      workspace: schema_field(
-        schema_object(
-          {dependencies: schema_field(schema_dict(dependency_schema()))},
-          {additional_properties: true},
+  const schema: Schema<RootManifestProjection> = schema_refine(
+    schema_of(RootManifestProjection),
+    schema_object(
+      {
+        workspace: schema_field(
+          schema_object(
+            {dependencies: schema_field(schema_dict(dependency_schema()))},
+            {additional_properties: true},
+          ),
         ),
-      ),
-    },
-    {additional_properties: true},
+      },
+      {additional_properties: true},
+    ),
   )
   return schema_expect(toml_parse(text), schema)
 }
 
 fn member_manifest_projection(text: string) -> MemberManifestProjection {
-  const schema: Schema<MemberManifestProjection> = schema_object(
-    {dependencies: schema_field(schema_dict(dependency_schema()))},
-    {additional_properties: true},
+  const schema: Schema<MemberManifestProjection> = schema_refine(
+    schema_of(MemberManifestProjection),
+    schema_object(
+      {dependencies: schema_field(schema_dict(dependency_schema()))},
+      {additional_properties: true},
+    ),
   )
   return schema_expect(toml_parse(text), schema)
 }
 
 fn agent_projection(text: string) -> AgentProjection {
-  const schema: Schema<AgentProjection> = schema_object(
-    {
-      version: schema_field(schema_string()),
-      distribution: schema_field(
-        schema_object(
-          {
-            binary: schema_field(
-              schema_object(
-                {linux: schema_field(schema_object({archive: schema_field(schema_string())}))},
+  const schema: Schema<AgentProjection> = schema_refine(
+    schema_of(AgentProjection),
+    schema_object(
+      {
+        version: schema_field(schema_string()),
+        distribution: schema_field(
+          schema_object(
+            {
+              binary: schema_field(
+                schema_object(
+                  {linux: schema_field(schema_object({archive: schema_field(schema_string())}))},
+                ),
               ),
-            ),
-          },
+            },
+          ),
         ),
-      ),
-    },
+      },
+    ),
   )
   return schema_expect(json_parse(text), schema)
 }
 
-fn assert_throws_eq(body, expected: string) -> nil {
+fn assert_throws_eq(body: unknown, expected: string) -> nil {
   let error_text = ""
   try {
     body()
@@ -205,7 +217,7 @@ version = "1.2.3"
 }
 
 @test
-pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task) {
+pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -223,7 +235,10 @@ pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task
 }
 
 @test
-pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(harness: Harness, task) {
+pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -257,7 +272,7 @@ pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(harness: 
 }
 
 @test
-pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task) {
+pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -296,7 +311,10 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
 }
 
 @test
-pipeline test_development_then_release_preserves_distribution_boundary(harness: Harness, task) {
+pipeline test_development_then_release_preserves_distribution_boundary(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -332,7 +350,10 @@ pipeline test_development_then_release_preserves_distribution_boundary(harness: 
 }
 
 @test
-pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness: Harness, task) {
+pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -375,7 +396,10 @@ pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness
 }
 
 @test
-pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: Harness, task) {
+pipeline test_apply_advances_install_projection_from_withdrawn_version(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -431,7 +455,10 @@ pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: 
 }
 
 @test
-pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harness, task) {
+pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -491,7 +518,7 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
 }
 
 @test
-pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, task) {
+pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, task: unknown) {
   assert_eq(
     rewrite_local_dependency_versions(
       "member-a = { path = \"crates/member-a\" }\n",
@@ -503,7 +530,7 @@ pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, 
 }
 
 @test
-pipeline test_changelog_top_validation(harness: Harness, task) {
+pipeline test_changelog_top_validation(harness: Harness, task: unknown) {
   verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
   verify_changelog_top("# Changelog\n\n## v1.2.4-rc.0\n\n- notes\n", "1.2.4-rc.0")
   assert_throws_eq(

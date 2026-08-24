@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const ch1 = harness.runtime.channel("ch1")
   const ch2 = harness.runtime.channel("ch2")
   // Send to ch2 first

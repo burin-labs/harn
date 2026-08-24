@@ -3,7 +3,7 @@ import {
   persona_crystallization_candidates,
 } from "std/personas/prelude"
 
-fn repair_run(id, repo, status = "completed") {
+fn repair_run(id: string, repo: string, status: string = "completed") {
   return {
     _type: "merge_captain.repair_run",
     id: id,
@@ -37,7 +37,7 @@ fn repair_run(id, repo, status = "completed") {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const gated = persona_crystallization_candidates(
     [
       repair_run("r1", "burin-labs/harn"),

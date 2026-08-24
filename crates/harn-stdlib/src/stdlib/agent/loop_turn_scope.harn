@@ -6,7 +6,10 @@ import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
-pub fn __scope_classifier_recent_context(messages, limit) {
+pub fn __scope_classifier_recent_context(
+  messages: string | bytes | list | dict | set | range | nil,
+  limit: int,
+) {
   if type_of(messages) != "list" {
     return []
   }
@@ -32,7 +35,7 @@ pub fn __scope_classifier_recent_context(messages, limit) {
   return out
 }
 
-pub fn __scope_classifier_confidence(value, fallback) {
+pub fn __scope_classifier_confidence(value: float?, fallback: float) {
   const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
@@ -46,7 +49,7 @@ pub fn __scope_classifier_confidence(value, fallback) {
   return parsed
 }
 
-pub fn __scope_classifier_label(value) {
+pub fn __scope_classifier_label(value: string?) {
   const label = lowercase(trim(to_string(value ?? "")))
   if label == "in_scope" || label == "inscope" || label == "in-scope" {
     return "in_scope"
@@ -60,7 +63,7 @@ pub fn __scope_classifier_label(value) {
   return "escalate"
 }
 
-pub fn __scope_classifier_normalize(raw, session_id, iteration) {
+pub fn __scope_classifier_normalize(raw: dict, session_id: any, iteration: any) {
   if raw == nil {
     return nil
   }
@@ -102,7 +105,7 @@ pub fn __scope_classifier_normalize(raw, session_id, iteration) {
     }
 }
 
-pub fn __scope_classifier_fail_open(session_id, iteration, err) {
+pub fn __scope_classifier_fail_open(session_id: any, iteration: any, err: any) {
   return {
     label: "escalate",
     original_label: "error",
@@ -118,11 +121,11 @@ pub fn __scope_classifier_fail_open(session_id, iteration, err) {
 
 pub fn __run_input_guardrail(
   agent: HarnessAgent,
-  guardrail,
-  session,
-  message,
-  turn_opts,
-  iteration_index,
+  guardrail: any,
+  session: dict,
+  message: any,
+  turn_opts: dict,
+  iteration_index: int,
 ) {
   if guardrail == nil || iteration_index != 0 {
     return nil
@@ -164,7 +167,7 @@ pub fn __run_input_guardrail(
   return verdict
 }
 
-pub fn __input_guardrail_assistant_text(verdict) {
+pub fn __input_guardrail_assistant_text(verdict: dict) {
   const reason = trim(to_string(verdict?.reason ?? ""))
   if reason == "" {
     return "Input guardrail stopped this request before the agent loop."
@@ -175,9 +178,9 @@ pub fn __input_guardrail_assistant_text(verdict) {
 pub fn __input_guardrail_record_skip_turn(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  verdict,
-  iteration_index,
+  session: dict,
+  verdict: dict,
+  iteration_index: int,
 ) {
   let text = __input_guardrail_assistant_text(verdict)
   agent_session_record_assistant(
@@ -229,11 +232,11 @@ pub fn __input_guardrail_record_skip_turn(
 
 pub fn __run_pre_turn_scope_classifier(
   agent: HarnessAgent,
-  classifier,
-  session,
-  message,
-  turn_opts,
-  iteration_index,
+  classifier: any,
+  session: dict,
+  message: any,
+  turn_opts: dict,
+  iteration_index: int,
 ) {
   if classifier == nil {
     return nil
@@ -279,7 +282,7 @@ pub fn __run_pre_turn_scope_classifier(
  * @effects: []
  * @errors: []
  */
-pub fn __scope_classifier_mounted_roots(anchor) {
+pub fn __scope_classifier_mounted_roots(anchor: dict) {
   const roots = anchor?.additional_roots ?? []
   if type_of(roots) != "list" || len(roots) == 0 {
     return "  (none)"
@@ -296,7 +299,7 @@ pub fn __scope_classifier_mounted_roots(anchor) {
   return join(lines, "\n")
 }
 
-pub fn __scope_classifier_alert_body(agent: HarnessAgent, verdict, session) {
+pub fn __scope_classifier_alert_body(agent: HarnessAgent, verdict: dict, session: dict) {
   const anchor = verdict?.workspace_anchor ?? agent.workspace_anchor(session.session_id)
   const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
@@ -312,7 +315,7 @@ pub fn __scope_classifier_alert_body(agent: HarnessAgent, verdict, session) {
     + "Ask the user which handoff they prefer before doing workspace-mutating work.\n</scope-alert>"
 }
 
-pub fn __scope_classifier_assistant_text(verdict) {
+pub fn __scope_classifier_assistant_text(verdict: dict) {
   const evidence = trim(to_string(verdict?.evidence ?? ""))
   const suffix = if evidence == "" {
     ""
@@ -324,16 +327,16 @@ pub fn __scope_classifier_assistant_text(verdict) {
     + " Options: 1) Add Root, 2) Re-anchor, 3) Fork to a new session. Which would you prefer?"
 }
 
-pub fn __scope_classifier_skip_main(verdict) {
+pub fn __scope_classifier_skip_main(verdict: dict?) {
   return verdict != nil && verdict?.label == "out_of_scope" && (verdict?.skip_main_turn ?? true)
 }
 
 pub fn __scope_classifier_record_skip_turn(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  session,
-  verdict,
-  iteration_index,
+  session: dict,
+  verdict: dict,
+  iteration_index: int,
 ) {
   let text = __scope_classifier_assistant_text(verdict)
   agent_session_record_assistant(
@@ -396,7 +399,7 @@ pub fn __scope_classifier_record_skip_turn(
   return text
 }
 
-pub fn __agent_loop_pop_structural_veto_turn(agent: HarnessAgent, session_id) {
+pub fn __agent_loop_pop_structural_veto_turn(agent: HarnessAgent, session_id: any) {
   const messages = agent_session_messages(agent, session_id)
   if len(messages) == 0 {
     return false
@@ -424,7 +427,7 @@ pub fn __agent_loop_pop_structural_veto_turn(agent: HarnessAgent, session_id) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_wrapup_response_protocol_tail(opts) {
+pub fn __agent_loop_wrapup_response_protocol_tail(opts: dict) {
   const sentinel = opts?.done_sentinel
   if sentinel == nil || to_string(sentinel) == "" {
     return " End with a concise `<user_response>...</user_response>` containing the final answer."
@@ -465,7 +468,7 @@ pub const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string =
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_wrapup_directive(opts) {
+pub fn __agent_loop_wrapup_directive(opts: dict) {
   const host_directive = trim(to_string(opts?.wrapup_directive ?? ""))
   const tail = __agent_loop_wrapup_response_protocol_tail(opts)
   if host_directive != "" {
@@ -485,7 +488,7 @@ pub fn __agent_loop_wrapup_directive(opts) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_has_host_wrapup_directive(opts) {
+pub fn __agent_loop_has_host_wrapup_directive(opts: dict) {
   return trim(to_string(opts?.wrapup_directive ?? "")) != ""
 }
 
@@ -501,7 +504,7 @@ pub fn __agent_loop_has_host_wrapup_directive(opts) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
+pub fn __agent_loop_effective_wrapup_context(opts: dict, final_status: any, stop_reason: string?) {
   const host_context = if type_of(opts?.wrapup_context) == "dict" {
     opts.wrapup_context
   } else {
@@ -522,7 +525,7 @@ pub fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_render_wrapup_context(context) {
+pub fn __agent_loop_render_wrapup_context(context: dict) {
   if context == nil || type_of(context) != "dict" || len(keys(context)) == 0 {
     return ""
   }
@@ -546,21 +549,21 @@ pub fn __agent_loop_render_wrapup_context(context) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_wrapup_eligible_status(final_status) {
+pub fn __agent_loop_wrapup_eligible_status(final_status: string) {
   return final_status == "budget_exhausted"
     || final_status == "completion_unverified"
     || final_status == "verify_exhausted"
     || final_status == "stuck"
 }
 
-pub fn __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
+pub fn __agent_loop_terminal_callback_continue_allowed(final_status: string, stop_reason: string?) {
   if final_status == "stuck" {
     return true
   }
   return final_status == "budget_exhausted" && (stop_reason ?? "") == "max_iterations"
 }
 
-pub fn __agent_loop_terminal_callback_extend_by(budget) {
+pub fn __agent_loop_terminal_callback_extend_by(budget: dict) {
   const by = budget?.extend_by ?? 0
   if type_of(by) == "int" && by > 0 {
     return by
@@ -568,7 +571,7 @@ pub fn __agent_loop_terminal_callback_extend_by(budget) {
   return 1
 }
 
-pub fn __agent_loop_tool_call_names(tool_calls) {
+pub fn __agent_loop_tool_call_names(tool_calls: list?) {
   let names = []
   for call in tool_calls ?? [] {
     const name = __tool_call_name(call)
@@ -579,7 +582,7 @@ pub fn __agent_loop_tool_call_names(tool_calls) {
   return names
 }
 
-pub fn __agent_loop_repeated_observation_recovery_feedback(warning) {
+pub fn __agent_loop_repeated_observation_recovery_feedback(warning: dict?) {
   const tool_name = to_string(warning?.tool_name ?? "")
   const action = if tool_name != "" {
     "`" + tool_name + "`"
@@ -592,7 +595,7 @@ pub fn __agent_loop_repeated_observation_recovery_feedback(warning) {
     + "the task, then edit only once you have the needed facts."
 }
 
-pub fn __agent_loop_monologue_recovery_feedback(visible_text) {
+pub fn __agent_loop_monologue_recovery_feedback(visible_text: string?) {
   let intent = trim(to_string(visible_text ?? ""))
   if len(intent) > 900 {
     intent = intent[0:900] + "..."
@@ -608,7 +611,7 @@ pub fn __agent_loop_monologue_recovery_feedback(visible_text) {
     + intent_block
 }
 
-pub fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
+pub fn __agent_loop_thrash_recovery_allowed(warning: dict?, tool_calls: list?) {
   if !(warning?.hard_stop ?? false) {
     return false
   }
@@ -619,35 +622,39 @@ pub fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
   return pattern == "no_progress_monologue" && len(tool_calls ?? []) == 0
 }
 
-pub fn __agent_loop_thrash_recovery_reason(warning) -> string {
+pub fn __agent_loop_thrash_recovery_reason(warning: dict?) -> string {
   if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
     return "monologue_recovery_continue"
   }
   return "thrash_recovery_continue"
 }
 
-pub fn __agent_loop_thrash_recovery_feedback(warning, visible_text) -> string {
+pub fn __agent_loop_thrash_recovery_feedback(warning: dict?, visible_text: string?) -> string {
   if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
     return __agent_loop_monologue_recovery_feedback(visible_text)
   }
   return __agent_loop_repeated_observation_recovery_feedback(warning)
 }
 
-pub fn __agent_loop_thrash_recovery_key(warning) -> string {
+pub fn __agent_loop_thrash_recovery_key(warning: dict?) -> string {
   if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
     return "monologue_recovery"
   }
   return "thrash_recovery"
 }
 
-pub fn __agent_loop_thrash_recovery_skip_reason(warning) -> string {
+pub fn __agent_loop_thrash_recovery_skip_reason(warning: dict?) -> string {
   if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
     return "monologue_recovery"
   }
   return "thrash_recovery"
 }
 
-pub fn __agent_loop_thrash_recovery_skip_outcome(warning, tool_calls, stall_hard_stop_rescues) {
+pub fn __agent_loop_thrash_recovery_skip_outcome(
+  warning: dict?,
+  tool_calls: list?,
+  stall_hard_stop_rescues: int,
+) {
   const pattern = to_string(warning?.pattern ?? "")
   if pattern != "repeated_same_observation" && pattern != "no_progress_monologue" {
     return "no_rung_for_pattern"
@@ -664,7 +671,7 @@ pub fn __agent_loop_thrash_recovery_skip_outcome(warning, tool_calls, stall_hard
   return "recovery_not_allowed"
 }
 
-pub fn __agent_loop_stall_warning_receipt(warning) {
+pub fn __agent_loop_stall_warning_receipt(warning: dict?) {
   return {
     pattern: to_string(warning?.pattern ?? ""),
     tool_name: to_string(warning?.tool_name ?? ""),
@@ -680,16 +687,16 @@ pub fn __agent_loop_stall_warning_receipt(warning) {
 
 pub fn __agent_loop_emit_thrash_recovery_checkpoint(
   agent: HarnessAgent,
-  session_id,
-  iteration,
-  tool_calls,
-  warning,
-  old_limit,
-  new_limit,
-  status = "fired",
-  action = "thrash_rescue",
-  reason = "thrash_recovery_continue",
-  outcome = nil,
+  session_id: any,
+  iteration: any,
+  tool_calls: list?,
+  warning: dict?,
+  old_limit: any,
+  new_limit: any,
+  status: string = "fired",
+  action: string = "thrash_rescue",
+  reason: string = "thrash_recovery_continue",
+  outcome: any = nil,
 ) {
   let checkpoint = {
     schema: "harn.agent_loop_recovery_receipt.v1",
@@ -728,12 +735,12 @@ pub fn __agent_loop_emit_thrash_recovery_checkpoint(
  */
 pub fn __agent_loop_final_wrapup(
   harness: Harness,
-  message,
-  session,
-  opts,
-  final_status,
-  stop_reason,
-  iteration,
+  message: any,
+  session: dict,
+  opts: dict,
+  final_status: any,
+  stop_reason: string?,
+  iteration: int,
 ) {
   const directive = __agent_loop_wrapup_directive(opts)
   // Disable tools for this turn so the model cannot dispatch: empty tool
@@ -914,7 +921,7 @@ pub fn __agent_loop_final_wrapup(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_active_skill_mcp_specs(active_skills) {
+pub fn __agent_loop_active_skill_mcp_specs(active_skills: list?) {
   let specs = []
   for active_skill in active_skills ?? [] {
     for spec in active_skill?.mcp ?? [] {
@@ -932,7 +939,7 @@ pub fn __agent_loop_active_skill_mcp_specs(active_skills) {
  */
 pub type AgentLoopOutputContractValue = {ok: bool, value: any?}
 
-pub fn __agent_loop_output_contract_value(text, schema) -> AgentLoopOutputContractValue {
+pub fn __agent_loop_output_contract_value(text: any, schema: any) -> AgentLoopOutputContractValue {
   const parsed = try {
     json_extract(text)
   }
@@ -952,7 +959,7 @@ pub fn __agent_loop_output_contract_value(text, schema) -> AgentLoopOutputContra
   return {ok: true, value: value}
 }
 
-pub fn __agent_loop_output_contract_repair_prompt(schema, text) -> string {
+pub fn __agent_loop_output_contract_repair_prompt(schema: any, text: string) -> string {
   if schema == nil {
     return "Your previous final answer was not valid JSON.\n"
       + "Reply with ONLY a valid JSON value.\n\nPrevious answer:\n\n"
@@ -975,11 +982,11 @@ pub fn __agent_loop_output_contract_repair_prompt(schema, text) -> string {
  */
 pub fn __agent_loop_apply_output_contract(
   harness: Harness,
-  final_result,
-  opts,
-  session,
-  message,
-  iteration,
+  final_result: dict,
+  opts: dict,
+  session: dict,
+  message: unknown,
+  iteration: int,
 ) -> dict {
   const schema = __agent_loop_output_contract(opts)?.schema
   let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")

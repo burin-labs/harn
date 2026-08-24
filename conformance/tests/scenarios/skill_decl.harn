@@ -6,7 +6,7 @@
  * Body entries are `<field_name> <expression>` pairs; lifecycle hooks
  * are fn literal expressions like any other value.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test 1: basic skill declaration with string/list fields
   skill deploy {
     description "Deploy the application to production"

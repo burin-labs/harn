@@ -41,7 +41,7 @@ fn pull_requests() {
   ]
 }
 
-fn classify(pr) {
+fn classify(pr: dict) {
   if len(pr.failing_checks) > 0 {
     return "block"
   }
@@ -62,7 +62,7 @@ review_captain, or block?
   - Diff size: {{ diff_lines }} lines
 """
 
-fn render_pr_prompt(fs: HarnessFs, pr) {
+fn render_pr_prompt(fs: HarnessFs, pr: dict) {
   return fs.render_template(
     PR_PROMPT,
     {
@@ -76,7 +76,7 @@ fn render_pr_prompt(fs: HarnessFs, pr) {
   )
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const prs = pull_requests()
   let decisions = []
   let merged = 0

@@ -1,4 +1,4 @@
-fn __command_suffix(value, limit) {
+fn __command_suffix(value: any, limit: int) {
   if value == nil {
     return nil
   }
@@ -15,7 +15,7 @@ fn __command_suffix(value, limit) {
  * @effects: []
  * @errors: []
  */
-pub fn command_step_ref_impl(step, options = nil) -> dict {
+pub fn command_step_ref_impl(step: dict, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const tail_bytes = opts?.tail_bytes ?? 4000
   return {

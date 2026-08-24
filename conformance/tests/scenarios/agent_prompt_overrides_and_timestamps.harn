@@ -2,7 +2,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_prompt_overrides } from "std/agent/prompts"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("<done>##DONE##</done>")],

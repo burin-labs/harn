@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Parse JSON object
   const obj = json_parse("{\"name\": \"alice\", \"age\": 30}")
   harness.stdio.log(obj.name)

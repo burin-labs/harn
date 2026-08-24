@@ -22,14 +22,14 @@
  *     {"ok": false, "error": "..."}
  *   HARN_OUTPUT_JSON — "1" for JSON output, else human text.
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -40,7 +40,7 @@ fn __safe_dict(value) -> dict {
  * Round display costs to a compact number of significant digits. Internal
  * accounting keeps full precision; this renderer owns user-facing readability.
  */
-fn __round_sig(value, digits: int) -> float {
+fn __round_sig(value: any, digits: int) -> float {
   const f = to_float(value) ?? 0.0
   if f == 0.0 {
     return 0.0
@@ -49,7 +49,7 @@ fn __round_sig(value, digits: int) -> float {
   return round(f * scale) / scale
 }
 
-fn __format_cost(value) -> string {
+fn __format_cost(value: any) -> string {
   const f = __round_sig(value, 4)
   const negative = f < 0.0
   const abs_f = if negative {

@@ -18,14 +18,14 @@
  * proves the guidance appears only when the tool does, and dumps the
  * provenance an operator would inspect. Fully offline — no LLM, no network.
  */
-fn mk_tool(name, description, guidance) {
+fn mk_tool(name: string, description: string, guidance: string?) {
   if guidance == nil {
     return {name: name, description: description}
   }
   return {name: name, description: description, guidance: guidance}
 }
 
-fn included_ids(explained) {
+fn included_ids(explained: dict) {
   let ids = []
   for frag in explained.fragments {
     if frag.included {
@@ -35,7 +35,7 @@ fn included_ids(explained) {
   return ids
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   harness.stdio.println("=== prompt-guidance demo ===")
   harness.stdio.println("")
   const base_system = "You are Ness, a pragmatic engineering partner."

@@ -1,5 +1,5 @@
 /** Verifies sleep_ms/monotonic_ms/now_ms honor mock_time + advance_time. */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1700000000000)
   harness.stdio.log(harness.clock.now_ms())
   harness.stdio.log(harness.clock.monotonic_ms())

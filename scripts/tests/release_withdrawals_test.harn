@@ -24,7 +24,7 @@ fn registry(version: string, replacement: string, tag_commit: string, reason: st
   )
 }
 
-fn assert_rejected(body) -> nil {
+fn assert_rejected(body: unknown) -> nil {
   let rejected = false
   try {
     body()
@@ -36,7 +36,7 @@ fn assert_rejected(body) -> nil {
 }
 
 @test
-pipeline test_parse_release_withdrawals(harness: Harness, task) {
+pipeline test_parse_release_withdrawals(harness: Harness, task: unknown) {
   const parsed = parse_release_withdrawals(
     registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
   )
@@ -47,7 +47,7 @@ pipeline test_parse_release_withdrawals(harness: Harness, task) {
 }
 
 @test
-pipeline test_release_distribution_version(harness: Harness, task) {
+pipeline test_release_distribution_version(harness: Harness, task: unknown) {
   const withdrawals = parse_release_withdrawals(
     registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
   )
@@ -56,7 +56,7 @@ pipeline test_release_distribution_version(harness: Harness, task) {
 }
 
 @test
-pipeline test_release_withdrawal_for_version(harness: Harness, task) {
+pipeline test_release_withdrawal_for_version(harness: Harness, task: unknown) {
   const withdrawals = parse_release_withdrawals(
     registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
   )
@@ -65,7 +65,7 @@ pipeline test_release_withdrawal_for_version(harness: Harness, task) {
 }
 
 @test
-pipeline test_release_withdrawal_matches_only_exact_tag(harness: Harness, task) {
+pipeline test_release_withdrawal_matches_only_exact_tag(harness: Harness, task: unknown) {
   const withdrawals = parse_release_withdrawals(
     registry("0.10.51", "0.10.52", TAG_COMMIT, "invalid_tagged_candidate"),
   )
@@ -77,7 +77,7 @@ pipeline test_release_withdrawal_matches_only_exact_tag(harness: Harness, task) 
 }
 
 @test
-pipeline test_release_withdrawal_rejects_non_patch_replacement(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_non_patch_replacement(harness: Harness, task: unknown) {
   const result = try {
     parse_release_withdrawals(registry("0.10.51", "0.11.0", TAG_COMMIT, "invalid_tagged_candidate"))
   } catch (e) {
@@ -87,14 +87,14 @@ pipeline test_release_withdrawal_rejects_non_patch_replacement(harness: Harness,
 }
 
 @test
-pipeline test_release_withdrawal_rejects_unknown_reason(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_unknown_reason(harness: Harness, task: unknown) {
   assert_rejected(
     { -> parse_release_withdrawals(registry("0.10.51", "0.10.52", TAG_COMMIT, "flaky_ci")) },
   )
 }
 
 @test
-pipeline test_release_withdrawal_rejects_duplicate_version(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_duplicate_version(harness: Harness, task: unknown) {
   const item = {
     version: "0.10.51",
     tag_commit: TAG_COMMIT,
@@ -111,7 +111,10 @@ pipeline test_release_withdrawal_rejects_duplicate_version(harness: Harness, tas
 }
 
 @test
-pipeline test_release_withdrawal_rejects_nonpreceding_distribution(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_nonpreceding_distribution(
+  harness: Harness,
+  task: unknown,
+) {
   const result = try {
     parse_release_withdrawals(
       json_stringify(
@@ -139,7 +142,7 @@ pipeline test_release_withdrawal_rejects_nonpreceding_distribution(harness: Harn
 }
 
 @test
-pipeline test_release_withdrawal_rejects_unknown_fields(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_unknown_fields(harness: Harness, task: unknown) {
   assert_rejected(
     { ->
       parse_release_withdrawals(
@@ -150,7 +153,10 @@ pipeline test_release_withdrawal_rejects_unknown_fields(harness: Harness, task) 
 }
 
 @test
-pipeline test_release_withdrawal_supports_minor_or_major_candidate(harness: Harness, task) {
+pipeline test_release_withdrawal_supports_minor_or_major_candidate(
+  harness: Harness,
+  task: unknown,
+) {
   const parsed = parse_release_withdrawals(
     json_stringify(
       {
@@ -171,7 +177,7 @@ pipeline test_release_withdrawal_supports_minor_or_major_candidate(harness: Harn
 }
 
 @test
-pipeline test_release_withdrawal_rejects_withdrawn_replacement(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_withdrawn_replacement(harness: Harness, task: unknown) {
   const result = try {
     parse_release_withdrawals(
       json_stringify(
@@ -207,7 +213,7 @@ pipeline test_release_withdrawal_rejects_withdrawn_replacement(harness: Harness,
 }
 
 @test
-pipeline test_release_withdrawal_rejects_withdrawn_distribution(harness: Harness, task) {
+pipeline test_release_withdrawal_rejects_withdrawn_distribution(harness: Harness, task: unknown) {
   const result = try {
     parse_release_withdrawals(
       json_stringify(

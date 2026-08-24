@@ -100,7 +100,7 @@ pub fn rel_path(path: string) -> string {
   return path
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const parsed = try {
     toml_parse(harness.fs.read_text(PROVIDERS_TOML))
   } catch (err) {

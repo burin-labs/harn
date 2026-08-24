@@ -34,7 +34,7 @@ fn language_of(path: string) -> string {
   return ""
 }
 
-fn noise_names(spec) -> list {
+fn noise_names(spec: dict) -> list {
   let out: list = []
   for signature in spec.permanent_noise {
     const text = to_string(signature)

@@ -24,7 +24,7 @@ fn dispatch(hash: string, current_hash: string) {
   ]
 }
 
-fn run(agent: HarnessAgent, random: HarnessRandom, dispatches, config) {
+fn run(agent: HarnessAgent, random: HarnessRandom, dispatches: list, config: dict) {
   let state = agent_stall_initial_state()
   let warnings = []
   for item in dispatches {

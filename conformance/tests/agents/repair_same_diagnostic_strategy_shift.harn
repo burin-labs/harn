@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `stuck_same_diagnostic_after: 3` the trip fires after the 4th identical
  * failing `run_test` turn (folding the 3rd same-failure observation).
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
@@ -38,7 +38,7 @@ fn repair_tools() {
   return tools
 }
 
-fn run_test_call(id) {
+fn run_test_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {}}]}
 }
 

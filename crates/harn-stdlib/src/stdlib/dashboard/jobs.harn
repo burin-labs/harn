@@ -162,14 +162,14 @@ const DASHBOARD_JOB_CARD_SCHEMA = "harn.dashboard_job_card.v1"
 
 const DASHBOARD_JOBS_VIEW_SCHEMA = "harn.dashboard_jobs_view.v1"
 
-fn __job_text(value) {
+fn __job_text(value: any) {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __job_first(values) {
+fn __job_first(values: list) {
   for value in values {
     const text = __job_text(value)
     if text != "" {
@@ -179,7 +179,7 @@ fn __job_first(values) {
   return nil
 }
 
-fn __job_list(value) {
+fn __job_list(value: any) {
   if value == nil {
     return []
   }
@@ -189,7 +189,7 @@ fn __job_list(value) {
   return value
 }
 
-fn __job_string_list(value) {
+fn __job_string_list(value: any) {
   let out = []
   for item in __job_list(value) {
     const text = __job_text(item)
@@ -200,11 +200,11 @@ fn __job_string_list(value) {
   return out
 }
 
-fn __job_payload(input) {
+fn __job_payload(input: dict) {
   return input?.raw_payload ?? input?.payload ?? input?.provider_payload ?? input ?? {}
 }
 
-fn __job_kind(kind, input, options) {
+fn __job_kind(kind: any, input: dict, options: dict) {
   const resolved = __job_first([kind, options?.kind, input?.kind, input?.event_kind])
   if resolved == nil {
     throw "std/dashboard/jobs: kind is required"
@@ -212,7 +212,7 @@ fn __job_kind(kind, input, options) {
   return resolved
 }
 
-fn __job_status_for_kind(kind) {
+fn __job_status_for_kind(kind: any) {
   if kind == "scheduled_job.created" || kind == "scheduled_job.updated" {
     return "scheduled"
   }
@@ -243,7 +243,7 @@ fn __job_status_for_kind(kind) {
   return "unknown"
 }
 
-fn __job_timestamp(input, payload, options) {
+fn __job_timestamp(input: dict, payload: dict, options: dict) {
   return __job_first(
     [
       options?.source_timestamp,
@@ -273,7 +273,7 @@ fn __job_timestamp(input, payload, options) {
   )
 }
 
-fn __job_source_clock_kind(input, payload, options) {
+fn __job_source_clock_kind(input: dict, payload: dict, options: dict) {
   const raw = options?.source_clock ?? input?.source_clock ?? payload?.source_clock
   if type_of(raw) == "dict" {
     return __job_first([raw?.kind])
@@ -281,7 +281,7 @@ fn __job_source_clock_kind(input, payload, options) {
   return __job_first([raw])
 }
 
-fn __job_source(input, payload, options) {
+fn __job_source(input: dict, payload: dict, options: dict) {
   return filter_nil(
     {
       runtime: __job_first([options?.runtime, input?.runtime, payload?.runtime]) ?? "harn",
@@ -296,14 +296,14 @@ fn __job_source(input, payload, options) {
   )
 }
 
-fn __job_source_clock(timestamp, input, payload, options) {
+fn __job_source_clock(timestamp: any, input: dict, payload: dict, options: dict) {
   const explicit = __job_source_clock_kind(input, payload, options)
   const environment = __job_source(input, payload, options).environment
   const fallback = environment == "cloud" ? "harn-cloud" : "harn-local"
   return {kind: explicit ?? fallback, timestamp: timestamp}
 }
 
-fn __job_id(input, payload, options) -> string {
+fn __job_id(input: dict, payload: dict, options: dict) -> string {
   const id = __job_first(
     [
       options?.job_id,
@@ -325,7 +325,7 @@ fn __job_id(input, payload, options) -> string {
   return id
 }
 
-fn __job_run_id(input, payload, options) {
+fn __job_run_id(input: dict, payload: dict, options: dict) {
   return __job_first(
     [
       options?.run_id,
@@ -339,7 +339,7 @@ fn __job_run_id(input, payload, options) {
   )
 }
 
-fn __job_refs(value) {
+fn __job_refs(value: any) {
   let out = []
   for ref in __job_list(value) {
     if type_of(ref) != "dict" {
@@ -361,7 +361,7 @@ fn __job_refs(value) {
   return out
 }
 
-fn __job_related_refs(input, payload, options) {
+fn __job_related_refs(input: dict, payload: dict, options: dict) {
   const refs = options?.related_refs ?? input?.related_refs ?? payload?.related_refs
   if refs != nil {
     return __job_refs(refs)
@@ -375,7 +375,7 @@ fn __job_related_refs(input, payload, options) {
   return []
 }
 
-fn __job_receipt_refs(input, payload, options) {
+fn __job_receipt_refs(input: dict, payload: dict, options: dict) {
   const refs = options?.receipt_refs ?? input?.receipt_refs ?? payload?.receipt_refs
   if refs != nil {
     return __job_refs(refs)
@@ -388,7 +388,7 @@ fn __job_receipt_refs(input, payload, options) {
   return []
 }
 
-fn __job_replay_refs(input, payload, options) {
+fn __job_replay_refs(input: dict, payload: dict, options: dict) {
   const refs = options?.replay_refs ?? input?.replay_refs ?? payload?.replay_refs
   if refs != nil {
     return __job_refs(refs)
@@ -403,7 +403,7 @@ fn __job_replay_refs(input, payload, options) {
   return []
 }
 
-fn __job_privacy(input, options) {
+fn __job_privacy(input: dict, options: dict) {
   const privacy = input?.privacy ?? {}
   return {
     redacted: options?.redacted ?? privacy?.redacted ?? false,
@@ -413,7 +413,7 @@ fn __job_privacy(input, options) {
   }
 }
 
-fn __job_approval(input, payload, options) {
+fn __job_approval(input: dict, payload: dict, options: dict) {
   const raw = options?.approval ?? input?.approval ?? payload?.approval
   const request_id = __job_first(
     [
@@ -442,7 +442,7 @@ fn __job_approval(input, payload, options) {
   )
 }
 
-fn __job_dlq(input, payload, options) {
+fn __job_dlq(input: dict, payload: dict, options: dict) {
   const raw = options?.dlq ?? input?.dlq ?? payload?.dlq
   const dlq_id = __job_first([raw?.dlq_id, options?.dlq_id, input?.dlq_id, payload?.dlq_id])
   if raw == nil && dlq_id == nil {
@@ -464,7 +464,15 @@ fn __job_dlq(input, payload, options) {
   )
 }
 
-fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, replay_refs) {
+fn __job_default_actions(
+  kind: any,
+  job_id: any,
+  run_id: any,
+  approval: any,
+  dlq: any,
+  receipt_refs: string | bytes | list | dict | set | range | nil,
+  replay_refs: string | bytes | list | dict | set | range | nil,
+) {
   const target = filter_nil({job_id: job_id, run_id: run_id})
   let out = [
     {
@@ -539,11 +547,11 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
  * @api_stability: experimental
  */
 pub fn dashboard_job_dedupe_key(
-  kind,
-  job_id,
-  run_id = nil,
-  timestamp = nil,
-  source_id = nil,
+  kind: any,
+  job_id: any,
+  run_id: any = nil,
+  timestamp: any = nil,
+  source_id: any = nil,
 ) -> string {
   const seed = __job_text(kind)
     + "\n"
@@ -557,7 +565,7 @@ pub fn dashboard_job_dedupe_key(
   return "dashboard_job:" + substring(sha256(seed), 0, 32)
 }
 
-fn __job_validate_required(event) {
+fn __job_validate_required(event: DashboardJobEvent) {
   if event.schema != DASHBOARD_JOB_EVENT_SCHEMA {
     throw "std/dashboard/jobs: unsupported schema " + __job_text(event.schema)
   }
@@ -574,7 +582,7 @@ fn __job_validate_required(event) {
   }
 }
 
-fn __job_validate_kind_requirements(event) {
+fn __job_validate_kind_requirements(event: DashboardJobEvent) {
   if event.kind.starts_with("run.") && __job_text(event.run_id) == "" {
     throw "std/dashboard/jobs: run_id is required for run events"
   }
@@ -596,13 +604,13 @@ fn __job_validate_kind_requirements(event) {
   }
 }
 
-fn __job_validate_refs(event) {
+fn __job_validate_refs(event: DashboardJobEvent) {
   const _ = __job_refs(event.receipt_refs)
   const _ = __job_refs(event.replay_refs)
   const _ = __job_refs(event.related_refs)
 }
 
-fn __job_validate_action_intents(event) {
+fn __job_validate_action_intents(event: DashboardJobEvent) {
   for intent in event.action_intents ?? [] {
     const effect = __job_text(intent.effect)
     if __job_text(intent.kind) == "" || __job_text(intent.label) == "" || effect == "" {
@@ -641,7 +649,7 @@ pub fn dashboard_job_validate(event: DashboardJobEvent) -> DashboardJobEvent {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEvent {
+pub fn dashboard_job_event(kind: any, input: any = nil, options: dict? = nil) -> DashboardJobEvent {
   const opts = options ?? {}
   const payload = __job_payload(input)
   const resolved_kind = __job_kind(kind, input, opts)
@@ -722,7 +730,7 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
 pub fn dashboard_job_emit(
   obs: HarnessObs,
   input: DashboardJobEvent,
-  options = nil,
+  options: dict? = nil,
 ) -> DashboardJobEmitReceipt {
   const opts = options ?? {}
   const event = dashboard_job_validate(input)
@@ -769,7 +777,7 @@ pub fn dashboard_job_dedupe_events(events: list) -> list<DashboardJobEvent> {
   return out
 }
 
-fn __job_append_refs(existing, refs) {
+fn __job_append_refs(existing: list?, refs: list?) {
   let out = existing ?? []
   for ref in refs ?? [] {
     const key = __job_text(ref.kind) + ":" + __job_text(ref.id) + ":" + __job_text(ref.url)
@@ -788,7 +796,7 @@ fn __job_append_refs(existing, refs) {
   return out
 }
 
-fn __job_append_actions(existing, intents) {
+fn __job_append_actions(existing: list?, intents: list?) {
   let out = existing ?? []
   for intent in intents ?? [] {
     const key = __job_text(intent.kind) + ":" + __job_text(intent.effect)
@@ -806,7 +814,7 @@ fn __job_append_actions(existing, intents) {
   return out
 }
 
-fn __job_card_from_event(event) {
+fn __job_card_from_event(event: dict) {
   return filter_nil(
     {
       schema: DASHBOARD_JOB_CARD_SCHEMA,
@@ -834,7 +842,7 @@ fn __job_card_from_event(event) {
   )
 }
 
-fn __job_merge_card(card, event) {
+fn __job_merge_card(card: dict, event: dict) {
   const status_neutral = event.kind == "receipt.available"
     || event.kind == "replay_fixture.available"
   return filter_nil(
@@ -874,7 +882,7 @@ fn __job_merge_card(card, event) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_jobs_snapshot(events: list, options = nil) {
+pub fn dashboard_jobs_snapshot(events: list, options: dict? = nil) {
   const opts = options ?? {}
   const unique = dashboard_job_dedupe_events(events)
   let cards = {}
@@ -902,7 +910,7 @@ pub fn dashboard_jobs_snapshot(events: list, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_jobs_view(obs: HarnessObs, events: list, options = nil) {
+pub fn dashboard_jobs_view(obs: HarnessObs, events: list, options: dict? = nil) {
   const opts = options ?? {}
   const unique = dashboard_job_dedupe_events(events)
   let receipts = []

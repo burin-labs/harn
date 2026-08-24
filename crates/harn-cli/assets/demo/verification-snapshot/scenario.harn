@@ -24,7 +24,7 @@ fn seed_workspace(fs: HarnessFs, root: string) {
   fs.write_text(path_join(root, "README.md"), "# verification demo\n")
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const root = path_join(harness.fs.runtime_paths().asset_root, "verification-workspace")
   seed_workspace(harness.fs, root)
   const _ = harness.code_index.rebuild({root: root})

@@ -98,7 +98,7 @@ fn __examples() {
   ]
 }
 
-fn __compiler_errors(candidate, context: ExperimentCompileContext) {
+fn __compiler_errors(candidate: any, context: ExperimentCompileContext) {
   const compilation = compile_experiment_intent(candidate, context)
   if compilation.ok {
     return {ok: true, errors: []}

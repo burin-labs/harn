@@ -536,7 +536,7 @@ pub fn list_providers(llm: HarnessLlm) -> list<ProviderCatalogEntry> {
  * @effects: []
  * @errors: []
  */
-pub fn stream_fork(source, branches = []) -> StreamForkPlan {
+pub fn stream_fork(source: any, branches: list = []) -> StreamForkPlan {
   return {kind: "stream.fork", source: source, branches: branches}
 }
 
@@ -546,7 +546,7 @@ pub fn stream_fork(source, branches = []) -> StreamForkPlan {
  * @effects: []
  * @errors: []
  */
-pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
+pub fn stream_join(source: any, join: dict? = nil) -> StreamJoinPlan {
   return {kind: "stream.join", source: source, join: join ?? {}}
 }
 
@@ -572,7 +572,7 @@ fn __stream_llm_classify_options(
  * @effects: []
  * @errors: []
  */
-pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
+pub fn window_by(events: any, window: StreamWindowSpec) -> StreamWindowPlan {
   return {kind: "stream.window", events: events, window: window}
 }
 
@@ -583,7 +583,7 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
  * @errors: []
  */
 pub fn llm_classify(
-  input,
+  input: any,
   labels: list<string>,
   options: StreamLlmClassifyOptions = nil,
 ) -> StreamLlmClassifyPlan {

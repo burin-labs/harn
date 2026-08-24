@@ -1,15 +1,15 @@
-pipeline test(harness: Harness, task) {
-  fn greet(name, greeting = "hello") {
+pipeline test(harness: Harness, task: unknown) {
+  fn greet(name: string, greeting: string = "hello") {
     harness.stdio.log("${greeting}, ${name}!")
   }
   greet("world")
   greet("world", "hi")
-  fn add(a, b = 10) {
+  fn add(a: int, b: int = 10) {
     return a + b
   }
   harness.stdio.log(add(5))
   harness.stdio.log(add(5, 20))
-  fn flag(x, enabled = true) {
+  fn flag(x: string, enabled: bool = true) {
     if enabled {
       harness.stdio.log("on: ${x}")
     } else {

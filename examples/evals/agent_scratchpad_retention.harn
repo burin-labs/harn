@@ -4,7 +4,7 @@
  * Run with:
  *   cargo run --quiet --bin harn -- run examples/evals/agent_scratchpad_retention.harn
  */
-fn __eval_llm_value(text) {
+fn __eval_llm_value(text: any) {
   return {
     text: text,
     model: "mock:cheap-worker-fixture",
@@ -15,7 +15,7 @@ fn __eval_llm_value(text) {
   }
 }
 
-fn __eval_worker_text(turn, retained) {
+fn __eval_worker_text(turn: int, retained: bool) {
   if turn == 1 {
     return "Subtask 1: extracted account key AURORA-17 from the intake note."
   }
@@ -34,7 +34,7 @@ fn __eval_worker_text(turn, retained) {
   return "Final: use account key UNKNOWN for the subtask-5 handoff. ##DONE##"
 }
 
-fn __eval_fact_for_text(text) {
+fn __eval_fact_for_text(text: string | list) {
   if contains(text, "AURORA-17") {
     return "fact: account key AURORA-17"
   }
@@ -50,7 +50,7 @@ fn __eval_fact_for_text(text) {
   return ""
 }
 
-fn __eval_excerpt(text, limit) {
+fn __eval_excerpt(text: string?, limit: int) {
   const cleaned = replace(trim(text ?? ""), "\n", " ")
   if len(cleaned) <= limit {
     return cleaned
@@ -58,7 +58,7 @@ fn __eval_excerpt(text, limit) {
   return substring(cleaned, 0, limit - 3) + "..."
 }
 
-fn __eval_append_callback(agent: HarnessAgent, arm) {
+fn __eval_append_callback(agent: HarnessAgent, arm: string) {
   return { info ->
     const text = info?.text ?? ""
     const fact = __eval_fact_for_text(text)
@@ -85,7 +85,7 @@ fn __eval_append_callback(agent: HarnessAgent, arm) {
   }
 }
 
-fn __eval_reorg_response(arm, fact_text) {
+fn __eval_reorg_response(arm: string, fact_text: string) {
   const ref_id = "eval:" + arm + ":1"
   return {
     text: json_stringify(
@@ -104,17 +104,24 @@ fn __eval_reorg_response(arm, fact_text) {
   }
 }
 
-fn __eval_estimated_tokens(chars) {
+fn __eval_estimated_tokens(chars: int) {
   return (chars + 3) / 4
 }
 
-fn __eval_require(condition, message) {
+fn __eval_require(condition: any, message: string) {
   if !condition {
     throw message
   }
 }
 
-fn __eval_run_arm(harness: Harness, name, arm_id, scratchpad, reorg_mocks, append_facts) {
+fn __eval_run_arm(
+  harness: Harness,
+  name: string,
+  arm_id: string,
+  scratchpad: dict?,
+  reorg_mocks: list,
+  append_facts: bool,
+) {
   harness.llm.mock_clear()
   for mock in reorg_mocks {
     harness.llm.mock_enqueue(mock)

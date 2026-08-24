@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // host_bridge tools must declare a host_capability so harn check
   // can validate the binding against the host capability manifest.
   const r = tool_registry()

@@ -27,11 +27,11 @@ fn __edit_fast_apply_system() {
   return "You are Harn's fast-apply merge model. Apply the requested edit to the supplied file bytes and return JSON only. The `content` field must contain the complete updated file content, including all unchanged lines. Do not explain the edit, omit code, use placeholders, or wrap the file in markdown fences."
 }
 
-fn __edit_fast_apply_prompt(path, before_hash, intent, before) {
+fn __edit_fast_apply_prompt(path: any, before_hash: any, intent: any, before: any) {
   return "Path: ${path}\nPreimage: ${before_hash}\n\nEdit intent:\n${intent}\n\nCurrent file content follows. Return the complete updated file content in JSON field `content`.\n\n```text\n${before}\n```"
 }
 
-fn __edit_fast_apply_content_candidate(content, source) {
+fn __edit_fast_apply_content_candidate(content: any, source: string) {
   if type_of(content) == "string" {
     return {ok: true, content: content, source: source}
   }
@@ -44,7 +44,7 @@ fn __edit_fast_apply_content_candidate(content, source) {
   }
 }
 
-fn __edit_fast_apply_content(response) {
+fn __edit_fast_apply_content(response: dict) {
   const data = response?.data
   if data?.content != nil {
     return __edit_fast_apply_content_candidate(data.content, "data.content")
@@ -64,7 +64,7 @@ fn __edit_fast_apply_content(response) {
   }
 }
 
-fn __edit_fast_apply_validate(ast: HarnessAst, path, proposed, params) {
+fn __edit_fast_apply_validate(ast: HarnessAst, path: any, proposed: any, params: dict?) {
   const opts = params ?? {}
   const should_validate = opts?.validate_syntax ?? true
   if !should_validate {
@@ -110,7 +110,7 @@ fn __edit_fast_apply_validate(ast: HarnessAst, path, proposed, params) {
   }
 }
 
-fn __edit_fast_apply_preview(ast: HarnessAst, path, before, after) {
+fn __edit_fast_apply_preview(ast: HarnessAst, path: any, before: string, after: string) {
   const dry = edit_dry_run(
     ast,
     {plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]},
@@ -147,7 +147,7 @@ fn __edit_fast_apply_preview(ast: HarnessAst, path, before, after) {
   }
 }
 
-fn __edit_fast_apply_telemetry(result, dry_run, validation_rejected) {
+fn __edit_fast_apply_telemetry(result: string, dry_run: any, validation_rejected: any) {
   return {
     apply_path: "fast_apply",
     requested: 1,
@@ -181,7 +181,7 @@ fn __edit_fast_apply_telemetry(result, dry_run, validation_rejected) {
   }
 }
 
-fn __edit_fast_apply_result(ctx, fields = nil) {
+fn __edit_fast_apply_result(ctx: dict, fields: dict? = nil) {
   const extra = fields ?? {}
   const {result = "applied", validation_rejected = 0} = extra ?? {}
   const base = {
@@ -242,7 +242,7 @@ pub fn edit_fast_apply(
   random: HarnessRandom,
   ast: HarnessAst,
   llm: HarnessLlm,
-  params,
+  params: dict?,
 ) {
   const opts = params ?? {}
   const path = opts?.path ?? ""
@@ -453,9 +453,9 @@ pub fn fast_apply(
   random: HarnessRandom,
   ast: HarnessAst,
   llm: HarnessLlm,
-  path,
-  edit_intent,
-  options = nil,
+  path: any,
+  edit_intent: any,
+  options: dict? = nil,
 ) {
   return edit_fast_apply(
     fs,

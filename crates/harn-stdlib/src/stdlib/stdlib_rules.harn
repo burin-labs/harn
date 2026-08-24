@@ -21,7 +21,7 @@
  * @api_stability: experimental
  * @example: rules_search({rule: src, source: "foo();", language: "typescript"})
  */
-pub fn rules_search(rules: HarnessRules, params) -> dict {
+pub fn rules_search(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.search(params ?? {}) ?? {}
   return payload.merging(
     {
@@ -41,7 +41,7 @@ pub fn rules_search(rules: HarnessRules, params) -> dict {
  * @api_stability: experimental
  * @example: rules_report({rule: src, paths: ["a.ts", "b.ts"]})
  */
-pub fn rules_report(rules: HarnessRules, params) -> dict {
+pub fn rules_report(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.report(params ?? {}) ?? {}
   return payload.merging({provenance: {module: "std/rules", helper: "rules_report"}})
 }
@@ -58,7 +58,7 @@ pub fn rules_report(rules: HarnessRules, params) -> dict {
  * @api_stability: experimental
  * @example: rules_diagnostics({rule: src, source: "foo();", language: "typescript"})
  */
-pub fn rules_diagnostics(rules: HarnessRules, params) -> dict {
+pub fn rules_diagnostics(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.diagnostics(params ?? {}) ?? {}
   return payload.merging(
     {
@@ -92,7 +92,7 @@ pub fn rules_diagnostics(rules: HarnessRules, params) -> dict {
  * @api_stability: experimental
  * @example: rules_visit({rule: src, source: "f();", language: "typescript", on_match: fn(node, ctx) { return {message: "call"} }})
  */
-pub fn rules_visit(rules: HarnessRules, params) -> dict {
+pub fn rules_visit(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.visit(params ?? {}) ?? {}
   return payload.merging(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_visit"}},
@@ -112,7 +112,7 @@ pub fn rules_visit(rules: HarnessRules, params) -> dict {
  * @api_stability: experimental
  * @example: rules_apply(harness.rules, {rule: src, paths: ["a.ts"], dry_run: false})
  */
-pub fn rules_apply(rules: HarnessRules, params) -> dict {
+pub fn rules_apply(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.apply(params ?? {}) ?? {}
   return payload.merging(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_apply"}},
@@ -131,7 +131,7 @@ pub fn rules_apply(rules: HarnessRules, params) -> dict {
  * @api_stability: experimental
  * @example: rules_fold({paths: ["a.harn"], dry_run: false})
  */
-pub fn rules_fold(rules: HarnessRules, params) -> dict {
+pub fn rules_fold(rules: HarnessRules, params: dict?) -> dict {
   const payload = rules.fold(params ?? {}) ?? {}
   return payload.merging(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_fold"}},

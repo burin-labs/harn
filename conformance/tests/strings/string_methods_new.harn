@@ -1,5 +1,5 @@
 /** Test new string methods */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // trim_start / trim_end — verify by measuring length
   const s = "  hello world  "
   harness.stdio.println(len(s.trim_start()))

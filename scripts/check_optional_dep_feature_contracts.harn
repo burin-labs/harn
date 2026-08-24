@@ -146,7 +146,7 @@ fn checked_manifest_paths(fs: HarnessFs) -> list<string> {
   return paths.sorted()
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const paths = checked_manifest_paths(harness.fs)
   let violations: list<string> = []
   for path in paths {

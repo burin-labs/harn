@@ -7,11 +7,11 @@ import "std/triggers"
  * and that the named pool then composes correctly with priority + fair
  * round-robin queue strategies (PL-02).
  */
-fn factory_for(tag) {
+fn factory_for(tag: string) {
   return { _event -> return { -> tag } }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const pool_name = "spawn-to-pool-extractor-demo-" + unique

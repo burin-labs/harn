@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log([1, 2, 3, 4].window(2))
   harness.stdio.log(["a", "b", "c"].window(4))
 }

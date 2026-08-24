@@ -21,8 +21,9 @@ fn release_withdrawal_registry_schema() -> Schema<ReleaseWithdrawalDocument> {
       reason: schema_literal("invalid_tagged_candidate"),
     },
   )
-  return schema_closed_object(
-    {schema_version: schema_literal(1), releases: schema_list(withdrawal)},
+  return schema_refine(
+    schema_of(ReleaseWithdrawalDocument),
+    schema_closed_object({schema_version: schema_literal(1), releases: schema_list(withdrawal)}),
   )
 }
 

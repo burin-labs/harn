@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const reader_a = harness.runtime.sync_rwlock_acquire("doc", "read", 0)
   const reader_b = harness.runtime.sync_rwlock_acquire("doc", "read", 0)
   assert(reader_a != nil)

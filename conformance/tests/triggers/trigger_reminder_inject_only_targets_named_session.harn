@@ -6,7 +6,7 @@ import "std/triggers"
  * other sessions' transcripts remain untouched. Guards against
  * cross-session leakage of reminders fired from a single dispatch.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const target = harness.agent.open("trigger-reminder-inject-router-target")
   const bystander = harness.agent.open("trigger-reminder-inject-router-bystander")
   harness.agent.reset(target)

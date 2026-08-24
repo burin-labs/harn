@@ -8,7 +8,7 @@ import { edit_apply_node, edit_insert_at_anchor } from "std/edit/patch"
  * @effects: []
  * @errors: []
  */
-pub fn __refactor_member(list, item) -> bool {
+pub fn __refactor_member(list: list?, item: any) -> bool {
   for x in list ?? [] {
     if x == item {
       return true
@@ -17,7 +17,7 @@ pub fn __refactor_member(list, item) -> bool {
   return false
 }
 
-fn __refactor_touched_paths(ops) {
+fn __refactor_touched_paths(ops: list?) {
   let seen = []
   for op in ops ?? [] {
     const path = op?.path
@@ -28,7 +28,7 @@ fn __refactor_touched_paths(ops) {
   return seen
 }
 
-fn __refactor_common_root(paths) {
+fn __refactor_common_root(paths: any) {
   if len(paths) == 0 {
     return "."
   }
@@ -60,7 +60,7 @@ fn __refactor_common_root(paths) {
   return root
 }
 
-fn __refactor_new_session(random: HarnessRandom, operation) {
+fn __refactor_new_session(random: HarnessRandom, operation: string) {
   return "harn-refactor-" + operation + "-" + random.uuid_v7()
 }
 
@@ -70,7 +70,7 @@ fn __refactor_new_session(random: HarnessRandom, operation) {
  * @effects: []
  * @errors: []
  */
-pub fn __refactor_result(operation, language, fields) -> dict {
+pub fn __refactor_result(operation: string, language: any, fields: dict?) -> dict {
   const base = {
     ok: false,
     applied: false,
@@ -101,7 +101,7 @@ pub fn __refactor_result(operation, language, fields) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn __refactor_unsupported(operation, language, reason) -> dict {
+pub fn __refactor_unsupported(operation: string, language: any, reason: any) -> dict {
   return __refactor_result(
     operation,
     language,
@@ -115,7 +115,7 @@ pub fn __refactor_unsupported(operation, language, reason) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn __refactor_invalid(operation, language, reason) -> dict {
+pub fn __refactor_invalid(operation: string, language: any, reason: any) -> dict {
   return __refactor_result(
     operation,
     language,
@@ -133,7 +133,7 @@ pub fn __refactor_invalid(operation, language, reason) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn __refactor_conflict(operation, language, conflicts) -> dict {
+pub fn __refactor_conflict(operation: string, language: any, conflicts: any) -> dict {
   return __refactor_result(
     operation,
     language,
@@ -150,7 +150,7 @@ pub fn __refactor_conflict(operation, language, conflicts) -> dict {
   )
 }
 
-fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op, session_id, before_map) {
+fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op: dict, session_id: any, before_map: dict) {
   const kind = op?.kind
   if kind == "content" {
     const before = before_map.get(op.path, "")
@@ -216,11 +216,11 @@ pub fn __refactor_run(
   fs: HarnessFs,
   random: HarnessRandom,
   ast: HarnessAst,
-  operation,
-  language,
-  ops,
-  params,
-  warnings,
+  operation: string,
+  language: any,
+  ops: any,
+  params: dict?,
+  warnings: list?,
 ) -> dict {
   const p = params ?? {}
   const dry_run = p?.dry_run ?? false

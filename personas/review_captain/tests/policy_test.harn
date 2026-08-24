@@ -1,19 +1,19 @@
 // Run: harn test personas/review_captain/tests/policy_test.harn
 import { default_policy, load_policy_json } from "../lib/policy"
 
-pipeline test_default_policy_has_baseline_patterns(harness: Harness, task) {
+pipeline test_default_policy_has_baseline_patterns(harness: Harness, task: unknown) {
   const policy = default_policy()
   assert(len(policy.risky_paths) > 0)
   assert(len(policy.test_globs) > 0)
 }
 
-pipeline test_load_policy_json_returns_default_when_empty(harness: Harness, task) {
+pipeline test_load_policy_json_returns_default_when_empty(harness: Harness, task: unknown) {
   const result = load_policy_json("")
   assert_eq(result.ok, true)
   assert(len(result.policy.risky_paths) > 0)
 }
 
-pipeline test_load_policy_json_round_trips(harness: Harness, task) {
+pipeline test_load_policy_json_round_trips(harness: Harness, task: unknown) {
   const raw =
     "{\"repo\":\"example-org/example-app\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
   const result = load_policy_json(raw)
@@ -25,7 +25,7 @@ pipeline test_load_policy_json_round_trips(harness: Harness, task) {
   assert_eq(result.policy.test_globs[0], "Tests/")
 }
 
-pipeline test_load_policy_json_falls_back_to_default_test_globs(harness: Harness, task) {
+pipeline test_load_policy_json_falls_back_to_default_test_globs(harness: Harness, task: unknown) {
   const raw = "{\"repo\":\"x/y\",\"risky_paths\":[\"a\"]}"
   const result = load_policy_json(raw)
   assert_eq(result.ok, true)

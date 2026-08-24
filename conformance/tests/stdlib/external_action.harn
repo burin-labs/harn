@@ -11,7 +11,7 @@ import {
   external_action_retry_intent,
 } from "std/external_action"
 
-fn grant(intent, amount_minor = 20000, expires_at_ms = 9999999999999) {
+fn grant(intent: any, amount_minor: int = 20000, expires_at_ms: int = 9999999999999) {
   return external_action_grant(
     intent,
     {

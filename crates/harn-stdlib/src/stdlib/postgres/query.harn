@@ -38,13 +38,13 @@ fn __sql_fragment(sql: string) -> PgSqlFragment {
   return {_type: __SQL_FRAGMENT_TYPE, __harn_postgres_query_trusted_fragment: true, sql: sql}
 }
 
-fn __is_sql_fragment(value) -> bool {
+fn __is_sql_fragment(value: any) -> bool {
   return type_of(value) == "dict"
     && value?._type == __SQL_FRAGMENT_TYPE
     && value?.__harn_postgres_query_trusted_fragment
 }
 
-fn __sql_fragment_text(value) -> string {
+fn __sql_fragment_text(value: any) -> string {
   const fragment_sql = value?.sql
   if type_of(fragment_sql) != "string" {
     throw "std/postgres/query: SQL fragment sql must be a string"
@@ -52,7 +52,7 @@ fn __sql_fragment_text(value) -> string {
   return fragment_sql
 }
 
-fn __query_name(query) -> string {
+fn __query_name(query: dict) -> string {
   if type_of(query) != "dict" {
     return ""
   }
@@ -66,7 +66,7 @@ fn __query_name(query) -> string {
   return name
 }
 
-fn __query_error_prefix(query) -> string {
+fn __query_error_prefix(query: dict) -> string {
   const name = __query_name(query)
   if name == "" {
     return "std/postgres/query: "
@@ -74,7 +74,7 @@ fn __query_error_prefix(query) -> string {
   return "std/postgres/query `" + name + "`: "
 }
 
-fn __normalize_query(query, expected_mode = nil) {
+fn __normalize_query(query: any, expected_mode: any = nil) {
   if type_of(query) != "dict" {
     throw "std/postgres/query: query must be a dict"
   }
@@ -101,7 +101,7 @@ fn __normalize_query(query, expected_mode = nil) {
   return {name: __query_name(query), mode: mode, sql: sql, params: params, options: options}
 }
 
-fn __with_query_name(query, body) {
+fn __with_query_name(query: dict, body: unknown) {
   try {
     return body()
   } catch (error) {
@@ -123,7 +123,7 @@ fn __find_placeholder_end(chars: list<string>, start: int) -> int {
   return -1
 }
 
-fn __render_placeholder(key: string, value, params: list<any>, positions: dict) {
+fn __render_placeholder(key: string, value: unknown, params: list<any>, positions: dict) {
   if __is_sql_fragment(value) {
     return {sql: __sql_fragment_text(value), params: params, positions: positions}
   }
@@ -219,7 +219,7 @@ pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = [
  * @api_stability: experimental
  * @example: sql("SELECT * FROM receipts WHERE tenant_id = {tenant_id}", {tenant_id: tenant_id})
  */
-pub fn sql(template: string, values: dict = {}, options = nil) -> PgQuery {
+pub fn sql(template: string, values: dict = {}, options: any = nil) -> PgQuery {
   const rendered = __render_sql_template(template, values)
   return __normalize_query({sql: rendered.sql, params: rendered.params, options: options})
 }
@@ -237,7 +237,7 @@ pub fn named_sql(
   mode: PgQueryMode,
   template: string,
   values: dict = {},
-  options = nil,
+  options: any = nil,
 ) -> PgNamedQuery {
   const rendered = __render_sql_template(template, values)
   return __normalize_query(
@@ -261,7 +261,7 @@ pub fn named_sql(
  * @api_stability: experimental
  * @example: raw_sql("SELECT data#>>'{}' FROM events WHERE tenant_id = $1::uuid", [tenant_id])
  */
-pub fn raw_sql(template: string, params: list<any> = [], options = nil) -> PgQuery {
+pub fn raw_sql(template: string, params: list<any> = [], options: any = nil) -> PgQuery {
   if type_of(template) != "string" || trim(template) == "" {
     throw "std/postgres/query: SQL template must be a non-empty string"
   }
@@ -286,7 +286,7 @@ pub fn named_raw_sql(
   mode: PgQueryMode,
   template: string,
   params: list<any> = [],
-  options = nil,
+  options: any = nil,
 ) -> PgNamedQuery {
   if type_of(template) != "string" || trim(template) == "" {
     throw __query_error_prefix({name: name}) + "sql must be a non-empty string"
@@ -304,7 +304,7 @@ pub fn named_raw_sql(
  * @api_stability: experimental
  * @example: one(db, {name: "get_receipt", sql: sql, params: [id]})
  */
-pub fn one(handle, query: PgQuery) {
+pub fn one(handle: any, query: PgQuery) {
   const q = __normalize_query(query, "one")
   return __with_query_name(q, { -> pg_query_one(handle, q.sql, q.params, q.options) })
 }
@@ -317,7 +317,7 @@ pub fn one(handle, query: PgQuery) {
  * @api_stability: experimental
  * @example: many(db, {name: "list_receipts", sql: sql, params: [tenant_id]})
  */
-pub fn many(handle, query: PgQuery) -> list {
+pub fn many(handle: any, query: PgQuery) -> list {
   const q = __normalize_query(query, "many")
   return __with_query_name(q, { -> pg_query(handle, q.sql, q.params, q.options) })
 }
@@ -330,7 +330,7 @@ pub fn many(handle, query: PgQuery) -> list {
  * @api_stability: experimental
  * @example: exec(db, {name: "mark_read", sql: sql, params: [id, status]})
  */
-pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
+pub fn exec(handle: any, query: PgQuery) -> PgExecuteResult {
   const q = __normalize_query(query, "exec")
   if q.options != nil {
     throw __query_error_prefix(q) + "options are only supported by one and many"
@@ -346,7 +346,7 @@ pub fn exec(handle, query: PgQuery) -> PgExecuteResult {
  * @api_stability: experimental
  * @example: run(db, named("list_receipts", "many", sql, [tenant_id]))
  */
-pub fn run(handle, query: PgNamedQuery) {
+pub fn run(handle: any, query: PgNamedQuery) {
   const q = __normalize_query(query)
   if q.mode == nil {
     throw __query_error_prefix(q) + "mode is required"
@@ -465,7 +465,7 @@ pub fn sql_fragment(template: string, values: dict = {}) -> PgSqlFragment {
   return __sql_fragment(rendered.sql)
 }
 
-fn __projection_part_text(part) -> string {
+fn __projection_part_text(part: any) -> string {
   if __is_sql_fragment(part) {
     return __sql_fragment_text(part)
   }
@@ -485,14 +485,14 @@ fn __sql_string_literal(value: string) -> string {
   return "'" + replace(value, "'", "''") + "'"
 }
 
-fn __trusted_fragment_text(value, label: string) -> string {
+fn __trusted_fragment_text(value: dict, label: string) -> string {
   if !__is_sql_fragment(value) {
     throw "std/postgres/query: " + label + " must be a trusted SQL fragment"
   }
   return __sql_fragment_text(value)
 }
 
-fn __predicate_part_text(part) -> string {
+fn __predicate_part_text(part: any) -> string {
   const sql = __trusted_fragment_text(part, "predicate part")
   if trim(sql) == "" {
     throw "std/postgres/query: predicate part must be non-empty"
@@ -555,7 +555,7 @@ pub fn sql_or(parts: list) -> PgSqlFragment {
  * @api_stability: experimental
  * @example: sql_not(sql_fragment("archived"))
  */
-pub fn sql_not(part) -> PgSqlFragment {
+pub fn sql_not(part: dict) -> PgSqlFragment {
   return __sql_fragment("(NOT (" + __predicate_part_text(part) + "))")
 }
 

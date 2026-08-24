@@ -40,7 +40,7 @@ pipeline main(harness: Harness) {
       const stream = harness.obs.event_log_subscribe(
         {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
       )
-      fn next_reminder_event(source) {
+      fn next_reminder_event(source: any) {
         let event = source.next().value
         while event != nil && event.kind == "transcript.reminder.provider_evaluated" {
           event = source.next().value

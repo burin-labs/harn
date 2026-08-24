@@ -13,11 +13,11 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-pub fn __native_tools_complete_naturally(opts) {
+pub fn __native_tools_complete_naturally(opts: dict) {
   return opts?.tools != nil && opts?.tool_format == "native"
 }
 
-pub fn __task_ledger_deliverable_text(value) {
+pub fn __task_ledger_deliverable_text(value: any) {
   const text = if type_of(value) == "string" {
     value
   } else {
@@ -26,7 +26,7 @@ pub fn __task_ledger_deliverable_text(value) {
   return trim(text)
 }
 
-pub fn __task_ledger_from_shorthand(opts) {
+pub fn __task_ledger_from_shorthand(opts: dict) {
   const root_task = trim(opts?.root_task ?? "")
   let deliverables = []
   const shorthand = opts?.deliverables
@@ -46,7 +46,7 @@ pub fn __task_ledger_from_shorthand(opts) {
   return {root_task: root_task, deliverables: deliverables, rationale: "", observations: []}
 }
 
-pub fn __with_task_ledger_shorthand(opts) {
+pub fn __with_task_ledger_shorthand(opts: dict) {
   if __has_key(opts, "task_ledger") {
     return opts
   }
@@ -57,11 +57,11 @@ pub fn __with_task_ledger_shorthand(opts) {
   return opts + {task_ledger: ledger}
 }
 
-pub fn __context_profile_root(opts) {
+pub fn __context_profile_root(opts: dict) {
   return opts?.context_profile_root ?? opts?.project_root ?? opts?.root ?? opts?.cwd ?? "."
 }
 
-pub fn __context_profile_options(opts) {
+pub fn __context_profile_options(opts: dict) {
   let profile_opts = opts?.context_profile_options ?? {}
   if opts?.context_signals != nil {
     profile_opts = profile_opts + {signals: opts.context_signals}
@@ -72,12 +72,12 @@ pub fn __context_profile_options(opts) {
   return profile_opts
 }
 
-pub fn __context_profile_disabled(opts) {
+pub fn __context_profile_disabled(opts: dict) {
   const value = opts?.auto_context_profile
   return type_of(value) == "bool" && !value
 }
 
-pub fn __with_project_context_profile(project: HarnessProject, opts) {
+pub fn __with_project_context_profile(project: HarnessProject, opts: dict) {
   if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
     || __context_profile_disabled(opts) {
     return opts
@@ -91,7 +91,7 @@ pub fn __with_project_context_profile(project: HarnessProject, opts) {
   return opts + {context_profile: unwrap(resolved)}
 }
 
-pub fn __validate_done_sentinel(value) {
+pub fn __validate_done_sentinel(value: unknown) {
   if value == nil {
     return
   }
@@ -99,12 +99,12 @@ pub fn __validate_done_sentinel(value) {
   if kind != "string" {
     throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got " + kind
   }
-  if trim(value) == "" {
+  if trim(to_string(value)) == "" {
     throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got empty string"
   }
 }
 
-pub fn __validate_verify_completion(value) {
+pub fn __validate_verify_completion(value: any) {
   if value == nil {
     return
   }
@@ -113,7 +113,7 @@ pub fn __validate_verify_completion(value) {
   }
 }
 
-pub fn __validate_judge_dict_or_bool(label, value) {
+pub fn __validate_judge_dict_or_bool(label: string, value: any) {
   if value == nil {
     return
   }
@@ -123,7 +123,7 @@ pub fn __validate_judge_dict_or_bool(label, value) {
   }
 }
 
-fn __validate_removed_judge_options(label: string, value) {
+fn __validate_removed_judge_options(label: string, value: dict | bool | nil) {
   if type_of(value) != "dict" {
     return
   }
@@ -138,7 +138,7 @@ fn __validate_removed_judge_options(label: string, value) {
   }
 }
 
-pub fn __validate_optional_positive_int(label, field, value) {
+pub fn __validate_optional_positive_int(label: string, field: string, value: int?) {
   if value == nil {
     return
   }
@@ -151,7 +151,7 @@ pub fn __validate_optional_positive_int(label, field, value) {
   }
 }
 
-pub fn __validate_optional_nonnegative_int(label, field, value) {
+pub fn __validate_optional_nonnegative_int(label: string, field: string, value: int?) {
   if value == nil {
     return
   }
@@ -164,7 +164,7 @@ pub fn __validate_optional_nonnegative_int(label, field, value) {
   }
 }
 
-pub fn __validate_judge_cadence(label, value) {
+pub fn __validate_judge_cadence(label: string, value: dict?) {
   if value == nil {
     return
   }
@@ -193,14 +193,14 @@ pub fn __validate_judge_cadence(label, value) {
     + to_string(when)
 }
 
-pub fn __validate_done_judge_cadence(value) {
+pub fn __validate_done_judge_cadence(value: dict | bool | nil) {
   if type_of(value) == "dict" {
     __validate_optional_nonnegative_int("done_judge", "max_invocations", value?.max_invocations)
     __validate_judge_cadence("done_judge.cadence", value?.cadence)
   }
 }
 
-pub fn __positive_int_budget_field(value, fallback, label) {
+pub fn __positive_int_budget_field(value: int?, fallback: int?, label: string) -> int? {
   if value == nil {
     return fallback
   }
@@ -213,7 +213,7 @@ pub fn __positive_int_budget_field(value, fallback, label) {
   return value
 }
 
-pub fn __nonnegative_int_budget_field(value, fallback, label) {
+pub fn __nonnegative_int_budget_field(value: int?, fallback: int?, label: string) -> int? {
   if value == nil {
     return fallback
   }
@@ -226,7 +226,7 @@ pub fn __nonnegative_int_budget_field(value, fallback, label) {
   return value
 }
 
-pub fn __positive_float_budget_field(value, fallback, label) {
+pub fn __positive_float_budget_field(value: float?, fallback: float?, label: string) -> float? {
   if value == nil {
     return fallback
   }
@@ -241,7 +241,7 @@ pub fn __positive_float_budget_field(value, fallback, label) {
   return parsed
 }
 
-pub fn __normalize_consecutive_failure_budget(value) {
+pub fn __normalize_consecutive_failure_budget(value: ConsecutiveFailureBudget?) {
   if value == nil {
     return nil
   }
@@ -281,7 +281,7 @@ pub fn __normalize_consecutive_failure_budget(value) {
   }
 }
 
-pub fn __validate_loop_control(value) {
+pub fn __validate_loop_control(value: any) {
   if value == nil {
     return
   }
@@ -290,7 +290,7 @@ pub fn __validate_loop_control(value) {
   }
 }
 
-pub fn __validate_terminal_callback(value) {
+pub fn __validate_terminal_callback(value: any) {
   if value == nil {
     return
   }
@@ -299,7 +299,7 @@ pub fn __validate_terminal_callback(value) {
   }
 }
 
-pub fn __validate_on_delta(value) {
+pub fn __validate_on_delta(value: any) {
   if value == nil {
     return
   }
@@ -308,7 +308,7 @@ pub fn __validate_on_delta(value) {
   }
 }
 
-pub fn __validate_tool_caller(value) {
+pub fn __validate_tool_caller(value: any) {
   if value == nil {
     return
   }
@@ -317,7 +317,7 @@ pub fn __validate_tool_caller(value) {
   }
 }
 
-pub fn __validate_structural_validator(value) {
+pub fn __validate_structural_validator(value: any) {
   if value == nil {
     return
   }
@@ -326,7 +326,7 @@ pub fn __validate_structural_validator(value) {
   }
 }
 
-pub fn __validate_pre_turn_scope_classifier(value) {
+pub fn __validate_pre_turn_scope_classifier(value: any) {
   if value == nil {
     return
   }
@@ -335,7 +335,7 @@ pub fn __validate_pre_turn_scope_classifier(value) {
   }
 }
 
-pub fn __validate_input_guardrail(value) {
+pub fn __validate_input_guardrail(value: any) {
   if value == nil {
     return
   }
@@ -344,7 +344,7 @@ pub fn __validate_input_guardrail(value) {
   }
 }
 
-pub fn __validate_missing_tool_call_recovery(value) {
+pub fn __validate_missing_tool_call_recovery(value: MissingToolCallRecoveryOptions | bool | nil) {
   if value == nil {
     return
   }
@@ -366,7 +366,7 @@ pub fn __validate_missing_tool_call_recovery(value) {
   }
 }
 
-pub fn __validate_max_concurrent_tools(value) {
+pub fn __validate_max_concurrent_tools(value: int?) {
   if value == nil {
     return
   }
@@ -378,7 +378,7 @@ pub fn __validate_max_concurrent_tools(value) {
   }
 }
 
-pub fn __validate_prefetch_next_turn(value) {
+pub fn __validate_prefetch_next_turn(value: any) {
   if value == nil {
     return
   }
@@ -387,7 +387,7 @@ pub fn __validate_prefetch_next_turn(value) {
   }
 }
 
-pub fn __validate_string_list(label, value) {
+pub fn __validate_string_list(label: string, value: list<string>?) {
   if value == nil {
     return
   }
@@ -452,14 +452,14 @@ pub fn __tool_surface_aggressive_defaults() {
   }
 }
 
-pub fn __validate_tool_surface_mode(mode) {
+pub fn __validate_tool_surface_mode(mode: string) {
   if mode == "safe" || mode == "aggressive" {
     return
   }
   throw "agent_loop: `tool_surface_narrowing.mode` must be \"safe\" or \"aggressive\""
 }
 
-pub fn __validate_tool_surface_unknown_policy(policy) {
+pub fn __validate_tool_surface_unknown_policy(policy: string) {
   if policy == "keep" || policy == "prune" {
     return
   }
@@ -478,7 +478,7 @@ pub fn __default_read_only_stance() {
   }
 }
 
-pub fn __normalize_read_only_stance(value) {
+pub fn __normalize_read_only_stance(value: ReadOnlyStanceOptions | bool | nil) {
   const defaults = __default_read_only_stance()
   if value == nil {
     return defaults
@@ -518,7 +518,7 @@ pub fn __normalize_read_only_stance(value) {
     }
 }
 
-pub fn __normalize_tool_surface_narrowing(value) {
+pub fn __normalize_tool_surface_narrowing(value: ToolSurfaceNarrowingOptions | bool | nil) {
   const safe_defaults = __tool_surface_safe_defaults()
   if value == nil {
     return safe_defaults
@@ -568,13 +568,13 @@ pub fn __normalize_tool_surface_narrowing(value) {
     }
 }
 
-pub fn __validate_removed_agent_loop_options(opts) {
+pub fn __validate_removed_agent_loop_options(opts: dict) {
   if __has_key(opts, "persistent") {
     throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
   }
 }
 
-pub fn __validate_agent_loop_completion_options(opts) {
+pub fn __validate_agent_loop_completion_options(opts: dict) {
   if __has_key(opts, "done_sentinel") {
     __validate_done_sentinel(opts.done_sentinel)
   }
@@ -627,7 +627,7 @@ pub fn __validate_agent_loop_completion_options(opts) {
   }
 }
 
-pub fn __is_transcript_projection_policy(policy) {
+pub fn __is_transcript_projection_policy(policy: any) {
   return policy == "raw" || policy == "clean_tool_repair" || policy == "squash_failed_calls"
     || policy
       == "summary_prefix"
@@ -637,17 +637,17 @@ pub fn __is_transcript_projection_policy(policy) {
     || policy == "custom"
 }
 
-pub fn __is_reachability_projection_policy(policy) {
+pub fn __is_reachability_projection_policy(policy: string) {
   return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
 }
 
-pub fn __validate_non_negative_int_option(label, value) {
+pub fn __validate_non_negative_int_option(label: string, value: unknown) {
   if value != nil && (type_of(value) != "int" || value < 0) {
     throw "agent_loop: `" + label + "` must be a non-negative integer"
   }
 }
 
-pub fn __validate_transcript_projection(value) {
+pub fn __validate_transcript_projection(value: any) {
   if value == nil {
     return
   }
@@ -692,7 +692,7 @@ pub fn __validate_transcript_projection(value) {
   }
 }
 
-pub fn __validate_agent_loop_callback_options(opts) {
+pub fn __validate_agent_loop_callback_options(opts: any) {
   if __has_key(opts, "loop_control") {
     __validate_loop_control(opts.loop_control)
   }
@@ -743,7 +743,7 @@ pub fn __validate_agent_loop_callback_options(opts) {
   }
 }
 
-pub fn __normalize_reminder_provider_options(opts) {
+pub fn __normalize_reminder_provider_options(opts: dict) {
   if !__has_key(opts, "reminders") {
     return opts + {reminders: {}}
   }
@@ -753,7 +753,7 @@ pub fn __normalize_reminder_provider_options(opts) {
   return opts
 }
 
-pub fn __with_resolved_tool_format(opts, resolution) {
+pub fn __with_resolved_tool_format(opts: dict, resolution: dict) {
   if resolution?.tool_format == nil {
     return opts
   }
@@ -768,12 +768,12 @@ pub fn __with_resolved_tool_format(opts, resolution) {
   return next
 }
 
-pub fn __auto_tool_format_source(value) {
+pub fn __auto_tool_format_source(value: string?) {
   const source = to_string(value ?? "")
   return source == "capabilities" || source == "fallback" || source == "unresolved"
 }
 
-pub fn __clear_tool_format_resolution(opts) {
+pub fn __clear_tool_format_resolution(opts: any) {
   return opts.removing("tool_format").removing("_tool_format_source").removing(
     "_tool_format_capability_gap",
   )

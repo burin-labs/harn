@@ -17,7 +17,7 @@ fn arg_value(args: list<string>, prefix: string) -> string? {
   return nil
 }
 
-fn require_plan(receipt) {
+fn require_plan(receipt: dict) {
   if !receipt.ok || receipt.compilation?.plan == nil {
     throw "hypothesis scenario: natural-language design did not compile"
   }

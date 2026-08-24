@@ -192,7 +192,7 @@ const AGENT_EDIT_OUTCOME_STATUSES = [
   "unknown",
 ]
 
-fn __agent_tool_result_transport_kind(result) -> AgentToolResultOutcomeKind? {
+fn __agent_tool_result_transport_kind(result: dict) -> AgentToolResultOutcomeKind? {
   if result?.ok != nil {
     return result.ok ? "ok" : "error"
   }
@@ -209,7 +209,7 @@ fn __agent_tool_result_transport_kind(result) -> AgentToolResultOutcomeKind? {
   return nil
 }
 
-fn __agent_tool_result_error_category(result) -> AgentToolLifecycleErrorCategory? {
+fn __agent_tool_result_error_category(result: dict) -> AgentToolLifecycleErrorCategory? {
   const explicit = agent_tool_lifecycle_error_category(result?.error_category)
   if explicit != nil {
     return explicit
@@ -225,7 +225,7 @@ fn __agent_edit_status_value(raw: any) -> AgentEditOutcomeStatus {
   return "unknown"
 }
 
-fn __agent_tool_result_edit_status(result) -> AgentEditOutcomeStatus? {
+fn __agent_tool_result_edit_status(result: dict) -> AgentEditOutcomeStatus? {
   const flat = result?.edit_status
   if flat != nil {
     return __agent_edit_status_value(flat)
@@ -237,7 +237,7 @@ fn __agent_tool_result_edit_status(result) -> AgentEditOutcomeStatus? {
   return nil
 }
 
-fn __agent_tool_result_product_error(result) -> bool? {
+fn __agent_tool_result_product_error(result: dict) -> bool? {
   const raw = result?.product_error
   if raw != nil {
     return raw ? true : false
@@ -255,7 +255,7 @@ fn __agent_tool_result_product_error(result) -> bool? {
   return nil
 }
 
-fn __agent_tool_result_diagnostics_error_count(result) -> int? {
+fn __agent_tool_result_diagnostics_error_count(result: dict) -> int? {
   const raw = result?.diagnostics_error_count ?? result?.diagnostics?.error_count
   if raw == nil {
     return nil

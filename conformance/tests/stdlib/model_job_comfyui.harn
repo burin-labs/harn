@@ -12,7 +12,7 @@ import {
   model_job_request_digest,
 } from "std/model_job"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const endpoint = "https://comfy.example.test"
   harness.testing.http_mock(
     "POST",

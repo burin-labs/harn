@@ -33,7 +33,7 @@ const CAPABILITY_KEYS = [
   "thinking_modes",
 ]
 
-fn __confidence_rank(value) {
+fn __confidence_rank(value: any) {
   return CONFIDENCE_RANK[value] ?? 0
 }
 
@@ -73,11 +73,11 @@ pub fn observation(provider: string, model_id: string, fields: dict, provenance:
  * pricing / context window. Empty defaults preserve existing
  * adapters that don't yet surface these fields.
  */
-fn __observation_key(obs) {
+fn __observation_key(obs: dict) {
   return obs.provider + ":" + obs.model_id
 }
 
-fn __merge_field(base, incoming, key, base_owner, incoming_owner) {
+fn __merge_field(base: any, incoming: any, key: any, base_owner: string, incoming_owner: string) {
   const incoming_value = incoming[key]
   if incoming_value == nil {
     return {value: base[key], conflict: nil}
@@ -98,7 +98,7 @@ fn __merge_field(base, incoming, key, base_owner, incoming_owner) {
   return {value: incoming_value, conflict: {key: key, kept: incoming_value, dropped: base_value}}
 }
 
-fn __merge_keyed(base_obs, incoming_obs, field, keys_list) {
+fn __merge_keyed(base_obs: dict, incoming_obs: dict, field: string, keys_list: list) {
   const base = base_obs[field] ?? {}
   const incoming = incoming_obs[field] ?? {}
   if len(base) == 0 && len(incoming) == 0 {
@@ -131,7 +131,7 @@ fn __merge_keyed(base_obs, incoming_obs, field, keys_list) {
   }
 }
 
-fn __pick_primary(existing, incoming) {
+fn __pick_primary(existing: dict, incoming: dict) {
   const prefer_existing = existing.source_owner == "provider" && incoming.source_owner != "provider"
   const prefer_incoming = incoming.source_owner == "provider" && existing.source_owner != "provider"
   if prefer_existing {
@@ -146,7 +146,7 @@ fn __pick_primary(existing, incoming) {
   return {primary: existing, secondary: incoming}
 }
 
-fn __source_entry(obs) {
+fn __source_entry(obs: dict) {
   return {
     source_url: obs.source,
     source_kind: obs.source_kind,
@@ -158,7 +158,7 @@ fn __source_entry(obs) {
   }
 }
 
-fn __merge_observations(base, incoming) {
+fn __merge_observations(base: dict, incoming: dict) {
   const pricing_outcome = __merge_keyed(base, incoming, "pricing", PRICING_KEYS)
   const capabilities_outcome = __merge_keyed(base, incoming, "capabilities", CAPABILITY_KEYS)
   const name_outcome = __merge_field(
@@ -230,7 +230,7 @@ pub fn normalize_observations(raw: list<dict>) -> dict {
   return {observations: canonical, conflicts: conflicts}
 }
 
-fn __catalog_model_by_route(catalog) {
+fn __catalog_model_by_route(catalog: dict) {
   let by_id: dict = {}
   for model in catalog?.models ?? [] {
     by_id = by_id + {[model.provider + ":" + model.id]: model}
@@ -244,7 +244,7 @@ fn __catalog_model_by_route(catalog) {
   return by_id
 }
 
-fn __pricing_change(catalog_pricing, observed_pricing) {
+fn __pricing_change(catalog_pricing: dict?, observed_pricing: dict?) -> list<dict> {
   let changes: list<dict> = []
   for key in PRICING_KEYS {
     const cat = catalog_pricing?.[key]
@@ -261,7 +261,7 @@ fn __pricing_change(catalog_pricing, observed_pricing) {
   return changes
 }
 
-fn __effective_catalog_pricing(pricing, observed_at) {
+fn __effective_catalog_pricing(pricing: dict?, observed_at: string?) -> dict? {
   if pricing == nil || observed_at == nil {
     return pricing
   }
@@ -288,7 +288,7 @@ fn __effective_catalog_pricing(pricing, observed_at) {
   return effective
 }
 
-fn __dict_to_pairs(value) -> list<dict> {
+fn __dict_to_pairs(value: any) -> list<dict> {
   if type_of(value) != "dict" {
     return []
   }
@@ -299,7 +299,7 @@ fn __dict_to_pairs(value) -> list<dict> {
   return pairs.sorted_by({ pair -> pair.key })
 }
 
-fn __values_equal(left, right) {
+fn __values_equal(left: any, right: any) {
   const lt = type_of(left)
   const rt = type_of(right)
   if lt != rt {
@@ -324,7 +324,7 @@ fn __values_equal(left, right) {
   return left == right
 }
 
-fn __capability_changes(catalog_caps, observed_caps) {
+fn __capability_changes(catalog_caps: any, observed_caps: any) {
   // The catalog model entries expose `capabilities` as a tag list,
   // while the observation dict carries the capability matrix shape
   // (native_tools, prompt_caching, ...). Comparison is only meaningful
@@ -348,7 +348,7 @@ fn __capability_changes(catalog_caps, observed_caps) {
   return changes
 }
 
-fn __observed_providers(observations) {
+fn __observed_providers(observations: list<dict>) {
   let providers: dict = {}
   for obs in observations {
     providers = providers + {[obs.provider]: true}
@@ -429,19 +429,19 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   }
 }
 
-fn __format_currency(value) -> string {
+fn __format_currency(value: float?) -> string {
   if value == nil {
     return "—"
   }
   return "$" + to_string(round(value * 1000) / 1000.0)
 }
 
-fn __format_change_line(change) -> string {
+fn __format_change_line(change: dict) -> string {
   return "  - " + change.key + ": " + __format_currency(change.from) + " → "
     + __format_currency(change.to)
 }
 
-fn __format_capability_change(change) -> string {
+fn __format_capability_change(change: dict) -> string {
   const from_text = if change.from == nil {
     "—"
   } else {
@@ -455,7 +455,7 @@ fn __format_capability_change(change) -> string {
   return "  - " + change.key + ": " + from_text + " → " + to_text
 }
 
-fn __sources_summary(adapter_runs) -> list<string> {
+fn __sources_summary(adapter_runs: list<dict>) -> list<string> {
   let lines: list<string> = []
   for run in adapter_runs {
     const badge = if run.status == "ok" {
@@ -482,14 +482,14 @@ fn __sources_summary(adapter_runs) -> list<string> {
   return lines
 }
 
-fn __section(title, lines) -> list<string> {
+fn __section(title: string, lines: list<string>) -> list<string> {
   if len(lines) == 0 {
     return ["## " + title, "", "_None._", ""]
   }
   return ["## " + title, ""] + lines + [""]
 }
 
-fn __added_lines(added) -> list<string> {
+fn __added_lines(added: list) -> list<string> {
   let lines: list<string> = []
   for obs in added {
     const pricing = obs.pricing ?? {}
@@ -515,7 +515,7 @@ fn __added_lines(added) -> list<string> {
   return lines
 }
 
-fn __removed_lines(removed) -> list<string> {
+fn __removed_lines(removed: list) -> list<string> {
   let lines: list<string> = []
   for model in removed {
     lines = lines + ["- `" + model.id + "` (" + model.provider + ")"]
@@ -523,7 +523,7 @@ fn __removed_lines(removed) -> list<string> {
   return lines
 }
 
-fn __changed_lines(changed) -> list<string> {
+fn __changed_lines(changed: list) -> list<string> {
   let lines: list<string> = []
   for c in changed {
     const obs = c.observation
@@ -550,7 +550,7 @@ fn __changed_lines(changed) -> list<string> {
   return lines
 }
 
-fn __obs_summary_lines(items, label) -> list<string> {
+fn __obs_summary_lines(items: list, label: string) -> list<string> {
   let lines: list<string> = []
   for obs in items {
     lines = lines
@@ -559,7 +559,7 @@ fn __obs_summary_lines(items, label) -> list<string> {
   return lines
 }
 
-fn __conflict_lines(conflicts) -> list<string> {
+fn __conflict_lines(conflicts: list<dict>) -> list<string> {
   let lines: list<string> = []
   for c in conflicts {
     const kept_text = json_stringify(c.kept)
@@ -615,15 +615,15 @@ pub fn render_markdown_report(
   return join(parts, "\n")
 }
 
-fn __toml_escape(value) -> string {
+fn __toml_escape(value: string) -> string {
   return value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
-fn __toml_string(value) -> string {
+fn __toml_string(value: any) -> string {
   return "\"" + __toml_escape(to_string(value)) + "\""
 }
 
-fn __toml_list_of_strings(items) -> string {
+fn __toml_list_of_strings(items: string | bytes | list | dict | set | range | nil) -> string {
   if len(items) == 0 {
     return "[]"
   }
@@ -634,7 +634,7 @@ fn __toml_list_of_strings(items) -> string {
   return "[" + join(rendered, ", ") + "]"
 }
 
-fn __format_model_section(obs) -> list<string> {
+fn __format_model_section(obs: dict) -> list<string> {
   const id_text = __toml_string(obs.model_id)
   let lines: list<string> = ["[models." + id_text + "]"]
   if obs.name != nil {

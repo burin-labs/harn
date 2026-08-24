@@ -35,9 +35,17 @@
  */
 import { unified_diff } from "std/diff"
 
+pub type NullaryBody<out T> = fn() -> T
+
+pub type ScopedBody<out T> = fn(nil) -> T
+
+pub type PathBody<out T> = fn(string) -> T
+
+pub type ScenarioScope = {dir: string?}
+
 let __testing_step_events = []
 
-fn params_subset_match(expected, actual) {
+fn params_subset_match(expected: dict, actual: dict) {
   if expected == nil {
     return true
   }
@@ -52,7 +60,7 @@ fn params_subset_match(expected, actual) {
   return true
 }
 
-fn __testing_is_callable(value) -> bool {
+fn __testing_is_callable(value: unknown) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
@@ -137,7 +145,7 @@ pub fn scripted_argv<T>(entries: list<ScriptedArgvStep<T>>) -> ScriptedArgv<T> {
   }
 }
 
-fn __testing_step_event_record(ctx) {
+fn __testing_step_event_record(ctx: dict) {
   let record = {
     event: ctx?.event,
     target: ctx?.target,
@@ -152,7 +160,7 @@ fn __testing_step_event_record(ctx) {
   return record
 }
 
-fn __testing_step_events_for(kind) {
+fn __testing_step_events_for(kind: string) {
   let out = []
   for event in __testing_step_events {
     if event.event == kind {
@@ -162,7 +170,7 @@ fn __testing_step_events_for(kind) {
   return out
 }
 
-fn __testing_event_matches(candidate, predicate) -> bool {
+fn __testing_event_matches(candidate: dict, predicate: unknown) -> bool {
   if predicate == nil {
     return true
   }
@@ -175,7 +183,7 @@ fn __testing_event_matches(candidate, predicate) -> bool {
   return candidate == predicate
 }
 
-fn __testing_handoff_target_matches(handoff, target) -> bool {
+fn __testing_handoff_target_matches(handoff: dict, target: any) -> bool {
   if target == nil {
     return true
   }
@@ -187,7 +195,7 @@ fn __testing_handoff_target_matches(handoff, target) -> bool {
     || handoff?.target_persona == target
 }
 
-fn __testing_golden_match(expected, actual) -> bool {
+fn __testing_golden_match(expected: any, actual: any) -> bool {
   if expected == "<ms>" {
     const kind = type_of(actual)
     return kind == "int" || kind == "float"
@@ -268,7 +276,7 @@ pub fn llm_call_count(llm: HarnessLlm) -> int {
  * @effects: []
  * @errors: []
  */
-pub fn with_llm_mocks(llm: HarnessLlm, mocks, body) {
+pub fn with_llm_mocks<T>(llm: HarnessLlm, mocks: list<dict>?, body: ScopedBody<T>) -> T {
   llm.mock_push_scope()
   try {
     for entry in mocks ?? [] {
@@ -289,13 +297,22 @@ pub fn with_llm_mocks(llm: HarnessLlm, mocks, body) {
 pub type CapabilityFixture = {
   capability: string,
   method: string,
-  result?: any,
+  result?: unknown,
   error?: string,
   when?: dict,
   repeat?: bool,
   /** Permit a test-local host operation that the embedding Rust host registers only at runtime. */
   unregistered_ok?: bool,
 }
+
+pub type ScenarioConfig = {
+  capabilities?: list<CapabilityFixture>,
+  llm?: list<dict>,
+  fs?: dict<string, unknown>,
+  temp_dir?: bool,
+}
+
+pub type LlmToolCall = {name: string, args?: dict, id?: string}
 
 /**
  * Run `body` with an isolated fixture scope owned by this exact `Harness`.
@@ -312,31 +329,31 @@ pub type CapabilityFixture = {
  * @effects: [state.mutate]
  * @errors: [invalid_capability, invalid_method]
  */
-pub fn with_capability_fixtures(
+pub fn with_capability_fixtures<T>(
   testing: HarnessTesting,
   fixtures: list<CapabilityFixture>,
-  body,
-) -> any {
+  body: ScopedBody<T>,
+) -> T {
   testing.push_scope()
   try {
     for fixture in fixtures {
-      if fixture?.error != nil {
+      if fixture.error != nil {
         testing.respond_error(
           fixture.capability,
           fixture.method,
           fixture.error,
-          fixture?.when,
-          fixture?.repeat,
-          fixture?.unregistered_ok,
+          fixture.when,
+          fixture.repeat,
+          fixture.unregistered_ok,
         )
       } else {
         testing.respond(
           fixture.capability,
           fixture.method,
-          fixture?.result,
-          fixture?.when,
-          fixture?.repeat,
-          fixture?.unregistered_ok,
+          fixture.result,
+          fixture.when,
+          fixture.repeat,
+          fixture.unregistered_ok,
         )
       }
     }
@@ -380,7 +397,7 @@ pub fn step_events() {
  * @effects: []
  * @errors: []
  */
-pub fn step_assertions_begin(agent: HarnessAgent, persona_pattern = "*") {
+pub fn step_assertions_begin(agent: HarnessAgent, persona_pattern: string = "*") {
   agent.clear_persona_hooks()
   step_events_clear()
   agent.register_persona_hook(
@@ -419,7 +436,7 @@ pub fn step_assertions_end(agent: HarnessAgent) {
  * @effects: []
  * @errors: []
  */
-pub fn assert_steps_ran(expected_names, message = nil) {
+pub fn assert_steps_ran(expected_names: list, message: string? = nil) {
   let actual = []
   for event in __testing_step_events_for("PreStep") {
     actual = actual.appending(event.step_name)
@@ -439,7 +456,7 @@ pub fn assert_steps_ran(expected_names, message = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn assert_step_received(step_name, predicate = nil, message = nil) {
+pub fn assert_step_received(step_name: any, predicate: any = nil, message: string? = nil) {
   for event in __testing_step_events_for("PreStep") {
     if event.step_name == step_name && __testing_event_matches(event, predicate) {
       return event
@@ -455,7 +472,7 @@ pub fn assert_step_received(step_name, predicate = nil, message = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
+pub fn assert_step_emitted(step_name: any, predicate: any = nil, message: string? = nil) {
   for event in __testing_step_events_for("PostStep") {
     if event.step_name == step_name && __testing_event_matches(event, predicate) {
       return event
@@ -471,7 +488,7 @@ pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
+pub fn assert_handoff_emitted(source: dict, handoff_kind: string, target: any = nil) {
   const handoffs = source?.handoffs ?? source
   for item in handoffs ?? [] {
     if item?.kind == handoff_kind && __testing_handoff_target_matches(item, target) {
@@ -498,7 +515,7 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
  * @errors: []
  * @example: assert_receipt_field(receipt, "/outcome/status", "ok")
  */
-pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
+pub fn assert_receipt_field(receipt: any, path: string, expected: any, message: any = nil) {
   const actual = json_pointer(receipt, path)
   const diff = value_diff(actual, expected)
   require diff == nil,
@@ -523,7 +540,7 @@ pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
  * @errors: []
  * @example: assert_golden_transcript(events, [{kind: "step", at: "<ms>"}])
  */
-pub fn assert_golden_transcript(actual, golden, message = nil) {
+pub fn assert_golden_transcript(actual: any, golden: any, message: any = nil) {
   require __testing_golden_match(golden, actual),
     message
     ?? ("assert_golden_transcript: the value does not match the golden.\n    golden    "
@@ -610,7 +627,7 @@ pub fn llm_error(message: string) -> dict {
  * @errors: []
  * @example: llm_tool_call("write_note", {path: "n.txt"})
  */
-pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
+pub fn llm_tool_call(name: string, args: dict? = {}, id: string? = nil) -> dict {
   return {tool_calls: [{id: id ?? name, name: name, arguments: args ?? {}}]}
 }
 
@@ -623,12 +640,12 @@ pub fn llm_tool_call(name: string, args = {}, id = nil) -> dict {
  * @errors: []
  * @example: llm_tool_calls([{name: "a", args: {}}, {name: "b"}])
  */
-pub fn llm_tool_calls(calls) -> dict {
+pub fn llm_tool_calls(calls: list<LlmToolCall>) -> dict {
   let out = []
   let index = 0
-  for call in calls ?? [] {
-    const resolved_id = call?.id ?? (to_string(call?.name) + "_" + to_string(index))
-    out = out.appending({id: resolved_id, name: call?.name, arguments: call?.args ?? {}})
+  for call in calls {
+    const resolved_id = call.id ?? (call.name + "_" + to_string(index))
+    out = out.appending({id: resolved_id, name: call.name, arguments: call.args ?? {}})
     index = index + 1
   }
   return {tool_calls: out}
@@ -642,7 +659,7 @@ pub fn llm_tool_calls(calls) -> dict {
  * @errors: []
  * @example: with_llm_script([llm_text("hi"), llm_done()], body)
  */
-pub fn with_llm_script(llm: HarnessLlm, turns, body) {
+pub fn with_llm_script<T>(llm: HarnessLlm, turns: list<dict>?, body: ScopedBody<T>) -> T {
   return with_llm_mocks(llm, turns, body)
 }
 
@@ -659,7 +676,7 @@ pub fn with_llm_script(llm: HarnessLlm, turns, body) {
  * @errors: [validation]
  * @example: with_llm_script([llm_done()], { -> with_nested_execution_budget(2, { -> agent_fanout(["check"]) }) })
  */
-pub fn with_nested_execution_budget<T>(depth: int, body) -> T {
+pub fn with_nested_execution_budget<T>(depth: int, body: fn() -> T) -> T {
   return __testing_with_nested_execution_budget(depth, body)
 }
 
@@ -680,7 +697,7 @@ pub fn with_nested_execution_budget<T>(depth: int, body) -> T {
  * @errors: []
  * @example: assert_throws({ -> parse("") })
  */
-pub fn assert_throws(body, message = nil) -> any {
+pub fn assert_throws<T>(body: fn() -> T, message: string? = nil) -> unknown {
   let threw = false
   let captured = nil
   try {
@@ -702,7 +719,11 @@ pub fn assert_throws(body, message = nil) -> any {
  * @errors: []
  * @example: assert_error_contains({ -> connect("") }, "url is required")
  */
-pub fn assert_error_contains(body, substring: string, message = nil) -> any {
+pub fn assert_error_contains<T>(
+  body: fn() -> T,
+  substring: string,
+  message: string? = nil,
+) -> string {
   const captured = assert_throws(body, message)
   const rendered = to_string(captured)
   require contains(rendered, substring),
@@ -711,7 +732,7 @@ pub fn assert_error_contains(body, substring: string, message = nil) -> any {
       + to_string(substring)
       + ", got: "
       + rendered)
-  return captured
+  return rendered
 }
 
 /**
@@ -722,21 +743,18 @@ pub fn assert_error_contains(body, substring: string, message = nil) -> any {
  * @errors: []
  * @example: assert_no_throw({ -> parse("ok") })
  */
-pub fn assert_no_throw(body, message = nil) -> any {
+pub fn assert_no_throw<T>(body: fn() -> T, message: string? = nil) -> T {
   // NB: assign-then-return rather than `return body()` inside the try.
   // A throw inside `return <expr>` within a try is not observed by the
   // local catch, so the assign-then-return shape is required for the
   // catch to fire.
-  let value = nil
   try {
-    value = body()
+    const outcome = {value: body()}
+    return outcome.value
   } catch (e) {
-    require false,
-      message
-      ?? ("assert_no_throw: expected the body not to throw, but it threw: "
-        + to_string(e))
+    throw message
+      ?? ("assert_no_throw: expected the body not to throw, but it threw: " + to_string(e))
   }
-  return value
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -766,7 +784,7 @@ pub fn assert_no_throw(body, message = nil) -> any {
  * @errors: []
  * @example: assert_nil(cache_lookup("missing-key"))
  */
-pub fn assert_nil(value: any, message = nil) -> nil {
+pub fn assert_nil<T>(value: T?, message: string? = nil) -> nil {
   require value == nil, message ?? ("assert_nil: expected nil, got " + to_string(value))
   return nil
 }
@@ -779,9 +797,11 @@ pub fn assert_nil(value: any, message = nil) -> nil {
  * @errors: []
  * @example: const id = assert_not_nil(created.id)
  */
-pub fn assert_not_nil(value: any, message = nil) -> any {
-  require value != nil, message ?? "assert_not_nil: expected a non-nil value, got nil"
-  return value
+pub fn assert_not_nil<T>(value: T?, message: string? = nil) -> T {
+  if value != nil {
+    return value
+  }
+  throw message ?? "assert_not_nil: expected a non-nil value, got nil"
 }
 
 /**
@@ -794,7 +814,7 @@ pub fn assert_not_nil(value: any, message = nil) -> any {
  * @errors: []
  * @example: assert_true(is_ready())
  */
-pub fn assert_true(value: bool, message = nil) -> nil {
+pub fn assert_true(value: bool, message: string? = nil) -> nil {
   require value, message ?? ("assert_true: expected true, got " + to_string(value))
   return nil
 }
@@ -807,7 +827,7 @@ pub fn assert_true(value: bool, message = nil) -> nil {
  * @errors: []
  * @example: assert_false(is_ready())
  */
-pub fn assert_false(value: bool, message = nil) -> nil {
+pub fn assert_false(value: bool, message: string? = nil) -> nil {
   require !value, message ?? ("assert_false: expected false, got " + to_string(value))
   return nil
 }
@@ -823,8 +843,20 @@ pub fn assert_false(value: bool, message = nil) -> nil {
  * @example: assert_contains("hello world", "world")
  * @example: assert_contains([1, 2, 3], 2)
  */
-pub fn assert_contains(haystack: string | list, needle: any, message = nil) -> any {
-  require contains(haystack, needle),
+pub fn assert_contains<U>(
+  haystack: string | list,
+  needle: U,
+  message: string? = nil,
+) -> string | list {
+  const matched = if type_of(haystack) == "string" {
+    require type_of(needle) == "string", "assert_contains: string haystack requires a string needle"
+    contains(haystack, needle)
+  } else if type_of(haystack) == "list" {
+    contains(haystack, needle)
+  } else {
+    throw "assert_contains: expected string or list, got " + type_of(haystack)
+  }
+  require matched,
     message
     ?? ("assert_contains: expected " + to_string(haystack)
       + " to contain "
@@ -843,7 +875,7 @@ pub fn assert_contains(haystack: string | list, needle: any, message = nil) -> a
 
 // -------------------------------------------------------------------------------------------------
 
-fn __testing_fs_content(value) -> string {
+fn __testing_fs_content(value: unknown) -> string {
   if type_of(value) == "string" {
     return value
   }
@@ -859,7 +891,7 @@ fn __testing_fs_content(value) -> string {
  * @errors: []
  * @example: with_temp_dir(harness.fs, { dir -> harness.fs.write_text(dir + "/x", "1") })
  */
-pub fn with_temp_dir(fs: HarnessFs, body) -> any {
+pub fn with_temp_dir<T>(fs: HarnessFs, body: PathBody<T>) -> T {
   const dir = fs.mkdtemp_in_workspace("harn-test-")
   try {
     const result = body(dir)
@@ -882,7 +914,7 @@ pub fn with_temp_dir(fs: HarnessFs, body) -> any {
  * @errors: []
  * @example: with_fs(harness.fs, {"in.txt": "hello"}, { dir -> harness.fs.read_text(dir + "/in.txt") })
  */
-pub fn with_fs(fs: HarnessFs, files, body) -> any {
+pub fn with_fs<T>(fs: HarnessFs, files: dict<string, unknown>?, body: PathBody<T>) -> T {
   return with_temp_dir(
     fs,
     { dir ->
@@ -912,18 +944,22 @@ pub fn with_fs(fs: HarnessFs, files, body) -> any {
  * @errors: []
  * @example: with_scenario(harness, {llm: [llm_done()], fs: {"a.txt": "1"}}, { s -> run(s.dir) })
  */
-pub fn with_scenario(harness: Harness, config, body) {
-  fn run_scoped(dir) {
+pub fn with_scenario<T>(
+  harness: Harness,
+  config: ScenarioConfig,
+  body: fn(ScenarioScope) -> T,
+) -> T {
+  fn run_scoped(dir: string?) -> T {
     return with_capability_fixtures(
       harness.testing,
-      config?.capabilities ?? [],
-      { _ -> return with_llm_mocks(harness.llm, config?.llm ?? [], { _ -> body({dir: dir}) }) },
+      config.capabilities ?? [],
+      { -> return with_llm_mocks(harness.llm, config.llm ?? [], { -> body({dir: dir}) }) },
     )
   }
-  if config?.fs != nil {
+  if config.fs != nil {
     return with_fs(harness.fs, config.fs, run_scoped)
   }
-  if config?.temp_dir {
+  if config.temp_dir {
     return with_temp_dir(harness.fs, run_scoped)
   }
   return run_scoped(nil)
@@ -985,7 +1021,7 @@ fn __testing_running_in_ci(env: HarnessEnv) -> bool {
  *     the convenient local flow; CI suppresses it so an ambient flag can't
  *     turn the gate into a silent no-op.
  */
-fn __testing_snapshot_may_write(env: HarnessEnv, options) -> bool {
+fn __testing_snapshot_may_write(env: HarnessEnv, options: dict?) -> bool {
   if options?.update == true {
     return true
   }
@@ -1000,7 +1036,7 @@ fn __testing_snapshot_may_write(env: HarnessEnv, options) -> bool {
  * owned by this primitive so a future orphan sweep never touches another
  * tool's goldens.
  */
-fn __testing_snapshot_path(fs: HarnessFs, name: string, options) -> string {
+fn __testing_snapshot_path(fs: HarnessFs, name: string, options: dict?) -> string {
   const dir = options?.dir ?? (fs.source_dir() + "/__snapshots__")
   return dir + "/" + name + ".harn.snap"
 }
@@ -1012,7 +1048,7 @@ fn __testing_snapshot_path(fs: HarnessFs, name: string, options) -> string {
  * regex, `replacement` defaults to "". The same normalization runs on both the
  * write and the compare path, so the stored golden is always the scrubbed form.
  */
-fn __testing_snapshot_normalize(actual: string, options) -> string {
+fn __testing_snapshot_normalize(actual: string, options: dict?) -> string {
   let out = actual
   for rule in options?.redact ?? [] {
     out = regex_replace(rule.pattern, rule.replacement ?? "", out)
@@ -1067,7 +1103,7 @@ pub fn assert_snapshot(
   fs: HarnessFs,
   name: string,
   actual: string,
-  options = nil,
+  options: any = nil,
 ) -> string {
   const path = __testing_snapshot_path(fs, name, options)
   const normalized = __testing_snapshot_normalize(actual, options)

@@ -168,7 +168,7 @@ const CONVERGENCE_GUARD_DEFAULT_THRESHOLD = 1
 
 const CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS = 2
 
-fn __convergence_guard_threshold(value) -> int {
+fn __convergence_guard_threshold(value: any) -> int {
   const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD)
     ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD
   if parsed <= 0 {
@@ -177,7 +177,7 @@ fn __convergence_guard_threshold(value) -> int {
   return parsed
 }
 
-fn __convergence_guard_min_turns(value) -> int {
+fn __convergence_guard_min_turns(value: any) -> int {
   const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS)
     ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS
   if parsed <= 0 {
@@ -251,7 +251,7 @@ fn __convergence_guard_receipt(
   confidence: float,
   reason: string,
   evidence: dict,
-  recovery,
+  recovery: any,
 ) -> dict {
   return {
     confidence: confidence,
@@ -577,7 +577,7 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pace_action_of(decision) -> string {
+pub fn pace_action_of(decision: dict?) -> string {
   const action = to_string(decision?.action ?? "proceed")
   if action == "cut" {
     return "abort"
@@ -654,7 +654,7 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
 // silently defaulting to 0 and never firing (the dead-since-inception class).
 const GOVERNOR_REQUIRED_PAYLOAD_KEYS = ["iteration", "session_id", "successful_tool_names"]
 
-fn __governor_shape_ok(payload) -> bool {
+fn __governor_shape_ok(payload: dict) -> bool {
   const present = keys(payload)
   for key in GOVERNOR_REQUIRED_PAYLOAD_KEYS {
     if !contains(present, key) {
@@ -721,7 +721,7 @@ pub fn governor_post_turn(agent: HarnessAgent, policy: GovernorPolicy) {
   }
 }
 
-fn __normalize_verdict(verdict) -> dict {
+fn __normalize_verdict(verdict: unknown) -> dict {
   if verdict == nil || verdict == "" {
     return {message: "", stop: false}
   }
@@ -858,7 +858,12 @@ pub fn with_governance(agent: HarnessAgent, opts: dict, config: dict) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_governed_preset(harness: Harness, kind, options = nil, governance = {}) -> dict {
+pub fn agent_governed_preset(
+  harness: Harness,
+  kind: string,
+  options: any = nil,
+  governance: dict = {},
+) -> dict {
   return with_governance(harness.agent, agent_preset(harness, kind, options), governance)
 }
 

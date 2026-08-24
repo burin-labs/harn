@@ -18,14 +18,14 @@ const CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
 
 const CONTEXT_EVAL_VERSION = 1
 
-fn __context_eval_text(value) {
+fn __context_eval_text(value: any) {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __context_eval_required_text(value, field) {
+fn __context_eval_required_text(value: string, field: string) {
   const text = __context_eval_text(value)
   if text == "" {
     throw "std/context/eval: " + field + " is required"
@@ -33,7 +33,7 @@ fn __context_eval_required_text(value, field) {
   return text
 }
 
-fn __context_eval_list(value, field) {
+fn __context_eval_list(value: any, field: string) {
   if value == nil {
     return []
   }
@@ -43,7 +43,7 @@ fn __context_eval_list(value, field) {
   return value
 }
 
-fn __context_eval_string_list(value, field) {
+fn __context_eval_string_list(value: any, field: string) {
   let out = []
   for item in __context_eval_list(value, field) {
     const text = __context_eval_text(item)

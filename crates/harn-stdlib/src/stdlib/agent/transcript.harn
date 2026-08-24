@@ -4,14 +4,17 @@
 // compatibility layer for reading them. Downstream eval/reporting tools should
 // consume these normalized rows instead of guessing at provider-specific or
 // historical JSONL shapes.
-import { read_jsonl } from "std/jsonl"
+import { ReadJsonlOptions, read_jsonl } from "std/jsonl"
 import "std/schema"
 
 const TRANSCRIPT_ROW_SCHEMA = "harn.agent.transcript.row.v1"
 
 const TRANSCRIPT_REPORT_SCHEMA = "harn.agent.transcript.report.v1"
 
-pub type AgentTranscriptToolCall = {id?: string, name: string, args: dict, raw?: any}
+pub type AgentTranscriptToolCall = {id?: string, name: string, args: dict, raw?: unknown}
+
+/** Provider message content forms accepted by transcript normalization. */
+pub type AgentTranscriptTextValue = string | list | dict | nil
 
 pub type AgentTranscriptToolResultOutcome = "ok" | "error" | "unknown"
 
@@ -31,11 +34,11 @@ pub type AgentTranscriptAssistantRow = {
   index: int,
   text: string,
   tool_calls: list<AgentTranscriptToolCall>,
-  provider?: any,
-  model?: any,
+  provider?: unknown,
+  model?: unknown,
   usage: AgentTranscriptUsage,
-  raw_type?: any,
-  raw?: any,
+  raw_type?: unknown,
+  raw?: unknown,
 }
 
 pub type AgentTranscriptUserRow = {
@@ -45,8 +48,8 @@ pub type AgentTranscriptUserRow = {
   iteration: int,
   index: int,
   text: string,
-  raw_type?: any,
-  raw?: any,
+  raw_type?: unknown,
+  raw?: unknown,
 }
 
 pub type AgentTranscriptToolResultRow = {
@@ -60,8 +63,8 @@ pub type AgentTranscriptToolResultRow = {
   text: string,
   outcome: AgentTranscriptToolResultOutcome,
   data: dict,
-  raw_type?: any,
-  raw?: any,
+  raw_type?: unknown,
+  raw?: unknown,
 }
 
 pub type AgentTranscriptRow = AgentTranscriptAssistantRow \
@@ -279,10 +282,10 @@ pub fn agent_transcript_report_schema() {
  * @api_stability: experimental
  * @example: agent_transcript_text(message.content)
  */
-pub fn agent_transcript_text(value) -> string {
+pub fn agent_transcript_text(value: AgentTranscriptTextValue) -> string {
   const kind = type_of(value)
   if kind == "string" {
-    return value
+    return to_string(value)
   }
   if kind == "list" {
     let parts = []
@@ -304,7 +307,7 @@ pub fn agent_transcript_text(value) -> string {
   return ""
 }
 
-fn __json_or_raw(raw) {
+fn __json_or_raw(raw: unknown) {
   if type_of(raw) != "string" {
     return raw ?? {}
   }
@@ -317,7 +320,7 @@ fn __json_or_raw(raw) {
   return {_raw: raw}
 }
 
-fn __args_dict_or_raw(raw) {
+fn __args_dict_or_raw(raw: unknown) {
   const value = __json_or_raw(raw)
   if type_of(value) == "dict" {
     return value
@@ -332,7 +335,7 @@ fn __args_dict_or_raw(raw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_call_name(call) -> string {
+pub fn agent_transcript_tool_call_name(call: dict) -> string {
   if type_of(call) != "dict" {
     return ""
   }
@@ -349,7 +352,7 @@ pub fn agent_transcript_tool_call_name(call) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_call_args(call) {
+pub fn agent_transcript_tool_call_args(call: dict) {
   if type_of(call) != "dict" {
     return {}
   }
@@ -374,7 +377,7 @@ pub fn agent_transcript_tool_call_args(call) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_call(call) -> AgentTranscriptToolCall? {
+pub fn agent_transcript_tool_call(call: dict) -> AgentTranscriptToolCall? {
   const name = agent_transcript_tool_call_name(call)
   if name == "" {
     return nil
@@ -394,7 +397,7 @@ pub fn agent_transcript_tool_call(call) -> AgentTranscriptToolCall? {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_calls(calls) -> list<AgentTranscriptToolCall> {
+pub fn agent_transcript_tool_calls(calls: list) -> list<AgentTranscriptToolCall> {
   let out = []
   if type_of(calls) != "list" {
     return out
@@ -408,11 +411,16 @@ pub fn agent_transcript_tool_calls(calls) -> list<AgentTranscriptToolCall> {
   return out
 }
 
-fn __issue(code: string, message: string, record_index: int, details = {}) -> AgentTranscriptIssue {
+fn __issue(
+  code: string,
+  message: string,
+  record_index: int,
+  details: dict? = {},
+) -> AgentTranscriptIssue {
   return {code: code, message: message, record_index: record_index, details: details ?? {}}
 }
 
-fn __known_record_shape(record) -> bool {
+fn __known_record_shape(record: dict) -> bool {
   if type_of(record) != "dict" {
     return false
   }
@@ -427,7 +435,7 @@ fn __known_record_shape(record) -> bool {
     || role == "user"
 }
 
-fn __tool_call_raw_args(call) {
+fn __tool_call_raw_args(call: dict) {
   if type_of(call) != "dict" {
     return nil
   }
@@ -443,7 +451,7 @@ fn __tool_call_raw_args(call) {
   return nil
 }
 
-fn __tool_call_record_issues(record, index: int) -> list {
+fn __tool_call_record_issues(record: dict, index: int) -> list {
   if type_of(record) != "dict" {
     return []
   }
@@ -528,11 +536,11 @@ fn __tool_call_record_issues(record, index: int) -> list {
   return issues
 }
 
-fn __role(record) -> string {
+fn __role(record: dict) -> string {
   return __first_text([record?.role, record?.message?.role])
 }
 
-fn __assistant_row(record, index: int, iteration: int) -> dict {
+fn __assistant_row(record: dict, index: int, iteration: int) -> dict {
   return {
     schema: TRANSCRIPT_ROW_SCHEMA,
     kind: "assistant",
@@ -561,7 +569,7 @@ fn __assistant_row(record, index: int, iteration: int) -> dict {
   }
 }
 
-fn __user_row(record, index: int, iteration: int) -> dict {
+fn __user_row(record: dict, index: int, iteration: int) -> dict {
   return {
     schema: TRANSCRIPT_ROW_SCHEMA,
     kind: "user",
@@ -574,7 +582,7 @@ fn __user_row(record, index: int, iteration: int) -> dict {
   }
 }
 
-fn __tool_result_outcome(record = nil) -> AgentTranscriptToolResultOutcome {
+fn __tool_result_outcome(record: dict? = nil) -> AgentTranscriptToolResultOutcome {
   const typed = if record?.schema == TRANSCRIPT_ROW_SCHEMA && record?.kind == "tool_result" {
     record?.outcome
   } else {
@@ -590,7 +598,7 @@ fn __tool_result_row(
   name: string,
   text: string,
   call_id: string,
-  record,
+  record: dict,
   index: int,
   iteration: int,
 ) -> dict {
@@ -623,7 +631,7 @@ fn __tool_result_row(
   }
 }
 
-fn __tool_message_row(record, index: int, iteration: int) -> dict {
+fn __tool_message_row(record: dict, index: int, iteration: int) -> dict {
   return __tool_result_row(
     __first_text(
       [record?._harn?.tool_name, record?.name, record?.message?.name, record?.tool_name],
@@ -696,7 +704,7 @@ pub fn agent_transcript_tool_result_blocks(text: string) -> list {
   return out
 }
 
-fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) -> dict {
+fn __legacy_request_tool_result_rows(record: dict, index: int, previous_count: int) -> dict {
   let all = []
   for message in record?.messages ?? [] {
     if message?.role == "user" {
@@ -738,7 +746,7 @@ fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) ->
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_normalize(records) -> list<AgentTranscriptRow> {
+pub fn agent_transcript_normalize(records: list<dict>?) -> list<AgentTranscriptRow> {
   let rows = []
   let next_iteration = 0
   let last_assistant_iteration = -1
@@ -787,7 +795,7 @@ pub fn agent_transcript_normalize(records) -> list<AgentTranscriptRow> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
+pub fn agent_transcript_normalize_report(records: unknown) -> AgentTranscriptReport {
   let issues = []
   const input_records = if type_of(records) == "list" {
     records
@@ -805,6 +813,7 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
     }
     []
   }
+  let valid_records: list<dict> = []
   let record_index = 0
   for record in input_records {
     if type_of(record) != "dict" {
@@ -820,6 +829,7 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
       record_index = record_index + 1
       continue
     }
+    valid_records = valid_records + [record]
     if !__known_record_shape(record) {
       issues = issues
         + [
@@ -834,7 +844,7 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
     issues = issues + __tool_call_record_issues(record, record_index)
     record_index = record_index + 1
   }
-  let rows = agent_transcript_normalize(input_records)
+  let rows = agent_transcript_normalize(valid_records)
   let errors = []
   let row_index = 0
   for row in rows {
@@ -867,7 +877,7 @@ fn __transcript_lifecycle_issue(
   code: string,
   message: string,
   row_index: int,
-  details = {},
+  details: dict = {},
 ) -> AgentTranscriptIssue {
   return {code: code, message: message, record_index: row_index, details: details}
 }
@@ -1066,7 +1076,9 @@ fn __transcript_lifecycle_orphans(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_lifecycle_report(records) -> AgentTranscriptToolLifecycleReport {
+pub fn agent_transcript_tool_lifecycle_report(
+  records: unknown,
+) -> AgentTranscriptToolLifecycleReport {
   const normalized = agent_transcript_normalize_report(records)
   const rows = normalized.rows
   const index = __transcript_lifecycle_index(rows)
@@ -1093,7 +1105,7 @@ pub fn agent_transcript_tool_lifecycle_report(records) -> AgentTranscriptToolLif
 pub fn agent_transcript_read(
   fs: HarnessFs,
   path: string,
-  options = {},
+  options: ReadJsonlOptions = {},
 ) -> list<AgentTranscriptRow> {
   return agent_transcript_normalize(read_jsonl(fs, path, options ?? {}))
 }
@@ -1108,7 +1120,7 @@ pub fn agent_transcript_read(
 pub fn agent_transcript_read_report(
   fs: HarnessFs,
   path: string,
-  options = {},
+  options: ReadJsonlOptions = {},
 ) -> AgentTranscriptReport {
   return agent_transcript_normalize_report(read_jsonl(fs, path, options ?? {}))
 }
@@ -1120,7 +1132,7 @@ pub fn agent_transcript_read_report(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_events(records) -> list {
+pub fn agent_transcript_tool_events(records: list?) -> list {
   const rows = agent_transcript_normalize(records)
   let out = []
   for row in rows {
@@ -1156,7 +1168,7 @@ pub fn agent_transcript_tool_events(records) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_results(records) -> list {
+pub fn agent_transcript_tool_results(records: list?) -> list {
   const rows = agent_transcript_normalize(records)
   let out = []
   for row in rows {

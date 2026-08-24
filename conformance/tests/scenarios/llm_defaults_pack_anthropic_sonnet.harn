@@ -2,7 +2,7 @@
 // catalog defaults, task defaults, and capability-backed reasoning policy.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const r = pack_for(
     harness.agent,
     harness.llm,

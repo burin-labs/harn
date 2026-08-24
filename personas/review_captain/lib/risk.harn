@@ -6,7 +6,7 @@
 // review is the source of truth; this layer only surfaces obvious
 // hotspots without requiring an LLM hop.
 /** classify_risky_paths(changed_files, patterns) -> {hits, misses}. */
-pub fn classify_risky_paths(changed_files, patterns) {
+pub fn classify_risky_paths(changed_files: list?, patterns: list?) {
   const pats = patterns ?? []
   const files = changed_files ?? []
   let hits = []
@@ -28,7 +28,7 @@ pub fn classify_risky_paths(changed_files, patterns) {
  * its lowered path matches one of the supplied test globs (for example
  * `tests/`, `__tests__`, `_test.swift`).
  */
-pub fn infer_missing_tests(changed_files, test_globs) {
+pub fn infer_missing_tests(changed_files: list?, test_globs: list?) {
   const files = changed_files ?? []
   const globs = test_globs ?? []
   let test_files = []
@@ -46,7 +46,7 @@ pub fn infer_missing_tests(changed_files, test_globs) {
   return source_files
 }
 
-fn _matches_any(file, patterns) {
+fn _matches_any(file: any, patterns: list) {
   for pattern in patterns {
     if _matches(file, pattern) {
       return true
@@ -55,7 +55,7 @@ fn _matches_any(file, patterns) {
   return false
 }
 
-fn _matches(file, pattern) {
+fn _matches(file: any, pattern: any) {
   if ends_with(pattern, "*") {
     const prefix = substring(pattern, 0, len(pattern) - 1)
     return starts_with(file, prefix)
@@ -67,7 +67,7 @@ fn _matches(file, pattern) {
   return contains(file, pattern)
 }
 
-fn _looks_like_test(file, globs) {
+fn _looks_like_test(file: string?, globs: list) {
   const lowered = lowercase(file)
   for glob in globs {
     if _matches(lowered, lowercase(glob)) {

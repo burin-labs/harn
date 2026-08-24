@@ -47,6 +47,15 @@ impl Compiler {
         }
     }
 
+    /// Compiler for Harn's immutable, embedder-owned stdlib sources.
+    #[doc(hidden)]
+    pub fn new_embedded_stdlib() -> Self {
+        install_native_builtin_contracts();
+        Self {
+            inner: harn_kernel::Compiler::new_embedded_stdlib(),
+        }
+    }
+
     pub fn with_options(options: CompilerOptions) -> Self {
         install_native_builtin_contracts();
         Self {

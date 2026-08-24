@@ -44,15 +44,15 @@ type EvalFingerprintIntegrity = {
   inconsistent_cases: list<string>,
 }
 
-fn __float(value) -> float {
+fn __float(value: any) -> float {
   return to_float(value) ?? 0.0
 }
 
-fn __int(value) -> int {
+fn __int(value: any) -> int {
   return to_int(value) ?? 0
 }
 
-fn __text(value) -> string {
+fn __text(value: string?) -> string {
   return trim(to_string(value ?? ""))
 }
 

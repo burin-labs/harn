@@ -1,6 +1,6 @@
 import { tree_of_thoughts } from "std/llm/ensemble"
 
-fn grid_expand(state, k) {
+fn grid_expand(state: dict, k: any) {
   const moves = [
     {name: "right", x: state.x + 1, y: state.y},
     {name: "up", x: state.x, y: state.y + 1},
@@ -9,15 +9,15 @@ fn grid_expand(state, k) {
   return moves.filter({ move -> move.x >= 0 && move.x <= 2 && move.y >= 0 && move.y <= 2 }).take(k)
 }
 
-fn grid_score(state) {
+fn grid_score(state: dict) {
   return 10 - abs(2 - state.x) - abs(2 - state.y)
 }
 
-fn grid_done(state) {
+fn grid_done(state: dict) {
   return state.x == 2 && state.y == 2
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const bfs = tree_of_thoughts(
     {
       initial_state: {name: "start", x: 0, y: 0},

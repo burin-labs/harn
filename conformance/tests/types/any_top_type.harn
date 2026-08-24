@@ -1,5 +1,5 @@
 /** `any` is a true top type — everything flows in, everything flows out. */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Every concrete type is assignable to `any`.
   const a1: any = 42
   const a2: any = "hello"

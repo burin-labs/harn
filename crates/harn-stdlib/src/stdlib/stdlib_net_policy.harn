@@ -56,7 +56,7 @@
  * @api_stability: experimental
  * @example: NetPolicy.domain("github.com")
  */
-pub fn domain(host) {
+pub fn domain(host: string) {
   return __net_policy_domain(host)
 }
 
@@ -70,7 +70,7 @@ pub fn domain(host) {
  * @api_stability: experimental
  * @example: NetPolicy.domain_wildcard("*.github.com")
  */
-pub fn domain_wildcard(pattern) {
+pub fn domain_wildcard(pattern: string) {
   return __net_policy_domain_wildcard(pattern)
 }
 
@@ -86,7 +86,7 @@ pub fn domain_wildcard(pattern) {
  * @api_stability: experimental
  * @example: NetPolicy.cidr("10.0.0.0/8")
  */
-pub fn cidr(range) {
+pub fn cidr(range: string) {
   return __net_policy_cidr(range)
 }
 
@@ -99,7 +99,7 @@ pub fn cidr(range) {
  * @api_stability: experimental
  * @example: NetPolicy.host("api.anthropic.com", [443])
  */
-pub fn host(host_name, ports) {
+pub fn host(host_name: string, ports: list) {
   return __net_policy_host(host_name, ports)
 }
 
@@ -114,7 +114,7 @@ pub fn host(host_name, ports) {
  * @api_stability: experimental
  * @example: NetPolicy.create({allow: [NetPolicy.domain("github.com")], default: "deny"})
  */
-pub fn create(config) {
+pub fn create(config: dict) {
   return __net_policy_create(config)
 }
 

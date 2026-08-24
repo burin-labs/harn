@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond("project", "metadata_get", {value: "facts"})
   harness.testing.respond_error("project", "metadata_set", "write denied")

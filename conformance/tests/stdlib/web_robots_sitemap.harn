@@ -1,6 +1,6 @@
 import { robots_allowed, sitemap_urls, web_origin_url } from "std/web"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",

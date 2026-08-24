@@ -1,6 +1,6 @@
 import { best_available_models, models_with, pick_model, routing_routes } from "std/llm/catalog"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // models_with returns ranked frontier models when asked. Multiple
   // open-weight frontier models exist in the catalog (MiniMax-M2.7,
   // glm-5.1, deepseek-v4-pro, ...), so the result must be non-empty.

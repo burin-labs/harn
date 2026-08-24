@@ -2,7 +2,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_session_finalize } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const failed = try {
     agent_loop(
       harness,

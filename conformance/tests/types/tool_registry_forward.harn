@@ -7,7 +7,7 @@ import { AgentSpec, agent_options } from "std/agent/options"
 import { ToolDefinitionSpec, ToolRegistry, tool_define_many } from "std/tools"
 import { with_ping_tool } from "tool_registry_forward_lib"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const base: ToolRegistry = tool_registry()
   const pinged: ToolRegistry = with_ping_tool(base)
   const specs: list<ToolDefinitionSpec> = [

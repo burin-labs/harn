@@ -40,8 +40,8 @@ import "std/verification_types"
 pub fn verification_affected_targets(
   harness: Harness,
   changed_paths: list<string>,
-  adapters = nil,
-  options = nil,
+  adapters: any = nil,
+  options: dict? = nil,
 ) -> VerificationAffectedTargetsFact {
   const opts = __verification_opts(options)
   const paths = __verification_string_list(changed_paths)
@@ -145,7 +145,7 @@ pub fn verification_affected_targets(
 pub fn verification_ladder_plan(
   runtime: HarnessRuntime,
   query: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationLadderPlan {
   const opts = __verification_opts(options)
   const matches = runtime.verification_profile_matches(query, opts?.dir)
@@ -208,7 +208,7 @@ pub fn verification_hud_model(
   clock: HarnessClock,
   runtime: HarnessRuntime,
   state: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> dict {
   const opts = __verification_opts(options)
   if type_of(state) != "dict" {
@@ -279,7 +279,7 @@ pub fn verification_hud_text(
   clock: HarnessClock,
   runtime: HarnessRuntime,
   model_or_state: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> string {
   const model = if model_or_state?.schema == "harn.verification.hud_model.v1" {
     model_or_state
@@ -328,9 +328,9 @@ pub fn verification_hud_text(
  */
 pub fn verification_diagnostic_delta(
   agent: HarnessAgent,
-  previous,
-  current,
-  options = nil,
+  previous: any,
+  current: any,
+  options: dict? = nil,
 ) -> VerificationDiagnosticDelta {
   const normalization = __verification_delta_normalization(options)
   const previous_info = __verification_delta_info(agent, previous, normalization)
@@ -494,26 +494,28 @@ pub fn verification_diagnostic_delta(
  */
 pub fn verification_gate_input(
   agent: HarnessAgent,
-  previous,
-  current,
-  current_hashes = nil,
-  options = nil,
+  previous: dict?,
+  current: dict?,
+  current_hashes: any = nil,
+  options: dict? = nil,
 ) -> VerificationGateInput {
   const opts = __verification_opts(options)
+  const previous_value = previous ?? {}
+  const current_value = current ?? {}
   const hashes_available = __verification_gate_hashes_available(current_hashes)
   const hashes = __verification_gate_hashes(current_hashes)
   const previous_classification = __verification_gate_classification(
-    previous,
+    previous_value,
     hashes,
     hashes_available,
   )
   const current_classification = __verification_gate_classification(
-    current,
+    current_value,
     hashes,
     hashes_available,
   )
-  const previous_delta = __verification_gate_delta_value(previous, previous_classification)
-  const current_delta = __verification_gate_delta_value(current, current_classification)
+  const previous_delta = __verification_gate_delta_value(previous_value, previous_classification)
+  const current_delta = __verification_gate_delta_value(current_value, current_classification)
   const delta = verification_diagnostic_delta(agent, previous_delta, current_delta, opts)
   const status = __verification_gate_status(delta, current_classification)
   const feeds_gates = current_classification?.feedsGates ? true : false
@@ -560,7 +562,7 @@ pub fn verification_gate_input(
 pub fn verification_observation_from_command_result(
   agent: HarnessAgent,
   result: CommandResult,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationCheckObservation {
   const opts = __verification_opts(options)
   let observation = {warm: __verification_warm(opts)}
@@ -600,7 +602,7 @@ pub fn verification_record_check_result(
   runtime: HarnessRuntime,
   row_id: string,
   result: CommandResult,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   const observation = verification_observation_from_command_result(agent, result, opts)
@@ -627,8 +629,8 @@ pub fn verification_record_check_result(
 pub fn verification_run_check(
   harness: Harness,
   row_id: string,
-  spec,
-  options = nil,
+  spec: any,
+  options: dict? = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   if opts?.command_options?.background == true {
@@ -662,8 +664,8 @@ pub fn verification_start_check(
   code_index: HarnessCodeIndex,
   tools: HarnessTools,
   row_id: string,
-  spec,
-  options = nil,
+  spec: any,
+  options: dict? = nil,
 ) -> VerificationStartedCheck {
   const opts = __verification_opts(options)
   const captured = __verification_capture_snapshot(code_index, opts)
@@ -696,7 +698,7 @@ pub fn verification_start_check(
 pub fn verification_finish_check(
   harness: Harness,
   started_check: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   const row_id = opts?.row_id ?? started_check?.row_id
@@ -746,7 +748,7 @@ pub fn verification_finish_check(
 pub fn verification_toolchain_facts(
   tools: HarnessTools,
   rows: list<dict>,
-  options = nil,
+  options: dict? = nil,
 ) -> list<VerificationToolchainFact> {
   const opts = __verification_opts(options)
   let facts = []
@@ -809,7 +811,7 @@ pub fn verification_toolchain_facts(
 pub fn verification_start_warm_state(
   tools: HarnessTools,
   row: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationWarmStateLifecycleReceipt {
   const opts = __verification_opts(options)
   const id = __verification_warm_state_id(row, 0)
@@ -892,7 +894,7 @@ pub fn verification_start_warm_state(
 pub fn verification_teardown_warm_state(
   tools: HarnessTools,
   receipt: dict,
-  options = nil,
+  options: dict? = nil,
 ) -> VerificationWarmStateLifecycleReceipt {
   const opts = __verification_opts(options)
   const row = opts?.row ?? receipt?.row ?? {}

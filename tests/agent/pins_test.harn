@@ -10,7 +10,7 @@
 import { pin, pin_compaction_policy, pin_kinds, pin_reminder } from "std/agent/pins"
 
 // --- Taxonomy registration (additive; default-off) -----------------------------
-pipeline test_pin_default_taxonomy_unchanged(harness: Harness, task) {
+pipeline test_pin_default_taxonomy_unchanged(harness: Harness, task: unknown) {
   // Byte-identical: the fixed 5 kinds still validate, an unknown kind still
   // throws, and the built-in discovery surface is untouched.
   const p = pin(harness.random, "goal", "Ship the migration", {dedupe_key: "pin/goal"})
@@ -24,7 +24,7 @@ pipeline test_pin_default_taxonomy_unchanged(harness: Harness, task) {
   assert(is_err(rejected), "unregistered kind still rejected by default")
 }
 
-pipeline test_pin_accepts_registered_kinds(harness: Harness, task) {
+pipeline test_pin_accepts_registered_kinds(harness: Harness, task: unknown) {
   // A caller taxonomy (burin's structural working-set kinds) is accepted for a
   // pin(harness) call via register_kinds instead of throwing.
   const kinds = [
@@ -52,7 +52,7 @@ pipeline test_pin_accepts_registered_kinds(harness: Harness, task) {
   assert_eq(defaulted.role_hint, "system")
 }
 
-pipeline test_pin_register_kinds_validated(harness: Harness, task) {
+pipeline test_pin_register_kinds_validated(harness: Harness, task: unknown) {
   const bad = try {
     pin(harness.random, "goal", "x", {register_kinds: "not-a-list"})
   }
@@ -60,7 +60,7 @@ pipeline test_pin_register_kinds_validated(harness: Harness, task) {
 }
 
 // --- pin_reminder opts (additive; default-off) ---------------------------------
-pipeline test_pin_reminder_default_shape_unchanged(harness: Harness, task) {
+pipeline test_pin_reminder_default_shape_unchanged(harness: Harness, task: unknown) {
   const p = pin(harness.random, "goal", "Ship it", {dedupe_key: "pin/goal"})
   const r = pin_reminder(harness.agent, p)
   assert_eq(r.body, "Ship it")
@@ -72,7 +72,7 @@ pipeline test_pin_reminder_default_shape_unchanged(harness: Harness, task) {
   assert_eq(r?.propagate, nil)
 }
 
-pipeline test_pin_reminder_opts_apply(harness: Harness, task) {
+pipeline test_pin_reminder_opts_apply(harness: Harness, task: unknown) {
   const p = pin(harness.random, "goal", "0123456789ABCDEF", {dedupe_key: "pin/goal"})
   const r = pin_reminder(
     harness.agent,
@@ -85,7 +85,7 @@ pipeline test_pin_reminder_opts_apply(harness: Harness, task) {
   assert(r.body.contains("01234567"), "clamped body keeps the leading budget")
 }
 
-pipeline test_pin_reminder_opts_validated(harness: Harness, task) {
+pipeline test_pin_reminder_opts_validated(harness: Harness, task: unknown) {
   const bad_propagate = try {
     pin_reminder(harness.agent, pin(harness.random, "goal", "x"), {propagate: 3})
   }
@@ -97,7 +97,7 @@ pipeline test_pin_reminder_opts_validated(harness: Harness, task) {
 }
 
 // --- pin_compaction_policy merge / label-preserve (additive; default-off) ------
-pipeline test_pin_compaction_policy_default_unchanged(harness: Harness, task) {
+pipeline test_pin_compaction_policy_default_unchanged(harness: Harness, task: unknown) {
   const pins = [
     pin(harness.random, "goal", "Ship the migration"),
     pin(harness.random, "constraint", "No new deps"),
@@ -115,7 +115,7 @@ pipeline test_pin_compaction_policy_default_unchanged(harness: Harness, task) {
   )
 }
 
-pipeline test_pin_compaction_policy_merges_existing(harness: Harness, task) {
+pipeline test_pin_compaction_policy_merges_existing(harness: Harness, task: unknown) {
   const pins = [pin(harness.random, "goal", "Ship the migration")]
   const existing = {
     author: "burin",
@@ -140,7 +140,7 @@ pipeline test_pin_compaction_policy_merges_existing(harness: Harness, task) {
   assert_eq(merged?.preserve_labels, nil)
 }
 
-pipeline test_pin_compaction_policy_merge_default_labels(harness: Harness, task) {
+pipeline test_pin_compaction_policy_merge_default_labels(harness: Harness, task: unknown) {
   // Without preserve_labels the pins default labels win even when merging.
   const merged = pin_compaction_policy(
     [pin(harness.random, "goal", "Ship it")],

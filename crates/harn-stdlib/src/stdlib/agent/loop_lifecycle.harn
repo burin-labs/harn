@@ -96,7 +96,7 @@ pub type AgentLoopCompletionState = {
  */
 pub fn agent_loop_complete(
   harness: Harness,
-  message,
+  message: any,
   session: dict,
   state: AgentLoopCompletionState,
 ) -> dict {

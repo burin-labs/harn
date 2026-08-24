@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   struct Point {
     x: int
     y: int
@@ -7,7 +7,7 @@ pipeline test(harness: Harness, task) {
     fn distance(self) {
       return sqrt(self.x * self.x + self.y * self.y)
     }
-    fn translate(self, dx, dy) {
+    fn translate(self, dx: any, dy: any) {
       return Point({x: self.x + dx, y: self.y + dy})
     }
     fn to_string(self) {

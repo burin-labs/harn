@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Small text should pass through unchanged
   const small = microcompact("hello world", 1000)
   harness.stdio.log(small)

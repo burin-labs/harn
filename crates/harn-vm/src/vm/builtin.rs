@@ -155,7 +155,9 @@ impl VmBuiltinMetadata {
     pub const fn is_source_visible(&self) -> bool {
         !matches!(
             self.contract.exposure,
-            BuiltinExposure::RuntimeInternal | BuiltinExposure::Undeclared
+            BuiltinExposure::StdlibInternal
+                | BuiltinExposure::RuntimeInternal
+                | BuiltinExposure::Undeclared
         )
     }
 }

@@ -102,14 +102,14 @@ pub type ChangesetSummary = {
   warnings: list<ChangesetWarning>,
 }
 
-fn __diff_label(prefix, path, fallback) {
+fn __diff_label(prefix: any, path: string?, fallback: string) {
   if path == nil || trim(path) == "" {
     return fallback
   }
   return prefix + path
 }
 
-fn __diff_color_line(line, options) {
+fn __diff_color_line(line: any, options: dict) {
   if !(options?.color ?? false) {
     return line
   }
@@ -148,7 +148,7 @@ pub fn diff_lines(before: string, after: string) -> DiffLines {
   }
 }
 
-fn __diff_without_final_newline(text) -> string {
+fn __diff_without_final_newline(text: string?) -> string {
   const value = text ?? ""
   if value.ends_with("\n") {
     return value.substring(0, len(value) - 1)
@@ -156,7 +156,7 @@ fn __diff_without_final_newline(text) -> string {
   return value
 }
 
-fn __render_unified_diff(body, changed, options) -> string {
+fn __render_unified_diff(body: string?, changed: any, options: dict?) -> string {
   const opts = options ?? {}
   const path = opts.path
   const old_label = opts.from_label ?? __diff_label("a/", path, "before")
@@ -249,7 +249,12 @@ pub fn diff_summary(before: string, after: string) -> DiffSummary {
  * @api_stability: experimental
  * @example: structural_diff("before.rs", "after.rs", "rust")
  */
-pub fn structural_diff(ast: HarnessAst, path_a: string, path_b: string, options = nil) -> dict {
+pub fn structural_diff(
+  ast: HarnessAst,
+  path_a: string,
+  path_b: string,
+  options: string | dict | nil = nil,
+) -> dict {
   const opts = if type_of(options) == "string" {
     {language: options}
   } else {
@@ -300,7 +305,7 @@ pub fn changeset_summary(ast: HarnessAst, files: list<ChangesetFileImage>) -> Ch
  * @effects: []
  * @errors: []
  */
-pub fn render_diff_stat(entries: list, options = {}) -> string {
+pub fn render_diff_stat(entries: list, options: dict = {}) -> string {
   let rows = []
   for entry in entries ?? [] {
     const stat = if entry?.before != nil || entry?.after != nil {

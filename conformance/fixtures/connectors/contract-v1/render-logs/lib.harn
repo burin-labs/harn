@@ -10,11 +10,14 @@ pub fn kinds() {
 
 /** Return the provider payload schema advertised to hosts. */
 pub fn payload_schema() {
-  return {harn_schema_name: "RenderLogPayload", json_schema: {type: "object", additionalProperties: true}}
+  return {
+    harn_schema_name: "RenderLogPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
 }
 
 /** Normalize one Render-style log delivery into a Harn trigger event. */
-pub fn normalize_inbound(_harness: Harness, raw) {
+pub fn normalize_inbound(_harness: Harness, raw: dict) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   return {
     type: "event",
@@ -36,6 +39,6 @@ pub fn normalize_inbound(_harness: Harness, raw) {
 }
 
 /** Reject outbound methods that this fixture does not implement. */
-pub fn call(_harness: Harness, method, _args) {
+pub fn call(_harness: Harness, method: string, _args: unknown) {
   throw "method_not_found:" + method
 }

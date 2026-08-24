@@ -33,7 +33,7 @@ pub fn semantic_eval_mode(harness: Harness) {
 }
 
 /** Load and parse a JSON file or throw with context. */
-pub fn load_json_file(fs: HarnessFs, path) {
+pub fn load_json_file(fs: HarnessFs, path: any) {
   const parsed: Result<unknown, JsonParseFailure> = try {
     json_parse(fs.read_text(path))
   }
@@ -44,14 +44,14 @@ pub fn load_json_file(fs: HarnessFs, path) {
 }
 
 /** Remove the Harn done sentinel from a text block. */
-pub fn strip_done_sentinel(text) {
+pub fn strip_done_sentinel(text: string?) {
   if type_of(text) != "string" {
     return ""
   }
   return regex_replace("^##DONE##\\s*", "", text).trim()
 }
 
-fn render_list(items) {
+fn render_list(items: string | bytes | list | dict | set | range | nil) {
   if len(items) == 0 {
     return "(none)"
   }
@@ -62,7 +62,7 @@ fn render_list(items) {
   return join(lines, "\n")
 }
 
-fn clamp_score(value) {
+fn clamp_score(value: int) {
   if value < 0 {
     return 0
   }
@@ -72,7 +72,7 @@ fn clamp_score(value) {
   return value
 }
 
-fn reference_signal_text(report, run) {
+fn reference_signal_text(report: dict, run: dict) {
   let sections = []
   const final_response = report?.final_response ?? ""
   if final_response != "" {
@@ -107,7 +107,7 @@ fn reference_signal_text(report, run) {
 }
 
 /** Return the idealized reference trace and rubric for one task id. */
-pub fn task_reference(task_id) {
+pub fn task_reference(task_id: string) {
   if task_id == "comment_file" {
     return {
       task_id: task_id,
@@ -184,7 +184,7 @@ pub fn task_reference(task_id) {
   }
 }
 
-fn failed_stage_ids(run) {
+fn failed_stage_ids(run: dict) {
   let failed = []
   for stage in run?.stages ?? [] {
     if stage?.status == "failed" {
@@ -194,7 +194,7 @@ fn failed_stage_ids(run) {
   return failed
 }
 
-fn verification_outcome_lines(run) {
+fn verification_outcome_lines(run: dict) {
   let lines = []
   for item in run?.observability?.verification_outcomes ?? [] {
     lines = lines
@@ -205,7 +205,7 @@ fn verification_outcome_lines(run) {
   return lines
 }
 
-fn planner_round_lines(run) {
+fn planner_round_lines(run: dict) {
   let lines = []
   for round in run?.observability?.planner_rounds ?? [] {
     lines = lines
@@ -216,7 +216,7 @@ fn planner_round_lines(run) {
   return lines
 }
 
-fn batch_output_lines(run) {
+fn batch_output_lines(run: dict) {
   let lines = []
   for artifact in run?.artifacts ?? [] {
     const source = artifact?.source ?? ""
@@ -231,7 +231,7 @@ fn batch_output_lines(run) {
 }
 
 /** Render a stable actual trace summary from the report and persisted run. */
-pub fn render_actual_trace(report, run) {
+pub fn render_actual_trace(report: dict, run: dict) {
   let sections = []
   sections = sections + ["Task: ${report?.task ?? ""}"]
   sections = sections + ["Pipeline verdict: ${report?.verdict ?? "unknown"}"]
@@ -245,7 +245,7 @@ pub fn render_actual_trace(report, run) {
   return join(sections, "\n\n")
 }
 
-fn render_file_bundle(harness: Harness, dir_path, heading) {
+fn render_file_bundle(harness: Harness, dir_path: string, heading: string) {
   const files = collect_tree_files(harness, dir_path)
   if len(files) == 0 {
     return "${heading}:\n(none)"
@@ -269,7 +269,7 @@ fn render_file_bundle(harness: Harness, dir_path, heading) {
 }
 
 /** Render raw transcript and event-log bundles for semantic grading. */
-pub fn render_inference_transcripts(harness: Harness, task_root) {
+pub fn render_inference_transcripts(harness: Harness, task_root: string) {
   if task_root == nil || task_root == "" {
     return "Inference transcripts:\n(none provided)"
   }
@@ -291,7 +291,7 @@ pub fn render_inference_transcripts(harness: Harness, task_root) {
 }
 
 /** Render the ideal reference trace and rubric for prompt context. */
-pub fn render_ideal_reference(reference) {
+pub fn render_ideal_reference(reference: dict) {
   return join(
     [
       "Ideal trace:\n${render_list(reference?.ideal_trace ?? [])}",
@@ -303,7 +303,7 @@ pub fn render_ideal_reference(reference) {
   )
 }
 
-fn text_contains_all(text, needles) {
+fn text_contains_all(text: string?, needles: list?) {
   const haystack = lowercase(text ?? "")
   for needle in needles ?? [] {
     if !contains(haystack, lowercase(needle)) {
@@ -314,7 +314,7 @@ fn text_contains_all(text, needles) {
 }
 
 /** Compute a deterministic pre-grade over the semantic-eval dimensions. */
-pub fn heuristic_semantic_eval(report, run, reference) {
+pub fn heuristic_semantic_eval(report: dict, run: dict, reference: dict) {
   const failed = failed_stage_ids(run)
   const rounds = run?.observability?.planner_rounds ?? []
   let churn = []
@@ -424,7 +424,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   }
 }
 
-fn collect_tree_files(harness: Harness, dir_path) {
+fn collect_tree_files(harness: Harness, dir_path: string) {
   const info = try {
     harness.fs.stat(dir_path)
   } catch (e) {

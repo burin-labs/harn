@@ -16,7 +16,7 @@
  *   }
  * }
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.tools.mcp_server_metadata(
     {
       name: "harn-demo",

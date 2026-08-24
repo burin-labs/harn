@@ -1,5 +1,5 @@
 /** Test circuit breaker builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Create a circuit breaker with threshold=3
   const cb = harness.runtime.circuit_breaker("test_cb", 3, 60000)
   harness.stdio.println(type_of(cb))

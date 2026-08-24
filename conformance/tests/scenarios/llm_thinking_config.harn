@@ -1,6 +1,6 @@
 import { with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [],

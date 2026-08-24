@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // harn#743: every tool declares its execution backend explicitly.
   // tool_define stamps the resolved executor onto the registry entry
   // so dispatch and ACP events have a single source of truth.

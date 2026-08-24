@@ -63,7 +63,7 @@ pub fn tool_call_label_body(body: string) -> dict {
   return {ok: true, body: rest, name_hint: to_string(labeled[0].groups[0])}
 }
 
-fn __tool_parse_envelope_call(value, name_hint: string = "") -> dict {
+fn __tool_parse_envelope_call(value: unknown, name_hint: string = "") -> dict {
   if type_of(value) != "dict" {
     return {ok: false, error: "each chat-template tool entry must be a JSON object"}
   }
@@ -360,7 +360,7 @@ fn __tool_parse_envelope_direct_body(
   raw_body: string,
   close: string,
   prose: string,
-  parse_body,
+  parse_body: any,
 ) -> dict {
   if parse_body == nil {
     return {matched: false}
@@ -425,7 +425,7 @@ pub fn tool_envelope_alternate_opener_at(text: string) -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_parse_envelope(text: string, parse_body = nil) -> dict {
+pub fn tool_parse_envelope(text: string, parse_body: any = nil) -> dict {
   let opener = ""
   let kind = ""
   let close_tag = ""

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const id = harness.random.uuid()
   harness.stdio.log(id.count())
   harness.stdio.log(id.contains("-"))

@@ -409,6 +409,11 @@ impl Linter<'_> {
                  primitive"
                     .to_string(),
             ),
+            BuiltinExposure::StdlibInternal => (
+                "an embedded stdlib implementation detail",
+                "call the public stdlib function that wraps it rather than the internal primitive"
+                    .to_string(),
+            ),
             BuiltinExposure::HarnessMethod { capability, method } => {
                 self.diagnostics.push(LintDiagnostic {
                     code: Code::LintNonSourceCallableBuiltin,

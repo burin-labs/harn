@@ -107,11 +107,11 @@ fn __agent_prompt_expected_ids() {
   return join(__agent_prompt_ids(), ", ")
 }
 
-fn __agent_is_known_prompt_id(id) {
+fn __agent_is_known_prompt_id(id: any) {
   return contains(__agent_prompt_ids(), id)
 }
 
-fn __agent_validate_prompt_entry(id, entry) {
+fn __agent_validate_prompt_entry(id: string, entry: dict) {
   const entry_type = type_of(entry)
   if entry_type == "string" || entry_type == "closure" {
     return entry
@@ -143,7 +143,7 @@ fn __agent_validate_prompt_entry(id, entry) {
   return entry
 }
 
-fn __agent_validate_prompt_overrides(overrides) {
+fn __agent_validate_prompt_overrides(overrides: dict) {
   if overrides == nil {
     return {}
   }
@@ -160,7 +160,7 @@ fn __agent_validate_prompt_overrides(overrides) {
   return overrides
 }
 
-fn __agent_options_are_direct_prompt_catalog(options) {
+fn __agent_options_are_direct_prompt_catalog(options: dict) {
   if type_of(options) != "dict" {
     return false
   }
@@ -172,7 +172,7 @@ fn __agent_options_are_direct_prompt_catalog(options) {
   return false
 }
 
-fn __agent_prompt_overrides(options = nil) {
+fn __agent_prompt_overrides(options: any = nil) {
   if options == nil {
     return {}
   }
@@ -191,7 +191,7 @@ fn __agent_prompt_overrides(options = nil) {
   return {}
 }
 
-fn __agent_add_prompt_override(out, id, entry) {
+fn __agent_add_prompt_override(out: dict, id: string, entry: any) {
   if entry == nil {
     return out
   }
@@ -343,11 +343,11 @@ pub fn agent_prompt_overrides(overrides: AgentPromptOverrides) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_prompt_catalog(options = nil) {
+pub fn agent_prompt_catalog(options: any = nil) {
   return __agent_default_prompt_catalog() + __agent_prompt_overrides(options)
 }
 
-fn __agent_render_prompt_entry(fs: HarnessFs, entry, bindings) {
+fn __agent_render_prompt_entry(fs: HarnessFs, entry: any, bindings: dict?) {
   if type_of(entry) == "closure" {
     return entry(bindings ?? {})
   }
@@ -376,7 +376,7 @@ fn __agent_render_prompt_entry(fs: HarnessFs, entry, bindings) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn render_agent_prompt_id(fs: HarnessFs, id, bindings = nil, options = nil) {
+pub fn render_agent_prompt_id(fs: HarnessFs, id: string, bindings: any = nil, options: any = nil) {
   const catalog = agent_prompt_catalog(options)
   const entry = catalog[id]
   if entry == nil {
@@ -392,7 +392,7 @@ pub fn render_agent_prompt_id(fs: HarnessFs, id, bindings = nil, options = nil) 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn render_agent_prompt(fs: HarnessFs, path, bindings = nil) {
+pub fn render_agent_prompt(fs: HarnessFs, path: string, bindings: dict? = nil) {
   return __agent_render_prompt_entry(fs, path, bindings ?? {})
 }
 
@@ -403,7 +403,7 @@ pub fn render_agent_prompt(fs: HarnessFs, path, bindings = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn loop_until_done_system_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn loop_until_done_system_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.loop_contract", bindings, options)
 }
 
@@ -414,7 +414,7 @@ pub fn loop_until_done_system_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn default_nudge_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn default_nudge_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.default_nudge", bindings, options)
 }
 
@@ -425,7 +425,7 @@ pub fn default_nudge_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_judge_system_prompt(fs: HarnessFs, options = nil) {
+pub fn completion_judge_system_prompt(fs: HarnessFs, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.completion_judge_system", {}, options)
 }
 
@@ -436,7 +436,7 @@ pub fn completion_judge_system_prompt(fs: HarnessFs, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_judge_feedback_prompt(fs: HarnessFs, options = nil) {
+pub fn completion_judge_feedback_prompt(fs: HarnessFs, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.completion_judge_feedback", {}, options)
 }
 
@@ -447,7 +447,7 @@ pub fn completion_judge_feedback_prompt(fs: HarnessFs, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_judge_user_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn completion_judge_user_prompt(fs: HarnessFs, bindings: any, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.completion_judge_user", bindings, options)
 }
 
@@ -458,7 +458,7 @@ pub fn completion_judge_user_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn daemon_timer_feedback_prompt(fs: HarnessFs, options = nil) {
+pub fn daemon_timer_feedback_prompt(fs: HarnessFs, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.daemon_timer_feedback", {}, options)
 }
 
@@ -469,7 +469,7 @@ pub fn daemon_timer_feedback_prompt(fs: HarnessFs, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn daemon_watch_feedback_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn daemon_watch_feedback_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.daemon_watch_feedback", bindings, options)
 }
 
@@ -480,7 +480,7 @@ pub fn daemon_watch_feedback_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn deferred_tool_listing_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn deferred_tool_listing_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.deferred_tool_listing", bindings, options)
 }
 
@@ -491,7 +491,7 @@ pub fn deferred_tool_listing_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn native_tool_contract_feedback_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn native_tool_contract_feedback_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.native_tool_contract_feedback", bindings, options)
 }
 
@@ -502,7 +502,7 @@ pub fn native_tool_contract_feedback_prompt(fs: HarnessFs, bindings, options = n
  * @errors: []
  * @api_stability: experimental
  */
-pub fn parse_guidance_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn parse_guidance_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.parse_guidance", bindings, options)
 }
 
@@ -513,7 +513,7 @@ pub fn parse_guidance_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_action_native_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_action_native_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_action_native", bindings, options)
 }
 
@@ -524,7 +524,7 @@ pub fn tool_contract_action_native_prompt(fs: HarnessFs, bindings, options = nil
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_action_text_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_action_text_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_action_text", bindings, options)
 }
 
@@ -535,7 +535,7 @@ pub fn tool_contract_action_text_prompt(fs: HarnessFs, bindings, options = nil) 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_deferred_tools_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_deferred_tools_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_deferred_tools", bindings, options)
 }
 
@@ -546,7 +546,7 @@ pub fn tool_contract_deferred_tools_prompt(fs: HarnessFs, bindings, options = ni
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_json_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_json_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_json", bindings, options)
 }
 
@@ -557,7 +557,7 @@ pub fn tool_contract_json_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_native_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_native_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_native", bindings, options)
 }
 
@@ -568,7 +568,7 @@ pub fn tool_contract_native_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_task_ledger_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_task_ledger_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_task_ledger", bindings, options)
 }
 
@@ -579,7 +579,7 @@ pub fn tool_contract_task_ledger_prompt(fs: HarnessFs, bindings, options = nil) 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_text_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_text_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_text", bindings, options)
 }
 
@@ -590,7 +590,11 @@ pub fn tool_contract_text_prompt(fs: HarnessFs, bindings, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_contract_text_response_protocol_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn tool_contract_text_response_protocol_prompt(
+  fs: HarnessFs,
+  bindings: dict?,
+  options: any = nil,
+) {
   return render_agent_prompt_id(fs, "agent.tool_contract_text_response_protocol", bindings, options)
 }
 
@@ -601,7 +605,7 @@ pub fn tool_contract_text_response_protocol_prompt(fs: HarnessFs, bindings, opti
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_gate_feedback_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn verification_gate_feedback_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.verification_gate_feedback", bindings, options)
 }
 
@@ -614,7 +618,7 @@ pub fn verification_gate_feedback_prompt(fs: HarnessFs, bindings, options = nil)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn step_judge_system_prompt(fs: HarnessFs, options = nil) {
+pub fn step_judge_system_prompt(fs: HarnessFs, options: any = nil) {
   const rubric = options?.rubric ?? "default"
   const id = if rubric == "adversarial" {
     "agent.step_judge_system_adversarial"
@@ -633,6 +637,6 @@ pub fn step_judge_system_prompt(fs: HarnessFs, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn step_judge_user_prompt(fs: HarnessFs, bindings, options = nil) {
+pub fn step_judge_user_prompt(fs: HarnessFs, bindings: dict?, options: any = nil) {
   return render_agent_prompt_id(fs, "agent.step_judge_user", bindings, options)
 }

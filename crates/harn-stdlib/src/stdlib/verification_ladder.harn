@@ -15,7 +15,7 @@ import "std/verification_core"
 import "std/verification_targets"
 import "std/verification_types"
 
-pub fn __verification_profile_row_id(row, index: int) -> string {
+pub fn __verification_profile_row_id(row: dict, index: int) -> string {
   const id = trim(to_string(row?.id ?? row?.name ?? ""))
   if id != "" {
     return id
@@ -23,18 +23,18 @@ pub fn __verification_profile_row_id(row, index: int) -> string {
   return "profile/" + to_string(index)
 }
 
-pub fn __verification_check(row) -> dict {
+pub fn __verification_check(row: dict) -> dict {
   if type_of(row?.check) == "dict" {
     return row.check
   }
   return {}
 }
 
-pub fn __verification_rung_text(value) -> string {
+pub fn __verification_rung_text(value: unknown) -> string {
   return uppercase(trim(to_string(value ?? "")))
 }
 
-pub fn __verification_rung_rank(value) {
+pub fn __verification_rung_rank(value: unknown) {
   const rung = __verification_rung_text(value)
   const direct = to_int(rung)
   if direct != nil && direct >= 0 && direct <= 5 {
@@ -49,12 +49,12 @@ pub fn __verification_rung_rank(value) {
   return nil
 }
 
-pub fn __verification_rung_bound(value, fallback: int) -> int {
+pub fn __verification_rung_bound(value: unknown, fallback: int) -> int {
   const rank = __verification_rung_rank(value)
   return rank ?? fallback
 }
 
-pub fn __verification_resource_class(row, check) -> string {
+pub fn __verification_resource_class(row: dict, check: dict) -> string {
   const raw = check?.resourceClass ?? check?.resource_class ?? row?.resourceClass
     ?? row?.resource_class
     ?? "moderate"
@@ -62,7 +62,7 @@ pub fn __verification_resource_class(row, check) -> string {
   return value == "" ? "moderate" : value
 }
 
-pub fn __verification_resource_rank(value) -> int {
+pub fn __verification_resource_rank(value: string?) -> int {
   const resource = lowercase(trim(to_string(value ?? "")))
   if resource == "cheap" {
     return 0
@@ -79,7 +79,7 @@ pub fn __verification_resource_rank(value) -> int {
   return 4
 }
 
-pub fn __verification_lower_string_list(value) -> list<string> {
+pub fn __verification_lower_string_list(value: any) -> list<string> {
   let out: list<string> = []
   for item in __verification_string_list(value) {
     const text = lowercase(item)
@@ -90,7 +90,7 @@ pub fn __verification_lower_string_list(value) -> list<string> {
   return out
 }
 
-pub fn __verification_resource_allowed(resource: string, opts) -> bool {
+pub fn __verification_resource_allowed(resource: string, opts: dict) -> bool {
   const allowed = __verification_lower_string_list(
     opts?.resource_classes ?? opts?.allowed_resource_classes,
   )
@@ -100,7 +100,7 @@ pub fn __verification_resource_allowed(resource: string, opts) -> bool {
   return contains(allowed, lowercase(resource))
 }
 
-pub fn __verification_warm_state_fact_for(row_id: string, opts) {
+pub fn __verification_warm_state_fact_for(row_id: string, opts: dict) {
   const facts = opts?.warm_state_facts ?? opts?.warm_states ?? []
   if type_of(facts) == "dict" {
     return facts[row_id]
@@ -114,7 +114,12 @@ pub fn __verification_warm_state_fact_for(row_id: string, opts) {
   return nil
 }
 
-pub fn __verification_row_timing_kind(row_id: string, row, opts, warm_state) -> string {
+pub fn __verification_row_timing_kind(
+  row_id: string,
+  row: dict,
+  opts: dict,
+  warm_state: dict?,
+) -> string {
   const explicit = lowercase(trim(to_string(opts?.timing_kind ?? "")))
   if explicit != "" && explicit != "auto" {
     return explicit
@@ -132,7 +137,7 @@ pub fn __verification_row_timing_kind(row_id: string, row, opts, warm_state) -> 
   return "warm"
 }
 
-pub fn __verification_row_p95_ms(row, opts, timing_kind: string) -> int {
+pub fn __verification_row_p95_ms(row: dict, opts: dict, timing_kind: string) -> int {
   const kind = lowercase(trim(to_string(timing_kind)))
   const timings = row?.timings ?? {}
   const raw = if kind == "cold" {
@@ -145,11 +150,11 @@ pub fn __verification_row_p95_ms(row, opts, timing_kind: string) -> int {
   return to_int(raw) ?? to_int(opts?.unknown_p95_ms) ?? 999999
 }
 
-pub fn __verification_row_command(row, check) {
+pub fn __verification_row_command(row: dict, check: dict) {
   return check?.command ?? check?.spec ?? row?.command ?? row?.spec
 }
 
-pub fn __verification_command_present(command) -> bool {
+pub fn __verification_command_present(command: unknown) -> bool {
   if command == nil {
     return false
   }
@@ -159,7 +164,7 @@ pub fn __verification_command_present(command) -> bool {
   return true
 }
 
-pub fn __verification_skip(row_id: string, reason: string, profile_match) -> dict {
+pub fn __verification_skip(row_id: string, reason: string, profile_match: dict) -> dict {
   return {
     row_id: row_id,
     reason: reason,
@@ -168,7 +173,7 @@ pub fn __verification_skip(row_id: string, reason: string, profile_match) -> dic
   }
 }
 
-pub fn __verification_ladder_candidate(profile_match, opts) {
+pub fn __verification_ladder_candidate(profile_match: dict, opts: dict) {
   const row = profile_match?.row ?? {}
   const row_id = __verification_profile_row_id(row, to_int(profile_match?.index) ?? 0)
   const check = __verification_check(row)
@@ -234,7 +239,7 @@ pub fn __verification_ladder_candidate(profile_match, opts) {
   }
 }
 
-pub fn __verification_duration_label(ms_value) -> string {
+pub fn __verification_duration_label(ms_value: any) -> string {
   let ms = to_int(ms_value) ?? 0
   if ms < 0 {
     ms = 0
@@ -248,7 +253,7 @@ pub fn __verification_duration_label(ms_value) -> string {
   return to_string(minutes) + "m" + to_string(remainder) + "s"
 }
 
-pub fn __verification_command_label(command) -> string {
+pub fn __verification_command_label(command: dict) -> string {
   if command == nil {
     return ""
   }
@@ -272,7 +277,7 @@ pub fn __verification_command_label(command) -> string {
   return trim(json_stringify(command))
 }
 
-pub fn __verification_hud_query(state, opts) -> dict {
+pub fn __verification_hud_query(state: dict, opts: dict) -> dict {
   let query: dict = {}
   const path = trim(to_string(state?.path ?? state?.file ?? ""))
   if path != "" {
@@ -295,7 +300,7 @@ pub fn __verification_hud_query(state, opts) -> dict {
   return query
 }
 
-pub fn __verification_hud_plan_options(dir: string, opts) -> dict {
+pub fn __verification_hud_plan_options(dir: string, opts: dict) -> dict {
   let plan_options = opts?.plan_options ?? {}
   if plan_options?.dir == nil {
     plan_options = plan_options + {dir: dir}
@@ -315,7 +320,7 @@ pub fn __verification_hud_plan_options(dir: string, opts) -> dict {
   return plan_options
 }
 
-pub fn __verification_hud_entry(entry) {
+pub fn __verification_hud_entry(entry: any) {
   if type_of(entry) != "dict" {
     return nil
   }
@@ -335,7 +340,7 @@ pub fn __verification_hud_entry(entry) {
   }
 }
 
-pub fn __verification_hud_last_check(state, current_hashes, now_ms: int) {
+pub fn __verification_hud_last_check(state: dict, current_hashes: dict, now_ms: int) {
   const last = state?.last_check ?? state?.lastCheck
   if type_of(last) != "dict" {
     return nil
@@ -381,7 +386,7 @@ pub fn __verification_hud_last_check(state, current_hashes, now_ms: int) {
   }
 }
 
-pub fn __verification_hud_last_line(last) -> string {
+pub fn __verification_hud_last_line(last: dict) -> string {
   const freshness = last?.freshness ?? {}
   const suffix = if freshness?.status == "bound_stale" {
     " - STALE (" + to_string(len(freshness?.stale_files ?? [])) + " file(s) changed since)"
@@ -399,7 +404,7 @@ pub fn __verification_hud_last_line(last) -> string {
     + suffix
 }
 
-pub fn __verification_hud_next_line(label: string, entry) -> string {
+pub fn __verification_hud_next_line(label: string, entry: dict) -> string {
   return label + ": " + to_string(entry?.rung ?? "R?")
     + " "
     + to_string(entry?.command ?? "")

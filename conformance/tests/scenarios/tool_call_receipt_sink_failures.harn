@@ -10,7 +10,7 @@ fn receipt_call(session_id: string, prefetch: bool = false) {
   }
 }
 
-fn successful_tool_result(_call) {
+fn successful_tool_result(_call: unknown) {
   return {ok: true, status: "ok", result: {value: "persist me"}, audit: {}}
 }
 

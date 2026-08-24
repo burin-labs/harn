@@ -10,7 +10,7 @@ const PACKAGES: list<PublishPlanPackage> = [
 @test
 pipeline test_publish_recovery_resumes_prior_progress_and_waits_for_visibility(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const beta_published = harness.runtime.atomic(0)
   const beta_probes = harness.runtime.atomic(0)
@@ -57,7 +57,10 @@ pipeline test_publish_recovery_resumes_prior_progress_and_waits_for_visibility(
 }
 
 @test
-pipeline test_publish_recovery_times_out_with_failed_and_remaining_dag(harness: Harness, task) {
+pipeline test_publish_recovery_times_out_with_failed_and_remaining_dag(
+  harness: Harness,
+  task: unknown,
+) {
   const alpha_published = harness.runtime.atomic(0)
   const publish_calls = harness.runtime.atomic(0)
   const waits = harness.runtime.atomic(0)
@@ -99,7 +102,10 @@ pipeline test_publish_recovery_times_out_with_failed_and_remaining_dag(harness: 
 }
 
 @test
-pipeline test_publish_recovery_fails_closed_on_permanent_publish_error(harness: Harness, task) {
+pipeline test_publish_recovery_fails_closed_on_permanent_publish_error(
+  harness: Harness,
+  task: unknown,
+) {
   const adapters: PublishAdapters = {
     probe: { _name, _version -> return {status: "missing"} },
     publish: { package ->
@@ -118,7 +124,10 @@ pipeline test_publish_recovery_fails_closed_on_permanent_publish_error(harness: 
 }
 
 @test
-pipeline test_publish_recovery_accepts_already_uploaded_cargo_result(harness: Harness, task) {
+pipeline test_publish_recovery_accepts_already_uploaded_cargo_result(
+  harness: Harness,
+  task: unknown,
+) {
   const adapters: PublishAdapters = {
     probe: { _name, _version -> return {status: "missing"} },
     publish: { package ->
@@ -133,7 +142,10 @@ pipeline test_publish_recovery_accepts_already_uploaded_cargo_result(harness: Ha
 }
 
 @test
-pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(harness: Harness, task) {
+pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(
+  harness: Harness,
+  task: unknown,
+) {
   const attempts = harness.runtime.atomic(0)
   const waited_ms = harness.runtime.atomic(0)
   const adapters: PublishAdapters = {
@@ -164,7 +176,7 @@ pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(harness: H
 @test
 pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const attempts = harness.runtime.atomic(0)
   const waited_ms = harness.runtime.atomic(0)
@@ -197,7 +209,10 @@ pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
 }
 
 @test
-pipeline test_publish_recovery_probes_after_uncertain_transport_failure(harness: Harness, task) {
+pipeline test_publish_recovery_probes_after_uncertain_transport_failure(
+  harness: Harness,
+  task: unknown,
+) {
   const attempts = harness.runtime.atomic(0)
   const adapters: PublishAdapters = {
     probe: { _name, _version ->
@@ -224,7 +239,7 @@ pipeline test_publish_recovery_probes_after_uncertain_transport_failure(harness:
 }
 
 @test
-pipeline test_publish_failure_categories_are_closed(harness: Harness, task) {
+pipeline test_publish_failure_categories_are_closed(harness: Harness, task: unknown) {
   assert_eq(publish_failure_category("429 Too Many Requests"), "rate_limited")
   assert_eq(
     publish_failure_category("failed to select a version for the requirement alpha = 1.2.3"),

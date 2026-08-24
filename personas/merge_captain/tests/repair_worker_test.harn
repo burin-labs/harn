@@ -24,7 +24,7 @@ fn _ok_output() {
   }
 }
 
-fn _stub_executor(output) {
+fn _stub_executor(output: any) {
   return { _bundle, _options ->
     {
       ok: true,
@@ -35,7 +35,7 @@ fn _stub_executor(output) {
   }
 }
 
-fn _failing_executor(error) {
+fn _failing_executor(error: string) {
   return { _bundle, _options ->
     {ok: false, output: nil, raw: "garbage", error: error, agent_loop: {status: "error"}}
   }
@@ -78,7 +78,7 @@ fn _human_required_policy() {
   }
 }
 
-pipeline test_dry_run_skips_executor(harness: Harness, task) {
+pipeline test_dry_run_skips_executor(harness: Harness, task: unknown) {
   let calls = 0
   const executor = { _b, _o ->
     calls = calls + 1
@@ -101,7 +101,7 @@ pipeline test_dry_run_skips_executor(harness: Harness, task) {
   assert_eq(calls, 0)
 }
 
-pipeline test_blocked_when_human_approval_required(harness: Harness, task) {
+pipeline test_blocked_when_human_approval_required(harness: Harness, task: unknown) {
   const run = invoke(
     harness.clock,
     harness.process,
@@ -120,7 +120,7 @@ pipeline test_blocked_when_human_approval_required(harness: Harness, task) {
   assert_eq(run.output, nil)
 }
 
-pipeline test_completed_run_attaches_output(harness: Harness, task) {
+pipeline test_completed_run_attaches_output(harness: Harness, task: unknown) {
   const run = invoke(
     harness.clock,
     harness.process,
@@ -140,7 +140,7 @@ pipeline test_completed_run_attaches_output(harness: Harness, task) {
   assert_eq(run.agent_loop.iterations, 1)
 }
 
-pipeline test_default_executor_repairs_validator_failures(harness: Harness, task) {
+pipeline test_default_executor_repairs_validator_failures(harness: Harness, task: unknown) {
   harness.llm.mock_clear()
   harness.llm.mock_enqueue(
     {
@@ -160,7 +160,7 @@ pipeline test_default_executor_repairs_validator_failures(harness: Harness, task
   assert(result.typed_checkpoint.validator_failures[0].contains("missing tests"))
 }
 
-pipeline test_schema_invalid_when_executor_fails(harness: Harness, task) {
+pipeline test_schema_invalid_when_executor_fails(harness: Harness, task: unknown) {
   const run = invoke(
     harness.clock,
     harness.process,
@@ -178,7 +178,7 @@ pipeline test_schema_invalid_when_executor_fails(harness: Harness, task) {
   assert_eq(run.raw_text, "garbage")
 }
 
-pipeline test_validators_failed_when_output_violates_contract(harness: Harness, task) {
+pipeline test_validators_failed_when_output_violates_contract(harness: Harness, task: unknown) {
   const bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
   const run = invoke(
     harness.clock,
@@ -197,7 +197,7 @@ pipeline test_validators_failed_when_output_violates_contract(harness: Harness, 
   assert_eq(run.output.diagnosis, "fixed")
 }
 
-pipeline test_bundle_invalid_short_circuits(harness: Harness, task) {
+pipeline test_bundle_invalid_short_circuits(harness: Harness, task: unknown) {
   const bad_bundle = build(
     {
       kind: "ci_failure",
@@ -220,7 +220,7 @@ pipeline test_bundle_invalid_short_circuits(harness: Harness, task) {
   assert(run.validation_errors[0].contains("repo"))
 }
 
-pipeline test_invoke_for_ci_failure_builds_correct_bundle(harness: Harness, task) {
+pipeline test_invoke_for_ci_failure_builds_correct_bundle(harness: Harness, task: unknown) {
   const observation = {
     repo: "x/y",
     number: 7,
@@ -253,7 +253,7 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(harness: Harness, task
   assert_eq(b.push_target.branch, "feat")
 }
 
-pipeline test_invoke_for_merge_conflict_marks_force_push(harness: Harness, task) {
+pipeline test_invoke_for_merge_conflict_marks_force_push(harness: Harness, task: unknown) {
   const observation = {
     repo: "x/y",
     number: 8,
@@ -283,7 +283,7 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(harness: Harness, task)
   assert(b.approval_required_for.contains("force_push"))
 }
 
-pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task) {
+pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task: unknown) {
   const release_facts = {
     tag: "v0.7.54",
     commits_in_range: [{sha: "abc", subject: "feat: foo", author: "x"}],
@@ -311,7 +311,7 @@ pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task) {
   assert_eq(b.push_target.force_with_lease, false)
 }
 
-pipeline test_run_record_is_versioned(harness: Harness, task) {
+pipeline test_run_record_is_versioned(harness: Harness, task: unknown) {
   const run = invoke(
     harness.clock,
     harness.process,

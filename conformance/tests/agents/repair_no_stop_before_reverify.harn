@@ -38,7 +38,7 @@ fn repair_tools() {
 }
 
 /** Vetoes the FIRST completion (the unverified post-edit done), confirms after. */
-fn verify_once_then_confirm(info) {
+fn verify_once_then_confirm(info: dict) {
   if info.iteration <= 1 {
     return "not verified yet — re-check before finishing"
   }

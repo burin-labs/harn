@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const long_body = "paragraph one sentence one.\nparagraph one sentence two.\n\n"
     + "paragraph two sentence one.\nparagraph two sentence two.\n\n"
     + "paragraph three sentence one.\nparagraph three sentence two.\n\n"

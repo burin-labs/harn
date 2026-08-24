@@ -126,11 +126,11 @@ fn arg_spec() {
   )
 }
 
-fn number(value) -> float {
+fn number(value: any) -> float {
   return to_float(value) ?? 0.0
 }
 
-fn format_fixed(value, places: int) -> string {
+fn format_fixed(value: any, places: int) -> string {
   const raw = to_float(value)
   if raw == nil {
     return "n/a"
@@ -185,7 +185,7 @@ fn field_values(rows: list, field: string) -> list {
   return out
 }
 
-fn emitted_mutation(row) -> bool {
+fn emitted_mutation(row: dict) -> bool {
   for call in row?.tool_sequence ?? [] {
     if MUTATING_TOOLS.contains(to_string(call)) {
       return true
@@ -203,7 +203,7 @@ fn emitted_mutation(row) -> bool {
  * anything to act on. Scoring it as a resolution failure would charge the
  * post-edit diagnostics path for a defect in the tool-call emission stream.
  */
-pub fn classify_trial(row) -> TrialClass {
+pub fn classify_trial(row: dict) -> TrialClass {
   if row?.passed == true {
     return {name: CLASS_RESOLVED, scoreable: true}
   }
@@ -229,7 +229,7 @@ pub fn classify_all(rows: list) -> list {
   return out
 }
 
-fn filter_rows(rows: list, field: string, value) -> list {
+fn filter_rows(rows: list, field: string, value: any) -> list {
   let out = []
   for row in rows {
     if row[field] == value {
@@ -249,7 +249,7 @@ fn rows_in_class(rows: list, name: string) -> list {
   return out
 }
 
-fn scoreable_class(row) -> bool {
+fn scoreable_class(row: dict) -> bool {
   return row.trial_class != CLASS_STALL && row.trial_class != CLASS_INFRA
 }
 
@@ -360,7 +360,7 @@ fn fixture_row(name: string, rows: list, arms: list) -> dict {
   }
 }
 
-fn pair_key(row) -> string {
+fn pair_key(row: dict) -> string {
   return to_string(row.fixture) + "\\u{1f}" + to_string(row.trial)
 }
 
@@ -625,7 +625,7 @@ fn report_json(rows: list, control_arm: string, metric: string) -> dict {
   }
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if help_requested(argv) {
     harness.stdio.println(usage())
     return 0

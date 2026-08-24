@@ -98,7 +98,7 @@ pub fn __batch_create_recovery(provider: string, wire: string) -> BatchCreateRec
  * @effects: []
  * @errors: []
  */
-pub fn __safe_int(value) -> int? {
+pub fn __safe_int(value: int?) -> int? {
   if type_of(value) == "int" {
     return value
   }

@@ -16,7 +16,7 @@ import { client, revoke, token } from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const topic = "oauth.client.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
   const _ = harness.testing.clock_set(1700000000000)

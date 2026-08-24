@@ -1,6 +1,6 @@
 import "std/waitpoint"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.runtime.waitpoint_create("fan-out-a")
   harness.runtime.waitpoint_create("fan-out-b")
   harness.runtime.waitpoint_create("fan-out-c")

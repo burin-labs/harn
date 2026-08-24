@@ -1,6 +1,6 @@
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
-fn __scope_classifier_label(value) {
+fn __scope_classifier_label(value: string?) {
   const label = lowercase(trim(to_string(value ?? "")))
   if label == "in_scope" || label == "inscope" || label == "in-scope" {
     return "in_scope"
@@ -14,7 +14,7 @@ fn __scope_classifier_label(value) {
   return "escalate"
 }
 
-fn __scope_classifier_confidence(value, fallback) {
+fn __scope_classifier_confidence(value: float?, fallback: float) {
   const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
@@ -28,7 +28,7 @@ fn __scope_classifier_confidence(value, fallback) {
   return parsed
 }
 
-fn __scope_classifier_threshold(value) {
+fn __scope_classifier_threshold(value: float?) {
   const threshold = to_float(value ?? 0.65)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw "pre_turn_scope_classifier: confidence_threshold must be between 0.0 and 1.0"
@@ -36,7 +36,7 @@ fn __scope_classifier_threshold(value) {
   return threshold
 }
 
-fn __scope_classifier_context_window(value) {
+fn __scope_classifier_context_window(value: int?) -> int {
   if value == nil {
     return 3
   }
@@ -46,7 +46,10 @@ fn __scope_classifier_context_window(value) {
   return value
 }
 
-fn __scope_classifier_recent_context(messages, limit) {
+fn __scope_classifier_recent_context(
+  messages: string | bytes | list | dict | set | range | nil,
+  limit: int,
+) {
   if type_of(messages) != "list" {
     return []
   }
@@ -82,7 +85,7 @@ fn __scope_classifier_schema() {
   }
 }
 
-fn __scope_classifier_anchor_summary(anchor) {
+fn __scope_classifier_anchor_summary(anchor: dict) {
   if anchor == nil {
     return "Current session has no workspace anchor."
   }
@@ -101,7 +104,7 @@ fn __scope_classifier_anchor_summary(anchor) {
   return out
 }
 
-fn __scope_classifier_prompt(payload, context) {
+fn __scope_classifier_prompt(payload: dict, context: any) {
   return "You are a scope-classification agent.\n\n"
     + __scope_classifier_anchor_summary(payload?.workspace_anchor)
     + "\n\nUser message:\n"
@@ -117,7 +120,7 @@ fn __scope_classifier_prompt(payload, context) {
     + "- escalate: ambiguous; let the main model decide.\n"
 }
 
-fn __scope_classifier_normalize(raw, threshold, skip_main_turn) {
+fn __scope_classifier_normalize(raw: unknown, threshold: any, skip_main_turn: any) {
   if type_of(raw) != "dict" {
     return {
       label: "escalate",
@@ -151,7 +154,7 @@ fn __scope_classifier_normalize(raw, threshold, skip_main_turn) {
     }
 }
 
-fn __scope_classifier_fail_open(error, threshold) {
+fn __scope_classifier_fail_open(error: any, threshold: any) {
   return {
     label: "escalate",
     original_label: "error",
@@ -176,7 +179,7 @@ fn __scope_classifier_fail_open(error, threshold) {
  * @api_stability: experimental
  * @example: pre_turn_scope_classifier({enabled: true})
  */
-pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = nil) {
+pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts: dict? = nil) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw "pre_turn_scope_classifier: opts must be a dict or nil; got " + type_of(cfg)

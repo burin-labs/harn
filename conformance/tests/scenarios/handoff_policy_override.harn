@@ -45,7 +45,7 @@ fn handoff_tool_call() {
   }
 }
 
-fn successful_handoff_result(payload) {
+fn successful_handoff_result(payload: dict) {
   return { call ->
     return {
       ok: true,
@@ -63,7 +63,7 @@ fn successful_handoff_result(payload) {
   }
 }
 
-fn review_captain_mock(harness: Harness, envelope) {
+fn review_captain_mock(harness: Harness, envelope: dict) {
   const policy = harness.runtime.current_policy()
   const tools = note_tools()
   const read_result = agent_dispatch_tool_call(

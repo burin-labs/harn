@@ -11,11 +11,11 @@ import { typed_output_checkpoint } from "std/checkpoint"
 pub fn workflow_typed_output_checkpoint(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  name,
-  prompt,
-  schema,
-  options = nil,
-  validator = nil,
+  name: any,
+  prompt: any,
+  schema: any,
+  options: any = nil,
+  validator: any = nil,
 ) {
   return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
 }

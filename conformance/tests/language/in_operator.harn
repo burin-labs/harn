@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // List membership
   const items = [1, 2, 3, 4, 5]
   harness.stdio.println(3 in items)

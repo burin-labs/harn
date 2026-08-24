@@ -114,7 +114,7 @@ fn __difference(left: list, right: list) -> list {
   return out
 }
 
-fn __split_csv(raw) -> list {
+fn __split_csv(raw: string?) -> list {
   let out = []
   for piece in split(to_string(raw ?? ""), ",") {
     const trimmed = trim(piece)
@@ -140,7 +140,7 @@ fn __split_csv(raw) -> list {
  * different question, and counting them as refusals is how a probe invents
  * drift it never observed.
  */
-fn __failure_class(error) -> string {
+fn __failure_class(error: dict) -> string {
   // Provenance first. Harn's own pre-dispatch option checks and a provider's
   // HTTP 400 are both `terminal`/`invalid_request`, so `kind` and `reason`
   // cannot separate them; only `origin` can. Reading a local refusal as a
@@ -186,7 +186,7 @@ fn __failure_class(error) -> string {
  *   * `inconclusive`  — the call failed for a reason unrelated to the rung
  *                       (auth, rate limit, timeout, provider 5xx).
  */
-fn __classify(rung: string, outcome, ungated: bool) -> dict {
+fn __classify(rung: string, outcome: any, ungated: bool) -> dict {
   if !is_err(outcome) {
     // Token counts are recorded, not judged. A route that accepts a rung and
     // silently ignores it looks identical to one that honours it, and the only

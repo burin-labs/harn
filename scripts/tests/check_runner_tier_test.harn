@@ -15,13 +15,16 @@ fn cloud_job(tier: string) {
 }
 
 @test
-pipeline test_cloud_only_ladder_accepts_cloud_tiers(harness: Harness, task) {
+pipeline test_cloud_only_ladder_accepts_cloud_tiers(harness: Harness, task: unknown) {
   const tier = "vars.DISABLE_VENDOR == 'true' && 'github-hosted' || 'blacksmith'"
   assert_eq(runner_tier_errors({jobs: {artifacts: cloud_job(tier)}}), [])
 }
 
 @test
-pipeline test_cloud_only_ladder_rejects_impossible_self_hosted_tier(harness: Harness, task) {
+pipeline test_cloud_only_ladder_rejects_impossible_self_hosted_tier(
+  harness: Harness,
+  task: unknown,
+) {
   const tier = "vars.DISABLE_VENDOR == 'true' && 'github-hosted' || 'self-hosted'"
   const errors = runner_tier_errors({jobs: {artifacts: cloud_job(tier)}})
   assert_eq(errors.count, 2)
@@ -30,7 +33,7 @@ pipeline test_cloud_only_ladder_rejects_impossible_self_hosted_tier(harness: Har
 }
 
 @test
-pipeline test_three_rung_ladder_still_requires_all_three_tiers(harness: Harness, task) {
+pipeline test_three_rung_ladder_still_requires_all_three_tiers(harness: Harness, task: unknown) {
   const job = {
     ...cloud_job(
       "vars.USE_LOCAL == 'true' && 'self-hosted' || "
@@ -46,7 +49,7 @@ pipeline test_three_rung_ladder_still_requires_all_three_tiers(harness: Harness,
 }
 
 @test
-pipeline test_ladder_inputs_must_still_match(harness: Harness, task) {
+pipeline test_ladder_inputs_must_still_match(harness: Harness, task: unknown) {
   const tier = "vars.OTHER_SWITCH == 'true' && 'github-hosted' || 'blacksmith'"
   const errors = runner_tier_errors({jobs: {artifacts: cloud_job(tier)}})
   assert_eq(errors.count, 1)
@@ -67,12 +70,15 @@ fn pinned_hosted_job(tier: string) {
 }
 
 @test
-pipeline test_pinned_hosted_job_declares_its_tier_as_a_literal(harness: Harness, task) {
+pipeline test_pinned_hosted_job_declares_its_tier_as_a_literal(harness: Harness, task: unknown) {
   assert_eq(runner_tier_errors({jobs: {audit: pinned_hosted_job("github-hosted")}}), [])
 }
 
 @test
-pipeline test_pinned_hosted_job_must_name_the_runner_it_actually_uses(harness: Harness, task) {
+pipeline test_pinned_hosted_job_must_name_the_runner_it_actually_uses(
+  harness: Harness,
+  task: unknown,
+) {
   const errors = runner_tier_errors({jobs: {audit: pinned_hosted_job("self-hosted")}})
   assert_eq(errors.any({ error -> error.contains("never resolves to 'github-hosted'") }), true)
   assert_eq(errors.any({ error -> error.contains("impossible tier 'self-hosted'") }), true)

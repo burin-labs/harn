@@ -78,7 +78,7 @@ pub fn evaluator_kind_weak() -> string {
   return "weak"
 }
 
-fn normalize_verdict(value) -> string {
+fn normalize_verdict(value: string?) -> string {
   const text = trim(to_string(value ?? "")).lower()
   if text == "pass" || text == "true" || text == "complete" {
     return verdict_pass()
@@ -97,7 +97,12 @@ fn normalize_verdict(value) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn evaluator_verdict(id: string, verdict, is_execution: bool, reason: string = "") -> dict {
+pub fn evaluator_verdict(
+  id: string,
+  verdict: string?,
+  is_execution: bool,
+  reason: string = "",
+) -> dict {
   return {
     id: id,
     verdict: normalize_verdict(verdict),

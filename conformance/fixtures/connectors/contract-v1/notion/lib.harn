@@ -13,17 +13,17 @@ pub fn payload_schema() {
   }
 }
 
-pub fn init(_harness: Harness, ctx) {
+pub fn init(_harness: Harness, ctx: dict) {
   if ctx.provider_id != "notion" {
     throw "unexpected provider id"
   }
 }
 
-pub fn activate(harness: Harness, bindings) {
+pub fn activate(harness: Harness, bindings: string | bytes | list | dict | set | range | nil) {
   harness.obs.metrics_inc("notion_contract_activations", len(bindings))
 }
 
-pub fn normalize_inbound(_harness: Harness, raw) {
+pub fn normalize_inbound(_harness: Harness, raw: dict) {
   const body = raw.body_json ?? json_parse(raw.body_text)
   return {
     type: "event",
@@ -36,7 +36,7 @@ pub fn normalize_inbound(_harness: Harness, raw) {
   }
 }
 
-pub fn poll_tick(_harness: Harness, ctx) {
+pub fn poll_tick(_harness: Harness, ctx: dict) {
   return {
     cursor: {last_seen: ctx.tick_at},
     state: {state_key: ctx.state_key},
@@ -50,6 +50,6 @@ pub fn poll_tick(_harness: Harness, ctx) {
   }
 }
 
-pub fn call(_harness: Harness, method, _args) {
+pub fn call(_harness: Harness, method: string, _args: unknown) {
   throw "method_not_found:" + method
 }

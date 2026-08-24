@@ -35,7 +35,7 @@ fn failing_tools() {
   return tools
 }
 
-fn messages_for_streak_retry(calls) {
+fn messages_for_streak_retry(calls: any) {
   return calls[2].messages[len(calls[2].messages) - 1].content
 }
 

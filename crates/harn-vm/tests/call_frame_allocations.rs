@@ -66,8 +66,10 @@ fn allocs_during_execute(source: &str) -> usize {
 /// slot-indexed locals).
 fn user_fn_loop(n: usize) -> String {
     format!(
-        "pipeline t(task) {{\n\
-         fn f(x) {{ return x + 1 }}\n\
+        "pipeline t(task: unknown) {{\n\
+         // Deliberate `any`: this benchmark isolates call-frame allocation
+         // from the separately-covered runtime parameter contract path.
+         fn f(x: any) {{ return x + 1 }}\n\
          let s = 0\n\
          for i in 0 to {n} {{ s = s + f(i) }}\n\
          return s\n\
@@ -79,7 +81,7 @@ fn user_fn_loop(n: usize) -> String {
 /// per-iteration loop overhead.
 fn bare_loop(n: usize) -> String {
     format!(
-        "pipeline t(task) {{\n\
+        "pipeline t(task: unknown) {{\n\
          let s = 0\n\
          for i in 0 to {n} {{ s = s + (i + 1) }}\n\
          return s\n\

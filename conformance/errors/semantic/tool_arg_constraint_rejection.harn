@@ -15,7 +15,7 @@ fn list_tools() {
   return tools
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = agent_loop(
     harness,
     "Inspect the workspace",

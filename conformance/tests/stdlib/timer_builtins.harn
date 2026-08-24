@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const t = harness.runtime.timer_start("my_timer")
   assert_eq(t.name, "my_timer")
   assert(t.start_ms > 0)

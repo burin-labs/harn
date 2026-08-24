@@ -4,7 +4,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn message(role, content) {
+pub fn message(role: any, content: any) {
   return {role: role, content: content}
 }
 
@@ -14,7 +14,7 @@ pub fn message(role, content) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_order_permutation(options = nil) {
+pub fn prompt_order_permutation(options: any = nil) {
   const seed = options?.seed ?? 0
   return {
     name: "prompt_order_permutation",
@@ -59,7 +59,7 @@ pub fn inverted_system() {
  * @effects: []
  * @errors: []
  */
-pub fn custom(label, transform, args = nil) {
+pub fn custom(label: any, transform: any, args: dict? = nil) {
   return {name: label, label: label, args: args ?? {}, transform: transform}
 }
 
@@ -69,7 +69,7 @@ pub fn custom(label, transform, args = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn latest_string_user_message(messages) {
+pub fn latest_string_user_message(messages: any) {
   let idx = len(messages)
   while idx > 0 {
     idx = idx - 1
@@ -87,7 +87,7 @@ pub fn latest_string_user_message(messages) {
  * @effects: []
  * @errors: []
  */
-pub fn replace_message(messages, index, message) {
+pub fn replace_message(messages: any, index: int, message: any) {
   let out = []
   let idx = 0
   while idx < len(messages) {
@@ -110,7 +110,7 @@ pub fn replace_message(messages, index, message) {
  * @effects: []
  * @errors: []
  */
-pub fn prepend_message(messages, msg) {
+pub fn prepend_message(messages: list, msg: any) {
   return [msg] + messages
 }
 
@@ -120,6 +120,6 @@ pub fn prepend_message(messages, msg) {
  * @effects: []
  * @errors: []
  */
-pub fn append_message(messages, msg) {
+pub fn append_message(messages: list, msg: any) {
   return messages + [msg]
 }

@@ -12,11 +12,11 @@ import { VerificationGateInput, verification_gate_input } from "std/verification
  * @effects: []
  * @errors: []
  */
-pub fn __agent_tool_call_name(call) -> string {
+pub fn __agent_tool_call_name(call: dict) -> string {
   return to_string(call?.name ?? call?.tool_name ?? "")
 }
 
-pub fn __agent_tool_call_args(call) -> dict {
+pub fn __agent_tool_call_args(call: dict) -> dict {
   const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
@@ -24,12 +24,12 @@ pub fn __agent_tool_call_args(call) -> dict {
   return {}
 }
 
-pub fn __agent_tool_call_signature(call) -> string {
+pub fn __agent_tool_call_signature(call: dict) -> string {
   const args_text = json_stringify(__agent_tool_call_args(call))
   return __agent_tool_call_name(call) + "\n" + args_text
 }
 
-pub fn __agent_stall_result_ok(result) -> bool {
+pub fn __agent_stall_result_ok(result: dict) -> bool {
   if result?.ok != nil {
     return result.ok ? true : false
   }
@@ -40,7 +40,7 @@ pub fn __agent_stall_result_ok(result) -> bool {
   return status == "ok" || status == "success"
 }
 
-pub fn __agent_stall_result_name(result) -> string {
+pub fn __agent_stall_result_name(result: dict) -> string {
   return to_string(result?.tool_name ?? result?.name ?? "")
 }
 
@@ -62,7 +62,7 @@ pub fn __agent_stall_delta_signature(current: dict) -> string {
   return "err:" + sha256(json_stringify({signatures: signatures, count: count}))
 }
 
-pub fn __agent_stall_result_error_signature(delta, result) -> string {
+pub fn __agent_stall_result_error_signature(delta: dict, result: dict) -> string {
   if len(delta.current.signatures) > 0 {
     return __agent_stall_delta_signature(delta.current)
   }
@@ -70,7 +70,7 @@ pub fn __agent_stall_result_error_signature(delta, result) -> string {
   return "err:" + sha256(fallback)
 }
 
-pub fn __agent_stall_current_hashes(result) -> dict? {
+pub fn __agent_stall_current_hashes(result: dict) -> dict? {
   if type_of(result) != "dict" {
     return nil
   }
@@ -80,7 +80,11 @@ pub fn __agent_stall_current_hashes(result) -> dict? {
     ?? result?.fileHashes
 }
 
-pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) -> VerificationGateInput {
+pub fn __agent_stall_gate_input(
+  agent: HarnessAgent,
+  previous: any,
+  result: dict,
+) -> VerificationGateInput {
   return verification_gate_input(agent, previous, result, __agent_stall_current_hashes(result))
 }
 
@@ -90,7 +94,7 @@ pub fn __agent_stall_gate_input(agent: HarnessAgent, previous, result) -> Verifi
  * @effects: []
  * @errors: []
  */
-pub fn __agent_stall_result_outcome(agent: HarnessAgent, result) -> dict {
+pub fn __agent_stall_result_outcome(agent: HarnessAgent, result: dict) -> dict {
   if __agent_stall_result_ok(result) {
     const payload = json_stringify(result?.result ?? result?.output ?? result?.content)
     return {kind: "ok", signature: "ok:" + sha256(payload)}
@@ -186,7 +190,7 @@ pub fn __agent_stall_observation_recurrence(
   return {counts: counts + {[key]: count}, count: count}
 }
 
-fn __agent_stall_call_id(call) -> string {
+fn __agent_stall_call_id(call: dict) -> string {
   return to_string(call?.id ?? call?.tool_call_id ?? call?.call_id ?? "")
 }
 
@@ -198,7 +202,11 @@ fn __agent_stall_call_id(call) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn __agent_stall_completed_result(dispatch: AgentToolDispatch, call, index: int) -> dict? {
+pub fn __agent_stall_completed_result(
+  dispatch: AgentToolDispatch,
+  call: dict,
+  index: int,
+) -> dict? {
   const results = __dispatch_results_list(dispatch)
   const call_id = __agent_stall_call_id(call)
   if call_id != "" {
@@ -230,9 +238,9 @@ pub fn __agent_stall_process_call(
   agent: HarnessAgent,
   state: AgentStallState,
   config: AgentStallConfig,
-  call,
+  call: dict,
   tool_name: string,
-  prev_dispatch,
+  prev_dispatch: AgentToolDispatch,
   turn_made_edit: bool,
 ) -> dict {
   const signature = __agent_tool_call_signature(call)
@@ -337,7 +345,7 @@ pub fn __agent_stall_process_call(
  * @effects: []
  * @errors: []
  */
-pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) -> dict? {
+pub fn __agent_stall_classify_trip(config: AgentStallConfig, s: dict) -> dict? {
   const repair_owns_repeat = config.repair_aware
   if s.context_streak >= config.repeat_context_window_error {
     return {

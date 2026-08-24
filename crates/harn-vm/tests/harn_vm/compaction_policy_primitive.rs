@@ -38,7 +38,7 @@ fn out(source: &str) -> Vec<String> {
 #[test]
 fn check_defers_when_session_under_threshold() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 10000, max_turns: 50})
   const decision = compaction.check(s)
@@ -54,7 +54,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn check_marks_compact_now_when_tokens_cross() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 1, max_turns: 100})
   harness.agent.inject(s, {role: "user", content: "Investigate the parser regression in stdlib once more."})
@@ -75,7 +75,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn check_uses_default_policy_when_session_unscoped() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   // No session_id → registers the default policy.
   compaction.policy({max_turns: 2})
   const s = harness.agent.open()
@@ -94,7 +94,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn run_compacts_session_via_lifecycle_with_custom_strategy() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   compaction.policy({session_id: s, max_tokens: 1, keep_last: 1})
   harness.agent.inject(s, {role: "user", content: "Investigate the parser regression."})
@@ -122,7 +122,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn policy_supports_safety_ratio_and_context_window() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   const snapshot = compaction.policy({
     session_id: s,
@@ -140,7 +140,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn check_rejects_unknown_strategy_during_policy() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   compaction.policy({strategy: "not-a-strategy"})
 }
 "#)
@@ -158,7 +158,7 @@ fn run_without_session_id_uses_current_session() {
     // free-standing pipeline there is no current session, so we expect
     // an error — verifying the contract.
     let err = run(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   compaction.run()
 }
 ")

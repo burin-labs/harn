@@ -125,7 +125,11 @@ fn __seed_workspace(fs: HarnessFs, root: string, fixture: string) {
   throw "unknown fixture: " + fixture
 }
 
-fn __replace_tool(fs: HarnessFs, registry, root: string) {
+fn __replace_tool(
+  fs: HarnessFs,
+  registry: {_type: "tool_registry", tools: list} | closure,
+  root: string,
+) {
   return tool_define(
     registry,
     "replace_in_file",
@@ -713,15 +717,15 @@ fn __verify_docs_symbol_rename(fs: HarnessFs, tools: HarnessTools, root: string,
   )
 }
 
-fn __tool_call_count(result) -> int {
+fn __tool_call_count(result: dict) -> int {
   return len(result?.tools?.calls ?? [])
 }
 
-fn __tool_call_name(call) -> string {
+fn __tool_call_name(call: dict) -> string {
   return to_string(call?.name ?? call?.tool_name ?? "")
 }
 
-fn __tool_call_args(call) {
+fn __tool_call_args(call: dict) {
   const args = call?.arguments ?? call?.args ?? call?.tool_args
   if type_of(args) == "dict" {
     return args
@@ -729,7 +733,7 @@ fn __tool_call_args(call) {
   return {}
 }
 
-fn __normalized_tool_path(path) -> string {
+fn __normalized_tool_path(path: string?) -> string {
   let normalized = replace(trim(to_string(path ?? "")), "\\", "/")
   while starts_with(normalized, "./") {
     normalized = normalized[2:]
@@ -737,7 +741,7 @@ fn __normalized_tool_path(path) -> string {
   return normalized
 }
 
-fn __read_only_audit_tool_calls_are_valid(result) -> bool {
+fn __read_only_audit_tool_calls_are_valid(result: dict) -> bool {
   const calls = result?.tools?.calls ?? []
   if len(calls) == 0 {
     return false
@@ -758,7 +762,7 @@ fn __read_only_audit_tool_calls_are_valid(result) -> bool {
   return saw_readme
 }
 
-fn __final_text(result) -> string {
+fn __final_text(result: dict) -> string {
   return result.visible_text ?? result.text ?? ""
 }
 
@@ -771,7 +775,7 @@ fn __final_text(result) -> string {
 pub fn coding_agent_read_only_audit_verification_success(
   readme: string,
   settings: string,
-  result,
+  result: dict,
 ) -> bool {
   return __read_only_audit_tool_calls_are_valid(result)
     && contains(__final_text(result), "AUDIT_OK")
@@ -779,7 +783,7 @@ pub fn coding_agent_read_only_audit_verification_success(
     && settings == __READ_ONLY_AUDIT_SETTINGS
 }
 
-fn __verify_read_only_audit(fs: HarnessFs, root: string, result) {
+fn __verify_read_only_audit(fs: HarnessFs, root: string, result: dict) {
   const readme = fs.read_text(path_join(root, "README.md"))
   const settings = fs.read_text(path_join(root, "settings.py"))
   const final_text = __final_text(result)
@@ -803,7 +807,7 @@ fn __verify_read_only_audit(fs: HarnessFs, root: string, result) {
  * token PATCH_HINT; a correct answer may say "subtracts"/"plus operator"
  * instead of "subtraction"/"addition", or name `a - b` / `a + b`.
  */
-pub fn coding_agent_no_tool_diagnosis_verification_success(result) -> bool {
+pub fn coding_agent_no_tool_diagnosis_verification_success(result: dict) -> bool {
   const final_text = __final_text(result)
   const normalized = lowercase(final_text)
   const names_defect = contains(normalized, "subtract")
@@ -822,7 +826,7 @@ pub fn coding_agent_no_tool_diagnosis_verification_success(result) -> bool {
     && describes_change
 }
 
-fn __verify_no_tool_diagnosis(result) {
+fn __verify_no_tool_diagnosis(result: dict) {
   const final_text = __final_text(result)
   const success = coding_agent_no_tool_diagnosis_verification_success(result)
   return __command_verification(
@@ -844,7 +848,7 @@ fn __verify_fixture(
   root: string,
   fixture: string,
   python: string,
-  result,
+  result: dict,
 ) {
   if fixture == "python-add" {
     return __verify_python_add(fs, tools, root, python)
@@ -919,12 +923,12 @@ fn __run_fixture_agent(
   provider: string,
   model: string,
   tool_format: string,
-  tools,
+  tools: any,
   max_iterations: int,
-  step_judge_config,
-  override_reason = nil,
-  structural_validator_config = nil,
-  reasoning_effort = nil,
+  step_judge_config: any,
+  override_reason: any = nil,
+  structural_validator_config: any = nil,
+  reasoning_effort: string? = nil,
 ) {
   const done_sentinel = if tool_format == "text" || tool_format == "json" {
     "##DONE##"
@@ -988,7 +992,7 @@ fn __run_fixture_agent(
   return __run_preset_agent(harness, "repair", task, options)
 }
 
-fn __run_preset_agent(harness: Harness, kind: string, task: string, options) {
+fn __run_preset_agent(harness: Harness, kind: string, task: string, options: any) {
   const opts = agent_preset(harness, kind, options)
   return agent_loop(harness, task, opts?.system, opts)
 }
@@ -1030,8 +1034,8 @@ fn __summary(
   provider: string,
   model: string,
   tool_format: string,
-  result,
-  verify,
+  result: dict,
+  verify: dict,
   duration_ms: int,
 ) {
   const events = transcript_events(result.transcript)

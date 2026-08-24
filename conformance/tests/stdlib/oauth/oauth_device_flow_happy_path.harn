@@ -14,7 +14,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const topic = "oauth.device_flow.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
   const _ = harness.testing.clock_set(1700000000000)

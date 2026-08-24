@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn bad(box: {value: unknown}) -> string {
     if type_of(box.value) == "string" {
       return box.value

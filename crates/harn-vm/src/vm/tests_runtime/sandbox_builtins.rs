@@ -10,7 +10,7 @@ use super::harness::*;
 fn test_sandbox_deny_builtin() {
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 const xs = [1, 2]
 push(xs, 3)
 }",
@@ -33,7 +33,7 @@ fn test_sandbox_allowed_builtin_works() {
     // Denying "push" should not block "log"
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r#"pipeline t(harness: Harness, task) { harness.stdio.log("hello") }"#,
+        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("hello") }"#,
         denied,
     );
     let (output, _) = result.unwrap();
@@ -44,7 +44,7 @@ fn test_sandbox_allowed_builtin_works() {
 fn test_sandbox_empty_denied_set() {
     // With an empty denied set, everything should work.
     let result = run_harn_with_denied(
-        r#"pipeline t(harness: Harness, task) { harness.stdio.log("ok") }"#,
+        r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log("ok") }"#,
         HashSet::new(),
     );
     let (output, _) = result.unwrap();
@@ -77,7 +77,7 @@ fn test_sandbox_propagates_to_spawn() {
     // Denied builtins should propagate to spawned VMs.
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 const handle = spawn {
   const xs = [1, 2]
   push(xs, 3)
@@ -99,7 +99,7 @@ fn test_sandbox_propagates_to_parallel() {
     // Denied builtins should propagate to parallel VMs.
     let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 const results = parallel(2) { i ->
   const xs = [1, 2]
   push(xs, 3)

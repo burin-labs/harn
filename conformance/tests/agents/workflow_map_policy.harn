@@ -5,7 +5,7 @@ import {
   workflow_map_work_items,
 } from "std/workflow/map"
 
-fn item_kinds(items) {
+fn item_kinds(items: list) {
   let out = []
   for item in items {
     out = out.appending(item.kind)

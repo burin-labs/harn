@@ -125,7 +125,7 @@ pub fn host_lease_status(
   )
 }
 
-fn __host_lease_is_callable(value) -> bool {
+fn __host_lease_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
@@ -223,7 +223,7 @@ pub fn with_host_lease<T>(
   host_lease: HarnessHostLease,
   clock: HarnessClock,
   options: HostLeaseOptions,
-  body,
+  body: any,
 ) -> HostLeaseScopeResult<T> {
   if !__host_lease_is_callable(body) {
     throw "std/host_lease: body must be callable; got " + type_of(body)

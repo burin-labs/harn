@@ -27,7 +27,7 @@ type RetryOptions = {max_attempts?: int, base_ms?: int, cap_ms?: int, multiplier
 
 type RetryReport = {ok: bool, value: any, error: any, attempts: int, elapsed_ms: int}
 
-fn __poll_options(options) {
+fn __poll_options(options: any) {
   const opts = options ?? {}
   const interval = to_int(opts?.interval_ms) ?? 250
   return {
@@ -51,7 +51,7 @@ fn __poll_options(options) {
  * @effects: []
  * @errors: []
  */
-pub fn poll_until(clock: HarnessClock, check, options: PollOptions = {}) -> any {
+pub fn poll_until(clock: HarnessClock, check: unknown, options: PollOptions = {}) -> any {
   const resolved = __poll_options(options)
   if resolved.initial_delay_ms > 0 {
     clock.sleep_ms(resolved.initial_delay_ms)
@@ -89,10 +89,10 @@ pub fn poll_until(clock: HarnessClock, check, options: PollOptions = {}) -> any 
  */
 pub fn wait_for_status(
   harness: Harness,
-  probe,
+  probe: unknown,
   terminal: list<string>,
   options: PollOptions = {},
-  extractor = nil,
+  extractor: any = nil,
 ) -> any {
   const resolved = __poll_options(options)
   const terminal_set = set(terminal ?? [])
@@ -122,7 +122,7 @@ pub fn wait_for_status(
   }
 }
 
-fn __retry_options(options) {
+fn __retry_options(options: any) {
   const opts = options ?? {}
   const max_attempts = to_int(opts?.max_attempts) ?? 5
   const base = to_int(opts?.base_ms) ?? 200
@@ -177,7 +177,11 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  * @effects: []
  * @errors: []
  */
-pub fn retry_with_result(clock: HarnessClock, action, options: RetryOptions = {}) -> RetryReport {
+pub fn retry_with_result(
+  clock: HarnessClock,
+  action: unknown,
+  options: RetryOptions = {},
+) -> RetryReport {
   const resolved = __retry_options(options)
   const timing = start_timing(clock, "poll.retry", {max_attempts: resolved.max_attempts})
   let attempt = 0

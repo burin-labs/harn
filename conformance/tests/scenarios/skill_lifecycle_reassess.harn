@@ -13,7 +13,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *   Turn 1: sticky=false, reassess re-reads visible_messages,
  *     scores the pivot, activates `review`, deactivates `draft`.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let tools = tool_registry()
   tools = tool_define(
     tools,

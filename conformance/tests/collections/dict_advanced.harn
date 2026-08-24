@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const d = {a: 1, b: 2, c: 3}
   harness.stdio.log(d.entries().map({ x -> x.key }))
   harness.stdio.log(d.entries().map({ x -> x.value }))

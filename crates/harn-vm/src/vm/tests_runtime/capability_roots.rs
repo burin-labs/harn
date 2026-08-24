@@ -119,41 +119,41 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
 
     let escapes = [
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.read_text("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.read_text("{}") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.read_bytes("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.read_bytes("{}") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text("{}", "x") }}"#,
             outside_new.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.append("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.append("{}", "x") }}"#,
             outside_file.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.copy("{}", "{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.copy("{}", "{}") }}"#,
             outside_file.display(),
             allowed.path().join("copy.txt").display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.copy("{}", "{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.copy("{}", "{}") }}"#,
             allowed.path().join("missing.txt").display(),
             outside_copy.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.list_dir("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.list_dir("{}") }}"#,
             outside.path().display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.mkdir("{}") }}"#,
             outside_dir.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.delete("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.delete("{}") }}"#,
             outside_file.display()
         ),
     ];
@@ -181,7 +181,7 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
     // returns the typed denial envelope needed by host diagnostics.
     let (_, exists_outside) = run_harn_with_policy(
         &format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.exists("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.exists("{}") }}"#,
             outside_file.display()
         ),
         policy.clone(),
@@ -193,7 +193,7 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
     );
     let (_, status_outside) = run_harn_with_policy(
         &format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.status("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.status("{}") }}"#,
             outside_file.display()
         ),
         policy,
@@ -226,7 +226,7 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
     for existing_root in [writable.path(), read_only.path()] {
         run_harn_with_policy(
             &format!(
-                r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+                r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.mkdir("{}", true) }}"#,
                 existing_root.display()
             ),
             policy.clone(),
@@ -237,7 +237,7 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
 
     run_harn_with_policy(
         &format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.mkdir("{}", true) }}"#,
             existing_file.display()
         ),
         policy.clone(),
@@ -248,7 +248,7 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
     let missing_read_only = read_only.path().join("missing");
     let read_only_error = run_harn_with_policy(
         &format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.mkdir("{}", true) }}"#,
             missing_read_only.display()
         ),
         policy.clone(),
@@ -261,7 +261,7 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
 
     let outside_error = run_harn_with_policy(
         &format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.mkdir("{}", true) }}"#,
             outside.path().display()
         ),
         policy,
@@ -297,7 +297,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
 
     // Reading from a read-only root succeeds.
     let read_source = format!(
-        r#"pipeline t(harness: Harness, task) {{ return harness.fs.read_text("{}") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ return harness.fs.read_text("{}") }}"#,
         read_only_file.display()
     );
     let (_out, value) = run_harn_with_policy(&read_source, policy.clone()).unwrap();
@@ -313,15 +313,15 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
     // non-existent case by the `sandbox_hardened` integration test).
     let existing_mutations = [
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text("{}", "x") }}"#,
             read_only_file.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.append("{}", "x") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.append("{}", "x") }}"#,
             read_only_file.display()
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.delete("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.delete("{}") }}"#,
             read_only_file.display()
         ),
     ];
@@ -345,7 +345,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
 
     // Creating a new file under a read-only root is likewise rejected.
     let create = format!(
-        r#"pipeline t(harness: Harness, task) {{ harness.fs.write_text("{}", "x") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.write_text("{}", "x") }}"#,
         read_only.path().join("new.txt").display()
     );
     let err = run_harn_with_policy(&create, policy).unwrap_err();
@@ -389,10 +389,10 @@ fn test_policy_workspace_roots_catch_template_render_escapes() {
     let escaped_path = outside_template.display();
     let escapes = [
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.render_prompt("{escaped_path}") }}"#
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.render_prompt("{escaped_path}") }}"#
         ),
         format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.fs.render_prompt_with_provenance("{escaped_path}") }}"#
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.fs.render_prompt_with_provenance("{escaped_path}") }}"#
         ),
     ];
 
@@ -420,7 +420,7 @@ fn test_policy_workspace_roots_reject_process_cwd_escape() {
     };
 
     let source = format!(
-        r#"pipeline t(harness: Harness, task) {{ harness.process.exec_at("{}", "sh", "-c", "true") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.exec_at("{}", "sh", "-c", "true") }}"#,
         outside.path().display()
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();

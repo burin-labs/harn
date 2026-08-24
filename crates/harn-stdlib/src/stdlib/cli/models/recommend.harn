@@ -34,35 +34,35 @@ const GIB: int = 1073741824
 
 const CLOUD_DEFAULT_SENTINEL: string = "$cloud_default"
 
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: unknown, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: unknown) -> dict {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __safe_list(value) -> list {
+fn __safe_list(value: unknown) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_bool(value, fallback: bool) -> bool {
+fn __safe_bool(value: unknown, fallback: bool) -> bool {
   if type_of(value) == "bool" {
     return value
   }
   return fallback
 }
 
-fn __safe_int(value) -> int? {
+fn __safe_int(value: int?) -> int? {
   if type_of(value) == "int" {
     return value
   }
@@ -77,7 +77,7 @@ fn __safe_int(value) -> int? {
  *   16..=31 GiB  → "16_32"
  *   _            → "32_plus"
  */
-fn __ram_bucket_from_bytes(available_bytes) -> string {
+fn __ram_bucket_from_bytes(available_bytes: int?) -> string {
   const bytes = __safe_int(available_bytes)
   if bytes == nil {
     return "lt8"
@@ -96,7 +96,7 @@ fn __ram_bucket_from_bytes(available_bytes) -> string {
 }
 
 /** Round half-up GiB conversion for the human rationale string. */
-fn __ram_gib_rounded(bytes) -> int {
+fn __ram_gib_rounded(bytes: int?) -> int {
   const b = __safe_int(bytes) ?? 0
   return (b + GIB / 2) / GIB
 }
@@ -139,22 +139,24 @@ fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: b
  *     through (already in `provider:model` form).
  *   * Otherwise strip the leading `provider/` if present.
  */
-fn __harn_selector_for(provider: string, model_id: string) -> string {
-  if provider == "ollama" {
+fn __harn_selector_for(provider: string?, model_id: string?) -> string {
+  const provider_name = provider ?? ""
+  const model_name = model_id ?? ""
+  if provider_name == "ollama" {
     const prefix = "ollama/"
-    if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
-      return "ollama:" + model_id[len(prefix):len(model_id)]
+    if len(model_name) >= len(prefix) && model_name[0:len(prefix)] == prefix {
+      return "ollama:" + model_name[len(prefix):len(model_name)]
     }
-    return model_id
+    return model_name
   }
-  const prefix = provider + "/"
-  if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
-    return model_id[len(prefix):len(model_id)]
+  const prefix = provider_name + "/"
+  if len(model_name) >= len(prefix) && model_name[0:len(prefix)] == prefix {
+    return model_name[len(prefix):len(model_name)]
   }
-  return model_id
+  return model_name
 }
 
-fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string) -> string {
+fn __rationale(ram_bytes: int?, gpu: string, has_provider_key: bool, model_id: string) -> string {
   const ram = if __safe_int(ram_bytes) == nil {
     "unknown free RAM"
   } else {
@@ -169,8 +171,8 @@ fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string)
 }
 
 fn __alternative_suffix(
-  local_model,
-  cloud_model,
+  local_model: dict,
+  cloud_model: any,
   selected_provider: string,
   selected_model: string,
 ) -> string {
@@ -204,7 +206,7 @@ fn __alternative_suffix(
  * guarantees the cloud branch only fires when `has_provider_key` is
  * also true.
  */
-fn __resolve_rule(rule: dict, cloud_model) -> dict? {
+fn __resolve_rule(rule: dict, cloud_model: any) -> dict? {
   const model_id = __safe_string(rule["model_id"], "")
   if model_id != CLOUD_DEFAULT_SENTINEL {
     return {provider: __safe_string(rule["provider"], ""), model_id: model_id}
@@ -220,7 +222,7 @@ fn __resolve_rule(rule: dict, cloud_model) -> dict? {
   return {provider: provider, model_id: provider + "/" + cloud_model_id}
 }
 
-fn __resolve_local_model(local_model) -> dict? {
+fn __resolve_local_model(local_model: any) -> dict? {
   if type_of(local_model) != "dict" {
     return nil
   }

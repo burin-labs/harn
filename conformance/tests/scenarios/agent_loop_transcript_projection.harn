@@ -9,7 +9,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * projected prefix omits the failure while the raw transcript keeps
  * both turns intact.
  */
-fn flaky_tool(runtime: HarnessRuntime, flaky_calls) {
+fn flaky_tool(runtime: HarnessRuntime, flaky_calls: any) {
   let tools = tool_registry()
   const handler = fn(_args) {
     const previous_calls = runtime.atomic_add(flaky_calls, 1)

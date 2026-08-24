@@ -2,7 +2,7 @@
 // every variant or include a wildcard arm.
 type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const m: Msg = {kind: "ping", ttl: 5}
   match m.kind {
     "ping" -> { harness.stdio.log("ping") }

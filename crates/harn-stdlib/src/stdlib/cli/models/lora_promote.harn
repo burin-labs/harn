@@ -117,11 +117,11 @@ fn __render_json(report: dict) -> string {
   return json_stringify_pretty(envelope)
 }
 
-fn __as_int(value) {
+fn __as_int(value: any) {
   return to_int(value) ?? 0
 }
 
-fn __as_number(value) {
+fn __as_number(value: any) {
   return to_float(value) ?? 0.0
 }
 

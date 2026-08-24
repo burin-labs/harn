@@ -13,24 +13,24 @@ const DOC = {
 
 // --- json_path_get ----------------------------------------------------------
 @test
-pipeline test_get_scalar(harness: Harness, task) {
+pipeline test_get_scalar(harness: Harness, task: unknown) {
   assert_eq(json_path_get(DOC, "valid"), true)
   assert_eq(json_path_get(DOC, "bundle_id"), "quickstart-minimal")
 }
 
 @test
-pipeline test_get_indexed_field(harness: Harness, task) {
+pipeline test_get_indexed_field(harness: Harness, task: unknown) {
   assert_eq(json_path_get(DOC, "executed_nodes[1].node_id"), "notify")
   assert_eq(json_path_get(DOC, "connectors[0].id"), "github")
 }
 
 @test
-pipeline test_get_empty_path_returns_doc(harness: Harness, task) {
+pipeline test_get_empty_path_returns_doc(harness: Harness, task: unknown) {
   assert_eq(json_path_get({a: 1}, ""), {a: 1})
 }
 
 @test
-pipeline test_get_missing_key_is_nil(harness: Harness, task) {
+pipeline test_get_missing_key_is_nil(harness: Harness, task: unknown) {
   // A missing dict key subscripts to nil (so the check reports
   // `actual: null` rather than crashing, unlike the bash+python original).
   assert_eq(json_path_get(DOC, "nope"), nil)
@@ -39,31 +39,31 @@ pipeline test_get_missing_key_is_nil(harness: Harness, task) {
 
 // --- json_path_check --------------------------------------------------------
 @test
-pipeline test_check_bool_true(harness: Harness, task) {
+pipeline test_check_bool_true(harness: Harness, task: unknown) {
   assert_eq(json_path_check(DOC, "valid", "true").ok, true)
 }
 
 @test
-pipeline test_check_string_json_encoding(harness: Harness, task) {
+pipeline test_check_string_json_encoding(harness: Harness, task: unknown) {
   // Expected values are JSON literals, so strings carry quotes.
   assert_eq(json_path_check(DOC, "bundle_id", "\"quickstart-minimal\"").ok, true)
   assert_eq(json_path_check(DOC, "bundle_id", "quickstart-minimal").ok, false)
 }
 
 @test
-pipeline test_check_empty_list(harness: Harness, task) {
+pipeline test_check_empty_list(harness: Harness, task: unknown) {
   assert_eq(json_path_check(DOC, "errors", "[]").ok, true)
 }
 
 @test
-pipeline test_check_mismatch_reports_actual(harness: Harness, task) {
+pipeline test_check_mismatch_reports_actual(harness: Harness, task: unknown) {
   const res = json_path_check(DOC, "executed_nodes[0].node_id", "\"notify\"")
   assert_eq(res.ok, false)
   assert_eq(res.actual, "\"summarize\"")
 }
 
 @test
-pipeline test_check_missing_path_not_ok(harness: Harness, task) {
+pipeline test_check_missing_path_not_ok(harness: Harness, task: unknown) {
   const res = json_path_check(DOC, "missing[0].x", "\"y\"")
   assert_eq(res.ok, false)
   assert_eq(res.actual.starts_with("<missing path:"), true)

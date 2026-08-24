@@ -1,22 +1,9 @@
+import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
 type MissingToolCallTool = {name: string, description?: string}
-
-type MissingToolCallOptions = {
-  enabled?: bool,
-  provider?: string,
-  model?: string,
-  confidence_threshold?: float,
-  max_tokens?: int,
-  temperature?: float,
-  classifier?: any,
-  top_p?: float,
-  seed?: int,
-  effort?: string,
-  timeout_ms?: int,
-}
 
 type MissingToolCallVerdict = {
   action: MissingToolCallAction,
@@ -32,14 +19,14 @@ type MissingToolCallVerdict = {
   error?: string,
 }
 
-fn __missing_tool_call_string(value) -> string {
+fn __missing_tool_call_string(value: any) -> string {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __missing_tool_call_float(value, fallback) {
+fn __missing_tool_call_float(value: float?, fallback: float) {
   const parsed = to_float(value ?? fallback)
   if parsed == nil {
     return fallback
@@ -53,7 +40,7 @@ fn __missing_tool_call_float(value, fallback) {
   return parsed
 }
 
-fn __missing_tool_call_config_error(code: string, message: string, fields = {}) {
+fn __missing_tool_call_config_error(code: string, message: string, fields: dict? = {}) {
   return {
     error: code,
     category: "invalid_config",
@@ -63,7 +50,7 @@ fn __missing_tool_call_config_error(code: string, message: string, fields = {}) 
     + (fields ?? {})
 }
 
-fn __missing_tool_call_threshold(value) -> float {
+fn __missing_tool_call_threshold(value: float?) -> float {
   const threshold = to_float(value ?? 0.65)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw __missing_tool_call_config_error(
@@ -75,7 +62,7 @@ fn __missing_tool_call_threshold(value) -> float {
   return threshold
 }
 
-fn __missing_tool_call_candidate_tool_entries(payload) {
+fn __missing_tool_call_candidate_tool_entries(payload: dict) {
   const registry = payload?.tools
   if type_of(registry) == "dict" {
     return registry?.tools ?? []
@@ -86,7 +73,7 @@ fn __missing_tool_call_candidate_tool_entries(payload) {
   return payload?.candidate_tools ?? []
 }
 
-fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
+fn __missing_tool_call_candidate_tools(payload: dict) -> list<MissingToolCallTool> {
   let out = []
   let names = []
   for entry in __missing_tool_call_candidate_tool_entries(payload) {
@@ -123,7 +110,7 @@ fn __missing_tool_call_tool_names(candidate_tools: list<MissingToolCallTool>) ->
   return names
 }
 
-fn __missing_tool_call_tool_name(value, candidate_tools: list<MissingToolCallTool>) -> string {
+fn __missing_tool_call_tool_name(value: any, candidate_tools: list<MissingToolCallTool>) -> string {
   const requested = __missing_tool_call_string(value)
   if requested == "" {
     return ""
@@ -157,7 +144,7 @@ fn __missing_tool_call_schema() {
   }
 }
 
-fn __missing_tool_call_prompt(payload, candidate_tools) {
+fn __missing_tool_call_prompt(payload: dict, candidate_tools: any) {
   return "You classify assistant text before a tool-dispatch step.\n\n"
     + "The parser already found ZERO valid tool calls in this turn. Decide whether the assistant text "
     + "is nevertheless expressing an intent to invoke one of the candidate tools.\n\n"
@@ -174,7 +161,7 @@ fn __missing_tool_call_prompt(payload, candidate_tools) {
     + "- Use ambiguous when the intent or target tool is unclear. Do not infer intent from the original user task alone.\n"
 }
 
-fn __missing_tool_call_action(value) -> MissingToolCallAction {
+fn __missing_tool_call_action(value: any) -> MissingToolCallAction {
   const action = __missing_tool_call_string(value)
   if action == "tool_call_intended" || action == "no_tool_call_intended" || action == "ambiguous" {
     return action
@@ -183,7 +170,7 @@ fn __missing_tool_call_action(value) -> MissingToolCallAction {
 }
 
 fn __missing_tool_call_normalize(
-  raw,
+  raw: any,
   candidate_tools: list<MissingToolCallTool>,
   threshold: float,
 ) -> MissingToolCallVerdict {
@@ -225,7 +212,7 @@ fn __missing_tool_call_normalize(
     }
 }
 
-fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerdict {
+fn __missing_tool_call_fail_open(error: any, threshold: float) -> MissingToolCallVerdict {
   return {
     action: "ambiguous",
     original_action: "error",
@@ -258,7 +245,7 @@ fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerd
 pub fn missing_tool_call_classifier(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  opts: MissingToolCallOptions = {},
+  opts: MissingToolCallRecoveryOptions? = nil,
 ) {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {

@@ -94,7 +94,7 @@ fn __runner_slot_key(slot: int) -> string {
 
 fn __runner_pool_status(
   runtime: HarnessRuntime,
-  statuses,
+  statuses: any,
   slot: int,
   online: bool,
   busy: bool,
@@ -107,7 +107,7 @@ fn __runner_pool_status(
   )
 }
 
-fn __runner_pool_children(runtime: HarnessRuntime, handle, size: int) -> list<dict> {
+fn __runner_pool_children(runtime: HarnessRuntime, handle: dict, size: int) -> list<dict> {
   let children = []
   for slot in range(0, size) {
     const slot_index = slot
@@ -159,7 +159,7 @@ fn __runner_pool_children(runtime: HarnessRuntime, handle, size: int) -> list<di
   return children
 }
 
-fn __runner_pool_launch(runtime: HarnessRuntime, handle, size: int) -> RunnerPoolHandle {
+fn __runner_pool_launch(runtime: HarnessRuntime, handle: any, size: int) -> RunnerPoolHandle {
   const next = handle + {size: size}
   const supervisor = runtime.supervisor_start(
     {

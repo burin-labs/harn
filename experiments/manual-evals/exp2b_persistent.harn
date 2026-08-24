@@ -121,7 +121,7 @@ fn run_variant(
   }
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const registry = build_tools()
   const results = [
     run_variant(harness, "E:persistent+native+default", "native", "(default)", registry),

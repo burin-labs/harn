@@ -2,12 +2,12 @@ import { bounded_loop } from "std/personas/prelude"
 
 @persona(name: "template_persona", description: "Frontier judgment loop template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run", "interaction.ask", "workspace.read_text"], autonomy: "suggest", receipts: "required")
 /** Run the frontier judgment loop template DAG. */
-pub fn template_persona(harness: Harness, task) {
+pub fn template_persona(harness: Harness, task: dict) {
   return judge_until_confident(harness, task)
 }
 
 @step(name: "judge_until_confident", model: "mock", receipt: audit, error_boundary: escalate, retry: {max_attempts: 2}, budget: {max_tokens: 4000})
-fn judge_until_confident(harness: Harness, task) {
+fn judge_until_confident(harness: Harness, task: dict) {
   const fixture = task?.fixture ?? {}
   const schema = {
     type: "object",
@@ -50,6 +50,6 @@ fn judge_until_confident(harness: Harness, task) {
   )
 }
 
-pub pipeline run(harness: Harness, task) -> dict {
+pub pipeline run(harness: Harness, task: dict) -> dict {
   return template_persona(harness, task)
 }

@@ -62,7 +62,7 @@ fn build_tools() -> dict {
   return registry
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const registry = build_tools()
   const task_text =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."

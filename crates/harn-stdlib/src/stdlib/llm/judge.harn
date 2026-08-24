@@ -1,4 +1,4 @@
-fn __as_candidate(value, index) {
+fn __as_candidate(value: string | dict, index: int) {
   if type_of(value) == "string" {
     return {index: index, prompt: value, instruction: value, demos: []}
   }
@@ -14,7 +14,7 @@ fn __as_candidate(value, index) {
     }
 }
 
-fn __candidate_rows(candidates) {
+fn __candidate_rows(candidates: string | dict | list) {
   const candidate_list = if type_of(candidates) == "list" {
     candidates
   } else {
@@ -30,7 +30,7 @@ fn __candidate_rows(candidates) {
   return rows
 }
 
-fn __case_rows(eval_set) {
+fn __case_rows(eval_set: string | bytes | list | dict | set | range | nil) {
   require type_of(eval_set) == "list", "parallel_judge: eval_set must be a list"
   require len(eval_set) > 0, "parallel_judge: eval_set must not be empty"
   let rows = []
@@ -42,14 +42,14 @@ fn __case_rows(eval_set) {
   return rows
 }
 
-fn __case_id(case, index) {
+fn __case_id(case: dict, index: any) {
   if type_of(case) == "dict" && case?.id != nil {
     return case.id
   }
   return "case-" + to_string(index)
 }
 
-fn __score_value(value) {
+fn __score_value(value: unknown) {
   const raw = if type_of(value) == "dict" {
     value?.score
   } else {
@@ -60,7 +60,13 @@ fn __score_value(value) {
   return score
 }
 
-fn __score_case(candidate, case, case_index, candidate_index, metric) {
+fn __score_case(
+  candidate: dict,
+  case: dict,
+  case_index: any,
+  candidate_index: any,
+  metric: unknown,
+) {
   const output = metric(
     {
       prompt: candidate.prompt,
@@ -78,7 +84,7 @@ fn __score_case(candidate, case, case_index, candidate_index, metric) {
   }
 }
 
-fn __mean_case_score(case_scores) {
+fn __mean_case_score(case_scores: string | bytes | list | dict | set | range | nil) {
   let total = 0.0
   for row in case_scores {
     total = total + row.score
@@ -86,7 +92,7 @@ fn __mean_case_score(case_scores) {
   return total / (len(case_scores) * 1.0)
 }
 
-fn __insert_ranked(ranked, entry) {
+fn __insert_ranked(ranked: list, entry: dict) {
   let out = []
   let inserted = false
   for existing in ranked {
@@ -102,7 +108,7 @@ fn __insert_ranked(ranked, entry) {
   return out
 }
 
-fn __rank(entries) {
+fn __rank(entries: list) {
   let ranked = []
   for entry in entries {
     ranked = __insert_ranked(ranked, entry)
@@ -116,7 +122,12 @@ fn __rank(entries) {
  * @effects: []
  * @errors: []
  */
-pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
+pub fn parallel_judge(
+  candidates: string | dict | list,
+  eval_set: string | bytes | list | dict | set | range | nil,
+  metric: any,
+  options: any = nil,
+) {
   require metric != nil, "parallel_judge: metric closure is required"
   const candidate_rows = __candidate_rows(candidates)
   const case_rows = __case_rows(eval_set)

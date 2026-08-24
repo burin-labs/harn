@@ -1,6 +1,6 @@
 import { verify_imports, web_grounding_tools, web_search } from "std/web"
 
-fn has_finding(items, kind, package) {
+fn has_finding(items: list, kind: string, package: string) {
   for item in items {
     if item.kind == kind && item.package == package {
       return true
@@ -9,7 +9,7 @@ fn has_finding(items, kind, package) {
   return false
 }
 
-fn has_import_status(items, package, symbol, status) {
+fn has_import_status(items: list, package: string, symbol: string, status: string) {
   for item in items {
     if item.package == package && item.symbol == symbol && item.status == status {
       return true
@@ -18,7 +18,7 @@ fn has_import_status(items, package, symbol, status) {
   return false
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const curated = web_search(
     harness,
     "fastapi dependency injection",

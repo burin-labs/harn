@@ -33,14 +33,18 @@ fn __agent_required_tool_missing(
   return !__agent_required_tool_satisfied(requirement, successful)
 }
 
-fn __agent_required_tool_label(requirement) -> string {
+fn __agent_required_tool_label(requirement: AgentRequiredToolRequirement) -> string {
   if type_of(requirement) == "list" {
-    return join(requirement, "|")
+    let candidates: list<string> = []
+    for candidate in requirement {
+      candidates = candidates.appending(to_string(candidate))
+    }
+    return join(candidates, "|")
   }
   return to_string(requirement)
 }
 
-fn __agent_required_tools_from_options(opts) -> list {
+fn __agent_required_tools_from_options(opts: dict) -> list {
   const required = opts?.require_successful_tools
   if required == nil {
     return []
@@ -55,7 +59,7 @@ fn __agent_required_tools_from_options(opts) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<string> {
+pub fn agent_required_tools_missing_from_result(result: dict, opts: dict) -> list<string> {
   const required = __agent_required_tools_from_options(opts)
   if len(required) == 0 {
     return []
@@ -78,7 +82,7 @@ pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<stri
  * @api_stability: experimental
  */
 pub fn agent_required_tools_missing_from_session(
-  opts,
+  opts: dict,
   successful_tools_seen: list,
 ) -> list<string> {
   const required = __agent_required_tools_from_options(opts)
@@ -94,7 +98,7 @@ pub fn agent_required_tools_missing_from_session(
   return missing
 }
 
-fn __agent_required_tools_friction_event(result: dict, opts, missing: list<string>) -> dict {
+fn __agent_required_tools_friction_event(result: dict, opts: dict, missing: list<string>) -> dict {
   const session_id = to_string(result?.session_id ?? "")
   let recurrence = ["missing_required_tools=" + to_string(len(missing))]
   if opts?.persona != nil {
@@ -140,7 +144,7 @@ fn __agent_required_tools_emit_friction(
   agent: HarnessAgent,
   obs: HarnessObs,
   result: dict,
-  opts,
+  opts: dict,
   missing: list<string>,
 ) {
   const event = __agent_required_tools_friction_event(result, opts, missing)
@@ -183,7 +187,7 @@ pub fn agent_required_tools_enforce(
   agent: HarnessAgent,
   obs: HarnessObs,
   result: dict,
-  opts,
+  opts: dict,
 ) -> dict {
   if __agent_required_tools_preserve_terminal_error(result) {
     return result

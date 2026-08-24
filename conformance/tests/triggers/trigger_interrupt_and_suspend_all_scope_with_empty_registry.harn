@@ -9,7 +9,7 @@ import "std/triggers"
  * org-scoped "panic into an empty registry" path — the trigger fired but
  * the registry was empty, which is success rather than failure.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

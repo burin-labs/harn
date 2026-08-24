@@ -47,29 +47,29 @@ fn assert_local_only(env: HarnessEnv) {
 // Task state directory layout.
 // -------------------------------------------------------------------------------------------------
 
-fn task_dir(fs: HarnessFs, task_id) {
+fn task_dir(fs: HarnessFs, task_id: any) {
   return path_join(fs.source_dir(), ".qmode", task_id)
 }
 
-fn ensure_task_dir(fs: HarnessFs, task_id) {
+fn ensure_task_dir(fs: HarnessFs, task_id: any) {
   const dir = task_dir(fs, task_id)
   fs.mkdir(dir)
   return dir
 }
 
-fn qa_path(fs: HarnessFs, task_id) {
+fn qa_path(fs: HarnessFs, task_id: any) {
   return path_join(task_dir(fs, task_id), "qa.jsonl")
 }
 
-fn pending_path(fs: HarnessFs, task_id) {
+fn pending_path(fs: HarnessFs, task_id: any) {
   return path_join(task_dir(fs, task_id), "pending.json")
 }
 
-fn plan_path(fs: HarnessFs, task_id) {
+fn plan_path(fs: HarnessFs, task_id: any) {
   return path_join(task_dir(fs, task_id), "plan.json")
 }
 
-fn task_meta_path(fs: HarnessFs, task_id) {
+fn task_meta_path(fs: HarnessFs, task_id: any) {
   return path_join(task_dir(fs, task_id), "task.json")
 }
 
@@ -77,7 +77,7 @@ fn task_meta_path(fs: HarnessFs, task_id) {
 // JSONL helpers (newline-delimited JSON).
 // -------------------------------------------------------------------------------------------------
 
-fn read_jsonl(fs: HarnessFs, path) {
+fn read_jsonl(fs: HarnessFs, path: any) {
   if !fs.exists(path) {
     return []
   }
@@ -106,7 +106,7 @@ fn read_jsonl(fs: HarnessFs, path) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn read_profile_file(fs: HarnessFs, path, scope) {
+fn read_profile_file(fs: HarnessFs, path: string, scope: string) {
   if !fs.exists(path) {
     return ""
   }
@@ -141,7 +141,7 @@ fn load_profile_layers(fs: HarnessFs) {
   return join(blocks, "\n\n")
 }
 
-fn profile_path_for_scope(fs: HarnessFs, scope) {
+fn profile_path_for_scope(fs: HarnessFs, scope: string) {
   if scope == "user" {
     return path_join(fs.home_dir(), ".harn", "USER_PROFILE.md")
   }
@@ -151,7 +151,7 @@ fn profile_path_for_scope(fs: HarnessFs, scope) {
   return path_join(fs.source_dir(), ".harn", "USER_PROFILE.md")
 }
 
-fn append_profile_writes(clock: HarnessClock, fs: HarnessFs, profile_writes) {
+fn append_profile_writes(clock: HarnessClock, fs: HarnessFs, profile_writes: any) {
   if type_of(profile_writes) != "list" || len(profile_writes) == 0 {
     return
   }
@@ -201,7 +201,7 @@ fn append_profile_writes(clock: HarnessClock, fs: HarnessFs, profile_writes) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn _first_nonempty_line(fs: HarnessFs, path) {
+fn _first_nonempty_line(fs: HarnessFs, path: string) {
   const body = fs.read_text(path)
   if body == nil {
     return ""
@@ -253,7 +253,7 @@ fn repo_map_text(fs: HarnessFs, process: HarnessProcess) {
 // Tools available to the model.
 // -------------------------------------------------------------------------------------------------
 
-fn build_tools(harness: Harness, dir) {
+fn build_tools(harness: Harness, dir: any) {
   const pending_p = path_join(dir, "pending.json")
   const plan_p = path_join(dir, "plan.json")
   let registry = tool_registry()
@@ -395,7 +395,7 @@ fn build_tools(harness: Harness, dir) {
 // Prompt construction.
 // -------------------------------------------------------------------------------------------------
 
-fn system_prompt(profile_block) {
+fn system_prompt(profile_block: any) {
   return """
 You are a planning partner pairing with the user. The user types one short message; you reply with one short question, or commit to a final plan. A whole conversation is typically 1–5 exchanges.
 
@@ -446,7 +446,7 @@ Reminder: no free-form prose answers. Every step ends with one tool call to ask_
  * First-turn user prompt: full orientation. Workspace overview + the task
  * + the "what to do this step" rubric.
  */
-fn build_first_turn_prompt(fs: HarnessFs, process: HarnessProcess, task) {
+fn build_first_turn_prompt(fs: HarnessFs, process: HarnessProcess, task: any) {
   const lines = [
     "The user's request:",
     "",
@@ -468,7 +468,7 @@ fn build_first_turn_prompt(fs: HarnessFs, process: HarnessProcess, task) {
  * has its full prior tool-call/result history via the persisted session, so
  * re-injecting qa_history textually would just bloat tokens.
  */
-fn build_resume_turn_prompt(answer, qa_count) {
+fn build_resume_turn_prompt(answer: any, qa_count: int) {
   const lines = [
     answer,
     "",
@@ -490,15 +490,21 @@ fn build_resume_turn_prompt(answer, qa_count) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn session_id_for(task_id) {
+fn session_id_for(task_id: any) {
   return "qmode-${task_id}"
 }
 
-fn session_snapshot_path(dir) {
+fn session_snapshot_path(dir: any) {
   return path_join(dir, "session.json")
 }
 
-fn restore_session(agent: HarnessAgent, fs: HarnessFs, session_id, snap_path, fresh_system_prompt) {
+fn restore_session(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  session_id: any,
+  snap_path: any,
+  fresh_system_prompt: any,
+) {
   agent.open(session_id)
   // Always start with the fresh system prompt — profile may have changed
   // (e.g. save_user_pref ran in a prior turn), and we want the latest
@@ -539,7 +545,7 @@ fn restore_session(agent: HarnessAgent, fs: HarnessFs, session_id, snap_path, fr
  * memory of the prior turns — degraded from "full prior tool history" to
  * "skeleton conversation", which is still better than starting over.
  */
-fn replay_qa_history_into_session(agent: HarnessAgent, session_id, qa_history) {
+fn replay_qa_history_into_session(agent: HarnessAgent, session_id: any, qa_history: list) {
   for entry in qa_history {
     const q = if type_of(entry?.question) == "string" {
       entry.question
@@ -559,7 +565,7 @@ fn replay_qa_history_into_session(agent: HarnessAgent, session_id, qa_history) {
   }
 }
 
-fn save_session(agent: HarnessAgent, fs: HarnessFs, session_id, snap_path) {
+fn save_session(agent: HarnessAgent, fs: HarnessFs, session_id: any, snap_path: any) {
   const snap = agent.snapshot(session_id)
   const messages = if type_of(snap) == "dict" {
     snap.messages ?? []

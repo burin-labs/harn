@@ -7,7 +7,7 @@ import {
   storage,
 } from "std/oauth/storage"
 
-fn require_token(label, value, expected_access) {
+fn require_token(label: string, value: dict, expected_access: string) {
   if value == nil {
     throw label + ": expected TokenSet, got nil"
   }
@@ -17,13 +17,13 @@ fn require_token(label, value, expected_access) {
   }
 }
 
-fn require_nil(label, value) {
+fn require_nil(label: string, value: any) {
   if value != nil {
     throw label + ": expected nil, got " + to_string(value)
   }
 }
 
-fn exercise_backend(label, store, expect_kind) {
+fn exercise_backend(label: string, store: dict, expect_kind: string) {
   if store.kind != expect_kind {
     throw label + ": expected kind=" + expect_kind + ", got " + store.kind
   }
@@ -140,7 +140,13 @@ fn exercise_custom(auth: HarnessAuth) {
   }
 }
 
-fn exercise_cloud(auth: HarnessAuth, testing: HarnessTesting, scope, factory, expect_kind) {
+fn exercise_cloud(
+  auth: HarnessAuth,
+  testing: HarnessTesting,
+  scope: string,
+  factory: unknown,
+  expect_kind: string,
+) {
   testing.clear()
   testing.respond("auth", "oauth_storage_set", nil)
   testing.respond("auth", "oauth_storage_delete", nil)
@@ -217,7 +223,7 @@ fn exercise_namespace(harness: Harness) {
   require_token("namespace.custom", cs.get("ns"), "ns-custom")
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   exercise_memory(harness.auth)
   exercise_file(harness)
   exercise_custom(harness.auth)

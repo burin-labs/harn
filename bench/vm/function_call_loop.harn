@@ -1,5 +1,5 @@
-pipeline default(harness: Harness, task) {
-  fn step(value) {
+pipeline default(harness: Harness, task: unknown) {
+  fn step(value: int) {
     return value + 1
   }
   let i = 0

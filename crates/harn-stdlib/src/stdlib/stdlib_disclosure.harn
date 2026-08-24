@@ -61,14 +61,14 @@ co_author = "current"
 bot_author = "current"
 """
 
-fn __dict(value) -> dict {
+fn __dict(value: any) -> dict {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __as_config(value) -> dict {
+fn __as_config(value: any) -> dict {
   const dict = __dict(value)
   if contains(dict.keys(), "disclosure") {
     return __dict(dict.disclosure)
@@ -76,7 +76,7 @@ fn __as_config(value) -> dict {
   return dict
 }
 
-fn __as_project_config(value) -> dict {
+fn __as_project_config(value: any) -> dict {
   const dict = __dict(value)
   if contains(dict.keys(), "disclosure") {
     return __dict(dict.disclosure)
@@ -144,7 +144,7 @@ fn __env_config(env: HarnessEnv, fs: HarnessFs, options: dict) -> dict {
   return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
 }
 
-fn __config(env: HarnessEnv, fs: HarnessFs, options) -> DisclosureConfig {
+fn __config(env: HarnessEnv, fs: HarnessFs, options: any) -> DisclosureConfig {
   const opts = __dict(options)
   let config = __parse_config_toml(__BUILTIN_DISCLOSURE_CONFIG, "built-in disclosure config")
   config = deep_merge(config, __project_config(fs, opts))
@@ -216,7 +216,7 @@ fn __principal(subject: string, config: DisclosureConfig, role: string, position
   return principal
 }
 
-fn __context(chain, config: DisclosureConfig) -> DisclosureContext {
+fn __context(chain: any, config: DisclosureConfig) -> DisclosureContext {
   const subject_entries = actor_chain_subjects(chain)
   const origin_index = len(subject_entries) - 1
   let principals = []
@@ -261,7 +261,7 @@ fn __surface_config(config: DisclosureConfig, surface: string) -> dict {
   return surface_config
 }
 
-fn __select_principal(ctx: DisclosureContext, selector) {
+fn __select_principal(ctx: DisclosureContext, selector: string?) {
   const name = to_string(selector ?? "")
   if name == "origin" {
     return ctx.origin
@@ -287,7 +287,7 @@ fn __render_text(fs: HarnessFs, surface_config: dict, ctx: DisclosureContext) ->
   return fs.render_template(to_string(template), ctx)
 }
 
-fn __render_optional_template(fs: HarnessFs, template, ctx: DisclosureContext) {
+fn __render_optional_template(fs: HarnessFs, template: any, ctx: DisclosureContext) {
   if template == nil || trim(to_string(template)) == "" {
     return nil
   }
@@ -313,7 +313,7 @@ fn __github_mode_label(author_mode: string) -> string {
   return "human_author_agent_coauthor"
 }
 
-fn __git_identity(principal) {
+fn __git_identity(principal: dict) {
   if principal == nil {
     return nil
   }
@@ -593,7 +593,7 @@ fn __append_trailer_block(message: string, block: string) -> string {
 pub fn render(
   env: HarnessEnv,
   fs: HarnessFs,
-  chain,
+  chain: any,
   surface: string,
   options: DisclosureRenderOptions = {},
 ) -> any {
@@ -624,7 +624,7 @@ pub fn render(
 pub fn slack_message_disclosure(
   env: HarnessEnv,
   fs: HarnessFs,
-  chain,
+  chain: any,
   options: DisclosureRenderOptions = {},
 ) -> dict {
   const config = __config(env, fs, options)
@@ -645,7 +645,7 @@ pub fn slack_message_disclosure(
 pub fn git_trailers(
   env: HarnessEnv,
   fs: HarnessFs,
-  chain,
+  chain: any,
   options: DisclosureGitTrailerOptions = {},
 ) -> string {
   const opts = __dict(options)
@@ -673,7 +673,7 @@ pub fn append_git_trailers(
   env: HarnessEnv,
   fs: HarnessFs,
   message: string,
-  chain,
+  chain: any,
   options: DisclosureGitTrailerOptions = {},
 ) -> string {
   return __append_trailer_block(message, git_trailers(env, fs, chain, options))

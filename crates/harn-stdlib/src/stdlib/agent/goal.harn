@@ -29,7 +29,7 @@ const __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
  * these as "closure", "function", or "fn" (mirrors std/agent/loop callable
  * detection). Gating on "closure" alone silently skips named-fn criteria.
  */
-fn __goal_callable(value) {
+fn __goal_callable(value: any) {
   const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
 }
@@ -57,7 +57,7 @@ pub type GoalJudgeOptions = {
   feedback_fallback?: string,
 }
 
-fn __string_list(value) {
+fn __string_list(value: list?) {
   if type_of(value) != "list" {
     return []
   }
@@ -68,7 +68,7 @@ fn __string_list(value) {
   return out
 }
 
-fn __normalize_criteria(value) {
+fn __normalize_criteria(value: list?) {
   if type_of(value) != "list" {
     return []
   }
@@ -110,7 +110,7 @@ fn __normalize_criteria(value) {
  * @api_stability: stable
  * @example: goal({objective: "Fix the flaky test", success_criteria: ["suite green twice"]})
  */
-pub fn goal(spec) {
+pub fn goal(spec: dict) {
   if type_of(spec) != "dict" {
     throw "goal(spec): spec must be a dict"
   }
@@ -130,7 +130,7 @@ pub fn goal(spec) {
   }
 }
 
-fn __render_goal_text(g) {
+fn __render_goal_text(g: any) {
   let lines = ["## Goal", "Objective: " + g.objective]
   if len(g.success_criteria) > 0 {
     lines = lines.appending("Success criteria:")
@@ -158,7 +158,7 @@ fn __render_goal_text(g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_text(g) {
+pub fn goal_text(g: dict) {
   return __render_goal_text(g)
 }
 
@@ -173,7 +173,7 @@ pub fn goal_text(g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_prompt_part(g) {
+pub fn goal_prompt_part(g: dict) {
   return system_prompt_part(__render_goal_text(g), {label: "goal", position: "before"})
 }
 
@@ -186,7 +186,7 @@ pub fn goal_prompt_part(g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_context_fragment(g) {
+pub fn goal_context_fragment(g: dict) {
   return {body: __render_goal_text(g), id: "goal", source: "goal"}
 }
 
@@ -202,7 +202,7 @@ pub fn goal_context_fragment(g) {
  * @api_stability: stable
  * @example: agent_loop(harness, task, nil, with_goal({provider: "anthropic"}, g))
  */
-pub fn with_goal(agent_options, g) {
+pub fn with_goal(agent_options: any, g: GoalSpec) {
   return __with_prompt_fragment(agent_options, goal_context_fragment(g))
 }
 
@@ -214,7 +214,7 @@ pub fn with_goal(agent_options, g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_pin(random: HarnessRandom, g) {
+pub fn goal_pin(random: HarnessRandom, g: dict) {
   return pin(random, "goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
 }
 
@@ -229,7 +229,7 @@ pub fn goal_pin(random: HarnessRandom, g) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn goal_check(g, facts = nil) {
+pub fn goal_check(g: GoalSpec, facts: any = nil) {
   const bindings = if type_of(facts) == "dict" {
     facts
   } else {
@@ -249,7 +249,7 @@ pub fn goal_check(g, facts = nil) {
   return {checkable: len(met) + len(unmet), done: len(unmet) == 0, met: met, unmet: unmet}
 }
 
-fn __goal_judge_system(g) {
+fn __goal_judge_system(g: any) {
   let lines = [
     "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
     "Return `action: \"accept\"` only if every success criterion is satisfied. Otherwise return `action: \"continue\"` with one concrete repair and the remaining specific gaps.",
@@ -295,7 +295,7 @@ pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
  * attempt. agent_evaluate_completion injects this into the transcript on a vetoed
  * completion, so the re-run agent sees exactly which criteria remain.
  */
-fn __goal_unmet_feedback(g, unmet_ids) {
+fn __goal_unmet_feedback(g: GoalSpec, unmet_ids: string | list) {
   let lines = ["The goal is not yet met. Address these unmet success criteria before finishing:"]
   let any = false
   for crit in g.success_criteria {
@@ -338,7 +338,7 @@ const __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_a
  * @api_stability: stable
  * @example: agent_loop(harness, task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
  */
-pub fn goal_reloop(g, opts = nil) {
+pub fn goal_reloop(g: any, opts: any = nil) {
   const o = if type_of(opts) == "dict" {
     opts
   } else {

@@ -7,7 +7,7 @@ import { count_to } from "lib/source_dir_generator"
  * source-relative read here still resolves against this file's directory
  * rather than `lib/`. Regression coverage for #6160.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const before = harness.fs.source_dir()
   const created = count_to(3)
   harness.stdio.log(harness.fs.source_dir() == before)

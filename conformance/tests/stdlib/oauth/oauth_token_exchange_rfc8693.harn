@@ -4,7 +4,7 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const topic = "oauth.client.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
   const provider = custom(

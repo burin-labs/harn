@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const link = signed_url(
     "https://example.test/receipts/r_123?b=two+words",
     {artifact: "transcript/json", receipt: "r_123"},

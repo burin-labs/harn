@@ -439,6 +439,21 @@ fn agent_spec_public_projection_matches_internal_owner() {
         agent_spec_keys_from(agent_options_types_harn()),
         "std/agent/options AgentSpec projection drifted from std/agent/options_types",
     );
+    for alias in [
+        "ConsecutiveFailureBudget",
+        "MissingToolCallRecoveryRequest",
+        "MissingToolCallRecoveryOptions",
+        "ToolSurfaceNarrowingOptions",
+        "ReadOnlyStanceClassification",
+        "ReadOnlyStanceConsent",
+        "ReadOnlyStanceOptions",
+    ] {
+        assert_eq!(
+            harn_alias_keys(agent_options_harn(), alias),
+            harn_alias_keys(agent_options_types_harn(), alias),
+            "std/agent/options `{alias}` projection drifted from std/agent/options_types",
+        );
+    }
 }
 
 /// Smoke-pin the agent-side aliases that have no Rust struct twin
@@ -456,6 +471,39 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
         "consecutive_failures",
     ] {
         assert!(budget.contains(key), "IterationBudget lost key `{key}`");
+    }
+    let failure_budget = harn_alias_keys(agent_options_harn(), "ConsecutiveFailureBudget");
+    for key in ["max", "kinds", "paused_for_ms"] {
+        assert!(
+            failure_budget.contains(key),
+            "ConsecutiveFailureBudget lost key `{key}`"
+        );
+    }
+    let missing_tool = harn_alias_keys(agent_options_harn(), "MissingToolCallRecoveryOptions");
+    for key in [
+        "enabled",
+        "classifier",
+        "confidence_threshold",
+        "timeout_ms",
+    ] {
+        assert!(
+            missing_tool.contains(key),
+            "MissingToolCallRecoveryOptions lost key `{key}`"
+        );
+    }
+    let narrowing = harn_alias_keys(agent_options_harn(), "ToolSurfaceNarrowingOptions");
+    for key in ["window_turns", "mode", "hard_keep", "unknown_tool_policy"] {
+        assert!(
+            narrowing.contains(key),
+            "ToolSurfaceNarrowingOptions lost key `{key}`"
+        );
+    }
+    let stance = harn_alias_keys(agent_options_harn(), "ReadOnlyStanceOptions");
+    for key in ["armed", "classifier", "consent_check", "min_confidence"] {
+        assert!(
+            stance.contains(key),
+            "ReadOnlyStanceOptions lost key `{key}`"
+        );
     }
     let stall = harn_alias_keys(agent_options_harn(), "StallDiagnostics");
     for key in ["enabled", "threshold", "inject_feedback", "max_feedback"] {

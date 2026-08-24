@@ -6,7 +6,7 @@
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness, task) {
+pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -67,7 +67,7 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
   )
 }
 
-pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harness, task) {
+pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("Policy wants an external completion check."), llm_text("Verified now. ##DONE##")],

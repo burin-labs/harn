@@ -1,7 +1,7 @@
 import "../gha_spend_report.harn"
 
 @test
-pipeline test_billing_usage_rows_filters_and_sorts(harness: Harness, task) {
+pipeline test_billing_usage_rows_filters_and_sorts(harness: Harness, task: unknown) {
   const rows = billing_usage_rows(
     {
       usageItems: [
@@ -68,7 +68,7 @@ pipeline test_billing_usage_rows_filters_and_sorts(harness: Harness, task) {
 }
 
 @test
-pipeline test_action_run_refs_preserve_workflow_names(harness: Harness, task) {
+pipeline test_action_run_refs_preserve_workflow_names(harness: Harness, task: unknown) {
   const refs = action_run_refs(
     {
       workflow_runs: [
@@ -81,7 +81,7 @@ pipeline test_action_run_refs_preserve_workflow_names(harness: Harness, task) {
 }
 
 @test
-pipeline test_run_timing_rows_groups_by_repo_workflow(harness: Harness, task) {
+pipeline test_run_timing_rows_groups_by_repo_workflow(harness: Harness, task: unknown) {
   const rows = run_timing_rows(
     [
       {
@@ -100,7 +100,7 @@ pipeline test_run_timing_rows_groups_by_repo_workflow(harness: Harness, task) {
 }
 
 @test
-pipeline test_render_spend_table(harness: Harness, task) {
+pipeline test_render_spend_table(harness: Harness, task: unknown) {
   const rendered = render_spend_table(
     [{label: "repo:harn", minutes: 12.345, usd: 1.2, source: "billing-usage"}],
   )

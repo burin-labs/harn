@@ -1,5 +1,5 @@
 pipeline default(harness: Harness) {
-  fn process(n) {
+  fn process(n: int) {
     if n <= 0 {
       return "done"
     }

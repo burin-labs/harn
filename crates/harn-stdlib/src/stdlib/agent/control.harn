@@ -48,7 +48,7 @@ type AgentLoopState = {
   progress: dict,
 }
 
-fn __agent_loop_state(args) -> AgentLoopState {
+fn __agent_loop_state(args: dict) -> AgentLoopState {
   const current_limit = args.current_limit
   const iteration = args.iteration
   const remaining = if iteration >= current_limit {
@@ -170,7 +170,7 @@ fn __agent_default_loop_control(state: AgentLoopState) {
   return nil
 }
 
-fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
+fn __agent_interpret_loop_command(command: any) -> AgentLoopCommand {
   if command == nil {
     return {action: "none", by: 0, until: 0, reason: "", status: ""}
   }
@@ -207,7 +207,7 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
  * @api_stability: experimental
  */
 pub fn agent_loop_control_invoke(
-  opts,
+  opts: dict,
   budget: AgentLoopBudget,
   state: AgentLoopState,
 ) -> AgentLoopCommand {
@@ -299,7 +299,7 @@ fn __agent_progress_summary_text(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
+pub fn agent_loop_snapshot_state(args: dict) -> AgentLoopState {
   const verdict = args.verdict
   const completion_vetoed = verdict?.action == "continue"
   const completion_verdict = if verdict == nil {
@@ -371,7 +371,7 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop_apply_command(agent: HarnessAgent, state) -> AgentLoopCommandApplication {
+pub fn agent_loop_apply_command(agent: HarnessAgent, state: dict) -> AgentLoopCommandApplication {
   const command = state.command
   const session_id = state.session_id
   const iteration = state.iteration

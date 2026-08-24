@@ -35,6 +35,28 @@ pub(super) fn print_human_plan(plan: &RepairPlan) {
     print_skipped_files(&plan.skipped_files);
     print_declared_invalid_files(&plan.declared_invalid_files);
     print_frozen_callables(&plan.frozen_callables);
+    print_parameter_annotations(plan.parameter_annotations.as_ref());
+}
+
+/// Report what the parameter-annotation migration proved and what it did not.
+///
+/// The residue is the number that matters. A run that wrote `unknown`
+/// everywhere is explicit but has not proven useful input shapes, so the share
+/// left for a human is printed next to the share that was inferred.
+pub(super) fn print_parameter_annotations(summary: Option<&ParameterAnnotationsWire>) {
+    let Some(summary) = summary else {
+        return;
+    };
+    println!(
+        "annotated {} parameter(s): {} inferred, {} left as `unknown` ({:.1}%)",
+        summary.total,
+        summary.inferred,
+        summary.unresolved,
+        summary.unresolved_share * 100.0
+    );
+    for (cause, count) in &summary.causes {
+        println!("  {count:>6}  {cause}");
+    }
 }
 
 /// Name what the migration could not re-sign.
@@ -113,6 +135,7 @@ pub(super) fn print_apply_result(result: &ApplyResult) {
     print_skipped_files(&result.skipped_files);
     print_declared_invalid_files(&result.declared_invalid_files);
     print_frozen_callables(&result.frozen_callables);
+    print_parameter_annotations(result.parameter_annotations.as_ref());
 }
 
 pub(super) fn skipped_files_error(count: usize) -> String {

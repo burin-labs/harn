@@ -151,8 +151,8 @@ mod tests {
     #[test]
     fn selected_file_compiles_all_callable_entries_once() {
         let source = Arc::new(
-            "pipeline test_one(task) { assert(true) }\n\
-             pipeline test_two(task) { assert(true) }\n"
+            "pipeline test_one(task: unknown) { assert(true) }\n\
+             pipeline test_two(task: unknown) { assert(true) }\n"
                 .to_string(),
         );
         let program = Arc::new(parse_program(&source).unwrap());

@@ -444,7 +444,7 @@ pub fn hypothesis_ledger_append(
   }
 }
 
-fn __decode_record(raw) -> HypothesisLedgerRecord {
+fn __decode_record(raw: dict) -> HypothesisLedgerRecord {
   const event = hypothesis_event(raw?.payload?.content)
   if event.fingerprint != raw?.payload?.fingerprint {
     throw "hypothesis ledger: persisted event fingerprint is corrupt"

@@ -19,7 +19,6 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
-# count    1  crates/harn-stdlib/src/stdlib/agent/introspection.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/lanes.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
@@ -29,13 +28,13 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
-# count   35  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
+# count   28  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   24  crates/harn-stdlib/src/stdlib/agent/options_public.harn
-# count   49  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
+# count   46  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/overlays.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/pins.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/postturn.harn
@@ -52,7 +51,6 @@
 # count    5  crates/harn-stdlib/src/stdlib/agent/scratchpad.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/sitrep.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/skills.harn
-# count    3  crates/harn-stdlib/src/stdlib/agent/stall_config.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/stall_observation.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/stall_verification.harn
@@ -65,8 +63,8 @@
 # count    3  crates/harn-stdlib/src/stdlib/agent/tool_search.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/tool_surface.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/transcript.harn
-# count    8  crates/harn-stdlib/src/stdlib/agent/user.harn
-# count   15  crates/harn-stdlib/src/stdlib/agent/workers.harn
+# count    6  crates/harn-stdlib/src/stdlib/agent/user.harn
+# count    5  crates/harn-stdlib/src/stdlib/agent/workers.harn
 # count    4  crates/harn-stdlib/src/stdlib/artifact/web.harn
 # count    5  crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn
 # count    3  crates/harn-stdlib/src/stdlib/cli/render.harn
@@ -140,13 +138,12 @@
 # count   12  crates/harn-stdlib/src/stdlib/stdlib_observability.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_os.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_path.harn
-# count    9  crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn
+# count    8  crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_plan.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_project.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_prompt_library.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_review.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
-# count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_slug.harn
 # count   14  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
 # count   17  crates/harn-stdlib/src/stdlib/stdlib_text.harn
@@ -224,7 +221,6 @@ crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_composition_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_edit_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_host_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_read_tools
-crates/harn-stdlib/src/stdlib/agent/introspection.harn::runtime_introspection_tools
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_apply_budget
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_classify_writes
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_combine_verify
@@ -304,18 +300,13 @@ crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_suspend_chec
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_suspend_initiator
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_suspend_reminder_body
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_with_llm_render_context
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_await_resumption_args
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_await_resumption_call
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_await_resumption
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_await_resumption_top_level
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_invalid_await_resumption_feedback
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_record_await_tool_results
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__audit_flushes_from_result
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__callable
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__collect_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__default_invoke_tool
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__detect_native_fallback
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__drain_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__drop_unsafe_recovered_text_batch
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__emit_synthetic_tool_lifecycle_finish
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__emit_tool_lifecycle_finish
@@ -329,8 +320,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_diagn
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_protocol_violations
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_tool_annotations
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__run_structural_validator
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__spawn_audit_flushes
-crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__strip_internal_tool_result
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__strip_internal_verdict_json
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__structural_validator_pass_result
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__tool_envelope
@@ -399,11 +388,11 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__scope_classifier_ski
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_admit_bootstrap
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_bootstrap_if_needed
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_mount_additional
-crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__client_tool_search_requested
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__explicit_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__fallback_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__has_key
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__profile_defaults
+crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_first_tool_format_override_warning_text
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_override_warning_text
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_resolution
@@ -441,13 +430,10 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__default_tool_surf
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__is_reachability_projection_policy
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__is_transcript_projection_policy
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__native_tools_complete_naturally
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__nonnegative_int_budget_field
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__normalize_consecutive_failure_budget
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__normalize_read_only_stance
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__normalize_reminder_provider_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__normalize_tool_surface_narrowing
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__positive_float_budget_field
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__positive_int_budget_field
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__task_ledger_deliverable_text
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__task_ledger_from_shorthand
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_aggressive_defaults
@@ -562,9 +548,6 @@ crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_reorganize
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep_append
 crates/harn-stdlib/src/stdlib/agent/skills.harn::agent_skills_match
-crates/harn-stdlib/src/stdlib/agent/stall_config.harn::__agent_stall_closure
-crates/harn-stdlib/src/stdlib/agent/stall_config.harn::__agent_stall_opt_int
-crates/harn-stdlib/src/stdlib/agent/stall_config.harn::__agent_stall_repair_value
 crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::detector_spec_token_runaway
 crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::token_runaway_post_turn
 crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::unified_detectors_post_turn
@@ -622,7 +605,6 @@ crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn::agent_tool_policy_ann
 crates/harn-stdlib/src/stdlib/agent/tool_search.harn::agent_tool_search_emit_queries
 crates/harn-stdlib/src/stdlib/agent/tool_search.harn::agent_tool_search_inject_if_needed
 crates/harn-stdlib/src/stdlib/agent/tool_search.harn::agent_tool_search_record_results
-crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::__tool_surface_filter_registry
 crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::__tool_surface_policy_tools
 crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::agent_apply_tool_surface_narrowing
 crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::agent_reset_tool_surface_narrowing
@@ -633,8 +615,6 @@ crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_call_
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_call_schema
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_event_schema
 crates/harn-stdlib/src/stdlib/agent/user.harn::agentic_user
-crates/harn-stdlib/src/stdlib/agent/user.harn::fixture_user
-crates/harn-stdlib/src/stdlib/agent/user.harn::scripted_user
 crates/harn-stdlib/src/stdlib/agent/user.harn::simulated_user_post_turn
 crates/harn-stdlib/src/stdlib/agent/user.harn::simulated_user_read_tools
 crates/harn-stdlib/src/stdlib/agent/user.harn::simulated_user_respond
@@ -643,18 +623,8 @@ crates/harn-stdlib/src/stdlib/agent/user.harn::user_tools
 crates/harn-stdlib/src/stdlib/agent/workers.harn::agent
 crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_config
 crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_fanout
-crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_lifecycle_tools
 crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_name
-crates/harn-stdlib/src/stdlib/agent/workers.harn::agent_stop
-crates/harn-stdlib/src/stdlib/agent/workers.harn::close_agent
 crates/harn-stdlib/src/stdlib/agent/workers.harn::list_agents
-crates/harn-stdlib/src/stdlib/agent/workers.harn::send_input
-crates/harn-stdlib/src/stdlib/agent/workers.harn::spawn_agent
-crates/harn-stdlib/src/stdlib/agent/workers.harn::sub_agent_request
-crates/harn-stdlib/src/stdlib/agent/workers.harn::sub_agent_run
-crates/harn-stdlib/src/stdlib/agent/workers.harn::suspend_agent
-crates/harn-stdlib/src/stdlib/agent/workers.harn::wait_agent
-crates/harn-stdlib/src/stdlib/agent/workers.harn::worker_trigger
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_apply_patch
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_extract
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_text_fallback
@@ -1145,7 +1115,6 @@ crates/harn-stdlib/src/stdlib/stdlib_path.harn::stem
 crates/harn-stdlib/src/stdlib/stdlib_path.harn::workspace_info
 crates/harn-stdlib/src/stdlib/stdlib_path.harn::workspace_normalize
 crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn::bounded_loop
-crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn::cheap_classify_then_escalate
 crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn::parallel_sweep_with_circuit_breaker
 crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn::persona_crystallization_bundle
 crates/harn-stdlib/src/stdlib/stdlib_personas_prelude.harn::persona_crystallization_candidates
@@ -1189,9 +1158,6 @@ crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::process_run
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::process_shell
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::record_run_metadata
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::runtime_pipeline_input
-crates/harn-stdlib/src/stdlib/stdlib_signal.harn::off_interrupt
-crates/harn-stdlib/src/stdlib/stdlib_signal.harn::on_interrupt
-crates/harn-stdlib/src/stdlib/stdlib_signal.harn::with_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_slug.harn::deterministic_slug
 crates/harn-stdlib/src/stdlib/stdlib_slug.harn::random_slug
 crates/harn-stdlib/src/stdlib/stdlib_slug.harn::slug
@@ -1212,9 +1178,6 @@ crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_assertions_begin
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_assertions_end
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_events
 crates/harn-stdlib/src/stdlib/stdlib_testing.harn::step_events_clear
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_llm_mocks
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_llm_script
-crates/harn-stdlib/src/stdlib/stdlib_testing.harn::with_scenario
 crates/harn-stdlib/src/stdlib/stdlib_text.harn::detect_compile_error
 crates/harn-stdlib/src/stdlib/stdlib_text.harn::extract_paths
 crates/harn-stdlib/src/stdlib/stdlib_text.harn::filter_test_cells

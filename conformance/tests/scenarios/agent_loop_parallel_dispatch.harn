@@ -16,7 +16,7 @@ import { agent_loop } from "std/agent/loop"
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn fanout_tools(runtime: HarnessRuntime, state) {
+fn fanout_tools(runtime: HarnessRuntime, state: dict) {
   const r = tool_registry()
   return tool_define(
     r,
@@ -42,7 +42,7 @@ fn fanout_tools(runtime: HarnessRuntime, state) {
   )
 }
 
-fn run(harness: Harness, state, cap) {
+fn run(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
   harness.runtime.atomic_set(state.observed, 0)
@@ -89,7 +89,7 @@ fn run(harness: Harness, state, cap) {
   )
 }
 
-fn run_without_middleware(harness: Harness, state, cap) {
+fn run_without_middleware(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
   return with_llm_script(
@@ -125,7 +125,7 @@ fn run_without_middleware(harness: Harness, state, cap) {
   )
 }
 
-fn run_with_audit(harness: Harness, state, cap) {
+fn run_with_audit(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
   harness.runtime.atomic_set(state.observed, 0)
@@ -188,7 +188,7 @@ fn run_with_audit(harness: Harness, state, cap) {
  * For 3 unique calls the bits are disjoint, so atomic_add == OR. The
  * expected mask for emit_orders {0, 1, 2} is 1+2+4 = 7.
  */
-fn run_prefetch(harness: Harness, state, prefetch) {
+fn run_prefetch(harness: Harness, state: dict, prefetch: bool) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
   harness.runtime.atomic_set(state.prefetch_audit_finished, 0)

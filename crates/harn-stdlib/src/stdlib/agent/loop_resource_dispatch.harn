@@ -3,7 +3,7 @@ import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
 
-pub fn __resolve_max_concurrent_tools(turn_opts) {
+pub fn __resolve_max_concurrent_tools(turn_opts: any) {
   const raw = turn_opts?.max_concurrent_tools
   if type_of(raw) == "int" && raw > 1 {
     return raw
@@ -32,7 +32,7 @@ pub fn __resolve_max_concurrent_tools(turn_opts) {
  * @effects: []
  * @errors: []
  */
-pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
+pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts: any) {
   const raw = turn_opts?.intra_turn_failure_fanout_cap
   if type_of(raw) == "int" && raw > 0 {
     return raw
@@ -40,7 +40,7 @@ pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
   return 0
 }
 
-pub fn __resolve_intra_turn_resource_fail_fast(turn_opts) -> bool {
+pub fn __resolve_intra_turn_resource_fail_fast(turn_opts: any) -> bool {
   const raw = turn_opts?.intra_turn_resource_fail_fast
   if type_of(raw) == "bool" {
     return raw
@@ -80,7 +80,7 @@ const __TOOL_BATCH_MUTATING_SIDE_EFFECTS = [
   "desktop_control",
 ]
 
-fn __tool_batch_entry_executor(entry) -> string {
+fn __tool_batch_entry_executor(entry: any) -> string {
   if type_of(entry) != "dict" {
     return ""
   }
@@ -94,7 +94,7 @@ fn __tool_batch_entry_executor(entry) -> string {
   return ""
 }
 
-fn __tool_batch_call_classification(call, tools, options = {}) {
+fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
@@ -144,11 +144,11 @@ fn __tool_batch_call_classification(call, tools, options = {}) {
   }
 }
 
-fn __tool_batch_signature(call) -> string {
+fn __tool_batch_signature(call: any) -> string {
   return __intra_turn_call_signature(call) ?? sha256(json_stringify(call))
 }
 
-fn __tool_batch_previous_deferred_signatures(state) {
+fn __tool_batch_previous_deferred_signatures(state: any) {
   if type_of(state?.deferred_signatures) == "list" {
     return state.deferred_signatures
   }
@@ -177,7 +177,7 @@ fn __tool_batch_phase_rank(phase: string) -> int {
   return 5
 }
 
-fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
+fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options: dict = {}) {
   const previous = options?._tool_batch_dependency_state
   const previous_deferred = __tool_batch_previous_deferred_signatures(previous)
   const planned_at_ms = clock.monotonic_ms()
@@ -231,22 +231,29 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
   }
 }
 
-fn __tool_batch_selected_entries(plan) {
+fn __tool_batch_selected_entries(plan: any) {
   return plan.entries.filter({ entry -> entry.selected })
 }
 
-fn __tool_batch_deferred_entries(plan) {
+fn __tool_batch_deferred_entries(plan: any) {
   return plan.entries.filter({ entry -> !entry.selected })
 }
 
-fn __tool_batch_blocking_barrier_applies(plan) -> bool {
+fn __tool_batch_blocking_barrier_applies(plan: any) -> bool {
   if plan?.previous?.blocking_result == nil {
     return false
   }
   return plan.selected_phase == "process_verification" || plan.selected_phase == "terminal"
 }
 
-fn __tool_batch_receipt(plan, entry, disposition, reason, timing = nil, blocking_result = nil) {
+fn __tool_batch_receipt(
+  plan: any,
+  entry: any,
+  disposition: any,
+  reason: any,
+  timing: any = nil,
+  blocking_result: any = nil,
+) {
   return {
     schema: "harn.agent_tool_batch_disposition.v1",
     batch_id: plan.batch_id,
@@ -269,7 +276,7 @@ fn __tool_batch_receipt(plan, entry, disposition, reason, timing = nil, blocking
   }
 }
 
-fn __tool_batch_emit_receipt(agent: HarnessAgent, options, receipt) {
+fn __tool_batch_emit_receipt(agent: HarnessAgent, options: any, receipt: any) {
   const session_id = to_string(options?.session_id ?? "")
   if session_id != "" {
     agent_emit_event(agent, session_id, "tool_batch_disposition", {receipt: receipt})
@@ -279,10 +286,10 @@ fn __tool_batch_emit_receipt(agent: HarnessAgent, options, receipt) {
 fn __tool_batch_deferred_result(
   agent: HarnessAgent,
   random: HarnessRandom,
-  plan,
-  entry,
-  tools,
-  options,
+  plan: any,
+  entry: any,
+  tools: any,
+  options: any,
 ) {
   const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
   const name = receipt.tool_name
@@ -317,11 +324,11 @@ fn __tool_batch_deferred_result(
 fn __tool_batch_blocked_result(
   agent: HarnessAgent,
   random: HarnessRandom,
-  plan,
-  entry,
-  tools,
-  options,
-  blocking_result,
+  plan: any,
+  entry: any,
+  tools: any,
+  options: any,
+  blocking_result: any,
 ) {
   const receipt = __tool_batch_receipt(
     plan,
@@ -357,14 +364,14 @@ fn __tool_batch_blocked_result(
   return result
 }
 
-fn __tool_batch_result_blocks_later_phase(entry, result) -> bool {
+fn __tool_batch_result_blocks_later_phase(entry: any, result: any) -> bool {
   if !entry.declared_mutation || __tool_result_ok(result) {
     return false
   }
   return __intra_turn_result_mutation_status(result) != "applied"
 }
 
-fn __tool_batch_blocking_result(entry, result) {
+fn __tool_batch_blocking_result(entry: any, result: any) {
   return {
     tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
     tool_name: to_string(entry.call?.name ?? entry.call?.tool_name ?? ""),
@@ -373,11 +380,11 @@ fn __tool_batch_blocking_result(entry, result) {
   }
 }
 
-fn __tool_batch_deferred_signatures(entries) {
+fn __tool_batch_deferred_signatures(entries: any) {
   return entries.map({ entry -> entry.signature })
 }
 
-fn __tool_batch_merge_deferred_signatures(previous, newly_deferred, executed) {
+fn __tool_batch_merge_deferred_signatures(previous: any, newly_deferred: list, executed: list) {
   const previous_sigs = __tool_batch_previous_deferred_signatures(previous)
   const executed_sigs = executed.map({ entry -> entry.signature })
   let merged = previous_sigs.filter({ sig -> !contains(executed_sigs, sig) })
@@ -389,7 +396,7 @@ fn __tool_batch_merge_deferred_signatures(previous, newly_deferred, executed) {
   return merged
 }
 
-fn __tool_batch_process_is_read_effect(call) -> bool {
+fn __tool_batch_process_is_read_effect(call: dict) -> bool {
   const args = __intra_turn_call_args(call)
   const command = args?.command ?? args?.cmd ?? args?.script
   const argv = args?.argv
@@ -412,7 +419,7 @@ fn __tool_batch_process_is_read_effect(call) -> bool {
   return unwrap(classified)?.effect == "read_effect"
 }
 
-fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
+fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options: dict, cap: int) {
   const plan = __tool_batch_plan(harness.clock, tool_calls, tools, options)
   const selected = __tool_batch_selected_entries(plan)
   const deferred = __tool_batch_deferred_entries(plan)
@@ -541,7 +548,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_failure_signature(result) {
+pub fn __intra_turn_failure_signature(result: any) {
   if type_of(result) != "dict" {
     return nil
   }
@@ -566,7 +573,7 @@ pub fn __intra_turn_failure_signature(result) {
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_call_signature(call) {
+pub fn __intra_turn_call_signature(call: any) {
   if type_of(call) != "dict" {
     return nil
   }
@@ -585,7 +592,7 @@ pub const __INTRA_TURN_RESOURCE_MUTATING_KINDS = [
   "mutate",
 ]
 
-pub fn __intra_turn_call_args(call) {
+pub fn __intra_turn_call_args(call: any) {
   const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
@@ -593,11 +600,11 @@ pub fn __intra_turn_call_args(call) {
   return {}
 }
 
-pub fn __intra_turn_annotation_text(value) -> string {
+pub fn __intra_turn_annotation_text(value: any) -> string {
   return lowercase(trim(to_string(value ?? "")))
 }
 
-pub fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
+pub fn __intra_turn_annotations_mutate_resource(annotations: any) -> bool {
   if type_of(annotations) != "dict" {
     return false
   }
@@ -621,7 +628,7 @@ pub fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
   return mutation == "workspace_write"
 }
 
-pub fn __intra_turn_annotation_path_params(annotations) {
+pub fn __intra_turn_annotation_path_params(annotations: any) {
   if type_of(annotations) != "dict" {
     return []
   }
@@ -645,7 +652,7 @@ pub fn __intra_turn_annotation_path_params(annotations) {
   return []
 }
 
-pub fn __intra_turn_annotation_dependency_key_params(annotations) {
+pub fn __intra_turn_annotation_dependency_key_params(annotations: any) {
   if type_of(annotations) != "dict" {
     return []
   }
@@ -676,7 +683,7 @@ pub fn __intra_turn_annotation_dependency_key_params(annotations) {
   return []
 }
 
-pub fn __intra_turn_annotation_dependency_range_params(annotations) {
+pub fn __intra_turn_annotation_dependency_range_params(annotations: any) {
   if type_of(annotations) != "dict" {
     return []
   }
@@ -707,7 +714,7 @@ pub fn __intra_turn_annotation_dependency_range_params(annotations) {
   return []
 }
 
-pub fn __intra_turn_annotation_arg_aliases(annotations) {
+pub fn __intra_turn_annotation_arg_aliases(annotations: any) {
   if type_of(annotations) != "dict" {
     return {}
   }
@@ -721,7 +728,7 @@ pub fn __intra_turn_annotation_arg_aliases(annotations) {
   return {}
 }
 
-pub fn __intra_turn_normalize_resource_path(raw) -> string {
+pub fn __intra_turn_normalize_resource_path(raw: any) -> string {
   let path = trim(to_string(raw ?? ""))
   while starts_with(path, "./") {
     path = substring(path, 2)
@@ -729,7 +736,7 @@ pub fn __intra_turn_normalize_resource_path(raw) -> string {
   return path
 }
 
-pub fn __intra_turn_push_resource_key(keys, value) {
+pub fn __intra_turn_push_resource_key(keys: any, value: any) {
   let path = __intra_turn_normalize_resource_path(value)
   if path == "" {
     return keys
@@ -741,7 +748,7 @@ pub fn __intra_turn_push_resource_key(keys, value) {
   return keys.appending(key)
 }
 
-pub fn __intra_turn_push_resource_value(keys, value) {
+pub fn __intra_turn_push_resource_value(keys: any, value: any) {
   if type_of(value) == "list" {
     let out = keys
     for item in value {
@@ -766,7 +773,7 @@ pub const __INTRA_TURN_FALLBACK_PATH_ARGS = [
   "directory",
 ]
 
-pub fn __intra_turn_fallback_resource_keys(args) {
+pub fn __intra_turn_fallback_resource_keys(args: any) {
   let keys = []
   for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
     if args[name] != nil {
@@ -776,7 +783,7 @@ pub fn __intra_turn_fallback_resource_keys(args) {
   return keys
 }
 
-pub fn __intra_turn_dependency_range_param_names(spec) {
+pub fn __intra_turn_dependency_range_param_names(spec: any) {
   if type_of(spec) != "dict" {
     return nil
   }
@@ -803,7 +810,7 @@ pub fn __intra_turn_dependency_range_param_names(spec) {
   }
 }
 
-pub fn __intra_turn_arg_value(args, aliases, name) {
+pub fn __intra_turn_arg_value(args: any, aliases: any, name: any) {
   const raw_name = to_string(name ?? "")
   if raw_name == "" {
     return nil
@@ -821,7 +828,7 @@ pub fn __intra_turn_arg_value(args, aliases, name) {
   return nil
 }
 
-pub fn __intra_turn_dependency_range_from_args(args, aliases, spec) {
+pub fn __intra_turn_dependency_range_from_args(args: any, aliases: any, spec: any) {
   const names = __intra_turn_dependency_range_param_names(spec)
   if names == nil {
     return nil
@@ -848,7 +855,7 @@ pub fn __intra_turn_dependency_range_from_args(args, aliases, spec) {
   return {start: lo, end: hi}
 }
 
-pub fn __intra_turn_dependency_target_ranges(resource_keys, args, annotations) {
+pub fn __intra_turn_dependency_target_ranges(resource_keys: any, args: any, annotations: any) {
   if len(resource_keys) == 0 {
     return []
   }
@@ -866,7 +873,7 @@ pub fn __intra_turn_dependency_target_ranges(resource_keys, args, annotations) {
   return ranges
 }
 
-pub fn __intra_turn_dependency_key_components(args, annotations) {
+pub fn __intra_turn_dependency_key_components(args: any, annotations: any) {
   const aliases = __intra_turn_annotation_arg_aliases(annotations)
   let components = []
   for param in __intra_turn_annotation_dependency_key_params(annotations) {
@@ -882,7 +889,7 @@ pub fn __intra_turn_dependency_key_components(args, annotations) {
   return components
 }
 
-pub fn __intra_turn_dependency_target_keys(resource_keys, args, annotations) {
+pub fn __intra_turn_dependency_target_keys(resource_keys: any, args: any, annotations: any) {
   let components = __intra_turn_dependency_key_components(args, annotations)
   if len(resource_keys) == 0 || len(components) == 0 {
     return []
@@ -895,7 +902,7 @@ pub fn __intra_turn_dependency_target_keys(resource_keys, args, annotations) {
   return keys
 }
 
-pub fn __intra_turn_resource_keys(call, tools, options = {}) {
+pub fn __intra_turn_resource_keys(call: any, tools: any, options: any = {}) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
@@ -916,7 +923,7 @@ pub fn __intra_turn_resource_keys(call, tools, options = {}) {
   return keys
 }
 
-pub fn __intra_turn_resource_guard(call, tools, options = {}) {
+pub fn __intra_turn_resource_guard(call: any, tools: any, options: any = {}) {
   const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   const entry = __tool_registry_entry(tools, tool_name)
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
@@ -944,7 +951,7 @@ pub fn __intra_turn_resource_guard(call, tools, options = {}) {
   }
 }
 
-pub fn __intra_turn_intersects(keys, failed_keys) -> bool {
+pub fn __intra_turn_intersects(keys: any, failed_keys: any) -> bool {
   for key in keys {
     if contains(failed_keys, key) {
       return true
@@ -953,7 +960,7 @@ pub fn __intra_turn_intersects(keys, failed_keys) -> bool {
   return false
 }
 
-pub fn __intra_turn_ranges_overlap(current, failed) -> bool {
+pub fn __intra_turn_ranges_overlap(current: any, failed: any) -> bool {
   return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
     && (to_int(current?.start)
         ?? 0)
@@ -961,7 +968,7 @@ pub fn __intra_turn_ranges_overlap(current, failed) -> bool {
     && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
 }
 
-pub fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
+pub fn __intra_turn_range_intersects(current_ranges: any, failed_ranges: any) -> bool {
   for current in current_ranges {
     for failed in failed_ranges {
       if __intra_turn_ranges_overlap(current, failed) {
@@ -972,7 +979,7 @@ pub fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
   return false
 }
 
-pub fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
+pub fn __intra_turn_guard_intersects(current_guard: any, failed_guard: any) -> bool {
   if !__intra_turn_intersects(
     current_guard?.resource_keys ?? [],
     failed_guard?.resource_keys ?? [],
@@ -992,7 +999,7 @@ pub fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
   return true
 }
 
-pub fn __intra_turn_first_blocking_guard(current_guard, failed_guards) {
+pub fn __intra_turn_first_blocking_guard(current_guard: any, failed_guards: any) {
   if current_guard == nil {
     return nil
   }
@@ -1004,7 +1011,7 @@ pub fn __intra_turn_first_blocking_guard(current_guard, failed_guards) {
   return nil
 }
 
-pub fn __intra_turn_guard_render_keys(resource_guard) {
+pub fn __intra_turn_guard_render_keys(resource_guard: any) {
   let resource_keys = resource_guard?.resource_keys ?? []
   if len(resource_keys) > 0 {
     return resource_keys
@@ -1012,7 +1019,7 @@ pub fn __intra_turn_guard_render_keys(resource_guard) {
   return resource_guard?.target_keys ?? []
 }
 
-pub fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
+pub fn __intra_turn_failed_guard_record(call: any, index: any, resource_guard: any, result: any) {
   return resource_guard
     + {
       failed_call_index: index,
@@ -1023,11 +1030,11 @@ pub fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
 }
 
 pub fn __intra_turn_dependent_suffix_count(
-  tool_calls,
-  tools,
-  options,
-  index,
-  blocking_guard,
+  tool_calls: any,
+  tools: any,
+  options: any,
+  index: any,
+  blocking_guard: any,
 ) -> number {
   let count = 0
   for (candidate_index, candidate_call) in iter(tool_calls).enumerate() {
@@ -1043,11 +1050,11 @@ pub fn __intra_turn_dependent_suffix_count(
 }
 
 pub fn __intra_turn_partial_apply_receipt(
-  call,
-  current_guard,
-  blocking_guard,
-  index,
-  skipped_suffix_count,
+  call: any,
+  current_guard: any,
+  blocking_guard: any,
+  index: any,
+  skipped_suffix_count: any,
 ) {
   return {
     kind: "intra_turn_same_resource_partial_apply",
@@ -1079,14 +1086,14 @@ pub fn __intra_turn_partial_apply_receipt(
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_result_mutation_status(result) -> string {
+pub fn __intra_turn_result_mutation_status(result: any) -> string {
   if type_of(result) != "dict" {
     return "unknown"
   }
   return to_string(agent_tool_mutation_status(result?.mutation_status))
 }
 
-pub fn __intra_turn_result_mutated(result) {
+pub fn __intra_turn_result_mutated(result: any) {
   const status = __intra_turn_result_mutation_status(result)
   if status == "not_applied" {
     return false
@@ -1106,7 +1113,7 @@ pub fn __intra_turn_result_mutated(result) {
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_failure_poisons_resource(result) -> bool {
+pub fn __intra_turn_failure_poisons_resource(result: any) -> bool {
   // Poison on `nil` (unknown — cannot rule out a mutation) and on any verdict
   // other than an affirmative `false`. Only a host-confirmed pre-apply rejection
   // (view unchanged) skips poisoning. Guards the safety property: unknown stays
@@ -1118,7 +1125,11 @@ pub fn __intra_turn_failure_poisons_resource(result) -> bool {
   return true
 }
 
-pub fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> bool {
+pub fn __intra_turn_has_keyed_mutating_calls(
+  tool_calls: any,
+  tools: any,
+  options: any = {},
+) -> bool {
   for call in tool_calls {
     if len(__intra_turn_resource_keys(call, tools, options)) > 0 {
       return true
@@ -1136,7 +1147,7 @@ pub fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) ->
  * @effects: []
  * @errors: []
  */
-pub fn __intra_turn_collapsed_result(call, sample_result) {
+pub fn __intra_turn_collapsed_result(call: any, sample_result: any) {
   const name = to_string(call?.name ?? sample_result?.tool_name ?? "")
   const observation = "[collapsed remaining identical failing `" + name + "` call(s) "
     + "from this turn]\n"
@@ -1161,11 +1172,11 @@ pub fn __intra_turn_collapsed_result(call, sample_result) {
 }
 
 pub fn __intra_turn_resource_blocked_result(
-  call,
-  current_guard,
-  blocking_guard,
-  index,
-  skipped_suffix_count,
+  call: any,
+  current_guard: any,
+  blocking_guard: any,
+  index: any,
+  skipped_suffix_count: any,
 ) {
   const name = to_string(call?.name ?? call?.tool_name ?? "")
   const receipt = __intra_turn_partial_apply_receipt(
@@ -1222,7 +1233,7 @@ pub fn __intra_turn_resource_blocked_result(
   }
 }
 
-pub fn __dispatch_tool_calls(harness: Harness, session_id, tool_calls, turn_opts) {
+pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any, turn_opts: any) {
   if len(tool_calls) == 0 {
     return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
   }
@@ -1271,7 +1282,7 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id, tool_calls, turn_opts
   }
 }
 
-pub fn __invoke_tool_with_index(harness: Harness, call, index, tools, options) {
+pub fn __invoke_tool_with_index(harness: Harness, call: any, index: any, tools: any, options: any) {
   const started_at_ms = harness.clock.monotonic_ms()
   const result = __invoke_tool(harness, call, tools, options + {_tool_call_index: index})
   const finished_at_ms = harness.clock.monotonic_ms()
@@ -1285,7 +1296,7 @@ pub fn __invoke_tool_with_index(harness: Harness, call, index, tools, options) {
     }
 }
 
-fn __dispatch_source_index(source_indices, dispatch_index: int) -> int {
+fn __dispatch_source_index(source_indices: list?, dispatch_index: int) -> int {
   if type_of(source_indices) == "list" && dispatch_index < len(source_indices) {
     const source_index = source_indices[dispatch_index]
     if type_of(source_index) == "int" && source_index >= 0 {
@@ -1297,11 +1308,11 @@ fn __dispatch_source_index(source_indices, dispatch_index: int) -> int {
 
 pub fn __dispatch_tool_calls_with_middleware(
   harness: Harness,
-  tool_calls,
-  tools,
-  options,
-  cap,
-  source_indices = nil,
+  tool_calls: list,
+  tools: any,
+  options: dict,
+  cap: int,
+  source_indices: list? = nil,
 ) {
   // Middleware-enabled path. Each call invokes its own caller chain
   // inside a fresh closure scope, so `audit.layers` histories stay
