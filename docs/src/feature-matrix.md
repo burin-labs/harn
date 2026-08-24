@@ -17,8 +17,8 @@ row here, the source is right; open an issue and the row gets fixed.
 ## Capabilities
 
 Pick the systems you're comparing against. Select a capability to read what its
-rating covers, or hover a cell for the one-line reason behind it. The last six
-rows are ones Harn doesn't win.
+rating covers, or hover a cell for the one-line reason behind it. The rows at
+the end are ones Harn doesn't win.
 
 {{#comparison-matrix}}
 
@@ -121,6 +121,51 @@ providers support that setup.
 See [LLM providers](./llm/providers.md), [Provider capability matrix](./provider-matrix.md),
 and [Orchestrator secrets](./orchestrator/secrets.md).
 
+### Sandboxed by default
+
+Agents run code and spawn commands, so the interesting question isn't whether a
+sandbox is available. It's whether one is on before anyone remembers to ask.
+
+`harn run` confines a script to its own project directory before the VM starts,
+and the operating system confines any subprocess the script spawns, using
+Landlock on Linux, `sandbox-exec` on macOS, and AppContainer on Windows. The
+default side-effect ceiling stops below `network`, so a script can touch its own
+files but can't open a socket until a run grants it.
+
+Widening it is per-path rather than all-or-nothing: `--write-root` and
+`--read-only-root` add one root for Harn and its children, `--sandbox-write-root`
+and `--sandbox-read-root` add one for children only. A run that widens anything
+prints the root it widened.
+
+`--no-sandbox` turns confinement off for a single run and warns when you use it.
+It also rejects the four root flags, so a run can't half-escape. Environment
+policy stays in force either way, so opting out of the filesystem sandbox doesn't
+hand a script your secrets.
+
+The systems in the other columns run your workflow in your own process with your
+own permissions, which is the ordinary library contract and not a shortcoming.
+Isolation there is the deployment's job.
+
+See [Process sandboxing](./sandboxing.md) and [Host boundary](./host-boundary.md).
+
+### Signed, versioned packages
+
+A Harn package is a versioned unit with a lockfile, stable exports, and a
+`harn package verify` contract. Filesystem-backed skills can go further: a
+project can require an Ed25519 signature chain before `load_skill(...)` promotes
+a skill's body into an agent session, so a model doesn't silently load prompt
+instructions off disk.
+
+Read the other columns here carefully, because `Partial` is doing real work. A
+framework living inside npm or PyPI inherits a much larger packaging ecosystem
+than Harn's, and those ecosystems have their own signing stories. The difference
+is what gets packaged: there, the workflow is ordinary source inside a package,
+while here the workflow and the instructions an agent loads are the unit that
+carries a version and a signature.
+
+See [Package authoring](./package-authoring.md) and
+[Skill provenance](./skill-provenance.md).
+
 ## Where Harn is the wrong choice
 
 The rows above are ones Harn was built to win. These are the ones it doesn't,
@@ -198,6 +243,39 @@ debug.
 
 See [Concurrency](./concurrency.md) and
 [Coming from elsewhere](./concepts/sota-comparison.md).
+
+### Small install
+
+Harn requires you to download a runtime. You probably already have a package
+manager you're happy with, so the question is whether Harn is the thing you're
+deploying or an addition to something you already deploy. If it's the thing,
+this is a one-time cost you'd pay for any runtime. If you're adding one typed
+model call to an existing service, it's tens of megabytes and a new artifact in
+a pipeline that already knew how to install packages, and a framework in your
+own language avoids both.
+
+As of `v0.10.114`, released 2026-08-24:
+
+| Platform | Download |
+|---|---|
+| macOS arm64 | 71.1 MB |
+| Linux arm64 | 74.3 MB |
+| Linux x86_64 | 76.6 MB |
+| macOS x86_64 | 78.6 MB |
+| Windows x86_64 | 232.3 MB |
+
+The Windows number is not the runtime's real weight, and shouldn't be read as
+one. Harn ships a single multi-call binary; `harn-lsp` and `harn-dap` are the
+same executable reached through `argv[0]`. On Unix the archive stores them as
+symlinks, so it carries one binary. Windows has no dependable unprivileged
+symlink, so the archive carries three identical copies and `.zip` compresses
+each in full. Divide by three and Windows lands at 77.4 MB, within a megabyte of
+Linux x86_64. Fixing it means shipping one executable and creating the aliases
+when the archive is unpacked, which is tracked in
+[#7175](https://github.com/burin-labs/harn/issues/7175).
+
+The other 71 to 79 MB is the runtime itself, and no work is currently tracked to
+reduce it.
 
 ## Public references
 

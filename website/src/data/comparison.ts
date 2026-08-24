@@ -40,6 +40,16 @@ export interface Capability {
    * the row set is not selected to flatter Harn.
    */
   favorsOthers?: boolean
+  /**
+   * Work that is tracked and intended to change this row.
+   *
+   * The issue number is required by the type, and that is the whole point:
+   * a published plan has to have something tracking it. Prose alone would let
+   * an aspiration outlive the intent behind it, which is how a comparison page
+   * turns into marketing. If work is dropped, the row loses its plan when the
+   * issue closes unfixed, rather than quietly reading as a live promise.
+   */
+  plan?: { note: string; issue: number }
 }
 
 export interface Cell {
@@ -124,6 +134,8 @@ export const CAPABILITIES: Capability[] = [
   { id: "cost-limits", label: "Cost limits in program code" },
   { id: "human-review-and-trust", label: "Human review and trust records" },
   { id: "model-and-infrastructure-choice", label: "Model and infrastructure choice" },
+  { id: "sandboxed-by-default", label: "Sandboxed by default" },
+  { id: "signed-versioned-packages", label: "Signed, versioned packages" },
 
   // Rows Harn does not win. A comparison whose every row favours the system
   // publishing it is an advertisement, so these are load-bearing.
@@ -144,6 +156,15 @@ export const CAPABILITIES: Capability[] = [
     id: "futures-that-outlive-their-scope",
     label: "Futures that outlive their scope",
     favorsOthers: true,
+  },
+  {
+    id: "small-install",
+    label: "Small install",
+    favorsOthers: true,
+    plan: {
+      note: "The Windows archive is three times the size of the others because it carries three identical copies of one executable. Shipping one and creating the aliases at install time would bring it in line.",
+      issue: 7175,
+    },
   },
 ]
 
@@ -297,5 +318,35 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
     baml: { rating: "yes", note: "Green threads with spawn and await. BAML rejected structured concurrency deliberately: a future outlives its creating scope and there's no automatic cancellation on scope exit." },
     cursor: { rating: "unknown" },
     flue: { rating: "yes", note: "Host-language async." },
+  },
+
+  "sandboxed-by-default": {
+    harn: { rating: "yes", note: "`harn run` confines a script to its project directory before the VM starts, and the OS confines any subprocess it spawns. Opting out is an explicit --no-sandbox flag that warns." },
+    inngest: { rating: "no", note: "Functions run in your own process with your own permissions." },
+    temporal: { rating: "no", note: "Workers run your code with your permissions. The Python SDK's workflow sandbox enforces determinism, not filesystem or process confinement." },
+    langgraph: { rating: "no", note: "A library in your process, with your permissions." },
+    baml: { rating: "no", note: "The generated client runs in your process, with your permissions." },
+    cursor: { rating: "partial", note: "Cloud agents run in isolated remote environments, which the vendor operates rather than the program declaring." },
+    flue: { rating: "unknown" },
+  },
+
+  "signed-versioned-packages": {
+    harn: { rating: "yes", note: "Packages carry a lockfile and a verify contract, and filesystem-backed skills can require an Ed25519 signature chain before an agent loads their instructions." },
+    inngest: { rating: "partial", note: "Inherits npm or PyPI packaging and signing; the workflow itself is not a separately versioned unit." },
+    temporal: { rating: "partial", note: "Inherits host-ecosystem packaging and signing." },
+    langgraph: { rating: "partial", note: "Inherits host-ecosystem packaging and signing." },
+    baml: { rating: "partial", note: "Inherits host-ecosystem packaging for the generated client." },
+    cursor: { rating: "no" },
+    flue: { rating: "unknown" },
+  },
+
+  "small-install": {
+    harn: { rating: "no", note: "One binary, 71 to 79 MB compressed on macOS and Linux as of v0.10.114. The Windows archive is 232 MB, which is a packaging defect rather than the runtime's real weight." },
+    inngest: { rating: "yes", note: "An ordinary npm or PyPI package." },
+    temporal: { rating: "partial", note: "The SDK is a small package; a self-hosted server and its datastore are not." },
+    langgraph: { rating: "yes", note: "An ordinary PyPI or npm package." },
+    baml: { rating: "yes", note: "An ordinary package plus a generator." },
+    cursor: { rating: "partial", note: "Agents run server-side, so there is no local runtime to install, but the editor itself is a full desktop application." },
+    flue: { rating: "yes", note: "An ordinary npm package." },
   },
 }

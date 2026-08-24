@@ -105,6 +105,34 @@ describe("comparison matrix", () => {
         .sort(),
     )
   })
+
+  it("keeps the rows Harn does not win contiguous at the end", () => {
+    // The page tells the reader the rows at the end are the ones Harn loses.
+    // If a new winning row is appended after them that sentence becomes false,
+    // and a reader skimming the bottom of the table is misled.
+    const flags = CAPABILITIES.map((c) => Boolean(c.favorsOthers))
+    expect(flags.indexOf(true), "no row is marked as favouring others").toBeGreaterThan(-1)
+    expect(flags.slice(flags.indexOf(true)).every(Boolean)).toBe(true)
+  })
+
+  it("publishes a plan only with an issue to check it against", () => {
+    // A promise on a comparison page has to be falsifiable by the reader.
+    //
+    // Asserting only that the issue number appears somewhere on the page is
+    // vacuous: the hand-written "Small install" section links #7175 too, so
+    // deleting the generated block entirely still passed. Anchor on the
+    // generated block's own heading, then require the link inside it.
+    const planned = CAPABILITIES.filter((c) => c.plan)
+    if (planned.length === 0) return
+
+    const block = page().markdownSource.split("**Work in progress.**")[1]
+    expect(block, "the generated plan block is missing from the page").toBeDefined()
+    for (const cap of planned) {
+      expect(cap.plan!.issue, `${cap.id} plan issue`).toBeGreaterThan(0)
+      expect(block, `${cap.id} plan is not rendered`).toContain(cap.plan!.note)
+      expect(block, `${cap.id} plan has no issue link`).toContain(`/issues/${cap.plan!.issue}`)
+    }
+  })
 })
 
 describe("diagram rendering", () => {

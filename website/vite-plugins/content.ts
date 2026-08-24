@@ -361,6 +361,7 @@ function resolveIncludes(raw: string, fileAbs: string, repoRoot: string): string
 
 const COMPARISON_MATRIX_RE = /\{\{#comparison-matrix\}\}/g
 const COMPARISON_MARKER = "comparison-matrix"
+const ISSUE_BASE = "https://github.com/burin-labs/harn/issues"
 
 const RATING_LABEL: Record<Rating, string> = {
   yes: "Yes",
@@ -401,7 +402,25 @@ function resolveComparisonMatrix(raw: string): string {
     ...rows.map((r) => `| ${r.join(" | ")} |`),
   ].join("\n")
 
-  return raw.replace(COMPARISON_MATRIX_RE, `<!--${COMPARISON_MARKER}-->\n\n${table}`)
+  // Rows with tracked work, emitted from the same data as the table. A plan
+  // cannot appear here without an issue number, because the type requires one,
+  // so a reader can always check whether the intent is still live.
+  const planned = CAPABILITIES.filter((cap) => cap.plan)
+  const plans = planned.length
+    ? [
+        "",
+        "**Work in progress.** These rows have tracked work behind them. Each",
+        "links the issue, so you can see for yourself whether it is still moving.",
+        "",
+        ...planned.map(
+          (cap) =>
+            `- [${cap.label}](#${cap.id}) — ${cap.plan!.note} ` +
+            `([#${cap.plan!.issue}](${ISSUE_BASE}/${cap.plan!.issue}))`,
+        ),
+      ].join("\n")
+    : ""
+
+  return raw.replace(COMPARISON_MATRIX_RE, `<!--${COMPARISON_MARKER}-->\n\n${table}\n${plans}`)
 }
 
 /**
