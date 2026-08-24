@@ -1041,6 +1041,20 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::JudgeStarted {
+                session_id,
+                iteration,
+                trigger,
+            } => {
+                self.emit_agent_event_ext(
+                    "judge_started",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "trigger": trigger,
+                    }),
+                );
+            }
             AgentEvent::JudgeDecision {
                 session_id,
                 iteration,

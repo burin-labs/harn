@@ -1039,6 +1039,31 @@ pub fn agent_has_done_judge(judge_cfg) -> bool {
   return agent_judge_config(judge_cfg) != nil
 }
 
+/*
+ * Open the completion-judge window. Paired with `__emit_judge_decision`, which
+ * closes it.
+ *
+ * A judge call is a model round trip with no tool row and no streamed text, so
+ * without this a host has nothing to show between the agent's last edit and the
+ * verdict — on an observed trial that silence was a third of the task's wall
+ * clock.
+ *
+ * Fires when the model-judge stage is entered past its invocation cap, which is
+ * one gate short of the model call itself: a request that then fails admission
+ * (no room left in the terminal deadline) closes this window immediately with
+ * an `unavailable` decision. That pairing is deliberate and pinned by test —
+ * every started window has a decision closing it, so a host can render the
+ * window without needing to know which gate ended it.
+ */
+fn __emit_judge_started(agent: HarnessAgent, session_id, iteration, trigger) {
+  agent_emit_event(
+    agent,
+    session_id,
+    "judge_started",
+    {iteration: iteration, trigger: trigger},
+  )
+}
+
 fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
   agent_emit_event(
     agent,
@@ -1391,6 +1416,7 @@ fn __completion_policy_run_stage(
       if max_invocations != nil && prior_invocations >= max_invocations {
         return __completion_policy_mark_cap(evaluation, slot)
       }
+      __emit_judge_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
       verdict = __completion_arbitrate_verification(verdict, evaluation) + {trigger: trigger}
       __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
