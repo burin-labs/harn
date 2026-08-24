@@ -129,6 +129,9 @@ fn __tool_batch_call_classification(call, tools, options = {}) {
     return {phase: "observation", declared_mutation: false}
   }
   if contains(__TOOL_BATCH_PROCESS_KINDS, kind) || side_effect == "process_exec" {
+    if __tool_batch_process_is_read_effect(call) {
+      return {phase: "observation", declared_mutation: false}
+    }
     return {phase: "process_verification", declared_mutation: false}
   }
   // Unknown and conflicting annotations fail closed into the mutation phase.
@@ -152,6 +155,28 @@ fn __tool_batch_previous_deferred_signatures(state) {
   return []
 }
 
+fn __tool_batch_phase_rank(phase: string) -> int {
+  // The rank is the dependency order, not the model's emission order. A model
+  // batch declares siblings; it does not make a later read depend on an
+  // earlier mutation merely by placing that mutation first.
+  if phase == "provider_native" {
+    return 0
+  }
+  if phase == "observation" {
+    return 1
+  }
+  if phase == "mutation" {
+    return 2
+  }
+  if phase == "process_verification" {
+    return 3
+  }
+  if phase == "terminal" {
+    return 4
+  }
+  return 5
+}
+
 fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
   const previous = options?._tool_batch_dependency_state
   const previous_deferred = __tool_batch_previous_deferred_signatures(previous)
@@ -159,15 +184,15 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
   let entries = []
   let signatures = []
   let selected_phase = ""
-  let boundary_reached = false
+  let selected_rank = 6
   for (index, call) in iter(tool_calls).enumerate() {
     const classification = __tool_batch_call_classification(call, tools, options)
     const phase = classification.phase
     const signature = __tool_batch_signature(call)
-    if index == 0 {
+    const phase_rank = __tool_batch_phase_rank(phase)
+    if phase_rank < selected_rank {
       selected_phase = phase
-    } else if phase != selected_phase {
-      boundary_reached = true
+      selected_rank = phase_rank
     }
     entries = entries.appending(
       {
@@ -176,7 +201,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
         phase: phase,
         declared_mutation: classification.declared_mutation,
         signature: signature,
-        selected: !boundary_reached && phase == selected_phase,
+        selected: false,
         proposal_status: if contains(previous_deferred, signature) {
           "re_proposed"
         } else {
@@ -186,6 +211,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls, tools, options = {}) {
     )
     signatures = signatures.appending(signature)
   }
+  entries = entries.map({ entry -> entry + {selected: entry.phase == selected_phase} })
   const batch_id = sha256(
     json_stringify(
       {
@@ -265,10 +291,10 @@ fn __tool_batch_deferred_result(
     + plan.selected_phase
     + "` into `"
     + entry.phase
-    + "`. Harn executed only the maximal independent `"
+    + "`. Harn executed every independent `"
     + plan.selected_phase
-    + "` prefix so the next inference can observe those results. Reconsider this call and "
-    + "re-propose it only if it is still needed."
+    + "` call in this batch so the next inference can observe those results. Reconsider this "
+    + "call and re-propose it only if it is still needed."
   const result = {
     ok: false,
     status: "deferred",
@@ -351,6 +377,41 @@ fn __tool_batch_deferred_signatures(entries) {
   return entries.map({ entry -> entry.signature })
 }
 
+fn __tool_batch_merge_deferred_signatures(previous, newly_deferred, executed) {
+  const previous_sigs = __tool_batch_previous_deferred_signatures(previous)
+  const executed_sigs = executed.map({ entry -> entry.signature })
+  let merged = previous_sigs.filter({ sig -> !contains(executed_sigs, sig) })
+  for sig in __tool_batch_deferred_signatures(newly_deferred) {
+    if !contains(merged, sig) {
+      merged = merged.appending(sig)
+    }
+  }
+  return merged
+}
+
+fn __tool_batch_process_is_read_effect(call) -> bool {
+  const args = __intra_turn_call_args(call)
+  const command = args?.command ?? args?.cmd ?? args?.script
+  const argv = args?.argv
+  const has_command = command != nil && to_string(command) != ""
+  const has_argv = type_of(argv) == "list" && len(argv) > 0
+  if !has_command && !has_argv {
+    return false
+  }
+  const request = if has_argv {
+    {mode: "argv", argv: argv, command: to_string(command ?? "")}
+  } else {
+    {mode: "shell", command: to_string(command)}
+  }
+  const classified = try {
+    command_workspace_effect({request: request})
+  }
+  if is_err(classified) {
+    return false
+  }
+  return unwrap(classified)?.effect == "read_effect"
+}
+
 fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
   const plan = __tool_batch_plan(harness.clock, tool_calls, tools, options)
   const selected = __tool_batch_selected_entries(plan)
@@ -376,7 +437,11 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
         schema: "harn.agent_tool_batch_state.v1",
         batch_id: plan.batch_id,
         selected_phase: plan.selected_phase,
-        deferred_signatures: __tool_batch_deferred_signatures(plan.entries),
+        deferred_signatures: __tool_batch_merge_deferred_signatures(
+          plan.previous,
+          plan.entries,
+          [],
+        ),
         // The synthetic results above are the observation boundary for this
         // dependency. Keeping the blocker would reject every later process or
         // terminal proposal until the model happened to emit another
@@ -386,14 +451,20 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
     }
   }
   const selected_calls = selected.map({ entry -> entry.call })
+  const selected_indices = selected.map({ entry -> entry.index })
   const raw_selected = __dispatch_tool_calls_with_middleware(
     harness,
     selected_calls,
     tools,
     options,
     cap,
+    selected_indices,
   )
-  let results = []
+  // Results are re-sorted to the model's original call order before they are
+  // returned. Selected and deferred calls are now interleaved rather than
+  // split at a boundary, and on the text channel a tool result carries no
+  // tool_call_id — position is the only thing tying a result to its call.
+  let ordered = []
   let blocking_result = plan.previous?.blocking_result
   if plan.selected_phase == "mutation" {
     blocking_result = nil
@@ -419,24 +490,41 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
       receipt_timing,
       raw_result?.partial_apply,
     )
-    results = results.appending(raw_result + {dispatch_receipt: receipt})
+    ordered = ordered.appending(
+      {index: entry.index, result: raw_result + {dispatch_receipt: receipt}},
+    )
     __tool_batch_emit_receipt(harness.agent, options, receipt)
     if __tool_batch_result_blocks_later_phase(entry, raw_result) {
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
   for entry in deferred {
-    results = results.appending(
-      __tool_batch_deferred_result(harness.agent, harness.random, plan, entry, tools, options),
+    ordered = ordered.appending(
+      {
+        index: entry.index,
+        result: __tool_batch_deferred_result(
+          harness.agent,
+          harness.random,
+          plan,
+          entry,
+          tools,
+          options,
+        ),
+      },
     )
   }
+  const results = ordered.sorted_by({ item -> item.index }).map({ item -> item.result })
   return {
     results: results,
     state: {
       schema: "harn.agent_tool_batch_state.v1",
       batch_id: plan.batch_id,
       selected_phase: plan.selected_phase,
-      deferred_signatures: __tool_batch_deferred_signatures(deferred),
+      deferred_signatures: __tool_batch_merge_deferred_signatures(
+        plan.previous,
+        deferred,
+        selected,
+      ),
       blocking_result: blocking_result,
     },
   }
@@ -1267,7 +1355,24 @@ pub fn __invoke_tool_with_index(harness: Harness, call, index, tools, options) {
     }
 }
 
-pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools, options, cap) {
+fn __dispatch_source_index(source_indices, dispatch_index: int) -> int {
+  if type_of(source_indices) == "list" && dispatch_index < len(source_indices) {
+    const source_index = source_indices[dispatch_index]
+    if type_of(source_index) == "int" && source_index >= 0 {
+      return source_index
+    }
+  }
+  return dispatch_index
+}
+
+pub fn __dispatch_tool_calls_with_middleware(
+  harness: Harness,
+  tool_calls,
+  tools,
+  options,
+  cap,
+  source_indices = nil,
+) {
   // Middleware-enabled path. Each call invokes its own caller chain
   // inside a fresh closure scope, so `audit.layers` histories stay
   // independent across siblings. When `max_concurrent_tools > 1`,
@@ -1298,6 +1403,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
     let collapsed_emitted = false
     let failed_resource_guards = []
     for (index, call) in iter(tool_calls).enumerate() {
+      const source_index = __dispatch_source_index(source_indices, index)
       const resource_guard = if resource_fail_fast {
         __intra_turn_resource_guard(call, tools, options)
       } else {
@@ -1319,7 +1425,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
           call,
           resource_guard,
           blocking_guard,
-          index,
+          source_index,
           skipped_suffix_count,
         )
         __emit_synthetic_tool_lifecycle_finish(
@@ -1352,7 +1458,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
         }
         continue
       }
-      const result = __invoke_tool_with_index(harness, call, index, tools, options)
+      const result = __invoke_tool_with_index(harness, call, source_index, tools, options)
       results = results.appending(result)
       // Poison this resource for later same-resource siblings only when the
       // execution boundary cannot prove the failure was a no-op. A structured
@@ -1362,7 +1468,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
         failed_resource_guards = failed_resource_guards.appending(
-          __intra_turn_failed_guard_record(call, index, resource_guard, result),
+          __intra_turn_failed_guard_record(call, source_index, resource_guard, result),
         )
       }
       if fanout_cap > 0 {
@@ -1396,7 +1502,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
   }
   let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
-    indexed = indexed.appending({index: index, call: call})
+    indexed = indexed.appending({index: __dispatch_source_index(source_indices, index), call: call})
   }
   const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(harness, entry.call, entry.index, tools, options)

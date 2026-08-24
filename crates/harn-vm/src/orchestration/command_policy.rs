@@ -1476,6 +1476,9 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
 
 mod catastrophic;
 mod scan;
+mod workspace_effect;
+
+pub use workspace_effect::{command_workspace_effect_json, command_workspace_effect_value};
 
 use scan::*;
 
