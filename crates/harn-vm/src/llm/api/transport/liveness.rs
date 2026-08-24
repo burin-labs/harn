@@ -224,32 +224,3 @@ impl StreamLiveness {
 fn elapsed_since(earlier_ms: i64, later_ms: i64) -> Duration {
     Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn expired_total_deadline_beats_an_immediately_ready_read() {
-        let mut liveness = StreamLiveness::new(
-            "fixture",
-            StreamDeadlinePolicy::for_test(
-                Duration::from_secs(2),
-                Duration::from_secs(10),
-                Duration::from_secs(10),
-            ),
-            tokio::time::Instant::now(),
-        );
-        tokio::time::advance(Duration::from_secs(2)).await;
-
-        let error = liveness
-            .next_line(async { Ok(Some("data: ready".to_string())) })
-            .await
-            .expect_err("an already-expired total deadline must win");
-        let failure = error
-            .provider_stream_failure()
-            .expect("typed stream failure");
-        assert_eq!(failure.deadline, Some(ProviderStreamDeadline::Total));
-        assert_eq!(failure.phase, ProviderStreamPhase::AwaitingFirstChunk);
-    }
-}

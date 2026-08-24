@@ -229,6 +229,12 @@ async fn first_frame_latency_measures_the_wait_before_the_first_frame() {
             request_origin,
         ),
         async move {
+            // `sleep`, not `advance`, and the difference is the whole test.
+            // Under `start_paused` the runtime auto-advances only once every
+            // task is idle, so this sleep yields until the reader has actually
+            // consumed and stamped the first frame. `advance` moves the clock
+            // immediately, the reader is not polled in between, and the stamp
+            // lands at the end of the stream — the exact bug under test.
             // Prefill: the request is dispatched and nothing comes back yet.
             tokio::time::sleep(Duration::from_millis(1_500)).await;
             writer

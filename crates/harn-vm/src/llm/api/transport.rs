@@ -635,6 +635,8 @@ use sse::{
 #[cfg(test)]
 mod dialect_golden_stream_tests;
 #[cfg(test)]
+mod liveness_tests;
+#[cfg(test)]
 mod schema_stream_abort_tests;
 #[cfg(test)]
 mod sse_read_error_tests;

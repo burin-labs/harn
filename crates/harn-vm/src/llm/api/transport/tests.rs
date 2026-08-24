@@ -147,6 +147,7 @@ async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect_err("empty Ollama parser-bug response should fail");
@@ -170,6 +171,7 @@ async fn ollama_ndjson_requires_done_frame() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect_err("truncated Ollama stream should fail");
@@ -202,6 +204,7 @@ async fn ollama_ndjson_captures_server_telemetry_from_done_frame() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect("ollama stream parses");
@@ -233,6 +236,7 @@ async fn ollama_ndjson_done_reason_stop_is_captured_as_stop_reason() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect("ollama stream parses");
@@ -258,6 +262,7 @@ async fn ollama_ndjson_thinking_is_private_not_visible_delta() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect("ollama stream parses");
@@ -303,6 +308,7 @@ async fn ollama_ndjson_done_reason_length_surfaces_truncation_not_parser_bug() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect("length truncation should return Ok, not the parser-bug error");
@@ -325,6 +331,7 @@ async fn ollama_ndjson_thinking_only_length_stays_private() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect("length truncation should return Ok, not promote thinking");
@@ -351,6 +358,7 @@ async fn ollama_ndjson_empty_content_without_done_reason_is_still_parser_bug() {
         Duration::ZERO,
         &mut warmup_gate,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect_err("empty content with done_reason=stop is still a parser bug");

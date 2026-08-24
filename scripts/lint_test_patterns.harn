@@ -55,6 +55,14 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+  // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
+  // a provider's first stream frame. Under `start_paused` the runtime
+  // auto-advances only when every task is idle, so `sleep` is the
+  // synchronisation point that lets the reader consume and stamp frame one
+  // before the clock moves again. `advance` moves it immediately, the reader
+  // is never polled in between, and the stamp records the end of the stream
+  // instead — the very regression the test exists to catch.
+  "crates/harn-vm/src/llm/api/transport/sse_telemetry_tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
   "crates/harn-vm/src/flow/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",

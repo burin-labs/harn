@@ -74,6 +74,7 @@ pub(super) async fn consume_ollama_ndjson_lines<R>(
     unload_grace: Duration,
     warmup_gate: &mut bool,
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError>
 where
     R: tokio::io::AsyncBufRead + Unpin,
@@ -91,7 +92,7 @@ where
             first_chunk: Duration::from_hours(1),
             idle: Duration::from_hours(1),
         },
-        tokio::time::Instant::now(),
+        request_origin,
     )
     .await
 }
