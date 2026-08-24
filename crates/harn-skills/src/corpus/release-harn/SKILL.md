@@ -1,13 +1,13 @@
 ---
 name: release-harn
-short: Merge-queue-safe Harn patch/minor/major release workflow.
+short: Merge-queue-safe Harn patch release workflow.
 description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; candidate archive builds run before the tag, and tag push promotes those exact archives without recompiling.
-when_to_use: Use when cutting a Harn `vX.Y.Z` patch / minor / major release from main, or recovering from a partially-failed release run.
+when_to_use: Use when cutting the declared Harn `vX.Y.Z-dev` target as a stable patch release, or recovering from a partially-failed release run.
 ---
 
 # Release Harn
 
-Use this skill when cutting a Harn `vX.Y.Z` release from `main`, or
+Use this skill when cutting the declared Harn `vX.Y.Z-dev` target from `main`, or
 recovering from a partial release.
 
 Pair it with [[harn-providers]] when the release includes provider
@@ -49,7 +49,7 @@ candidate receipt fails closed unless `force_rebuild=true`.
 The default flow:
 
 ```bash
-./scripts/release_ship.sh --prepare --bump <patch|minor|major>
+./scripts/release_ship.sh --prepare --bump patch
 ```
 
 Recovery / partial-run reentry:
@@ -98,6 +98,11 @@ A real release lands as **one** commit on `main` after squash:
    enabled, so it lands as soon as CI is green.
 
 That's it. The bot takes over once it lands.
+
+After publication, the same release workflow opens an auto-merge PR that
+advances the workspace to the next patch's `-dev` identity. Mid-cycle builds
+therefore never claim to be the last stable release. A release strips the
+exact `-dev` suffix and fails closed when main is not in that state.
 
 ## Cross-repo consumers don't wait on releases
 

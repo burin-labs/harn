@@ -1922,8 +1922,13 @@ jobs:
         id: harn-version
         shell: bash
         run: |
-          version="$(cargo metadata --locked --no-deps --format-version 1 \
+          source scripts/lib/release_version.sh
+          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
+          version="$(release_published_version_for_workspace "$workspace_version")" || {
+            echo "::error::Workspace version $workspace_version has no stable published projection"
+            exit 1
+          }
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn
