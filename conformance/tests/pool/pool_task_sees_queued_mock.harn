@@ -17,14 +17,10 @@ import { pool_create } from "std/lifecycle/pool"
 pipeline default(harness: Harness) {
   harness.llm.mock_enqueue({text: "inline-control"})
   harness.llm.mock_enqueue({text: "pooled-arm"})
-
   const control = harness.llm.call("control probe", nil, {provider: "mock"})
   harness.stdio.log(control.text)
-
   const pool = pool_create(harness.agent, {name: "mock-visibility", max_concurrent: 1})
-  const task = pool.submit({ ->
-    harness.llm.call("pooled probe", nil, {provider: "mock"}).text
-  })
+  const task = pool.submit({ -> harness.llm.call("pooled probe", nil, {provider: "mock"}).text })
   const settled = wait_agent(harness.agent, task)
   harness.stdio.log(settled.status)
   harness.stdio.log(settled.result)
