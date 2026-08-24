@@ -381,6 +381,10 @@ duration distribution under `data.timing`. Sequential and parallel runs use
 the same snapshot and result contract; durations can differ because workers
 overlap:
 
+A run that executed no tests is reported as `ok: false` with `error.code:
+"conformance_empty_selection"` and `data: null`, on both the sequential and
+parallel paths, unless `--allow-empty` is passed.
+
 ```json
 {
   "schemaVersion": 3,

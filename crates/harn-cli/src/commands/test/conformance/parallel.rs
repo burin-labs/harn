@@ -6,6 +6,7 @@ use std::process::{self, Stdio};
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_report::{TestCaseReport, TestOutcome, TestReport};
 
+use super::selection::{conformance_filter_matches, resolve_conformance_selection};
 use super::*;
 
 struct WorkerChild {
@@ -98,6 +99,16 @@ pub(in crate::commands::test) async fn run_parallel_conformance_tests(
         summary.record(result.outcome);
     }
     let duration_ms = started.elapsed().as_millis() as u64;
+    // A run that executed nothing is not a pass. `is_success` cannot see this
+    // — an all-zero summary satisfies it trivially — so the emptiness check is
+    // separate and names its own cause. Applied to the aggregate: an
+    // individual worker's shard may legitimately be empty.
+    if !summary.ran_anything() && !options.allow_empty {
+        super::report_empty_run(
+            options.json,
+            super::empty_run_message(&suite_root, selection, filter, &selected_files),
+        );
+    }
     let ok = summary.is_success();
     let report = ConformanceJsonReport::new(snapshot_key, results, summary);
 

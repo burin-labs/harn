@@ -639,11 +639,22 @@ test still receives a fresh VM, module state, and persistence root.
 | `--replay` | Replay recorded LLM responses |
 | `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |
 | `--coverage-out <path>` | Write an LCOV tracefile (implies `--coverage`); consumable by Codecov, `genhtml`, and Coverage Gutters |
+| `--allow-empty` | Accept a conformance run that executed no tests. Without it, a run that executed nothing exits non-zero. |
 
 When no path is given, `harn test` auto-discovers a `tests/` directory
 in the current folder. Conformance targets must resolve to a file or directory
 inside `conformance/`; the CLI now errors instead of silently falling back to
 the full suite when a requested target is missing.
+
+A conformance run that executed no tests exits non-zero. An all-zero result
+satisfies "nothing failed", so without this check the exit status cannot
+distinguish a selection that matched nothing from a suite that fully passed,
+and any caller gating on the exit code reads the vacuous run as green. The
+diagnosis names the selection, the filter, and how many selected files have no
+`.expected`, `.error`, or `.lint` sibling — the usual reason the runner can see
+a file but not run it. Pass `--allow-empty` where an empty selection is
+expected; parallel workers set it for themselves, because an individual shard
+may legitimately be empty and the parent applies the check to the aggregate.
 
 For timing-aware CI shards, first write an unsharded receipt in the enforcing
 environment, then give every sibling shard that immutable receipt:
