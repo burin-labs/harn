@@ -1,0 +1,27 @@
+/**
+ * A pooled task is the same logical agent as its submitter: it runs that
+ * agent's closure and re-establishes no context of its own. So a response
+ * queued with `harness.llm.mock_enqueue` before `pool.submit` must be visible
+ * inside the task.
+ *
+ * The mock queue lives in a thread-local and the pool dispatches onto a
+ * work-stealing worker, so the submitter's ambient scope has to travel with the
+ * task rather than being read back on whatever thread frees a slot.
+ *
+ * The first call is a positive control on the submitter's own thread. If it
+ * fails, the enqueue itself is broken and the pooled arm below proves nothing.
+ */
+import { wait_agent } from "std/agent/workers"
+import { pool_create } from "std/lifecycle/pool"
+
+pipeline default(harness: Harness) {
+  harness.llm.mock_enqueue({text: "inline-control"})
+  harness.llm.mock_enqueue({text: "pooled-arm"})
+  const control = harness.llm.call("control probe", nil, {provider: "mock"})
+  harness.stdio.log(control.text)
+  const pool = pool_create(harness.agent, {name: "mock-visibility", max_concurrent: 1})
+  const task = pool.submit({ -> harness.llm.call("pooled probe", nil, {provider: "mock"}).text })
+  const settled = wait_agent(harness.agent, task)
+  harness.stdio.log(settled.status)
+  harness.stdio.log(settled.result)
+}
