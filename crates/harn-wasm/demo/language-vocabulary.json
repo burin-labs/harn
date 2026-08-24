@@ -222,6 +222,7 @@
     "command_policy_push",
     "command_result_scan",
     "command_risk_scan",
+    "command_workspace_effect",
     "compaction.check",
     "compaction.policy",
     "compaction.run",

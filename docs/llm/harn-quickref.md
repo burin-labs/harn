@@ -4588,9 +4588,11 @@ For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
 fan out dispatch across siblings inside one independent effect phase (capped at
 N). Tool annotations classify calls as observation, mutation,
 process/verification, terminal, or provider-native. A response that crosses a
-local effect boundary executes only its maximal first-phase prefix and returns
-typed deferred results for the suffix, forcing the next inference to observe
-the prefix results before re-proposing later calls. Each proposal emits a
+local effect boundary selects the earliest semantic phase rather than the first
+emitted phase, executes every call in that phase wherever it sits in the batch,
+and returns typed deferred results for the rest, forcing the
+next inference to observe those results before re-proposing the deferred calls.
+Each proposal emits a
 `tool_batch_disposition` event with phase, disposition, re-proposal, and
 monotonic timing fields. Middleware-backed
 dispatch uses `parallel settle`; the host-batch path uses the same cap.
