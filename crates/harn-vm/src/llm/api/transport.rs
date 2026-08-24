@@ -275,7 +275,12 @@ pub(crate) async fn vm_call_llm_api_with_body(
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
-    let mut result = vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect).await?;
+    // Same origin as `started`, in `tokio` form so the first-frame stamp is
+    // subtractable from `client_wall_ms` and so virtual-time tests can advance
+    // it. Both therefore span the whole call including any retried attempts.
+    let request_origin = tokio::time::Instant::now();
+    let mut result =
+        vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect, request_origin).await?;
     crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
@@ -330,6 +335,7 @@ async fn vm_call_llm_api_with_body_inner(
     delta_tx: Option<DeltaSender>,
     mut body: serde_json::Value,
     dialect: DialectContract,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError> {
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
@@ -504,6 +510,7 @@ async fn vm_call_llm_api_with_body_inner(
                         deadline_policy,
                         RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
                         provider_request_id.as_deref(),
+                        request_origin,
                     )
                     .await;
                 }
@@ -522,6 +529,7 @@ async fn vm_call_llm_api_with_body_inner(
                 schema_watch,
                 deadline_policy,
                 RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
+                request_origin,
             )
             .await
             {

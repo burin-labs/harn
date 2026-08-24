@@ -17,6 +17,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
     deadline_policy: super::liveness::StreamDeadlinePolicy,
     raw_capture: RawProviderCaptureTarget,
     provider_request_id: Option<&str>,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -46,6 +47,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
         tools_offered,
         deadline_policy,
         provider_request_id,
+        request_origin,
     )
     .await;
     if let Some(raw_bytes) = raw_bytes {
@@ -567,6 +569,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             idle: Duration::from_hours(1),
         },
         None,
+        tokio::time::Instant::now(),
     )
     .await
 }
@@ -583,10 +586,12 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     tools_offered: bool,
     deadline_policy: super::liveness::StreamDeadlinePolicy,
     provider_request_id: Option<&str>,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
-    let mut liveness = super::liveness::StreamLiveness::new(provider, deadline_policy);
+    let mut liveness =
+        super::liveness::StreamLiveness::new(provider, deadline_policy, request_origin);
 
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
@@ -713,6 +718,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             ));
         }
         liveness.mark_partial_output();
+        liveness.mark_first_frame();
         let managed_receipt_frame = managed_transport
             && json
                 .get(crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY)
@@ -1340,6 +1346,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
     }
     telemetry.capture_request_id(provider_request_id);
+    // Written after the loop, never inside it: the usage frame replaces
+    // `telemetry` wholesale via `from_openai_usage` / `from_anthropic_usage`,
+    // so a value assigned mid-stream would be discarded by the rebuild.
+    telemetry.client_first_frame_ms = liveness.first_frame_ms();
     Ok(LlmResult {
         attempts: Default::default(),
         text_projection: None,

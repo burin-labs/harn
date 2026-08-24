@@ -378,6 +378,7 @@ async fn pending_sse_deadline(
         false,
         policy,
         None,
+        tokio::time::Instant::now(),
     )
     .await
     .expect_err("pending stream must reach a deadline");

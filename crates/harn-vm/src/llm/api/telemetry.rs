@@ -128,6 +128,17 @@ pub struct ProviderTelemetry {
     /// call regardless of provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_wall_ms: Option<u64>,
+    /// Client-side latency from request dispatch to the first well-formed
+    /// provider stream frame. Present only for streamed calls: a single-shot
+    /// request has no first frame, so this stays absent rather than reporting
+    /// zero, and a consumer can tell "not streamed" from "arrived instantly".
+    /// Subtracting it from `client_wall_ms` separates the wait for the first
+    /// frame from the time spent streaming the rest, on providers that report
+    /// no server-side breakdown of their own. Measured per provider request,
+    /// like `client_wall_ms`, so a retried call reports the attempt that
+    /// succeeded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_first_frame_ms: Option<u64>,
     /// Context window the model was loaded with (where the runtime
     /// reports it; `/api/ps` for Ollama).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,6 +219,7 @@ impl ProviderTelemetry {
             server_prompt_tokens,
             server_output_tokens,
             client_wall_ms,
+            client_first_frame_ms,
             runtime_context_length,
             runtime_loaded_model,
             response_model,
@@ -229,6 +241,7 @@ impl ProviderTelemetry {
             && server_prompt_tokens.is_none()
             && server_output_tokens.is_none()
             && client_wall_ms.is_none()
+            && client_first_frame_ms.is_none()
             && runtime_context_length.is_none()
             && runtime_loaded_model.is_none()
             && response_model.is_none()
@@ -472,6 +485,11 @@ impl ProviderTelemetry {
         insert_opt_i64(&mut dict, "server_prompt_tokens", self.server_prompt_tokens);
         insert_opt_i64(&mut dict, "server_output_tokens", self.server_output_tokens);
         insert_opt_u64(&mut dict, "client_wall_ms", self.client_wall_ms);
+        insert_opt_u64(
+            &mut dict,
+            "client_first_frame_ms",
+            self.client_first_frame_ms,
+        );
         insert_opt_u64(
             &mut dict,
             "runtime_context_length",
@@ -772,6 +790,113 @@ mod tests {
                 _ => None,
             }),
             Some(120)
+        );
+    }
+
+    /// Fields that reach the transcript artifact but are deliberately not
+    /// projected into the VM dict, with the reason each one is exempt. Keep
+    /// this list short and justified: every entry is a field a `.harn` script
+    /// cannot read.
+    ///
+    /// - `cache_accounting_declared` is consumed in Rust by
+    ///   `crate::llm::usage`, which folds it into the derived `cache_hit_ratio`
+    ///   a script actually reads. Projecting the raw declaration alongside the
+    ///   derived value would give the same question two answers.
+    const RUST_INTERNAL_TELEMETRY_FIELDS: &[&str] = &["cache_accounting_declared"];
+
+    /// `as_vm_dict` is a hand-maintained whitelist, not a derive. A field added
+    /// to the struct reaches `llm_transcript.jsonl` for free through
+    /// whole-struct serde, while staying invisible to every `.harn` script that
+    /// reads `usage.provider_telemetry` until someone remembers to list it. The
+    /// failure is quiet in the worst way: the field looks wired because the
+    /// artifact has it, and reads as absent everywhere a script looks.
+    ///
+    /// The neighbouring `as_vm_dict_serializes_all_present_fields` does not
+    /// catch this despite its name — it spot-checks four fields. This is the
+    /// census: populate every field, then require each serialized key to
+    /// survive the projection.
+    #[test]
+    fn as_vm_dict_projects_every_serialized_field() {
+        let telemetry = ProviderTelemetry {
+            source: source::OLLAMA_CHAT.to_string(),
+            serving_base_url: Some("https://provider.example/v1".to_string()),
+            serving_fingerprint: Some("build-1".to_string()),
+            cache_accounting_declared: Some(true),
+            server_total_ms: Some(100),
+            server_load_ms: Some(1),
+            server_prompt_eval_ms: Some(2),
+            server_generation_ms: Some(3),
+            server_prompt_tokens: Some(4),
+            server_output_tokens: Some(5),
+            client_wall_ms: Some(2_000),
+            client_first_frame_ms: Some(1_500),
+            runtime_context_length: Some(8_192),
+            runtime_loaded_model: Some("served-model".to_string()),
+            response_model: Some("response-model".to_string()),
+            runtime_memory_bytes: Some(6),
+            runtime_memory_vram_bytes: Some(7),
+            runtime_keep_alive_until: Some("2026-01-01T00:00:00Z".to_string()),
+            request_id: Some("req-1".to_string()),
+            provider_cost_usd: Some(0.5),
+            provider_metadata: Some(serde_json::json!({"tier": "standard"})),
+        };
+
+        let encoded = serde_json::to_value(&telemetry).expect("telemetry serializes");
+        let encoded = encoded.as_object().expect("telemetry is a JSON object");
+        let value = telemetry.as_vm_dict().expect("dict present");
+        let dict = value.as_dict().expect("dict body");
+
+        for key in encoded.keys() {
+            if RUST_INTERNAL_TELEMETRY_FIELDS.contains(&key.as_str()) {
+                continue;
+            }
+            assert!(
+                dict.get(key.as_str()).is_some(),
+                "{key} reaches the transcript but not the VM dict: add it to \
+                 as_vm_dict, or to RUST_INTERNAL_TELEMETRY_FIELDS with a reason"
+            );
+        }
+
+        // Expire a stale exemption: if an internal field ever does get
+        // projected, this list must shrink rather than quietly over-claim.
+        for exempt in RUST_INTERNAL_TELEMETRY_FIELDS {
+            assert!(
+                dict.get(*exempt).is_none(),
+                "{exempt} is now projected; drop it from \
+                 RUST_INTERNAL_TELEMETRY_FIELDS"
+            );
+        }
+
+        // The census is only meaningful if the struct really was fully
+        // populated; a field left at `None` would be skipped by serde and
+        // silently excused from the check above.
+        assert_eq!(
+            encoded.len(),
+            21,
+            "every ProviderTelemetry field must be populated for the census to \
+             cover it; update this count when the struct gains a field"
+        );
+    }
+
+    /// An unmeasured first frame stays absent through both projections, so a
+    /// single-shot call cannot read as one that answered instantly.
+    #[test]
+    fn an_absent_first_frame_is_omitted_rather_than_zeroed() {
+        let telemetry = ProviderTelemetry {
+            source: source::OLLAMA_CHAT.to_string(),
+            client_wall_ms: Some(2_000),
+            ..Default::default()
+        };
+        let value = telemetry.as_vm_dict().expect("dict present");
+        let dict = value.as_dict().expect("dict body");
+        assert!(
+            dict.get("client_first_frame_ms").is_none(),
+            "absent must not project as 0 into the VM dict"
+        );
+        let encoded = serde_json::to_value(&telemetry).expect("telemetry serializes");
+        assert!(
+            encoded.get("client_first_frame_ms").is_none(),
+            "absent must not serialize as 0 into the artifact"
         );
     }
 

@@ -19,6 +19,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
     deadline_policy: super::liveness::StreamDeadlinePolicy,
     raw_capture: RawProviderCaptureTarget,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -46,6 +47,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
         warmup_gate,
         schema_watch,
         deadline_policy,
+        request_origin,
     )
     .await;
     if let Some(raw_bytes) = raw_bytes {
@@ -89,6 +91,7 @@ where
             first_chunk: Duration::from_hours(1),
             idle: Duration::from_hours(1),
         },
+        tokio::time::Instant::now(),
     )
     .await
 }
@@ -103,6 +106,7 @@ pub(super) async fn consume_ollama_ndjson_lines_with_policy<R>(
     warmup_gate: &mut bool,
     mut schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
     deadline_policy: super::liveness::StreamDeadlinePolicy,
+    request_origin: tokio::time::Instant,
 ) -> Result<LlmResult, VmError>
 where
     R: tokio::io::AsyncBufRead + Unpin,
@@ -110,7 +114,8 @@ where
     use tokio::io::AsyncBufReadExt;
 
     let mut lines = reader.lines();
-    let mut liveness = super::liveness::StreamLiveness::new(provider, deadline_policy);
+    let mut liveness =
+        super::liveness::StreamLiveness::new(provider, deadline_policy, request_origin);
 
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
@@ -152,6 +157,7 @@ where
             ))))
         })?;
         liveness.mark_partial_output();
+        liveness.mark_first_frame();
 
         // Ollama streams content and thinking as separate channels for
         // reasoning-capable models (gemma3/4, qwen3, etc.); we always set
@@ -231,6 +237,9 @@ where
         )))));
     }
 
+    // Written after the loop: the done frame replaces `telemetry` wholesale via
+    // `from_ollama_done`, so a value assigned mid-stream would be discarded.
+    telemetry.client_first_frame_ms = liveness.first_frame_ms();
     Ok(LlmResult {
         attempts: Default::default(),
         text_projection: None,

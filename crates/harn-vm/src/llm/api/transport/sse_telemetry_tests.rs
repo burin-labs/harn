@@ -14,7 +14,8 @@
 //! They are built with `json!` rather than written as wire literals so no
 //! single fixture string trips the long-string prose lint.
 
-use super::sse::consume_sse_lines;
+use super::liveness::StreamDeadlinePolicy;
+use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
 use crate::llm::api::DialectContract;
 use crate::llm::api::LlmResult;
 use crate::llm::capabilities::WireDialect;
@@ -138,5 +139,108 @@ async fn a_later_frames_fingerprint_wins_over_an_earlier_one() {
     assert_eq!(
         result.telemetry.serving_fingerprint.as_deref(),
         Some(OTHER_BUILD)
+    );
+}
+
+/// A content chunk that ends the content stream, so the reader reaches its
+/// finalize path rather than waiting for more deltas.
+fn terminal_content_chunk() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{"finish_reason": "stop", "index": 0, "delta": {"content": "hi"}}],
+        "id": "chatcmpl-stream",
+        "model": "served-model",
+        "object": "chat.completion.chunk"
+    })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn first_frame_latency_survives_the_usage_frame_rebuild() {
+    // The usage frame replaces the telemetry envelope wholesale, exactly as it
+    // does for the serving fingerprint. A first-frame stamp written inside the
+    // read loop would be discarded by that rebuild; this pins that it is not.
+    let body = sse_body(&[content_chunk(None), usage_chunk(None)]);
+    let result = drive_openai(&body).await;
+
+    assert!(
+        result.telemetry.client_first_frame_ms.is_some(),
+        "a streamed call records its first-frame latency"
+    );
+    assert_eq!(
+        result.telemetry.server_prompt_tokens,
+        Some(14),
+        "the usage frame still lands, so the rebuild really happened"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stream_with_no_parseable_frame_reports_no_first_frame() {
+    // Absent, not zero. A comment-only stream produced no provider frame, and
+    // reporting 0 would claim the first frame arrived instantly.
+    let body = ": keepalive\n\ndata: [DONE]\n".to_string();
+    let result = drive_openai(&body).await;
+
+    assert_eq!(
+        result.telemetry.client_first_frame_ms, None,
+        "a keepalive is not a provider frame"
+    );
+    let encoded = serde_json::to_value(&result.telemetry).expect("telemetry serializes");
+    assert!(
+        encoded.get("client_first_frame_ms").is_none(),
+        "an unmeasured first frame is omitted from the artifact, not written as 0"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn first_frame_latency_measures_the_wait_before_the_first_frame() {
+    use tokio::io::AsyncWriteExt;
+
+    let (reader, mut writer) = tokio::io::duplex(4096);
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let request_origin = tokio::time::Instant::now();
+    let first = format!("data: {}\n", terminal_content_chunk());
+    let rest = format!("data: {}\ndata: [DONE]\n", usage_chunk(None));
+
+    let (result, ()) = tokio::join!(
+        consume_sse_lines_with_policy(
+            tokio::io::BufReader::new(reader),
+            "llamacpp",
+            "test-model",
+            DialectContract::new(WireDialect::OpenAiCompat, None),
+            delta_tx,
+            None,
+            None,
+            false,
+            StreamDeadlinePolicy::for_test(
+                Duration::from_secs(600),
+                Duration::from_secs(600),
+                Duration::from_secs(600),
+            ),
+            None,
+            request_origin,
+        ),
+        async move {
+            // Prefill: the request is dispatched and nothing comes back yet.
+            tokio::time::sleep(Duration::from_millis(1_500)).await;
+            writer
+                .write_all(first.as_bytes())
+                .await
+                .expect("first frame");
+            // Decode: the rest of the stream, which must NOT move the stamp.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            writer
+                .write_all(rest.as_bytes())
+                .await
+                .expect("usage frame");
+            drop(writer);
+        }
+    );
+
+    let telemetry = result.expect("sse parse should succeed").telemetry;
+    let first_frame = telemetry
+        .client_first_frame_ms
+        .expect("a streamed call records its first-frame latency");
+    assert!(
+        (1_500..2_000).contains(&first_frame),
+        "first-frame latency measures the prefill wait, not the whole stream: {first_frame}"
     );
 }
