@@ -6,7 +6,6 @@
  * row, and decide whether a `light` row may skip the LLM confirmation. They
  * touch no judge state, so the judge imports them rather than owning them.
  */
-
 fn __agent_completion_review(llm, opts) -> dict {
   const model = trim(to_string(opts?.model ?? ""))
   if model == "" {
@@ -68,6 +67,7 @@ pub fn agent_completion_review_should_skip_llm(review, evaluation, payload) -> b
   }
   return to_string(payload?.stop_reason ?? "") == "sentinel"
 }
+
 // Conservative default cap on how many times the completion-judge LLM may
 // veto a proposed completion within one session. Each veto is a paid model
 // call plus an injected feedback message, so a weak model that never satisfies

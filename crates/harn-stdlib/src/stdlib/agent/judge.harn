@@ -1,3 +1,9 @@
+pub import {
+  COMPLETION_JUDGE_DEFAULT_CAP,
+  agent_completion_review,
+  agent_completion_review_should_skip_llm,
+  agent_verify_completion_judge_cap,
+} from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -12,12 +18,6 @@ import {
   __judge_emit_started,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
-pub import {
-  COMPLETION_JUDGE_DEFAULT_CAP,
-  agent_completion_review,
-  agent_completion_review_should_skip_llm,
-  agent_verify_completion_judge_cap,
-} from "std/agent/completion_review"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
@@ -31,7 +31,6 @@ import {
   AgentTranscriptToolLifecycleStatus,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
-
 
 // The completion judge is a terminal checkpoint, not a second agent loop. Give
 // it the latest effect-bearing actions and their observations without replaying
@@ -938,8 +937,6 @@ fn __judge_invoke_structured(
     typed_checkpoint: checkpoint,
   }
 }
-
-
 
 /**
  * agent_done_judge_cap.
