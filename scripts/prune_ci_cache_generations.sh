@@ -133,6 +133,31 @@ case "$mode" in
       | .id
     '
     ;;
+  --local-sccache-family-prefix)
+    family_prefix="${2:-}"
+    local_prefix="${repository}-sccache-local-"
+    local_identity="${family_prefix#"$local_prefix"}"
+    local_identity="${local_identity%-}"
+    if [[ "$family_prefix" != "$local_prefix"* \
+      || ! "$local_identity" =~ ^[A-Za-z0-9_.-]+-(Linux|Windows|macOS)-(X64|ARM64)$ \
+      || -n "${3:-}" ]]; then
+      echo "usage: $0 --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>-" >&2
+      exit 64
+    fi
+    selector='
+      [.[].actions_caches[]
+        | select(
+            .ref == "refs/heads/main"
+            and (.key | startswith($family_prefix))
+            and (.key | test("-[0-9a-f]{40}$"))
+          )
+      ]
+      | sort_by(.created_at, .id)
+      | reverse
+      | .[1:][]
+      | .id
+    '
+    ;;
   --all-release-families)
     if [[ -n "${2:-}" ]]; then
       echo "usage: $0 --all-release-families" >&2
@@ -192,7 +217,7 @@ case "$mode" in
     exit 0
     ;;
   *)
-    echo "usage: $0 --family-prefix v0-rust-release-<target>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>" >&2
+    echo "usage: $0 --family-prefix v0-rust-release-<target>- | --local-sccache-family-prefix <repository>-sccache-local-<cache-key>-<os>-<arch>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>" >&2
     exit 64
     ;;
 esac
