@@ -276,6 +276,8 @@ fn load_check_config_walks_up_from_nested_file() {
 preflight_severity = "warning"
 preflight_allow = ["custom.scan", "runtime.*"]
 host_capabilities_path = "./schemas/host-caps.json"
+host_served_capabilities_path = "./schemas/host-served.json"
+runtime_installed_host_operations = ["project.runtime_handler"]
 
 [workspace]
 pipelines = ["pipelines", "scripts"]
@@ -295,6 +297,18 @@ pipelines = ["pipelines", "scripts"]
         caps_path.ends_with("schemas/host-caps.json")
             || caps_path.ends_with("schemas\\host-caps.json"),
         "unexpected absolutized path: {caps_path}"
+    );
+    let served_path = cfg
+        .host_served_capabilities_path
+        .expect("served host caps path");
+    assert!(
+        served_path.ends_with("schemas/host-served.json")
+            || served_path.ends_with("schemas\\host-served.json"),
+        "unexpected absolutized served path: {served_path}"
+    );
+    assert_eq!(
+        cfg.runtime_installed_host_operations,
+        ["project.runtime_handler"]
     );
 
     let (workspace, manifest_dir) =

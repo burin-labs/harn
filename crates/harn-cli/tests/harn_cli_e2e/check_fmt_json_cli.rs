@@ -101,6 +101,92 @@ fn check_json_reports_success_and_diagnostics() {
 }
 
 #[test]
+fn check_reconciles_declared_and_served_host_capability_surfaces() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(&script, "pipeline main() {}\n").expect("write script");
+    std::fs::write(
+        temp.path().join("declared.json"),
+        r#"{"synthetic":["served","phantom","runtime_only"]}"#,
+    )
+    .expect("write declarations");
+    let served = temp.path().join("served.json");
+    std::fs::write(&served, r#"{"synthetic":["served"]}"#).expect("write served surface");
+    std::fs::write(
+        temp.path().join("harn.toml"),
+        r#"
+[check]
+host_capabilities_path = "declared.json"
+host_served_capabilities_path = "served.json"
+runtime_installed_host_operations = ["synthetic.runtime_only"]
+"#,
+    )
+    .expect("write manifest");
+
+    let failed = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["check", "--json", "main.harn"])
+        .output()
+        .expect("spawn harn check --json");
+    assert!(
+        !failed.status.success(),
+        "phantom operation must fail check"
+    );
+    let parsed = stdout_json(&failed);
+    let diagnostics = parsed["data"]["files"][0]["diagnostics"]
+        .as_array()
+        .expect("diagnostics");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == "HARN-CAP-008")
+            .count(),
+        1,
+        "only the non-exempt phantom should fail: {parsed}"
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("synthetic.phantom"))
+    }));
+
+    std::fs::write(&served, r#"{"synthetic":["served","phantom"]}"#)
+        .expect("serve formerly phantom operation");
+    let passed = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["check", "--json", "main.harn"])
+        .output()
+        .expect("spawn reconciled harn check --json");
+    assert!(
+        passed.status.success(),
+        "reconciled surface should pass: {}",
+        String::from_utf8_lossy(&passed.stderr)
+    );
+
+    std::fs::write(temp.path().join("declared.json"), "not valid JSON or TOML")
+        .expect("write malformed declarations");
+    let malformed = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["check", "--json", "main.harn"])
+        .output()
+        .expect("spawn harn check --json with malformed declarations");
+    assert!(
+        !malformed.status.success(),
+        "malformed declarations must not pass reconciliation"
+    );
+    let parsed = stdout_json(&malformed);
+    let diagnostics = parsed["data"]["files"][0]["diagnostics"]
+        .as_array()
+        .expect("diagnostics");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["code"] == "HARN-CAP-008"
+            && diagnostic["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("failed to parse declared host operations"))
+    }));
+}
+
+#[test]
 fn check_reports_bytecode_compile_errors_not_just_type_errors() {
     // `harn check` is a "will this run?" gate: it must catch errors the type
     // checker does not model but that stop `harn run`. Interpolation holes are

@@ -42,6 +42,13 @@ pub struct CheckConfig {
     pub host_capabilities: HashMap<String, Vec<String>>,
     #[serde(default, alias = "host_capabilities_file")]
     pub host_capabilities_path: Option<String>,
+    /// JSON or TOML file that lists the operations the target host serves.
+    /// `harn check` compares this list with explicit declarations.
+    #[serde(default, alias = "host_served_capabilities_file")]
+    pub host_served_capabilities_path: Option<String>,
+    /// Exact declared operations whose handlers are added at runtime.
+    #[serde(default)]
+    pub runtime_installed_host_operations: Vec<String>,
     #[serde(default)]
     pub bundle_root: Option<String>,
     /// Downgrade or suppress preflight diagnostics. See
@@ -63,6 +70,13 @@ pub(crate) fn absolutize_check_config_paths(
         let candidate = PathBuf::from(&path);
         if !candidate.is_absolute() {
             config.host_capabilities_path =
+                Some(manifest_dir.join(candidate).display().to_string());
+        }
+    }
+    if let Some(path) = config.host_served_capabilities_path.clone() {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            config.host_served_capabilities_path =
                 Some(manifest_dir.join(candidate).display().to_string());
         }
     }

@@ -1376,6 +1376,12 @@ directory) to find the nearest `harn.toml`. The following keys are honored:
 # harn.toml. Accepts JSON or TOML with the namespaced shape
 # { workspace = [...], process = [...], project = [...], ... }.
 host_capabilities_path = "./schemas/host-capabilities.json"
+host_served_capabilities_path = "./schemas/host-served-capabilities.json"
+runtime_installed_host_operations = ["project.control_plane_handler"]
+
+# The served file uses the same JSON or TOML shape as the declared file.
+# Every declared operation must appear there unless its exact name is listed
+# as runtime-installed. Wildcards are not allowed in that list.
 
 # Or declare inline:
 [check.host_capabilities]

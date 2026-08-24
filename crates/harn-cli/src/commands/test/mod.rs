@@ -270,30 +270,36 @@ async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
             if !args.test_paths.is_empty() {
                 command_error("`harn test conformance` does not support --test-path");
             }
-            run_conformance_determinism_tests(
+            Box::pin(run_conformance_determinism_tests(
                 t,
                 args.selection.as_deref(),
                 args.filter.as_deref(),
                 args.timeout,
                 &cli_skill_dirs,
-            )
+            ))
             .await;
         } else if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         } else {
-            run_determinism_tests(t, args.filter.as_deref(), args.timeout, &cli_skill_dirs).await;
+            Box::pin(run_determinism_tests(
+                t,
+                args.filter.as_deref(),
+                args.timeout,
+                &cli_skill_dirs,
+            ))
+            .await;
         }
     } else {
         let test_dir = default_test_dir_or_exit();
         if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         }
-        run_determinism_tests(
+        Box::pin(run_determinism_tests(
             &test_dir,
             args.filter.as_deref(),
             args.timeout,
             &cli_skill_dirs,
-        )
+        ))
         .await;
     }
 }
