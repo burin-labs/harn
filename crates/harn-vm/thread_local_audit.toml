@@ -522,6 +522,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/stdlib/host/turn_cache/metadata_snapshot.rs"
+statics = ["METADATA_SNAPSHOTS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/stdlib/host/operation_registry.rs"
 statics = ["SCOPED_MOCKABLE"]
 category = "thread_private"

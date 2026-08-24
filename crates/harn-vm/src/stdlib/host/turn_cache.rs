@@ -5,8 +5,9 @@
 //! round-trips per turn; Burin H-063 later measured roughly 164 repeated
 //! `project.metadata_get` calls in an ordinary context build. This module
 //! front-runs the thread-local `HOST_CALL_BRIDGE` with a per-turn memo so those
-//! reads collapse to one host round-trip per exact argument set, leaving every
-//! call site unchanged. The allowlist ([`is_turn_stable`]) is deliberately
+//! reads collapse to one host round-trip per stable fact. Project metadata is
+//! fetched once as a typed directory snapshot and namespace reads project from
+//! it locally. The allowlist ([`is_turn_stable`]) is deliberately
 //! narrow, and metadata mutations invalidate the whole memo before and after
 //! dispatch so inherited read-after-write values cannot be stale.
 //!
@@ -21,6 +22,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::value::{DictMap, VmError, VmValue};
+
+mod metadata_snapshot;
 
 /// Monotonic turn counter, bumped by [`reset`] at every turn boundary.
 ///
@@ -96,8 +99,8 @@ fn disposition(capability: &str, operation: &str) -> TurnCacheDisposition {
 ///   re-read never diverges.
 /// - `project.metadata_get`: directory metadata is coherent for a turn unless
 ///   the canonical metadata mutation operations change it. Those writes
-///   invalidate the global epoch on both sides of dispatch; parameterized keys
-///   keep directories and namespaces distinct.
+///   invalidate the global epoch on both sides of dispatch. Directory keys stay
+///   distinct while sibling namespaces share one validated bulk snapshot.
 ///
 /// Deliberately excluded after auditing the producers:
 /// - `session.active_roots` — the IDE host serves it live from the mutable
@@ -150,7 +153,7 @@ pub(crate) fn invalidation_scope(capability: &str, operation: &str) -> Invalidat
 
 /// Cache key for a turn-stable host call. Keyed on capability, operation, and a
 /// canonical fingerprint of the params so `project.metadata_get` caches per
-/// distinct directory/namespace while no-arg reads retain the cheap fast path.
+/// distinct argument set while no-arg reads retain the cheap fast path.
 /// serde_json's `Map` is key-sorted here (no `preserve_order` feature), so the
 /// fingerprint is stable.
 fn cache_key(capability: &str, operation: &str, params: &DictMap) -> String {
@@ -192,6 +195,21 @@ where
     Ok(result)
 }
 
+/// Metadata-specific deep cache interface: validate one directory snapshot,
+/// project namespaces locally, and coalesce concurrent cold reads. The
+/// dispatcher receives owned canonical params because a namespace request is
+/// deliberately replaced with one namespace-free bulk request.
+pub(crate) async fn cached_metadata_or<F, Fut>(
+    params: &DictMap,
+    dispatch: F,
+) -> Result<Option<VmValue>, VmError>
+where
+    F: FnOnce(DictMap) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<VmValue>, VmError>>,
+{
+    metadata_snapshot::cached_or(params, current_epoch(), dispatch).await
+}
+
 /// Read a turn-stable host fact from the current turn's memo.
 ///
 /// Returns `None` for anything not on the [`is_turn_stable`] allowlist, for a
@@ -204,8 +222,11 @@ pub fn lookup(capability: &str, operation: &str, params: &DictMap) -> Option<VmV
     if !is_turn_stable(capability, operation) {
         return None;
     }
-    let key = cache_key(capability, operation, params);
     let epoch = current_epoch();
+    if capability == "project" && operation == "metadata_get" {
+        return metadata_snapshot::lookup(params, epoch);
+    }
+    let key = cache_key(capability, operation, params);
     TURN_STABLE_HOST_CACHE.with(|cache| {
         cache
             .borrow()
@@ -240,6 +261,10 @@ fn store_at_epoch(
         return;
     }
     if current_epoch() != dispatch_epoch {
+        return;
+    }
+    if capability == "project" && operation == "metadata_get" {
+        metadata_snapshot::store(params, value, dispatch_epoch);
         return;
     }
     let key = cache_key(capability, operation, params);
@@ -293,6 +318,7 @@ pub(crate) fn reset() {
 /// bridge swaps gained cross-thread reach.
 pub(crate) fn reset_local() {
     TURN_STABLE_HOST_CACHE.with(|cache| cache.borrow_mut().clear());
+    metadata_snapshot::reset_local();
 }
 
 /// Serializes tests that bump [`TURN_EPOCH`] against tests that rely on a memo
@@ -353,14 +379,23 @@ mod tests {
                 return super::super::host_call_ready(Ok(Some(VmValue::Nil)));
             }
             let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
-            let dir = params.get("dir").map(VmValue::display).unwrap_or_default();
-            let namespace = params
-                .get("namespace")
-                .map(VmValue::display)
-                .unwrap_or_default();
-            super::super::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
-                "v{generation}:{dir}:{namespace}"
-            ))))))
+            assert!(
+                params.get("namespace").is_none(),
+                "metadata snapshots must be fetched without a namespace projection"
+            );
+            let namespace = |name: &str| {
+                (
+                    crate::value::intern_key(name),
+                    VmValue::dict(DictMap::from_iter([(
+                        crate::value::intern_key("generation"),
+                        VmValue::Int(generation as i64),
+                    )])),
+                )
+            };
+            super::super::host_call_ready(Ok(Some(VmValue::dict(DictMap::from_iter([
+                namespace("facts"),
+                namespace("test"),
+            ])))))
         }
     }
 
@@ -462,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_reads_are_parameterized_and_writes_invalidate_inherited_values() {
+    fn metadata_namespaces_share_a_snapshot_and_writes_invalidate_inherited_values() {
         let _guard = super::epoch_test_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -508,7 +543,10 @@ mod tests {
                 let value = dispatch_host_operation("project", "metadata_get", &descendant_facts)
                     .await
                     .expect("metadata_get");
-                assert_eq!(value.display(), "v0:src/nested:facts");
+                assert!(matches!(
+                    value.as_dict().and_then(|fields| fields.get("generation")),
+                    Some(VmValue::Int(0))
+                ));
             }
             assert_eq!(
                 count("metadata_get"),
@@ -521,8 +559,8 @@ mod tests {
                 .expect("parameter-distinct metadata_get");
             assert_eq!(
                 count("metadata_get"),
-                2,
-                "a distinct namespace must retain its own memo entry"
+                1,
+                "sibling namespaces must project from one directory snapshot"
             );
 
             let ancestor_write = DictMap::from_iter([
@@ -547,18 +585,22 @@ mod tests {
             let refreshed = dispatch_host_operation("project", "metadata_get", &descendant_facts)
                 .await
                 .expect("read after ancestor write");
-            assert_eq!(
-                refreshed.display(),
-                "v1:src/nested:facts",
+            assert!(
+                matches!(
+                    refreshed
+                        .as_dict()
+                        .and_then(|fields| fields.get("generation")),
+                    Some(VmValue::Int(1))
+                ),
                 "an ancestor write must invalidate a cached descendant read"
             );
-            assert_eq!(count("metadata_get"), 3);
+            assert_eq!(count("metadata_get"), 2);
 
             reset();
             dispatch_host_operation("project", "metadata_get", &descendant_facts)
                 .await
                 .expect("next-turn metadata_get");
-            assert_eq!(count("metadata_get"), 4, "the next turn must re-read once");
+            assert_eq!(count("metadata_get"), 3, "the next turn must re-read once");
 
             clear_host_call_bridge();
         });
@@ -661,7 +703,10 @@ mod tests {
             "project",
             "metadata_get",
             &params,
-            &VmValue::String(arcstr::ArcStr::from("stale")),
+            &VmValue::dict(DictMap::from_iter([(
+                crate::value::intern_key("facts"),
+                VmValue::dict(DictMap::new()),
+            )])),
             dispatch_epoch,
         );
 

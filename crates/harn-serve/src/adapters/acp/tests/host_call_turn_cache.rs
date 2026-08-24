@@ -90,14 +90,29 @@ async fn metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch
     harn_vm::host_turn_cache::store(
         "project",
         "metadata_get",
-        &read_params,
-        &VmValue::String(arcstr::ArcStr::from("stale")),
+        &harn_vm::value::DictMap::from_iter([(
+            harn_vm::value::intern_key("dir"),
+            VmValue::String(arcstr::ArcStr::from("src/nested")),
+        )]),
+        &VmValue::dict(harn_vm::value::DictMap::from_iter([(
+            harn_vm::value::intern_key("facts"),
+            VmValue::dict(harn_vm::value::DictMap::from_iter([(
+                harn_vm::value::intern_key("state"),
+                VmValue::String(arcstr::ArcStr::from("stale")),
+            )])),
+        )])),
     );
 
     let cached = dispatch_host_operation("project", "metadata_get", &read_params)
         .await
         .expect("memoized metadata read");
-    assert_eq!(cached.display(), "stale");
+    assert_eq!(
+        cached
+            .as_dict()
+            .and_then(|fields| fields.get("state"))
+            .map(VmValue::display),
+        Some("stale".to_string())
+    );
     assert!(
         rx.try_recv().is_err(),
         "a metadata memo hit must not emit an ACP host/call frame"
@@ -142,16 +157,26 @@ async fn metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch
     };
     assert_eq!(outgoing_read["method"], "host/call");
     assert_eq!(outgoing_read["params"]["name"], "project.metadata_get");
+    assert_eq!(
+        outgoing_read["params"]["args"],
+        serde_json::json!({ "dir": "src/nested" }),
+        "the VM must fetch one namespace-free directory snapshot"
+    );
     server
         .handle_incoming_message(serde_json::json!({
             "jsonrpc": "2.0",
             "id": outgoing_read["id"].clone(),
-            "result": "fresh"
+            "result": { "facts": { "state": "fresh" } }
         }))
         .await;
     assert_eq!(
-        refreshed.await.expect("fresh metadata read").display(),
-        "fresh"
+        refreshed
+            .await
+            .expect("fresh metadata read")
+            .as_dict()
+            .and_then(|fields| fields.get("state"))
+            .map(VmValue::display),
+        Some("fresh".to_string())
     );
 
     harn_vm::clear_host_call_bridge();
