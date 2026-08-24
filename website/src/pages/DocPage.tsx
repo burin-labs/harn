@@ -6,6 +6,7 @@ import { pageMetaForDoc } from "../lib/metadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
 import { useMermaid } from "../hooks/useMermaid"
 import { useComparisonMatrix } from "../hooks/useComparisonMatrix"
+import { useHeadingAnchors } from "../hooks/useHeadingAnchors"
 import { useMessages } from "../i18n"
 import { plainTitle, RichTitle } from "../components/docs/RichTitle"
 import { SectionTabs } from "../components/docs/SectionTabs"
@@ -23,6 +24,7 @@ export function DocPage({ slug }: { slug: string }) {
 
   useMermaid(contentRef, page?.slug ?? null)
   useComparisonMatrix(contentRef, page?.slug ?? null)
+  useHeadingAnchors(contentRef, page?.slug ?? null)
 
   useEffect(() => {
     document.title = pageMetaForDoc(docMeta).title

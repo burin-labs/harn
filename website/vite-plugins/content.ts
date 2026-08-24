@@ -36,6 +36,12 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import {
+  HEADING_ANCHOR_CLASS,
+  HEADING_ANCHOR_DEPTHS,
+  HEADING_LINKED_CLASS,
+  headingAnchorLabel,
+} from "../src/lib/heading-markup.ts"
 import { SYSTEMS, CAPABILITIES, RATINGS, type Rating } from "../src/data/comparison.ts"
 import {
   loadDiagnosticExamples,
@@ -857,6 +863,49 @@ function rehypeCollectHeadings(headings: Heading[]) {
   }
 }
 
+/**
+ * Append a permalink control to every section heading.
+ *
+ * Runs last in the chain, after headings, the page title, and internal links
+ * have been collected. Injecting earlier would fold the anchor's text into
+ * `toText(node)`, so the table of contents and the search index would carry a
+ * stray character on every entry.
+ *
+ * The control is a real `<a href="#id">`, so it works with no JavaScript: it
+ * scrolls and it puts the fragment in the address bar. The client hook adds
+ * clipboard copying on top without preventing that default.
+ */
+function rehypeHeadingAnchors() {
+  const depths = new Set<number>(HEADING_ANCHOR_DEPTHS)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "element", (node: any) => {
+      const m = /^h([1-6])$/.exec(node.tagName ?? "")
+      if (!m || !depths.has(parseInt(m[1], 10))) return
+      const id = node.properties?.id
+      if (typeof id !== "string" || id.length === 0) return
+
+      const existing = node.properties.className
+      node.properties.className = Array.isArray(existing)
+        ? [...existing, HEADING_LINKED_CLASS]
+        : [HEADING_LINKED_CLASS]
+
+      node.children.push({
+        type: "element",
+        tagName: "a",
+        properties: {
+          className: [HEADING_ANCHOR_CLASS],
+          href: `#${id}`,
+          // The glyph is decorative; the accessible name carries the heading.
+          "aria-label": headingAnchorLabel(toText(node).trim()),
+        },
+        children: [{ type: "text", value: "#" }],
+      })
+    })
+  }
+}
+
 function rehypeCaptureTitle(ref: { title: string | null }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (tree: any) => {
@@ -969,6 +1018,7 @@ function buildProcessor(
     .use(rehypeCaptureTitle, titleRef)
     .use(rehypeRewriteLinks, sourceRel)
     .use(rehypeCollectInternalLinks, sourceSlug, links)
+    .use(rehypeHeadingAnchors)
     .use(rehypeStringify, { allowDangerousHtml: true })
 }
 

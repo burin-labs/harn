@@ -1079,3 +1079,71 @@ body {
 .dark .prose td[data-rating="yes"] {
   color: var(--color-accent-300);
 }
+
+/* Section permalinks.
+
+   The control is emitted at build time as a real `<a href="#id">`, so it
+   scrolls and updates the address bar with no JavaScript; `useHeadingAnchors`
+   only adds clipboard copying on top. Revealed on hover or keyboard focus so
+   the heading stays clean while reading, and always visible where there is no
+   hover to reveal it. */
+.prose .heading-linked {
+  position: relative;
+}
+.prose a.heading-anchor {
+  margin-left: 0.4em;
+  /* Vertically centred against the heading's own box rather than sitting on
+     the text baseline, which is what makes it read as a control beside the
+     heading instead of a stray character in it. */
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  font-size: 0.7em;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-foreground-muted);
+  text-decoration: none;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+}
+@media (hover: none) {
+  /* No hover to reveal it, so show it faintly and let it be tapped. */
+  .prose a.heading-anchor {
+    opacity: 0.5;
+  }
+}
+.prose .heading-linked:hover a.heading-anchor,
+.prose a.heading-anchor:focus-visible,
+.prose a.heading-anchor[data-copied] {
+  opacity: 1;
+}
+.prose a.heading-anchor:hover,
+.prose a.heading-anchor:focus-visible {
+  color: var(--color-accent-600);
+}
+.dark .prose a.heading-anchor:hover,
+.dark .prose a.heading-anchor:focus-visible {
+  color: var(--color-accent-300);
+}
+@media (prefers-reduced-motion: reduce) {
+  .prose a.heading-anchor {
+    transition: none;
+  }
+}
+
+/* Confirmation after the URL is copied. Absolutely positioned so appearing and
+   disappearing cannot reflow the heading it sits beside. */
+.prose a.heading-anchor[data-copied]::after {
+  content: "Copied";
+  position: absolute;
+  margin-left: 0.5em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  background-color: var(--color-surface-tertiary);
+  color: var(--color-foreground-secondary);
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
