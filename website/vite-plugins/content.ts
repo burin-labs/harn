@@ -414,8 +414,9 @@ function resolveComparisonMatrix(raw: string): string {
   const plans = planned.length
     ? [
         "",
-        "**Work in progress.** These rows have tracked work behind them. Each",
-        "links the issue, so you can see for yourself whether it is still moving.",
+        "**Tracked work.** These rows have work behind them, landed or in flight.",
+        "Each links its issue, so you can check the state yourself rather than",
+        "taking this page's word for it.",
         "",
         ...planned.map(
           (cap) =>

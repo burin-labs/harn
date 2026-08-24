@@ -126,6 +126,33 @@ retry 3 {
 }
 ```
 
+<details>
+<summary>How to read this snippet</summary>
+
+`retry` is deliberately not clever. It doesn't know what an LLM is and it
+doesn't classify errors: any error thrown inside the block starts another
+attempt, up to three in total. That's what makes the two lines above work
+together, because the failure worth retrying here is usually the second one.
+A model that returns prose where you asked for JSON fails at `json_parse`, not
+at the network, and a construct that only retried transport errors would give
+up on exactly the case you wrote this for.
+
+The cost of that generality is that a genuine bug retries too. A missing key or
+a wrong type in the block will fail three times before the error escapes.
+
+If all three attempts fail, the last error propagates rather than returning
+`nil`, so a `retry` block is not a way to make failure quiet. Wrap it in
+`try`/`catch` if you want to handle exhaustion.
+
+When you do want the error-aware version, that lives in the standard library
+rather than the language:
+[`harness.llm.with_rate_limit`](builtins.md#llm) retries with exponential
+backoff only on `rate_limit`, `overloaded`, `transient_network`, and `timeout`.
+
+See [Error handling](error-handling.md#retry) for the full contract.
+
+</details>
+
 ### Gradual typing
 
 Type annotations are optional. Add them where they help, leave them off

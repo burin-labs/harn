@@ -178,7 +178,7 @@ export const CAPABILITIES: Capability[] = [
     label: "Small install",
     favorsOthers: true,
     plan: {
-      note: "The Windows archive is three times the size of the others because it carries three identical copies of one executable. Shipping one and creating the aliases at install time would bring it in line.",
+      note: "The Windows archive carried three identical copies of one executable, tripling its size. Fixed on main: the archive now ships one executable and the installer creates the aliases. The measured figures below predate that, and the next release should land near the other platforms.",
       issue: 7175,
     },
   },

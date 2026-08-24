@@ -125,8 +125,8 @@ describe("comparison matrix", () => {
     const planned = CAPABILITIES.filter((c) => c.plan)
     if (planned.length === 0) return
 
-    const block = page().markdownSource.split("**Work in progress.**")[1]
-    expect(block, "the generated plan block is missing from the page").toBeDefined()
+    const block = page().markdownSource.split("**Tracked work.**")[1]
+    expect(block, "the generated tracked-work block is missing from the page").toBeDefined()
     for (const cap of planned) {
       expect(cap.plan!.issue, `${cap.id} plan issue`).toBeGreaterThan(0)
       expect(block, `${cap.id} plan is not rendered`).toContain(cap.plan!.note)

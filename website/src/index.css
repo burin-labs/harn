@@ -468,7 +468,13 @@ body {
   overflow-wrap: anywhere;
 }
 .prose .table-scroll-wide table {
-  min-width: 42rem;
+  /* Hug the content instead of filling the scroll container. A comparison
+     table legitimately needs more room than body text, but the step out past
+     the prose measure should be as large as the columns require and no larger.
+     With the default four columns the table lands close to the text edge; add
+     columns and it widens, then scrolls. */
+  width: max-content;
+  min-width: 0;
 }
 .prose .table-scroll-wide th:first-child,
 .prose .table-scroll-wide td:first-child {
@@ -1062,7 +1068,12 @@ body {
 .prose td[data-rating="unknown"] {
   color: var(--color-foreground-muted);
 }
-.prose td[data-rating]:not([data-rating="unknown"]) {
+/* Only cells that actually carry a note get the help cursor. Keying on the
+   rating instead meant the whole table claimed a tooltip it mostly did not
+   have, so the pointer promised an explanation on every cell and delivered one
+   on some. The title attribute is set only where a note exists, so it is the
+   honest selector. */
+.prose td[data-rating][title] {
   cursor: help;
 }
 .dark .prose td[data-rating="yes"] {

@@ -80,7 +80,7 @@ export function DocPage({ slug }: { slug: string }) {
           onClick={() => setSidebarOpen(false)}
         >
           <div
-            className="docs-scroll h-full w-72 max-w-[80vw] overflow-y-auto border-r border-border bg-surface px-4 pt-6 pb-16 lg:sticky lg:top-[6.75rem] lg:h-[calc(100vh-6.75rem)] lg:w-64 lg:border-r-0 lg:bg-transparent lg:px-2"
+            className="docs-scroll h-full w-72 max-w-[80vw] overflow-y-auto border-r border-border bg-surface px-4 pt-6 pb-16 lg:sticky lg:top-[6.75rem] lg:h-[calc(100vh-6.75rem)] lg:w-64 lg:bg-transparent lg:px-2 lg:pr-4"
             onClick={(e) => e.stopPropagation()}
           >
             <SidebarNav section={section} currentSlug={slug} />

@@ -274,11 +274,14 @@ The Windows number is not the runtime's real weight, and shouldn't be read as
 one. Harn ships a single multi-call binary; `harn-lsp` and `harn-dap` are the
 same executable reached through `argv[0]`. On Unix the archive stores them as
 symlinks, so it carries one binary. Windows has no dependable unprivileged
-symlink, so the archive carries three identical copies and `.zip` compresses
+symlink, so that archive carried three identical copies and `.zip` compressed
 each in full. Divide by three and Windows lands at 77.4 MB, within a megabyte of
-Linux x86_64. Fixing it means shipping one executable and creating the aliases
-when the archive is unpacked, which is tracked in
-[#7175](https://github.com/burin-labs/harn/issues/7175).
+Linux x86_64.
+
+That's fixed on `main`: the archive now ships one executable and the installer
+creates the two aliases. `v0.10.114` predates the fix, so the figure above is
+what you would download today, and the next release should put Windows beside
+the other platforms.
 
 The other 71 to 79 MB is the runtime itself, and no work is currently tracked to
 reduce it.
