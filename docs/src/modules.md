@@ -2001,7 +2001,7 @@ Typed results and producer-owned terminal outcomes for the agent plane:
 |---|---|
 | `AgentResult` | Result of `agent_loop` and `HarnessAgent.session_finalize`, including LLM/tool summaries and the terminal outcome |
 | `AgentTerminalOutcome` | Stable `{kind, reason, owner}` terminal decision projected to hosts and protocols |
-| `AgentTerminalKind` | Closed natural, policy, cancellation, error, suspension, and unknown vocabulary |
+| `AgentTerminalKind` | Closed natural, policy, cancellation, error, suspension, and unknown vocabulary; `policy_no_progress` identifies text-only nudge exhaustion and `policy_thrash` identifies a repeated-action stall hard stop |
 
 Consumers branch on `AgentResult.terminal.kind`. The transport `status`,
 `stop_reason`, and raw payload fields remain available for diagnostics but do

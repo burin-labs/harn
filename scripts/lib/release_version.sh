@@ -30,6 +30,53 @@ release_version_is_prerelease() {
   release_version_is_canonical "${1:-}" && [[ "$1" == *-* ]]
 }
 
+release_next_patch_development() {
+  local stable="${1:-}"
+  if [[ ! "$stable" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    return 1
+  fi
+  printf '%s.%s.%s-dev\n' \
+    "${BASH_REMATCH[1]}" \
+    "${BASH_REMATCH[2]}" \
+    "$(( 10#${BASH_REMATCH[3]} + 1 ))"
+}
+
+release_development_target_matches_stable() {
+  local development="${1:-}"
+  local stable="${2:-}"
+  local expected
+  expected="$(release_next_patch_development "$stable")" || return 1
+  [[ "$development" == "$expected" ]]
+}
+
+release_published_version_for_workspace() {
+  local workspace="${1:-}"
+  if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    printf '%s\n' "$workspace"
+    return 0
+  fi
+  if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-dev$ ]] \
+    && (( 10#${BASH_REMATCH[3]} > 0 )); then
+    printf '%s.%s.%s\n' \
+      "${BASH_REMATCH[1]}" \
+      "${BASH_REMATCH[2]}" \
+      "$(( 10#${BASH_REMATCH[3]} - 1 ))"
+    return 0
+  fi
+  return 1
+}
+
+release_head_is_release_commit_for_version() {
+  local version="${1:-}"
+  release_version_is_canonical "$version" || return 1
+  release_version_is_prerelease "$version" && return 1
+  local subject
+  subject="$(git log -1 --format='%s' HEAD)" || return 1
+  [[ "$subject" =~ ^Release\ v"$version"([[:space:]].*)?$ ]] || return 1
+  git show HEAD -- Cargo.toml \
+    | grep -Eq "^\+version = \"$version\"$"
+}
+
 release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
 }

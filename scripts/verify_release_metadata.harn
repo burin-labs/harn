@@ -8,8 +8,9 @@
 //
 // Exits 0 on success (prints a `verified release metadata ...` line);
 // exits non-zero with an `error: ...` message on any failed check.
-import { compare_release, next, parse_release } from "std/semver"
+import { compare_release, next, parse, parse_release } from "std/semver"
 import { git_error_detail, resolve_commit } from "./git_base.harn"
+import { development_version_from_stable } from "./release_metadata.harn"
 import {
   ReleaseWithdrawal,
   load_release_withdrawals,
@@ -216,6 +217,14 @@ pub fn is_bump_ahead(cargo_version: string, changelog_version: string) -> bool {
   return false
 }
 
+/** True for the one valid mid-cycle relationship to the latest release. */
+pub fn is_development_after_release(workspace_version: string, released_version: string) -> bool {
+  if parse(released_version) == nil {
+    return false
+  }
+  return development_version_from_stable(released_version) == workspace_version
+}
+
 /** True when `versions` is already in strictly/weakly descending semver order. */
 pub fn is_descending(versions: list<string>) -> bool {
   let i = 1
@@ -270,7 +279,9 @@ pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
   }
   let effective_version = version
   if top != version {
-    if is_bump_ahead(version, top) {
+    if is_development_after_release(version, top) {
+      effective_version = top
+    } else if is_bump_ahead(version, top) {
       effective_version = top
     } else {
       throw "error: Cargo.toml version " + version + " does not match top changelog entry "
@@ -291,6 +302,12 @@ pub fn check_metadata(cargo_text: string, changelog_text: string) -> string {
 pub fn success_message(version: string, effective_version: string) -> string {
   if effective_version == version {
     return "verified release metadata for v" + version
+  }
+  if is_development_after_release(version, effective_version) {
+    return "verified development metadata for v" + version
+      + " (latest release v"
+      + effective_version
+      + ")"
   }
   return "verified release metadata for v" + effective_version
     + " (Cargo.toml still at v"
@@ -429,7 +446,12 @@ pipeline main(harness: Harness, task) {
         + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
     }
     const withdrawals = load_release_withdrawals(harness.fs, RELEASE_WITHDRAWALS_PATH)
-    const distribution_version = release_distribution_version(withdrawals, version)
+    const distribution_source = if is_development_after_release(version, effective_version) {
+      effective_version
+    } else {
+      version
+    }
+    const distribution_version = release_distribution_version(withdrawals, distribution_source)
     const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
     check_acp_agent_manifest(acp_manifest_text, distribution_version)
     verify_release_notes(harness.fs, harness.stdio, effective_version)

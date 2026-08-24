@@ -6,6 +6,7 @@ import "../sync_protocol_fixture_runtime_versions.harn"
 pipeline test_is_semver(harness: Harness, task) {
   assert_eq(is_semver("0.8.71"), true)
   assert_eq(is_semver("10.20.30"), true)
+  assert_eq(is_semver("10.20.31-dev"), true)
   assert_eq(is_semver("0.8"), false)
   assert_eq(is_semver("0.8.71.2"), false)
   assert_eq(is_semver("v0.8.71"), false)

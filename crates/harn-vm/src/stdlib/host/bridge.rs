@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{DictMap, VmError, VmValue};
 
 use super::turn_cache;
 
@@ -27,6 +27,27 @@ pub fn host_call_ready(
     result: Result<Option<VmValue>, VmError>,
 ) -> HostCallDispatchFuture<'static> {
     Box::pin(async move { result })
+}
+
+/// Apply the canonical turn cache without cloning params on ordinary live host
+/// calls. Metadata alone may replace its request with an owned bulk snapshot
+/// request; every other operation keeps the bridge's borrowed fast path.
+pub(super) async fn dispatch_cached(
+    bridge: Arc<dyn HostCallBridge>,
+    capability: &str,
+    operation: &str,
+    params: &DictMap,
+) -> Result<Option<VmValue>, VmError> {
+    if capability == "project" && operation == "metadata_get" {
+        return turn_cache::cached_metadata_or(params, |params: DictMap| async move {
+            bridge.dispatch(capability, operation, &params).await
+        })
+        .await;
+    }
+    turn_cache::cached_or(capability, operation, params, || {
+        bridge.dispatch(capability, operation, params)
+    })
+    .await
 }
 
 /// Embedder-supplied bridge for `host_call` ops.

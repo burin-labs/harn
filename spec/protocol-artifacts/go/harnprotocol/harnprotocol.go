@@ -10,7 +10,7 @@ package harnprotocol
 import "encoding/json"
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.114"
+const ArtifactVersion = "0.10.115-dev"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -384,6 +384,7 @@ var AgentTerminalKinds = []AgentTerminalKind{
 	"policy_budget",
 	"completion_unverified",
 	"policy_no_progress",
+	"policy_thrash",
 	"policy_guardrail",
 	"policy_stop",
 	"provider_error",

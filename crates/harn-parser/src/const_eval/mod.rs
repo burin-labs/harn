@@ -1208,13 +1208,4 @@ mod tests {
         let err = ctx.step(span).unwrap_err();
         assert!(matches!(err.kind, ConstEvalErrorKind::StepLimit));
     }
-
-    #[test]
-    fn evaluator_version_is_exposed() {
-        // Cache key consumers depend on this being a public stable int.
-        // The exact value participates in the documented cache key shape
-        // so just reading it suffices — a renamed constant would fail
-        // to compile.
-        let _ = EVAL_VERSION;
-    }
 }

@@ -6,6 +6,7 @@ mod callable_entry;
 mod debug;
 mod dispatch;
 mod execution;
+mod execution_deadline;
 mod format;
 mod interrupts;
 mod introspection;

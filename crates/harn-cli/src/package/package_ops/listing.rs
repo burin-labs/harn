@@ -312,6 +312,7 @@ pub(super) fn host_requirement_satisfied(check: &CheckConfig, requirement: &str)
         return false;
     };
     check
+        .host
         .host_capabilities
         .get(capability)
         .is_some_and(|ops| ops.iter().any(|op| op == "*" || op == operation))

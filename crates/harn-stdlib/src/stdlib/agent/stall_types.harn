@@ -76,6 +76,8 @@ pub type AgentStallState = {
   context_window_error_streak: int,
   parse_rejection_streak: int,
   no_progress_streak: int,
+  last_no_progress_signature: string,
+  last_no_progress_tokens: list<string>,
   ping_pong_a: string,
   ping_pong_b: string,
   ping_pong_alternations: int,

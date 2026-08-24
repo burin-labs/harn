@@ -98,13 +98,8 @@ impl HostCallBridge for AcpHostCallBridge {
     }
 }
 
-/// Register builtins that delegate to the ACP client (editor).
-pub(super) async fn register_acp_builtins(
-    vm: &mut harn_vm::Vm,
-    bridge: Arc<AcpBridge>,
-    prompt_content: harn_vm::VmValue,
-) {
-    let host_capability_manifest = bridge
+pub(super) async fn load_host_capability_manifest(bridge: &AcpBridge) -> harn_vm::VmValue {
+    let manifest = bridge
         .call_client(
             "host/capabilities",
             serde_json::json!({
@@ -116,7 +111,16 @@ pub(super) async fn register_acp_builtins(
             normalize_host_capability_manifest(harn_vm::bridge::json_result_to_vm_value(&result))
         })
         .unwrap_or_else(|_| harn_vm::VmValue::dict_map(Default::default()));
-    let host_capability_manifest = advertise_runtime_prompt_content(host_capability_manifest);
+    advertise_runtime_prompt_content(manifest)
+}
+
+/// Register builtins that delegate to the ACP client (editor).
+pub(super) async fn register_acp_builtins(
+    vm: &mut harn_vm::Vm,
+    bridge: Arc<AcpBridge>,
+    prompt_content: harn_vm::VmValue,
+    host_capability_manifest: harn_vm::VmValue,
+) {
     let selected_shell =
         if manifest_has_operation(&host_capability_manifest, "process", "get_default_shell") {
             bridge

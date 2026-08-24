@@ -222,6 +222,7 @@ diagnostic_codes! {
     CapabilityUnknownOperation, "HARN-CAP-005", Cap, "host capability operation is not declared";
     CapabilityCallStaticNameRequired, "HARN-CAP-006", Cap, "host capability call must use a static operation name";
     CapabilityBindingInvalid, "HARN-CAP-007", Cap, "tool host capability binding is invalid";
+    CapabilityOperationUnserved, "HARN-CAP-008", Cap, "declared host capability operation is not served";
     EffectInheritanceViolation, "HARN-CAP-301", Cap, "child agent effect set exceeds the parent's declared effects";
     DeprecatedLlmOption, "HARN-LLM-002", Llm, "LLM option key is deprecated";
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";

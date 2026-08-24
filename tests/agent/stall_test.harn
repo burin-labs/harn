@@ -107,7 +107,7 @@ fn _observe_parse_error(agent: HarnessAgent, state, iteration) {
   )
 }
 
-fn _observe_text_only(agent: HarnessAgent, state, iteration) {
+fn _observe_text(agent: HarnessAgent, state, iteration, text) {
   // Same shape but a genuine no-progress monologue (no parser errors).
   return agent_stall_observe_tool_calls(
     agent,
@@ -118,9 +118,13 @@ fn _observe_text_only(agent: HarnessAgent, state, iteration) {
     state,
     true,
     nil,
-    "I edited the file.",
+    text,
     false,
   )
+}
+
+fn _observe_text_only(agent: HarnessAgent, state, iteration) {
+  return _observe_text(agent, state, iteration, "I edited the file.")
 }
 
 pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, task) {
@@ -185,6 +189,55 @@ pipeline test_text_only_turn_without_parse_errors_still_trips(harness: Harness, 
   assert(o2.warning == nil)
   const o3 = _observe_text_only(harness.agent, o2.state, 3)
   assert(o3.warning != nil)
+  assert(o3.warning.signature != "")
+  assert(o3.warning.signature_digest != "")
+}
+
+pipeline test_distinct_text_only_turns_restart_no_progress_streak(harness: Harness, task) {
+  const o1 = _observe_text(
+    harness.agent,
+    agent_stall_initial_state(),
+    1,
+    "I should inspect the parser entry point.",
+  )
+  const o2 = _observe_text(
+    harness.agent,
+    o1.state,
+    2,
+    "The formatter owns whitespace normalization.",
+  )
+  const o3 = _observe_text(
+    harness.agent,
+    o2.state,
+    3,
+    "Next I will compare the tree-sitter grammar.",
+  )
+  assert(o3.warning == nil)
+  assert(o3.state.no_progress_streak == 1)
+}
+
+pipeline test_light_monologue_rewrites_share_a_content_streak(harness: Harness, task) {
+  const o1 = _observe_text(
+    harness.agent,
+    agent_stall_initial_state(),
+    1,
+    "I still need to inspect app/Models/Entry.php before editing.",
+  )
+  const o2 = _observe_text(
+    harness.agent,
+    o1.state,
+    2,
+    "Still need to quickly inspect APP models Entry PHP before editing!",
+  )
+  const o3 = _observe_text(
+    harness.agent,
+    o2.state,
+    3,
+    "Inspect app models Entry php before editing.",
+  )
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "no_progress_monologue")
+  assert(o3.warning.count == 3)
 }
 
 /**

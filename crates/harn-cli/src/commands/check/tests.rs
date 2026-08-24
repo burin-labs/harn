@@ -1120,10 +1120,13 @@ pipeline main() {
         source,
         &program,
         &CheckConfig {
-            host_capabilities: HashMap::from([
-                ("project".to_string(), vec!["scan".to_string()]),
-                ("runtime".to_string(), vec!["set_result".to_string()]),
-            ]),
+            host: harn_modules::host_capability_config::HostCapabilityConfig {
+                host_capabilities: HashMap::from([
+                    ("project".to_string(), vec!["scan".to_string()]),
+                    ("runtime".to_string(), vec!["set_result".to_string()]),
+                ]),
+                ..Default::default()
+            },
             ..CheckConfig::default()
         },
     );

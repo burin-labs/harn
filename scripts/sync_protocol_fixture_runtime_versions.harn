@@ -10,11 +10,13 @@
 //
 // Pure logic lives in `pub fn`s driven by the paired test with no filesystem.
 // `main` does the globbing/reads/writes.
+import * as semver from "std/semver"
+
 const FIXTURE_ROOT = "conformance/protocols/fixtures"
 
-/** True iff `v` is exactly X.Y.Z — mirrors Python `SEMVER_RE.fullmatch`. */
+/** True iff `v` is canonical stable or prerelease SemVer without a `v` prefix. */
 pub fn is_semver(v: string) -> bool {
-  return regex_captures(r"^\d+\.\d+\.\d+$", v, "").count > 0
+  return !v.starts_with("v") && semver.parse_release(v) != nil
 }
 
 /**
@@ -80,11 +82,11 @@ pipeline main(harness: Harness, task) {
   const old = parsed.old
   const new = parsed.new
   if !is_semver(old) {
-    harness.stdio.eprintln("error: --from must be X.Y.Z, got ${py_repr(old)}")
+    harness.stdio.eprintln("error: --from must be release SemVer, got ${py_repr(old)}")
     return 1
   }
   if !is_semver(new) {
-    harness.stdio.eprintln("error: --to must be X.Y.Z, got ${py_repr(new)}")
+    harness.stdio.eprintln("error: --to must be release SemVer, got ${py_repr(new)}")
     return 1
   }
   if old == new {

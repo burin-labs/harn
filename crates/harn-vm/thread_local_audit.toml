@@ -498,6 +498,12 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/stdlib/host/process_admission.rs"
+statics = ["PROCESS_ADMISSION_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/stdlib/host/fixtured_operations.rs"
 statics = ["FIXTURED_HOST_OPERATIONS"]
 category = "thread_private"
@@ -512,6 +518,12 @@ plan = "task_local_or_explicit"
 [[thread_local]]
 path = "src/stdlib/host/turn_cache.rs"
 statics = ["TURN_STABLE_HOST_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/host/turn_cache/metadata_snapshot.rs"
+statics = ["METADATA_SNAPSHOTS"]
 category = "thread_private"
 plan = "thread_private_cache"
 
