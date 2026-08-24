@@ -1035,3 +1035,63 @@ async fn calls_recorded_before_attempts_existed_count_as_one_request_each() {
         Some(3)
     );
 }
+
+/// #6741: every non-error final status collapsed to `completed`, so a run that
+/// was cancelled, stopped by policy, or parked mid-loop was recorded as a
+/// success. These are the spellings a loop actually reports.
+#[test]
+fn final_status_projects_onto_the_run_record_vocabulary() {
+    for (final_status, expected) in [
+        ("user_cancelled", "cancelled"),
+        ("policy_stop", "stopped"),
+        ("policy_budget", "stopped"),
+        ("policy_no_progress", "stopped"),
+        ("policy_guardrail", "stopped"),
+        ("completion_unverified", "failed"),
+        ("provider_error", "failed"),
+        ("runtime_error", "failed"),
+        ("suspended", "suspended"),
+        ("awaiting_input", "awaiting_input"),
+        ("cancelled", "cancelled"),
+        ("aborted", "cancelled"),
+        ("timeout", "failed"),
+    ] {
+        assert_eq!(
+            run_status_from_final_status(final_status),
+            expected,
+            "{final_status} must not be recorded as a success"
+        );
+    }
+}
+
+/// Negative control for the test above. If `run_status_from_final_status`
+/// started reporting a non-success for everything, the assertions above would
+/// still pass; these are the cases that must stay `completed`.
+#[test]
+fn genuine_and_unrecognized_completions_still_report_completed() {
+    for final_status in ["natural", "done", "succeeded", "success", "ok"] {
+        assert_eq!(run_status_from_final_status(final_status), "completed");
+    }
+    // Documented boundary, not an endorsement: a spelling neither vocabulary
+    // knows and the error classifier declines is reported as a completion.
+    assert_eq!(
+        run_status_from_final_status("some_status_nothing_owns"),
+        "completed"
+    );
+}
+
+/// The class-killer. The producer-owned `AgentTerminalKind` table is the one
+/// place this mapping lives; a re-derived copy in this module would drift from
+/// it silently. Assert the string path agrees with the typed path for every
+/// kind, so adding a kind without teaching this projection fails here.
+#[test]
+fn every_terminal_kind_agrees_with_its_typed_projection() {
+    for kind in crate::agent_events::AgentTerminalKind::ALL {
+        assert_eq!(
+            run_status_from_final_status(kind.as_str()),
+            kind.lifecycle_state().projection().run_record_status,
+            "{} must route through AgentTerminalKind::lifecycle_state",
+            kind.as_str()
+        );
+    }
+}
