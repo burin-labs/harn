@@ -2,15 +2,19 @@ use super::*;
 use crate::{execute_with_skill_dirs_and_options, SourceExecutionOptions};
 
 mod case_config;
+mod empty_run;
 mod lint;
 mod parallel;
+mod selection;
 mod sharding;
 mod write_root;
 
 pub(super) use parallel::run_parallel_conformance_tests;
 use sharding::select_conformance_shard;
 
+use empty_run::{empty_run_message, expectation_sibling, report_empty_run};
 use lint::{format_conformance_lint_diagnostics, lint_expectation_error};
+use selection::{conformance_filter_matches, resolve_conformance_selection};
 
 fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
     let fixture = harn_file.with_extension("llm-mock.jsonl");
@@ -634,76 +638,6 @@ fn parse_xfail_marker(source: &str) -> Option<String> {
     None
 }
 
-fn resolve_conformance_selection(
-    suite_root: &Path,
-    selection: Option<&str>,
-) -> Result<Vec<PathBuf>, String> {
-    let suite_root = canonicalize_or_err(suite_root)?;
-
-    let Some(selection) = selection else {
-        return Ok(collect_harn_files_sorted(&suite_root));
-    };
-
-    let raw = PathBuf::from(selection);
-    let mut candidates = vec![raw.clone()];
-    if !raw.is_absolute() && !raw.starts_with(&suite_root) {
-        candidates.push(suite_root.join(&raw));
-    }
-
-    let Some(candidate) = candidates.into_iter().find(|path| path.exists()) else {
-        return Err(format!(
-            "Conformance target not found: {selection}. Expected a file or directory under {}",
-            suite_root.display()
-        ));
-    };
-
-    let canonical = canonicalize_or_err(&candidate)?;
-    if !canonical.starts_with(&suite_root) {
-        return Err(format!(
-            "Conformance target must be inside {}: {}",
-            suite_root.display(),
-            candidate.display()
-        ));
-    }
-
-    if canonical.is_file() {
-        if canonical.extension().is_some_and(|ext| ext == "harn") {
-            return Ok(vec![canonical]);
-        }
-        return Err(format!(
-            "Conformance target must be a .harn file or directory: {}",
-            candidate.display()
-        ));
-    }
-
-    let files = collect_harn_files_sorted(&canonical);
-    if files.is_empty() {
-        return Err(format!(
-            "No .harn conformance tests found under {}",
-            candidate.display()
-        ));
-    }
-    Ok(files)
-}
-
-fn conformance_filter_matches(rel_path: &str, filter: Option<&str>) -> bool {
-    let Some(pattern) = filter else {
-        return true;
-    };
-    if let Some(re_pat) = pattern.strip_prefix("re:") {
-        Regex::new(re_pat).is_ok_and(|re| re.is_match(rel_path))
-    } else if pattern.contains('|') {
-        pattern.split('|').any(|p| rel_path.contains(p.trim()))
-    } else if pattern.contains('*') || pattern.contains('?') {
-        let escaped = regex::escape(pattern)
-            .replace(r"\*", ".*")
-            .replace(r"\?", ".");
-        Regex::new(&escaped).is_ok_and(|re| re.is_match(rel_path))
-    } else {
-        rel_path.contains(pattern)
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ConformanceCaseEvaluation {
     passed: bool,
@@ -858,6 +792,13 @@ pub(crate) struct ConformanceRunOptions<'a> {
     pub(crate) json: bool,
     pub(crate) skip_xfail: bool,
     pub(crate) shard: Option<crate::test_runner::TestShard>,
+    /// Accept a run that executed no tests.
+    ///
+    /// Set by `--allow-empty`, and always set inside a parallel worker. A
+    /// worker legitimately receives an empty shard, and it is the parent that
+    /// owns the verdict: it applies the same check to the aggregate once every
+    /// worker has reported.
+    pub(crate) allow_empty: bool,
     pub(crate) cli_skill_dirs: &'a [PathBuf],
 }
 
@@ -1169,7 +1110,7 @@ pub(crate) async fn run_conformance_tests(
     let mut skipped_summary: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut json_results: Vec<ConformanceJsonResult> = Vec::new();
-    let mut json_summary = ConformanceJsonSummary::default();
+    let mut run_summary = ConformanceJsonSummary::default();
     let mut report = TestReport::new("conformance", Some(&suite_root));
 
     let harn_files = match resolve_conformance_selection(&suite_root, selection) {
@@ -1213,7 +1154,7 @@ pub(crate) async fn run_conformance_tests(
         if skip_xfail {
             if let Some(reason) = xfail_reason.as_ref() {
                 if options.json {
-                    json_summary.record(ConformanceJsonOutcome::Skipped);
+                    run_summary.record(ConformanceJsonOutcome::Skipped);
                     json_results.push(ConformanceJsonResult {
                         name: rel_path.clone(),
                         outcome: ConformanceJsonOutcome::Skipped,
@@ -1224,13 +1165,17 @@ pub(crate) async fn run_conformance_tests(
                     continue;
                 }
                 println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
+                run_summary.record(ConformanceJsonOutcome::Skipped);
                 skipped_summary.push((rel_path.clone(), reason.clone()));
                 skipped += 1;
                 continue;
             }
         }
 
-        if !expected_file.exists() && !error_file.exists() && !lint_file.exists() {
+        if expectation_sibling(harn_file).is_none() {
+            // Not a defect on its own: the suite also holds library modules
+            // that real tests import. It is only notable when it leaves the
+            // run with nothing to do, which the caller checks for.
             continue;
         }
 
@@ -1245,15 +1190,18 @@ pub(crate) async fn run_conformance_tests(
         )
         .await;
 
-        if options.json {
-            let outcome = match (&xfail_reason, evaluation.passed) {
-                (Some(_), true) => ConformanceJsonOutcome::XfailUnexpectedPass,
-                (Some(_), false) => ConformanceJsonOutcome::XfailExpected,
-                (None, true) => ConformanceJsonOutcome::Pass,
-                (None, false) => ConformanceJsonOutcome::Fail,
-            };
-            json_summary.record(outcome);
+        // Recorded on both paths. The summary is what answers "did anything
+        // run", and a text-mode run executes exactly the same cases, so
+        // counting only under --json would leave every text run looking empty.
+        let outcome = match (&xfail_reason, evaluation.passed) {
+            (Some(_), true) => ConformanceJsonOutcome::XfailUnexpectedPass,
+            (Some(_), false) => ConformanceJsonOutcome::XfailExpected,
+            (None, true) => ConformanceJsonOutcome::Pass,
+            (None, false) => ConformanceJsonOutcome::Fail,
+        };
+        run_summary.record(outcome);
 
+        if options.json {
             let message = match (
                 outcome,
                 xfail_reason.as_deref(),
@@ -1356,19 +1304,29 @@ pub(crate) async fn run_conformance_tests(
     let total_duration_ms = suite_start.elapsed().as_millis() as u64;
     report.set_duration_ms(total_duration_ms);
 
+    // A run that executed nothing is not a pass. Checked before the outcome
+    // reporting below, because both of those branches are "non-zero only if
+    // something failed" and an all-zero summary satisfies them trivially.
+    if !run_summary.ran_anything() && !options.allow_empty {
+        report_empty_run(
+            options.json,
+            empty_run_message(&suite_root, selection, filter, &selected_harn_files),
+        );
+    }
+
     if options.json {
         if let Some(path) = junit_path {
             write_junit_xml_or_exit(path, &report, false);
         }
         let snapshot_key = conformance_snapshot_key(&suite_root, &selected_harn_files);
-        let ok = json_summary.is_success();
+        let ok = run_summary.is_success();
         let error = (!ok).then(|| JsonError {
             code: "conformance_failed".to_string(),
             message: "one or more conformance tests failed or unexpectedly passed an xfail marker"
                 .to_string(),
             details: serde_json::json!({
-                "fail": json_summary.fail,
-                "xfail_unexpected_pass": json_summary.xfail_unexpected_pass,
+                "fail": run_summary.fail,
+                "xfail_unexpected_pass": run_summary.xfail_unexpected_pass,
             }),
         });
         let envelope = JsonEnvelope {
@@ -1377,7 +1335,7 @@ pub(crate) async fn run_conformance_tests(
             data: Some(ConformanceJsonReport::new(
                 snapshot_key,
                 json_results,
-                json_summary,
+                run_summary,
             )),
             error,
             warnings: Vec::new(),

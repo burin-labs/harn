@@ -68,6 +68,14 @@ pub(crate) struct TestArgs {
     /// running under --parallel finish and remain in the report.
     #[arg(long)]
     pub fail_fast: bool,
+    /// Accept a run that executes no tests.
+    ///
+    /// By default a selection that matches nothing exits non-zero, because an
+    /// empty run is otherwise indistinguishable from every test passing at the
+    /// exit-code boundary. Set this for the rare caller that legitimately
+    /// tolerates an empty selection.
+    #[arg(long = "allow-empty")]
+    pub allow_empty: bool,
     /// Maximum number of concurrent test workers. Defaults to available
     /// parallelism, capped both by core count and by currently-available
     /// system memory (so an auto-sized run backs off on a small or already-

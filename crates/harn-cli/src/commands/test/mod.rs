@@ -336,6 +336,7 @@ async fn run_standard_command(
                     Some(crate::cli::InternalConformanceWorkerMode::SkipXfail)
                 ),
                 shard,
+                allow_empty: args.allow_empty || args.internal_conformance_worker.is_some(),
                 cli_skill_dirs: &cli_skill_dirs,
             };
             if args.parallel {

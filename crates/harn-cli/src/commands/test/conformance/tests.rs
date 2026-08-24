@@ -204,6 +204,7 @@ fn conformance_options() -> ConformanceRunOptions<'static> {
         json: false,
         skip_xfail: false,
         shard: None,
+        allow_empty: false,
         cli_skill_dirs: &[],
     }
 }
@@ -443,6 +444,7 @@ async fn conformance_harness_sidecar_error_fails_expected_error_fixture() {
         json: false,
         skip_xfail: false,
         shard: None,
+        allow_empty: false,
         cli_skill_dirs: &[],
     };
 

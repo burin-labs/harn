@@ -66,6 +66,19 @@ impl ConformanceJsonSummary {
     pub(super) fn is_success(&self) -> bool {
         self.fail == 0 && self.xfail_unexpected_pass == 0
     }
+
+    /// Whether any test actually ran.
+    ///
+    /// [`is_success`] cannot answer this: it is a "nothing failed" test, and
+    /// an all-zero summary satisfies it trivially. At the exit-code boundary
+    /// that makes "ran nothing" indistinguishable from "passed everything",
+    /// so every consumer gating on the exit status — a CI step, a script, an
+    /// author's shell loop — reads a vacuous run as a green one.
+    ///
+    /// [`is_success`]: Self::is_success
+    pub(super) fn ran_anything(&self) -> bool {
+        self.pass + self.fail + self.xfail_expected + self.xfail_unexpected_pass + self.skipped > 0
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -423,6 +436,37 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
 mod tests {
     use super::*;
     use crate::test_runner::{AggregateTimings, PhaseTimings, TestPhase, TestResult, TestTimeout};
+
+    /// The exact confusion the emptiness check exists to break: an all-zero
+    /// summary is "success" to `is_success`, so without a separate question
+    /// the exit-code boundary cannot tell a vacuous run from a green one.
+    #[test]
+    fn empty_summary_is_success_but_did_not_run_anything() {
+        let empty = ConformanceJsonSummary::default();
+        assert!(empty.is_success());
+        assert!(!empty.ran_anything());
+    }
+
+    /// Every outcome the runner can record counts as having run, including the
+    /// ones that are not passes. A run that skipped everything still executed
+    /// its selection; only a run that recorded nothing at all is vacuous.
+    #[test]
+    fn any_recorded_outcome_counts_as_having_run() {
+        for outcome in [
+            ConformanceJsonOutcome::Pass,
+            ConformanceJsonOutcome::Fail,
+            ConformanceJsonOutcome::XfailExpected,
+            ConformanceJsonOutcome::XfailUnexpectedPass,
+            ConformanceJsonOutcome::Skipped,
+        ] {
+            let mut summary = ConformanceJsonSummary::default();
+            summary.record(outcome);
+            assert!(
+                summary.ran_anything(),
+                "{outcome:?} should count as having run"
+            );
+        }
+    }
 
     #[test]
     fn user_report_conversion_pins_v4_execution_metrics() {
