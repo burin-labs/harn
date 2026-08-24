@@ -449,7 +449,11 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
   }
   let all_ok = true
   let findings = []
+  let command = ""
   for verdict in verdicts {
+    if command == "" {
+      command = trim(to_string(verdict?.command ?? ""))
+    }
     if !(verdict?.ok ?? false) {
       all_ok = false
       const finding = to_string(verdict?.findings ?? "")
@@ -458,7 +462,167 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
       }
     }
   }
-  return {ok: all_ok, findings: join(findings, "; ")}
+  return {ok: all_ok, findings: join(findings, "; "), command: command}
+}
+
+/** What a deterministic verifier oracle was observed to do, or that it did not run. */
+pub type CompletionVerificationObservation = "passed" | "failed" | "not_run"
+
+/**
+ * The deterministic completion gate's own reading of the verifier oracle for one
+ * boundary. It is threaded onto the evidence snapshot so a model judge is SHOWN
+ * the answer the runtime already computed rather than asked to infer it from a
+ * bounded packet that may not carry the verifying call at all.
+ *
+ * `observed` is a positive reading only when it says `passed`. `not_run` covers
+ * both "no oracle was configured" and "the gate could not read facts", which is
+ * why no consumer may treat the gate's `confirm` as a substitute for this field.
+ */
+pub type CompletionVerificationState = {
+  oracle_expected: bool,
+  command: string,
+  observed: CompletionVerificationObservation,
+  observed_at_evidence_index?: int?,
+}
+
+/**
+ * The kind of gap a `continue` names. This is what CONSTRAINS a refusal: the
+ * judge keeps sole authority over artifacts, manner and negative clauses, and
+ * authorization. It loses authority only over `failed_verification`, the single
+ * question a deterministic oracle may already have answered. An absent or
+ * unrecognized value reads as `other`, which never yields authority.
+ */
+pub type CompletionJudgeGapClass = "missing_artifact" \
+  | "unmet_manner_clause" \
+  | "failed_verification" \
+  | "unresolved_authorization" \
+  | "other"
+
+/** The gap classes a model `continue` may name. See `CompletionJudgeGapClass`. */
+pub const COMPLETION_JUDGE_GAP_CLASSES = [
+  "missing_artifact",
+  "unmet_manner_clause",
+  "failed_verification",
+  "unresolved_authorization",
+  "other",
+]
+
+/**
+ * Normalize a judge-reported gap class. Absent, blank, and unrecognized values
+ * all read as `other` — the class that grants no authority — so the tolerant
+ * direction and the safe direction are the same direction.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_judge_gap_class("Failed_Verification")
+ */
+pub fn __completion_judge_gap_class(value) -> CompletionJudgeGapClass {
+  const named = lowercase(trim(to_string(value ?? "")))
+  if named == "missing_artifact"
+    || named == "unmet_manner_clause"
+    || named == "failed_verification"
+    || named == "unresolved_authorization" {
+    return named
+  }
+  return "other"
+}
+
+/**
+ * Normalize a gate-reported verification reading. The gate is a host-supplied
+ * closure, so its result is untrusted: an unrecognized `observed` is refused
+ * outright rather than defaulted, because the only value that grants authority
+ * downstream is a positive one and a coerced default could manufacture it.
+ * Returns nil when there is no usable reading.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_verification_state_read({observed: "passed"})
+ */
+pub fn __completion_verification_state_read(value) -> CompletionVerificationState? {
+  if type_of(value) != "dict" {
+    return nil
+  }
+  const named = lowercase(trim(to_string(value?.observed ?? "")))
+  const observed = if named == "passed" {
+    "passed"
+  } else if named == "failed" {
+    "failed"
+  } else if named == "not_run" {
+    "not_run"
+  } else {
+    nil
+  }
+  if observed == nil {
+    return nil
+  }
+  return {
+    oracle_expected: value?.oracle_expected == true,
+    command: to_string(value?.command ?? ""),
+    observed: observed,
+    observed_at_evidence_index: nil,
+  }
+}
+
+/**
+ * Where in a bounded packet the verification observation sits, or nil when the
+ * packet selected no verification action. A nil here alongside a `passed`
+ * reading is the exact diagnostic shape of a host that declared no
+ * `completion_evidence_role`: the gate saw the verifier, the packet did not.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_verification_evidence_index([])
+ */
+pub fn __completion_verification_evidence_index(selected_actions) -> int? {
+  let index = nil
+  for selection in selected_actions {
+    if selection?.evidence_role == "verification" {
+      index = selection?.evidence_index
+    }
+  }
+  return index
+}
+
+/**
+ * Does a model `continue` naming a failed verification lose to the deterministic
+ * gate's reading?
+ *
+ * Every clause is required, and each blocks one specific way of getting this
+ * wrong:
+ *
+ * 1. `deterministic_invoked` — the gate stage actually ran. A declared plan is
+ *    not proof that anyone answered, and an evaluation nobody adjudicated is
+ *    not vetoed either, so silence would otherwise read as approval.
+ * 2. `observed == "passed"` — a POSITIVE reading. The gate also confirms when
+ *    it could not read facts at all; keying on that confirm would let a gate
+ *    that never looked overrule a legitimate refusal, which is the blanket
+ *    weakening this arbitration exists to avoid, arriving from the other side.
+ * 3. `deterministic_reason != "facts_unavailable"` — the same hazard named
+ *    directly, so a future gate that reports both a reading and that reason
+ *    still cannot convert.
+ * 4. `gap_class == "failed_verification"` — the judge is only overruled on the
+ *    one question a deterministic oracle has already answered.
+ *
+ * Anything short of all four leaves the judge's `continue` standing.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_arbitration_converts("failed_verification", true, "verified", "passed")
+ */
+pub fn __completion_arbitration_converts(
+  gap_class: string,
+  deterministic_invoked: bool,
+  deterministic_reason: string,
+  observed: string,
+) -> bool {
+  return gap_class == "failed_verification"
+    && deterministic_invoked
+    && deterministic_reason != "facts_unavailable"
+    && observed == "passed"
 }
 
 /**
