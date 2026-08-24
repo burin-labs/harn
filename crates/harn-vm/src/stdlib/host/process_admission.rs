@@ -37,7 +37,7 @@ impl ProcessAdmissionGate {
 }
 
 #[derive(Clone)]
-struct ProcessAdmissionContext {
+pub(crate) struct ProcessAdmissionContext {
     gate: Arc<ProcessAdmissionGate>,
     receipt: Arc<ProcessAdmissionReceipt>,
 }
@@ -116,6 +116,12 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+pub(crate) fn swap_process_admission_context(
+    new: Option<ProcessAdmissionContext>,
+) -> Option<ProcessAdmissionContext> {
+    PROCESS_ADMISSION_CONTEXT.with(|slot| slot.replace(new))
+}
+
 pub struct ProcessAdmissionScope {
     previous: Option<ProcessAdmissionContext>,
     receipt: Arc<ProcessAdmissionReceipt>,
@@ -128,7 +134,7 @@ pub fn scope_process_admission(gate: Arc<ProcessAdmissionGate>) -> ProcessAdmiss
         gate,
         receipt: Arc::clone(&receipt),
     };
-    let previous = PROCESS_ADMISSION_CONTEXT.with(|slot| slot.replace(Some(current)));
+    let previous = swap_process_admission_context(Some(current));
     ProcessAdmissionScope { previous, receipt }
 }
 
@@ -140,9 +146,7 @@ impl ProcessAdmissionScope {
 
 impl Drop for ProcessAdmissionScope {
     fn drop(&mut self) {
-        PROCESS_ADMISSION_CONTEXT.with(|slot| {
-            slot.replace(self.previous.take());
-        });
+        swap_process_admission_context(self.previous.take());
     }
 }
 
@@ -256,5 +260,32 @@ mod tests {
             .await
             .expect("cancelled waiter releases its receipt depth");
         assert_eq!(scope.waited_ms(), 12);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn inline_subtask_carries_the_case_admission_context() {
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let gate_clock: Arc<dyn Clock> = clock.clone();
+        let scope = scope_process_admission(ProcessAdmissionGate::new(1, gate_clock));
+        let first = acquire_process_admission(None)
+            .await
+            .expect("gate is open")
+            .expect("outer task receives a permit");
+
+        let second = crate::orchestration::scope_inline_subtask(acquire_process_admission(None));
+        tokio::pin!(second);
+        assert!(
+            futures::poll!(&mut second).is_pending(),
+            "the inline task must observe the occupied case-local gate"
+        );
+
+        clock.advance(Duration::from_millis(17));
+        drop(first);
+        let permit = second
+            .await
+            .expect("gate remains open")
+            .expect("inline task receives the shared permit");
+        drop(permit);
+        assert_eq!(scope.waited_ms(), 17);
     }
 }

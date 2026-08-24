@@ -116,12 +116,6 @@ fn pop_host_mock_scope() -> bool {
     }
 }
 
-fn async_builtin_cancel_token(
-    ctx: Option<&AsyncBuiltinCtx>,
-) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
-}
-
 fn capability_manifest_map() -> crate::value::DictMap {
     let mut root = crate::value::DictMap::new();
     root.insert(
@@ -850,7 +844,7 @@ pub async fn dispatch_host_operation_with_ctx(
         if let Some(result) = crate::stdlib::process_spawn::dispatch(
             operation,
             params,
-            async_builtin_cancel_token(ctx),
+            process_exec::async_builtin_cancel_token(ctx),
         )
         .await
         {

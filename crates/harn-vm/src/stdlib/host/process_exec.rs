@@ -17,9 +17,15 @@ use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
 use super::{
-    async_builtin_cancel_token, audited_utc_now_rfc3339, optional_i64, optional_string,
-    optional_string_dict, optional_string_list, require_param,
+    audited_utc_now_rfc3339, optional_i64, optional_string, optional_string_dict,
+    optional_string_list, require_param,
 };
+
+pub(super) fn async_builtin_cancel_token(
+    ctx: Option<&AsyncBuiltinCtx>,
+) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
+}
 
 /// Apply the command-policy preflight (deny-patterns, approval gating,
 /// sandbox decisions) and then spawn the process non-blocking. Mirrors
