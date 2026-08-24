@@ -246,13 +246,14 @@ See [Concurrency](./concurrency.md) and
 
 ### Small install
 
-Harn requires you to download a runtime. You probably already have a package
-manager you're happy with, so the question is whether Harn is the thing you're
-deploying or an addition to something you already deploy. If it's the thing,
-this is a one-time cost you'd pay for any runtime. If you're adding one typed
-model call to an existing service, it's tens of megabytes and a new artifact in
-a pipeline that already knew how to install packages, and a framework in your
-own language avoids both.
+Harn requires you to download a runtime, and you probably already have a package
+manager you're happy with. So the question is whether Harn is the thing you're
+deploying, or an addition to something you already deploy.
+
+If it's the thing you're deploying, this is a one-time cost you'd pay for any
+runtime. If you're adding one typed model call to an existing service, it's tens
+of megabytes and a new artifact in a pipeline that already knew how to install
+packages. A framework in your own language avoids both.
 
 As of `v0.10.114`, released 2026-08-24:
 
