@@ -142,12 +142,7 @@ pub(super) fn user_test_report_from_summary(
         } else {
             TestOutcome::Failed
         };
-        let file_path = PathBuf::from(&result.file);
-        let relative = file_path
-            .strip_prefix(suite_root)
-            .ok()
-            .map(logical_path)
-            .unwrap_or_else(|| result.file.clone());
+        let relative = report_relative_path(suite_root, &result.file);
         report.push(TestCaseReport {
             name: result.name.clone(),
             file: relative.clone(),
@@ -156,13 +151,39 @@ pub(super) fn user_test_report_from_summary(
             duration_ms: result.duration_ms,
             timeout: result.timeout,
             phases: result.phases,
+            timing_spans: result.timing_spans.clone(),
             message: result.error.clone(),
             captured_output: result.captured_output.clone(),
         });
     }
     report.set_duration_ms(summary.duration_ms);
     report.set_execution_metrics(summary.timing, summary.aggregate);
+    let mut shard_plan = summary.shard_plan.clone();
+    if let Some(dominant) = shard_plan
+        .as_mut()
+        .and_then(|plan| plan.dominant_case.as_mut())
+    {
+        dominant.file = report_relative_path(suite_root, &dominant.file);
+    }
+    let mut cost_regressions = summary.cost_regressions.clone();
+    for regression in &mut cost_regressions {
+        regression.file = report_relative_path(suite_root, &regression.file);
+    }
+    report.set_timing_policy(
+        summary.timing_environment.clone(),
+        shard_plan,
+        cost_regressions,
+    );
     report
+}
+
+fn report_relative_path(suite_root: &Path, file: &str) -> String {
+    let file_path = PathBuf::from(file);
+    file_path
+        .strip_prefix(suite_root)
+        .ok()
+        .map(logical_path)
+        .unwrap_or_else(|| file.to_string())
 }
 
 /// Prints a case's buffered `log`/`print`/`println` output beneath its
@@ -403,7 +424,7 @@ mod tests {
     use crate::test_runner::{AggregateTimings, PhaseTimings, TestPhase, TestResult, TestTimeout};
 
     #[test]
-    fn user_report_conversion_pins_v3_execution_metrics() {
+    fn user_report_conversion_pins_v4_execution_metrics() {
         let modules = harn_vm::ModulePhaseStats::default();
         let phases = PhaseTimings {
             execute_ms: 30,
@@ -424,6 +445,7 @@ mod tests {
                     }),
                     duration_ms: 30,
                     phases: Some(phases),
+                    timing_spans: Vec::new(),
                 },
                 TestResult {
                     name: "<file error>".into(),
@@ -434,6 +456,7 @@ mod tests {
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    timing_spans: Vec::new(),
                 },
             ],
             passed: 0,
@@ -446,13 +469,16 @@ mod tests {
                 modules: phases.modules,
                 ..AggregateTimings::default()
             },
+            timing_environment: None,
+            shard_plan: None,
+            cost_regressions: Vec::new(),
         };
 
         let value =
             serde_json::to_value(user_test_report_from_summary(Path::new("/suite"), &summary))
                 .expect("report serializes");
 
-        assert_eq!(value["schemaVersion"], 3);
+        assert_eq!(value["schemaVersion"], 4);
         assert_eq!(value["timing"]["sample_count"], 1);
         assert_eq!(value["aggregate"]["modules"]["modules_loaded"], 0);
         assert_eq!(value["cases"][0]["timeout"]["phase"], "execute");

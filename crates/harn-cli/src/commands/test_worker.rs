@@ -222,6 +222,8 @@ async fn run_tests(id: Value, params: Value, state: &mut WorkerState) -> Value {
         fail_fast: params.fail_fast,
         jobs: params.jobs,
         shard,
+        timing_baseline: None,
+        timing_environment: None,
         cli_skill_dirs: params.skill_dirs,
         progress: None,
         diagnose: params.diagnose,
@@ -403,6 +405,7 @@ mod tests {
                         teardown_ms: 0,
                         modules: harn_vm::ModulePhaseStats::default(),
                     }),
+                    timing_spans: Vec::new(),
                 }],
                 passed: 0,
                 failed: 1,
@@ -420,6 +423,9 @@ mod tests {
                     teardown_ms: 0,
                     modules: harn_vm::ModulePhaseStats::default(),
                 },
+                timing_environment: None,
+                shard_plan: None,
+                cost_regressions: Vec::new(),
             },
         };
 

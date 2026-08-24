@@ -94,6 +94,96 @@ fn junit_and_json_out_written_for_passing_user_tests() {
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn timing_receipt_drives_dominant_shard_through_the_cli() {
+    let temp = TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(),
+        "suite/test_costs.harn",
+        r#"
+import { timed } from "std/timing"
+
+pipeline test_big(harness: Harness, task) {
+  const measured = timed(harness.clock, "sweep.big", {case: "big"}, { -> task })
+  assert_eq(measured.result, task)
+}
+
+pipeline test_small_a(task) { return task }
+pipeline test_small_b(task) { return task }
+"#,
+    );
+    let baseline_path = temp.path().join("baseline.json");
+    let baseline_output = run_test(
+        &temp,
+        &[
+            "--json-out",
+            baseline_path.to_str().unwrap(),
+            "--timing-environment",
+            "github-linux-x64",
+        ],
+    );
+    assert!(
+        baseline_output.status.success(),
+        "baseline run failed: {}",
+        String::from_utf8_lossy(&baseline_output.stderr)
+    );
+    let mut baseline: Value =
+        serde_json::from_slice(&std::fs::read(&baseline_path).unwrap()).unwrap();
+    assert_eq!(baseline["timingEnvironment"], "github-linux-x64");
+    let big = baseline["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "test_big")
+        .expect("baseline contains test_big");
+    assert_eq!(big["timing_spans"][0]["name"], "sweep.big");
+    for case in baseline["cases"].as_array_mut().unwrap() {
+        case["phases"]["execute_ms"] = match case["name"].as_str().unwrap() {
+            "test_big" => serde_json::json!(500),
+            "test_small_a" => serde_json::json!(40),
+            "test_small_b" => serde_json::json!(30),
+            name => panic!("unexpected case {name}"),
+        };
+    }
+    std::fs::write(
+        &baseline_path,
+        serde_json::to_vec_pretty(&baseline).unwrap(),
+    )
+    .unwrap();
+
+    let shard_path = temp.path().join("shard.json");
+    let shard_output = run_test(
+        &temp,
+        &[
+            "--shard-index",
+            "1",
+            "--shard-total",
+            "2",
+            "--timing-baseline",
+            baseline_path.to_str().unwrap(),
+            "--timing-environment",
+            "github-linux-x64",
+            "--json-out",
+            shard_path.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        shard_output.status.success(),
+        "shard run failed: {}",
+        String::from_utf8_lossy(&shard_output.stderr)
+    );
+    let shard: Value = serde_json::from_slice(&std::fs::read(&shard_path).unwrap()).unwrap();
+    assert_eq!(shard["cases"].as_array().unwrap().len(), 1);
+    assert_eq!(shard["cases"][0]["name"], "test_big");
+    assert_eq!(shard["shard_plan"]["dominant_case"]["name"], "test_big");
+    assert_eq!(
+        shard["shard_plan"]["dominant_case"]["file"],
+        "test_costs.harn"
+    );
+    assert!(shard.get("cost_regressions").is_none());
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn junit_and_json_out_capture_failures_with_exit_code_one() {
     let temp = TempDir::new().expect("tempdir");
     write_fixture(temp.path(), "suite/test_pass.harn", PASS_PIPELINE);

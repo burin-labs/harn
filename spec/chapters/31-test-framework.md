@@ -137,6 +137,9 @@ that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
 | `--timeout <ms>` | Per-test timeout in milliseconds (default 30000) |
 | `--parallel` | Run user tests in a bounded pool, or conformance tests in isolated worker processes |
 | `--fail-fast` | Stop scheduling new tests after the first failure; already-running parallel tests finish |
+| `--shard-index <N>` / `--shard-total <N>` | Select one deterministic user-test or conformance shard |
+| `--timing-environment <name>` | Stamp the enforcing environment into a user-test JSON receipt |
+| `--timing-baseline <path>` | Balance user-test shards from a matching Harn receipt and enforce absolute case-cost regressions |
 | `--junit <path>` | Write JUnit XML report to `<path>` |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay LLM responses from `.harn-fixtures/` |
