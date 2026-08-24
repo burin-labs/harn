@@ -6,6 +6,7 @@ import {
   __agent_loop_fire_resume_continuity,
   __loop_progress_nudge_text,
 } from "std/agent/loop_turn_options"
+import { agent_tool_format_override_warning_text } from "std/agent/options"
 
 pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   return __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls)
@@ -36,6 +37,10 @@ pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil)
       "tool_format_override",
       opts._tool_format_override,
     )
+    const warning = agent_tool_format_override_warning_text(opts._tool_format_override)
+    if warning != nil {
+      harness.stdio.eprintln(warning)
+    }
   }
   if opts?._tool_format_capability_gap != nil {
     agent_emit_event(

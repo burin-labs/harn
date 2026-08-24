@@ -38,3 +38,7 @@ native
 text
 native_unreliable
 cross-check native parser drift
+true
+bool
+warning: tool_format override: testcatalog:native-unreliable-route requested native, route pins text, steering to text (parity: native_unreliable)
+warning: tool_format override: testcatalog:catalogued-native requested text over recommended native (parity: interchangeable)

@@ -379,6 +379,13 @@ fn __tool_format_override_event(pair, requested, preferred, parity, override_rea
   return event
 }
 
+fn __stamp_tool_format_override_event(event, applied, steered) {
+  if event == nil {
+    return nil
+  }
+  return event + {applied_format: applied, steered: steered}
+}
+
 /**
  * Render one `tool_format_override` event as the CLI's single-line warning.
  *
@@ -394,45 +401,33 @@ pub fn agent_tool_format_override_warning_text(event) {
   const {provider = "unknown", model = "unknown"} = payload ?? {}
   const requested = payload?.requested_format ?? "unknown"
   const recommended = payload?.recommended_format ?? "unknown"
+  const applied = payload?.applied_format ?? recommended
+  const steered = payload?.steered == true
   const parity = payload?.catalog_parity ?? "unknown"
   const override_reason = trim(to_string(payload?.override_reason ?? ""))
   const needs_reason = (parity == "native_unreliable" && requested == "native")
     || (parity
       == "text_unreliable"
       && requested == "text")
-  let line = "warning: tool_format override: "
-    + provider
-    + ":"
-    + model
-    + " requested "
-    + requested
-    + " over recommended "
-    + recommended
-    + " (parity: "
-    + parity
-    + ")"
+  let line = "warning: tool_format override: " + provider + ":" + model + " "
+  if steered {
+    line = line
+      + "requested "
+      + requested
+      + ", route pins "
+      + recommended
+      + ", steering to "
+      + applied
+  } else {
+    line = line + "requested " + requested + " over recommended " + recommended
+  }
+  line = line + " (parity: " + parity + ")"
   if override_reason != "" {
     line = line + "; reason: " + override_reason
-  } else if needs_reason {
+  } else if needs_reason && !steered {
     line = line + "; missing --override-reason while forcing the catalog-marked unreliable side"
   }
   return line
-}
-
-/**
- * Render the first `tool_format_override` event in an event list, if present.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn agent_first_tool_format_override_warning_text(events) {
-  for event in events {
-    if event?.kind == "tool_format_override" || event?.type == "tool_format_override" {
-      return agent_tool_format_override_warning_text(event)
-    }
-  }
-  return nil
 }
 
 fn __capability_gap_event(pair, opts, fallback, reason) {
@@ -528,19 +523,25 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
     } else {
       nil
     }
+    const applied = steered ?? explicit
+    const stamped_event = __stamp_tool_format_override_event(
+      override_event,
+      applied,
+      steered != nil,
+    )
     if steered != nil {
       return {
         tool_format: steered,
         source: "explicit_parity_steered",
         capability_gap_event: nil,
-        tool_format_override_event: override_event,
+        tool_format_override_event: stamped_event,
       }
     }
     return {
       tool_format: explicit,
       source: "explicit",
       capability_gap_event: nil,
-      tool_format_override_event: override_event,
+      tool_format_override_event: stamped_event,
     }
   }
   const route = __tool_format_route(llm, opts)

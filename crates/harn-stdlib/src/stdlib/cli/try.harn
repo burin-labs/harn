@@ -1,5 +1,4 @@
 import { agent_loop } from "std/agent/loop"
-import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 
 /**
  * Zero-config `agent_loop` convenience wrapper for `harn try "<prompt>"`.
@@ -48,11 +47,5 @@ fn main(harness: Harness) {
     options = options + {tool_format_override_reason: override_reason}
   }
   const result = agent_loop(harness, prompt, nil, options)
-  const warning = agent_first_tool_format_override_warning_text(
-    transcript_events(result.transcript),
-  )
-  if warning != nil {
-    harness.stdio.eprintln(warning)
-  }
   harness.stdio.println(result.text)
 }
