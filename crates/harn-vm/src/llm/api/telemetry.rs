@@ -134,9 +134,16 @@ pub struct ProviderTelemetry {
     /// zero, and a consumer can tell "not streamed" from "arrived instantly".
     /// Subtracting it from `client_wall_ms` separates the wait for the first
     /// frame from the time spent streaming the rest, on providers that report
-    /// no server-side breakdown of their own. Measured per provider request,
-    /// like `client_wall_ms`, so a retried call reports the attempt that
-    /// succeeded.
+    /// no server-side breakdown of their own. That subtraction is only sound
+    /// because both are measured from the same origin in `transport`, and
+    /// both therefore span the whole call: on a retried call each includes
+    /// the attempts that failed, rather than starting over at the attempt
+    /// that succeeded.
+    ///
+    /// Set only by the shared SSE and NDJSON readers. Provider paths with
+    /// their own reader and their own `client_wall_ms` origin — Ollama's raw
+    /// `/api/generate`, the OpenAI Responses path — leave this absent rather
+    /// than reporting a value the sibling field cannot be differenced with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_first_frame_ms: Option<u64>,
     /// Context window the model was loaded with (where the runtime
