@@ -1183,10 +1183,10 @@ async fn execute_cases(
     let max_test_ms = options.max_test_ms;
     let max_execute_ms = options.max_execute_ms;
     let diagnose = options.diagnose;
-    // Process-backed tests share one typed host lane. Known read-only probes
-    // bypass it at command-policy resolution; unknown/write effects serialize
-    // so toolchain and workspace locks cannot starve a sibling VM while its
-    // execution safety rail is running.
+    // Process-backed tests share one typed host lane, including read-only
+    // compilers and formatters. Waiting for that lane is admission time, not
+    // user-code execution time. `@heavy` separately reserves CPU capacity for
+    // a case whose admitted child process does substantial work.
     let process_admission_gate =
         harn_vm::stdlib::host::process_admission::ProcessAdmissionGate::new(
             1,
