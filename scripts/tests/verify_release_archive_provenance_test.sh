@@ -276,16 +276,14 @@ expect_failure wrong_source run_verifier
 write_attestation harn-aarch64-apple-darwin.tar.gz 100 v9.9.9 "$source_commit"
 expect_failure mixed_version run_verifier
 
-# Candidate-phase attestations bind sourceCommit without a tag and promote when
-# the signed tag peels to that exact commit.
+# Candidate-phase attestations are pre-merge evidence, not publication
+# authority. Even matching bytes and source identity cannot substitute for an
+# attestation produced from the merged-main release tag.
 new_fixture
 for archive in "${archives[@]}"; do
   write_attestation "$archive" 300 "" "$source_commit" candidate
 done
-expect_success candidate_phase run_verifier
-write_attestation harn-aarch64-apple-darwin.tar.gz 300 "" \
-  3333333333333333333333333333333333333333 candidate
-expect_failure candidate_wrong_source run_verifier
+expect_failure candidate_phase run_verifier
 
 # A self-asserted policy revision must also match the signer digest carried by
 # the verified certificate.
@@ -395,35 +393,26 @@ require_workflow_text "needs.build.result == 'success' || needs.build.result == 
 require_workflow_text "Only release metadata is missing"
 require_workflow_text "gh release upload \"\$REF\" \"\$archive\" --repo \"\$GITHUB_REPOSITORY\" --clobber"
 require_workflow_text "candidate_only:"
-require_workflow_text "promote_only:"
-require_workflow_text "candidate_run_id:"
 require_workflow_text "candidate-archive-manifest-"
 require_workflow_text "should_package_archives"
-require_workflow_text "BUILD_MODE=promote"
 require_workflow_text "BUILD_MODE=candidate"
-require_workflow_text "name: Promote candidate archives"
+require_workflow_text 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF"'
+require_workflow_text 'Building missing release archives from merged-main tag $REF'
+if grep -Eq 'promote_only|candidate_run_id|BUILD_MODE.?=.?promote|Promote candidate archives' "$workflow"; then
+  echo "FAIL: obsolete candidate promotion path remains in the release workflow" >&2
+  exit 1
+fi
 if grep -Fq "make_latest: true" "$workflow"; then
   echo "FAIL: historical recovery must not unconditionally move /releases/latest" >&2
   exit 1
 fi
-# Canonical tag path must not cold-compile unless force_rebuild is set.
-if ! grep -Fq 'Promoting candidate archives for $REF from run' "$workflow"; then
-  echo "FAIL: tag path must promote candidate archives instead of rebuilding" >&2
-  exit 1
-fi
-
 attest_line="$(workflow_line "name: Attest release archive provenance")"
 publish_line="$(workflow_line "name: Publish archive to release (incremental)")"
 verify_line="$(workflow_line "name: Verify release archive provenance")"
 checksums_line="$(workflow_line "name: Generate SHA256SUMS")"
 finalize_line="$(workflow_line "name: Finalize GitHub release")"
-promote_line="$(workflow_line "name: Promote candidate archives")"
 if ! (( attest_line < publish_line && verify_line < checksums_line && verify_line < finalize_line )); then
   echo "FAIL: provenance must be emitted before upload and verified before metadata/finalization" >&2
-  exit 1
-fi
-if ! (( promote_line > 0 && promote_line < finalize_line )); then
-  echo "FAIL: promote job must exist before finalize" >&2
   exit 1
 fi
 
