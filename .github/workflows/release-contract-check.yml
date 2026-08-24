@@ -45,7 +45,7 @@ env:
   # The release orchestrator, pinned by commit. Moving this pin is a deliberate
   # change to which release semantics this repository is checked against.
   ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-  ORCHESTRATOR_REF: 5a6019fff87e5bb8ade37cbeef223283a1ce8fee
+  ORCHESTRATOR_REF: d69c29d084421771c1247e3300808644ff08bc2b
 
 jobs:
   contract:
