@@ -11,8 +11,9 @@
  * reporter, so parallel stages keep separate identities by construction — two
  * stages simply hold two reporters, and neither can throttle the other.
  *
- * Time comes from `harness.clock.now_ms()`, so `mock_time` / `advance_time`
- * drive throttling deterministically in tests without a second clock seam.
+ * Time comes from `harness.clock.now_ms()`, so `harness.testing.clock_set` and
+ * `harness.testing.clock_advance` drive throttling deterministically in tests
+ * without a second clock seam.
  *
  * Import:
  *   import { progress_start, progress_tick, progress_finish } from "std/lifecycle/progress"
