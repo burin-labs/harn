@@ -179,6 +179,7 @@ export interface HarnCatalogModel {
   lineage: string
   complementary_with?: string[]
   avoid_as_reviewer_for?: string[]
+  completion_review?: HarnCompletionReview
   tier: "small" | "mid" | "frontier" | "reasoning"
   open_weight?: boolean
   strengths?: string[]
@@ -295,6 +296,12 @@ export interface HarnLocalMemory {
   source_url?: string
   last_verified?: string
   notes?: string
+}
+
+export interface HarnCompletionReview {
+  scrutiny: "standard" | "light"
+  max_judge_calls?: number
+  evidence: string
 }
 
 export interface HarnModelServingTierRequest {

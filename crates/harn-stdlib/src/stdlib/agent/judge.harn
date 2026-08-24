@@ -1446,7 +1446,8 @@ fn __completion_policy_run_stage(
             return evaluation + {verdict: skipped}
           }
         }
-        Completion() -> {}
+        Completion() -> {
+        }
       }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)

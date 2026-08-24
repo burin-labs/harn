@@ -145,6 +145,29 @@
       ],
       "type": "object"
     },
+    "completion_review": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "max_judge_calls": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "scrutiny": {
+          "enum": [
+            "standard",
+            "light"
+          ]
+        }
+      },
+      "required": [
+        "evidence"
+      ],
+      "type": "object"
+    },
     "deprecation": {
       "additionalProperties": false,
       "properties": {
@@ -573,6 +596,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "completion_review": {
+          "$ref": "#/$defs/completion_review"
         },
         "context_window": {
           "minimum": 1,
