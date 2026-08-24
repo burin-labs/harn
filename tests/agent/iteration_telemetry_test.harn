@@ -30,3 +30,27 @@ pipeline test_iteration_info_defaults_missing_cache_usage(harness: Harness, task
   assert_eq(info.cache_read_tokens, 0)
   assert_eq(info.cache_write_tokens, 0)
 }
+
+pipeline test_iteration_info_carries_first_frame_latency(harness: Harness, task) {
+  // A streamed call reports both, and the pair is what lets a consumer
+  // separate the wait for the first frame from the time spent streaming.
+  const info = __iteration_info_payload(
+    {usage: {provider_telemetry: {client_wall_ms: 2000, client_first_frame_ms: 1500}}},
+    0,
+    "",
+  )
+  assert_eq(info.response_ms, 2000)
+  assert_eq(info.client_first_frame_ms, 1500)
+}
+
+pipeline test_iteration_info_omits_an_unmeasured_first_frame(harness: Harness, task) {
+  // A single-shot call has no first frame. The key must be absent rather than
+  // 0, or "not streamed" reads as "arrived instantly".
+  const info = __iteration_info_payload(
+    {usage: {provider_telemetry: {client_wall_ms: 2000}}},
+    0,
+    "",
+  )
+  assert_eq(info.response_ms, 2000)
+  assert_eq(info.keys().contains("client_first_frame_ms"), false)
+}
