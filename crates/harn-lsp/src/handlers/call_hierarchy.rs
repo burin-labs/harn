@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::*;
 use crate::call_hierarchy::{
     incoming_call_hierarchy, outgoing_call_hierarchy, prepare_call_hierarchy,
 };
+use crate::resolution::workspace_refs;
 use crate::HarnLsp;
 
 impl HarnLsp {
@@ -34,7 +35,18 @@ impl HarnLsp {
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         let docs = self.documents.lock().unwrap();
-        Ok(incoming_call_hierarchy(&params.item, &docs))
+        let workspace_root = self
+            .rule_workspace
+            .lock()
+            .unwrap()
+            .root()
+            .map(std::path::PathBuf::from);
+        let workspace = workspace_refs(&docs, workspace_root.as_deref());
+        Ok(incoming_call_hierarchy(
+            &params.item,
+            &docs,
+            workspace.as_ref(),
+        ))
     }
 
     pub(super) async fn handle_outgoing_calls(
@@ -42,6 +54,17 @@ impl HarnLsp {
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
         let docs = self.documents.lock().unwrap();
-        Ok(outgoing_call_hierarchy(&params.item, &docs))
+        let workspace_root = self
+            .rule_workspace
+            .lock()
+            .unwrap()
+            .root()
+            .map(std::path::PathBuf::from);
+        let workspace = workspace_refs(&docs, workspace_root.as_deref());
+        Ok(outgoing_call_hierarchy(
+            &params.item,
+            &docs,
+            workspace.as_ref(),
+        ))
     }
 }

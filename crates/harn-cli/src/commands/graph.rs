@@ -15,7 +15,7 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
-pub(crate) const GRAPH_SCHEMA_VERSION: u32 = 1;
+pub(crate) const GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// Env var the embedded `cli/graph.harn` script reads to pick up the
 /// pre-serialised module-graph view the Rust shim derived from the
@@ -32,6 +32,9 @@ static DISPATCH_GRAPH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_n
 pub(crate) struct GraphReport {
     pub modules: Vec<GraphModule>,
     pub graph: GraphEdges,
+    /// What this report indexed. `harn graph` always reads disk; the LSP
+    /// overlays unsaved buffers on the same ModuleGraph.
+    pub indexed: GraphIndexed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,12 +68,30 @@ pub(crate) struct GraphSymbol {
 pub(crate) struct GraphEdges {
     pub nodes: Vec<String>,
     pub edges: Vec<GraphEdge>,
+    /// Resolution-backed name uses. `from` is the using module, `to` is the
+    /// defining module, `name` is the resolved symbol. Same-named symbols in
+    /// different modules stay distinct because the edge follows
+    /// `definition_of`, not the identifier text.
+    pub references: Vec<GraphReference>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct GraphEdge {
     pub from: String,
     pub to: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct GraphReference {
+    pub from: String,
+    pub to: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct GraphIndexed {
+    pub source: String,
+    pub files: Vec<String>,
 }
 
 /// Run `harn graph`. Rust owns module-graph extraction; the embedded
@@ -124,7 +145,14 @@ fn analyze_graph(root: &Path, module_filter: Option<&str>) -> Result<GraphReport
         return Err(format!("no .harn files found under {}", root.display()));
     }
 
-    let module_graph = crate::commands::check::build_module_graph(&files);
+    crate::commands::check::ensure_module_dependencies(&files);
+    let build = harn_modules::build_for_reference_index(&files, None);
+    let module_graph = build.graph;
+    let references = harn_modules::index_references(
+        &module_graph,
+        &build.parsed_sources,
+        &std::collections::HashSet::new(),
+    );
     let mut module_paths = module_graph.module_paths();
     if let Some(filter) = module_filter {
         module_paths.retain(|path| module_matches_filter(path, filter, &root_dir));
@@ -179,11 +207,48 @@ fn analyze_graph(root: &Path, module_filter: Option<&str>) -> Result<GraphReport
     });
     edges.dedup_by(|left, right| left.from == right.from && left.to == right.to);
 
+    let mut reference_edges = Vec::new();
+    for edge in references.edges() {
+        let from = display_paths
+            .get(&edge.from.file)
+            .cloned()
+            .unwrap_or_else(|| display_module_path(&edge.from.file, &root_dir));
+        let to = display_paths
+            .get(&edge.to_file)
+            .cloned()
+            .unwrap_or_else(|| display_module_path(&edge.to_file, &root_dir));
+        nodes.insert(from.clone());
+        nodes.insert(to.clone());
+        reference_edges.push(GraphReference {
+            from,
+            to,
+            name: edge.to_name,
+        });
+    }
+    reference_edges.sort_by(|left, right| {
+        left.from
+            .cmp(&right.from)
+            .then_with(|| left.to.cmp(&right.to))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    reference_edges.dedup();
+
+    let indexed_files = references
+        .files
+        .iter()
+        .map(|path| display_module_path(path, &root_dir))
+        .collect();
+
     Ok(GraphReport {
         modules,
         graph: GraphEdges {
             nodes: nodes.into_iter().collect(),
             edges,
+            references: reference_edges,
+        },
+        indexed: GraphIndexed {
+            source: "disk".to_string(),
+            files: indexed_files,
         },
     })
 }

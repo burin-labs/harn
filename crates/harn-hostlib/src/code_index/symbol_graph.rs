@@ -81,7 +81,8 @@ impl NodeKind {
 pub enum EdgeKind {
     /// CallSite → Function. A call expression resolving to a function.
     Calls,
-    /// Module → any. Cheap heuristic for cross-file name references.
+    /// Module → any. Name-heuristic for languages without a resolver.
+    /// Harn files do not emit these; they use ModuleGraph instead.
     Refs,
     /// Module → Module (resolved) or Module → Import (unresolved).
     Imports,
@@ -422,11 +423,13 @@ impl SymbolGraph {
             self.add_edge(module_id, imp_id, EdgeKind::Imports);
         }
 
-        // REFS: any cross-file by-name reference. Cheap heuristic; the
-        // REFS edge isn't meant to be precise. Collected upfront so the
-        // immutable borrow of `self` ends before we add the edges.
-        for target in self.collect_cross_file_refs(source, file_id) {
-            self.add_edge(module_id, target, EdgeKind::Refs);
+        // REFS: name-heuristic only for languages without a resolver.
+        // Harn answers from ModuleGraph (`definition_of`); a word match
+        // here would collapse a local `run` with an imported `run`.
+        if language.name() != "harn" {
+            for target in self.collect_cross_file_refs(source, file_id) {
+                self.add_edge(module_id, target, EdgeKind::Refs);
+            }
         }
 
         let node_count = self.by_file.get(&file_id).map(Vec::len).unwrap_or_default();

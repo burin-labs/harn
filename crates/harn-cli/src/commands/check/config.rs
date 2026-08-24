@@ -178,7 +178,7 @@ fn seed_parsed_source(
     );
 }
 
-fn ensure_module_dependencies(files: &[PathBuf]) {
+pub(crate) fn ensure_module_dependencies(files: &[PathBuf]) {
     for file in files {
         if let Err(error) = crate::package::ensure_dependencies_materialized(file) {
             eprintln!("error: {error}");

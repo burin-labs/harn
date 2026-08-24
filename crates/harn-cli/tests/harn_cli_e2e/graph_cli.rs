@@ -74,7 +74,7 @@ fn graph_json_reports_modules_symbols_capabilities_and_edges() {
         String::from_utf8_lossy(&output.stderr)
     );
     let parsed = stdout_json(&output);
-    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["schemaVersion"], 2);
     assert_eq!(parsed["ok"], true);
 
     let modules = parsed["data"]["modules"].as_array().unwrap();
@@ -134,6 +134,25 @@ fn graph_json_reports_modules_symbols_capabilities_and_edges() {
             {"from": "main.harn", "to": "util.harn"},
             {"from": "util.harn", "to": "types.harn"}
         ])
+    );
+    let references = parsed["data"]["graph"]["references"].as_array().unwrap();
+    assert!(
+        references.iter().any(|edge| {
+            edge["from"] == "main.harn"
+                && edge["to"] == "util.harn"
+                && edge["name"] == "format_title"
+        }),
+        "cross-file use of format_title must appear: {references:?}"
+    );
+    assert_eq!(parsed["data"]["indexed"]["source"], "disk");
+    assert!(
+        parsed["data"]["indexed"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file == "main.harn"),
+        "indexed files must name the walked tree: {}",
+        parsed["data"]["indexed"]["files"]
     );
 }
 
@@ -326,6 +345,55 @@ fn main(harness: Harness) {
 }
 
 #[test]
+fn graph_json_does_not_collapse_same_named_symbols() {
+    let temp = TempDir::new().unwrap();
+    fs::write(temp.path().join("exported.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(
+        temp.path().join("importer.harn"),
+        "import { run } from \"./exported\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("local.harn"),
+        "fn run() { 2 }\nfn helper() { run() }\n",
+    )
+    .unwrap();
+
+    let output = run_harn(&["graph", temp.path().to_str().unwrap(), "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed = stdout_json(&output);
+    assert_eq!(parsed["schemaVersion"], 2);
+    let references = parsed["data"]["graph"]["references"].as_array().unwrap();
+    let imported_run = references
+        .iter()
+        .filter(|edge| edge["name"] == "run" && edge["to"] == "exported.harn")
+        .collect::<Vec<_>>();
+    assert!(
+        imported_run
+            .iter()
+            .any(|edge| edge["from"] == "importer.harn"),
+        "importer must resolve to exported.run: {references:?}"
+    );
+    assert!(
+        !imported_run.iter().any(|edge| edge["from"] == "local.harn"),
+        "local.run must not collapse into exported.run: {references:?}"
+    );
+    assert!(
+        parsed["data"]["indexed"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file == "importer.harn"),
+        "cross-file control: importer must have been indexed"
+    );
+}
+
+#[test]
 fn graph_appears_in_json_schemas_catalog() {
     let output = run_harn(&["--json-schemas", "--command", "graph"]);
     assert!(output.status.success(), "exit={:?}", output.status.code());
@@ -336,5 +404,5 @@ fn graph_appears_in_json_schemas_catalog() {
     let entries = parsed["data"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["command"], "graph");
-    assert_eq!(entries[0]["schemaVersion"], 1);
+    assert_eq!(entries[0]["schemaVersion"], 2);
 }
