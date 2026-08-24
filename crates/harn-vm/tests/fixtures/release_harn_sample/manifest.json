@@ -1,5 +1,5 @@
 {
-  "schema_version": "release_harn.crystallization_input.v1",
+  "schema_version": "release_harn.crystallization_input.v3",
   "kind": "release_harn_crystallization_input",
   "generated_by": "release_harn.harn",
   "generated_at": "2026-05-02T18:00:00Z",

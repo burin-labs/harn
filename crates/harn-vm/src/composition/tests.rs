@@ -507,6 +507,15 @@ async fn composition_state_replay_receipts_preserve_the_transition_sequence() {
     assert!(report.ok, "{}", report.summary);
 
     let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
+    assert_eq!(trace["actions"][0]["side_effects_known"], true);
+    assert_eq!(
+        trace["actions"][0]["side_effects"][0]["kind"],
+        "workspace_write"
+    );
+    assert_eq!(
+        trace["actions"][1]["side_effects"][0]["kind"],
+        "workspace_write"
+    );
     let receipts = trace["replay_run"]["effect_receipts"]
         .as_array()
         .expect("effect receipts");
@@ -1344,6 +1353,9 @@ fn composition_report_can_be_projected_to_crystallization_trace() {
     assert_eq!(trace["source"], "composition_run");
     assert_eq!(trace["actions"][0]["name"], "execute_composition");
     assert_eq!(trace["actions"][1]["name"], "read_file");
+    assert_eq!(trace["actions"][0]["side_effects_known"], true);
+    assert_eq!(trace["actions"][0]["side_effects"], serde_json::json!([]));
+    assert_eq!(trace["actions"][1]["side_effects_known"], true);
     assert_eq!(trace["replay_run"]["run_id"], "run-crystal");
     assert_eq!(
         trace["replay_run"]["effect_receipts"][0]["kind"],

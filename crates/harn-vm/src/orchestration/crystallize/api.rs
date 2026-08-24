@@ -293,6 +293,7 @@ fn build_single_trace_candidate(
             parameter_refs: parameter_refs.into_iter().collect(),
             constants: constants_for_action(action),
             preconditions: preconditions_for_action(action),
+            side_effects_known: action.side_effects_known,
             side_effects: action.side_effects.clone(),
             capabilities: sorted_strings(action.capabilities.iter().cloned()),
             required_secrets: sorted_strings(action.required_secrets.iter().cloned()),

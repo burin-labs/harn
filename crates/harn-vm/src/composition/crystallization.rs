@@ -4,6 +4,24 @@ use serde_json::Value;
 
 use super::events::composition_report_events;
 use super::types::CompositionExecutionReport;
+use crate::tool_annotations::SideEffectLevel;
+
+fn crystallization_side_effect(level: SideEffectLevel, tool_name: &str) -> Option<Value> {
+    let kind = match level {
+        SideEffectLevel::None | SideEffectLevel::ReadOnly => return None,
+        SideEffectLevel::WorkspaceWrite => "workspace_write",
+        SideEffectLevel::ProcessExec => "process_exec",
+        SideEffectLevel::Network => "network",
+        SideEffectLevel::DesktopControl => "desktop_control",
+    };
+    Some(serde_json::json!({
+        "kind": kind,
+        "target": tool_name,
+        "capability": "composition.tool_call",
+        "mutation": tool_name,
+        "metadata": {"side_effect_level": level},
+    }))
+}
 
 pub fn composition_crystallization_trace(
     report: &CompositionExecutionReport,
@@ -30,6 +48,17 @@ pub fn composition_crystallization_trace(
         "binding_manifest_hash": report.run.binding_manifest_hash,
         "requested_side_effect_ceiling": report.run.requested_side_effect_ceiling,
     });
+    let parent_side_effects_known = report
+        .child_calls
+        .iter()
+        .all(|call| call.requested_side_effect_level != SideEffectLevel::None);
+    let parent_side_effects = report
+        .child_calls
+        .iter()
+        .filter_map(|call| {
+            crystallization_side_effect(call.requested_side_effect_level, &call.tool_name)
+        })
+        .collect::<Vec<_>>();
     let mut actions = vec![serde_json::json!({
         "id": "composition_parent",
         "kind": "composition_run",
@@ -39,7 +68,8 @@ pub fn composition_crystallization_trace(
         "output": report.run.result,
         "observed_output": report.run.result,
         "capabilities": capabilities.into_iter().collect::<Vec<_>>(),
-        "side_effects": [],
+        "side_effects_known": parent_side_effects_known,
+        "side_effects": parent_side_effects,
         "duration_ms": report.run.duration_ms.unwrap_or(0),
         "deterministic": true,
         "fuzzy": false,
@@ -68,25 +98,10 @@ pub fn composition_crystallization_trace(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let side_effects = call
-            .annotations
-            .as_ref()
-            .filter(|annotations| {
-                annotations
-                    .capabilities
-                    .get(super::state::COMPOSITION_STATE_CAPABILITY)
-                    .is_some_and(|operations| {
-                        operations.iter().any(|operation| operation == "write")
-                    })
-            })
-            .map(|_| {
-                vec![serde_json::json!({
-                    "class": super::state::COMPOSITION_STATE_CAPABILITY,
-                    "operation": call.tool_name,
-                    "input": call.raw_input,
-                })]
-            })
-            .unwrap_or_default();
+        let side_effects =
+            crystallization_side_effect(call.requested_side_effect_level, &call.tool_name)
+                .into_iter()
+                .collect::<Vec<_>>();
         serde_json::json!({
             "id": format!("composition_child_{}", call.operation_index),
             "kind": "tool_call",
@@ -96,6 +111,7 @@ pub fn composition_crystallization_trace(
             "output": result.and_then(|result| result.raw_output.clone()),
             "observed_output": result.and_then(|result| result.raw_output.clone()),
             "capabilities": capabilities,
+            "side_effects_known": call.requested_side_effect_level != SideEffectLevel::None,
             "side_effects": side_effects,
             "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
             "deterministic": true,
