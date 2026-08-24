@@ -169,7 +169,7 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
 
   "runtime-replay-contract": {
     harn: { rating: "yes", note: "The runtime owns the transcript and event-log boundary, so replay sees the same model request, tool result, trigger event, and approval." },
-    inngest: { rating: "partial", note: "Completed steps are memoized, so a model call inside a durable step is not re-sent on resume." },
+    inngest: { rating: "partial", note: "Completed steps are memoized, so a model call inside a durable step isn't re-sent on resume." },
     temporal: { rating: "yes", note: "Workflow state replays when workflow code follows its deterministic constraints and side effects run in Activities." },
     langgraph: { rating: "partial", note: "Replay re-executes nodes after the selected checkpoint, including model calls, which may return different results." },
     baml: { rating: "no", note: "No durable execution or checkpointing; the journal is in-memory and per-run." },
@@ -193,7 +193,7 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
     temporal: { rating: "yes", note: "Open-source server and SDKs, self-hostable." },
     langgraph: { rating: "partial", note: "The library is open source; the platform is a hosted product." },
     baml: { rating: "yes", note: "The compiler and runtime are open source." },
-    cursor: { rating: "partial", note: "Self-hosted agent pools exist; the product is not open source." },
+    cursor: { rating: "partial", note: "Self-hosted agent pools exist; the product isn't open source." },
     flue: { rating: "unknown" },
   },
 
@@ -240,7 +240,7 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
   // --- Rows Harn does not win ---------------------------------------------
 
   "callable-from-an-existing-codebase": {
-    harn: { rating: "partial", note: "Reachable over MCP, ACP, and A2A, or by embedding the runtime in Rust. There is no generated client for your language." },
+    harn: { rating: "partial", note: "Reachable over MCP, ACP, and A2A, or by embedding the runtime in Rust. There's no generated client for your language." },
     inngest: { rating: "yes", note: "An SDK you import into the application you already have." },
     temporal: { rating: "yes", note: "SDKs for Go, Java, Python, TypeScript, .NET, and PHP." },
     langgraph: { rating: "yes", note: "A library you import." },
@@ -250,7 +250,7 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
   },
 
   "reuse-your-languages-libraries": {
-    harn: { rating: "partial", note: "The stdlib and host capabilities cover a lot, but you cannot reach for an arbitrary pip or npm package inside a workflow." },
+    harn: { rating: "partial", note: "The stdlib and host capabilities cover a lot, but you can't reach for an arbitrary pip or npm package inside a workflow." },
     inngest: { rating: "yes", note: "Ordinary host-language code." },
     temporal: { rating: "yes", note: "Ordinary host-language code, within deterministic constraints." },
     langgraph: { rating: "yes", note: "Ordinary Python or JavaScript." },
@@ -290,11 +290,11 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
   },
 
   "futures-that-outlive-their-scope": {
-    harn: { rating: "no", note: "Concurrency is scoped: a task does not outlive the scope that created it. That makes lifetimes obvious and leaks harder, at the cost of the freedom in the next column." },
+    harn: { rating: "no", note: "Concurrency is scoped: a task doesn't outlive the scope that created it. That makes lifetimes obvious and leaks harder, at the cost of the freedom in the next column." },
     inngest: { rating: "yes", note: "Host-language async." },
     temporal: { rating: "yes", note: "Detached child workflows outlive their parent." },
     langgraph: { rating: "yes", note: "Host-language async." },
-    baml: { rating: "yes", note: "Green threads with spawn and await. BAML rejected structured concurrency deliberately: a future outlives its creating scope and there is no automatic cancellation on scope exit." },
+    baml: { rating: "yes", note: "Green threads with spawn and await. BAML rejected structured concurrency deliberately: a future outlives its creating scope and there's no automatic cancellation on scope exit." },
     cursor: { rating: "unknown" },
     flue: { rating: "yes", note: "Host-language async." },
   },

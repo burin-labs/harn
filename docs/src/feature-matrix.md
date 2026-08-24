@@ -16,9 +16,9 @@ row here, the source is right; open an issue and the row gets fixed.
 
 ## Capabilities
 
-Pick the systems you are comparing against. Select a capability to read what its
+Pick the systems you're comparing against. Select a capability to read what its
 rating covers, or hover a cell for the one-line reason behind it. The last six
-rows are ones Harn does not win.
+rows are ones Harn doesn't win.
 
 {{#comparison-matrix}}
 
@@ -28,7 +28,7 @@ rows are ones Harn does not win.
 |---|---|
 | Yes | The core platform provides an explicit contract or runtime primitive. |
 | Partial | The outcome needs application code, a paid plan, or deployment setup outside the core programming model. |
-| No | The system does not publish the capability as a platform primitive. |
+| No | The system doesn't publish the capability as a platform primitive. |
 | — | Not checked against that system's documentation yet. |
 
 ## What each row covers
@@ -52,7 +52,7 @@ history.
 
 Temporal replays workflow state when workflow code follows its deterministic
 constraints and side effects run in Activities. Inngest memoizes completed
-steps, so a model call inside a durable step is not sent again on resume.
+steps, so a model call inside a durable step isn't sent again on resume.
 LangGraph replay re-executes nodes after the selected checkpoint, including
 model calls, which may return different results.
 
@@ -75,7 +75,7 @@ and [Trigger budgets](./triggers/budgets.md).
 Harn's open-source boundary includes the runtime substrate: language, VM,
 orchestrator, EventLog contracts, connectors, protocols, and self-hostable
 deployment path. A cloud platform can add managed tenancy and operations, but the
-core orchestration model is not reserved for a hosted service.
+core orchestration model isn't reserved for a hosted service.
 
 See [Orchestrator](./orchestrator.md), [Deploy to Render](./deploy/render.md),
 [Deploy to Fly.io](./deploy/fly.md), and [Deploy to Railway](./deploy/railway.md).
@@ -123,28 +123,28 @@ and [Orchestrator secrets](./orchestrator/secrets.md).
 
 ## Where Harn is the wrong choice
 
-The rows above are ones Harn was built to win. These are the ones it does not,
+The rows above are ones Harn was built to win. These are the ones it doesn't,
 and they are the fastest way to find out that another system fits your problem
 better.
 
 ### Callable from an existing codebase
 
-Harn runs a program. It does not generate a typed client you import into the
+Harn runs a program. It doesn't generate a typed client you import into the
 service you already have. You can reach a Harn program over MCP, ACP, or A2A,
-or embed the runtime in Rust, but that is a heavier boundary than a library
+or embed the runtime in Rust, but that's a heavier boundary than a library
 call.
 
 BAML sits at the other end of this: its primary path is generating a typed
 client for Python, TypeScript, Go, Java, C#, or Rust so an existing codebase
 calls into it. If your problem is one call that must return a reliable object
-and you want to keep the codebase you have, that is the shorter path.
+and you want to keep the codebase you have, that's the shorter path.
 
 See [MCP, ACP, and A2A integration](./mcp-and-acp.md) and
 [embedding in Rust](./embedding-rust.md).
 
 ### Reuse your language's libraries
 
-A workflow written in Harn cannot reach for an arbitrary package from PyPI or
+A workflow written in Harn can't reach for an arbitrary package from PyPI or
 npm. The stdlib and host capabilities cover the orchestration surface, and the
 host boundary covers the rest, but a framework written in your language lets you
 import anything you already depend on. If your workflow leans on a specific
@@ -166,7 +166,7 @@ See [Orchestrator](./orchestrator.md), [Deploy to Render](./deploy/render.md),
 
 Harn is pre-1.0, and surface-level breaking changes are possible between minor
 and patch releases. Temporal has years of at-scale production operation behind
-it. If you are putting revenue-critical work on an orchestrator this quarter,
+it. If you're putting revenue-critical work on an orchestrator this quarter,
 that difference is the whole decision.
 
 See the [changelog](https://github.com/burin-labs/harn/blob/main/CHANGELOG.md).
@@ -182,9 +182,9 @@ See the [connector catalog](./connectors/catalog.md).
 
 ### Futures that outlive their scope
 
-Harn's concurrency is scoped: a spawned task does not outlive the scope that
+Harn's concurrency is scoped: a spawned task doesn't outlive the scope that
 created it, and leaving a scope cancels what it started. That makes lifetimes
-obvious and leaks harder, and it means you cannot fire off work that keeps
+obvious and leaks harder, and it means you can't fire off work that keeps
 running after its caller returns.
 
 BAML rejected structured concurrency deliberately, so a future there outlives
