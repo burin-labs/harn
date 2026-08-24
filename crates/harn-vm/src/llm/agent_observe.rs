@@ -485,7 +485,6 @@ pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
               msg and end from find() on the sliced tail, so both are char boundaries"
 )]
 pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
-    const MAX_MS: u64 = 60_000;
     let lower = msg.to_ascii_lowercase();
     let pos = lower.find("retry-after:")?;
     let after = &msg[pos + "retry-after:".len()..];
@@ -495,28 +494,7 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     if value.is_empty() {
         return None;
     }
-    let numeric_prefix = value
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
-        .collect::<String>();
-    if !numeric_prefix.is_empty() {
-        if let Ok(secs) = numeric_prefix.parse::<f64>() {
-            if !secs.is_finite() || secs < 0.0 {
-                return Some(0);
-            }
-            let ms = (secs * 1000.0) as u64;
-            return Some(ms.min(MAX_MS));
-        }
-    }
-    if let Ok(target) = httpdate::parse_http_date(value) {
-        let now = std::time::SystemTime::now();
-        let delta = target
-            .duration_since(now)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        return Some(delta.min(MAX_MS));
-    }
-    None
+    super::api::parse_retry_after_value(value)
 }
 
 /// Effective retry budget for zero-token empty completions:
@@ -1107,6 +1085,10 @@ pub(crate) async fn observed_llm_call(
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
                 let mut classified = super::api::classify_llm_error(category.clone(), &message);
+                // Provider quota headers are a typed live account-tier signal.
+                // Feed them to the proactive route owner before the cooldown;
+                // do not scrape the human error message for Limit/Used text.
+                super::rate_limit::observe_provider_quota_for_llm_call(opts, &error);
                 // Shared cooldown: 429 Retry-After, plus 529/503 overload
                 // (with a default window when the provider sent no header) so
                 // sibling agents on the same route back off together.

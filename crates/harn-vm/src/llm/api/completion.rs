@@ -21,14 +21,11 @@ async fn completion_json_response(
 ) -> Result<serde_json::Value, VmError> {
     if !response.status().is_success() {
         let status = response.status();
-        let retry_after = super::retry_after_header(response.headers());
+        let headers = response.headers().clone();
         let body = response.text().await.unwrap_or_default();
-        let message =
-            super::classify_provider_http_error(provider, status, retry_after.as_deref(), &body)
-                .message;
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            message,
-        ))));
+        return Err(super::provider_http_error(
+            None, provider, status, &headers, &body,
+        ));
     }
 
     response.json().await.map_err(|e| {

@@ -22,7 +22,7 @@
 //! Retry-After / retry / escalation path. Set it to `0` to restore the old
 //! unbounded wait.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -30,6 +30,12 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 mod durable_admission;
+mod provider_quota;
+mod sliding_window;
+
+pub(crate) use provider_quota::observe_for_llm_call as observe_provider_quota_for_llm_call;
+use provider_quota::{ObservedTokenQuota, ProviderTokenQuotaReceipt};
+use sliding_window::SlidingWindow;
 
 const DURABLE_RATE_LIMIT_ENABLED_ENV: &str = "HARN_LLM_RATE_LIMIT_DURABLE";
 const DURABLE_RATE_LIMIT_STATE_PATH_ENV: &str = "HARN_LLM_RATE_LIMIT_STATE_PATH";
@@ -174,90 +180,6 @@ impl EffectiveRateLimits {
             output_tpm: self.output_tpm,
             concurrency: self.concurrency,
             ..Default::default()
-        }
-    }
-}
-
-/// Weighted sliding-window counter.
-///
-/// Request buckets use one unit per request; token buckets use projected token
-/// counts. A single request larger than the published per-minute quota is
-/// charged as one full window so it can run, but the next request waits until
-/// the window clears.
-struct SlidingWindow {
-    max_units: u64,
-    window_ms: u128,
-    entries: VecDeque<(u128, u64)>,
-}
-
-impl SlidingWindow {
-    fn new(max_units: u64) -> Self {
-        Self {
-            max_units: max_units.max(1),
-            window_ms: u128::from(WINDOW_SECS) * 1000,
-            entries: VecDeque::with_capacity(max_units.min(1024) as usize),
-        }
-    }
-
-    fn prune(&mut self, now_ms: u128) {
-        while self
-            .entries
-            .front()
-            .is_some_and(|(t, _)| now_ms.saturating_sub(*t) >= self.window_ms)
-        {
-            self.entries.pop_front();
-        }
-    }
-
-    fn usage(&self) -> u64 {
-        self.entries
-            .iter()
-            .fold(0u64, |acc, (_, units)| acc.saturating_add(*units))
-    }
-
-    fn charge(&self, units: u64) -> u64 {
-        if units == 0 {
-            0
-        } else {
-            units.min(self.max_units)
-        }
-    }
-
-    /// Drain expired entries and check capacity.
-    /// Returns `Some(wait_duration)` if the window is full, `None` if OK.
-    fn check(&mut self, now_ms: u128, units: u64) -> Option<Duration> {
-        let charge = self.charge(units);
-        if charge == 0 {
-            return None;
-        }
-        self.prune(now_ms);
-        let usage = self.usage();
-        if usage.saturating_add(charge) <= self.max_units {
-            return None;
-        }
-        let needed = usage.saturating_add(charge).saturating_sub(self.max_units);
-        let mut freed = 0u64;
-        for (entry_ms, units) in &self.entries {
-            freed = freed.saturating_add(*units);
-            if freed >= needed {
-                let wait_ms = entry_ms
-                    .saturating_add(self.window_ms)
-                    .saturating_sub(now_ms);
-                return Some(Duration::from_millis(
-                    wait_ms.min(u128::from(u64::MAX)) as u64
-                ));
-            }
-        }
-        Some(Duration::from_millis(
-            self.window_ms.min(u128::from(u64::MAX)) as u64,
-        ))
-    }
-
-    /// Record a request or token charge timestamp.
-    fn record(&mut self, now_ms: u128, units: u64) {
-        let charge = self.charge(units);
-        if charge > 0 {
-            self.entries.push_back((now_ms, charge));
         }
     }
 }
@@ -415,6 +337,7 @@ struct RouteLimiter {
     total_token_window: Option<SlidingWindow>,
     input_token_window: Option<SlidingWindow>,
     output_token_window: Option<SlidingWindow>,
+    observed_token_quota: Option<ObservedTokenQuota>,
     concurrency: Option<Arc<Semaphore>>,
     cooldown_until_ms: Option<u128>,
     breaker: NetworkBreaker,
@@ -428,6 +351,7 @@ impl RouteLimiter {
             total_token_window: limits.tpm.map(SlidingWindow::new),
             input_token_window: limits.input_tpm.map(SlidingWindow::new),
             output_token_window: limits.output_tpm.map(SlidingWindow::new),
+            observed_token_quota: None,
             concurrency: limits
                 .concurrency
                 .map(|limit| Arc::new(Semaphore::new(limit.max(1) as usize))),
@@ -451,6 +375,8 @@ impl RouteLimiter {
             self.output_token_window
                 .as_mut()
                 .and_then(|window| window.check(now_ms, request.output_tokens)),
+            self.observed_token_quota
+                .and_then(|quota| quota.check(now_ms, request.total_tokens())),
             self.cooldown_until_ms
                 .filter(|until_ms| *until_ms > now_ms)
                 .map(|until_ms| {
@@ -475,6 +401,19 @@ impl RouteLimiter {
         if let Some(window) = self.output_token_window.as_mut() {
             window.record(now_ms, request.output_tokens);
         }
+        if let Some(quota) = self.observed_token_quota.as_mut() {
+            quota.record(now_ms, request.total_tokens());
+        }
+    }
+
+    fn record_observed_token_quota(&mut self, now_ms: u128, request: RateLimitRequest) {
+        if let Some(quota) = self.observed_token_quota.as_mut() {
+            quota.record(now_ms, request.total_tokens());
+        }
+    }
+
+    fn observe_token_quota(&mut self, now_ms: u128, receipt: ProviderTokenQuotaReceipt) {
+        self.observed_token_quota = Some(ObservedTokenQuota::from_receipt(now_ms, receipt));
     }
 
     fn observe_retry_after(&mut self, now_ms: u128, retry_after_ms: u64) {
@@ -850,6 +789,19 @@ fn record_for_keys(
     }
 }
 
+fn record_observed_quota_for_keys(
+    registry: &mut RateLimitRegistry,
+    keys: &[String],
+    request: RateLimitRequest,
+    now_ms: u128,
+) {
+    for key in keys {
+        if let Some(limiter) = registry.limiters.get_mut(key) {
+            limiter.record_observed_token_quota(now_ms, request);
+        }
+    }
+}
+
 fn durable_rate_limit_disabled() -> bool {
     let Ok(raw) = std::env::var(DURABLE_RATE_LIMIT_ENABLED_ENV) else {
         return false;
@@ -959,7 +911,10 @@ async fn sleep_after_throttle(provider: &str, model: &str, duration: Duration) {
             crate::llm_config::normalize_model_id(model)
         )
     };
-    crate::events::log_debug(
+    // This is user-visible wall time and part of the canonical eval receipt,
+    // not debug trivia. Keeping the existing stable sentence also lets older
+    // report projections account for the wait without a parallel metric path.
+    crate::events::log_info(
         "llm.rate_limit",
         &format!(
             "Rate limit for '{}': throttling for {}ms",
@@ -1003,6 +958,15 @@ async fn acquire_permit_for(
                 reroute_on_timeout,
             )
             .await?;
+            // Catalog limits were charged durably above; a provider-discovered
+            // quota is live process state and must be charged here as well.
+            // Omitting this makes every post-receipt request compare against
+            // the same stale `used` snapshot and eventually rediscover 429.
+            {
+                let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+                let now_ms = crate::clock_mock::instant_now().as_millis();
+                record_observed_quota_for_keys(&mut registry, &keys, request, now_ms);
+            }
             return Ok(RateLimitPermit { _permits: permits });
         }
     }
@@ -1354,6 +1318,41 @@ fn provider_request_usage(provider: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_200k_tpm_receipt_paces_growing_requests_before_provider() {
+        let mut limiter = RouteLimiter::new(EffectiveRateLimits::default());
+        let mut now_ms = 0u128;
+        limiter.observe_token_quota(
+            now_ms,
+            ProviderTokenQuotaReceipt {
+                limit: 200_000,
+                used: 190_000,
+                requested: 17_000,
+                window_ms: 60_000,
+            },
+        );
+
+        for requested in [17_000, 27_000, 37_000, 47_000] {
+            let request = RateLimitRequest {
+                input_tokens: requested,
+                output_tokens: 0,
+            };
+            let wait = limiter
+                .check(now_ms, request)
+                .expect("growing request must pace before exceeding observed quota");
+            now_ms = now_ms.saturating_add(wait.as_millis());
+            let live = limiter
+                .observed_token_quota
+                .expect("quota retained")
+                .usage_at(now_ms);
+            assert!(
+                live.saturating_add(requested) <= 200_000,
+                "provider would still 429 after proactive wait: used={live} requested={requested}"
+            );
+            limiter.record(now_ms, request);
+        }
+    }
 
     fn install_quota_overlay() {
         let overlay = crate::llm_config::parse_config_toml(
