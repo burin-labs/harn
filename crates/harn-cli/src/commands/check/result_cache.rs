@@ -269,6 +269,8 @@ fn fold_config(
         disable_rules,
         host_capabilities,
         host_capabilities_path,
+        host_served_capabilities_path,
+        runtime_installed_host_operations,
         bundle_root,
         preflight_severity,
         preflight_allow,
@@ -300,6 +302,14 @@ fn fold_config(
             "host-capabilities-content",
             host_capabilities_content.unwrap_or_default().as_bytes(),
         );
+    }
+    if let Some(path) = host_served_capabilities_path {
+        fold("host-served-capabilities-path", path.as_bytes());
+    }
+    let mut runtime_installed: Vec<&String> = runtime_installed_host_operations.iter().collect();
+    runtime_installed.sort();
+    for operation in runtime_installed {
+        fold("runtime-installed-host-operation", operation.as_bytes());
     }
     if let Some(root) = bundle_root {
         fold("bundle-root", root.as_bytes());
