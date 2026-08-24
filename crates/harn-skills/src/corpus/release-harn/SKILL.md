@@ -1,8 +1,8 @@
 ---
 name: release-harn
-short: Merge-queue-safe Harn patch release workflow.
-description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; candidate archive builds run before the tag, and tag push promotes those exact archives without recompiling.
-when_to_use: Use when cutting the declared Harn `vX.Y.Z-dev` target as a stable patch release, or recovering from a partially-failed release run.
+short: Merge-queue-safe Harn patch/minor/major release workflow.
+description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; candidate builds certify the proposed tree, then a signed tag selects and publishes the merged main squash commit.
+when_to_use: Use when cutting the declared Harn `vX.Y.Z-dev` target as a stable patch release, cutting a minor or major release from main, or recovering from a partially-failed release run.
 ---
 
 # Release Harn
@@ -37,12 +37,15 @@ identity:
 ```text
 immutable candidate OID
   → candidate_only archive matrix (sign/notarize/attest) in parallel with certification
-  → join receipts → signed tag
-  → tag push promotes exact archives + finalize + GHCR container (no compile)
+  → join receipts → merge Release PR
+  → signed tag on the main squash commit
+  → tag-derived archive matrix + finalize + GHCR container
 ```
 
-Fleet `release_harn` owns that orchestration. Direct tag recovery without a
-candidate receipt fails closed unless `force_rebuild=true`.
+Fleet `release_harn` owns that orchestration. Candidate receipts are
+certification evidence only. Publication and recovery both require the signed
+tag to select the matching Release squash commit on `main`; `force_rebuild`
+rebuilds missing archives from that tag.
 
 ## Local entry points
 
@@ -67,8 +70,6 @@ gh workflow run build-release-binaries.yml --ref main \
   -f candidate_only=true \
   -f candidate_source_ref=release-certify/<sha> \
   -f candidate_source_sha=<40-hex>
-gh workflow run build-release-binaries.yml --ref main \
-  -f promote_only=true -f tag=vX.Y.Z -f candidate_run_id=<id>
 gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z -f force_rebuild=true
 gh workflow run bump-release.yml --ref main          # reconstruct a missed bump PR
 ```
@@ -114,14 +115,12 @@ is a published-version concern, not a developer-loop concern.
 ## Workflows
 
 - `.github/workflows/publish-release.yml` (display name: "Publish
-  release") — fires on push to main when `Cargo.toml` is ahead of
-  the latest `vX.Y.Z` tag. Pushes the tag using the App token so
-  downstream cascades fire (a `GITHUB_TOKEN` tag push would be
-  suppressed by GHA).
+  release") — publishes crates only after the signed tag is proven to
+  select the matching Release squash commit on `main`.
 - `.github/workflows/build-release-binaries.yml` (display name:
   "Build release binaries") — `candidate_only` builds signed archives
-  for an exact SHA; tag push / `promote_only` attaches those exact
-  archives without compiling; `force_rebuild` is audited recovery.
+  for an exact SHA as pre-merge evidence; the tag path builds and attests
+  archives from the merged-main source; `force_rebuild` is audited recovery.
 - `.github/workflows/bump-release.yml`, display name "Open version bump
   PR (recovery)". It is `workflow_dispatch` only. Use it to reconstruct
   a bump PR if a "Prepare vX.Y.Z release"-style commit accidentally

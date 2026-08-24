@@ -87,30 +87,23 @@ DEFAULT FLOW (one human PR, then bot finalizes)
        harn run --no-sandbox release_harn.harn -- \
          --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
 
-  4. The release_harn.harn harness commits, pushes, tags, pushes the tag,
-     and opens the PR in that order so the tag is on origin BEFORE the PR
-     is opened:
+  4. The release_harn.harn harness commits and certifies an immutable
+     candidate, opens its PR, and enables auto-merge:
        git commit -m "Release vX.Y.Z"
-       git push -u origin release/vX.Y.Z
-       git tag -a vX.Y.Z -m "Release vX.Y.Z"
-       git push origin vX.Y.Z              # ← triggers publish-release.yml
        gh pr create
 
-  5. publish-release.yml fires on the tag push, checks out the tagged
-     commit (detached), and finalizes crates.io. The
-     build-release-binaries cascade creates the GitHub release with
-     binary artifacts from the same pinned commit. The Release PR
-     remains as paperwork; auto-merge can land it whenever, even if
-     main has moved on. The post-merge push to main no-ops (no drift,
-     since Cargo.toml on main now matches the tag).
+  5. After the PR squash-merges, the release watcher signs and pushes
+     vX.Y.Z at that exact main commit. publish-release.yml and
+     build-release-binaries.yml prove the tag's main ancestry and publish
+     crates, binaries, and the GitHub release from the tagged source.
 
 ==============================================================================
 PREPARE MODE
 ==============================================================================
 
   - Implementation detail used by release_harn.harn. Standalone prepare is
-    rejected because the tag must be pushed before the Release PR enters the
-    merge queue.
+    rejected because only the harness owns candidate certification and the
+    durable post-merge tag handoff.
   - Runs from a non-main branch with the release content already authored.
   - Detects bump type via --bump and confirms it matches the CHANGELOG
     top entry (CHANGELOG must be at the next vX.Y.Z heading already).
@@ -299,13 +292,10 @@ require_base_branch() {
   fi
 }
 
-# Sync local base branch to origin/base instead of asserting strict
-# equality. Used by --finalize where the GHA runner clones main early
-# in setup, then sits through ~30s of toolchain installs before this
-# script runs — main can move during that window. The bump intent is
-# already in main's history regardless of where HEAD is now, so the
-# right move is to fast-forward the local clone and tag whichever
-# commit Cargo.toml's version is set on.
+# Sync local base branch to origin/base instead of asserting strict equality.
+# A normal hosted finalization checks out the immutable tag. This main-branch
+# path exists for operator recovery and may fast-forward only before verifying
+# that the already-existing tag selects the exact resulting HEAD.
 sync_base_branch() {
   local base="$1"
   local branch
@@ -383,7 +373,7 @@ require_release_harness_prepare() {
   echo "hint: run from ~/projects/harn-bump-fleet:"
   echo "      harn run --no-sandbox release_harn.harn -- \\"
   echo "        --repo ~/projects/harn --mode ship-pr --agent --yes-live-release"
-  echo "hint: tag-first is mandatory; standalone prepare can open a racy Release PR without a pre-pushed tag"
+  echo "hint: the harness must certify the candidate and persist the post-merge tag handoff"
   exit 1
 }
 
@@ -717,71 +707,29 @@ prepare_here() {
   echo "Next steps:"
   if [[ "$materialize_candidate" -eq 1 ]]; then
     echo "  1. Commit and publish this candidate through release_harn.harn"
-    echo "  2. Certify the immutable candidate OID before creating its tag"
+    echo "  2. Certify the immutable candidate OID before opening its PR"
     return 0
   fi
   echo "  git status                                # review staged changes"
   echo "  git commit -m \"Release v$next\""
   echo "  git push -u origin $branch"
-  echo "  git tag -s v$next HEAD -m \"Release v$next\""
-  echo "  git push origin v$next"
   echo "  gh pr create --title \"Release v$next\" --body \"...\""
   echo "  gh pr merge --auto"
   echo ""
-  echo "The tag push ships v$next from the pinned commit. The PR is the"
-  echo "review and merge-queue artifact, not the publishing trigger."
+  echo "After merge, the release watcher tags the exact squash commit on main."
 }
 
-tag_exists() {
-  local tag="$1"
-  git rev-parse -q --verify "refs/tags/$tag" >/dev/null
-}
-
-ensure_tag_at_head() {
-  local tag="$1"
-  if tag_exists "$tag"; then
-    local tag_commit head_commit
-    tag_commit="$(git rev-list -n 1 "$tag")"
-    head_commit="$(git rev-parse HEAD)"
-    if [[ "$tag_commit" != "$head_commit" ]]; then
-      echo "error: $tag already exists at $tag_commit, but HEAD is $head_commit"
-      exit 1
-    fi
-    echo "Tag already exists at HEAD: $tag"
-  else
-    # Some developer machines set tag.gpgSign/tag.forceSignAnnotated. In that
-    # configuration even plain `git tag <name>` can become an annotated signed
-    # tag and open $EDITOR for the message. Finalization must be noninteractive,
-    # so provide the stable release message explicitly.
-    git tag -m "Release $tag" "$tag"
-  fi
-}
-
-remote_tag_commit() {
-  local tag="$1"
-  local commit
-  commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
-  if [[ -n "$commit" ]]; then
-    printf '%s\n' "$commit"
-    return 0
-  fi
-  git ls-remote --tags origin "refs/tags/${tag}" | awk 'NR == 1 { print $1 }'
-}
-
-push_tag_if_needed() {
+require_main_anchored_tag_at_head() {
   local tag="$1"
   local head_commit remote_commit
   head_commit="$(git rev-parse HEAD)"
-  remote_commit="$(remote_tag_commit "$tag")"
-  if [[ -n "$remote_commit" ]]; then
-    if [[ "$remote_commit" == "$head_commit" ]]; then
-      echo "Origin tag already exists at HEAD: $tag"
-      return 0
-    fi
-    echo "error: origin/$tag already exists at $remote_commit, but HEAD is $head_commit"
+  "$ROOT_DIR/scripts/verify_release_tag_main_ancestry.sh" --repo "$ROOT_DIR" --tag "$tag"
+  remote_commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
+  if [[ "$remote_commit" != "$head_commit" ]]; then
+    echo "error: origin/$tag selects $remote_commit, but finalization checkout is $head_commit"
     exit 1
   fi
-  git push origin "$tag"
+  echo "Verified main-anchored release tag at HEAD: $tag"
 }
 
 BUMP="patch"
@@ -955,13 +903,8 @@ BRANCH="$(git branch --show-current)"
 
 run_common_gates
 
-log_step "Tag"
-ensure_tag_at_head "$TAG"
-
-# Push the tag before cargo publish so GitHub release-binary workflows and
-# downstream fetchers can start working in parallel with crates.io publication.
-log_step "Push tag"
-push_tag_if_needed "$TAG"
+log_step "Verify main-anchored tag"
+require_main_anchored_tag_at_head "$TAG"
 
 log_step "Publish"
 "$RELEASE_GATE_SCRIPT" publish

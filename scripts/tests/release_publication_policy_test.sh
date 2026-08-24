@@ -55,6 +55,11 @@ grep -Fq 'type=raw,value=${{ needs.setup.outputs.version }}' "$workflow" \
   || fail "exact container tag is not projected"
 grep -Fq -- "--prerelease \\" "$workflow" \
   || fail "stable release placeholder is no longer created as prerelease"
+grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF"' "$workflow" \
+  || fail "binary publication does not prove the tag selects merged main"
+if grep -Eq 'promote_only|candidate_run_id|BUILD_MODE.?=.?promote' "$workflow"; then
+  fail "binary publication retains obsolete candidate-promotion authority"
+fi
 
 vscode_workflow="$root/.github/workflows/publish-vscode.yml"
 grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vscode_workflow" \
@@ -76,5 +81,7 @@ grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$publish_workflow" \
 ci_workflow="$root/.github/workflows/ci.yml"
 grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \
   || fail "source-only documentation checks try to install an unpublished -dev build"
+grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF_NAME"' "$publish_workflow" \
+  || fail "crate publication does not prove the tag selects merged main"
 
 echo "release publication policy tests passed"

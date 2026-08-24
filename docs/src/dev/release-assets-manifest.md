@@ -94,28 +94,30 @@ let a downloader detect corruption or substitution relative to the metadata it
 fetched, but they do not prove which source revision or workflow produced an
 archive.
 
-Release archives are built as immutable candidate artifacts before the tag.
-`build-release-binaries.yml` `candidate_only` builds, signs, notarizes, packages,
-and attests the five-target matrix against an exact source SHA, then uploads
-fail-closed run-scoped archives plus
-`candidate-archive-manifest-<sha>.json`. That path never mutates a GitHub
-release.
+Before merge, `build-release-binaries.yml` `candidate_only` builds, signs,
+notarizes, packages, and attests the five-target matrix against the exact
+candidate SHA, then uploads fail-closed run-scoped evidence plus
+`candidate-archive-manifest-<sha>.json`. That path certifies the candidate and
+never mutates a GitHub release.
 
-Tag push (and `promote_only`) attach those exact bytes, regenerate
-`SHA256SUMS` / `release-assets.json`, and publish the container. The canonical
-path does not compile again; `force_rebuild` remains the audited recovery that
-re-enters the receipt contract after a rebuild.
+After the Release PR squash-merges, the signed tag selects that main commit.
+The tag-triggered workflow builds the five release archives from the immutable
+tag source, regenerates `SHA256SUMS` / `release-assets.json`, and publishes the
+container. Candidate archives are evidence about the pre-merge tree, not a
+substitute for the source commit that actually landed.
+
+Historical release tags remain immutable at their original commits. The
+main-ancestry invariant applies to tags created after this release-flow cutover;
+automation never moves an existing public tag to retrofit it.
 
 Every new release archive therefore also has a GitHub artifact attestation with
 predicate type
 `https://harnlang.com/attestations/release-archive/v1`. Candidate-phase
 predicates bind the archive digest and filename to the target triple, source
 commit, workflow run/job, and exact build-policy revision without a tag.
-Promote/finalization accepts that candidate binding when the signed tag peels
-to the same source commit, and refuses digest, target-set, policy, or provenance
-mismatches against the candidate manifest. Recovery runs may combine archives
-from multiple workflow runs, but all five must resolve to the same
-GitHub-verified signed tag commit.
+Finalization accepts only archives whose attestations resolve to the same
+GitHub-verified signed tag commit. Recovery runs may combine archives from
+multiple workflow runs, but all five retain that one immutable source identity.
 
 Releases through v0.10.40 predate attestations and fail closed by default. A
 recovery operator may provide `legacy_provenance_override` only as an explicit
