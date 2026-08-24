@@ -585,7 +585,7 @@ test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
-	./scripts/tests/release_ship_tag_push_idempotent_test.sh
+	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/verify_release_archive_provenance_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh

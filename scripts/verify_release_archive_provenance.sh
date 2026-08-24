@@ -197,12 +197,8 @@ predicate_matches() {
       $p.schemaVersion == $schema and
       $p.repository == $repo and
       (
-        $p.tag == $tag or
-        (
-          ($p.phase // "") == "candidate" and
-          (($p.tag // "") == "") and
-          $p.sourceCommit == $source
-        )
+        ($p.phase // "release") == "release" and
+        $p.tag == $tag
       ) and
       $p.sourceCommit == $source and
       $p.archive == $archive and
@@ -246,12 +242,8 @@ for archive in "${expected_archives[@]}"; do
          select(
            $p.schemaVersion == $schema and
            (
-             $p.tag == $tag or
-             (
-               ($p.phase // "") == "candidate" and
-               (($p.tag // "") == "") and
-               $p.sourceCommit == $source
-             )
+             ($p.phase // "release") == "release" and
+             $p.tag == $tag
            ) and
            $p.sourceCommit == $source and
            $p.archive == $archive and
