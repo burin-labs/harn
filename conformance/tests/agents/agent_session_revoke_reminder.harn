@@ -1,0 +1,57 @@
+// agent_session_revoke_reminder: revoking a reminder must stop it being
+// re-projected on later turns, and must be able to say WHY it did nothing when
+// it does nothing. Before #7050 a transcript-injected reminder was invisible to
+// revoke: every call returned `unknown_reminder_id`, so a live reminder and a
+// typo were reported identically and neither stopped re-projection.
+//
+// The assertions below run through the production seam — the post-turn apply
+// that carries reminders forward — rather than only reading back the snapshot.
+import {
+  agent_session_apply_reminder_post_turn,
+  agent_session_inject_reminder,
+  agent_session_revoke_reminder,
+} from "std/agent/state"
+
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  harness.agent.reset(s)
+  // A reminder with room left on its TTL: delivered once, still carried.
+  const live = agent_session_inject_reminder(
+    harness.agent,
+    s,
+    {body: "still carried", ttl_turns: 3, dedupe_key: "revoke/live"},
+  )
+  require live != nil && live != "", "inject returns a reminder id"
+  const delivered = agent_session_apply_reminder_post_turn(harness.agent, s, 1)
+  require delivered.remaining_count == 1, "the reminder survives its first turn"
+  const revoked = agent_session_revoke_reminder(harness.agent, s, live)
+  require revoked.status == "revoked", "revoking a carried reminder reports revoked"
+  require revoked.reminderId == live, "the response echoes the reminder id"
+  // The claim is about future carriage, so assert on the carry seam, not just
+  // on the snapshot: the next post-turn pass must have nothing left to carry.
+  const after = agent_session_apply_reminder_post_turn(harness.agent, s, 2)
+  require after.remaining_count == 0, "a revoked reminder is not carried forward"
+  const events = transcript_events_by_kind(harness.agent.snapshot(s), "system_reminder")
+  require len(events) == 0, "and it is gone from the event stream"
+  // Revoking twice is not an error, and does not report the id as unknown.
+  const again = agent_session_revoke_reminder(harness.agent, s, live)
+  require again.status == "already_revoked", "a second revoke reports already_revoked"
+  // A reminder whose TTL ran out has already had its full life. Revoke must say
+  // so rather than reporting it as an id it has never heard of.
+  const expiring = agent_session_inject_reminder(
+    harness.agent,
+    s,
+    {body: "one turn only", ttl_turns: 1, dedupe_key: "revoke/expiring"},
+  )
+  const expiry = agent_session_apply_reminder_post_turn(harness.agent, s, 3)
+  require expiry.expired_count == 1, "the ttl=1 reminder expires after one turn"
+  const late = agent_session_revoke_reminder(harness.agent, s, expiring)
+  require late.status == "already_delivered",
+    "revoking an expired reminder reports already_delivered"
+  // Negative control. Without this the three assertions above would also pass
+  // if revoke reported the same status for every input.
+  const bogus = agent_session_revoke_reminder(harness.agent, s, "no-such-reminder-id")
+  require bogus.status == "unknown_reminder_id", "an id that was never issued is still unknown"
+  harness.agent.close(s)
+  harness.stdio.log("agent_session_revoke_reminder stops re-projection and reports why")
+}

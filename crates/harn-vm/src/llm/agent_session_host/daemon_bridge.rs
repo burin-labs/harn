@@ -378,20 +378,33 @@ async fn host_agent_session_revoke_reminder(
             "{HOST_SESSION_REVOKE_REMINDER}: reminder_id must be a non-empty string"
         )));
     }
-    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_REVOKE_REMINDER) else {
+    let session_status = match crate::agent_sessions::revoke_reminder(&session_id, &reminder_id) {
+        Ok(status) => status,
+        Err(error) => return Err(VmError::Runtime(error)),
+    };
+    if matches!(session_status, "revoked" | "already_revoked") {
+        if let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_REVOKE_REMINDER) {
+            let _ = bridge.revoke_pending_reminder(&reminder_id).await;
+        }
         return Ok(json_to_vm(&serde_json::json!({
-            "status": "unknown_reminder_id",
+            "status": session_status,
             "reminderId": reminder_id,
         })));
-    };
-    let status = match bridge.revoke_pending_reminder(&reminder_id).await {
-        crate::bridge::PendingReminderMutationResult::Mutated => "revoked",
-        crate::bridge::PendingReminderMutationResult::AlreadyRevoked => "already_revoked",
-        crate::bridge::PendingReminderMutationResult::AlreadyDelivered => "already_delivered",
-        crate::bridge::PendingReminderMutationResult::UnknownReminderId => "unknown_reminder_id",
-    };
+    }
+    if let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_REVOKE_REMINDER) {
+        let status = match bridge.revoke_pending_reminder(&reminder_id).await {
+            crate::bridge::PendingReminderMutationResult::Mutated => "revoked",
+            crate::bridge::PendingReminderMutationResult::AlreadyRevoked => "already_revoked",
+            crate::bridge::PendingReminderMutationResult::AlreadyDelivered => "already_delivered",
+            crate::bridge::PendingReminderMutationResult::UnknownReminderId => session_status,
+        };
+        return Ok(json_to_vm(&serde_json::json!({
+            "status": status,
+            "reminderId": reminder_id,
+        })));
+    }
     Ok(json_to_vm(&serde_json::json!({
-        "status": status,
+        "status": session_status,
         "reminderId": reminder_id,
     })))
 }
