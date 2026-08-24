@@ -63,5 +63,18 @@ grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vsc
 publish_workflow="$root/.github/workflows/publish-release.yml"
 grep -Fq "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" "$publish_workflow" \
   || fail "stable drift comparison can select a prerelease tag"
+grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
+  "$publish_workflow" \
+  || fail "declared -dev workspace state does not bypass publication"
+grep -Fq 'release_head_is_release_commit_for_version "$version"' "$publish_workflow" \
+  || fail "post-release bump is not bound to the version-changing release commit"
+grep -Fq 'HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh' "$publish_workflow" \
+  || fail "post-release workflow bypasses the tested development preparation seam"
+grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$publish_workflow" \
+  || fail "post-release development bump does not enter the merge queue"
+
+ci_workflow="$root/.github/workflows/ci.yml"
+grep -Fq 'release_published_version_for_workspace "$workspace_version"' "$ci_workflow" \
+  || fail "source-only documentation checks try to install an unpublished -dev build"
 
 echo "release publication policy tests passed"
