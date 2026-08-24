@@ -1,0 +1,251 @@
+// MECHANISM CONTRACT (onramp tier): COMPLETION-VERIFICATION ARBITRATION.
+//
+//   CONTRACT: when the deterministic completion gate has watched the verifier
+//   run and pass, a model judge may no longer refuse the final ON THAT GROUND.
+//   A `continue` naming `failed_verification` against a positive reading is
+//   converted to `done`. A `continue` naming anything else vetoes untouched.
+//
+// WHY THIS EXISTS. The gate derived "the verifier ran and passed" and returned
+// only `{confirm, reason}`, so the fact never reached the judge. The bounded
+// evidence packet did not carry it either: a call reaches the packet's
+// verification slot only if its tool declares `completion_evidence_role`, and a
+// typical verifier is `kind: execute` with `side_effect_level: process_exec`,
+// which resolves to `other` and is counted and then dropped. So the judge was
+// asked whether verification passed, shown a packet that omitted the passing
+// verification, and given the last word on the answer.
+//
+//   trigger  — a run whose gate observed a PASSING verifier, whose judge then
+//              returns `continue` naming `failed_verification`;
+//   effect   — the judge's own acceptance flips: the directive seals `accept`
+//              carrying `converted_from`, and the run completes;
+//   negative — (a) the same judge refusal against an UNRUN verifier stands;
+//              (b) a refusal naming `unmet_manner_clause` against the same
+//              passing verifier stands; and (c) the same refusal against a gate
+//              that could not read facts at all stands.
+//
+// Clause (c) is the load-bearing one. `__completion_gate_evaluate` returns
+// `{confirm: true, reason: "facts_unavailable"}` when its facts closure is
+// unavailable — a confirm that means "I could not look", not "I looked and it
+// passed". Keying the conversion on `confirm` would let a run whose gate never
+// read anything overrule a legitimate refusal, which is the blanket weakening
+// this mechanism exists to avoid, arriving through the back door.
+//
+// The clauses deliberately avoid the terminal LABEL. #7097 relabels terminals on
+// this same path — a judge that exhausts its invocation cap now yields
+// `completion_unverified` rather than a no-progress stop — so a before/after
+// keyed on a terminal's name reports this defect fixed when only its label
+// moved. These clauses read the judge's own acceptance, the conversion count,
+// the projection numbers, and the provider call count, which this change and
+// #7097 do not share.
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import { agent_completion_adjudicator_declared } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const CONVERSION = "failed_verification_contradicted_by_gate"
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Write a source file.",
+    {
+      handler: { _args -> "write applied" },
+      parameters: {content: {type: "string", description: "New contents"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  // Deliberately declares NO `completion_evidence_role`. This is the shape a
+  // real host ships, and the shape whose verification the packet drops.
+  tools = tool_define(
+    tools,
+    "verify",
+    "Run the project checks.",
+    {
+      handler: { _args -> "0 failed" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+    },
+  )
+  return tools
+}
+
+/**
+ * A gate that reports exactly one reading. The real `agent_completion_gate` owns
+ * deriving these from host facts; a case that needs a specific reading states it
+ * directly so the clause under test is the arbitration and not the ladder.
+ */
+fn gate_observing(observed: string, reason: string) {
+  return { _payload ->
+    {
+      confirm: true,
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn judge_refusing(gap_class: string, detail: string) {
+  return {text: json_stringify({verdict: "continue", detail: detail, gap_class: gap_class})}
+}
+
+fn completion_receipts(events) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/**
+ * Conversions, counted by `converted_from` alone. A completion directive
+ * receipt's `trigger` names whichever adjudicator ANSWERED, not the boundary
+ * that asked, so a count keyed on the boundary reads zero while the mechanism
+ * works perfectly.
+ */
+fn conversions(receipts) -> int {
+  let n = 0
+  for receipt in receipts {
+    if to_string(receipt?.converted_from ?? "") == CONVERSION {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+fn base_opts(session: string) {
+  return {
+    provider: "mock",
+    session_id: session,
+    tools: toolset(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 3,
+    final_wrapup: false,
+    verify_completion_judge: {provider: "mock", max_invocations: 1},
+  }
+}
+
+fn run_case(harness: Harness, label: string, script, extra) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = base_opts(session) + extra
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Apply the requested change.", nil, opts) },
+      )
+      const receipts = completion_receipts(captured.events)
+      const first = receipts[0]
+      return {
+        declared: agent_completion_adjudicator_declared(opts, "sentinel"),
+        accepted: len(receipts) > 0 && to_string(first?.action ?? "") == "accept",
+        conversions: conversions(receipts),
+        provider_calls: len(harness.llm.mock_calls()),
+        included: to_int(first?.projection?.included_action_count) ?? -1,
+        omitted_older: to_int(first?.projection?.omitted_older_action_count) ?? -1,
+        verification_selected: len(
+          (first?.projection?.selected_actions ?? []).filter(
+            { selection -> selection?.evidence_role == "verification" },
+          )
+            .to_list(),
+        ),
+      }
+    },
+  )
+}
+
+/** Edit, then verify, then propose completion. */
+fn working_script(judge_turn) {
+  return [
+    {text: "", tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "the change"}}]},
+    {text: "", tool_calls: [{id: "verify-1", name: "verify", arguments: {}}]},
+    llm_done(),
+    judge_turn,
+    llm_done(),
+  ]
+}
+
+pipeline default(harness: Harness) {
+  const refusal =
+    "the required verification command has not been executed successfully in the provided evidence"
+  const converted = run_case(
+    harness,
+    "converted",
+    working_script(judge_refusing("failed_verification", refusal)),
+    {verify_completion: gate_observing("passed", "verified_after_write")},
+  )
+  harness.stdio.println("converted_accepted=" + to_string(converted.accepted))
+  harness.stdio.println("converted_conversions=" + to_string(converted.conversions))
+  harness.stdio.println("converted_provider_calls=" + to_string(converted.provider_calls))
+  const not_run = run_case(
+    harness,
+    "not-run",
+    working_script(judge_refusing("failed_verification", refusal)),
+    {verify_completion: gate_observing("not_run", "no_workspace_write")},
+  )
+  harness.stdio.println("not_run_accepted=" + to_string(not_run.accepted))
+  harness.stdio.println("not_run_conversions=" + to_string(not_run.conversions))
+  const manner = run_case(
+    harness,
+    "manner",
+    working_script(
+      judge_refusing("unmet_manner_clause", "the task forbade touching the vendored directory"),
+    ),
+    {verify_completion: gate_observing("passed", "verified_after_write")},
+  )
+  harness.stdio.println("manner_accepted=" + to_string(manner.accepted))
+  harness.stdio.println("manner_conversions=" + to_string(manner.conversions))
+  const blind = run_case(
+    harness,
+    "blind",
+    working_script(judge_refusing("failed_verification", refusal)),
+    agent_completion_gate(harness.runtime, {}),
+  )
+  harness.stdio.println("blind_accepted=" + to_string(blind.accepted))
+  harness.stdio.println("blind_conversions=" + to_string(blind.conversions))
+  // The defect's own signature, unchanged by this fix and pinned so a future
+  // reader does not mistake the arbitration for a projection repair. The
+  // verifier declares no evidence role, so the packet counts it and drops it.
+  harness.stdio.println("converted_included_actions=" + to_string(converted.included))
+  harness.stdio.println("converted_omitted_older=" + to_string(converted.omitted_older))
+  harness.stdio.println(
+    "converted_verification_slots=" + to_string(converted.verification_selected),
+  )
+  // Every case declares an adjudicator, so the cases differ by ONE variable.
+  contract_effect(
+    harness.stdio,
+    "every_case_declares_an_adjudicator",
+    converted.declared && not_run.declared && manner.declared && blind.declared,
+  )
+  // EFFECT: the judge's own acceptance flips, and the conversion is on the record.
+  contract_effect(harness.stdio, "passing_verification_converts_the_refusal", converted.accepted)
+  contract_effect(harness.stdio, "conversion_is_receipted_once", converted.conversions == 1)
+  // NEGATIVE (a): an unrun verifier is not a passing one.
+  contract_negative(harness.stdio, "unrun_verifier_does_not_convert", not_run.conversions > 0)
+  contract_negative(harness.stdio, "unrun_verifier_refusal_stands", not_run.accepted)
+  // NEGATIVE (b): the judge keeps every gap class but this one.
+  contract_negative(harness.stdio, "manner_clause_does_not_convert", manner.conversions > 0)
+  contract_negative(harness.stdio, "manner_clause_refusal_stands", manner.accepted)
+  // NEGATIVE (c): a gate that could not look never overrules anyone.
+  contract_negative(harness.stdio, "facts_unavailable_does_not_convert", blind.conversions > 0)
+  contract_negative(harness.stdio, "facts_unavailable_refusal_stands", blind.accepted)
+}
