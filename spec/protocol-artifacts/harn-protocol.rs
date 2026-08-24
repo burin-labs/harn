@@ -1617,6 +1617,7 @@ pub enum HarnAgentEventKind {
     IterationEnd,
     IterationStart,
     JudgeDecision,
+    JudgeStarted,
     LoopControlDecision,
     LoopStuck,
     McpAuthRequired,
@@ -1666,6 +1667,7 @@ impl HarnAgentEventKind {
             Self::IterationEnd => "iteration_end",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
+            Self::JudgeStarted => "judge_started",
             Self::LoopControlDecision => "loop_control_decision",
             Self::LoopStuck => "loop_stuck",
             Self::McpAuthRequired => "mcp_auth_required",
@@ -1730,6 +1732,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "iteration_end" => Self::IterationEnd,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
+            "judge_started" => Self::JudgeStarted,
             "loop_control_decision" => Self::LoopControlDecision,
             "loop_stuck" => Self::LoopStuck,
             "mcp_auth_required" => Self::McpAuthRequired,
@@ -2402,6 +2405,7 @@ pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
+pub const HARN_AGENT_EVENT_KIND_JUDGE_STARTED: &str = "judge_started";
 pub const HARN_AGENT_EVENT_KIND_LOOP_CONTROL_DECISION: &str = "loop_control_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
 pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
@@ -2451,6 +2455,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "iteration_end",
     "iteration_start",
     "judge_decision",
+    "judge_started",
     "loop_control_decision",
     "loop_stuck",
     "mcp_auth_required",

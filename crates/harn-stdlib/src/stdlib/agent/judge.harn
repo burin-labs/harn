@@ -1056,12 +1056,7 @@ pub fn agent_has_done_judge(judge_cfg) -> bool {
  * window without needing to know which gate ended it.
  */
 fn __emit_judge_started(agent: HarnessAgent, session_id, iteration, trigger) {
-  agent_emit_event(
-    agent,
-    session_id,
-    "judge_started",
-    {iteration: iteration, trigger: trigger},
-  )
+  agent_emit_event(agent, session_id, "judge_started", {iteration: iteration, trigger: trigger})
 }
 
 fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
