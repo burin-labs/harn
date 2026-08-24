@@ -181,16 +181,53 @@ fn __active_from_ids(registry, ids) {
   return active
 }
 
-fn __context_profile_skill_ids(opts) {
-  return opts?.context_profile?.skills ?? opts?.project_context_profile?.skills ?? []
+type ContextProfileSkillBinding = {skill_id: string, tool_group: string}
+
+fn __context_profile(opts) {
+  return opts?.context_profile ?? opts?.project_context_profile ?? {}
+}
+
+fn __served_tool_groups(opts) -> list<string> {
+  let groups: list<string> = []
+  for tool_entry in opts?.tools?.tools ?? [] {
+    const namespace = __tool_namespace(tool_entry)
+    if namespace != "" && !contains(groups, namespace) {
+      groups = groups.appending(namespace)
+    }
+  }
+  return groups
+}
+
+fn __context_profile_skill_bindings(opts) -> list<ContextProfileSkillBinding> {
+  const served_groups = __served_tool_groups(opts)
+  let bindings: list<ContextProfileSkillBinding> = []
+  for profile in __context_profile(opts)?.profiles ?? [] {
+    for tool_group in profile?.tool_groups ?? [] {
+      if !contains(served_groups, tool_group) {
+        continue
+      }
+      for skill_id in profile?.skills ?? [] {
+        bindings = bindings.appending({skill_id: skill_id, tool_group: tool_group})
+      }
+    }
+  }
+  return bindings
 }
 
 fn __active_from_context_profile(registry, opts) {
   let active = []
-  for id in __context_profile_skill_ids(opts) {
-    const entry = __skill_find(registry, id)
-    if entry != nil {
-      active = active.appending(entry + {id: id, score: 1.0, trigger: "context_profile"})
+  for binding in __context_profile_skill_bindings(opts) {
+    const entry = __skill_find(registry, binding.skill_id)
+    if entry != nil && !contains(__skill_ids(active), binding.skill_id) {
+      active = active.appending(
+        entry
+          + {
+            id: binding.skill_id,
+            score: 1.0,
+            trigger: "served_tool_group",
+            tool_group: binding.tool_group,
+          },
+      )
     }
   }
   return active

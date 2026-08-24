@@ -2328,7 +2328,10 @@ advisory only), or `unbound` (no binding; advisory only).
 - `profile_ids`: active profile IDs such as `"git"`, `"github"`, `"rust"`, `"node"`, `"python"`, and `"swift"`
 - `prompt_fragments`: fragments accepted by the prompt reducer and gated by `requires_caps`
 - `skills`, `tool_groups`, `mcp_presets`, and `mcp_preset_candidates`:
-  activation metadata for existing skill/tool/preset surfaces
+  candidate bindings for existing skill/tool/preset surfaces. Project detection
+  does not activate a full skill body by itself; Harn requires matching task
+  intent, an explicit `load_skill`, or a served tool whose typed namespace
+  intersects one of the profile's `tool_groups`.
 - `caps`: capability flags that explain profile-fragment inclusion in `prompt_explain(...)`
 - `signals`: normalized project fingerprint, redacted Git remote, signal source, and credential aliases
 - `token_delta`: estimated tokens/bytes for activated profile fragments versus the always-on profile catalog
