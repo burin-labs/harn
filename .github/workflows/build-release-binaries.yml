@@ -1437,15 +1437,19 @@ jobs:
           start=$SECONDS
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
-          # Windows has no dependable unprivileged symlinks, so harn-lsp.exe /
-          # harn-dap.exe are copies of the single multi-call harn.exe (argv[0]
-          # dispatch still routes them). Editors that spawn them by name keep
-          # working; we still build only one binary, so the LTO-link win holds.
-          cp dist/harn.exe dist/harn-lsp.exe
-          cp dist/harn.exe dist/harn-dap.exe
           cd dist
           archive="harn-${{ matrix.target }}.zip"
-          7z a "$archive" harn.exe harn-dap.exe harn-lsp.exe
+          # The bootstrap installer creates harn-lsp.exe and harn-dap.exe as
+          # hard links. Keeping one binary in the zip cuts its download to
+          # roughly one third while manual extraction still yields harn.exe.
+          7z a "$archive" harn.exe
+          proof_dir="${RUNNER_TEMP}/harn-windows-manual-unpack"
+          mkdir -p "$proof_dir"
+          powershell.exe -NoProfile -Command \
+            "Expand-Archive -LiteralPath '$PWD/$archive' -DestinationPath '$proof_dir' -Force"
+          "$proof_dir/harn.exe" --version
+          test ! -e "$proof_dir/harn-lsp.exe"
+          test ! -e "$proof_dir/harn-dap.exe"
           archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
           duration=$((SECONDS - start))
           {

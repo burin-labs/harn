@@ -15,6 +15,7 @@ const INSTALL_LOCK_TOTAL_TIMEOUT_MULTIPLIER = 4;
 const INSTALL_LOCK_STALE_MS = 5 * 60_000;
 const INSTALL_MUTATION_ATTEMPTS = 6;
 const INSTALL_MUTATION_RETRY_MS = 25;
+const WINDOWS_MULTICALL_ALIASES = ["harn-lsp.exe", "harn-dap.exe"];
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const CHECKSUM_LINE = /^([0-9a-fA-F]{64})[ \t]+\*?([^/\\\0]+)$/;
@@ -487,6 +488,31 @@ function extractArchive(archivePath, directory, target) {
   return destination;
 }
 
+/**
+ * Give Windows installs the same one-binary layout as Unix installs.
+ *
+ * Hard links preserve argv[0] dispatch without requiring elevation or
+ * Developer Mode. The release archive therefore carries only harn.exe.
+ */
+export function installMulticallAliases(binaryPath, target) {
+  if (!target.endsWith("windows-msvc")) return [];
+  return WINDOWS_MULTICALL_ALIASES.map((name) => {
+    const aliasPath = path.join(path.dirname(binaryPath), name);
+    fs.rmSync(aliasPath, { force: true });
+    fs.linkSync(binaryPath, aliasPath);
+    return aliasPath;
+  });
+}
+
+function hasMulticallAliases(binaryPath, target) {
+  if (!target.endsWith("windows-msvc")) return true;
+  const binary = fs.statSync(binaryPath);
+  return WINDOWS_MULTICALL_ALIASES.every((name) => {
+    const alias = fs.statSync(path.join(path.dirname(binaryPath), name));
+    return alias.dev === binary.dev && alias.ino === binary.ino;
+  });
+}
+
 function readValidInstall(installRoot, expected) {
   try {
     const manifestPath = path.join(installRoot, "install-manifest.json");
@@ -502,7 +528,8 @@ function readValidInstall(installRoot, expected) {
       manifest.checksum !== expected.checksum ||
       manifest.source !== expected.source ||
       manifest.binary_path !== binaryPath ||
-      manifest.binary_sha256 !== sha256(fs.readFileSync(binaryPath))
+      manifest.binary_sha256 !== sha256(fs.readFileSync(binaryPath)) ||
+      !hasMulticallAliases(binaryPath, expected.target)
     ) {
       return null;
     }
@@ -746,6 +773,7 @@ async function installVerifiedArchive(options) {
       temporary,
       options.target,
     );
+    installMulticallAliases(temporaryBinary, options.target);
     const binaryName = path.basename(temporaryBinary);
     const binaryPath = path.join(options.installRoot, binaryName);
     const binaryChecksum = sha256(fs.readFileSync(temporaryBinary));

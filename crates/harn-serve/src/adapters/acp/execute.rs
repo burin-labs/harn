@@ -241,7 +241,23 @@ pub(super) async fn execute_chunk(
     // truth the type-checker allowlist also consumes (`harn_parser`), so a
     // global bound here can never be one `harn check` rejects. The exhaustive
     // match makes adding a global a deliberate, checked change on both sides.
-    let mut mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
+    let host_capability_manifest = builtins::load_host_capability_manifest(&bridge).await;
+    let served_host_capabilities = host_capability_surface(&host_capability_manifest);
+    let reconciliation = reconcile_host_capabilities(setup.project_root, &served_host_capabilities);
+    if !reconciliation.findings.is_empty() {
+        if reconciliation.fail_closed {
+            return Err(format!("HARN-CAP-008: {}", reconciliation.findings.join("; ")).into());
+        }
+        for finding in &reconciliation.findings {
+            bridge.send_log(
+                "warning",
+                &format!("HARN-CAP-008: {finding}"),
+                Some(serde_json::json!({"code": "HARN-CAP-008"})),
+            );
+        }
+    }
+    let mut mcp_globals =
+        load_host_mcp_clients(host_bridge.clone(), &served_host_capabilities).await;
     for global in AcpAmbientGlobal::ALL {
         let value = match global {
             AcpAmbientGlobal::Prompt => harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
@@ -264,7 +280,13 @@ pub(super) async fn execute_chunk(
         vm.set_global(global.name(), value);
     }
 
-    builtins::register_acp_builtins(&mut vm, bridge.clone(), prompt_content_value).await;
+    builtins::register_acp_builtins(
+        &mut vm,
+        bridge.clone(),
+        prompt_content_value,
+        host_capability_manifest,
+    )
+    .await;
 
     // Share the same cancellation flag the ACP session's `cancellation`
     // already installed on `host_bridge` (see prompt.rs) with the VM's
@@ -391,19 +413,10 @@ fn configured_execution_harness(
 
 pub(super) async fn load_host_mcp_clients(
     host_bridge: Arc<harn_vm::bridge::HostBridge>,
+    served_host_capabilities: &harn_modules::host_capabilities::HostCapabilitySurface,
 ) -> BTreeMap<String, harn_vm::VmValue> {
     let mut mcp_dict = BTreeMap::new();
-    let capabilities = host_bridge
-        .call("host/capabilities", serde_json::json!({}))
-        .await
-        .ok()
-        .and_then(|value| value.as_object().cloned());
-    let has_project_mcp_config = capabilities
-        .as_ref()
-        .and_then(|root| root.get("project"))
-        .and_then(|entry| entry.as_array())
-        .is_some_and(|ops| ops.iter().any(|value| value.as_str() == Some("mcp_config")));
-    if !has_project_mcp_config {
+    if !served_host_capabilities.contains("project", "mcp_config") {
         return mcp_dict;
     }
     let response = match host_bridge
@@ -444,6 +457,92 @@ pub(super) async fn load_host_mcp_clients(
     }
 
     mcp_dict
+}
+
+struct RuntimeHostReconciliation {
+    findings: Vec<String>,
+    fail_closed: bool,
+}
+
+fn reconcile_host_capabilities(
+    project_root: Option<&Path>,
+    served: &harn_modules::host_capabilities::HostCapabilitySurface,
+) -> RuntimeHostReconciliation {
+    let Some(project_root) = project_root else {
+        return RuntimeHostReconciliation {
+            findings: Vec::new(),
+            fail_closed: false,
+        };
+    };
+    let config =
+        match harn_modules::host_capability_config::load_host_capability_config(project_root) {
+            Ok(config) => config,
+            Err(error) => {
+                return RuntimeHostReconciliation {
+                    findings: vec![error],
+                    fail_closed: false,
+                };
+            }
+        };
+    let fail_closed = config.require_declared_operations_served;
+    let resolved = harn_modules::host_capability_config::resolve_host_capability_config(&config);
+    if let Some(error) = resolved.error {
+        return RuntimeHostReconciliation {
+            findings: vec![error],
+            fail_closed,
+        };
+    }
+    let exemptions = match harn_modules::host_capabilities::HostCapabilityExemptions::parse(
+        config
+            .runtime_installed_host_operations
+            .iter()
+            .map(String::as_str),
+    ) {
+        Ok(exemptions) => exemptions,
+        Err(error) => {
+            return RuntimeHostReconciliation {
+                findings: vec![error],
+                fail_closed,
+            };
+        }
+    };
+    let findings = resolved
+        .declared
+        .missing_from(served, &exemptions)
+        .into_iter()
+        .map(|operation| {
+            format!(
+                "connected host does not serve declared operation `{}`",
+                operation.qualified_name()
+            )
+        })
+        .collect();
+    RuntimeHostReconciliation {
+        findings,
+        fail_closed,
+    }
+}
+
+fn host_capability_surface(
+    manifest: &harn_vm::VmValue,
+) -> harn_modules::host_capabilities::HostCapabilitySurface {
+    let pairs = manifest
+        .as_dict()
+        .into_iter()
+        .flat_map(|root| root.iter())
+        .flat_map(|(capability, entry)| {
+            entry
+                .as_dict()
+                .and_then(|entry| entry.get("ops"))
+                .and_then(|operations| match operations {
+                    harn_vm::VmValue::List(operations) => Some(operations.as_ref()),
+                    _ => None,
+                })
+                .into_iter()
+                .flatten()
+                .map(move |operation| (capability.to_string(), operation.display()))
+        });
+    harn_modules::host_capabilities::HostCapabilitySurface::from_pairs(pairs)
 }
 
 #[cfg(test)]
@@ -490,6 +589,33 @@ mod tests {
         assert_eq!(
             acp_project_root(Some(&source_path), &nested, None),
             Some(project_root.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn runtime_reconciliation_honors_policy_and_exact_exemptions() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[check]
+host_capabilities.synthetic = ["served", "missing", "runtime_only"]
+runtime_installed_host_operations = ["synthetic.runtime_only"]
+require_declared_operations_served = true
+"#,
+        )
+        .unwrap();
+        let served = harn_modules::host_capabilities::HostCapabilitySurface::from_pairs([(
+            "synthetic",
+            "served",
+        )]);
+
+        let result = reconcile_host_capabilities(Some(project.path()), &served);
+
+        assert!(result.fail_closed);
+        assert_eq!(
+            result.findings,
+            ["connected host does not serve declared operation `synthetic.missing`"]
         );
     }
 

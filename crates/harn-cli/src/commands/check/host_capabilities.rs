@@ -33,13 +33,6 @@ impl HostCapabilities {
         self.operations
     }
 
-    pub(super) fn as_surface(&self) -> harn_modules::host_capabilities::HostCapabilitySurface {
-        harn_modules::host_capabilities::HostCapabilitySurface::from_pairs(
-            self.operation_pairs()
-                .map(|(capability, operation)| (capability.to_string(), operation.to_string())),
-        )
-    }
-
     /// Every declared `(capability, operation)` pair.
     pub(super) fn operation_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
         self.operations.iter().flat_map(|(capability, operations)| {
@@ -297,24 +290,6 @@ pub(super) fn parse_host_capability_value(value: &serde_json::Value) -> HostCapa
     result
 }
 
-fn parse_host_capability_document(
-    content: &str,
-    path: &str,
-    kind: &str,
-) -> Result<HostCapabilities, String> {
-    let value = serde_json::from_str::<serde_json::Value>(content)
-        .ok()
-        .or_else(|| {
-            toml::from_str::<toml::Value>(content)
-                .ok()
-                .and_then(|value| serde_json::to_value(value).ok())
-        })
-        .ok_or_else(|| {
-            format!("failed to parse {kind} host operations in `{path}` as JSON or TOML")
-        })?;
-    Ok(parse_host_capability_value(&value))
-}
-
 fn parse_operation_list(list: &[serde_json::Value], ops: &mut HashSet<String>) {
     for item in list {
         if let Some(operation) = item.as_str() {
@@ -378,6 +353,7 @@ fn parse_operation_map(
 pub(super) fn resolve_host_capabilities(config: &CheckConfig) -> ResolvedHostCapabilities {
     let mut capabilities = DEFAULT_HOST_CAPABILITIES.clone();
     let inline = config
+        .host
         .host_capabilities
         .iter()
         .map(|(capability, ops)| {
@@ -391,57 +367,55 @@ pub(super) fn resolve_host_capabilities(config: &CheckConfig) -> ResolvedHostCap
         operations: inline,
         param_discriminators: HashMap::new(),
     };
-    let mut declared = inline.clone();
     merge_host_capability_map(&mut capabilities, inline);
-    let (source_content, declaration_error) = config.host_capabilities_path.as_deref().map_or_else(
-        || (None, None),
-        |path| match std::fs::read_to_string(path) {
-            Ok(content) => match parse_host_capability_document(&content, path, "declared") {
-                Ok(parsed) => {
-                    merge_host_capability_map(&mut declared, parsed.clone());
-                    merge_host_capability_map(&mut capabilities, parsed);
-                    (Some(content), None)
-                }
-                Err(error) => (Some(content), Some(error)),
-            },
-            Err(error) => (
-                None,
-                Some(format!(
-                    "failed to read declared host operations from `{path}`: {error}"
-                )),
-            ),
-        },
-    );
-    let reconciliation = config.host_served_capabilities_path.as_deref().map(|path| {
-        let mut result = HostCapabilityReconciliation {
-            missing_operations: Vec::new(),
-            error: declaration_error.clone(),
-            served_path: path.to_string(),
-        };
-        if result.error.is_some() {
-            return result;
-        }
-        let served = std::fs::read_to_string(path)
-            .map_err(|error| {
-                format!("failed to read served host operations from `{path}`: {error}")
-            })
-            .and_then(|content| parse_host_capability_document(&content, path, "served"));
-        let exemptions = harn_modules::host_capabilities::HostCapabilityExemptions::parse(
-            config
-                .runtime_installed_host_operations
-                .iter()
-                .map(String::as_str),
-        );
-        match (served, exemptions) {
-            (Ok(served), Ok(exemptions)) => {
-                result.missing_operations = declared
-                    .as_surface()
-                    .missing_from(&served.as_surface(), &exemptions);
+    let resolved =
+        harn_modules::host_capability_config::resolve_host_capability_config(&config.host);
+    if let Some(value) = resolved.source_value.as_ref() {
+        merge_host_capability_map(&mut capabilities, parse_host_capability_value(value));
+    }
+    let declared = resolved.declared;
+    let source_content = resolved.source_content;
+    let declaration_error = resolved.error;
+    let reconciliation = config
+        .host
+        .host_served_capabilities_path
+        .as_deref()
+        .map(|path| {
+            let mut result = HostCapabilityReconciliation {
+                missing_operations: Vec::new(),
+                error: declaration_error.clone(),
+                served_path: path.to_string(),
+            };
+            if result.error.is_some() {
+                return result;
             }
-            (Err(error), _) | (_, Err(error)) => result.error = Some(error),
-        }
-        result
-    });
+            let served = std::fs::read_to_string(path)
+                .map_err(|error| {
+                    format!("failed to read served host operations from `{path}`: {error}")
+                })
+                .and_then(|content| {
+                    harn_modules::host_capabilities::parse_host_capability_document(
+                        &content, path, "served",
+                    )
+                })
+                .map(|value| {
+                    harn_modules::host_capabilities::HostCapabilitySurface::from_value(&value)
+                });
+            let exemptions = harn_modules::host_capabilities::HostCapabilityExemptions::parse(
+                config
+                    .host
+                    .runtime_installed_host_operations
+                    .iter()
+                    .map(String::as_str),
+            );
+            match (served, exemptions) {
+                (Ok(served), Ok(exemptions)) => {
+                    result.missing_operations = declared.missing_from(&served, &exemptions);
+                }
+                (Err(error), _) | (_, Err(error)) => result.error = Some(error),
+            }
+            result
+        });
     ResolvedHostCapabilities {
         capabilities,
         source_content,

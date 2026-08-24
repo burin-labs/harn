@@ -1353,12 +1353,12 @@ pub(crate) fn known_persona_capabilities(
             capabilities.insert(format!("{capability}.{operation}"));
         }
     }
-    for (capability, operations) in &manifest.check.host_capabilities {
+    for (capability, operations) in &manifest.check.host.host_capabilities {
         for operation in operations {
             capabilities.insert(format!("{capability}.{operation}"));
         }
     }
-    if let Some(path) = manifest.check.host_capabilities_path.as_deref() {
+    if let Some(path) = manifest.check.host.host_capabilities_path.as_deref() {
         let path = PathBuf::from(path);
         let path = if path.is_absolute() {
             path
