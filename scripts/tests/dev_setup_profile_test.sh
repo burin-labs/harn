@@ -54,6 +54,11 @@ if [[ "${1:-}" == "--record-receipt" ]]; then
   exit 0
 fi
 target_dir=$(sed -n 's/^[[:space:]]*target-dir = "\([^"]*\)".*/\1/p' .cargo/config.toml)
+if [[ "${1:-}" == "--print" ]]; then
+  mkdir -p "$target_dir/debug"
+  printf '#!/usr/bin/env bash\n' > "$target_dir/debug/harn"
+  chmod +x "$target_dir/debug/harn"
+fi
 printf '%s/debug/harn\n' "$target_dir"
 SH
   {
@@ -120,11 +125,13 @@ add_available_cargo_tools "$rust_repo"
 rust_cargo="$tmp_root/rust-cargo.txt"
 run_setup "$rust_repo" rust "$tmp_root/rust-output.txt" "$rust_cargo"
 
-if ! grep -Fxq 'build --locked -p harn-cli --bin harn' "$rust_cargo"; then
-  echo "rust setup did not build the canonical linked Harn CLI" >&2
+if grep -Eq '^build([[:space:]]|$)' "$rust_cargo"; then
+  echo "rust setup bypassed the canonical resolver with a separate Cargo build" >&2
+  cat "$rust_cargo" >&2
   exit 1
 fi
-if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--print' "$tmp_root/resolver-rust.txt"; then
+if [[ "$(grep -Fxc 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--print' \
+      "$tmp_root/resolver-rust.txt")" -ne 1 ]]; then
   echo "rust setup did not clear inherited resolver policy before recording freshness" >&2
   cat "$tmp_root/resolver-rust.txt" >&2
   exit 1
@@ -139,6 +146,21 @@ rust_target_dir="$tmp_root/cache-rust/harn/dev-setup/harn-target/$(basename "$tm
 rust_harn_bin="$rust_target_dir/debug/harn"
 if [[ ! -x "$rust_harn_bin" ]]; then
   echo "rust setup did not leave an executable production Harn binary" >&2
+  exit 1
+fi
+publication_resolver_record="$tmp_root/resolver-rust-publication.txt"
+publication_harn_bin="$(
+  cd "$rust_repo"
+  HARN_BIN='' HARN_BIN_NO_BUILD=1 \
+    DEV_SETUP_TEST_RESOLVER_RECORD="$publication_resolver_record" \
+    ./scripts/harn_bin.sh --print
+)"
+if [[ "$publication_harn_bin" != "$rust_harn_bin" ]]; then
+  echo "publication-shaped no-build resolution did not reuse setup's exact binary" >&2
+  exit 1
+fi
+if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=1 args=--print' "$publication_resolver_record"; then
+  echo "publication-shaped proof did not keep no-build resolution explicit" >&2
   exit 1
 fi
 rust_seed_dir="$tmp_root/cache-rust/harn/dev-setup/cargo-target-seed/fixture-toolchain"
@@ -200,10 +222,18 @@ PATH="$rust_repo/bin:/usr/bin:/bin" \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-rust" \
   HARN_DEV_TARGET_WORKTREE_PATH="$rust_repo" \
   DEV_SETUP_TEST_CARGO_RECORD="$missing_artifact_cargo" \
+  DEV_SETUP_TEST_RESOLVER_RECORD="$tmp_root/resolver-rust-missing.txt" \
   DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-rust.txt" \
   "$rust_repo/scripts/dev_setup.sh" > "$tmp_root/rust-missing-artifact-output.txt" 2>&1
-if ! grep -Fxq 'build --locked -p harn-cli --bin harn' "$missing_artifact_cargo"; then
-  echo "rust setup trusted a stamp whose Harn binary was not executable" >&2
+if { [[ -f "$missing_artifact_cargo" ]] \
+    && grep -Eq '^build([[:space:]]|$)' "$missing_artifact_cargo"; } \
+  || [[ ! -x "$rust_harn_bin" ]]; then
+  echo "rust setup did not restore a missing binary through the canonical resolver" >&2
+  exit 1
+fi
+if [[ "$(grep -Fxc 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--print' \
+      "$tmp_root/resolver-rust-missing.txt")" -ne 1 ]]; then
+  echo "rust setup did not give missing-artifact recovery to one canonical resolver call" >&2
   exit 1
 fi
 
