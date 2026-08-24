@@ -1,0 +1,41 @@
+// Run: harn test tests/agent/completion_review_light_skip_test.harn
+//
+// Catalog `completion_review` is optional. Light scrutiny may skip the LLM
+// confirmation only after a green deterministic gate and a terminal sentinel.
+import {
+  agent_completion_review_should_skip_llm,
+  agent_verify_completion_judge_cap,
+} from "std/agent/judge"
+
+pipeline test_light_scrutiny_skips_only_on_green_sentinel(harness: Harness, task) {
+  const review = {scrutiny: "light", evidence: "tests/agent/completion_review_light_skip_test.harn"}
+  const green = {
+    invoked: {deterministic: true, verify_completion_judge: false, done_judge: false},
+    verdict: {vetoed: false},
+  }
+  const payload = {stop_reason: "sentinel"}
+  assert(agent_completion_review_should_skip_llm(review, green, payload))
+  assert(!agent_completion_review_should_skip_llm({scrutiny: "standard"}, green, payload))
+  assert(!agent_completion_review_should_skip_llm(review, green, {stop_reason: "natural"}))
+  assert(
+    !agent_completion_review_should_skip_llm(
+      review,
+      {invoked: {deterministic: false}, verdict: {vetoed: false}},
+      payload,
+    ),
+  )
+  assert(
+    !agent_completion_review_should_skip_llm(
+      review,
+      {invoked: {deterministic: true}, verdict: {vetoed: true}},
+      payload,
+    ),
+  )
+}
+
+pipeline test_catalog_max_judge_calls_lower_the_default_cap(harness: Harness, task) {
+  assert_eq(agent_verify_completion_judge_cap(true), 5)
+  assert_eq(agent_verify_completion_judge_cap(true, {max_judge_calls: 2}), 2)
+  assert_eq(agent_verify_completion_judge_cap({max_invocations: 4}, {max_judge_calls: 2}), 4)
+  assert_eq(agent_verify_completion_judge_cap({max_invocations: 0}, {max_judge_calls: 2}), nil)
+}

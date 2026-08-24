@@ -21,6 +21,7 @@ pub import {
 } from "std/agent/guardrails"
 pub import {
   agent_completion_adjudicator_declared,
+  agent_completion_review,
   agent_done_judge_cap,
   agent_evaluate_completion,
   agent_has_done_judge,

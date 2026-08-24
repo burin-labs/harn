@@ -55,19 +55,10 @@ impl AcpAgentEventSink {
     /// Emit a Harn agent event as `_harn/agentEvent`. The schema is the per-kind
     /// payload defined in `HARN_AGENT_EVENT_KINDS`: top-level `sessionId` and
     /// `kind`, plus kind-specific fields directly under `params`.
-    fn emit_agent_event_ext(&self, kind: &str, session_id: &str, mut payload: serde_json::Value) {
-        let obj = payload
-            .as_object_mut()
-            .expect("emit_agent_event_ext: payload must be a JSON object");
-        obj.insert(
-            "sessionId".to_string(),
-            serde_json::Value::String(session_id.to_string()),
-        );
-        obj.insert(
-            "kind".to_string(),
-            serde_json::Value::String(kind.to_string()),
-        );
-        self.write_jsonrpc_notification(super::schema::HARN_AGENT_EVENT_METHOD, payload);
+    fn emit_agent_event_ext(&self, kind: &str, session_id: &str, payload: serde_json::Value) {
+        let params = agent_event_ext_params(kind, session_id, payload)
+            .unwrap_or_else(|error| panic!("{error}"));
+        self.write_jsonrpc_notification(super::schema::HARN_AGENT_EVENT_METHOD, params);
     }
 
     fn status_str(status: harn_vm::agent_events::ToolCallStatus) -> &'static str {
@@ -151,6 +142,35 @@ impl AcpAgentEventSink {
             "executionDurationMs": result.execution_duration_ms,
         })
     }
+}
+
+fn agent_event_ext_params(
+    kind: &str,
+    session_id: &str,
+    mut payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let obj = payload
+        .as_object_mut()
+        .ok_or_else(|| format!("agent event {kind:?} payload must be a JSON object"))?;
+    let collisions = ["kind", "sessionId"]
+        .into_iter()
+        .filter(|key| obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if !collisions.is_empty() {
+        return Err(format!(
+            "agent event {kind:?} payload uses reserved envelope key(s): {}",
+            collisions.join(", ")
+        ));
+    }
+    obj.insert(
+        "sessionId".to_string(),
+        serde_json::Value::String(session_id.to_string()),
+    );
+    obj.insert(
+        "kind".to_string(),
+        serde_json::Value::String(kind.to_string()),
+    );
+    Ok(payload)
 }
 
 fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
@@ -1282,7 +1302,7 @@ impl AgentEventSink for AcpAgentEventSink {
                         "injectionId": injection_id,
                         "toolCallId": tool_call_id,
                         "toolName": tool_name,
-                        "kind": kind,
+                        "toolKind": kind,
                         "rawInput": raw_input,
                         "status": Self::status_str(*status),
                         "rawOutput": raw_output,

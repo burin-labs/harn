@@ -47,12 +47,12 @@ fn build_tools() {
 
 /**
  * The zero-write guard reuses the payload-preserving `reserved_terminal_verify`
- * wire event and tags the mechanism with `payload.kind` (no new wire kind), so
- * forensics filters on the kind discriminator.
+ * wire event and tags the mechanism with `payload.reserveKind` (no new wire
+ * kind), so forensics can distinguish the verification path.
  */
 fn is_zero_write_event(event) -> bool {
   return event.type == "reserved_terminal_verify"
-    && (event?.payload?.kind ?? "")
+    && (event?.payload?.reserveKind ?? "")
       == "zero_write_terminal_verify"
 }
 

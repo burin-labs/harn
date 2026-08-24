@@ -23,6 +23,8 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::orchestration::AmbientExecutionScope;
+
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
@@ -72,6 +74,15 @@ struct PendingTask {
     /// later from slot-free callbacks, so the runner context must travel with
     /// the task instead of being rediscovered from ambient state.
     context: Option<AsyncBuiltinCtx>,
+    /// Ambient execution scope captured at submit time, for the same reason
+    /// `context` is: the dispatcher runs on whatever thread frees a slot, so
+    /// anything read from ambient state there belongs to an unrelated task.
+    /// A pool task is the same logical agent as its submitter — it runs that
+    /// agent's closure and re-establishes none of this itself — so it inherits
+    /// the full scope, `llm_mock` included. Without that, queued mock responses
+    /// are invisible inside `pool.submit` because the mock context is a
+    /// thread-local the worker thread does not share.
+    ambient: AmbientExecutionScope,
 }
 
 struct TaskState {
@@ -1764,6 +1775,7 @@ fn create_pending_task(
         key,
         seq,
         context: ctx.map(AsyncBuiltinCtx::child_ctx),
+        ambient: AmbientExecutionScope::capture_for_inline_subtask(),
     };
     (state, pending)
 }
@@ -2234,6 +2246,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         closure,
         state,
         context,
+        ambient,
         ..
     } = pending;
     let task_runtime_id = task_id.clone();
@@ -2326,10 +2339,12 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
                 "pool task",
                 Some(task_group_id),
             );
-            let outcome = runner
-                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
-                .await
-                .map_err(|error| error.to_string());
+            let outcome = crate::orchestration::scope_ambient(
+                ambient,
+                runner.call_closure_args(&closure, crate::vm::CallArgs::Empty),
+            )
+            .await
+            .map_err(|error| error.to_string());
             ctx.forward_output(&runner.take_output());
             outcome
         })

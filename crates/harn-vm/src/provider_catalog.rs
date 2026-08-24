@@ -480,6 +480,7 @@ fn catalog_model(
         lineage: llm_config::model_lineage_with_config(config, &model.provider, &id),
         complementary_with: model.complementary_with.clone(),
         avoid_as_reviewer_for: model.avoid_as_reviewer_for.clone(),
+        completion_review: model.completion_review.clone(),
         tier: llm_config::model_tier_with_config(config, &id),
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),

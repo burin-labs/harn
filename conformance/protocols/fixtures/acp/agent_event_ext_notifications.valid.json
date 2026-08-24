@@ -445,6 +445,7 @@
         "sessionId": "session-1",
         "status": "completed",
         "toolCallId": "hosttc-1",
+        "toolKind": "fetch",
         "toolName": "web_fetch"
       }
     },

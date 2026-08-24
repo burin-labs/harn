@@ -804,6 +804,26 @@ pub struct ModelLadderStepDef {
     pub capabilities: Vec<String>,
 }
 
+/// How much completion-judge scrutiny a model's own terminal output needs.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionReviewDef {
+    /// `standard` keeps today's LLM confirmation. `light` may skip it when
+    /// the deterministic gate already passed and `stop_reason` is `sentinel`.
+    #[serde(default = "default_completion_review_scrutiny")]
+    pub scrutiny: String,
+    /// Optional override for `COMPLETION_JUDGE_DEFAULT_CAP`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_judge_calls: Option<u32>,
+    /// Pointer to the measurement that justified this row. Required whenever
+    /// the object is present.
+    pub evidence: String,
+}
+
+fn default_completion_review_scrutiny() -> String {
+    "standard".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
@@ -938,6 +958,10 @@ pub struct ModelDef {
     /// this row should not review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub avoid_as_reviewer_for: Vec<String>,
+    /// How much completion-judge scrutiny this model's own output needs.
+    /// Absent means standard scrutiny. `evidence` is required when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_review: Option<CompletionReviewDef>,
     /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
     /// Absent for undated selectors and rows whose publish date is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]

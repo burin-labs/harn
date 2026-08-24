@@ -11,7 +11,8 @@
 //!   hard failure so feature-wiring regressions cannot pass vacuously.
 //! * Use a unique account name per run so concurrent CI invocations and
 //!   leftover entries from prior failed runs cannot cause cross-contamination.
-//! * Always clean up after themselves, even on assertion failure.
+//! * Always clean up after themselves, even on assertion failure, and VERIFY
+//!   the removal by reading the key back rather than assuming the delete took.
 //!
 //! Linux uses Secret Service too, but headless CI generally has no unlocked
 //! session collection, so live coverage stays on desktop runners.
@@ -61,7 +62,7 @@ fn as_string(value: &VmValue) -> &str {
 /// collide. The pid plus an atomic counter is sufficient: PIDs differ
 /// across concurrent processes, the counter differs across calls within
 /// a process, and every test cleans up after itself via `scopeguard_delete`
-/// (or the inline `Cleanup` RAII helper).
+/// (or the inline `Cleanup` RAII helper), both of which verify the removal.
 fn unique_account(prefix: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let pid = std::process::id();
@@ -108,24 +109,23 @@ fn os_native_round_trip_get_set_delete_list() {
     let list = reg.find("hostlib_secret_store_list").unwrap();
     let delete = reg.find("hostlib_secret_store_delete").unwrap();
 
-    // Always clean up, even if an assertion below fires.
+    // Always clean up, even if an assertion below fires — and prove it worked.
     struct Cleanup<'a> {
         delete: &'a harn_hostlib::RegisteredBuiltin,
+        get: &'a harn_hostlib::RegisteredBuiltin,
         account: String,
         keys: Vec<&'static str>,
     }
     impl Drop for Cleanup<'_> {
         fn drop(&mut self) {
             for key in &self.keys {
-                let _ = (self.delete.handler)(&dict_arg(&[
-                    ("account", vm_string(&self.account)),
-                    ("key", vm_string(key)),
-                ]));
+                verify_deleted(self.delete, self.get, &self.account, key);
             }
         }
     }
     let _cleanup = Cleanup {
         delete,
+        get,
         account: account.clone(),
         keys: vec![key1, key2],
     };
@@ -191,7 +191,7 @@ fn os_native_overwrite_replaces_existing_value() {
     let get = reg.find("hostlib_secret_store_get").unwrap();
     let delete = reg.find("hostlib_secret_store_delete").unwrap();
 
-    let _cleanup = scopeguard_delete(delete, account.clone(), key);
+    let _cleanup = scopeguard_delete(delete, get, account.clone(), key);
 
     if !native_operation_or_skip((set.handler)(&dict_arg(&[
         ("account", vm_string(&account)),
@@ -215,27 +215,82 @@ fn os_native_overwrite_replaces_existing_value() {
     assert_eq!(as_string(dict_get(&g, "value")), "second");
 }
 
-/// Lightweight RAII helper: deletes the named key on drop.
+/// Delete `key` and prove it is gone, rather than assuming it.
+///
+/// Teardown used to discard the delete result, so an item that survived looked
+/// exactly like one that was cleaned up. That is how the leftover Keychain
+/// entries in #6709 accumulated unnoticed across runs.
+///
+/// `delete` returning an error is not itself a leak — the key may already be
+/// gone — so the check is the read-back the tests themselves establish: a key
+/// that is absent reads as `value: nil`. Anything else is still in the user's
+/// Keychain.
+///
+/// A leak discovered while the test is already unwinding is reported and not
+/// re-panicked. Panicking in `Drop` during an unwind aborts the process, which
+/// would replace the real assertion failure with a far less useful one.
+fn verify_deleted(
+    delete: &harn_hostlib::RegisteredBuiltin,
+    get: &harn_hostlib::RegisteredBuiltin,
+    account: &str,
+    key: &str,
+) {
+    let delete_result = (delete.handler)(&dict_arg(&[
+        ("account", vm_string(account)),
+        ("key", vm_string(key)),
+    ]));
+    let read_back = (get.handler)(&dict_arg(&[
+        ("account", vm_string(account)),
+        ("key", vm_string(key)),
+    ]));
+    let read_back = match read_back {
+        Ok(value) => value,
+        // The store is unreachable — which is also how these tests skip. An
+        // item we cannot read is not an item we can call leaked, and failing
+        // here would turn every legitimate skip red. Say so and stop.
+        Err(error) => {
+            eprintln!(
+                "keychain teardown for {account}/{key} could not verify removal \
+                 (delete: {delete_result:?}, read-back: {error})"
+            );
+            return;
+        }
+    };
+    if matches!(dict_get(&read_back, "value"), VmValue::Nil) {
+        return;
+    }
+    let message = format!(
+        "keychain teardown left {account}/{key} behind (delete: {delete_result:?}). \
+         Remove it manually; later runs of this suite will otherwise read a stale value."
+    );
+    if std::thread::panicking() {
+        eprintln!("{message}");
+    } else {
+        panic!("{message}");
+    }
+}
+
+/// Lightweight RAII helper: deletes the named key on drop and verifies it went.
 fn scopeguard_delete<'a>(
     delete: &'a harn_hostlib::RegisteredBuiltin,
+    get: &'a harn_hostlib::RegisteredBuiltin,
     account: String,
     key: &'static str,
 ) -> impl Drop + 'a {
     struct Guard<'a> {
         delete: &'a harn_hostlib::RegisteredBuiltin,
+        get: &'a harn_hostlib::RegisteredBuiltin,
         account: String,
         key: &'static str,
     }
     impl Drop for Guard<'_> {
         fn drop(&mut self) {
-            let _ = (self.delete.handler)(&dict_arg(&[
-                ("account", vm_string(&self.account)),
-                ("key", vm_string(self.key)),
-            ]));
+            verify_deleted(self.delete, self.get, &self.account, self.key);
         }
     }
     Guard {
         delete,
+        get,
         account,
         key,
     }

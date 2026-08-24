@@ -1,3 +1,10 @@
+pub import {
+  COMPLETION_JUDGE_DEFAULT_CAP,
+  agent_completion_review,
+  agent_completion_review_should_skip_llm,
+  agent_done_judge_cap,
+  agent_verify_completion_judge_cap,
+} from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -25,15 +32,6 @@ import {
   AgentTranscriptToolLifecycleStatus,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
-
-// Conservative default cap on how many times the completion-judge LLM may
-// veto a proposed completion within one session. Each veto is a paid model
-// call plus an injected feedback message, so a weak model that never satisfies
-// the judge can otherwise burn calls up to `max_verify_attempts` (default 20)
-// with no structured signal. Callers raise it via
-// `verify_completion_judge.max_invocations`, or disable the cap entirely with
-// `0`.
-pub const COMPLETION_JUDGE_DEFAULT_CAP = 5
 
 // The completion judge is a terminal checkpoint, not a second agent loop. Give
 // it the latest effect-bearing actions and their observations without replaying
@@ -942,71 +940,6 @@ fn __judge_invoke_structured(
 }
 
 /**
- * Resolve the per-session veto cap for the completion judge. Returns nil when
- * the cap is disabled (`max_invocations` set to 0), otherwise a positive
- * integer ceiling on judge invocations.
- */
-fn __verify_completion_judge_cap(judge_cfg) -> int? {
-  const configured = if type_of(judge_cfg) == "dict" {
-    judge_cfg?.max_invocations
-  } else {
-    nil
-  }
-  const cap = configured ?? COMPLETION_JUDGE_DEFAULT_CAP
-  if cap <= 0 {
-    return nil
-  }
-  return cap
-}
-
-/**
- * Resolve the optional top-level cap for `done_judge`. Unlike
- * `done_judge.cadence.max_invocations`, this is a terminal veto-loop cap: the
- * judge may fire up to the cap, then the loop finalizes instead of silently
- * continuing until the iteration budget expires.
- */
-fn __done_judge_cap(judge_cfg) -> int? {
-  if type_of(judge_cfg) != "dict" {
-    return nil
-  }
-  const cap = judge_cfg?.max_invocations
-  if cap == nil || cap <= 0 {
-    return nil
-  }
-  return cap
-}
-
-/**
- * agent_verify_completion_judge_cap.
- *
- * Resolved completion-judge veto cap for a `verify_completion_judge` config,
- * for surfacing in run records. Returns nil when the cap is disabled.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge)
- */
-pub fn agent_verify_completion_judge_cap(judge_cfg) -> int? {
-  return __verify_completion_judge_cap(judge_cfg)
-}
-
-/**
- * agent_done_judge_cap.
- *
- * Resolved terminal veto cap for a `done_judge` config. Returns nil when the
- * cap is not configured or is disabled with 0.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_done_judge_cap(opts?.done_judge)
- */
-pub fn agent_done_judge_cap(judge_cfg) -> int? {
-  return __done_judge_cap(judge_cfg)
-}
-
-/**
  * agent_judge_config.
  *
  * Normalize a `done_judge` or `verify_completion_judge` option. Returns nil when
@@ -1194,7 +1127,7 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
 }
 
 /** Build the one ordered plan for a completion boundary. */
-fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyStage> {
+fn __completion_policy_plan(opts, stop_reason: string, review = {}) -> list<CompletionPolicyStage> {
   let stages: list<CompletionPolicyStage> = []
   if opts?.verify_completion != nil {
     stages = stages + [CompletionPolicyStage.Deterministic(opts.verify_completion)]
@@ -1208,7 +1141,7 @@ fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyS
           verification_config,
           opts?._verify_completion_judge_trigger,
           opts?._verify_completion_judge_invocations ?? 0,
-          __verify_completion_judge_cap(verification_config),
+          agent_verify_completion_judge_cap(verification_config, review),
         ),
       ]
   }
@@ -1222,7 +1155,7 @@ fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyS
           completion_config,
           opts?._done_judge_trigger,
           opts?._done_judge_invocations ?? 0,
-          __done_judge_cap(completion_config),
+          agent_done_judge_cap(completion_config),
         ),
       ]
   }
@@ -1363,6 +1296,31 @@ fn __completion_policy_run_stage(
       if max_invocations != nil && prior_invocations >= max_invocations {
         return __completion_policy_mark_cap(evaluation, slot)
       }
+      // Decide whether the LLM confirmation is needed BEFORE announcing that a
+      // judge started. A skipped judge never ran, so emitting a started event
+      // for it would put a call in the timeline that no decision ever answers.
+      match slot {
+        Verification() -> {
+          if agent_completion_review_should_skip_llm(
+            agent_completion_review(harness.llm, opts),
+            evaluation,
+            payload,
+          ) {
+            const skipped = {
+              vetoed: false,
+              verdict: "done",
+              source: "catalog",
+              judge_outcome: "skipped_light_scrutiny",
+              judge_duration_ms: 0,
+              trigger: trigger,
+            }
+            __judge_emit_decision(harness.agent, payload.session_id, iteration, skipped)
+            return evaluation + {verdict: skipped}
+          }
+        }
+        Completion() -> {
+        }
+      }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
       verdict = __completion_arbitrate_verification(verdict, evaluation) + {trigger: trigger}
@@ -1425,7 +1383,11 @@ pub fn agent_evaluate_completion(
     iteration,
     raw_text,
   )
-  const stages = __completion_policy_plan(opts, stop_reason)
+  const stages = __completion_policy_plan(
+    opts,
+    stop_reason,
+    agent_completion_review(harness.llm, opts),
+  )
   const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
   const verdict = evaluation.verdict
   // The evaluated snapshot, not the one built before any stage ran: it is the
