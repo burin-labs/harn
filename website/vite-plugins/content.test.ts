@@ -10,6 +10,7 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import { SYSTEMS, CAPABILITIES, RATINGS } from "../src/data/comparison.ts"
 import {
   DIAGNOSTIC_DETAIL_CLASS,
   DIAGNOSTIC_FIGURE_CLASS,
@@ -47,6 +48,62 @@ describe("documentation content contract", () => {
     expect(featureMatrix!.html).toContain('class="table-scroll table-scroll-wide"')
     expect(precedence!.html).toContain('class="table-scroll"')
     expect(precedence!.html).not.toContain("table-scroll-wide")
+  })
+})
+
+describe("comparison matrix", () => {
+  const page = () => docs.pages.get("feature-matrix")!
+
+  it("expands the directive into a real Markdown table, not a literal", () => {
+    expect(page().markdownSource).not.toContain("{{#comparison-matrix}}")
+    // The agent projection has to be a Markdown table, not raw HTML: it is what
+    // an LLM reads and what the search index is built from.
+    for (const system of SYSTEMS) {
+      expect(page().markdownSource).toContain(`| ${system.name} |`)
+    }
+  })
+
+  it("ships every column in the HTML so the picker is only an enhancement", () => {
+    // A reader with JavaScript off, and the prerendered page a crawler sees,
+    // must get the whole comparison — the hook narrows it, it does not build it.
+    for (const system of SYSTEMS) {
+      expect(page().html, system.id).toContain(`data-system="${system.id}"`)
+    }
+  })
+
+  it("anchors every row at a heading that exists on the page", () => {
+    // The row label links to `#<capability id>`. If a heading is renamed
+    // without renaming the id, the link dies silently — this is that guard.
+    for (const cap of CAPABILITIES) {
+      expect(
+        page().headings.some((h) => h.id === cap.id),
+        `capability "${cap.id}" has no matching heading in feature-matrix.md`,
+      ).toBe(true)
+    }
+  })
+
+  it("rates every system on every capability", () => {
+    for (const cap of CAPABILITIES) {
+      for (const system of SYSTEMS) {
+        expect(RATINGS[cap.id]?.[system.id], `${cap.id} × ${system.id}`).toBeDefined()
+      }
+    }
+  })
+
+  it("keeps rows Harn does not win, and labels exactly those", () => {
+    // A comparison published by Harn in which Harn wins every row is an
+    // advertisement. Guard the property, not the current row count.
+    const harnLoses = CAPABILITIES.filter((c) => RATINGS[c.id]?.harn?.rating !== "yes")
+    expect(harnLoses.length).toBeGreaterThanOrEqual(3)
+
+    // Bidirectional: upgrading Harn's rating without unmarking the row, or
+    // marking a row Harn actually wins, both fail here. A one-way check would
+    // let the page drift back to an all-Yes Harn column unnoticed.
+    expect(harnLoses.map((c) => c.id).sort()).toEqual(
+      CAPABILITIES.filter((c) => c.favorsOthers)
+        .map((c) => c.id)
+        .sort(),
+    )
   })
 })
 

@@ -97,8 +97,8 @@ policy. [The host boundary](./host-boundary.md) explains the full split.
   <dd>MIT or Apache-2.0, at your option</dd>
   <dt>Maturity</dt>
   <dd>
-    Pre-1.0. Surface-level breaking changes are possible between minor
-    releases. See the
+    Pre-1.0. Surface-level breaking changes are possible between minor and
+    patch releases. See the
     <a href="https://github.com/burin-labs/harn/blob/main/CHANGELOG.md">changelog</a>.
   </dd>
 </dl>

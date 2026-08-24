@@ -2,31 +2,25 @@
 
 # Feature matrix
 
-This page compares Harn with adjacent orchestration systems for teams building
-event-driven LLM systems. It focuses on platform shape, not broad product
-quality: the question is where the primitive lives and what portability,
-governance, and replay guarantees the team gets by default.
+This page is for a developer who runs agents on another system and is deciding
+whether to move them to Harn. Each row asks where a primitive lives and what the
+runtime guarantees by default, so you can find out quickly whether Harn is the
+wrong tool for your problem.
 
-Every claim about a non-Harn system below was re-verified against that system's
-current public documentation in August 2026. These platforms ship quickly, so
-treat the linked sources as authoritative where they disagree with this page,
-and please open an issue if you find a row that is unfair to your system.
+The comparison covers platform shape, not product quality. A `No` in a column
+often means the system chose a different scope, not that it fell short.
 
-## At a glance
+Every non-Harn claim was checked against that system's public documentation in
+August 2026. These systems ship quickly. Where a linked source disagrees with a
+row here, the source is right; open an issue and the row gets fixed.
 
-Select a capability to read what the rating covers. The short cells keep the
-comparison readable; the sections below hold the details and sources.
+## Capabilities
 
-| Capability | Harn | Inngest / AgentKit | Temporal | LangGraph | Cursor Automations |
-|---|---|---|---|---|---|
-| [Own orchestration language](#orchestration-language) | Yes | No | No | No | No |
-| [Runtime replay contract](#runtime-replay-contract) | Yes | Partial | Yes | Partial | No |
-| [Model-aware trigger predicates](#model-aware-trigger-predicates) | Yes | Partial | No | Partial | No |
-| [Open source and self-hostable](#open-source-and-self-hostable) | Yes | Partial | Yes | Partial | Partial |
-| [One program across environments](#one-program-across-environments) | Yes | Partial | Partial | Partial | No |
-| [Cost limits in program code](#cost-limits) | Yes | Partial | Partial | Partial | Partial |
-| [Human review and trust records](#human-review-and-trust) | Yes | Partial | Partial | Partial | Partial |
-| [Model and infrastructure choice](#model-and-infrastructure-choice) | Yes | Partial | Partial | Partial | Partial |
+Pick the systems you are comparing against. Select a capability to read what its
+rating covers, or hover a cell for the one-line reason behind it. The last six
+rows are ones Harn does not win.
+
+{{#comparison-matrix}}
 
 ## How to read the table
 
@@ -35,8 +29,9 @@ comparison readable; the sections below hold the details and sources.
 | Yes | The core platform provides an explicit contract or runtime primitive. |
 | Partial | The outcome needs application code, a paid plan, or deployment setup outside the core programming model. |
 | No | The system does not publish the capability as a platform primitive. |
+| — | Not checked against that system's documentation yet. |
 
-## Why these rows matter
+## What each row covers
 
 ### Orchestration language
 
@@ -125,6 +120,81 @@ providers support that setup.
 
 See [LLM providers](./llm/providers.md), [Provider capability matrix](./provider-matrix.md),
 and [Orchestrator secrets](./orchestrator/secrets.md).
+
+## Where Harn is the wrong choice
+
+The rows above are ones Harn was built to win. These are the ones it does not,
+and they are the fastest way to find out that another system fits your problem
+better.
+
+### Callable from an existing codebase
+
+Harn runs a program. It does not generate a typed client you import into the
+service you already have. You can reach a Harn program over MCP, ACP, or A2A,
+or embed the runtime in Rust, but that is a heavier boundary than a library
+call.
+
+BAML sits at the other end of this: its primary path is generating a typed
+client for Python, TypeScript, Go, Java, C#, or Rust so an existing codebase
+calls into it. If your problem is one call that must return a reliable object
+and you want to keep the codebase you have, that is the shorter path.
+
+See [MCP, ACP, and A2A integration](./mcp-and-acp.md) and
+[embedding in Rust](./embedding-rust.md).
+
+### Reuse your language's libraries
+
+A workflow written in Harn cannot reach for an arbitrary package from PyPI or
+npm. The stdlib and host capabilities cover the orchestration surface, and the
+host boundary covers the rest, but a framework written in your language lets you
+import anything you already depend on. If your workflow leans on a specific
+library, count that cost before moving.
+
+See [Host boundary](./host-boundary.md) and the
+[scripting cheatsheet](./scripting-cheatsheet.md).
+
+### Managed hosting from the vendor
+
+Self-hosting is the first-class path. Temporal Cloud, Inngest Cloud, and
+LangGraph Platform are mature managed products; Harn's managed path is early. If
+you want someone else to run the control plane today, they are ahead.
+
+See [Orchestrator](./orchestrator.md), [Deploy to Render](./deploy/render.md),
+[Deploy to Fly.io](./deploy/fly.md), and [Deploy to Railway](./deploy/railway.md).
+
+### Proven at production scale
+
+Harn is pre-1.0, and surface-level breaking changes are possible between minor
+and patch releases. Temporal has years of at-scale production operation behind
+it. If you are putting revenue-critical work on an orchestrator this quarter,
+that difference is the whole decision.
+
+See the [changelog](https://github.com/burin-labs/harn/blob/main/CHANGELOG.md).
+
+### Third-party integration catalog
+
+Harn ships a small connector set on purpose, and the LangChain ecosystem around
+LangGraph is the largest in this table by a wide margin. If your work is mostly
+gluing together many third-party services, you will write more of that glue
+yourself here.
+
+See the [connector catalog](./connectors/catalog.md).
+
+### Futures that outlive their scope
+
+Harn's concurrency is scoped: a spawned task does not outlive the scope that
+created it, and leaving a scope cancels what it started. That makes lifetimes
+obvious and leaks harder, and it means you cannot fire off work that keeps
+running after its caller returns.
+
+BAML rejected structured concurrency deliberately, so a future there outlives
+its creating scope with no automatic cancellation. Neither default is better.
+BAML's has no syntactic cost for functions that ignore cancellation; Harn's
+makes lifetimes explicit. Pick the one whose failure mode you would rather
+debug.
+
+See [Concurrency](./concurrency.md) and
+[Coming from elsewhere](./concepts/sota-comparison.md).
 
 ## Public references
 

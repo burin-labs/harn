@@ -190,7 +190,7 @@ async def main():
     urls = ["https://a.com", "https://b.com", "https://c.com"]
     results = await asyncio.gather(*[summarize(u) for u in urls])
     for r in results:
-        harness.stdio.log(r)
+        print(r)
 
 asyncio.run(main())
 ```
@@ -198,7 +198,7 @@ asyncio.run(main())
 **Harn**:
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const urls = ["https://a.com", "https://b.com", "https://c.com"]
 
   const results = parallel each urls { url ->
