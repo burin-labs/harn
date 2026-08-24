@@ -1183,6 +1183,12 @@ async fn execute_cases(
     let max_test_ms = options.max_test_ms;
     let max_execute_ms = options.max_execute_ms;
     let diagnose = options.diagnose;
+    // Process-backed tests share one typed host lane. Known read-only probes
+    // bypass it at command-policy resolution; unknown/write effects serialize
+    // so toolchain and workspace locks cannot starve a sibling VM while its
+    // execution safety rail is running.
+    let process_admission_gate =
+        harn_vm::stdlib::host::process_admission::ProcessAdmissionGate::new(1);
     let parallel = harn_test_runner::execute_parallel_cases(
         cases,
         harn_test_runner::ParallelRunOptions {
@@ -1202,6 +1208,9 @@ async fn execute_cases(
         move |worker, case| {
             let cwd = case_execution_cwd(case);
             let loaded_skills = skill_contexts.for_case(case);
+            let admission_scope = harn_vm::stdlib::host::process_admission::scope_process_admission(
+                Arc::clone(&process_admission_gate),
+            );
             let result = worker.0.block_on(execute_case(
                 case,
                 &cwd,
@@ -1211,6 +1220,7 @@ async fn execute_cases(
                 stdio_available,
                 operator_approval_grant.as_ref(),
             ));
+            let result = attribute_admission_wait(result, admission_scope.waited_ms());
             let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
             if diagnose {
                 result.emit_diagnose();
@@ -1222,6 +1232,17 @@ async fn execute_cases(
         cases: parallel.cases,
         infrastructure_errors: parallel.infrastructure_errors,
     }
+}
+
+fn attribute_admission_wait(mut result: TestResult, admission_ms: u64) -> TestResult {
+    if admission_ms == 0 {
+        return result;
+    }
+    if let Some(phases) = result.phases.as_mut() {
+        phases.admission_ms = phases.admission_ms.saturating_add(admission_ms);
+        phases.execute_ms = phases.execute_ms.saturating_sub(admission_ms);
+    }
+    result
 }
 
 fn enforce_case_budgets(

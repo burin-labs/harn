@@ -103,6 +103,14 @@ impl AsyncBuiltinCtx {
     pub fn interrupt_sources(&self) -> (Option<Arc<AtomicBool>>, Option<Instant>) {
         self.child.lock().interrupt_sources()
     }
+
+    /// Pause the outer host execution rail while an embedder-owned resource is
+    /// not runnable. Catchable script deadlines remain unchanged.
+    pub(crate) fn pause_execution_deadline(
+        &self,
+    ) -> Option<super::state::ExecutionDeadlinePauseGuard> {
+        self.child.lock().execution_deadline.pause()
+    }
 }
 
 /// Run an async builtin's future with `child` installed as its explicit

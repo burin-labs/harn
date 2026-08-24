@@ -81,6 +81,10 @@ async fn inline_child_inherits_held_lock_keys_but_concurrent_child_does_not() {
     // re-acquire is caught as a cross-context self-deadlock (HARN-ORC-011)
     // — even transitively through a further inline child.
     let inline = parent.child_vm_inline();
+    assert!(Arc::ptr_eq(
+        &inline.execution_deadline,
+        &parent.execution_deadline
+    ));
     assert_eq!(inline.held_permits_for("mutex", "v:test"), 1);
     assert_eq!(
         inline.child_vm_inline().held_permits_for("mutex", "v:test"),
