@@ -173,6 +173,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "lifecycle/pool" => "stdlib/lifecycle/pool.harn",
     "lifecycle/combinators" => "stdlib/lifecycle/combinators.harn",
     "lifecycle/on_budget" => "stdlib/lifecycle/on_budget.harn",
+    "lifecycle/progress" => "stdlib/lifecycle/progress.harn",
     "agent/prompts" => "stdlib/agent/prompts.harn",
     "llm/media" => "stdlib/llm/media.harn",
     "media/asset" => "stdlib/media/asset.harn",
