@@ -443,6 +443,21 @@ mod tests {
         audit_capabilities(&parse_capabilities_toml(src).expect("parses"))
     }
 
+    /// Build one self-hosted row. Assembling fixtures instead of pasting whole
+    /// TOML blocks keeps every literal here short: the long-string lint treats
+    /// a multi-row block as one 200+ char literal, and its allowlist is a
+    /// deliberately small budget that test fixtures should not spend.
+    fn row(provider: &str, native: bool, justification: &str) -> String {
+        format!(
+            "[[provider.{provider}]]\nmodel_match = \"q*\"\nnative_tools = {native}\n\
+             tool_format_justification = {justification}\n\n"
+        )
+    }
+
+    fn mirrors(provider: &str) -> String {
+        format!("{{ mirrors = {{ provider = \"{provider}\", model_match = \"q*\" }} }}")
+    }
+
     /// A synthetic native-unreliable family, so the family-consistency gate is
     /// exercised independently of whatever the shipped list happens to contain.
     const TEST_FAMILIES: &[(&str, &str)] =
@@ -783,15 +798,7 @@ tool_format_justification = { measured = "   " }
 
     #[test]
     fn assumed_self_hosted_tool_format_decision_is_clean() {
-        let report = audit_toml(
-            r#"
-[[provider.mlx]]
-model_match = "*qwen3*"
-native_tools = true
-preferred_tool_format = "native"
-tool_format_justification = { assumed = "OpenAI-compat tools wire; no probe on this runtime. Roll back to json if tool_calls come back empty." }
-"#,
-        );
+        let report = audit_toml(&row("mlx", true, r#"{ assumed = "no probe yet" }"#));
         assert!(report.is_clean(), "{}", report.render());
     }
 
@@ -818,19 +825,8 @@ tool_format_justification = { assumed = "  " }
         // The original #6829 shape: mlx cites llama.cpp in prose (now a
         // structural link) after llama.cpp flipped to text and mlx stayed native.
         let report = audit_toml(
-            r#"
-[[provider.llamacpp]]
-model_match = "*qwen3.6*"
-native_tools = false
-preferred_tool_format = "json"
-tool_format_justification = { measured = "forced-format sweep, text channel" }
-
-[[provider.mlx]]
-model_match = "*qwen3.6*"
-native_tools = true
-preferred_tool_format = "native"
-tool_format_justification = { mirrors = { provider = "llamacpp", model_match = "*qwen3.6*" } }
-"#,
+            &(row("llamacpp", false, r#"{ measured = "sweep" }"#)
+                + &row("mlx", true, &mirrors("llamacpp"))),
         );
         assert_eq!(report.footguns.len(), 1, "{}", report.render());
         assert_eq!(report.footguns[0].provider, "mlx");
@@ -844,19 +840,8 @@ tool_format_justification = { mirrors = { provider = "llamacpp", model_match = "
     #[test]
     fn matching_mirror_is_clean() {
         let report = audit_toml(
-            r#"
-[[provider.llamacpp]]
-model_match = "*qwen3.6*"
-native_tools = true
-preferred_tool_format = "native"
-tool_format_justification = { measured = "CUDA receipt" }
-
-[[provider.mlx]]
-model_match = "*qwen3.6*"
-native_tools = true
-preferred_tool_format = "native"
-tool_format_justification = { mirrors = { provider = "llamacpp", model_match = "*qwen3.6*" } }
-"#,
+            &(row("llamacpp", true, r#"{ measured = "receipt" }"#)
+                + &row("mlx", true, &mirrors("llamacpp"))),
         );
         assert!(report.is_clean(), "{}", report.render());
     }
