@@ -12,6 +12,11 @@ The boundary is deliberate:
 - This package maps the remote capability to one locked connector revision.
 - `harn-github-connector` owns GitHub transport, exact leases, worktree byte
   encoding, signed publication, tree comparison, and pull-request mutations.
+- The driver retries a leased signed-worktree publication up to three times
+  only for GitHub 5xx network envelopes. Each replay uses the same checked and
+  validated worktree plus the same base lease; refresh and validation are never
+  rerun. Authentication, schema, conflict, and other semantic failures remain
+  fail-fast.
 
 Verify the package with `harn package verify . --strict`. No GitHub credential
 is needed; the tests use exact typed HTTP fixtures.
