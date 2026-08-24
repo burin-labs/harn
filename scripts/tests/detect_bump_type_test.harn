@@ -22,27 +22,15 @@ pipeline test_parse_rejects_non_numeric(harness: Harness, task) {
 }
 
 @test
-pipeline test_detect_patch(harness: Harness, task) {
-  assert_eq(detect("0.8.4", "0.8.5"), "patch")
-  assert_eq(detect("1.0.0", "1.0.1"), "patch")
+pipeline test_detect_strips_declared_development_target(harness: Harness, task) {
+  assert_eq(detect("0.8.5-dev", "0.8.5"), "patch")
+  assert_eq(detect("1.0.0-dev", "1.0.0"), "patch")
 }
 
 @test
-pipeline test_detect_minor(harness: Harness, task) {
-  assert_eq(detect("0.8.4", "0.9.0"), "minor")
-  assert_eq(detect("1.5.7", "1.6.0"), "minor")
-}
-
-@test
-pipeline test_detect_major(harness: Harness, task) {
-  assert_eq(detect("0.8.4", "1.0.0"), "major")
-  assert_eq(detect("2.3.4", "3.0.0"), "major")
-}
-
-@test
-pipeline test_detect_rejects_skipped_versions(harness: Harness, task) {
+pipeline test_detect_rejects_mismatched_target(harness: Harness, task) {
   const r = try {
-    detect("0.8.4", "0.8.6")
+    detect("0.8.5-dev", "0.8.6")
   } catch (_) {
     "caught"
   }
@@ -50,29 +38,9 @@ pipeline test_detect_rejects_skipped_versions(harness: Harness, task) {
 }
 
 @test
-pipeline test_detect_rejects_non_zero_minor_on_major(harness: Harness, task) {
+pipeline test_detect_rejects_missing_development_suffix(harness: Harness, task) {
   const r = try {
-    detect("1.0.0", "2.1.0")
-  } catch (_) {
-    "caught"
-  }
-  assert_eq(r, "caught")
-}
-
-@test
-pipeline test_detect_rejects_non_zero_patch_on_minor(harness: Harness, task) {
-  const r = try {
-    detect("1.0.0", "1.1.5")
-  } catch (_) {
-    "caught"
-  }
-  assert_eq(r, "caught")
-}
-
-@test
-pipeline test_detect_rejects_downgrade(harness: Harness, task) {
-  const r = try {
-    detect("1.2.3", "1.2.2")
+    detect("1.0.0", "1.0.0")
   } catch (_) {
     "caught"
   }

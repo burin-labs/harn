@@ -1297,7 +1297,7 @@ fn cancelled_step(agent: HarnessAgent) {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn host_admission_wait_does_not_spend_execution_deadline() {
+    async fn host_admission_extends_execution_deadline_by_injected_clock_delta() {
         let chunk = compile_harn(
             r"
 pipeline default(harness: Harness) {
@@ -1308,19 +1308,28 @@ pipeline default(harness: Harness) {
         );
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
-        vm.register_async_builtin("wait_for_admission", |ctx, _args| async move {
-            let pause = ctx
-                .pause_execution_deadline()
-                .expect("timed execution exposes its outer deadline to inline host work");
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            drop(pause);
-            Ok(VmValue::Nil)
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let admission_clock: Arc<dyn harn_clock::Clock> = clock.clone();
+        vm.register_async_builtin("wait_for_admission", move |ctx, _args| {
+            let clock = Arc::clone(&clock);
+            let admission_clock = Arc::clone(&admission_clock);
+            async move {
+                let before = ctx.execution_deadline_offset_for_test();
+                let pause = ctx
+                    .pause_execution_deadline(admission_clock)
+                    .expect("timed execution exposes its outer deadline to inline host work");
+                clock.advance(Duration::from_millis(25));
+                drop(pause);
+                let after = ctx.execution_deadline_offset_for_test();
+                assert_eq!(after.saturating_sub(before), 25_000_000);
+                Ok(VmValue::Nil)
+            }
         });
 
         let value = vm
-            .execute_with_timeout(&chunk, Duration::from_millis(5))
+            .execute_with_timeout(&chunk, Duration::from_secs(5))
             .await
-            .expect("host admission wait is outside the execution budget");
+            .expect("host admission extends rather than spends the execution budget");
         assert!(matches!(value, VmValue::Int(42)));
     }
 

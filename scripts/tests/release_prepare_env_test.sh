@@ -24,7 +24,7 @@ mkdir -p \
   "$release_root/docs/theme"
 cat > "$release_root/Cargo.toml" <<'EOF'
 [workspace]
-version = "1.2.3"
+version = "1.2.4-dev"
 members = ["crates/example", "tree-sitter-harn"]
 exclude = ["crates/excluded"]
 resolver = "2"
@@ -212,9 +212,9 @@ FAKE_AOT_RECORD="$record_aot" \
 FAKE_CARGO_RECORD="$record_cargo" \
 FAKE_MAKE_RECORD="$record_make" \
 PATH="$fake_bin:$PATH" \
-  "$repo_root/scripts/release_gate.sh" prepare --bump minor
+  "$repo_root/scripts/release_gate.sh" prepare --bump patch
 
-if ! grep -Fxq "argv=run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.3.0" "$record_harn"; then
+if ! grep -Fxq "argv=run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.4-dev --to 1.2.4" "$record_harn"; then
   echo "release_gate prepare did not route fixture sync through the release-tools CLI" >&2
   cat "$record_harn" >&2
   exit 1
@@ -234,12 +234,12 @@ if [[ "$(grep -c "^argv=build -p harn-cli --bin harn --quiet$" "$record_cargo")"
   exit 1
 fi
 
-if ! grep -Fq 'tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=1.3.0", optional = true }' "$release_root/crates/example/Cargo.toml"; then
+if ! grep -Fq 'tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=1.2.4", optional = true }' "$release_root/crates/example/Cargo.toml"; then
   echo "release_gate prepare did not update root-level workspace member dependency versions to exact pins" >&2
   cat "$release_root/crates/example/Cargo.toml" >&2
   exit 1
 fi
-if ! grep -Fq 'harn-excluded = { path = "../excluded", version = "=1.3.0" }' "$release_root/crates/example/Cargo.toml"; then
+if ! grep -Fq 'harn-excluded = { path = "../excluded", version = "=1.2.4" }' "$release_root/crates/example/Cargo.toml"; then
   echo "release_gate prepare did not preserve excluded local crate dependency version rewrites" >&2
   cat "$release_root/crates/example/Cargo.toml" >&2
   exit 1
@@ -250,7 +250,7 @@ if ! grep -Fq 'serde = { version = "1", optional = true }' "$release_root/crates
   exit 1
 fi
 
-if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.3.0" "$record_harn"; then
+if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.2.4" "$record_harn"; then
   echo "release_gate prepare did not generate explicitly versioned protocol artifacts through HARN_BIN" >&2
   cat "$record_harn" >&2
   exit 1
@@ -260,7 +260,7 @@ if [[ "$(grep -Fxc 'target=gen-cli-aot' "$record_make")" -ne 1 ]]; then
   cat "$record_make" >&2
   exit 1
 fi
-if ! grep -A1 -Fx 'target=gen-cli-aot' "$record_make" | grep -Fxq 'version=1.3.0'; then
+if ! grep -A1 -Fx 'target=gen-cli-aot' "$record_make" | grep -Fxq 'version=1.2.4'; then
   echo "release_gate prepare did not regenerate CLI AOT artifacts after the version bump" >&2
   cat "$record_make" >&2
   exit 1
@@ -272,7 +272,7 @@ if ! grep -A3 -Fx 'target=gen-cli-aot' "$record_make" \
   exit 1
 fi
 if ! grep -A4 -Fx 'target=gen-cli-aot' "$record_make" \
-  | grep -Fxq 'HARN_CLI_AOT_ARTIFACT_VERSION=1.3.0'; then
+  | grep -Fxq 'HARN_CLI_AOT_ARTIFACT_VERSION=1.2.4'; then
   echo "release_gate prepare did not pass the bumped AOT artifact version explicitly" >&2
   cat "$record_make" >&2
   exit 1
@@ -326,7 +326,7 @@ members = ["crates/example"]
 resolver = "2"
 
 [workspace.package]
-version = "1.2.3"
+version = "1.2.4-dev"
 EOF
 cat > "$real_release_root/crates/example/Cargo.toml" <<'EOF'
 [package]
@@ -412,7 +412,7 @@ BIN
     if [[ " $* " == *" --preid rc "* ]]; then
       next_version="1.2.4-rc.0"
     fi
-    sed "s/version = \"1.2.3\"/version = \"$next_version\"/" Cargo.toml > Cargo.toml.next
+    sed "s/version = \"1.2.4-dev\"/version = \"$next_version\"/" Cargo.toml > Cargo.toml.next
     mv Cargo.toml.next Cargo.toml
     printf '# touched\n' >> Cargo.lock
     ;;
@@ -478,7 +478,7 @@ if ! grep -Fxq "prepare HARN_BIN=__unset__" "$record_ship"; then
 fi
 
 for target in sync-language-spec gen-highlight; do
-  expected_record=$(printf 'target=%s\nversion=1.2.3' "$target")
+  expected_record=$(printf 'target=%s\nversion=1.2.4-dev' "$target")
   if ! grep -Fq "$expected_record" "$record_make"; then
     echo "release_ship did not run $target against the pre-bump source version" >&2
     cat "$record_make" >&2
@@ -543,16 +543,12 @@ if ! cmp -s "$full_candidate_diff" "$materialized_candidate_diff"; then
   exit 1
 fi
 
-# Prerelease intent must reach the owning metadata/gate boundary as two typed
-# values: bump kind plus identifier. The full prerelease string remains the
-# derived release identity used by changelog validation.
+# The declared development target is the only releasable identity. A caller
+# cannot reinterpret it as a different prerelease after audit.
 git -C "$release_root" reset --hard --quiet HEAD
-sed 's/## v1.2.4/## v1.2.4-rc.0/' "$release_root/CHANGELOG.md" \
-  > "$release_root/CHANGELOG.md.next"
-mv "$release_root/CHANGELOG.md.next" "$release_root/CHANGELOG.md"
 : > "$record_make"
 : > "$record_ship"
-env -u HARN_BIN \
+if env -u HARN_BIN \
 HARN_RELEASE_ROOT="$release_root" \
 HARN_RELEASE_HARNESS=1 \
 HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
@@ -562,10 +558,18 @@ FAKE_MAKE_RECORD="$record_make" \
 PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_ship.sh" \
     --prepare --materialize-candidate --bump prepatch --preid rc \
-    > "$tmp_root/ship-prerelease.txt" 2>&1
-if ! grep -Fxq "gate=prepare --bump prepatch --preid rc --allow-dirty" "$record_ship"; then
-  echo "release_ship did not preserve prerelease bump kind and identifier" >&2
-  cat "$record_ship" "$tmp_root/ship-prerelease.txt" >&2
+    > "$tmp_root/ship-prerelease.txt" 2>&1; then
+  echo "release_ship reinterpreted the declared development target" >&2
+  exit 1
+fi
+if ! grep -Fq "stable releases strip the declared X.Y.Z-dev target" \
+  "$tmp_root/ship-prerelease.txt"; then
+  echo "release_ship did not explain the development-target invariant" >&2
+  cat "$tmp_root/ship-prerelease.txt" >&2
+  exit 1
+fi
+if [[ -s "$record_make" || -s "$record_ship" ]]; then
+  echo "release_ship started work before rejecting target reinterpretation" >&2
   exit 1
 fi
 
@@ -717,7 +721,7 @@ if ! cmp -s "$baseline_status" "$after_status"; then
   diff -u "$baseline_status" "$after_status" >&2 || true
   exit 1
 fi
-if ! grep -Fq 'version = "1.2.3"' "$release_root/Cargo.toml"; then
+if ! grep -Fq 'version = "1.2.4-dev"' "$release_root/Cargo.toml"; then
   echo "failed post-generation audit left the version bump in place" >&2
   exit 1
 fi

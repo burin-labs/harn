@@ -11,7 +11,7 @@ pub(crate) struct ExecutionDeadlineState {
     /// Nanoseconds from `origin`, plus one so zero remains the inactive value.
     deadline_offset: AtomicU64,
     pause_depth: AtomicU64,
-    pause_started: parking_lot::Mutex<Option<Instant>>,
+    pause_window: parking_lot::Mutex<Option<PauseWindow>>,
     changed: tokio::sync::Notify,
     /// Set when the host drops a polled execution future. Arbitrary async
     /// cancellation cannot unwind interpreter state, so subsequent execution
@@ -25,7 +25,7 @@ impl ExecutionDeadlineState {
             origin,
             deadline_offset: AtomicU64::new(Self::encode(origin, deadline)),
             pause_depth: AtomicU64::new(0),
-            pause_started: parking_lot::Mutex::new(None),
+            pause_window: parking_lot::Mutex::new(None),
             changed: tokio::sync::Notify::new(),
             abandoned: AtomicBool::new(false),
         })
@@ -62,20 +62,31 @@ impl ExecutionDeadlineState {
             .then(|| self.origin + std::time::Duration::from_nanos(encoded.saturating_sub(1)))
     }
 
-    pub(crate) fn pause(self: &Arc<Self>) -> Option<ExecutionDeadlinePauseGuard> {
+    #[cfg(test)]
+    pub(crate) fn encoded_offset_for_test(&self) -> u64 {
+        self.deadline_offset.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn pause(
+        self: &Arc<Self>,
+        clock: Arc<dyn harn_clock::Clock>,
+    ) -> Option<ExecutionDeadlinePauseGuard> {
         if !self.is_active() {
             return None;
         }
-        let mut started = self.pause_started.lock();
+        let mut window = self.pause_window.lock();
         let previous = self.pause_depth.fetch_add(1, Ordering::AcqRel);
         if previous == 0 {
-            *started = Some(Instant::now());
+            *window = Some(PauseWindow {
+                started_ms: clock.monotonic_ms(),
+                clock,
+            });
             // `notify_one` retains a permit if the interpreter's select has
             // not polled its deadline branch yet; `notify_waiters` would lose
             // that edge and let the stale pre-pause timer fire.
             self.changed.notify_one();
         }
-        drop(started);
+        drop(window);
         Some(ExecutionDeadlinePauseGuard {
             state: Arc::clone(self),
         })
@@ -115,14 +126,29 @@ pub(crate) struct ExecutionDeadlinePauseGuard {
     state: Arc<ExecutionDeadlineState>,
 }
 
+struct PauseWindow {
+    started_ms: i64,
+    clock: Arc<dyn harn_clock::Clock>,
+}
+
 impl Drop for ExecutionDeadlinePauseGuard {
     fn drop(&mut self) {
-        let mut started = self.state.pause_started.lock();
+        let mut window = self.state.pause_window.lock();
         let depth = self.state.pause_depth.load(Ordering::Acquire);
         debug_assert!(depth > 0, "execution deadline pause depth underflow");
         if depth == 1 {
-            let paused_for = started.take().map(|at| at.elapsed()).unwrap_or_default();
-            let add = u64::try_from(paused_for.as_nanos()).unwrap_or(u64::MAX);
+            let paused_for_ms = window
+                .take()
+                .map(|window| {
+                    window
+                        .clock
+                        .monotonic_ms()
+                        .saturating_sub(window.started_ms)
+                })
+                .unwrap_or_default();
+            let add = u64::try_from(paused_for_ms)
+                .unwrap_or_default()
+                .saturating_mul(1_000_000);
             let _ = self.state.deadline_offset.fetch_update(
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -130,7 +156,7 @@ impl Drop for ExecutionDeadlinePauseGuard {
             );
         }
         self.state.pause_depth.fetch_sub(1, Ordering::AcqRel);
-        drop(started);
+        drop(window);
         self.state.changed.notify_one();
     }
 }
@@ -157,28 +183,5 @@ impl Drop for ExecutionDeadlineGuard {
         if !self.completed {
             self.state.abandoned.store(true, Ordering::Release);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn host_admission_pause_defers_only_the_outer_execution_deadline() {
-        let now = Instant::now();
-        let state = ExecutionDeadlineState::new(now, Some(now + Duration::from_secs(1)));
-        let before = state.current().expect("deadline is active");
-
-        let pause = state.pause().expect("active deadline can pause");
-        assert_eq!(state.current(), None, "paused host work is not runnable");
-        // Drive the clock-independent contract directly: the guard owns
-        // elapsed admission accounting without scheduler sleeps in this test.
-        *state.pause_started.lock() = Some(Instant::now() - Duration::from_millis(25));
-        drop(pause);
-
-        let after = state.current().expect("deadline resumes after admission");
-        assert!(after.duration_since(before) >= Duration::from_millis(25));
     }
 }

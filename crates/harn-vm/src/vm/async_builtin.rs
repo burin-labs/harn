@@ -108,8 +108,17 @@ impl AsyncBuiltinCtx {
     /// not runnable. Catchable script deadlines remain unchanged.
     pub(crate) fn pause_execution_deadline(
         &self,
+        clock: Arc<dyn harn_clock::Clock>,
     ) -> Option<super::state::ExecutionDeadlinePauseGuard> {
-        self.child.lock().execution_deadline.pause()
+        self.child.lock().execution_deadline.pause(clock)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_deadline_offset_for_test(&self) -> u64 {
+        self.child
+            .lock()
+            .execution_deadline
+            .encoded_offset_for_test()
     }
 }
 

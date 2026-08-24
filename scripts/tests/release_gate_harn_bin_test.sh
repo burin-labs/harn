@@ -45,9 +45,9 @@ case "$command" in
   current)
     echo "$current"
     ;;
-  next)
-    [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
-    echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+  release-target)
+    [[ "$current" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-dev$ ]]
+    echo "${BASH_REMATCH[1]}"
     ;;
   apply)
     tmp_manifest="$root/Cargo.toml.tmp"
@@ -283,7 +283,7 @@ mkdir -p \
   "$audit_root/spec"
 cat > "$audit_root/Cargo.toml" <<'EOF'
 [workspace]
-version = "1.2.3"
+version = "1.2.4-dev"
 members = []
 EOF
 printf 'OAuth MCP trust boundary mutation session worker_update\n' > "$audit_root/README.md"

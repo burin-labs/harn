@@ -1188,7 +1188,10 @@ async fn execute_cases(
     // so toolchain and workspace locks cannot starve a sibling VM while its
     // execution safety rail is running.
     let process_admission_gate =
-        harn_vm::stdlib::host::process_admission::ProcessAdmissionGate::new(1);
+        harn_vm::stdlib::host::process_admission::ProcessAdmissionGate::new(
+            1,
+            harn_clock::RealClock::arc(),
+        );
     let parallel = harn_test_runner::execute_parallel_cases(
         cases,
         harn_test_runner::ParallelRunOptions {

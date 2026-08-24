@@ -13,6 +13,7 @@ import {
   has_duplicates,
   is_bump_ahead,
   is_descending,
+  is_development_after_release,
   protocol_artifact_version,
   success_message,
 } from "../verify_release_metadata.harn"
@@ -193,6 +194,14 @@ pipeline test_is_bump_ahead_rejects(harness: Harness, task) {
 }
 
 @test
+pipeline test_development_after_release_is_exact_next_patch(harness: Harness, task) {
+  assert_eq(is_development_after_release("0.8.72-dev", "0.8.71"), true)
+  assert_eq(is_development_after_release("0.8.73-dev", "0.8.71"), false)
+  assert_eq(is_development_after_release("0.9.0-dev", "0.8.71"), false)
+  assert_eq(is_development_after_release("0.8.72-rc.1", "0.8.71"), false)
+}
+
+@test
 pipeline test_has_duplicates(harness: Harness, task) {
   assert_eq(has_duplicates(["1.0.1", "1.0.0"]), false)
   assert_eq(has_duplicates(["1.0.1", "1.0.1"]), true)
@@ -216,6 +225,12 @@ pipeline test_check_metadata_ok(harness: Harness, task) {
 pipeline test_check_metadata_bump_ahead(harness: Harness, task) {
   const changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
   assert_eq(check_metadata(CARGO, changelog), "0.8.72")
+}
+
+@test
+pipeline test_check_metadata_accepts_post_release_development_state(harness: Harness, task) {
+  const cargo = replace(CARGO, "0.8.71", "0.8.72-dev")
+  assert_eq(check_metadata(cargo, CHANGELOG), "0.8.71")
 }
 
 @test
@@ -309,5 +324,9 @@ pipeline test_success_message(harness: Harness, task) {
   assert_eq(
     success_message("0.8.71", "0.8.72"),
     "verified release metadata for v0.8.72 (Cargo.toml still at v0.8.71; bump pending)",
+  )
+  assert_eq(
+    success_message("0.8.72-dev", "0.8.71"),
+    "verified development metadata for v0.8.72-dev (latest release v0.8.71)",
   )
 }

@@ -61,9 +61,9 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh --prepare --bump KIND [--preid ID] [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
-  ./scripts/release_ship.sh --prepare --materialize-candidate --bump KIND [--preid ID]                  # release_harn.harn only
-  ./scripts/release_ship.sh --bump KIND [--preid ID] [--skip-dry-run] [--base main]   # recovery
+  ./scripts/release_ship.sh --prepare --bump patch [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
+  ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch                  # release_harn.harn only
+  ./scripts/release_ship.sh --bump patch [--skip-dry-run] [--base main]   # recovery
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
 Merge-queue-safe release sequence for a prepared Harn release.
@@ -254,11 +254,11 @@ stage_version_bump_manifests() {
 next_version() {
   local bump="$1"
   local preid="${2:-}"
-  if [[ -n "$preid" ]]; then
-    release_metadata next --bump "$bump" --preid "$preid"
-  else
-    release_metadata next --bump "$bump"
+  if [[ "$bump" != "patch" || -n "$preid" ]]; then
+    echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid" >&2
+    return 1
   fi
+  release_metadata release-target
 }
 
 export_warmed_harn_bin() {
@@ -865,27 +865,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$BUMP" in
-  patch|minor|major|premajor|preminor|prepatch|prerelease) ;;
-  *)
-    echo "error: --bump must be patch, minor, major, premajor, preminor, prepatch, or prerelease"
-    exit 1
-    ;;
-esac
-case "$BUMP" in
-  premajor|preminor|prepatch|prerelease)
-    if [[ -z "$PREID" ]]; then
-      echo "error: --preid is required for prerelease bumps"
-      exit 1
-    fi
-    ;;
-  *)
-    if [[ -n "$PREID" ]]; then
-      echo "error: --preid is only valid for prerelease bumps"
-      exit 1
-    fi
-    ;;
-esac
+if [[ "$BUMP" != "patch" || -n "$PREID" ]]; then
+  echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid"
+  exit 1
+fi
 
 if [[ -n "$AUDIT_RECEIPT" && "$MODE" != "prepare-here" ]]; then
   echo "error: --audit-receipt is only valid with harness-driven --prepare" >&2

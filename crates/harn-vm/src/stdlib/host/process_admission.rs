@@ -10,8 +10,8 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
+use harn_clock::Clock;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::value::VmError;
@@ -25,12 +25,14 @@ pub(super) fn process_requires_admission(command_policy_context: &serde_json::Va
 #[derive(Debug)]
 pub struct ProcessAdmissionGate {
     semaphore: Arc<Semaphore>,
+    clock: Arc<dyn Clock>,
 }
 
 impl ProcessAdmissionGate {
-    pub fn new(max_concurrent: usize) -> Arc<Self> {
+    pub fn new(max_concurrent: usize, clock: Arc<dyn Clock>) -> Arc<Self> {
         Arc::new(Self {
             semaphore: Arc::new(Semaphore::new(max_concurrent.max(1))),
+            clock,
         })
     }
 }
@@ -38,7 +40,7 @@ impl ProcessAdmissionGate {
 #[derive(Clone)]
 struct ProcessAdmissionContext {
     gate: Arc<ProcessAdmissionGate>,
-    waited_ns: Arc<AtomicU64>,
+    waited_ms: Arc<AtomicU64>,
 }
 
 thread_local! {
@@ -48,26 +50,26 @@ thread_local! {
 
 pub struct ProcessAdmissionScope {
     previous: Option<ProcessAdmissionContext>,
-    waited_ns: Arc<AtomicU64>,
+    waited_ms: Arc<AtomicU64>,
 }
 
 /// Install a case-local receipt over a run-shared process gate.
 pub fn scope_process_admission(gate: Arc<ProcessAdmissionGate>) -> ProcessAdmissionScope {
-    let waited_ns = Arc::new(AtomicU64::new(0));
+    let waited_ms = Arc::new(AtomicU64::new(0));
     let current = ProcessAdmissionContext {
         gate,
-        waited_ns: Arc::clone(&waited_ns),
+        waited_ms: Arc::clone(&waited_ms),
     };
     let previous = PROCESS_ADMISSION_CONTEXT.with(|slot| slot.replace(Some(current)));
     ProcessAdmissionScope {
         previous,
-        waited_ns,
+        waited_ms,
     }
 }
 
 impl ProcessAdmissionScope {
     pub fn waited_ms(&self) -> u64 {
-        self.waited_ns.load(Ordering::Acquire) / 1_000_000
+        self.waited_ms.load(Ordering::Acquire)
     }
 }
 
@@ -86,14 +88,16 @@ pub(super) async fn acquire_process_admission(
     else {
         return Ok(None);
     };
-    let deadline_pause = ctx.and_then(AsyncBuiltinCtx::pause_execution_deadline);
-    let started = Instant::now();
+    let clock = Arc::clone(&admission.gate.clock);
+    let deadline_pause = ctx.and_then(|ctx| ctx.pause_execution_deadline(Arc::clone(&clock)));
+    let started_ms = clock.monotonic_ms();
     let permit = Arc::clone(&admission.gate.semaphore)
         .acquire_owned()
         .await
         .map_err(|_| VmError::Runtime("process admission gate closed".to_string()))?;
-    admission.waited_ns.fetch_add(
-        u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+    let waited_ms = clock.monotonic_ms().saturating_sub(started_ms);
+    admission.waited_ms.fetch_add(
+        u64::try_from(waited_ms).unwrap_or_default(),
         Ordering::AcqRel,
     );
     drop(deadline_pause);
@@ -102,7 +106,8 @@ pub(super) async fn acquire_process_admission(
 
 #[cfg(test)]
 mod tests {
-    use super::process_requires_admission;
+    use super::*;
+    use std::time::Duration;
 
     #[test]
     fn resolved_effect_is_the_single_admission_classifier() {
@@ -121,5 +126,25 @@ mod tests {
             "stdout",
             "source.rs"
         ])));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn admission_receipt_uses_the_injected_monotonic_clock() {
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let gate_clock: Arc<dyn Clock> = clock.clone();
+        let scope = scope_process_admission(ProcessAdmissionGate::new(1, gate_clock));
+        let first = acquire_process_admission(None)
+            .await
+            .expect("gate is open")
+            .expect("scoped admission returns a permit");
+        let second = acquire_process_admission(None);
+        tokio::pin!(second);
+        assert!(futures::poll!(&mut second).is_pending());
+
+        clock.advance(Duration::from_millis(35));
+        drop(first);
+        let _second = second.await.expect("gate remains open");
+
+        assert_eq!(scope.waited_ms(), 35);
     }
 }
