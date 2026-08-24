@@ -448,7 +448,7 @@ impl crate::vm::Vm {
                 if let Some(cwd) = cwd {
                     wire.put_str("cwd", cwd);
                 }
-                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
                 return crate::stdlib::host::dispatch_host_operation_with_ctx(
                     Some(&ctx),
                     "process",
@@ -487,7 +487,7 @@ impl crate::vm::Vm {
                 if let Some(cwd) = cwd {
                     wire.put_str("cwd", cwd);
                 }
-                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
                 return crate::stdlib::host::dispatch_host_operation_with_ctx(
                     Some(&ctx),
                     "process",
@@ -542,7 +542,7 @@ impl crate::vm::Vm {
                             .collect(),
                     )),
                 );
-                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                let ctx = crate::vm::AsyncBuiltinCtx::from_inline_parent(self);
                 crate::stdlib::host::dispatch_host_operation_with_ctx(
                     Some(&ctx),
                     "process",

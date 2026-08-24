@@ -99,6 +99,13 @@ impl HostCapabilities {
 pub(super) struct ResolvedHostCapabilities {
     pub(super) capabilities: HostCapabilities,
     pub(super) source_content: Option<String>,
+    pub(super) reconciliation: Option<HostCapabilityReconciliation>,
+}
+
+pub(super) struct HostCapabilityReconciliation {
+    pub(super) missing_operations: Vec<harn_modules::host_capabilities::HostCapabilityOperation>,
+    pub(super) error: Option<String>,
+    pub(super) served_path: String,
 }
 
 static DEFAULT_HOST_CAPABILITIES: LazyLock<HostCapabilities> =
@@ -346,6 +353,7 @@ fn parse_operation_map(
 pub(super) fn resolve_host_capabilities(config: &CheckConfig) -> ResolvedHostCapabilities {
     let mut capabilities = DEFAULT_HOST_CAPABILITIES.clone();
     let inline = config
+        .host
         .host_capabilities
         .iter()
         .map(|(capability, ops)| {
@@ -360,25 +368,58 @@ pub(super) fn resolve_host_capabilities(config: &CheckConfig) -> ResolvedHostCap
         param_discriminators: HashMap::new(),
     };
     merge_host_capability_map(&mut capabilities, inline);
-    let source_content = config
-        .host_capabilities_path
-        .as_deref()
-        .and_then(|path| std::fs::read_to_string(path).ok());
-    if let Some(content) = source_content.as_deref() {
-        let parsed = serde_json::from_str::<serde_json::Value>(content)
-            .ok()
-            .or_else(|| {
-                toml::from_str::<toml::Value>(content)
-                    .ok()
-                    .and_then(|value| serde_json::to_value(value).ok())
-            });
-        if let Some(value) = parsed {
-            merge_host_capability_map(&mut capabilities, parse_host_capability_value(&value));
-        }
+    let resolved =
+        harn_modules::host_capability_config::resolve_host_capability_config(&config.host);
+    if let Some(value) = resolved.source_value.as_ref() {
+        merge_host_capability_map(&mut capabilities, parse_host_capability_value(value));
     }
+    let declared = resolved.declared;
+    let source_content = resolved.source_content;
+    let declaration_error = resolved.error;
+    let reconciliation = config
+        .host
+        .host_served_capabilities_path
+        .as_deref()
+        .map(|path| {
+            let mut result = HostCapabilityReconciliation {
+                missing_operations: Vec::new(),
+                error: declaration_error.clone(),
+                served_path: path.to_string(),
+            };
+            if result.error.is_some() {
+                return result;
+            }
+            let served = std::fs::read_to_string(path)
+                .map_err(|error| {
+                    format!("failed to read served host operations from `{path}`: {error}")
+                })
+                .and_then(|content| {
+                    harn_modules::host_capabilities::parse_host_capability_document(
+                        &content, path, "served",
+                    )
+                })
+                .map(|value| {
+                    harn_modules::host_capabilities::HostCapabilitySurface::from_value(&value)
+                });
+            let exemptions = harn_modules::host_capabilities::HostCapabilityExemptions::parse(
+                config
+                    .host
+                    .runtime_installed_host_operations
+                    .iter()
+                    .map(String::as_str),
+            );
+            match (served, exemptions) {
+                (Ok(served), Ok(exemptions)) => {
+                    result.missing_operations = declared.missing_from(&served, &exemptions);
+                }
+                (Err(error), _) | (_, Err(error)) => result.error = Some(error),
+            }
+            result
+        });
     ResolvedHostCapabilities {
         capabilities,
         source_content,
+        reconciliation,
     }
 }
 

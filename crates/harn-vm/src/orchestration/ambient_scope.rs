@@ -54,6 +54,9 @@ use crate::llm_config::{
 };
 use crate::run_events::{swap_run_event_sink, RunEventSink};
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
+use crate::stdlib::host::process_admission::{
+    swap_process_admission_context, ProcessAdmissionContext,
+};
 use crate::stdlib::process::{
     swap_session_environment, swap_source_dir, swap_thread_execution_context,
 };
@@ -110,6 +113,10 @@ pub(crate) struct AmbientExecutionScope {
     /// subprocess, so each fan-out child must hold its own copy. `None` means
     /// execution is outside a launched session.
     session_environment: Option<crate::security::SessionEnvironment>,
+    /// One test case's process-admission gate and union receipt. All inline and
+    /// delegated VM work shares this case-local owner without leaking it to a
+    /// concurrently-polled sibling case.
+    process_admission: Option<ProcessAdmissionContext>,
     /// Host capability bridge installed for the current agent loop. Fan-out
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
@@ -203,6 +210,7 @@ impl AmbientExecutionScope {
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
+            process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
@@ -266,6 +274,7 @@ impl AmbientExecutionScope {
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
+            process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
@@ -322,6 +331,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.source_dir, swap_source_dir);
         swap_slot(&mut self.mutation_session, swap_mutation_session);
         swap_slot(&mut self.session_environment, swap_session_environment);
+        swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
@@ -534,6 +544,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // Session environment policy (isolated/granted grants): read at subprocess
     // spawn across a worker's awaits, so each fan-out child holds its own copy.
     ("SESSION_ENVIRONMENT_CONTEXT", AmbientScoping::Captured),
+    // A case-local admission gate and receipt follows every subprocess spawned
+    // by that case, including inline and delegated VM work.
+    ("PROCESS_ADMISSION_CONTEXT", AmbientScoping::Captured),
     // Host capability bridge: fan-out workers need the same host_call routing
     // as the parent agent loop, even when process cwd differs from project root.
     ("CURRENT_HOST_BRIDGE", AmbientScoping::Captured),

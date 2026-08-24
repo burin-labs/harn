@@ -1,0 +1,93 @@
+name: Release contract
+
+# Release semantics have two enforcers: this repository's release scripts and
+# workflows, and the release orchestrator that drives cuts. When they disagree,
+# nothing in either repository's test suite notices -- the orchestrator's own
+# checks run against fixed version fixtures, and this repository never
+# evaluates the orchestrator's gates at all. The disagreement therefore
+# surfaces for the first time at a live release cut, which is the most
+# expensive place to learn about it.
+#
+# This job evaluates the orchestrator's release-semantics gates against this
+# repository's REAL current version, tag, and changelog, on every change that
+# could move those semantics. It is read-only: it fetches refs, reads two files
+# out of `origin/<base>`, and evaluates pure decision functions. It performs no
+# writes, needs no credentials, and never dispatches a release.
+#
+# A red job here means a change in this repository would be refused by the
+# orchestrator at the next cut. Fix the disagreement before releasing.
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "CHANGELOG.md"
+      - "scripts/release_*"
+      - "scripts/publish*"
+      - "scripts/prepare_development_version.sh"
+      - "scripts/verify_release_*"
+      - "scripts/lib/release_version.sh"
+      - ".github/workflows/publish-release.yml"
+      - ".github/workflows/build-release-binaries.yml"
+      - ".github/workflows/bump-release.yml"
+      - ".github/workflows/release-contract-check.yml"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The release orchestrator, pinned by commit. Moving this pin is a deliberate
+  # change to which release semantics this repository is checked against.
+  ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
+  ORCHESTRATOR_REF: d69c29d084421771c1247e3300808644ff08bc2b
+
+jobs:
+  contract:
+    name: Release contract holds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the pinned release orchestrator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.ORCHESTRATOR_REPOSITORY }}
+          ref: ${{ env.ORCHESTRATOR_REF }}
+          path: .release-orchestrator
+          persist-credentials: false
+
+      # The orchestrator's modules are written against the Harn runtime it
+      # pins, not the one this repository is currently building.
+      - name: Install the orchestrator's pinned Harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .release-orchestrator/.harn-version
+          token: ${{ github.token }}
+
+      # The check reads `origin/<base>:Cargo.toml` and
+      # `origin/<base>:CHANGELOG.md`. A PR checkout does not necessarily carry
+      # the base branch as a local ref.
+      - name: Fetch the base branch and release tags
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Evaluate the release contract
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: |
+          harn run --no-sandbox \
+            .release-orchestrator/check_release_contract.harn \
+            -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}"

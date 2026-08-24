@@ -35,6 +35,16 @@ impl AsyncBuiltinCtx {
         Self::new(vm)
     }
 
+    /// Construct a context for host work that the current VM awaits inline.
+    ///
+    /// The parent is parked until the host future completes, so the context
+    /// must share its execution deadline and inherited lock set. Using a plain
+    /// `child_vm()` here would fork the outer deadline: admission could pause
+    /// the fork while the real caller still timed out.
+    pub(crate) fn from_inline_parent(parent: &Vm) -> Self {
+        Self::new(parent.child_vm_inline())
+    }
+
     /// Construct a standalone ctx around `vm` for unit tests that drive an async
     /// builtin handler directly (outside the dispatch loop). Production code
     /// receives its ctx from the dispatch path, never this.
@@ -102,6 +112,23 @@ impl AsyncBuiltinCtx {
     /// that must move its blocking work to Tokio's blocking pool.
     pub fn interrupt_sources(&self) -> (Option<Arc<AtomicBool>>, Option<Instant>) {
         self.child.lock().interrupt_sources()
+    }
+
+    /// Pause the outer host execution rail while an embedder-owned resource is
+    /// not runnable. Catchable script deadlines remain unchanged.
+    pub(crate) fn pause_execution_deadline(
+        &self,
+        clock: Arc<dyn harn_clock::Clock>,
+    ) -> Option<super::state::ExecutionDeadlinePauseGuard> {
+        self.child.lock().execution_deadline.pause(clock)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_deadline_offset_for_test(&self) -> u64 {
+        self.child
+            .lock()
+            .execution_deadline
+            .encoded_offset_for_test()
     }
 }
 

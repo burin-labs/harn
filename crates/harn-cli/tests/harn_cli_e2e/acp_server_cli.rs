@@ -76,11 +76,25 @@ fn send_request(
     client: &mut StdioJsonRpcClient,
     request: JsonValue,
 ) -> (Vec<JsonValue>, JsonValue) {
+    let (notifications, response, _) =
+        send_request_with_host_capabilities(client, request, json!({}));
+    (notifications, response)
+}
+
+fn send_request_with_host_capabilities(
+    client: &mut StdioJsonRpcClient,
+    request: JsonValue,
+    capabilities: JsonValue,
+) -> (Vec<JsonValue>, JsonValue, usize) {
+    let mut requests = 0;
     let exchange = client.exchange(request, |method| match method {
-        "host/capabilities" => json!({}),
+        "host/capabilities" => {
+            requests += 1;
+            capabilities.clone()
+        }
         other => panic!("unexpected ACP server request: {other}"),
     });
-    (exchange.notifications, exchange.response)
+    (exchange.notifications, exchange.response, requests)
 }
 
 fn select_code_mode(client: &mut StdioJsonRpcClient, session_id: &str) {
@@ -117,6 +131,97 @@ fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonV
             serde_json::from_str(text.trim()).ok()
         })
         .unwrap_or_else(|| panic!("no prompt summary found for session {session_id}"))
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn acp_reconciles_declared_operations_with_one_host_handshake() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "agent.harn",
+        "pub pipeline main(harness: Harness) { harness.stdio.println(\"complete\") }\n",
+    );
+    let write_manifest = |fail_closed: bool| {
+        write_file(
+            temp.path(),
+            "harn.toml",
+            &format!(
+                r#"
+[check]
+host_capabilities.synthetic = ["served", "missing", "runtime_only"]
+runtime_installed_host_operations = ["synthetic.runtime_only"]
+require_declared_operations_served = {fail_closed}
+"#,
+            ),
+        );
+    };
+    write_manifest(false);
+    let mut client = spawn_acp(&temp, "agent.harn");
+    let (_, init) = send_request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    assert!(init["error"].is_null());
+    let (_, created) = send_request(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0",
+            "id":2,
+            "method":"session/new",
+            "params":{"cwd":temp.path()}
+        }),
+    );
+    let session_id = created["result"]["sessionId"].as_str().unwrap();
+
+    let (notifications, response, capability_requests) = send_request_with_host_capabilities(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0",
+            "id":3,
+            "method":"session/prompt",
+            "params":{
+                "sessionId":session_id,
+                "prompt":[{"type":"text","text":"run"}]
+            }
+        }),
+        json!({"synthetic":["served"]}),
+    );
+    assert_eq!(capability_requests, 1, "host surface must be fetched once");
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    let warning = notifications
+        .iter()
+        .find(|notification| {
+            notification["params"]["update"]["_meta"]["harn"]["fields"]["code"] == "HARN-CAP-008"
+        })
+        .unwrap_or_else(|| panic!("missing reconciliation warning: {notifications:#?}"));
+    let message = warning["params"]["update"]["_meta"]["harn"]["message"]
+        .as_str()
+        .unwrap();
+    assert!(message.contains("synthetic.missing"));
+    assert!(!message.contains("synthetic.runtime_only"));
+
+    write_manifest(true);
+    let (_, response, capability_requests) = send_request_with_host_capabilities(
+        &mut client,
+        json!({
+            "jsonrpc":"2.0",
+            "id":4,
+            "method":"session/prompt",
+            "params":{
+                "sessionId":session_id,
+                "prompt":[{"type":"text","text":"run again"}]
+            }
+        }),
+        json!({"synthetic":["served"]}),
+    );
+    assert_eq!(capability_requests, 1);
+    assert!(response["error"]["message"]
+        .as_str()
+        .is_some_and(|message| {
+            message.contains("HARN-CAP-008") && message.contains("synthetic.missing")
+        }));
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]

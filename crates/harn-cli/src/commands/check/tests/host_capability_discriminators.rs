@@ -76,7 +76,10 @@ fn preflight_validates_host_param_discriminator_literals() {
     )
     .unwrap();
     let config = CheckConfig {
-        host_capabilities_path: Some(manifest.display().to_string()),
+        host: harn_modules::host_capability_config::HostCapabilityConfig {
+            host_capabilities_path: Some(manifest.display().to_string()),
+            ..Default::default()
+        },
         ..CheckConfig::default()
     };
 
@@ -151,7 +154,10 @@ pipeline main(op) {
     )
     .unwrap();
     let forwarding_config = CheckConfig {
-        host_capabilities_path: Some(forwarding_manifest.display().to_string()),
+        host: harn_modules::host_capability_config::HostCapabilityConfig {
+            host_capabilities_path: Some(forwarding_manifest.display().to_string()),
+            ..Default::default()
+        },
         ..CheckConfig::default()
     };
     let diagnostics = collect_preflight_diagnostics(

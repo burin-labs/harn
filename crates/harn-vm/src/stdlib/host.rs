@@ -12,6 +12,7 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 mod bridge;
 pub(crate) mod fixtured_operations;
 mod operation_registry;
+pub mod process_admission;
 pub(crate) mod process_dispatch;
 mod process_exec;
 // Public so tests and embedders can share the per-turn memo allowlist even
@@ -113,12 +114,6 @@ fn pop_host_mock_scope() -> bool {
         }
         None => false,
     }
-}
-
-fn async_builtin_cancel_token(
-    ctx: Option<&AsyncBuiltinCtx>,
-) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-    ctx.and_then(|ctx| ctx.child_vm().cancel_token.clone())
 }
 
 fn capability_manifest_map() -> crate::value::DictMap {
@@ -849,7 +844,7 @@ pub async fn dispatch_host_operation_with_ctx(
         if let Some(result) = crate::stdlib::process_spawn::dispatch(
             operation,
             params,
-            async_builtin_cancel_token(ctx),
+            process_exec::async_builtin_cancel_token(ctx),
         )
         .await
         {

@@ -30,7 +30,7 @@ pipeline test_diagnose_parser_requires_exact_lines(harness: Harness, task: unkno
 @test
 pipeline test_diagnose_parser_accepts_additive_fields(harness: Harness, task: unknown) {
   const parsed = parse_diagnose_output(
-    "[harn test diag] ok perf_0_8 setup=10ms compile=0ms execute=37ms teardown=1ms module_compile=14ms module_load=21ms modules_compiled=5 modules_loaded=5 total=51ms\n",
+    "[harn test diag] ok perf_0_8 setup=10ms compile=0ms admission=13ms execute=37ms teardown=1ms module_compile=14ms module_load=21ms modules_compiled=5 modules_loaded=5 total=64ms\n",
   )
   assert_eq(parsed.samples.count, 1)
   const sample = parsed.samples[0]
@@ -39,7 +39,17 @@ pipeline test_diagnose_parser_accepts_additive_fields(harness: Harness, task: un
   assert_eq(sample.compile_ms, 0)
   assert_eq(sample.execute_ms, 37)
   assert_eq(sample.teardown_ms, 1)
-  assert_eq(sample.total_ms, 51)
+  assert_eq(sample.total_ms, 64)
+}
+
+@test
+pipeline test_diagnose_parser_rejects_non_diagnostic_selectors(harness: Harness, task: unknown) {
+  const parsed = parse_diagnose_output(
+    "ok perf_0_8 setup=10ms compile=0ms admission=13ms execute=37ms teardown=1ms total=64ms\n"
+      + "[harn test summary] ok perf_0_8 setup=10ms compile=0ms admission=13ms execute=37ms teardown=1ms total=64ms\n",
+  )
+  assert_eq(parsed.samples, [])
+  assert_eq(parsed.failures, [])
 }
 
 @test

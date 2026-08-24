@@ -816,6 +816,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         phases: Some(PhaseTimings {
             setup_ms: 7,
             compile_ms: 3,
+            admission_ms: 0,
             execute_ms,
             teardown_ms: 2,
             modules: harn_vm::ModulePhaseStats::default(),
@@ -858,6 +859,16 @@ fn enforce_case_budgets_preserves_existing_failure() {
 
     assert!(!result.passed);
     assert_eq!(result.error.as_deref(), Some("assertion failed"));
+}
+
+#[test]
+fn process_admission_wait_is_projected_out_of_user_execution() {
+    let result = attribute_admission_wait(passing_result_with_timings(120, 100), 35);
+    let phases = result.phases.expect("passing result has phase timings");
+
+    assert_eq!(phases.admission_ms, 35);
+    assert_eq!(phases.execute_ms, 65);
+    assert_eq!(result.duration_ms, 120, "wall time remains factual");
 }
 
 #[test]

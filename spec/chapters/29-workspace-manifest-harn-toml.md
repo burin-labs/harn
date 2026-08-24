@@ -14,6 +14,9 @@ strict = true
 strict_types = true
 trusted_host_dispatch = true
 host_capabilities_path = "./schemas/host-capabilities.json"
+host_served_capabilities_path = "./schemas/host-served-capabilities.json"
+runtime_installed_host_operations = ["project.control_plane_handler"]
+require_declared_operations_served = false
 preflight_severity = "warning"          # "error" (default), "warning", "off"
 preflight_allow = ["mystery.*", "runtime.task"]
 
@@ -54,6 +57,18 @@ workspace = ["read_text", "write_text"]
   boundary may use the explicit object form
   `{ "values": ["agents.get"], "allow_dynamic": true }`; the field must still
   be present, and every literal value remains checked.
+- `host_served_capabilities_path` points to a JSON or TOML file that lists the
+  operations a host serves. It uses the same shape as `host_capabilities_path`.
+  When present, `harn check` fails with `HARN-CAP-008` for each declared
+  operation missing from the served list. The check ignores built-in preflight
+  defaults because the project did not declare them.
+- `runtime_installed_host_operations` lists exact `capability.operation` pairs
+  whose handlers are added at runtime. The static check skips these operations.
+  Wildcards and malformed names are not allowed.
+- ACP compares explicit declarations with the connected host's advertised
+  operations when a prompt starts. It reports `HARN-CAP-008` warnings by
+  default. Set `require_declared_operations_served = true` to stop before the
+  script runs. Runtime-installed operations are exempt from both checks.
 - `strict` treats warnings from every `harn check` phase as failures after all
   files have been rendered. `harn check --strict` monotonically enables the
   same policy for one invocation; it cannot disable manifest strictness.
