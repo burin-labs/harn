@@ -1,0 +1,221 @@
+// MECHANISM CONTRACT (onramp tier): GOVERNOR-STOP ARBITRATION.
+//
+//   CONTRACT: when the no-progress governor is about to seal a terminal, the
+//   turn is handed to the declared completion adjudicator first. An answer the
+//   adjudicator accepts terminates as a completion; anything else terminates
+//   exactly as the governor decided.
+//
+// WHY THIS EXISTS. `postturn.harn` declares `__arbitrate_stalled_toolless_turn`
+// THE arbitration point for a turn carrying prose and no tool call. The stall
+// governor's hard stop leaves the loop before `agent_compute_post_turn` runs,
+// so for precisely that turn shape the contract was owed an arbitration that
+// never happened. A read-only task answers in prose, and composing an answer is
+// indistinguishable by signature from a monologue stall — so the run that is
+// finishing and the run that is looping both ended `stuck`, with the answer
+// sitting in the final message of a terminal that reported none.
+//
+//   trigger  — a read-only run that reads, then composes its answer in prose,
+//              under a stall policy tight enough to hard-stop it;
+//   effect   — the run terminates `done`, and no `thrash_hard_stop` decision is
+//              emitted, because the arbitration claimed the turn first;
+//   negative — (a) a genuinely looping run, repeating one call and never
+//              answering, still terminates `stuck`; and (b) the SAME converging
+//              run with no adjudicator declared also still terminates `stuck`.
+//
+// Clause (b) is the load-bearing one. `agent_evaluate_completion` plans zero
+// stages when a run declares no `verify_completion` and no judge, and a
+// zero-stage evaluation is not vetoed, so the directive seals `accept`. That
+// accept reports that nothing objected, not that anything approved. Converting
+// a terminal on the strength of it would promote every unadjudicated governor
+// stop to a completion — the mechanism would look like it worked while actually
+// having stopped reading its input.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const ANSWER = "ANSWER: promotional input 0.11, output 0.28, review date 2026-09-01."
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn look_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "catalog/entry.toml"}}]}
+}
+
+fn base_opts(session: string) -> AgentSpec {
+  return {
+    provider: "mock",
+    tools: toolset(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    max_iterations: 8,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {
+      enabled: true,
+      no_progress_messages: 2,
+      hard_stop_after_trips: 1,
+      inject_feedback: true,
+      max_feedback: 1,
+    },
+  }
+}
+
+/**
+ * The declared adjudicator. It approves only the arbitration a governor stop
+ * owes the turn, and only when the turn actually carries the answer, so an
+ * accept here cannot come from anywhere but the mechanism under test. A
+ * returned string is a veto; nil is a pass.
+ */
+fn answer_verifier() {
+  return { info ->
+    if info.stop_reason == "stalled" && contains(to_string(info?.text ?? ""), "ANSWER:") {
+      return nil
+    }
+    return "no answer on the record yet"
+  }
+}
+
+fn hard_stop_decisions(events) {
+  return events.filter(
+    { event -> event.type == "loop_control_decision" && event?.reason == "thrash_hard_stop" },
+  )
+}
+
+/**
+ * Every completion directive this run sealed. A turn is owed exactly one
+ * arbitration, so this is how the single-arbitration contract is checked rather
+ * than argued: a second claimant for the same turn shows up here as a second
+ * receipt. The run never proposes completion on its own — it emits no done
+ * sentinel — so any receipt at all is the governor stop asking.
+ *
+ * Deliberately not filtered by trigger. The receipt's `trigger` names whichever
+ * adjudicator answered, not the boundary that asked, so a filter keyed on the
+ * boundary reads zero while the mechanism is working perfectly.
+ */
+fn completion_arbitrations(events) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1"
+    },
+  )
+}
+
+fn run_case(harness: Harness, label: string, script, extra) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Confirm the catalog entry's promotional pricing and review date.",
+          nil,
+          base_opts(session) + extra,
+        ) },
+      )
+      return {
+        status: to_string(captured.result.status),
+        text: to_string(captured.result?.text ?? ""),
+        hard_stops: len(hard_stop_decisions(captured.events)),
+        arbitrations: len(completion_arbitrations(captured.events)),
+      }
+    },
+  )
+}
+
+/**
+ * Read once, then compose the answer in prose. Under this stall policy the
+ * third prose turn is the one the governor hard-stops on with no rescue left,
+ * so the answer has to be on THAT turn — an answer arriving a turn later is an
+ * answer the governor never saw, and the fixture would be testing nothing. The
+ * tail is padding: the run must end because the mechanism decided, not because
+ * the script ran out.
+ */
+fn converging_script() {
+  return [
+    look_call("look-1"),
+    llm_text("Still confirming the second field."),
+    llm_text("Cross-checking the recorded review date."),
+    llm_text(ANSWER),
+    llm_text(ANSWER),
+    llm_text(ANSWER),
+    llm_text(ANSWER),
+    llm_text(ANSWER),
+  ]
+}
+
+fn looping_script() {
+  return [
+    look_call("loop-1"),
+    look_call("loop-2"),
+    look_call("loop-3"),
+    look_call("loop-4"),
+    look_call("loop-5"),
+    look_call("loop-6"),
+    look_call("loop-7"),
+    look_call("loop-8"),
+  ]
+}
+
+pipeline default(harness: Harness) {
+  const converging = run_case(
+    harness,
+    "arbitrated",
+    converging_script(),
+    {verify_completion: answer_verifier()},
+  )
+  harness.stdio.println("converging_status=" + converging.status)
+  harness.stdio.println("converging_hard_stops=" + to_string(converging.hard_stops))
+  harness.stdio.println("converging_arbitrations=" + to_string(converging.arbitrations))
+  const looping = run_case(
+    harness,
+    "looping",
+    looping_script(),
+    {verify_completion: answer_verifier()},
+  )
+  harness.stdio.println("looping_status=" + looping.status)
+  harness.stdio.println("looping_hard_stops=" + to_string(looping.hard_stops))
+  const unadjudicated = run_case(harness, "unadjudicated", converging_script(), {})
+  harness.stdio.println("unadjudicated_status=" + unadjudicated.status)
+  harness.stdio.println("unadjudicated_hard_stops=" + to_string(unadjudicated.hard_stops))
+  // EFFECT: the converging read-only run terminates as a completion.
+  contract_effect(harness.stdio, "converging_run_completes", converging.status == "done")
+  // EFFECT: the invariant itself — a governor may not seal a terminal on a turn
+  // the arbiter was contractually owed.
+  contract_negative(
+    harness.stdio,
+    "governor_did_not_seal_a_terminal_the_arbiter_was_owed",
+    converging.hard_stops > 0,
+  )
+  // EFFECT: the turn was arbitrated exactly once. The cadence-driven
+  // arbitration and this one are mutually exclusive by control flow, and this
+  // is where that stops being an argument and becomes a measurement.
+  contract_effect(harness.stdio, "arbitrated_exactly_once", converging.arbitrations == 1)
+  // NEGATIVE (a): a genuinely looping run is still terminated.
+  contract_effect(harness.stdio, "looping_run_still_stuck", looping.status == "stuck")
+  // NEGATIVE (b): with no adjudicator declared, the vacuous `accept` converts
+  // nothing and the governor's terminal stands.
+  contract_effect(harness.stdio, "unadjudicated_run_still_stuck", unadjudicated.status == "stuck")
+}

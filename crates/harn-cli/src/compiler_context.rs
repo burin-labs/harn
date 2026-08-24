@@ -21,6 +21,20 @@ impl SourceCompilerAuthority {
         harn_parser::TypeChecker::new().with_privileged_wire_builtins(self.trusted_host_dispatch)
     }
 
+    /// The authority a module compiled under this projection carries.
+    ///
+    /// Precompiled artifacts are written next to their source, where they are
+    /// offered to whoever imports that file. Stamping the authority into their
+    /// cache identity is what stops an ordinary import from accepting one
+    /// compiled with privileged-wire access.
+    pub(crate) fn module_provenance(self) -> harn_vm::module_artifact::ModuleProvenance {
+        if self.trusted_host_dispatch {
+            harn_vm::module_artifact::ModuleProvenance::TrustedHostDispatch
+        } else {
+            harn_vm::module_artifact::ModuleProvenance::User
+        }
+    }
+
     pub(crate) fn compiler_with_imported_enums(
         self,
         candidates: impl IntoIterator<Item = String>,

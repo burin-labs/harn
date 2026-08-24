@@ -346,6 +346,7 @@
       "iteration_end",
       "iteration_start",
       "judge_decision",
+      "judge_started",
       "loop_control_decision",
       "loop_stuck",
       "mcp_auth_required",
@@ -565,7 +566,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.112",
+  "artifactVersion": "0.10.114",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",

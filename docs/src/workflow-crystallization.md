@@ -78,6 +78,7 @@ costs, timestamps, source hashes, and optional Flow provenance references:
         "branch_name": "release-0.7.41"
       },
       "capabilities": ["git.write"],
+      "side_effects_known": true,
       "side_effects": [
         {"kind": "git_ref", "target": "release-branch", "capability": "git.write"}
       ],
@@ -90,6 +91,7 @@ costs, timestamps, source hashes, and optional Flow provenance references:
       "parameters": {"version": "0.7.41"},
       "inputs": {"path": "harn.toml", "version": "0.7.41"},
       "capabilities": ["fs.write"],
+      "side_effects_known": true,
       "side_effects": [
         {"kind": "file_write", "target": "harn.toml", "capability": "fs.write"}
       ]
@@ -318,7 +320,7 @@ needs to import a candidate directly:
 ```json
 {
   "schema": "harn.crystallization.candidate.bundle",
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-04-26T12:34:56Z",
   "generator": {"tool": "harn", "version": "0.7.43"},
   "kind": "candidate",
@@ -399,16 +401,19 @@ needs to import a candidate directly:
 ```
 
 Importers MUST refuse bundles whose `schema` is not exactly
-`harn.crystallization.candidate.bundle` or whose `schema_version` is greater
-than the highest version they understand. Only the documented additive fields
-may be added without bumping `schema_version`.
+`harn.crystallization.candidate.bundle` or whose `schema_version` is not the
+exact version they understand. Bundle v2 adds complete side-effect evidence;
+accepting v1 would also accept its unsafe `plan_only` classification. Only the
+documented additive fields may be added without bumping `schema_version`.
 
 `kind` is one of:
 
 - `candidate` — a normal candidate that passed shadow comparison.
-- `plan_only` — every side effect stays inside Harn's own data plane (receipt
-  writes, in-memory event-log appends, plan stashes). Cloud can promote these
-  without explicit external-side-effect approval.
+- `plan_only` — every step has complete side-effect evidence and every recorded
+  effect stays inside Harn's own data plane (receipt writes, in-memory event-log
+  appends, plan stashes). Cloud can promote these without explicit
+  external-side-effect approval. A missing or false `side_effects_known` field
+  means unknown, not side-effect-free, and produces `candidate` instead.
 - `rejected` — no safe candidate was selected; the bundle still records what
   was attempted and why so reviewers can debug or feed it back into mining.
 
@@ -461,7 +466,7 @@ The `crystallize ingest` subcommand is the consumer half of the
 [harn-bump-fleet#2](https://github.com/burin-labs/harn-bump-fleet/issues/2)
 (producer) and [harn#1146](https://github.com/burin-labs/harn/issues/1146)
 (this consumer). It turns a single
-`release_harn.crystallization_input.v1` fixture bundle into a reviewed
+`release_harn.crystallization_input.v3` fixture bundle into a reviewed
 crystallization candidate without going through repeated-sequence
 mining: the trace IS the workflow.
 
@@ -489,7 +494,7 @@ harn crystallize ingest \
   --bundle bundles/release-harn-sample \
   --shadow
 # Ingest: from=… run_id=… version=0.7.52->0.7.53 candidate=candidate_…
-# Bundle: bundles/release-harn-sample (kind=Candidate schema_version=1 fixtures=1)
+# Bundle: bundles/release-harn-sample (kind=Candidate schema_version=2 fixtures=1)
 # Segments: deterministic=7 agentic=4 (review-required: 4)
 # Recovery: shell_failures=2 recovery_runs=1 fed_into_agent=true
 # Shadow replay: candidate_id=candidate_… compared=1 pass=true
@@ -540,7 +545,9 @@ Governed Code Mode reports can be fed into the same crystallization pipeline.
 whose actions are the child binding calls from the composition report. The
 trace metadata keeps the composition run id, snippet hash, binding-manifest
 hash, requested side-effect ceiling, child statuses, capabilities, inputs,
-outputs, and policy context.
+outputs, and policy context. Each child action projects its requested
+side-effect level into typed side-effect evidence. The conservative `none`
+level leaves that evidence unknown, so it cannot produce a `plan_only` bundle.
 
 The stdlib alias
 `composition_crystallization_input(report, options?)` lives in

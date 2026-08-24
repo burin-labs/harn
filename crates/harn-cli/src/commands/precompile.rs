@@ -208,6 +208,7 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
+    let module_provenance = authority.module_provenance();
     let artifacts = compile_artifacts(source_path, &source, &program, authority)?;
     let entry_key = if source_root.is_some() {
         harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, &source)
@@ -224,6 +225,7 @@ fn precompile_one(
         let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(
             &module_source,
             &artifacts.module_compilation_context,
+            module_provenance,
         );
         let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
         harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)

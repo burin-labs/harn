@@ -83,6 +83,21 @@ pub(crate) struct TestArgs {
     /// Total number of user or conformance test shards. Pair with `--shard-index`.
     #[arg(long = "shard-total", value_name = "N", env = "HARN_TEST_SHARD_TOTAL")]
     pub shard_total: Option<usize>,
+    /// Harn JSON test receipt used as the shard-cost and regression baseline.
+    /// The receipt must carry the same --timing-environment identity.
+    #[arg(long = "timing-baseline", value_name = "PATH")]
+    pub timing_baseline: Option<String>,
+    /// Stable identity for the environment that produced or enforces timing
+    /// receipts (for example `github-linux-x64`).
+    #[arg(
+        long = "timing-environment",
+        value_name = "NAME",
+        env = "HARN_TEST_TIMING_ENVIRONMENT"
+    )]
+    pub timing_environment: Option<String>,
+    /// Fail cases that grow beyond this percentage of their receipt baseline.
+    #[arg(long = "max-cost-regression-percent", default_value_t = 25)]
+    pub max_cost_regression_percent: u64,
     /// Internal transport for the process-isolated conformance worker.
     #[arg(long = "internal-conformance-worker", value_name = "MODE", hide = true)]
     pub internal_conformance_worker: Option<InternalConformanceWorkerMode>,

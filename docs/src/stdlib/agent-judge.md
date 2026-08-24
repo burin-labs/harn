@@ -57,8 +57,9 @@ The fact types:
 - `CompletionWriteFact` — `{path?, diff?, kind?}`. `kind` is a `WriteKind`
   string; `"source"` and `"cosmetic"` are load-bearing, anything else is treated
   as non-source.
-- `CompletionVerifyVerdict` — `{ok?, findings?}`. `findings` is optional
-  red-detail text.
+- `CompletionVerifyVerdict` — `{ok?, findings?, command?}`. `findings` is
+  optional red-detail text. `command` optionally names what the oracle ran, so
+  the reading passed to the bounded judge can say which verification passed.
 
 ## The deterministic ladder
 
@@ -119,6 +120,40 @@ agent_done_judge_cap(judge_cfg) -> int | nil
 ```
 
 Both return `nil` when the cap is disabled.
+
+### What the judge is shown, and what it may refuse on
+
+The ladder's verifier reading is passed to the judge rather than discarded. The
+evidence snapshot carries a typed
+`verification: {oracle_expected, command, observed, observed_at_evidence_index}`,
+where `observed` is `passed`, `failed`, or `not_run`, and the judge's prompt
+renders it as an explicit deterministic-verification block. `not_run` covers
+both "no oracle was configured" and "the gate could not read facts", so a
+`facts_unavailable` allow can never read as a passing verification.
+
+The judge's verdict carries a `gap_class` alongside `verdict` and `detail`:
+`missing_artifact`, `unmet_manner_clause`, `failed_verification`,
+`unresolved_authorization`, or `other`. It is optional on the wire — an absent
+or unrecognized value reads as `other`.
+
+A `continue` naming `failed_verification` is converted to `done` when, and only
+when, all four hold: the deterministic stage actually ran (the directive
+receipt's `invoked.deterministic`), the threaded `observed` is `passed`, the
+gate's reason is not `facts_unavailable`, and the named class is
+`failed_verification`. The converted directive carries
+`converted_from: "failed_verification_contradicted_by_gate"`. Count conversions
+by `converted_from`; a receipt's `trigger` names whichever adjudicator answered,
+not the boundary that asked.
+
+Every other `gap_class` vetoes exactly as before. The judge keeps sole authority
+over artifact clauses, manner and negative clauses, and authorization, and loses
+it only over the one question a deterministic oracle has already answered.
+
+Projection receipts name their selected actions and resolved evidence roles in
+`selected_actions`, so a host whose verifier declares no
+`completion_evidence_role` — and whose passing verification is therefore counted
+and then dropped from the bounded packet — is visible without arithmetic on the
+counts.
 
 ## See also
 

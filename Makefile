@@ -571,6 +571,7 @@ test-agent-scripts:
 test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/apt_install_action_test.sh
+	./scripts/tests/rust_toolchain_action_test.sh
 	./scripts/tests/npm_ci_with_retry_test.sh
 	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh

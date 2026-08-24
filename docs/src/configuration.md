@@ -112,7 +112,10 @@ Embedding hosts that need private names should use the structural
 Runtime-generated model-role, rate-limit, and secret-provider names have their
 own narrower grammars; no broad `HARN_*` prefix bypass exists. Embedders should
 invoke `harn_vm::initialize_runtime()` during bootstrap to apply the same
-validation and process-wide asset initialization as the `harn` CLI.
+validation and process-wide asset initialization as the `harn` CLI. That
+call also rejects an empty or relative `$HARN_CACHE_DIR` and returns a
+warning when no cache directory resolves, so embedding hosts see the same
+bytecode-cache contract as the CLI.
 
 | Variable | Field |
 |---|---|

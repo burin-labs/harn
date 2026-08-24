@@ -16,6 +16,7 @@ mod modules;
 pub(crate) mod ops;
 mod scope;
 mod state;
+mod stdlib_artifact;
 mod tool_callable;
 
 #[cfg(test)]
@@ -44,9 +45,9 @@ pub use async_builtin::AsyncBuiltinCtx;
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
 pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
-pub(crate) use modules::prepare_stdlib_module_artifact;
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
+pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{

@@ -20,8 +20,12 @@ pub type WriteKind = string
 /** One host-supplied write fact. */
 pub type CompletionWriteFact = {path?: string, diff?: string, kind?: WriteKind}
 
-/** A host-supplied verifier verdict. `findings` is optional red-detail text. */
-pub type CompletionVerifyVerdict = {ok?: bool, findings?: string}
+/**
+ * A host-supplied verifier verdict. `findings` is optional red-detail text.
+ * `command` optionally names what the oracle ran, so the reading threaded to a
+ * model judge can say WHICH verification passed rather than only that one did.
+ */
+pub type CompletionVerifyVerdict = {ok?: bool, findings?: string, command?: string}
 
 /**
  * Facts a host supplies (via the `facts` callback) for one gate evaluation.
@@ -272,7 +276,19 @@ fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_avai
   const facts = opts?.facts
   const max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
   if !facts_available {
-    return {confirm: true, reason: "facts_unavailable"}
+    // This `confirm` means "I could not look", not "I looked and it passed".
+    // The reading it ships says exactly that, so a consumer cannot mistake the
+    // confirm for a positive observation.
+    return {
+      confirm: true,
+      reason: "facts_unavailable",
+      verification: {
+        oracle_expected: false,
+        command: "",
+        observed: "not_run",
+        observed_at_evidence_index: nil,
+      },
+    }
   }
   const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
   const ctx = {
@@ -315,6 +331,21 @@ fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_avai
     escalation_threshold: opts?.escalation_threshold ?? 3,
     escalation_target: opts?.escalation_target,
   }
+  // The gate already computes this to reach its own verdict. Returning only
+  // `{confirm, reason}` threw it away, and the model judge downstream was then
+  // asked a question this oracle had answered, with no way to see the answer.
+  const verification = {
+    oracle_expected: derived.oracle_expected,
+    command: to_string(verify?.command ?? ""),
+    observed: if verify == nil {
+      "not_run"
+    } else if verify?.ok ?? false {
+      "passed"
+    } else {
+      "failed"
+    },
+    observed_at_evidence_index: nil,
+  }
   const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
   const vetoes_used = __completion_gate_vetoes_used(runtime, session_id)
   const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
@@ -334,6 +365,7 @@ fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_avai
       converted_from: resolved?.converted_from,
       escalation_recommended: resolved?.escalation_recommended,
       escalation_target: resolved?.escalation_target,
+      verification: verification,
     }
   }
   return {
@@ -342,6 +374,7 @@ fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_avai
     reason: resolved?.reason ?? "",
     escalation_recommended: resolved?.escalation_recommended,
     escalation_target: resolved?.escalation_target,
+    verification: verification,
   }
 }
 

@@ -1,0 +1,12 @@
+converging_status=done
+converging_hard_stops=0
+converging_arbitrations=1
+looping_status=stuck
+looping_hard_stops=1
+unadjudicated_status=stuck
+unadjudicated_hard_stops=1
+converging_run_completes=true
+governor_did_not_seal_a_terminal_the_arbiter_was_owed=true
+arbitrated_exactly_once=true
+looping_run_still_stuck=true
+unadjudicated_run_still_stuck=true

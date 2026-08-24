@@ -385,6 +385,7 @@ fn test_report_from_conformance(
             duration_ms: result.duration_ms,
             timeout: None,
             phases: None,
+            timing_spans: Vec::new(),
             message: result.message.clone(),
             captured_output: None,
         });

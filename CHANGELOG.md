@@ -9,6 +9,233 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.114
+
+### Added
+
+- **harnlang.com now ships `llms.txt` and per-page Markdown for agents
+  (#7081).** The docs build writes `/llms.txt`, `/llms-full.txt`, and one
+  include-resolved `.md` file per page, each with a one-line summary, a
+  canonical Website URL, a pre-1.0 version notice, and a Read-next list
+  of `.md` links. The landing page puts the agent path next to Get
+  started.
+- **The end-of-turn review announces itself before it runs.** The completion
+  judge emits a new `judge_started` agent event, and the reserved terminal
+  verifier emits its existing `reserved_terminal_verify` with a new
+  `verify_started` phase, both immediately before the work begins. Previously
+  only terminal verdicts were emitted, so a host had nothing to show between
+  the agent's last edit and the verdict — a window that ran to a third of the
+  wall clock on an observed trial. Every started window is closed by a
+  decision, including one refused at admission (#7103).
+
+### Fixed
+
+- Retry pinned Rust toolchain downloads triggered by the final `rustc` and `cargo` probes in CI.
+- **Code-index warm now persists across short runs and refuses a snapshot
+  that does not describe the current tree (#7053, #7054, #7055).** Sync
+  `code_index.rebuild` writes the snapshot it just built, embedders can
+  `wait_until_idle` so a background warm finishes instead of vanishing at
+  process exit, a reader that joins an in-flight build reports the wait in
+  `elapsed_ms` and emits `tool_progress` heartbeats, and restore ignores a
+  snapshot whose workspace root or git `HEAD` does not match — including
+  linked worktrees whose `.git` is a file.
+- Module bytecode is now cached by the authority it was compiled under. Modules
+  compiled under `[check].trusted_host_dispatch` previously skipped the disk
+  cache in both directions, so a trusted module graph recompiled from source on
+  every run. They now cache like any other module: on a 519-module graph, warm
+  runs went from recompiling 368 modules every time to compiling none.
+- The bytecode cache schema version moved to 12, so artifacts written by an
+  earlier version are ignored and recompiled once.
+- **The completion judge is now shown the deterministic verifier's result, and
+  may no longer refuse a final for a verification the runtime watched pass
+  (#7099).** The completion gate derived "the verifier ran and passed" and then
+  discarded it, so the judge was asked a question the runtime had already
+  answered — with a bounded evidence packet that, for any tool declaring no
+  `completion_evidence_role`, omitted the passing verification entirely. The
+  gate's reading is now threaded onto the evidence snapshot as a typed
+  `verification: {oracle_expected, command, observed, observed_at_evidence_index}`
+  and rendered in the judge's prompt as an explicit deterministic-verification
+  block. The bounded verdict gains `gap_class`, and a `continue` naming
+  `failed_verification` against a positive reading is converted to `done` with a
+  `converted_from: failed_verification_contradicted_by_gate` receipt — but only
+  when the gate actually ran, observed `passed`, and did not report
+  `facts_unavailable`. Every other `gap_class` vetoes exactly as before, so the
+  judge keeps full authority over artifact, manner and negative-clause, and
+  authorization gaps. Projection receipts now name their selected actions and
+  resolved evidence roles, so a host that declared no verification role anywhere
+  is visible at a glance instead of by arithmetic on the counts.
+
+## v0.10.113
+
+### Added
+
+- **Provider catalog snapshot metadata.** Model rows can carry optional
+  `released` (ISO 8601 date), `row_kind` (`snapshot` or `selector`), and
+  `current_snapshot` (the dated id a selector currently follows). The colliding
+  Claude Sonnet 4.5 selector/snapshot pair and the dated Sonnet 3.5 snapshots
+  use the new fields. Schema, TypeScript, and Swift bindings move with the
+  TOML (#6834).
+- `harn provider effort-probe` discovers which reasoning-effort rungs a route
+  actually accepts and diffs that against the ladder the catalog declares in
+  `reasoning_effort_levels`, reporting both drift directions: rungs the catalog
+  promises but the route refuses (callers take a provider error) and rungs the
+  route serves but the catalog omits (Harn's ladder snap quietly redirects
+  callers away from a working rung). Effort ladders were previously the one
+  capability row nothing verified — hand-written in fragments and hand-asserted
+  in unit tests — which is how Harn came to declare a `medium` rung for
+  `glm-5.3` that Z.AI rejects with HTTP 400. `--suggest-fragment` prints a
+  corrected capability row and `--fail-on-drift` gives CI a gate; the probe
+  never edits catalog TOML. Every dialect consults one policy
+  (`catalog_may_shape_requested_reasoning`) before omitting or rewriting an
+  explicit effort, so a probe cannot record an acceptance for a rung that
+  never left the process — the failure that made OpenRouter GLM-5.3 look like
+  it accepted `none` while the nested disable was still being dropped.
+  `--gated` keeps the catalog checks on for a confirm-only run, where
+  unmeasured rungs are reported as `gated_locally` rather than counted as
+  provider verdicts. Accepted rungs whose output-token counts do not move
+  are flagged `usage_unmoved`: a warning that the parameter may have been
+  ignored, not a catalog contradiction.
+- `harn eval coding-agent --reasoning-effort <level>` pins the effort every run
+  in an invocation asks for, so effort rungs can be A/B tested on the agentic
+  fixture suite instead of only on single-turn prompts.
+- Registered `agent_preset` packs can now carry `stall_diagnostics` and
+  `iteration_budget`. A named row can ship a domain-tuned stall block and an
+  adaptive iteration budget instead of inheriting the generic tool-using stall
+  and a fixed `{50, 50}` cap; caller options still override the pack, and an
+  unknown pack key still rejects.
+- Session title changes written in one process now reach ACP clients in another
+  process that has the same SQLite store open. The watcher keeps its own reader
+  and publishes through the existing `session_info_update` fanout when
+  `PRAGMA data_version` moves.
+
+### Changed
+
+- Z.AI's GLM-5.3 route now defaults to `high` reasoning effort rather than
+  `low`. The previous `low` pin was recorded as a compatibility note ("GLM-5.3
+  rejects disabled reasoning") but acted as a cost cap, and the compatibility
+  concern is already covered by the reasoning policy's floor. `high` is a
+  deliberate cost/quality choice, stated as one: measured over 24 short-answer
+  tasks x 3 trials x 3 levels against the live route, accuracy runs 85.1% at
+  `low`, 90.3% at `high`, and 95.7% at `max`, but the ladder is not evenly
+  spaced in cost — `high` spends 1.4x `low`'s output tokens while `max` spends
+  13.4x. `high` therefore sits on the cheap side of that cliff and captures
+  roughly half the only difference that clears the noise floor (`max` - `low`)
+  for about 3% more spend per correct answer. It also makes Harn's two entry
+  points agree, since the reasoning policy already resolves `high` for agent and
+  code tasks at the default scale and outranks this default; the default applies
+  only to a bare `llm_call` that sets neither an explicit effort nor a policy.
+- Workspace search and every other Harn walk honor the repository's committed
+  `.gitignore` set, not `.ignore`. `.ignore` is a ripgrep/fd convention git
+  cannot evaluate, so a host implementing the same contract on git tooling
+  could not reproduce it. `.rgignore`, `.git/info/exclude`, and global
+  `core.excludesFile` remain unhonored. `.agentignore` is unchanged.
+- Redrew the Harn mark as a lowercase `h` read as a pipeline, and fixed a
+  rendering bug in the old one. Its horizontal rail never painted, which is why
+  its nodes looked unconnected: an SVG gradient declared in `objectBoundingBox`
+  units does not render on a straight line, because the bounding box has zero
+  height. The new mark declares its gradient in `userSpaceOnUse`, and interpolates
+  teal to amber in OKLCH so the midpoint stays saturated instead of going olive.
+  `favicon.svg` is now a separate pixel-snapped drawing on a 16-unit grid with
+  flat fills and `shape-rendering="crispEdges"`, because curves and gradients do
+  not survive 16 pixels; `favicon.ico` and `apple-touch-icon.png` were
+  regenerated from it.
+
+  Reworked the documentation front door. The introduction page led with a
+  step-by-step description of what an agent program does, and now answers what a
+  newcomer actually arrives asking: whether Harn fits their problem, the smallest
+  useful thing to start with, and where the argument and comparisons live. It
+  gained an "at a glance" fact panel covering paradigm, typing, implementation,
+  platforms, license, and maturity, backed by a new platform support page that
+  states the real release matrix including the gaps: Windows on ARM has no
+  prebuilt binary, Linux builds link glibc, and the WebAssembly target runs
+  portable reducers rather than arbitrary Harn programs.
+
+  Each homepage example now names the pattern it demonstrates rather than the
+  fixture it runs against, and carries a note on what changes when the subject is
+  your own.
+- `harn serve mcp` no longer pretends every exported tool is destructive and
+  open-world. Tool titles and descriptions come from the `pub fn` doc comment,
+  behavior hints come from `@annotations(...)`, and the script's leading doc
+  comment is served as MCP `instructions`. A sibling `<script>.md` is exposed as
+  `harn://package/howto`. A sibling `<script>.icon.svg` is served as
+  `serverInfo.icons` (data URI) and `harn://package/icon`. Undeclared hints stay
+  off the wire.
+
+### Fixed
+
+- **Mock LLM completion.** Generated prose finishes from the agent loop's
+  structured `done_sentinel` / `done_sentinel_form`, not from scanning the
+  system prompt for `<done>` or `##DONE##`. A prompt-wording change cannot
+  silently stop a run completing, and a run that never asked to finish still
+  exhausts its budget (#6840).
+- **Coding-agent no-tool-diagnosis grader.** A correct diagnosis that said
+  "subtracts" / "plus operator" (or named `a - b` / `a + b`) no longer fails
+  just because it skipped the substrings `return a + b` or
+  `subtraction`/`addition`. The grader matches the defect and the repair on
+  operator vocabulary (#6843).
+- **Skill rendering accepts an explicit session id (#7012).**
+  `harness.agent.skill_render` no longer depends on a process
+  `HARN_SESSION_ID` environment variable to substitute
+  `${HARN_SESSION_ID}`. `agent_loop` threads the live session id through
+  the host-registry fallback when lazy `load_skill` fails, so headless
+  and in-process embedders do not serve the placeholder to the model.
+- **Linux `harn run --allow-process-network` no longer fail-closes local
+  git remotes (#7016).** Managed child egress is macOS-only. Off-macOS the
+  grant still raises the network capability ceiling, but Harn does not
+  start a proxy it cannot enforce, so `git.push` to a file remote works
+  again. That fail-open child-socket grant is named on stderr.
+- **Provider dispatch audit follows the live Anthropic catalog for Sonnet
+  4.6.** Structured output is `native` / `native_json`, not the older
+  `tool_use` / `xml_tagged` pair.
+- **Dead recoverable host-lease waiters no longer block the FIFO.** A
+  supervised waiter whose process is gone is reaped like any other dead
+  waiter, instead of occupying the head of the queue until its deadline.
+- **Supervised Cargo runs transfer lease liveness to the Cargo PID.** After
+  spawn, the lease and run receipt track Cargo rather than the wrapper, so
+  supervisor loss keeps the lease until Cargo exits.
+- **CLI E2E children no longer inherit Nextest identity.** Spawned `harn`
+  processes write `.harn` / `.harn-runs` in the test project instead of
+  `/tmp/harn-nextest-state/<hash>/`.
+- Bytecode cache artifacts are written owner-only (`0o600`) instead of taking whatever the process umask allows.
+- Restored the documentation sidebar nesting for the language specification. The
+  new platform support entry was inserted directly above the generated chapter
+  list, and because that list is indented, mdBook re-parented all 33 specification
+  chapters under "Platform support". `sync_language_spec.harn` now pins the entry
+  the generated block belongs to and fails when something else takes it, so the
+  sync check owns the nesting rather than only the contents between its markers.
+- Reasoning-effort capability is now one claim instead of three that could
+  disagree. A capability fragment can spell "this route takes an effort ladder"
+  three ways — `thinking_modes` containing `effort`, the legacy
+  `reasoning_effort_supported` flag, and a non-empty `reasoning_effort_levels` —
+  and the last two are now absorbed into `thinking_modes` rather than compared,
+  so a contradiction is unrepresentable rather than merely detectable. Nineteen
+  shipped routes were contradicting themselves, and both directions were broken
+  at runtime: the reasoning policy read one field and built an effort request,
+  and the option validator read another and refused the request the policy had
+  just built. `harn` rejected an explicit `effort` on `gemini:gemini-2.5-pro`,
+  whose own row lists the `effort` mode, and refused every effort request to
+  `openrouter:z-ai/glm-5*`. Both failed with the same message a route that
+  genuinely has no effort control produces, which is why neither was visible.
+- `openrouter:z-ai/glm-5.3` no longer fails every agent, verify, and code task.
+  The route always reasons and answers HTTP 400 to a disable directive
+  ("Reasoning is mandatory for this endpoint"), but its capability row declared
+  the `enabled` thinking mode alongside `auto_reasoning_overrides = { agent =
+  "off", verify = "off", code = "off" }`, so the default auto reasoning policy
+  resolved those tasks to a disable directive and every such call took the 400.
+  Its effort ladder was also asserted rather than measured: the row declared
+  `["high", "xhigh", "max"]` while the route serves `minimal` through `max`.
+- `gemini-3.6-flash` can disable thinking. The 3.6/3.7 family row claimed
+  `reasoning_disable_supported = false` because that is the Pro-class
+  contract; a live effort-probe sending `thinkingBudget: 0` was accepted and
+  produced 1 output token against 62/87/83 at low/medium/high. The Flash
+  row now says so, so a caller asking for `effort: none` actually reaches
+  the wire instead of being silently dropped.
+- `llm_call` failures now carry `origin`, either `"provider"` or `"local"`.
+  Harn's own pre-dispatch option checks and a provider's HTTP 400 were both
+  `terminal`/`invalid_request` with nothing to separate them, so a caller
+  deciding whether to retry, fall back, or correct its own request could not
+  tell whether the request had ever left the process.
+
 ## v0.10.112
 
 ### Breaking

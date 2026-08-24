@@ -101,7 +101,7 @@ prove it out.
    make conformance       # tool_hooks_catalogue_<stack> cases pass
    make lint-md           # docs lint clean
    make check-docs-snippets   # harn,ignore fences only — others must type-check
-   ./scripts/build_docs_site.sh  # mdBook builds clean and emits raw .md companions
+   ./scripts/build_docs_site.sh  # site build writes HTML plus llms.txt and per-page .md
    ```
 
 ## Adding a new stack catalogue

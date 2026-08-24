@@ -1,0 +1,521 @@
+// Run: harn test tests/agent/completion_verification_arbitration_test.harn
+//
+// The deterministic completion gate already knows whether the verifier ran and
+// passed. These fixtures pin that it SAYS SO — onto the evidence snapshot and
+// into the judge's prompt — and that a model `continue` naming a failed
+// verification loses to a positive reading and to NOTHING ELSE.
+//
+// The controls are the load-bearing half. A conversion that also fires on a
+// gate that could not read facts, on an unrun verifier, or on a manner-clause
+// refusal is the blanket weakening this mechanism exists to avoid, and it would
+// look identical to a working one from the positive case alone.
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import {
+  __judge_completion_verdict_read,
+  __judge_evidence_projection,
+  agent_completion_adjudicator_declared,
+} from "std/agent/judge"
+import { __completion_arbitration_converts } from "std/agent/judge_internals"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+const CONVERSION = "failed_verification_contradicted_by_gate"
+
+fn __completion_receipts(events) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/** Count conversions by `converted_from` ONLY. */
+fn __conversion_count(events) -> int {
+  let count = 0
+  for receipt in __completion_receipts(events) {
+    if receipt?.converted_from == CONVERSION {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __judge_says(gap_class, detail: string) -> dict {
+  const body = if gap_class == nil {
+    {verdict: "continue", detail: detail}
+  } else {
+    {verdict: "continue", detail: detail, gap_class: gap_class}
+  }
+  return {text: json_stringify(body)}
+}
+
+/** A gate that reports exactly the reading the case is about. */
+fn __gate_reporting(confirm: bool, reason: string, observed: string) {
+  return { _payload ->
+    {
+      confirm: confirm,
+      message: "verification is red",
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
+      }
+        + opts_extra
+      assert(
+        agent_completion_adjudicator_declared(opts, "sentinel"),
+        "every case here must declare an adjudicator, or it differs from the others by two variables",
+      )
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
+      )
+      // `mock_calls` is only readable inside the script scope, so the prompt
+      // itself is captured here rather than reconstructed by the caller.
+      return {
+        events: captured.events,
+        result: captured.result,
+        judge_prompts: harness.llm.mock_calls().filter(
+          { call -> contains(to_string(call?.system ?? ""), "Required verdict schema") },
+        )
+          .map({ call -> to_string(call.messages[0].content) })
+          .to_list(),
+        provider_calls: len(harness.llm.mock_calls()),
+      }
+    },
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The conditions, at the owning interface. The end-to-end cases below each
+// block on two clauses at once by construction; this is where each clause is
+// isolated.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_arbitration_requires_every_clause(harness: Harness, task) {
+  assert(
+    __completion_arbitration_converts(
+      "failed_verification",
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "all four clauses hold",
+  )
+  assert(
+    !__completion_arbitration_converts(
+      "unmet_manner_clause",
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "a manner-clause refusal is never converted",
+  )
+  assert(
+    !__completion_arbitration_converts("other", true, "verified_after_write", "passed"),
+    "an unnamed gap is never converted",
+  )
+  assert(
+    !__completion_arbitration_converts(
+      "failed_verification",
+      false,
+      "verified_after_write",
+      "passed",
+    ),
+    "a gate that never ran cannot overrule anyone",
+  )
+  // The isolated clause-3 case: a POSITIVE reading is present and the gate still
+  // reports that it could not look. The reading loses.
+  assert(
+    !__completion_arbitration_converts("failed_verification", true, "facts_unavailable", "passed"),
+    "`facts_unavailable` blocks the conversion even alongside a passed reading",
+  )
+  assert(
+    !__completion_arbitration_converts(
+      "failed_verification",
+      true,
+      "verified_after_write",
+      "not_run",
+    ),
+    "an unrun verifier is not a passing one",
+  )
+  assert(
+    !__completion_arbitration_converts(
+      "failed_verification",
+      true,
+      "verified_after_write",
+      "failed",
+    ),
+    "a failing verifier is not a passing one",
+  )
+}
+
+pipeline test_absent_gap_class_reads_as_other(harness: Harness, task) {
+  // Cached and replayed judge responses outlive the schema that produced them.
+  // The tolerant reading must also be the one that grants no authority.
+  assert_eq(
+    __judge_completion_verdict_read({verdict: "continue", detail: "gap"}).gap_class,
+    "other",
+  )
+  assert_eq(
+    __judge_completion_verdict_read({verdict: "continue", detail: "g", gap_class: "nonsense"})
+      .gap_class,
+    "other",
+  )
+  assert_eq(
+    __judge_completion_verdict_read(
+      {verdict: "continue", detail: "g", gap_class: "Failed_Verification"},
+    ).gap_class,
+    "failed_verification",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// B1: the gate reports what it observed.
+// -------------------------------------------------------------------------------------------------
+
+fn __green_verify() {
+  return {command: "run the project checks", ok: true}
+}
+
+fn __red_verify() {
+  return {findings: "2 failed", ok: false}
+}
+
+fn __wrote_source(_ctx) {
+  return {source_write_count: 1}
+}
+
+pipeline test_gate_reports_the_verification_it_observed(harness: Harness, task) {
+  const green = agent_completion_gate(
+    harness.runtime,
+    {facts: __wrote_source, verify_command: __green_verify},
+  )
+    .verify_completion({session_id: "gate-green", transcript: "[]"})
+  assert_eq(green.confirm, true)
+  assert_eq(green.verification.observed, "passed")
+  assert_eq(green.verification.oracle_expected, true)
+  assert_eq(green.verification.command, "run the project checks")
+  const red = agent_completion_gate(
+    harness.runtime,
+    {facts: __wrote_source, max_vetoes: 0, verify_command: __red_verify},
+  )
+    .verify_completion({session_id: "gate-red", transcript: "[]"})
+  assert_eq(red.confirm, false)
+  assert_eq(red.verification.observed, "failed")
+  // A verifier is configured but produced no verdict this turn.
+  const unrun = agent_completion_gate(harness.runtime, {facts: __wrote_source, max_vetoes: 0})
+    .verify_completion({session_id: "gate-unrun", transcript: "[]"})
+  assert_eq(unrun.verification.observed, "not_run")
+  assert_eq(unrun.verification.oracle_expected, false)
+}
+
+pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task) {
+  // The trap this mechanism is built around: this `confirm` means "I could not
+  // look". Nothing it ships may read as a positive observation.
+  const verdict = agent_completion_gate(harness.runtime, {}).verify_completion(
+    {session_id: "gate-blind", transcript: "[]"},
+  )
+  assert_eq(verdict.confirm, true)
+  assert_eq(verdict.reason, "facts_unavailable")
+  assert_eq(verdict.verification.observed, "not_run")
+}
+
+pipeline test_judge_prompt_carries_the_deterministic_verification_block(harness: Harness, task) {
+  const captured = __run(
+    harness,
+    "judge-verification-block",
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "checks pass", gap_class: "other"})},
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(len(captured.judge_prompts), 1)
+  const judge_user = captured.judge_prompts[0]
+  assert(
+    contains(judge_user, "Deterministic verification"),
+    "the judge must be shown the reading, not asked to infer it",
+  )
+  assert(contains(judge_user, "observed: passed"))
+  assert(contains(judge_user, "run the project checks"))
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, task) {
+  const messages = [
+    {
+      role: "assistant",
+      content: "",
+      _harn: {kind: "assistant", tool_calls: [{id: "e1", name: "edit", arguments: {}}]},
+    },
+    {
+      role: "user",
+      content: "written",
+      _harn: {kind: "tool_result", tool_call_id: "e1", tool_name: "edit", outcome: "ok", data: {}},
+    },
+    {
+      role: "assistant",
+      content: "",
+      _harn: {kind: "assistant", tool_calls: [{id: "d1", name: "dispatch", arguments: {}}]},
+    },
+    {
+      role: "user",
+      content: "This call was NOT executed",
+      _harn: {
+        kind: "tool_result",
+        tool_call_id: "d1",
+        tool_name: "dispatch",
+        outcome: "error",
+        data: {},
+      },
+    },
+    {
+      role: "assistant",
+      content: "",
+      _harn: {kind: "assistant", tool_calls: [{id: "v1", name: "verify", arguments: {}}]},
+    },
+    {
+      role: "user",
+      content: "ok",
+      _harn: {
+        kind: "tool_result",
+        tool_call_id: "v1",
+        tool_name: "verify",
+        outcome: "ok",
+        data: {},
+      },
+    },
+  ]
+  const edit_tool = {
+    name: "edit",
+    annotations: {kind: "edit", side_effect_level: "workspace_write"},
+  }
+  const dispatch_tool = {
+    name: "dispatch",
+    annotations: {kind: "execute", side_effect_level: "process_exec"},
+  }
+  // Declared verification role: all three effect-bearing calls are selected.
+  const declared = __judge_evidence_projection(
+    messages,
+    {
+      tools: [
+        edit_tool,
+        dispatch_tool,
+        {
+          name: "verify",
+          annotations: {
+            kind: "execute",
+            side_effect_level: "process_exec",
+            completion_evidence_role: "verification",
+          },
+        },
+      ],
+    },
+  )
+  assert_eq(declared.stats.included_action_count, 3)
+  assert_eq(declared.stats.omitted_older_action_count, 0)
+  const declared_roles = declared.stats.selected_actions.map({ s -> s.evidence_role }).to_list()
+  assert(contains(declared_roles, "verification"), "the selection names the role it resolved")
+  // No declared role: the verifier is counted and then dropped. Reading that off
+  // the counts took arithmetic; the named selection shows it directly.
+  const undeclared = __judge_evidence_projection(
+    messages,
+    {
+      tools: [
+        edit_tool,
+        dispatch_tool,
+        {name: "verify", annotations: {kind: "execute", side_effect_level: "process_exec"}},
+      ],
+    },
+  )
+  assert_eq(undeclared.stats.relevant_call_count, 3)
+  assert_eq(undeclared.stats.included_action_count, 2)
+  assert_eq(undeclared.stats.omitted_older_action_count, 1)
+  assert(
+    !contains(
+      undeclared.stats.selected_actions.map({ s -> s.evidence_role }).to_list(),
+      "verification",
+    ),
+    "a host that declared no verification role is visible at a glance",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// B2: the arbitration, and every way it must NOT fire.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
+  harness: Harness,
+  task,
+) {
+  const captured = __run(
+    harness,
+    "arbitration-positive",
+    [
+      llm_done(),
+      __judge_says(
+        "failed_verification",
+        "the required verification command has not been executed successfully in the provided evidence",
+      ),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  // The conversion count comes first deliberately: it is counted by
+  // `converted_from` alone, and it is the quantity this mechanism owns. Reverting
+  // the arbitration must fail HERE, naming the missing conversion, rather than
+  // downstream on a receipt count that a dozen unrelated changes could also move.
+  assert_eq(__conversion_count(captured.events), 1)
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(len(receipts), 1)
+  assert_eq(receipts[0].action, "accept")
+  assert_eq(receipts[0].converted_from, CONVERSION)
+  assert_eq(receipts[0].gap_class, "failed_verification")
+  assert(receipts[0].invoked.deterministic, "the gate must be recorded as having run")
+  assert_eq(receipts[0].verification.observed, "passed")
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_unmet_manner_clause_continue_still_vetoes(harness: Harness, task) {
+  // Green verification, violated negative clause. The judge keeps this one
+  // outright — it is where its discriminating power lives.
+  const captured = __run(
+    harness,
+    "arbitration-manner",
+    [
+      llm_done(),
+      __judge_says("unmet_manner_clause", "the task forbade touching the vendored directory"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "continue")
+  assert_eq(receipts[0].converted_from, nil)
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_absent_gap_class_continue_still_vetoes(harness: Harness, task) {
+  const captured = __run(
+    harness,
+    "arbitration-unnamed",
+    [llm_done(), __judge_says(nil, "verification has not been run"), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(__completion_receipts(captured.events)[0].action, "continue")
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_unrun_verification_does_not_convert(harness: Harness, task) {
+  // The verifier never ran. The refusal is premature only if you assume it ran.
+  const captured = __run(
+    harness,
+    "arbitration-not-run",
+    [
+      llm_done(),
+      __judge_says("failed_verification", "run the verifier before finishing"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "no_workspace_write", "not_run")},
+  )
+  assert_eq(__completion_receipts(captured.events)[0].action, "continue")
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, task) {
+  // The real facts-free gate, through its real seam: `confirm: true` with
+  // `reason: facts_unavailable`. Keying the conversion on `confirm` would
+  // convert here, and this case is why it does not.
+  const captured = with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      __judge_says("failed_verification", "verification was never executed"),
+      llm_done(),
+    ],
+    { ->
+      const session = "arbitration-blind-" + harness.random.uuid()
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 2,
+            verify_completion_judge: {provider: "mock", max_invocations: 1},
+          }
+            + agent_completion_gate(harness.runtime, {}),
+        ) },
+      )
+    },
+  )
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "continue")
+  assert_eq(receipts[0].converted_from, nil)
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_no_deterministic_gate_does_not_convert(harness: Harness, task) {
+  const captured = __run(
+    harness,
+    "arbitration-no-gate",
+    [
+      llm_done(),
+      __judge_says("failed_verification", "verification was never executed"),
+      llm_done(),
+    ],
+    {},
+  )
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "continue")
+  assert(!receipts[0].invoked.deterministic)
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_red_verification_never_reaches_the_model_judge(harness: Harness, task) {
+  // The gate vetoes first, so the model stage is never reached and there is
+  // nothing to arbitrate. Unchanged by this mechanism, and asserted so.
+  const captured = __run(
+    harness,
+    "arbitration-red",
+    [llm_done(), llm_done()],
+    {verify_completion: __gate_reporting(false, "verification_after_write_red", "failed")},
+  )
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "continue")
+  assert(!receipts[0].invoked.verify_completion_judge, "no judge call is spent after a red gate")
+  assert_eq(__conversion_count(captured.events), 0)
+}

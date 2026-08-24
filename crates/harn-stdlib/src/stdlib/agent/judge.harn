@@ -1,5 +1,17 @@
 import { agent_feedback_emit } from "std/agent/feedback"
-import { CompletionJudgeAdmission, __judge_run_checkpoint } from "std/agent/judge_internals"
+import {
+  COMPLETION_JUDGE_GAP_CLASSES,
+  CompletionJudgeAdmission,
+  CompletionJudgeGapClass,
+  CompletionVerificationState,
+  __completion_arbitration_converts,
+  __completion_judge_gap_class,
+  __completion_verification_evidence_index,
+  __completion_verification_state_read,
+  __judge_emit_decision,
+  __judge_emit_started,
+  __judge_run_checkpoint,
+} from "std/agent/judge_internals"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
@@ -79,6 +91,17 @@ pub type CompletionEvidencePacket = {
   fallback_observations: list<CompletionEvidenceAction>,
 }
 
+/**
+ * One selected action, named on the projection receipt. Recovering WHICH action
+ * a packet dropped used to take arithmetic on the counts; a host that declared
+ * no verification role anywhere is visible here at a glance instead.
+ */
+pub type CompletionEvidenceSelection = {
+  name: string,
+  evidence_role: CompletionEvidenceRole,
+  evidence_index: int,
+}
+
 pub type CompletionEvidenceProjectionStats = {
   schema: "harn.completion_judge_evidence_projection.v1",
   raw_message_count: int,
@@ -90,6 +113,7 @@ pub type CompletionEvidenceProjectionStats = {
   lifecycle_issue_count: int,
   serialized_chars: int,
   raw_transcript_digest: string,
+  selected_actions: list<CompletionEvidenceSelection>,
 }
 
 pub type CompletionEvidenceProjection = {
@@ -121,6 +145,9 @@ pub type CompletionEvidenceSnapshot = {
   successful_tools_used: string,
   iteration: int,
   knowledge_state: string,
+  // Absent until a deterministic gate has actually run and reported. A judge
+  // stage reads it; nothing else may synthesize one.
+  verification?: CompletionVerificationState?,
 }
 
 pub type CompletionJudgeInvocations = {
@@ -142,6 +169,15 @@ pub type CompletionDirectiveReceipt = {
   invoked: CompletionJudgeInvocations,
   feedback_delivery: CompletionFeedbackDelivery,
   projection: CompletionEvidenceProjectionStats,
+  // The gap the model judge named, and — when an adjudication was overruled —
+  // WHAT overruled it. `trigger` names whichever adjudicator ANSWERED, not the
+  // boundary that asked, so a reader counting conversions must count
+  // `converted_from` and never filter by `trigger`. The completion gate also
+  // writes `converted_from`, but only ever a bare ladder reason
+  // (`failed_verification`), never an arbitration name, so the two never alias.
+  converted_from?: string?,
+  gap_class?: string?,
+  verification?: CompletionVerificationState?,
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
 }
@@ -160,7 +196,11 @@ pub type CompletionDirective = {
  * an out-of-contract value is preserved verbatim so telemetry can show what
  * the judge actually said, and is treated as a non-veto by the caller.
  */
-pub type CompletionJudgeVerdict = {verdict: string, detail: string}
+pub type CompletionJudgeVerdict = {
+  verdict: string,
+  detail: string,
+  gap_class: CompletionJudgeGapClass,
+}
 
 /** Normalized result from either a deterministic or model completion check. */
 type CompletionStageVerdict = {
@@ -173,6 +213,8 @@ type CompletionStageVerdict = {
   source?: string,
   trigger?: string?,
   reason?: string?,
+  gap_class?: CompletionJudgeGapClass?,
+  verification?: CompletionVerificationState?,
   converted_from?: string?,
   escalation_recommended?: bool?,
   escalation_target?: string?,
@@ -207,6 +249,13 @@ type CompletionPolicyEvaluation = {
   invoked: CompletionJudgeInvocations,
   verification_judge_cap_reached: bool,
   completion_judge_cap_reached: bool,
+  // The snapshot as of this stage. Later stages see what earlier stages
+  // established; a second model judge must not read the gate's facts through the
+  // first judge's overwritten verdict.
+  payload: CompletionEvidenceSnapshot,
+  // The deterministic gate's own reason, held separately because
+  // `evaluation.verdict` is overwritten by every stage that follows it.
+  deterministic_reason: string,
 }
 
 fn __unique_names(names) -> list<string> {
@@ -484,6 +533,17 @@ fn __judge_evidence_projection_from_lifecycle(
     actions: selected,
     fallback_observations: observation_fallback,
   }
+  let selection: list<CompletionEvidenceSelection> = []
+  for action in selected {
+    selection = selection
+      + [
+        {
+          name: action.name,
+          evidence_role: action.semantics.evidence_role,
+          evidence_index: action.evidence_index,
+        },
+      ]
+  }
   const serialized = json_stringify(packet)
   return {
     packet: packet,
@@ -499,6 +559,7 @@ fn __judge_evidence_projection_from_lifecycle(
       lifecycle_issue_count: lifecycle.invalid_count,
       serialized_chars: len(serialized),
       raw_transcript_digest: packet.raw_transcript_digest,
+      selected_actions: selection,
     },
   }
 }
@@ -584,7 +645,27 @@ fn __judge_payload(
     successful_tools_used: join(successful_tool_names, ", "),
     iteration: iteration,
     knowledge_state: __judge_knowledge_state(lifecycle, text),
+    verification: nil,
   }
+}
+
+/** Bind a gate reading onto the snapshot the remaining stages will be shown. */
+fn __judge_payload_with_verification(
+  payload: CompletionEvidenceSnapshot,
+  state: CompletionVerificationState?,
+) -> CompletionEvidenceSnapshot {
+  if state == nil {
+    return payload
+  }
+  return payload
+    + {
+      verification: state
+        + {
+          observed_at_evidence_index: __completion_verification_evidence_index(
+            payload.judge_evidence_projection.selected_actions,
+          ),
+        },
+    }
 }
 
 const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
@@ -595,6 +676,12 @@ const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
  * One discriminant and one dual-purpose detail keep completion decisions
  * inside small-model output budgets. `detail` is the evidence basis for
  * `done`, or the single concrete gap and next action for `continue`.
+ *
+ * `gap_class` names WHAT a `continue` is refusing on. It is deliberately NOT
+ * required: the checkpoint validates this schema strictly, and cached, replayed,
+ * and older-pin judge responses carry no such field. An absent value decodes to
+ * `other`, which is the reading that grants no authority — so the compatible
+ * direction and the safe direction are the same direction.
  *
  * @effects: []
  * @errors: []
@@ -607,6 +694,11 @@ pub fn __judge_completion_verdict_schema() -> dict {
     properties: {
       verdict: {type: "string", enum: ["done", "continue"]},
       detail: {type: "string", minLength: 1, maxLength: __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT},
+      gap_class: {
+        type: "string",
+        enum: COMPLETION_JUDGE_GAP_CLASSES,
+        description: "On `continue`, the kind of gap being named. On `done`, use `other`.",
+      },
     },
     required: ["verdict", "detail"],
     additionalProperties: false,
@@ -647,7 +739,11 @@ pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
   } else {
     detail
   }
-  return {verdict: verdict, detail: clamped}
+  return {
+    verdict: verdict,
+    detail: clamped,
+    gap_class: __completion_judge_gap_class(result?.gap_class),
+  }
 }
 
 fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
@@ -692,6 +788,7 @@ fn __judge_invoke_closure(
       vetoed: !confirm,
       feedback: message,
       confirm: confirm,
+      verification: __completion_verification_state_read(result?.verification),
       source: "deterministic",
       reason: if result?.reason == nil {
         nil
@@ -825,6 +922,7 @@ fn __judge_invoke_structured(
   return {
     vetoed: verdict == "continue",
     verdict: verdict,
+    gap_class: decoded.gap_class,
     feedback: if verdict == "continue" {
       feedback
     } else {
@@ -943,35 +1041,6 @@ pub fn agent_has_done_judge(judge_cfg) -> bool {
   return agent_judge_config(judge_cfg) != nil
 }
 
-fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
-  agent_emit_event(
-    agent,
-    session_id,
-    "judge_decision",
-    {
-      iteration: iteration,
-      verdict: verdict?.verdict
-        ?? if verdict.vetoed {
-          "continue"
-        } else {
-          "done"
-        },
-      reasoning: verdict?.reasoning ?? "",
-      next_step: verdict?.next_step ?? "",
-      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
-      source: verdict?.source ?? "unknown",
-      trigger: verdict?.trigger,
-      reason: verdict?.reason,
-      confirm: verdict?.confirm ?? !verdict.vetoed,
-      converted_from: verdict?.converted_from,
-      escalation_recommended: verdict?.escalation_recommended,
-      escalation_target: verdict?.escalation_target,
-      judge_outcome: verdict?.judge_outcome,
-      terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
-    },
-  )
-}
-
 fn __done_contract_primary_prompt(opts) {
   const marker = to_string(opts?.done_sentinel ?? "the configured done sentinel")
   return join(
@@ -992,7 +1061,7 @@ pub fn __done_contract_judge_system(opts) -> string {
     "Return `done` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
     "Judge the substance of the claim, never its wire format. Response markers, sentinels, and layout are enforced elsewhere, and their absence is never a reason to continue.",
-    "Return only `verdict` and one concise `detail`.",
+    "Return only `verdict`, one concise `detail`, and the `gap_class` the gap belongs to.",
     "On `done`, use `detail` for the strongest evidence that every requirement is met.",
     "On `continue`, use `detail` for the single most important gap and the substantive next action that closes it, never a restatement or formatting instruction.",
   ]
@@ -1101,6 +1170,9 @@ fn __judge_directive(
     invoked: invoked,
     feedback_delivery: feedback_delivery,
     projection: payload.judge_evidence_projection,
+    converted_from: verdict?.converted_from,
+    gap_class: verdict?.gap_class,
+    verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
   }
@@ -1157,12 +1229,38 @@ fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyS
   return stages
 }
 
-fn __completion_policy_initial_evaluation() -> CompletionPolicyEvaluation {
+/**
+ * Whether this run declares anything that could adjudicate a completion at
+ * `stop_reason`.
+ *
+ * A caller that is about to end the run and wants the turn adjudicated first
+ * needs to know whether asking is worth a provider call — and, more importantly,
+ * whether an answer it gets back means anything. An evaluation with no stages is
+ * not vetoed, so the directive seals `accept`: silence read as approval. Ask
+ * this before evaluating, and treat a false as "nobody was asked".
+ *
+ * The plan is the single owner of what counts as an adjudicator; this only
+ * reports whether it produced any stages.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_adjudicator_declared(opts, "stalled")
+ */
+pub fn agent_completion_adjudicator_declared(opts, stop_reason: string) -> bool {
+  return len(__completion_policy_plan(opts, stop_reason)) > 0
+}
+
+fn __completion_policy_initial_evaluation(
+  payload: CompletionEvidenceSnapshot,
+) -> CompletionPolicyEvaluation {
   return {
     verdict: {vetoed: false},
     invoked: {deterministic: false, verify_completion_judge: false, done_judge: false},
     verification_judge_cap_reached: false,
     completion_judge_cap_reached: false,
+    payload: payload,
+    deterministic_reason: "",
   }
 }
 
@@ -1197,28 +1295,78 @@ fn __completion_policy_mark_model_invoked(
   }
 }
 
+const __COMPLETION_VERIFICATION_CONVERSION: string = "failed_verification_contradicted_by_gate"
+
+/**
+ * Refuse a model `continue` that names a failed verification the deterministic
+ * gate observed passing, and convert it to `done` with a receipt saying so.
+ *
+ * This narrows WHAT EVIDENCE a refusal may rest on; it does not weaken refusal.
+ * Every other `gap_class` vetoes exactly as before, so artifact, manner and
+ * negative-clause, and authorization gaps keep the judge's full authority — and
+ * those are where its demonstrated discriminating power lives.
+ *
+ * `__completion_arbitration_converts` owns the conditions and why each is
+ * required. The invocation map is read here rather than re-derived: whether an
+ * adjudicator actually ran is the invocation map's question, not this
+ * function's.
+ */
+fn __completion_arbitrate_verification(
+  verdict: CompletionStageVerdict,
+  evaluation: CompletionPolicyEvaluation,
+) -> CompletionStageVerdict {
+  if !verdict.vetoed || verdict.source != "llm" {
+    return verdict
+  }
+  if !__completion_arbitration_converts(
+    to_string(verdict.gap_class ?? "other"),
+    evaluation.invoked.deterministic,
+    evaluation.deterministic_reason,
+    to_string(evaluation.payload.verification?.observed ?? "not_run"),
+  ) {
+    return verdict
+  }
+  // `reasoning` keeps the judge's own words. The record must show that a real
+  // refusal was overruled, not that no refusal happened.
+  return verdict
+    + {
+      vetoed: false,
+      verdict: "done",
+      feedback: nil,
+      next_step: "",
+      converted_from: __COMPLETION_VERIFICATION_CONVERSION,
+      reason: __COMPLETION_VERIFICATION_CONVERSION,
+    }
+}
+
 fn __completion_policy_run_stage(
   harness: Harness,
   opts,
-  payload: CompletionEvidenceSnapshot,
   iteration: int,
   evaluation: CompletionPolicyEvaluation,
   stage: CompletionPolicyStage,
 ) -> CompletionPolicyEvaluation {
+  const payload = evaluation.payload
   match stage {
     Deterministic(check) -> {
       const verdict = __judge_invoke_closure(check, payload)
-      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       return evaluation
-        + {verdict: verdict, invoked: evaluation.invoked + {deterministic: true}}
+        + {
+          verdict: verdict,
+          invoked: evaluation.invoked + {deterministic: true},
+          payload: __judge_payload_with_verification(payload, verdict.verification),
+          deterministic_reason: to_string(verdict.reason ?? ""),
+        }
     }
     ModelJudge(slot, config, trigger, prior_invocations, max_invocations) -> {
       if max_invocations != nil && prior_invocations >= max_invocations {
         return __completion_policy_mark_cap(evaluation, slot)
       }
+      __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
-      verdict = verdict + {trigger: trigger}
-      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      verdict = __completion_arbitrate_verification(verdict, evaluation) + {trigger: trigger}
+      __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       const next = evaluation + {verdict: verdict}
       return __completion_policy_mark_model_invoked(
         next,
@@ -1236,12 +1384,12 @@ fn __completion_policy_evaluate(
   iteration: int,
   stages: list<CompletionPolicyStage>,
 ) -> CompletionPolicyEvaluation {
-  let evaluation = __completion_policy_initial_evaluation()
+  let evaluation = __completion_policy_initial_evaluation(payload)
   for stage in stages {
     if !__completion_policy_can_advance(evaluation) {
       break
     }
-    evaluation = __completion_policy_run_stage(harness, opts, payload, iteration, evaluation, stage)
+    evaluation = __completion_policy_run_stage(harness, opts, iteration, evaluation, stage)
   }
   return evaluation
 }
@@ -1280,6 +1428,9 @@ pub fn agent_evaluate_completion(
   const stages = __completion_policy_plan(opts, stop_reason)
   const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
   const verdict = evaluation.verdict
+  // The evaluated snapshot, not the one built before any stage ran: it is the
+  // one carrying whatever the deterministic gate observed.
+  const evaluated = evaluation.payload
   let feedback_composition = nil
   if verdict.vetoed
     && verdict.feedback != nil
@@ -1298,12 +1449,12 @@ pub fn agent_evaluate_completion(
           next_step: verdict.next_step ?? "",
         },
       ],
-      {history: opts?._feedback_history ?? {}, knowledge_state: payload.knowledge_state},
+      {history: opts?._feedback_history ?? {}, knowledge_state: evaluated.knowledge_state},
     )
   }
   const directive = __judge_directive(
     verdict,
-    payload,
+    evaluated,
     evaluation.invoked,
     evaluation.verification_judge_cap_reached,
     evaluation.completion_judge_cap_reached,

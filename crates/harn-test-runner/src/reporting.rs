@@ -1,5 +1,7 @@
 //! Test result contracts, timing rollups, and diagnostic rendering.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use crate::timing::DurationSummary;
@@ -24,6 +26,19 @@ pub struct TestResult {
     /// errors have no execution timeline and leave this absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phases: Option<PhaseTimings>,
+    /// Script-owned `std/timing` spans closed while this case executed.
+    /// These are the receipt-level attribution boundary for sub-operations
+    /// inside an otherwise monolithic test case.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub timing_spans: Vec<TestTimingSpan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TestTimingSpan {
+    pub name: String,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -49,6 +64,39 @@ pub struct TestSummary {
     pub timing: DurationSummary,
     /// Aggregated phase costs across the entire run.
     pub aggregate: AggregateTimings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing_environment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_plan: Option<ShardPlan>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cost_regressions: Vec<CostRegression>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ShardPlan {
+    pub index: usize,
+    pub total: usize,
+    pub estimated_duration_ms: u64,
+    pub unknown_cases: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dominant_case: Option<DominantCase>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DominantCase {
+    pub file: String,
+    pub name: String,
+    pub baseline_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CostRegression {
+    pub file: String,
+    pub name: String,
+    pub baseline_ms: u64,
+    pub actual_ms: u64,
+    pub increase_percent: u64,
+    pub limit_percent: u64,
 }
 
 /// Wall-clock cost of each phase of a single test execution.

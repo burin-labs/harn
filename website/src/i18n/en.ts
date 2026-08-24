@@ -51,6 +51,7 @@ export const en = {
     gettingStarted: "Getting started",
     languageReference: "Language reference",
     cookbook: "Cookbook",
+    llmsTxt: "llms.txt",
     github: "GitHub",
     releases: "Releases",
     playground: "Playground",
@@ -112,6 +113,7 @@ export const en = {
       subhead:
         "Harn is a pipeline-oriented language for AI agents. LLM calls, tools, capability checks, durable steps, and deterministic replay are language and standard-library features, not SDKs you wire together yourself.",
       getStarted: "Get started",
+      forAgents: "For agents",
       readDocs: "Read the docs",
       github: "GitHub",
       facts: [

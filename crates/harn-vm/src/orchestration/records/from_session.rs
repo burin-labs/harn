@@ -837,16 +837,48 @@ fn run_status_for(
         return kind.lifecycle_state().wire_name();
     }
     if let Some(final_status) = final_status.filter(|value| !value.is_empty()) {
-        return if crate::llm::session_status_indicates_error(final_status) {
-            "failed"
-        } else {
-            "completed"
-        };
+        return run_status_from_final_status(final_status);
     }
     match session_status {
         SessionStatus::Open => "running",
         SessionStatus::Closed => "completed",
         SessionStatus::SoftDeleted | SessionStatus::HardDeleted => "deleted",
+    }
+}
+
+/// Project a loop's reported final status onto the run-record vocabulary.
+///
+/// A session that ends without a typed `terminal_kind` still reports a status
+/// string, and that string is drawn from one of two vocabularies that already
+/// have owners. Ask them, in order, rather than re-deriving either here:
+///
+/// 1. `AgentTerminalKind` — the producer-owned classification. Its
+///    `lifecycle_state` projection exists for exactly this: "Protocol and
+///    persistence adapters use this projection instead of independently
+///    interpreting status strings."
+/// 2. `AgentLifecycleState` — the lifecycle vocabulary itself, including its
+///    compatibility aliases (`done`, `succeeded`, `timeout`, `aborted`, ...).
+///    Only a terminal or resumable state is an outcome; `running` and
+///    `progressed` are not, so those fall through.
+///
+/// A spelling neither owner recognizes is not evidence of success. It goes to
+/// the error classifier, and only a status that classifier also declines is
+/// reported as `completed`. That is the bug this function exists to fix:
+/// collapsing every non-error status to `completed` stamped success on
+/// cancelled, stopped, and suspended runs.
+fn run_status_from_final_status(final_status: &str) -> &'static str {
+    if let Some(kind) = crate::agent_events::AgentTerminalKind::from_wire(final_status) {
+        return kind.lifecycle_state().projection().run_record_status;
+    }
+    if let Some(state) = crate::agent_events::AgentLifecycleState::from_wire(final_status) {
+        if state.is_terminal() || state.is_resumable() {
+            return state.projection().run_record_status;
+        }
+    }
+    if crate::llm::session_status_indicates_error(final_status) {
+        "failed"
+    } else {
+        "completed"
     }
 }
 

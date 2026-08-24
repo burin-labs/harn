@@ -10,6 +10,7 @@ import {
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
+import { with_audit_log } from "std/llm/tool_middleware"
 import { with_llm_script } from "std/testing"
 
 fn reset_counts(runtime: HarnessRuntime, counters) {
@@ -18,7 +19,29 @@ fn reset_counts(runtime: HarnessRuntime, counters) {
   runtime.atomic_set(counters.delete, 0)
   runtime.atomic_set(counters.search, 0)
   runtime.atomic_set(counters.verify, 0)
+  runtime.atomic_set(counters.run, 0)
   runtime.atomic_set(counters.done, 0)
+}
+
+fn run_tools(runtime: HarnessRuntime, counters) {
+  let tools = phase_tools(runtime, counters)
+  return tool_define(
+    tools,
+    "run",
+    "Run a workspace command.",
+    {
+      handler: { args ->
+        runtime.atomic_add(counters.run, 1)
+        return "ran " + to_string(args?.command ?? "")
+      },
+      parameters: {command: {type: "string"}},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+    },
+  )
+}
+
+fn run_call(command: string, id = "run") {
+  return {id: id, name: "run", arguments: {command: command}}
 }
 
 fn phase_tools(runtime: HarnessRuntime, counters) {
@@ -156,8 +179,14 @@ fn receipt_counts(events) {
   let skipped_blockers = []
   let executed_mutations = []
   let reproposed = 0
+  let reproposed_ids = []
+  let reproposed_names = []
+  let audit_orders = []
   let total = 0
   for event in events {
+    if event?.type == "tool_call_audit" && event?.receipt != nil {
+      audit_orders = audit_orders.appending(event.receipt.emit_order)
+    }
     if event?.type != "tool_batch_disposition" {
       continue
     }
@@ -180,6 +209,8 @@ fn receipt_counts(events) {
     }
     if receipt.proposal_status == "re_proposed" {
       reproposed = reproposed + 1
+      reproposed_ids = reproposed_ids.appending(receipt.tool_call_id)
+      reproposed_names = reproposed_names.appending(receipt.tool_name)
     }
     require receipt.planned_at_ms >= 0, "every call needs planning timing"
     if receipt.disposition == "executed" {
@@ -200,6 +231,9 @@ fn receipt_counts(events) {
     skipped_blockers: skipped_blockers,
     executed_mutations: executed_mutations,
     reproposed: reproposed,
+    reproposed_ids: reproposed_ids,
+    reproposed_names: reproposed_names,
+    audit_orders: audit_orders,
   }
 }
 
@@ -234,7 +268,14 @@ fn run_phased(harness: Harness, counters) {
               done_call("done-2"),
             ],
           },
-          {tool_calls: [search_call("search-3"), verify_call("verify-3"), done_call("done-3")]},
+          {
+            tool_calls: [
+              edit_call(false, "edit-3"),
+              delete_call("delete-3"),
+              verify_call("verify-3"),
+              done_call("done-3"),
+            ],
+          },
           {tool_calls: [verify_call("verify-4"), done_call("done-4")]},
           {tool_calls: [done_call("done-5")]},
         ],
@@ -310,6 +351,136 @@ fn run_blocked_then_consumed(harness: Harness, counters) {
   }
 }
 
+fn run_partitioned_reads(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-partition-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              verify_call("lead-verify"),
+              read_call("middle-read"),
+              read_call("tail-read"),
+              search_call("tail-search"),
+              done_call("partition-done"),
+            ],
+          },
+          {tool_calls: [verify_call("reproposed-verify"), done_call("later-done")]},
+          {tool_calls: [done_call("final-done")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 5,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+            tool_caller: with_audit_log(harness.clock, harness.fs, "cloud"),
+          }
+          return agent_loop(harness, "Keep independent reads after a later-phase call.", nil, opts)
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
+fn run_read_effect_status(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-status-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              read_call("status-read"),
+              run_call("git status --short --branch", "status-run"),
+              search_call("status-search"),
+              done_call("status-done"),
+            ],
+          },
+          {tool_calls: [done_call("status-done-2")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: run_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(harness, "Batch a read-only status probe with observations.", nil, opts)
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
+fn run_durable_reproposal(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-durable-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              read_call("quiet-read-1"),
+              run_call("echo hi > scratch.txt", "write-run-1"),
+            ],
+          },
+          {tool_calls: [read_call("quiet-read-2")]},
+          {
+            tool_calls: [
+              run_call("echo hi > scratch.txt", "write-run-2"),
+              done_call("durable-done"),
+            ],
+          },
+          {tool_calls: [done_call("durable-done-2")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: run_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(
+            harness,
+            "Remember a deferred write across a quiet observation turn.",
+            nil,
+            opts,
+          )
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
 fn run_rearmed_barrier(harness: Harness, counters) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-rearmed-" + harness.random.uuid()
@@ -358,6 +529,7 @@ pipeline main(harness: Harness) {
     delete: harness.runtime.atomic(0),
     search: harness.runtime.atomic(0),
     verify: harness.runtime.atomic(0),
+    run: harness.runtime.atomic(0),
     done: harness.runtime.atomic(0),
   }
   const phased = run_phased(harness, counters)
@@ -366,11 +538,13 @@ pipeline main(harness: Harness) {
   require harness.runtime.atomic_get(counters.edit) == 1,
     "one atomic edit call must remain one mutation"
   require harness.runtime.atomic_get(counters.delete) == 1, "the delete call must execute once"
-  require harness.runtime.atomic_get(counters.search) == 1, "post-mutation search must execute once"
+  require harness.runtime.atomic_get(counters.search) == 2,
+    "the first-phase search must execute with the leading observation, and the later search once"
   require harness.runtime.atomic_get(counters.verify) == 1, "verification must execute once"
   require harness.runtime.atomic_get(counters.done) == 1, "terminal completion must execute once"
-  require phased.receipts.total == 17, "every proposed call needs a disposition receipt"
-  require phased.receipts.executed == 6, "each logical call should execute exactly once"
+  require phased.receipts.total == 18, "every proposed call needs a disposition receipt"
+  require phased.receipts.executed == 7,
+    "partition keeps later first-phase calls instead of truncating them"
   require phased.receipts.deferred == 11, "later effect phases should be deferred"
   require phased.receipts.skipped == 0, "the successful path should not skip calls"
   require phased.receipts.reproposed == 11,
@@ -409,4 +583,45 @@ pipeline main(harness: Harness) {
     "each consumed barrier must identify the mutation that armed it"
   harness.stdio.println("rearmed.status=" + rearmed.result.status)
   harness.stdio.println("rearmed.skipped=" + to_string(rearmed.receipts.skipped))
+  const partitioned = run_partitioned_reads(harness, counters)
+  require partitioned.result.status == "done", "partitioned reads should finish"
+  require harness.runtime.atomic_get(counters.read) == 2,
+    "both observation calls must execute even when a later phase was emitted first"
+  require harness.runtime.atomic_get(counters.search) == 1, "the trailing search must also execute"
+  require harness.runtime.atomic_get(counters.verify) == 1,
+    "verification waits for its own phase regardless of emission order"
+  require contains(partitioned.receipts.audit_orders, 1),
+    "the selected subset must preserve the read's original model emission index: "
+    + json_stringify(partitioned.receipts.audit_orders)
+  require contains(partitioned.receipts.audit_orders, 2),
+    "the second read must preserve its original model emission index"
+  require contains(partitioned.receipts.audit_orders, 3),
+    "the search must preserve its original model emission index"
+  require partitioned.receipts.deferred >= 1, "the later-phase verify must still defer"
+  harness.stdio.println("partitioned.status=" + partitioned.result.status)
+  harness.stdio.println("partitioned.executed=" + to_string(partitioned.receipts.executed))
+  const status = run_read_effect_status(harness, counters)
+  require status.result.status == "done", "read-effect status probes should finish"
+  require harness.runtime.atomic_get(counters.run) == 1, "git status must execute in the read batch"
+  require harness.runtime.atomic_get(counters.read) == 1, "the sibling read must execute"
+  require harness.runtime.atomic_get(counters.search) == 1, "the sibling search must execute"
+  require status.receipts.deferred == 1, "only the terminal done call should defer"
+  harness.stdio.println("status.status=" + status.result.status)
+  harness.stdio.println("status.executed=" + to_string(status.receipts.executed))
+  const durable = run_durable_reproposal(harness, counters)
+  require durable.result.status == "done", "durable re-proposal should finish"
+  require harness.runtime.atomic_get(counters.run) == 1,
+    "the write-effect run executes once after the quiet turn"
+  // Name the tool. A bare `reproposed >= 1` is satisfied by the unrelated
+  // `done` re-proposal in the last turn, which happens with or without durable
+  // signatures — so that assertion passed before this fix existed. The claim
+  // under test is specifically that the write deferred in turn 1 is still
+  // remembered in turn 3, across a turn that never mentioned it.
+  // Mock providers normalize call IDs at their boundary, so the durable public
+  // invariant is the re-proposed tool identity rather than the source-local ID.
+  require contains(durable.receipts.reproposed_names, "run"),
+    "the identical write proposed after a quiet turn must be marked re_proposed: "
+    + json_stringify(durable.receipts.reproposed_names)
+  harness.stdio.println("durable.status=" + durable.result.status)
+  harness.stdio.println("durable.reproposed=" + to_string(durable.receipts.reproposed))
 }

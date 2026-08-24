@@ -93,7 +93,8 @@ pub struct DefaultHostlibHandles {
 /// hostlib surface; pick-and-choose embedders should construct
 /// [`HostlibRegistry`] directly. Embedders that need the retained
 /// [`code_index::CodeIndexCapability`] handle (for
-/// [`code_index::CodeIndexCapability::warm_session`]) should call
+/// [`code_index::CodeIndexCapability::warm_session`] and
+/// [`code_index::CodeIndexCapability::wait_until_idle`]) should call
 /// [`install_default_with_handles`] instead.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     install_default_with_embed(vm, embed::EmbedCapability::from_env()).0
@@ -104,7 +105,9 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
 /// The code-index handle shares the same [`code_index::SharedIndex`] cell
 /// installed into the VM, so a session-start
 /// [`code_index::CodeIndexCapability::warm_session`] populates the index
-/// visible to later agent turns.
+/// visible to later agent turns. Short-lived processes should then call
+/// [`code_index::CodeIndexCapability::wait_until_idle`] before exit so an
+/// in-flight warm can persist.
 pub fn install_default_with_handles(
     vm: &mut harn_vm::Vm,
 ) -> (HostlibRegistry, DefaultHostlibHandles) {

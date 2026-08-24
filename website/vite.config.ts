@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), harnDocsPlugin()],
   build: {
     // Emit the static site into docs/dist — the directory Render publishes for
-    // harnlang.com, and where build_docs_site.sh adds the raw .md mirror.
+    // harnlang.com. prerender.mjs also writes llms.txt and per-page .md.
     outDir: "../docs/dist",
     emptyOutDir: true,
   },

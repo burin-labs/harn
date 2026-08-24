@@ -85,7 +85,7 @@ impl IndexState {
             symbols: SymbolGraph::new(),
             overlays: OverlayState::new(),
             last_built_unix_ms: now_unix_ms(),
-            git_head: read_git_head(&canonical_root),
+            git_head: super::git_head::read_git_head(&canonical_root),
             next_id: 1,
         };
         let mut outcome = BuildOutcome::default();
@@ -419,19 +419,6 @@ fn canonicalize_existing(abs: &Path) -> PathBuf {
         }
     }
     abs.to_path_buf()
-}
-
-fn read_git_head(workspace_root: &Path) -> Option<String> {
-    let head = workspace_root.join(".git").join("HEAD");
-    let txt = std::fs::read_to_string(&head).ok()?;
-    let line = txt.trim().to_string();
-    if let Some(ref_target) = line.strip_prefix("ref: ") {
-        let ref_path = workspace_root.join(".git").join(ref_target);
-        if let Ok(sha) = std::fs::read_to_string(&ref_path) {
-            return Some(sha.trim().to_string());
-        }
-    }
-    Some(line)
 }
 
 #[cfg(test)]

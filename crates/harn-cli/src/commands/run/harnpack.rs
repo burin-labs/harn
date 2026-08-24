@@ -153,7 +153,18 @@ pub fn prepare_harnpack<W: Write>(
         prepare_execution_artifact(&manifest, &contents)?;
     let artifact_decode_elapsed = decode_started.elapsed();
     let bundle_hash = workflow_bundle_hash(&manifest, &contents)?;
-    let cache_dir = bytecode_cache::packs_cache_dir().join(sanitize_bundle_hash(&bundle_hash));
+    // Unpacking a bundle needs somewhere durable to replay into, so unlike the
+    // bytecode cache this cannot degrade to "off".
+    let Some(packs_root) = bytecode_cache::packs_cache_dir() else {
+        return Err(HarnpackError::new(
+            "harnpack.no_cache_dir",
+            format!(
+                "no cache directory resolves for unpacking this bundle; set {} to an absolute path",
+                bytecode_cache::CACHE_DIR_ENV
+            ),
+        ));
+    };
+    let cache_dir = packs_root.join(sanitize_bundle_hash(&bundle_hash));
     let replay_plan = plan_replay(&contents)?;
     let cache_hit = manifest_already_replayed(&cache_dir, &manifest)?;
     if !cache_hit {

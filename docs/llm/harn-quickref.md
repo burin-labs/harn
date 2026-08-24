@@ -1727,6 +1727,7 @@ set under `[provider_defaults.<name>]`:
 | `preferred_tool_format` | string | Default preset tool mode: `native` or `text`. |
 | `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
 | `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
+| `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. `{ measured = "..." }`, `{ assumed = "..." }`, or `{ mirrors = { provider, model_match } }`. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
@@ -1840,8 +1841,9 @@ harness.stdio.log(r.data.verdict)
 Diagnostic envelope `harness.llm.call_structured_result(prompt, schema,
 options?)` returns the full failure-mode breakdown
 production agent pipelines need — `{ok, data, raw_text, error,
-error_category, attempts, repaired, extracted_json, usage, model,
-provider}`. Never throws; dispatch on `ok` / `error_category`:
+error_category, attempts, repaired, repair_tier, extracted_json,
+usage, model, provider}`. Never throws; dispatch on `ok` /
+`error_category`:
 
 ```harn
 const r = harness.llm.call_structured_result(prompt, schema, {
@@ -1866,9 +1868,11 @@ if r.ok {
 ```
 
 `r.attempts` counts model calls (1 = no retries used; ≥2 = one or
-more schema retries were spent). `r.repaired: true` means the repair
-pass succeeded. `r.extracted_json: true` flags responses where
-JSON had to be lifted from prose / markdown fences.
+more schema retries were spent). `r.repaired: true` means a repair
+tier succeeded. `r.repair_tier` is `"local"` for a mechanical fix
+(no extra provider call), `"llm"` for a reissue, and `nil` otherwise.
+`r.extracted_json: true` flags responses where JSON had to be lifted
+from prose / markdown fences.
 
 Options: everything `llm_call` accepts flows through, plus
 `retries` as an alias for `schema_retries`. Provider options,
@@ -4584,9 +4588,11 @@ For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
 fan out dispatch across siblings inside one independent effect phase (capped at
 N). Tool annotations classify calls as observation, mutation,
 process/verification, terminal, or provider-native. A response that crosses a
-local effect boundary executes only its maximal first-phase prefix and returns
-typed deferred results for the suffix, forcing the next inference to observe
-the prefix results before re-proposing later calls. Each proposal emits a
+local effect boundary selects the earliest semantic phase rather than the first
+emitted phase, executes every call in that phase wherever it sits in the batch,
+and returns typed deferred results for the rest, forcing the
+next inference to observe those results before re-proposing the deferred calls.
+Each proposal emits a
 `tool_batch_disposition` event with phase, disposition, re-proposal, and
 monotonic timing fields. Middleware-backed
 dispatch uses `parallel settle`; the host-batch path uses the same cap.

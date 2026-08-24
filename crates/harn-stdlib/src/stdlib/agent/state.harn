@@ -383,10 +383,14 @@ pub fn agent_session_pending_injections(agent: HarnessAgent, session_id) {
 /**
  * agent_session_revoke_reminder.
  *
- * Revoke a pending bridge reminder before it is drained by an agent
- * checkpoint. Returns `{status, reminderId}` where `status` is one of
- * `"revoked"`, `"already_revoked"`, `"already_delivered"`, or
- * `"unknown_reminder_id"`.
+ * Revoke a reminder so later turns do not re-project it. Works for
+ * transcript-injected reminders (including after delivery while a TTL
+ * still remains) and for pending bridge reminders. Returns
+ * `{status, reminderId}` where `status` is one of `"revoked"`,
+ * `"already_revoked"`, `"already_delivered"`, or `"unknown_reminder_id"`.
+ * `revoked` means future carriage has been stopped. `already_delivered`
+ * is reserved for reminders whose live carriage already ended (TTL
+ * expiry, or a drained pending-queue item with nothing left to project).
  *
  * @effects: [host]
  * @errors: []

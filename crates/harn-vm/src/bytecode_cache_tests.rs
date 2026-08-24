@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::compile_source;
+use crate::module_artifact::ModuleProvenance;
 
 #[test]
 fn header_round_trips_chunk() {
@@ -55,6 +56,7 @@ fn header_mismatch_returns_none() {
     let path = tmp.path().join("a.harnbc");
     store_at(&path, &key, &chunk).expect("write");
     let other = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: [0xAB; 32],
         context_hash: key.context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -86,6 +88,7 @@ fn compiler_tag_mismatch_returns_none() {
     let path = tmp.path().join("b.harnbc");
     store_at(&path, &key, &chunk).expect("write");
     let other = CacheKey {
+        provenance: ModuleProvenance::User,
         compiler_tag: key.compiler_tag ^ 0xFF,
         ..key
     };
@@ -170,13 +173,13 @@ fn module_key_tracks_canonical_imported_interface_not_dependency_bodies() {
         "set order and duplicates are not semantics"
     );
     assert_eq!(
-        CacheKey::from_module_source(&source, &first),
-        CacheKey::from_module_source(&source, &reordered),
+        CacheKey::from_module_source(&source, &first, ModuleProvenance::User),
+        CacheKey::from_module_source(&source, &reordered, ModuleProvenance::User),
         "one imported interface must have one key"
     );
     assert_ne!(
-        CacheKey::from_module_source(&source, &first),
-        CacheKey::from_module_source(&source, &changed),
+        CacheKey::from_module_source(&source, &first, ModuleProvenance::User),
+        CacheKey::from_module_source(&source, &changed, ModuleProvenance::User),
         "changing an imported name consulted by lowering must miss"
     );
 }
@@ -194,10 +197,12 @@ fn module_key_excludes_dependency_bodies_while_entry_key_tracks_them() {
     let module_before = CacheKey::from_module_source(
         &ModuleSource::from_text(importer_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let dependency_before = CacheKey::from_module_source(
         &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
@@ -214,10 +219,12 @@ fn module_key_excludes_dependency_bodies_while_entry_key_tracks_them() {
     let module_after = CacheKey::from_module_source(
         &ModuleSource::from_text(importer_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let dependency_after = CacheKey::from_module_source(
         &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     assert_ne!(
@@ -309,6 +316,44 @@ fn adjacent_relocatable_entry_loads_and_dependency_edits_fail_closed() {
 }
 
 #[test]
+fn an_adjacent_artifact_is_offered_only_to_the_authority_that_compiled_it() {
+    // Paired on purpose. The negative arm alone passes vacuously for any
+    // reason a read can fail — wrong path, unreadable payload, disabled
+    // cache — so the positive arm reads the SAME artifact at the SAME path
+    // with the SAME source and context, differing only in provenance. A miss
+    // in one arm and a hit in the other is attributable to provenance and to
+    // nothing else.
+    let tmp = tempfile::tempdir().unwrap();
+    let source_text = "pub fn value() -> int { return 1 }\n";
+    let source_path = tmp.path().join("dependency.harn");
+    let adjacent = tmp.path().join("dependency.harnmod");
+    let source = ModuleSource::from_text(source_text);
+    let context = ModuleCompilationContext::default();
+    let artifact =
+        crate::module_artifact::compile_module_artifact_from_source(&source_path, source_text)
+            .expect("compile module");
+
+    let trusted_key =
+        CacheKey::from_module_source(&source, &context, ModuleProvenance::TrustedHostDispatch);
+    store_module_at(&adjacent, &trusted_key, &artifact).expect("store trusted artifact");
+
+    let ordinary_key = CacheKey::from_module_source(&source, &context, ModuleProvenance::User);
+    assert!(
+        read_module_if_matches(&adjacent, &ordinary_key, &source_path)
+            .unwrap()
+            .is_none(),
+        "an ordinary import must not accept bytecode compiled under trusted host dispatch"
+    );
+    assert!(
+        read_module_if_matches(&adjacent, &trusted_key, &source_path)
+            .unwrap()
+            .is_some(),
+        "the authority that wrote the artifact must still hit it, or the negative arm \
+         proves nothing about provenance"
+    );
+}
+
+#[test]
 fn packaged_module_artifact_with_another_sources_key_fails_closed() {
     let tmp = tempfile::tempdir().unwrap();
     let first_source = "pub fn value() -> int { return 1 }\n";
@@ -322,12 +367,14 @@ fn packaged_module_artifact_with_another_sources_key_fails_closed() {
     let first_key = CacheKey::from_module_source(
         &ModuleSource::from_text(first_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     store_module_at(&target, &first_key, &artifact).expect("store swapped artifact");
 
     let second_key = CacheKey::from_module_source(
         &ModuleSource::from_text(second_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     assert!(
         read_module_if_matches(&target, &second_key, &second_path)
@@ -345,6 +392,7 @@ fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
     let key = CacheKey::from_module_source(
         &ModuleSource::from_text(source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     let artifact = crate::module_artifact::compile_module_artifact_from_source(first_path, source)
@@ -400,6 +448,7 @@ fn source_local_module_artifact_round_trips() {
     let key = CacheKey::from_module_source(
         &ModuleSource::from_text(source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("source-local-module.harnmod");
@@ -632,6 +681,7 @@ fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
         "a graph of ordinary readable files must produce a manifest"
     );
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(entry_source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -769,6 +819,7 @@ fn stored_manifest(entry: &Path, entry_source: &str) -> ContextManifest {
     read_entry_candidate(
         &adjacent_cache_path(entry).unwrap(),
         &CacheKey {
+            provenance: ModuleProvenance::User,
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -948,6 +999,7 @@ fn a_touched_dependency_refreshes_the_manifest_instead_of_re_walking_forever() {
     let refreshed = read_entry_candidate(
         &adjacent_cache_path(&entry).unwrap(),
         &CacheKey {
+            provenance: ModuleProvenance::User,
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -1068,6 +1120,7 @@ fn store_beside(entry: &Path, source: &str) -> PathBuf {
     let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(entry, source);
     let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -1151,6 +1204,7 @@ fn an_artifact_from_another_build_of_this_version_is_not_served() {
     let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(&entry, &source);
     let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -1263,6 +1317,7 @@ fn cached_artifacts_are_owner_only() {
     let module_key = CacheKey::from_module_source(
         &ModuleSource::from_text(module_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let module_target = tmp.path().join("module.harnmod");
     store_module_at(&module_target, &module_key, &artifact).expect("write module artifact");
@@ -1274,4 +1329,118 @@ fn cached_artifacts_are_owner_only() {
         "module artifact must not be group- or world-accessible, got {module_mode:o}"
     );
     assert_eq!(module_mode, 0o600, "module artifact mode");
+}
+
+// ── Cache-root contract (#7066, #7067) ──────────────────────────────────────
+
+fn absolute_cache_path(unix: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!(
+            r"C:\{}",
+            unix.trim_start_matches('/').replace('/', r"\")
+        ))
+    } else {
+        PathBuf::from(unix)
+    }
+}
+
+/// An explicitly configured cache directory is honored verbatim, and its
+/// `packs` family lives beneath it. That asymmetry with a discovered root is
+/// deliberate: collapsing them would move every existing bytecode cache.
+#[test]
+fn an_absolute_override_is_the_bytecode_directory_itself() {
+    let override_path = absolute_cache_path("/tmp/harn-cache");
+    let root = cache_root_from(Some(override_path.clone()), None, None)
+        .expect("an absolute override is valid")
+        .expect("a root resolves");
+    assert_eq!(root.bytecode_dir(), override_path);
+    assert_eq!(root.packs_dir(), override_path.join("packs"));
+}
+
+/// A discovered root is a `harn` cache home; each family gets a subdirectory.
+#[test]
+fn a_discovered_root_gives_each_family_a_subdirectory() {
+    let xdg = absolute_cache_path("/xdg");
+    let from_xdg = cache_root_from(None, Some(xdg.clone()), None)
+        .expect("valid")
+        .expect("a root resolves");
+    assert_eq!(from_xdg.bytecode_dir(), xdg.join("harn").join("bytecode"));
+    assert_eq!(from_xdg.packs_dir(), xdg.join("harn").join("packs"));
+
+    let home = absolute_cache_path("/home/someone");
+    let from_home = cache_root_from(None, None, Some(home.clone()))
+        .expect("valid")
+        .expect("a root resolves");
+    assert_eq!(
+        from_home.bytecode_dir(),
+        home.join(".cache").join("harn").join("bytecode")
+    );
+}
+
+/// #7066: an override the operator set but Harn cannot honor is a hard error,
+/// never a silent downgrade. Empty previously resolved the cache to the empty
+/// path while the adjacent `XDG_CACHE_HOME` branch correctly fell through.
+#[test]
+fn an_empty_override_is_rejected() {
+    assert_eq!(
+        cache_root_from(
+            Some(PathBuf::new()),
+            None,
+            Some(absolute_cache_path("/home/someone"))
+        ),
+        Err(CacheDirError::Empty),
+        "an empty override must not fall through to the default root"
+    );
+}
+
+/// #7067: a relative override would make the cache location follow the working
+/// directory, so the same process run from two directories would keep two
+/// unrelated caches.
+#[test]
+fn a_relative_override_is_rejected() {
+    let error = cache_root_from(
+        Some(PathBuf::from("relative/cache")),
+        None,
+        Some(absolute_cache_path("/home/someone")),
+    )
+    .expect_err("a relative override must be rejected");
+    assert_eq!(
+        error,
+        CacheDirError::Relative(PathBuf::from("relative/cache"))
+    );
+    // The message names the variable and the offending value so an operator
+    // can act on it without reading the source.
+    let rendered = error.to_string();
+    assert!(rendered.contains(CACHE_DIR_ENV), "message: {rendered}");
+    assert!(rendered.contains("relative/cache"), "message: {rendered}");
+}
+
+/// `XDG_CACHE_HOME` is not Harn's own knob: the XDG spec says a relative value
+/// is ignored, so an unusable one falls through instead of failing the process.
+#[test]
+fn an_unusable_xdg_value_falls_through_rather_than_failing() {
+    let home = absolute_cache_path("/home/someone");
+    for unusable in [PathBuf::new(), PathBuf::from("relative/cache")] {
+        let root = cache_root_from(None, Some(unusable.clone()), Some(home.clone()))
+            .expect("an unusable XDG value must not fail the process")
+            .expect("the home root still resolves");
+        assert_eq!(
+            root.bytecode_dir(),
+            home.join(".cache").join("harn").join("bytecode"),
+            "unusable XDG value {unusable:?} should have fallen through"
+        );
+    }
+}
+
+/// #7067: with nothing configured and no home directory, there is no cache
+/// location. The old code fell back to a working-directory-relative path, so
+/// compiled bytecode was read from and written to whatever directory the
+/// process happened to be in. Caching is off instead.
+#[test]
+fn no_resolvable_root_disables_the_cache_rather_than_using_the_working_directory() {
+    assert_eq!(
+        cache_root_from(None, None, None).expect("not an operator error"),
+        None,
+        "nothing configured and no home must not fall back to a relative path"
+    );
 }

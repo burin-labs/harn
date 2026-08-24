@@ -1,5 +1,5 @@
 phased.status=done
-phased.executed=6
+phased.executed=7
 phased.deferred=11
 phased.reproposed=11
 blocked.status=done
@@ -8,3 +8,9 @@ blocked.counters.verify=1
 blocked.counters.done=1
 rearmed.status=done
 rearmed.skipped=2
+partitioned.status=done
+partitioned.executed=5
+status.status=done
+status.executed=4
+durable.status=done
+durable.reproposed=2

@@ -60,6 +60,9 @@ export interface PageData extends DocMeta {
   headings: Heading[]
   prev: { title: string; url: string } | null
   next: { title: string; url: string } | null
+  // Include-resolved Markdown used only to emit the agent `.md` projection.
+  // Stripped from the client `_content/*.json` payload in prerender.
+  markdownSource: string
 }
 
 export interface NavItem {
@@ -95,6 +98,8 @@ export interface LoadedDocs {
   meta: Record<string, DocMeta>
   pages: Map<string, PageData>
   search: SearchDoc[]
+  // SUMMARY.md page order, excluding missing files. Used by the agent index.
+  order: string[]
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
@@ -501,10 +506,19 @@ function rehypeScrollableRegions() {
       if (node.tagName !== "table" || parent == null || index == null) return
       if (wrapped.has(node)) return SKIP
       wrapped.add(node)
+      const header = node.children
+        ?.find((child: any) => child.tagName === "thead")
+        ?.children?.find((child: any) => child.tagName === "tr")
+      const columnCount = header?.children?.filter(
+        (child: any) => child.tagName === "th" || child.tagName === "td",
+      ).length ?? 0
       parent.children[index] = {
         type: "element",
         tagName: "div",
-        properties: { className: ["table-scroll"], tabIndex: 0 },
+        properties: {
+          className: columnCount >= 5 ? ["table-scroll", "table-scroll-wide"] : ["table-scroll"],
+          tabIndex: 0,
+        },
         children: [node],
       }
       return SKIP
@@ -978,6 +992,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       headings,
       prev: null,
       next: null,
+      markdownSource: included,
     })
 
     const plain = textFromHtml(stripDiagramSources(html))
@@ -1035,5 +1050,5 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     }
   }).filter((s) => s.groups.length > 0)
 
-  return { nav, meta, pages, search }
+  return { nav, meta, pages, search, order: orderedExisting }
 }

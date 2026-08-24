@@ -118,6 +118,25 @@ pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(harness: Ha
   assert_eq(schema.properties.detail.minLength, 1)
 }
 
+pipeline test_verdict_schema_bounds_the_gap_class_without_requiring_it(harness: Harness, task) {
+  const schema = __judge_completion_verdict_schema()
+  assert_eq(
+    schema.properties.gap_class.enum.sorted(),
+    [
+      "failed_verification",
+      "missing_artifact",
+      "other",
+      "unmet_manner_clause",
+      "unresolved_authorization",
+    ],
+  )
+  // Deliberately NOT required. The checkpoint validates this schema strictly,
+  // so requiring a field that cached and replayed responses predate would turn
+  // every one of them into a validation error — and the reading an absent value
+  // decodes to (`other`) is the one that grants no authority anyway.
+  assert_eq(contains(schema.required, "gap_class"), false)
+}
+
 pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, task) {
   const approved = __judge_completion_verdict_read(
     {verdict: "done", detail: "The targeted verifier ran and passed on the changed file."},

@@ -25,8 +25,8 @@ npm run build
 
 This runs `tsc`, the Vite client build, the Vite SSR build, and `prerender.mjs`, emitting a
 statically prerendered, fully crawlable site into `../docs/dist`. The canonical build entry point
-is `../scripts/build_docs_site.sh`, which also mirrors the raw `.md` sources and the LLM
-quick-reference files into `docs/dist`.
+is `../scripts/build_docs_site.sh`. prerender writes `/llms.txt`, `/llms-full.txt`, and one
+agent-oriented `.md` file per page; the build script then copies the LLM quick-reference files.
 
 ```bash
 npm run typecheck   # tsc -b --noEmit
@@ -41,7 +41,8 @@ npm run typecheck   # tsc -b --noEmit
   `docs/theme/harn-keywords.js` (regenerate with `make gen-highlight`).
 - **Search**: a client-side index (`_content/search.json`) fetched on first ⌘K.
 - **SSG** (`prerender.mjs`): renders every route to a real HTML file, embeds per-page JSON for
-  hydration, and emits the legacy redirect stubs.
+  hydration, emits the legacy redirect stubs, and writes the agent projections (`llms.txt`,
+  `llms-full.txt`, and per-page `.md`).
 
 ## Layout
 

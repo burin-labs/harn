@@ -130,6 +130,11 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/attributed_decl_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/acp_server_cli.rs",
+  // The cache-directory contract is enforced in `initialize_runtime`, which
+  // runs before clap. Only a real process proves an operator-set value that
+  // cannot be honored stops startup instead of degrading silently, and that
+  // a rejected relative override writes no cache beside the caller.
+  "crates/harn-cli/tests/harn_cli_e2e/cache_dir_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
   "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
   // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real

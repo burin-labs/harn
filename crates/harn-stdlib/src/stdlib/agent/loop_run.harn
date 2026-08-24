@@ -837,6 +837,100 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             )
             continue
           }
+          // The governor is about to seal a terminal. `postturn.harn` declares
+          // `__arbitrate_stalled_toolless_turn` THE arbitration point for a turn
+          // carrying prose and no tool call — but this branch leaves the loop
+          // before `agent_compute_post_turn` ever runs, so for exactly that turn
+          // shape the contract was owed an arbitration it never got. A read-only
+          // task answers in prose; composing the answer is indistinguishable
+          // from a monologue stall by signature alone, so the run that is
+          // finishing and the run that is looping both end here.
+          //
+          // Arbitrate once, at the moment of the stop. This can only convert a
+          // terminal, never extend the run: a decline leaves the hard stop
+          // exactly as it was, so a genuinely looping run still terminates. The
+          // cadence-driven arbitration above cannot collide with this one —
+          // every path out of it continues or breaks, so a turn that reaches
+          // here was never arbitrated. A cadence rations how often a judge runs
+          // during a run; this is the end of the run, so it asks anyway. The
+          // invocation caps still apply, and they are the budget that matters.
+          //
+          // Only a turn that actually said something is worth arbitrating, and
+          // only when this run declared someone to arbitrate it. Silence has no
+          // answer to adjudicate, and an undeclared adjudicator would answer
+          // `accept` out of an empty plan — silence read as approval.
+          const stall_arbitration_opts = __stall_judge_opts(
+            turn_opts,
+            verify_completion_judge_invocations,
+            done_judge_invocations,
+          )
+            + {_feedback_history: feedback_history}
+          if trim(visible_text) != ""
+            && agent_completion_adjudicator_declared(stall_arbitration_opts, "stalled") {
+            const governor_verdict = agent_evaluate_completion(
+              harness,
+              session,
+              stall_arbitration_opts,
+              "stalled",
+              visible_text,
+              iteration_index + 1,
+            )
+            done_judge_invocations += __done_judge_hit(governor_verdict)
+            verify_completion_judge_invocations += __completion_judge_hit(governor_verdict)
+            feedback_history = governor_verdict?.feedback_history ?? feedback_history
+            // A judge that hit its invocation cap is marked capped without ever
+            // being asked, so a plan alone is not proof that anyone answered.
+            // Only an adjudicator that actually ran may convert a stop into a
+            // completion; a cap instead reports the completion as unverified,
+            // which is what it is.
+            if governor_verdict.action == "accept"
+              && __completion_directive_adjudicated(governor_verdict) {
+              __close_stall_calls(
+                harness.agent,
+                session.session_id,
+                tool_calls,
+                "accepted completion",
+              )
+              const arbitrated_totals = agent_session_record_usage(
+                harness.agent,
+                session.session_id,
+                llm_result,
+                turn_llm_opts,
+                iteration_index + 1,
+              )
+              agent_emit_event(
+                harness.agent,
+                session.session_id,
+                "iteration_end",
+                {
+                  iteration: iteration_index + 1,
+                  iteration_info: __agent_loop_iteration_info(
+                    harness.agent,
+                    harness.clock,
+                    session.session_id,
+                    llm_result,
+                    len(tool_calls),
+                    visible_text,
+                    arbitrated_totals,
+                    loop_start_ms,
+                  ),
+                },
+              )
+              final_status = "done"
+              stop_reason = "stalled_done_judge"
+              break
+            } else if governor_verdict.action == "stop_unverified" {
+              __close_stall_calls(
+                harness.agent,
+                session.session_id,
+                tool_calls,
+                "stopped without verified completion",
+              )
+              final_status = "completion_unverified"
+              stop_reason = __completion_stop_reason(governor_verdict)
+              break
+            }
+          }
           const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(
             stall_warning,
             tool_calls,

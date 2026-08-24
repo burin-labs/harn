@@ -1283,6 +1283,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                timing_spans: Vec::new(),
                 message: if junit_passed { None } else { message.clone() },
                 captured_output: None,
             });
@@ -1313,6 +1314,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                timing_spans: Vec::new(),
                 message: None,
                 captured_output: None,
             });
@@ -1338,6 +1340,7 @@ pub(crate) async fn run_conformance_tests(
                 duration_ms: evaluation.duration_ms,
                 timeout: None,
                 phases: None,
+                timing_spans: Vec::new(),
                 message: Some(msg),
                 captured_output: None,
             });

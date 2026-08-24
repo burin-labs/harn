@@ -74,7 +74,7 @@ pub(crate) enum CrystallizeCommand {
     Validate(CrystallizeValidateArgs),
     /// Re-run shadow comparison from a bundle's redacted fixtures (no live side effects).
     Shadow(CrystallizeShadowArgs),
-    /// Ingest a `release_harn.crystallization_input.v1` fixture bundle (emitted
+    /// Ingest a `release_harn.crystallization_input.v3` fixture bundle (emitted
     /// by `release_harn.harn` in `harn-bump-fleet`) and emit a reviewed
     /// crystallization candidate bundle. The output is bundle-validate /
     /// shadow-replay ready and contains plain-language deterministic-vs-agentic

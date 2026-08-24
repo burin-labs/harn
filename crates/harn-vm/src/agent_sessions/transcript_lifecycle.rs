@@ -317,6 +317,9 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
             if let Some(next) = report.transcript.clone() {
                 apply_transcript_with_budget(state, next, "apply_reminder_post_turn")?;
             }
+            for reminder in &report.expired {
+                state.expired_reminder_ids.insert(reminder.id.clone());
+            }
             state.touch();
         }
         Ok(report)
@@ -436,5 +439,55 @@ pub fn inject_reminder(
     Ok(ReminderInjectionReport {
         reminder_id,
         deduped_count: deduped_reminder_ids.len(),
+    })
+}
+
+/// Stop future projection of a live session reminder.
+///
+/// Bridge-queued reminders are handled by the host builtin first. This
+/// path owns transcript-injected reminders: removing the event stops
+/// later turns from re-rendering it. After a successful removal the
+/// reminder id is remembered so a second revoke reports `already_revoked`
+/// rather than `unknown_reminder_id`. Expired ids report
+/// `already_delivered`.
+pub fn revoke_reminder(id: &str, reminder_id: &str) -> Result<&'static str, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Ok("unknown_reminder_id");
+        };
+        if state.revoked_reminder_ids.contains(reminder_id) {
+            return Ok("already_revoked");
+        }
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(crate::value::DictMap::new);
+        let mut events: Vec<VmValue> = match dict.get("events") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        let before = events.len();
+        events.retain(|event| {
+            crate::llm::helpers::reminder_from_event(event)
+                .map(|reminder| reminder.id != reminder_id)
+                .unwrap_or(true)
+        });
+        if events.len() != before {
+            let mut next = dict;
+            next.insert(
+                crate::value::intern_key("events"),
+                VmValue::List(std::sync::Arc::new(events)),
+            );
+            apply_transcript_with_budget(state, VmValue::dict(next), "revoke_reminder")?;
+            state.revoked_reminder_ids.insert(reminder_id.to_string());
+            state.touch();
+            return Ok("revoked");
+        }
+        if state.expired_reminder_ids.contains(reminder_id) {
+            return Ok("already_delivered");
+        }
+        Ok("unknown_reminder_id")
     })
 }

@@ -284,6 +284,7 @@ body {
 }
 .prose a {
   color: var(--color-accent-700);
+  overflow-wrap: anywhere;
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
@@ -322,6 +323,10 @@ body {
 }
 .prose code {
   font-family: var(--font-mono);
+  /* Source operators must stay visibly copyable. JetBrains Mono otherwise
+     turns pairs such as `|>` into a single decorative ligature. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   font-size: 0.85em;
   background-color: var(--color-surface-tertiary);
   color: var(--color-foreground);
@@ -391,6 +396,24 @@ body {
 .prose .table-scroll {
   overflow-x: auto;
   margin-bottom: 1.25rem;
+}
+.prose .table-scroll-wide table {
+  min-width: 42rem;
+}
+.prose .table-scroll-wide th:first-child,
+.prose .table-scroll-wide td:first-child {
+  position: sticky;
+  left: 0;
+  min-width: 10rem;
+  box-shadow: 1px 0 0 var(--color-border);
+}
+.prose .table-scroll-wide th:first-child {
+  z-index: 2;
+  background-color: var(--color-surface-secondary);
+}
+.prose .table-scroll-wide td:first-child {
+  z-index: 1;
+  background-color: var(--color-surface);
 }
 .prose table {
   width: 100%;

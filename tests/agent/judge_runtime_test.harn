@@ -21,6 +21,20 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
   return contents
 }
 
+/*
+ * The completion-judge window as an ordered list of its own boundary events.
+ *
+ * Ordering is the whole contract: a host renders "checking the work" on
+ * `judge_started` and clears it on `judge_decision`, so a decision that arrives
+ * without its start, or a start with no decision, is a stuck progress claim on
+ * a real user's screen.
+ */
+fn __judge_window(events) -> list<string> {
+  return events.filter({ event -> event.type == "judge_started" || event.type == "judge_decision" })
+    .map({ event -> to_string(event.type) })
+    .to_list()
+}
+
 fn __completion_receipts(events) {
   return events.filter(
     { event ->
@@ -448,6 +462,17 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
         contains(join(__feedback_contents(captured, "verify_completion"), "\n"), "hollow negative"),
         "the compact packet drives a real completion veto and repair receipt",
       )
+      // Every judge call the user waits through opens a window and closes it,
+      // in that order. Without the start half the host has nothing to show
+      // between the last edit and the verdict (bc#6934).
+      const window = __judge_window(captured.events)
+      assert(len(window) > 0, "a real judge run must emit window events")
+      assert_eq(window[0], "judge_started", "the window opens before it closes")
+      assert_eq(
+        len(window.filter({ kind -> kind == "judge_started" }).to_list()),
+        len(window.filter({ kind -> kind == "judge_decision" }).to_list()),
+        "every opened window is closed",
+      )
       const receipts = __completion_receipts(captured.events)
       assert_eq(receipts[0].action, "continue")
       assert(contains(receipts[0].evidence_id, "sha256:"))
@@ -514,6 +539,14 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
       )
         .to_list()
       assert_eq(len(decisions), 1, "one unavailable judge decision")
+      // The window opens one gate before the model call, so a request refused
+      // at admission still announces and then immediately closes. A host that
+      // renders `judge_started` must never be left holding an open window.
+      assert_eq(
+        __judge_window(captured.events),
+        ["judge_started", "judge_decision"],
+        "a refused admission still closes the window it opened",
+      )
       const receipts = __completion_receipts(captured.events)
       assert_eq(len(receipts), 1, "one terminal completion directive")
       assert_eq(receipts[0].action, "stop_unverified")

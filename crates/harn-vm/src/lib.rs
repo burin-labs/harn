@@ -169,12 +169,39 @@ pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
 }
 
+/// A startup condition that must stop the process before any work begins.
+#[derive(Debug)]
+pub enum RuntimeInitError {
+    /// The Harn-owned environment namespace holds an unknown or malformed key.
+    Environment(environment_registry::EnvironmentValidationError),
+    /// A configured cache directory cannot be honored.
+    CacheDir(bytecode_cache::CacheDirError),
+}
+
+impl std::fmt::Display for RuntimeInitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Environment(error) => error.fmt(formatter),
+            Self::CacheDir(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeInitError {}
+
 /// Validate the Harn-owned environment namespace and initialize process-wide
 /// runtime assets through the same bootstrap boundary used by the CLI.
-pub fn initialize_runtime() -> Result<(), environment_registry::EnvironmentValidationError> {
-    environment_registry::validate_startup_environment()?;
+///
+/// Returns a warning the caller should print once when startup succeeded but
+/// something degraded — today, that caching is off because no cache directory
+/// resolves. A *configured* value that cannot be honored is an `Err` instead:
+/// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
+/// silent downgrade to no caching.
+pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
+    environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
+    let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();
-    Ok(())
+    Ok(warning)
 }
 
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the
