@@ -8,3 +8,7 @@ sentinel_reason=sentinel
 policy=policy_stop
 policy_owner=policy
 policy_reason=fixture_policy_stop
+no_progress=policy_no_progress
+no_progress_reason=max_nudges
+thrash=policy_thrash
+thrash_reason=thrash_hard_stop

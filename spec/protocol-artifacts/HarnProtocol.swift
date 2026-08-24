@@ -1613,6 +1613,7 @@ public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
     case policyBudget = "policy_budget"
     case completionUnverified = "completion_unverified"
     case policyNoProgress = "policy_no_progress"
+    case policyThrash = "policy_thrash"
     case policyGuardrail = "policy_guardrail"
     case policyStop = "policy_stop"
     case providerError = "provider_error"
@@ -1626,6 +1627,7 @@ public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
         "policy_budget",
         "completion_unverified",
         "policy_no_progress",
+        "policy_thrash",
         "policy_guardrail",
         "policy_stop",
         "provider_error",
