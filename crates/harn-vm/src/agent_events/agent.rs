@@ -307,6 +307,12 @@ pub enum AgentEvent {
         /// `input_tokens`, `output_tokens`, `thinking_chars`. Hosts that
         /// surface latency/cost panes key off these without re-parsing
         /// the transcript JSONL.
+        ///
+        /// Some keys are present only when they were measured, and a
+        /// consumer must treat missing as "not measured" rather than
+        /// substituting a zero: `client_first_frame_ms` appears only for a
+        /// streamed call, and `serving_fingerprint` only when the provider
+        /// reported one.
         iteration_info: serde_json::Value,
     },
     /// Emitted when a first-class agent session is explicitly closed by
