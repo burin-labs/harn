@@ -36,6 +36,7 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import { SYSTEMS, CAPABILITIES, RATINGS, type Rating } from "../src/data/comparison.ts"
 import {
   loadDiagnosticExamples,
   remarkCheckedDiagnostics,
@@ -159,16 +160,21 @@ function descriptionFromHtml(html: string, fallback: string): string {
 }
 
 // Maps SUMMARY.md parts (the `# Heading` groups) to the top-level section tabs.
-// Mirrors docs/theme/harn-docs-nav.js, plus a Migrations tab so that part — which
-// the old nav left orphaned — is reachable.
+//
+// "Internals" rather than the Diataxis label "Explanation": that part holds
+// architecture, protocol contributions, and ADRs, so it explains how Harn is
+// built rather than teaching a reader the concepts they need to use it. The
+// concept material has its own part, folded into Introduction.
+//
+// Migrations has no tab. Version-upgrade instructions are how-to material, and
+// they sit under How-to guides rather than claiming a seventh tab of their own.
 const SECTION_TABS: { id: string; title: string; parts: string[] }[] = [
   { id: "introduction", title: "Introduction", parts: ["Introduction", "Concepts"] },
   { id: "tutorials", title: "Tutorials", parts: ["Tutorials"] },
   { id: "guides", title: "Guides", parts: ["How-to guides"] },
   { id: "reference", title: "Reference", parts: ["Reference"] },
-  { id: "explanation", title: "Explanation", parts: ["Explanation"] },
-  { id: "operations", title: "Operations", parts: ["Operations"] },
-  { id: "migrations", title: "Migrations", parts: ["Migrations"] },
+  { id: "explanation", title: "Internals", parts: ["Internals"] },
+  { id: "operations", title: "Operating Harn", parts: ["Operating Harn"] },
 ]
 
 // ---------------------------------------------------------------------------
@@ -352,6 +358,214 @@ function resolveIncludes(raw: string, fileAbs: string, repoRoot: string): string
     const end = parts[2] ? parseInt(parts[2], 10) : lines.length
     return lines.slice(Math.max(0, start - 1), end).join("\n")
   })
+}
+
+// ---------------------------------------------------------------------------
+// Comparison matrix
+// ---------------------------------------------------------------------------
+
+const COMPARISON_MATRIX_RE = /\{\{#comparison-matrix\}\}/g
+const COMPARISON_MARKER = "comparison-matrix"
+const ISSUE_BASE = "https://github.com/burin-labs/harn/issues"
+
+const RATING_LABEL: Record<Rating, string> = {
+  yes: "Yes",
+  partial: "Partial",
+  no: "No",
+  unknown: "—",
+}
+
+/**
+ * Expand `{{#comparison-matrix}}` into a real Markdown table.
+ *
+ * The table is emitted with every system, in `SYSTEMS` order, so the
+ * prerendered page, a reader with JavaScript off, and the Markdown projection
+ * an agent reads all get the complete comparison. Narrowing to the default
+ * columns is progressive enhancement layered on top by `useComparisonMatrix`.
+ *
+ * An HTML comment marks the table for the rehype pass below. Markdown cells
+ * cannot carry attributes, so per-cell identity and the hover notes are
+ * attached there instead of being inlined as raw HTML here — that keeps
+ * `markdownSource` a genuine Markdown table.
+ */
+function resolveComparisonMatrix(raw: string): string {
+  if (!COMPARISON_MATRIX_RE.test(raw)) return raw
+  COMPARISON_MATRIX_RE.lastIndex = 0
+
+  const header = ["Capability", ...SYSTEMS.map((s) => s.name)]
+  const rows = CAPABILITIES.map((cap) => {
+    const cells = SYSTEMS.map((sys) => {
+      const cell = RATINGS[cap.id]?.[sys.id]
+      return RATING_LABEL[cell?.rating ?? "unknown"]
+    })
+    return [`[${cap.label}](#${cap.id})`, ...cells]
+  })
+
+  const table = [
+    `| ${header.join(" | ")} |`,
+    `|${header.map(() => "---").join("|")}|`,
+    ...rows.map((r) => `| ${r.join(" | ")} |`),
+  ].join("\n")
+
+  // Rows with tracked work, emitted from the same data as the table. A plan
+  // cannot appear here without an issue number, because the type requires one,
+  // so a reader can always check whether the intent is still live.
+  const planned = CAPABILITIES.filter((cap) => cap.plan)
+  const plans = planned.length
+    ? [
+        "",
+        "**Tracked work.** These rows have work behind them, landed or in flight.",
+        "Each links its issue, so you can check the state yourself rather than",
+        "taking this page's word for it.",
+        "",
+        ...planned.map(
+          (cap) =>
+            `- [${cap.label}](#${cap.id}) — ${cap.plan!.note} ` +
+            `([#${cap.plan!.issue}](${ISSUE_BASE}/${cap.plan!.issue}))`,
+        ),
+      ].join("\n")
+    : ""
+
+  // Systems whose vocabulary is mapped onto Harn's. These are the closest thing
+  // to a migration path, so the reader who has just decided the table is in
+  // their favour has somewhere to go next. Anchors are validated downstream:
+  // a renamed heading on that page fails the build rather than rotting here.
+  const mapped = SYSTEMS.filter((s) => s.comingFrom)
+  const coming = mapped.length
+    ? [
+        "",
+        "**Already using one of these?** These systems have a term-by-term map",
+        "onto Harn's vocabulary, which is the shortest way to read your own",
+        "workflow in Harn's terms.",
+        "",
+        ...mapped.map(
+          (s) => `- [Coming from ${s.name}](./concepts/sota-comparison.md#${s.comingFrom})`,
+        ),
+      ].join("\n")
+    : ""
+
+  return raw.replace(
+    COMPARISON_MATRIX_RE,
+    `<!--${COMPARISON_MARKER}-->\n\n${table}\n${plans}\n${coming}`,
+  )
+}
+
+/**
+ * Attach per-cell identity to the comparison table and inject the column
+ * picker ahead of it.
+ *
+ * Column and row identity come from `SYSTEMS` and `CAPABILITIES` order, which
+ * is the same order the emitter above wrote, so the two stay consistent by
+ * construction rather than by matching header text.
+ */
+function rehypeComparisonMatrix() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "comment", (node: any, index: number | undefined, parent: any) => {
+      if (node.value?.trim() !== COMPARISON_MARKER || !parent || index === undefined) return
+      const table = parent.children
+        .slice(index + 1)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .find((n: any) => n.type === "element" && n.tagName === "table")
+      if (!table) return
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rowsOf = (section: string): any[] => {
+        const el = table.children.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (n: any) => n.type === "element" && n.tagName === section,
+        )
+        return el
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            el.children.filter((n: any) => n.type === "element" && n.tagName === "tr")
+          : []
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cellsOf = (tr: any): any[] =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tr.children.filter((n: any) => n.type === "element" && /^t[hd]$/.test(n.tagName))
+
+      // Header: first cell is the capability label, the rest are systems.
+      for (const tr of rowsOf("thead")) {
+        cellsOf(tr).forEach((cell, i) => {
+          if (i === 0) return
+          const sys = SYSTEMS[i - 1]
+          if (!sys) return
+          cell.properties = { ...cell.properties, dataSystem: sys.id, scope: "col" }
+        })
+      }
+
+      // Body: one row per capability, in declaration order.
+      rowsOf("tbody").forEach((tr, rowIndex) => {
+        const cap = CAPABILITIES[rowIndex]
+        if (!cap) return
+        cellsOf(tr).forEach((cell, i) => {
+          if (i === 0) {
+            cell.properties = {
+              ...cell.properties,
+              scope: "row",
+              ...(cap.favorsOthers ? { dataFavorsOthers: "true" } : {}),
+            }
+            return
+          }
+          const sys = SYSTEMS[i - 1]
+          if (!sys) return
+          const rated = RATINGS[cap.id]?.[sys.id]
+          cell.properties = {
+            ...cell.properties,
+            dataSystem: sys.id,
+            dataRating: rated?.rating ?? "unknown",
+            ...(rated?.note ? { title: rated.note } : {}),
+          }
+        })
+      })
+
+      parent.children[index] = comparisonLegend()
+      return SKIP
+    })
+  }
+}
+
+/** The column picker. Inert without JavaScript, which is why it starts hidden. */
+function comparisonLegend() {
+  const optional = SYSTEMS.filter((s) => s.id !== "harn")
+  return {
+    type: "element",
+    tagName: "div",
+    properties: { className: ["cmp-legend"], dataComparisonLegend: "true", hidden: true },
+    children: [
+      {
+        type: "element",
+        tagName: "p",
+        properties: { className: ["cmp-legend__label"] },
+        children: [{ type: "text", value: "Compare Harn with" }],
+      },
+      {
+        type: "element",
+        tagName: "div",
+        properties: { className: ["cmp-legend__options"] },
+        children: optional.map((sys) => ({
+          type: "element",
+          tagName: "label",
+          properties: { className: ["cmp-legend__option"], title: sys.summary },
+          children: [
+            {
+              type: "element",
+              tagName: "input",
+              properties: {
+                type: "checkbox",
+                value: sys.id,
+                ...(sys.shownByDefault ? { checked: true } : {}),
+              },
+              children: [],
+            },
+            { type: "text", value: ` ${sys.name}` },
+          ],
+        })),
+      },
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -736,6 +950,7 @@ function buildProcessor(
     .use(remarkCheckedDiagnostics, sourceRel, diagnosticExamples, seenDiagnosticExamples)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    .use(rehypeComparisonMatrix)
     .use(rehypeGithubAlerts)
     .use(rehypeNormalizeCodeLang)
     .use(rehypeMermaid)
@@ -956,7 +1171,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     const slug = sourceRel.replace(/\.md$/, "")
     const raw = readFileSync(fileAbs, "utf8")
     const fm = matter(raw)
-    const included = resolveIncludes(fm.content, fileAbs, repoRoot)
+    const included = resolveComparisonMatrix(resolveIncludes(fm.content, fileAbs, repoRoot))
 
     const headings: Heading[] = []
     const anchors = new Set<string>()

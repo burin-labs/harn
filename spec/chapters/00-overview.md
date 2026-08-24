@@ -2,7 +2,7 @@
 
 Version: tracks the current workspace release series; derived from the
 implementation and updated alongside it. The language is still
-pre-1.0 — surface-level breaking changes are possible between minor
+pre-1.0 — surface-level breaking changes are possible between minor and patch
 releases. Run `harn --version` for the build you have. See the
 [changelog](https://github.com/burin-labs/harn/blob/main/CHANGELOG.md) for
 what changed and when, and the `Stability` column in subsections below for

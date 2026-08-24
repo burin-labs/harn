@@ -26,7 +26,9 @@ const app = (
 )
 
 // Prerendered pages have server markup to hydrate; a cold dev load does not.
-if (root.childNodes.length > 0) {
+// Test for an element, not for any child: in dev the unreplaced `<!--app-html-->`
+// placeholder is itself a child node, and hydrating against it blanks the page.
+if (root.firstElementChild !== null) {
   hydrateRoot(root, app)
 } else {
   createRoot(root).render(app)

@@ -139,9 +139,18 @@ retry 3 {
 }
 ```
 
-- If the body succeeds on any attempt, returns that result immediately
-- If all attempts fail, returns `nil`
-- `return` inside a retry block propagates out (not retried)
+- Any error in the body triggers a retry. `retry` doesn't inspect the error, so
+  a malformed response and an unreachable host are treated the same way.
+- If the body succeeds on any attempt, that result is returned immediately.
+- `retry N` makes at most N attempts, not N retries after a first try.
+- If every attempt fails, the last error propagates. Wrap the block in
+  `try`/`catch`, or use a `try` expression, if you want to handle exhaustion
+  rather than let it escape.
+- `return` inside a retry block propagates out (not retried).
+
+For a retry that reacts to *why* a call failed, use
+[`harness.llm.with_rate_limit`](./builtins.md#llm), which backs off only on
+`rate_limit`, `overloaded`, `transient_network`, and `timeout`.
 
 ## Try-expression
 

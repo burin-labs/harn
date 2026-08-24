@@ -16,7 +16,7 @@
 - [Why Harn apps separate behavior from pixels](./concepts/interactive-apps.md)
 - [Coming from elsewhere](./concepts/sota-comparison.md)
 - [Why Harn?](./why-harn.md)
-- [Feature matrix](./feature-matrix.md)
+- [How Harn compares](./how-harn-compares.md)
 
 # Tutorials
 
@@ -58,6 +58,21 @@
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
 - [Run a portable reducer in a browser](./portable-kernel-browser.md)
+
+## Migrations
+
+- [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
+- [Agent plane cutover](./migrations/agent-plane-cutover.md)
+
+- [0.6.x → 0.7.0](./migrations/v0.7.md)
+- [Migrating to 0.10](./migrations/v0.10.md)
+- [`const`/`let` keyword scheme](./migrations/const-let.md)
+- [Pure collection method names](./migrations/pure-collection-methods.md)
+- [Prompt templates: v2](./migrations/template-engine-v2.md)
+- [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
+- [Schema-as-type](./migrations/schema-as-type.md)
+- [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)
+- [harn-hostlib host contracts](./migrations/harn-hostlib-host-contracts.md)
 
 # Reference
 
@@ -300,7 +315,7 @@
 - [Typed terminal sessions (hostlib)](./hostlib/terminal-session.md)
 - [Ambient host conditions (hostlib)](./hostlib/host-conditions.md)
 
-# Explanation
+# Internals
 
 ## Architecture
 
@@ -337,7 +352,7 @@
 - [ADR 0007: Compile hypotheses into Harn's existing experiment and workflow owners](./adr/0007-hypothesis-compiler-ownership.md)
 - [ADR 0008: Harn owns prepared-run authority](./adr/0008-harn-owns-prepared-run-authority.md)
 
-# Operations
+# Operating Harn
 
 - [Playground](./playground.md)
 - [Deploy to Render](./deploy/render.md)
@@ -364,17 +379,3 @@
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 
-# Migrations
-
-- [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
-- [Agent plane cutover](./migrations/agent-plane-cutover.md)
-
-- [0.6.x → 0.7.0](./migrations/v0.7.md)
-- [Migrating to 0.10](./migrations/v0.10.md)
-- [`const`/`let` keyword scheme](./migrations/const-let.md)
-- [Pure collection method names](./migrations/pure-collection-methods.md)
-- [Prompt templates: v2](./migrations/template-engine-v2.md)
-- [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
-- [Schema-as-type](./migrations/schema-as-type.md)
-- [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)
-- [harn-hostlib host contracts](./migrations/harn-hostlib-host-contracts.md)

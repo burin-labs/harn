@@ -253,7 +253,7 @@ shapes. Harn's `serve` adapter emits AG-UI-compatible events.
   resources](https://mastra.ai/docs/memory/threads-and-resources)
 - [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/)
 - [AWS Strands Agents — Agent
-  loop](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/agent-loop/)
+  loop](https://strandsagents.com/docs/user-guide/concepts/agents/agent-loop/)
 - [BAML documentation](https://docs.boundaryml.com/home)
 - [Agent Client
   Protocol](https://agentclientprotocol.com/get-started/introduction)

@@ -26,7 +26,7 @@ const introduction = {
   slug: "introduction",
   title: "Introduction",
   description: "What Harn is and who it is for.",
-  sectionTitle: "Explanation",
+  sectionTitle: "Internals",
   markdownSource: "Harn is a language for agents.",
   prev: { title: "Getting started", slug: "getting-started" },
   next: null,
@@ -63,8 +63,8 @@ describe("llms.txt", () => {
     expect(txt).toContain(`Website: ${SITE_ORIGIN}/`)
     expect(txt).toContain("pre-1.0")
     expect(txt).toContain("### Tutorials")
-    expect(txt).toContain("### Explanation")
-    expect(txt.indexOf("### Tutorials")).toBeLessThan(txt.indexOf("### Explanation"))
+    expect(txt).toContain("### Internals")
+    expect(txt.indexOf("### Tutorials")).toBeLessThan(txt.indexOf("### Internals"))
     expect(txt).toContain(
       `[Getting started](${absoluteMarkdownUrl("getting-started")}): Install Harn and run a first pipeline.`,
     )
