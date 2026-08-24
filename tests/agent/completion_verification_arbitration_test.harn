@@ -388,6 +388,11 @@ pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
     ],
     {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
   )
+  // The conversion count comes first deliberately: it is counted by
+  // `converted_from` alone, and it is the quantity this mechanism owns. Reverting
+  // the arbitration must fail HERE, naming the missing conversion, rather than
+  // downstream on a receipt count that a dozen unrelated changes could also move.
+  assert_eq(__conversion_count(captured.events), 1)
   const receipts = __completion_receipts(captured.events)
   assert_eq(len(receipts), 1)
   assert_eq(receipts[0].action, "accept")
@@ -395,7 +400,6 @@ pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
   assert_eq(receipts[0].gap_class, "failed_verification")
   assert(receipts[0].invoked.deterministic, "the gate must be recorded as having run")
   assert_eq(receipts[0].verification.observed, "passed")
-  assert_eq(__conversion_count(captured.events), 1)
   assert_eq(captured.result.status, "done")
 }
 
