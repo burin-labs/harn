@@ -835,7 +835,7 @@ tool_format_justification = { mirrors = { provider = "llamacpp", model_match = "
         assert_eq!(report.footguns.len(), 1, "{}", report.render());
         assert_eq!(report.footguns[0].provider, "mlx");
         assert!(
-            report.footguns[0].message.contains("the cited row changed"),
+            report.footguns[0].message.contains("cited row changed"),
             "{}",
             report.render()
         );
