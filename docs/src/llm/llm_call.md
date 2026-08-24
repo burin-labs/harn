@@ -636,7 +636,8 @@ Envelope fields:
 | `error` | string | Human-readable error message (empty on success). |
 | `error_category` | `string \| nil` | `nil` on success. On failure, one of `transport`-class categories (`rate_limit`, `timeout`, `auth`, `transient_network`, …) or `missing_json` / `schema_validation` / `repair_failed`. |
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
-| `repaired` | bool | `true` when the repair pass produced valid JSON. |
+| `repaired` | bool | `true` when a repair tier produced valid JSON. |
+| `repair_tier` | `string \| nil` | `nil` when no repair ran. `"local"` for a mechanical fix with no extra provider call. `"llm"` for a successful reissue. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
 | `usage` | dict | Final-attempt token, cache-adjusted priced-cost, and prompt-cache accounting. Each structured retry is charged as its own provider call; this envelope is not an aggregate. Unknown `cost_usd` stays `nil`. |
 | `model` | string | Model that produced the final attempt. |
@@ -644,15 +645,44 @@ Envelope fields:
 
 Repair-pass semantics:
 
+- After a schema or JSON miss, Harn first tries a local mechanical
+  salvage: trailing commas, unquoted identifier keys, prose/fence
+  extraction, and truncated closing braces. That tier spends no extra
+  tokens. If the repaired text still fails the schema, it is rejected
+  rather than coerced into a plausible shape.
 - The `repair` block is recognized only by
   `llm_call_structured_result`. Pass `repair: {enabled: true, ...}`
-  to enable it; presence of the dict implies opt-in.
-- Repair runs at most once, with `schema_retries: 0`, only when the
-  main call ended with malformed JSON or schema-invalid output. It
-  is skipped on transport failures because there is no raw text to
-  salvage.
+  to enable the LLM reissue; presence of the dict implies opt-in.
+- The LLM tier runs at most once, with `schema_retries: 0`, only when
+  local salvage did not produce valid JSON. It is skipped on transport
+  failures because there is no raw text to salvage.
 - Override keys (`model`, `provider`, `max_tokens`, `system`, …) are
-  merged onto the main call's options for the repair attempt.
+  merged onto the main call's options for the LLM repair attempt.
+
+### Recover already-produced text
+
+`harness.llm.recover_schema(text, schema, opts?)` is the after-the-fact
+owner for already-produced text. Use it when you already have model
+text from `harness.llm.call` (or another producer) and want parse →
+extract → regex → optional LLM repair without issuing a new structured
+call first.
+
+```harn,ignore
+const raw = harness.llm.call("Summarize the ticket").text
+const r = harness.llm.recover_schema(raw, schema)
+if r.ok {
+  harness.stdio.log(r.data)
+} else {
+  harness.stdio.log("recovery failed:", r.stage, r.error_category)
+}
+```
+
+Set `{repair: false}` for a fully deterministic pass. The optional LLM
+repair block accepts the same overrides as
+`llm_call_structured_result`. See the language spec for the
+`{ok, data, raw_text, error, error_category, attempts, stage, repaired}`
+envelope and the `parsed` / `extracted` / `regex` / `llm_repair`
+stages.
 
 ### When to use which helper
 

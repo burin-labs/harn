@@ -66,6 +66,7 @@ pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
 mod json_query;
+pub(crate) mod json_repair;
 pub(crate) mod json_stream;
 mod jsonrpc;
 mod junit;

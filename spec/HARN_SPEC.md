@@ -5041,6 +5041,7 @@ wrappers pick up the same narrowing.
 - `llm_call_structured_result<T>(prompt, schema: Schema<T>, options?) ->
   {ok: bool, data: T | nil, raw_text: string, error: string,
   error_category: string | nil, attempts: int, repaired: bool,
+  repair_tier: string | nil,
   extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
   cost_usd: float | nil,
   cache_read_tokens: int, cache_write_tokens: int,
@@ -5058,9 +5059,12 @@ wrappers pick up the same narrowing.
   `transient_network`, ...); JSON / schema failures surface as
   `missing_json`, `schema_validation`, or `repair_failed` when an
   optional repair pass was attempted and also failed. Options accept a
-  `repair: {enabled: bool, ...llm_call_overrides}` block — the repair
-  pass runs a single shot on malformed JSON only and is skipped on
-  transport-layer failures.
+  `repair: {enabled: bool, ...llm_call_overrides}` block. The ladder is
+  local mechanical salvage first (trailing commas, unquoted keys, prose
+  preambles, truncated closers), then a single LLM reissue. `repaired`
+  is true for either success; `repair_tier` is `"local"` or `"llm"`
+  when a repair produced the payload and `nil` otherwise. Transport
+  failures skip both repair tiers.
 - `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`

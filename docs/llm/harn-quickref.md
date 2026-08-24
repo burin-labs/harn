@@ -1841,8 +1841,9 @@ harness.stdio.log(r.data.verdict)
 Diagnostic envelope `harness.llm.call_structured_result(prompt, schema,
 options?)` returns the full failure-mode breakdown
 production agent pipelines need — `{ok, data, raw_text, error,
-error_category, attempts, repaired, extracted_json, usage, model,
-provider}`. Never throws; dispatch on `ok` / `error_category`:
+error_category, attempts, repaired, repair_tier, extracted_json,
+usage, model, provider}`. Never throws; dispatch on `ok` /
+`error_category`:
 
 ```harn
 const r = harness.llm.call_structured_result(prompt, schema, {
@@ -1867,9 +1868,11 @@ if r.ok {
 ```
 
 `r.attempts` counts model calls (1 = no retries used; ≥2 = one or
-more schema retries were spent). `r.repaired: true` means the repair
-pass succeeded. `r.extracted_json: true` flags responses where
-JSON had to be lifted from prose / markdown fences.
+more schema retries were spent). `r.repaired: true` means a repair
+tier succeeded. `r.repair_tier` is `"local"` for a mechanical fix
+(no extra provider call), `"llm"` for a reissue, and `nil` otherwise.
+`r.extracted_json: true` flags responses where JSON had to be lifted
+from prose / markdown fences.
 
 Options: everything `llm_call` accepts flows through, plus
 `retries` as an alias for `schema_retries`. Provider options,
