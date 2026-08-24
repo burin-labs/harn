@@ -1445,8 +1445,10 @@ jobs:
           7z a "$archive" harn.exe
           proof_dir="${RUNNER_TEMP}/harn-windows-manual-unpack"
           mkdir -p "$proof_dir"
-          powershell.exe -NoProfile -Command \
-            "Expand-Archive -LiteralPath '$PWD/$archive' -DestinationPath '$proof_dir' -Force"
+          HARN_RELEASE_ARCHIVE_PATH="$(cygpath -w "$PWD/$archive")" \
+            HARN_RELEASE_PROOF_DIR="$(cygpath -w "$proof_dir")" \
+            powershell.exe -NoProfile -Command \
+              "Expand-Archive -LiteralPath \$env:HARN_RELEASE_ARCHIVE_PATH -DestinationPath \$env:HARN_RELEASE_PROOF_DIR -Force"
           "$proof_dir/harn.exe" --version
           test ! -e "$proof_dir/harn-lsp.exe"
           test ! -e "$proof_dir/harn-dap.exe"
