@@ -1140,7 +1140,12 @@ pub(crate) fn locally_repair_json(text: &str) -> Option<String> {
         if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
             return Some(candidate);
         }
-        let repaired = apply_mechanical_json_fixes(&candidate)?;
+        // `continue`, not `?`. A candidate this cannot fix says nothing about
+        // the next one, and the raw text failing must not stop the extracted
+        // span from being tried.
+        let Some(repaired) = apply_mechanical_json_fixes(&candidate) else {
+            continue;
+        };
         if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
             return Some(repaired);
         }
@@ -1300,6 +1305,11 @@ fn close_truncated_containers(text: &str) -> Option<String> {
                 escape = true;
             } else if b == b'"' {
                 in_string = false;
+                // A closed string is a complete value. Without this the last
+                // significant byte stays whatever preceded the string — for
+                // `{"k": "v"` that is the `:`, and the truncation would be
+                // rejected as a dangling key rather than closed.
+                last_significant = b'"';
             }
             continue;
         }
