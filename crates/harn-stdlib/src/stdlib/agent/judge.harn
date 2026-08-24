@@ -12,6 +12,12 @@ import {
   __judge_emit_started,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+pub import {
+  COMPLETION_JUDGE_DEFAULT_CAP,
+  agent_completion_review,
+  agent_completion_review_should_skip_llm,
+  agent_verify_completion_judge_cap,
+} from "std/agent/completion_review"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
@@ -26,14 +32,6 @@ import {
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 
-// Conservative default cap on how many times the completion-judge LLM may
-// veto a proposed completion within one session. Each veto is a paid model
-// call plus an injected feedback message, so a weak model that never satisfies
-// the judge can otherwise burn calls up to `max_verify_attempts` (default 20)
-// with no structured signal. Callers raise it via
-// `verify_completion_judge.max_invocations`, or disable the cap entirely with
-// `0`.
-pub const COMPLETION_JUDGE_DEFAULT_CAP = 5
 
 // The completion judge is a terminal checkpoint, not a second agent loop. Give
 // it the latest effect-bearing actions and their observations without replaying
@@ -941,116 +939,7 @@ fn __judge_invoke_structured(
   }
 }
 
-fn __agent_completion_review(llm, opts) -> dict {
-  const model = trim(to_string(opts?.model ?? ""))
-  if model == "" {
-    return {scrutiny: "standard"}
-  }
-  const info = try {
-    llm.model_info(model)
-  }
-  if is_err(info) {
-    return {scrutiny: "standard"}
-  }
-  const review = unwrap(info)?.catalog?.completion_review
-  if type_of(review) != "dict" {
-    return {scrutiny: "standard"}
-  }
-  return {
-    scrutiny: to_string(review?.scrutiny ?? "standard"),
-    max_judge_calls: review?.max_judge_calls,
-    evidence: review?.evidence,
-  }
-}
 
-/**
- * agent_completion_review.
- *
- * Catalog `completion_review` for the session model, or `{scrutiny: "standard"}`
- * when the row omits it.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_completion_review(harness.llm, opts)
- */
-pub fn agent_completion_review(llm, opts) -> dict {
-  return __agent_completion_review(llm, opts)
-}
-
-/**
- * Whether light completion-review may skip the LLM confirmation.
- *
- * The catalog row must opt into `light`. The deterministic gate must already
- * have passed, and the turn must carry a terminal sentinel. Absent any of
- * those, the judge still runs.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_completion_review_should_skip_llm(review, evaluation, payload)
- */
-pub fn agent_completion_review_should_skip_llm(review, evaluation, payload) -> bool {
-  if to_string(review?.scrutiny ?? "standard") != "light" {
-    return false
-  }
-  if !(evaluation?.invoked?.deterministic ?? false) {
-    return false
-  }
-  if evaluation?.verdict?.vetoed ?? false {
-    return false
-  }
-  return to_string(payload?.stop_reason ?? "") == "sentinel"
-}
-
-fn __verify_completion_judge_cap(judge_cfg, review = {}) -> int? {
-  const configured = if type_of(judge_cfg) == "dict" {
-    judge_cfg?.max_invocations
-  } else {
-    nil
-  }
-  const catalog_cap = review?.max_judge_calls
-  const cap = configured ?? catalog_cap ?? COMPLETION_JUDGE_DEFAULT_CAP
-  if cap <= 0 {
-    return nil
-  }
-  return cap
-}
-
-/**
- * Resolve the optional top-level cap for `done_judge`. Unlike
- * `done_judge.cadence.max_invocations`, this is a terminal veto-loop cap: the
- * judge may fire up to the cap, then the loop finalizes instead of silently
- * continuing until the iteration budget expires.
- */
-fn __done_judge_cap(judge_cfg) -> int? {
-  if type_of(judge_cfg) != "dict" {
-    return nil
-  }
-  const cap = judge_cfg?.max_invocations
-  if cap == nil || cap <= 0 {
-    return nil
-  }
-  return cap
-}
-
-/**
- * agent_verify_completion_judge_cap.
- *
- * Resolved completion-judge veto cap for a `verify_completion_judge` config,
- * for surfacing in run records. Returns nil when the cap is disabled.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * An explicit `max_invocations` wins. Otherwise the catalog
- * `completion_review.max_judge_calls` applies, then the default of 5.
- *
- * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge, review)
- */
-pub fn agent_verify_completion_judge_cap(judge_cfg, review = {}) -> int? {
-  return __verify_completion_judge_cap(judge_cfg, review)
-}
 
 /**
  * agent_done_judge_cap.
@@ -1269,7 +1158,7 @@ fn __completion_policy_plan(opts, stop_reason: string, review = {}) -> list<Comp
           verification_config,
           opts?._verify_completion_judge_trigger,
           opts?._verify_completion_judge_invocations ?? 0,
-          __verify_completion_judge_cap(verification_config, review),
+          agent_verify_completion_judge_cap(verification_config, review),
         ),
       ]
   }
@@ -1430,7 +1319,7 @@ fn __completion_policy_run_stage(
       match slot {
         Verification() -> {
           if agent_completion_review_should_skip_llm(
-            __agent_completion_review(harness.llm, opts),
+            agent_completion_review(harness.llm, opts),
             evaluation,
             payload,
           ) {
@@ -1514,7 +1403,7 @@ pub fn agent_evaluate_completion(
   const stages = __completion_policy_plan(
     opts,
     stop_reason,
-    __agent_completion_review(harness.llm, opts),
+    agent_completion_review(harness.llm, opts),
   )
   const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
   const verdict = evaluation.verdict
