@@ -32,6 +32,16 @@ describe("documentation content contract", () => {
       expect(page.markdownSource.length, page.slug).toBeGreaterThan(0)
     }
   })
+
+  it("keeps the row label visible while wide comparison tables scroll", () => {
+    const featureMatrix = docs.pages.get("feature-matrix")
+    const precedence = docs.pages.get("spec/language/03-operator-precedence-table")
+    expect(featureMatrix).toBeDefined()
+    expect(precedence).toBeDefined()
+    expect(featureMatrix!.html).toContain('class="table-scroll table-scroll-wide"')
+    expect(precedence!.html).toContain('class="table-scroll"')
+    expect(precedence!.html).not.toContain("table-scroll-wide")
+  })
 })
 
 describe("diagram rendering", () => {
