@@ -50,6 +50,72 @@ pub type JudgeCheckpointRequest = {
 }
 
 /**
+ * Open the completion-judge window. Paired with `__judge_emit_decision`, which
+ * closes it.
+ *
+ * A judge call is a model round trip with no tool row and no streamed text, so
+ * without this a host has nothing to show between the agent's last edit and the
+ * verdict. Fires after the invocation cap but before deadline admission: a
+ * refused admission therefore closes the window with an unavailable decision.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_emit_started(
+  agent: HarnessAgent,
+  session_id: string,
+  iteration: int,
+  trigger: string,
+) -> nil {
+  agent_emit_event(agent, session_id, "judge_started", {iteration: iteration, trigger: trigger})
+  return nil
+}
+
+/**
+ * Close the completion-judge window with its normalized host projection.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_emit_decision(
+  agent: HarnessAgent,
+  session_id: string,
+  iteration: int,
+  verdict,
+) -> nil {
+  agent_emit_event(
+    agent,
+    session_id,
+    "judge_decision",
+    {
+      iteration: iteration,
+      verdict: verdict?.verdict
+        ?? if verdict.vetoed {
+          "continue"
+        } else {
+          "done"
+        },
+      reasoning: verdict?.reasoning ?? "",
+      next_step: verdict?.next_step ?? "",
+      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+      source: verdict?.source ?? "unknown",
+      trigger: verdict?.trigger,
+      reason: verdict?.reason,
+      gap_class: verdict?.gap_class,
+      confirm: verdict?.confirm ?? !verdict.vetoed,
+      converted_from: verdict?.converted_from,
+      escalation_recommended: verdict?.escalation_recommended,
+      escalation_target: verdict?.escalation_target,
+      judge_outcome: verdict?.judge_outcome,
+      terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
+    },
+  )
+  return nil
+}
+
+/**
  * Pure completion-judge deadline admission core.
  *
  * @effects: []
