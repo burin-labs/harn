@@ -2326,10 +2326,13 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
                 "pool task",
                 Some(task_group_id),
             );
-            let outcome = runner
-                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
-                .await
-                .map_err(|error| error.to_string());
+            let mock = runner.llm_mock_context.clone();
+            let outcome = crate::orchestration::scope_ambient(
+                crate::orchestration::AmbientExecutionScope::with_llm_mock(mock),
+                runner.call_closure_args(&closure, crate::vm::CallArgs::Empty),
+            )
+            .await
+            .map_err(|error| error.to_string());
             ctx.forward_output(&runner.take_output());
             outcome
         })

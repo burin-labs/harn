@@ -162,6 +162,13 @@ impl AmbientExecutionScope {
         scope
     }
 
+    pub(crate) fn with_llm_mock(llm_mock: LlmMockContext) -> Self {
+        Self {
+            llm_mock,
+            ..Self::default()
+        }
+    }
+
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's

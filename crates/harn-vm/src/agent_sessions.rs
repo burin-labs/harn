@@ -195,6 +195,8 @@ pub struct SessionState {
     /// shares the session record's lifecycle so reset and eviction cannot
     /// leave a second ambient journal behind.
     pub(crate) transcript_journal: Option<crate::agent_session_journal::JournalState>,
+    pub(crate) revoked_reminder_ids: HashSet<String>,
+    pub(crate) expired_reminder_ids: HashSet<String>,
 }
 
 impl SessionState {
@@ -229,6 +231,8 @@ impl SessionState {
             text_tool_call_seq: 0,
             taint: Vec::new(),
             transcript_journal: None,
+            revoked_reminder_ids: HashSet::new(),
+            expired_reminder_ids: HashSet::new(),
         }
     }
 

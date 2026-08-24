@@ -837,16 +837,34 @@ fn run_status_for(
         return kind.lifecycle_state().wire_name();
     }
     if let Some(final_status) = final_status.filter(|value| !value.is_empty()) {
-        return if crate::llm::session_status_indicates_error(final_status) {
-            "failed"
-        } else {
-            "completed"
-        };
+        return run_status_from_final_status(final_status);
     }
     match session_status {
         SessionStatus::Open => "running",
         SessionStatus::Closed => "completed",
         SessionStatus::SoftDeleted | SessionStatus::HardDeleted => "deleted",
+    }
+}
+
+fn run_status_from_final_status(final_status: &str) -> &'static str {
+    if let Some(state) = crate::agent_events::AgentLifecycleState::from_wire(final_status) {
+        if state.is_terminal()
+            || matches!(
+                state,
+                crate::agent_events::AgentLifecycleState::Suspended
+                    | crate::agent_events::AgentLifecycleState::AwaitingInput
+            )
+        {
+            return state.wire_name();
+        }
+    }
+    match final_status {
+        "user_cancelled" => "cancelled",
+        "paused" | "blocked" => "suspended",
+        "budget_exhausted" | "policy_stop" => "stopped",
+        "completion_unverified" | "input_guardrail" | "scope_alert" => "failed",
+        _ if crate::llm::session_status_indicates_error(final_status) => "failed",
+        _ => "completed",
     }
 }
 
