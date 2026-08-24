@@ -25,6 +25,33 @@ fn checkout_boundary_errors(steps: list) -> list<string> {
   return errors
 }
 
+fn refresh_order_errors(
+  command: string,
+  migration: string,
+  safe_repairs: string,
+  caller_refresh: string,
+  format_migration: string,
+  refresh_sentinel: string,
+) -> list<string> {
+  let errors: list<string> = []
+  if command.index_of(migration) >= command.index_of(caller_refresh) {
+    errors = errors + ["target capability migrations must precede the caller refresh"]
+  }
+  if command.index_of(migration) >= command.index_of(safe_repairs) {
+    errors = errors + ["behavior-preserving repairs must run after target capability migrations"]
+  }
+  if command.index_of(safe_repairs) >= command.index_of(caller_refresh) {
+    errors = errors + ["behavior-preserving repairs must precede the caller refresh"]
+  }
+  if command.index_of(caller_refresh) >= command.index_of(format_migration) {
+    errors = errors + ["caller refresh must settle before the unconditional format migration"]
+  }
+  if command.index_of(format_migration) >= command.index_of(refresh_sentinel) {
+    errors = errors + ["format migration must finish before refresh success is recorded"]
+  }
+  return errors
+}
+
 fn bump_workflow_errors(workflow, text: string) -> list<string> {
   let errors: list<string> = []
   const inputs = workflow?.on?.workflow_call?.inputs ?? {}
@@ -86,11 +113,25 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   const command = to_string(run?.run ?? "")
   const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
   const safe_repairs = "harn fix --apply --safety behavior-preserving ."
+  const caller_refresh = "eval \"$HARN_BUMP_REFRESH_COMMAND\""
+  const format_migration = "harn fmt ."
+  const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
+  const refresh_pipeline = "$"
+    + "{refresh_migrations}"
+    + "$"
+    + "{refresh_behavior_preserving}"
+    + "$"
+    + "{refresh_caller}"
+    + "$"
+    + "{refresh_format}"
+    + "$"
+    + "{refresh_complete}"
   for required in [
     migration,
     safe_repairs,
-    "eval \"$HARN_BUMP_REFRESH_COMMAND\"",
-    "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
+    caller_refresh,
+    format_migration,
+    refresh_sentinel,
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
     "../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn",
@@ -99,14 +140,18 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
       errors = errors + ["orchestration must fail closed across runtime version skew: " + required]
     }
   }
-  if command.index_of(migration) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
-    errors = errors + ["target capability migrations must precede the caller refresh"]
-  }
-  if command.index_of(migration) >= command.index_of(safe_repairs) {
-    errors = errors + ["behavior-preserving repairs must run after target capability migrations"]
-  }
-  if command.index_of(safe_repairs) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
-    errors = errors + ["behavior-preserving repairs must precede the caller refresh"]
+  errors = errors
+    + refresh_order_errors(
+      command,
+      migration,
+      safe_repairs,
+      caller_refresh,
+      format_migration,
+      refresh_sentinel,
+    )
+  if !command.contains(refresh_pipeline) {
+    errors = errors
+      + ["format migration must remain outside the optional behavior-preserving repair pass"]
   }
   if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
     errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
