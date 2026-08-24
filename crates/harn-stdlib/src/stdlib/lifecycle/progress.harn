@@ -17,7 +17,6 @@
  * Import:
  *   import { progress_start, progress_tick, progress_finish } from "std/lifecycle/progress"
  */
-
 /** Default heartbeat spacing: often enough to show life, rare enough not to flood a pipe. */
 pub const PROGRESS_DEFAULT_INTERVAL_MS = 60000
 
