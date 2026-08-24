@@ -109,9 +109,16 @@ pub(super) fn effective_node_policy(
     let node_policy = graph_policy
         .intersect(&node.capability_policy)
         .map_err(VmError::Runtime)?;
-    node_policy
+    let stage_policy = node_policy
         .intersect(&tool_capability_policy_from_spec(&node.tools))
-        .map_err(VmError::Runtime)
+        .map_err(VmError::Runtime)?;
+    match crate::orchestration::current_execution_policy() {
+        // The invoking host is the outer security ceiling and may carry
+        // process-only roots that are intentionally absent from the workflow
+        // graph. Keep those grants while allowing the stage to narrow them.
+        Some(ambient) => ambient.intersect(&stage_policy).map_err(VmError::Runtime),
+        None => Ok(stage_policy),
+    }
 }
 
 pub(super) fn effective_node_approval_policy(
@@ -122,4 +129,72 @@ pub(super) fn effective_node_approval_policy(
         .unwrap_or_default()
         .intersect(&graph.approval_policy);
     base.intersect(&node.approval_policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::{
+        clear_execution_policy_stacks, push_execution_policy, ProcessSandboxPolicy, SandboxProfile,
+    };
+
+    #[test]
+    fn workflow_stage_policy_preserves_ambient_process_only_roots() {
+        clear_execution_policy_stacks();
+        let process_root = tempfile::tempdir().expect("process root");
+        push_execution_policy(CapabilityPolicy {
+            workspace_roots: vec!["/workspace".to_string()],
+            process_sandbox: ProcessSandboxPolicy {
+                write_roots: vec![process_root.path().display().to_string()],
+                ..Default::default()
+            },
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        });
+
+        let graph = WorkflowGraph::default();
+        let node = crate::orchestration::WorkflowNode::default();
+        let effective = effective_node_policy(&graph, &node).expect("effective node policy");
+
+        assert_eq!(
+            effective.process_sandbox.write_roots,
+            vec![process_root.path().display().to_string()],
+            "a workflow stage must retain process roots granted by the invoking host"
+        );
+        clear_execution_policy_stacks();
+    }
+
+    #[test]
+    fn workflow_stage_policy_can_only_narrow_ambient_process_roots() {
+        clear_execution_policy_stacks();
+        let process_root = tempfile::tempdir().expect("process root");
+        let nested_root = process_root.path().join("nested");
+        push_execution_policy(CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                write_roots: vec![process_root.path().display().to_string()],
+                ..Default::default()
+            },
+            ..CapabilityPolicy::default()
+        });
+
+        let graph = WorkflowGraph::default();
+        let node = crate::orchestration::WorkflowNode {
+            capability_policy: CapabilityPolicy {
+                process_sandbox: ProcessSandboxPolicy {
+                    write_roots: vec![nested_root.display().to_string()],
+                    ..Default::default()
+                },
+                ..CapabilityPolicy::default()
+            },
+            ..Default::default()
+        };
+        let effective = effective_node_policy(&graph, &node).expect("effective node policy");
+
+        assert_eq!(
+            effective.process_sandbox.write_roots,
+            vec![nested_root.display().to_string()],
+            "a workflow stage may narrow but not widen the invoking host root"
+        );
+        clear_execution_policy_stacks();
+    }
 }
