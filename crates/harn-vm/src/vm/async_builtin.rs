@@ -35,6 +35,16 @@ impl AsyncBuiltinCtx {
         Self::new(vm)
     }
 
+    /// Construct a context for host work that the current VM awaits inline.
+    ///
+    /// The parent is parked until the host future completes, so the context
+    /// must share its execution deadline and inherited lock set. Using a plain
+    /// `child_vm()` here would fork the outer deadline: admission could pause
+    /// the fork while the real caller still timed out.
+    pub(crate) fn from_inline_parent(parent: &Vm) -> Self {
+        Self::new(parent.child_vm_inline())
+    }
+
     /// Construct a standalone ctx around `vm` for unit tests that drive an async
     /// builtin handler directly (outside the dispatch loop). Production code
     /// receives its ctx from the dispatch path, never this.

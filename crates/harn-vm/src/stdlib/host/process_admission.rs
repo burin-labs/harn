@@ -174,6 +174,11 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    use crate::compiler::Compiler;
+    use crate::stdlib::register_vm_stdlib;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+
     #[test]
     fn resolved_effect_is_the_single_admission_classifier() {
         let context = |argv: &[&str]| {
@@ -287,5 +292,61 @@ mod tests {
             .expect("inline task receives the shared permit");
         drop(permit);
         assert_eq!(scope.waited_ms(), 17);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn harness_process_run_pauses_the_calling_vm_deadline_while_admission_waits() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let source = r#"
+pipeline blocked(harness: Harness) {
+  harness.process.run({program: "rustc", args: ["--version"]})
+}
+"#;
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().expect("tokenize process fixture");
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().expect("parse process fixture");
+                let entry = Compiler::new()
+                    .compile_named_pipeline_entry(&program, "blocked", None)
+                    .expect("compile process fixture");
+
+                let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+                let gate_clock: Arc<dyn Clock> = clock.clone();
+                let scope = scope_process_admission(ProcessAdmissionGate::new(1, gate_clock));
+                let occupied = acquire_process_admission(None)
+                    .await
+                    .expect("gate is open")
+                    .expect("test occupies the only process lane");
+
+                let mut vm = crate::Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_harness(crate::Harness::real());
+                let caller_deadline = Arc::clone(&vm.execution_deadline);
+                let execution = tokio::task::spawn_local(async move {
+                    vm.execute_callable_entry_with_timeout(&entry, &[], Duration::from_secs(5))
+                        .await
+                });
+
+                for _ in 0..1_000 {
+                    if caller_deadline.is_active() && caller_deadline.current().is_none() {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    caller_deadline.is_active() && caller_deadline.current().is_none(),
+                    "the canonical HarnessProcess.run wait must pause the caller's outer deadline"
+                );
+
+                clock.advance(Duration::from_millis(25));
+                drop(occupied);
+                execution
+                    .await
+                    .expect("process fixture task joins")
+                    .expect("admission extends rather than spends the caller deadline");
+                assert_eq!(scope.waited_ms(), 25);
+            })
+            .await;
     }
 }
