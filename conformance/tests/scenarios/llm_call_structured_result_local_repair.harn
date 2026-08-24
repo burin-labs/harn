@@ -14,7 +14,6 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   const opts = {provider: "mock", retries: 0, repair: {enabled: true}}
-
   for raw in [
     "{\"verdict\": \"PASS\",}",
     "{verdict: \"PASS\"}",
@@ -36,7 +35,6 @@ pipeline default(harness: Harness) {
       },
     )
   }
-
   for raw in ["nothing useful here at all", "{\"note\": \"nope\"}"] {
     with_llm_script(
       harness.llm,
