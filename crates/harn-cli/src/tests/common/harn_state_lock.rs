@@ -15,7 +15,13 @@ static HARN_STATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 ///   into OAuth-required mode, so a test that constructs a service
 ///   while a previous OAuth test's env is still live receives 401 on
 ///   every unauthenticated request.
+/// - `HARN_CACHE_DIR` points the bytecode cache at a private directory.
+///   A test that counts compiles has to own its cache, because keys are
+///   content-addressed and the shared dir already holds the artifact any
+///   earlier run stored. Left set, it aims later tests at a `TempDir`
+///   that has since been removed.
 const LEAKY_STATE_ENV_VARS: &[&str] = &[
+    harn_vm::bytecode_cache::CACHE_DIR_ENV,
     harn_vm::runtime_paths::HARN_STATE_DIR_ENV,
     harn_vm::runtime_paths::HARN_RUN_DIR_ENV,
     harn_vm::runtime_paths::HARN_WORKTREE_DIR_ENV,

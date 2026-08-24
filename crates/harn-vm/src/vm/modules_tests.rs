@@ -1272,6 +1272,7 @@ fn seed_linked_module(
     let key = bytecode_cache::CacheKey::from_module_source(
         &source,
         &crate::module_artifact::ModuleCompilationContext::default(),
+        crate::module_artifact::ModuleProvenance::User,
     );
     bytecode_cache::store_module_at(
         &bytecode_cache::adjacent_module_cache_path(&dep).expect("adjacent artifact path"),
@@ -1374,6 +1375,7 @@ fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
     let key = bytecode_cache::CacheKey::from_module_source(
         &module_source::ModuleSource::from_text(body),
         &crate::module_artifact::ModuleCompilationContext::default(),
+        crate::module_artifact::ModuleProvenance::User,
     );
     for path in [
         bytecode_cache::adjacent_module_cache_path(&dep).unwrap(),

@@ -4,6 +4,16 @@ use super::*;
 async fn selected_test_file_entries_compile_once_and_run_in_fresh_vms() {
     let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
+    // This test counts compiles, so it must own the cache it compiles into.
+    // Cache keys are content-addressed, so with the shared cache dir the very
+    // same sources are already present once any earlier run has stored them,
+    // and `modules_compiled` reads 0 instead of 1 — passing cold and failing
+    // warm. Pointing at a private dir inside the test's own tree makes every
+    // run cold and the counts deterministic.
+    std::env::set_var(
+        harn_vm::bytecode_cache::CACHE_DIR_ENV,
+        temp.path().join("bytecode-cache"),
+    );
     temp.write("harn.toml", "[check]\ntrusted_host_dispatch = true\n");
     temp.write(
         "suite/counter.harn",

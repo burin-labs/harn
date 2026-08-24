@@ -430,36 +430,44 @@ impl PreparedModuleCache {
             // Disk cache hits skip parse + compile. The scoped prepared cache
             // additionally skips deserialization and chunk hydration on later
             // fresh VMs without sharing any runtime module state.
-            let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
-                let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                let compiled =
-                    compile_trusted_host_dispatch_module_artifact_from_source_with_context(
-                        source_path,
-                        source.as_str(),
-                        &compilation_context,
-                    )?;
-                if let Some(span) = &mut compile_span {
-                    span.mark_compile_succeeded();
-                }
-                drop(compile_span);
-                compiled
-            } else {
-                // Only ordinary user bytecode enters the process-wide disk cache.
-                // Trusted host-dispatch artifacts remain in this explicitly scoped,
-                // provenance-keyed in-memory cache.
+            // Every provenance shares one cache path. The cache key carries the
+            // authority, so the on-disk identity already separates a trusted
+            // artifact from an ordinary one: they hash to different shared-cache
+            // filenames, and an adjacent artifact found by path fails the other
+            // authority's header check. Before the key had that field, the only
+            // thing keeping privileged bytecode out of an ordinary reader's
+            // reach was this branch skipping the cache entirely, which also
+            // meant a trusted graph recompiled from source on every process.
+            let cached = {
                 let lookup = {
                     let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-                    crate::bytecode_cache::load_module(source_path, source, &compilation_context)
+                    crate::bytecode_cache::load_module(
+                        source_path,
+                        source,
+                        &compilation_context,
+                        provenance,
+                    )
                 };
                 if let Some(artifact) = lookup.artifact {
                     artifact
                 } else {
                     let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                    let compiled = compile_module_artifact_from_source_with_context(
-                        source_path,
-                        source.as_str(),
-                        &compilation_context,
-                    )?;
+                    // Same `provenance` that keyed the lookup above, so the
+                    // artifact stored on a miss can only be found by a reader
+                    // asking for the authority it was compiled under.
+                    let compiled = if provenance == ModuleProvenance::TrustedHostDispatch {
+                        compile_trusted_host_dispatch_module_artifact_from_source_with_context(
+                            source_path,
+                            source.as_str(),
+                            &compilation_context,
+                        )?
+                    } else {
+                        compile_module_artifact_from_source_with_context(
+                            source_path,
+                            source.as_str(),
+                            &compilation_context,
+                        )?
+                    };
                     if let Some(span) = &mut compile_span {
                         span.mark_compile_succeeded();
                     }
@@ -710,9 +718,30 @@ pub fn exercise(value: any) -> string {
         const WORKERS: usize = 8;
 
         let cache = PreparedModuleCache::default();
+        // The nonce makes this source content nobody has compiled before, so
+        // the shared disk cache cannot serve it and every worker genuinely
+        // races to compile. Without it the test asserts single-flight against
+        // a key an earlier run already stored: it passes cold and reads zero
+        // compilations warm. Trusted modules used to skip the disk cache
+        // entirely, which hid this by making the test hermetic by accident.
+        //
+        // What this needs is uniqueness, not time, so it takes the randomness
+        // `tempfile` already uses to name a directory no other process holds.
+        // A clock would be a flaky-test pattern, and a pid plus a counter can
+        // repeat once the OS recycles that pid against a cache that outlives
+        // the run.
+        let nonce_dir = tempfile::tempdir().expect("temp dir for a unique module identity");
+        let nonce = nonce_dir
+            .path()
+            .file_name()
+            .expect("temp dir has a final component")
+            .to_string_lossy()
+            .into_owned();
         let source = Arc::new(ModuleSource::from_text(
-            (0..128)
-                .map(|index| format!("pub fn value_{index}() {{ return {index} }}\n"))
+            std::iter::once(format!("// {nonce}\n"))
+                .chain(
+                    (0..128).map(|index| format!("pub fn value_{index}() {{ return {index} }}\n")),
+                )
                 .collect::<String>(),
         ));
         let source_path = Arc::new(PathBuf::from("shared-runtime-module.harn"));
