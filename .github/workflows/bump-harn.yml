@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: "harn install --locked || harn install"
+      format-command:
+        description: "Repository-owned formatter command run after regeneration. Defaults to formatting every Harn source below the repository root."
+        required: false
+        type: string
+        default: "harn fmt ."
       node-version:
         description: "Optional Node.js version installed before refresh and validation commands."
         required: false
@@ -207,6 +212,7 @@ jobs:
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
           HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
+          HARN_BUMP_FORMAT_COMMAND: ${{ inputs.format-command }}
           HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
           HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
@@ -243,7 +249,11 @@ jobs:
           refresh_behavior_preserving='harn fix --apply --safety behavior-preserving .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_caller='eval "$HARN_BUMP_REFRESH_COMMAND"; '
-          refresh_format='harn fmt .; '
+          # Callers with intentional invalid fixtures own the valid-source
+          # boundary; every caller still formats after regeneration and before
+          # the success sentinel.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_format='test -n "$HARN_BUMP_FORMAT_COMMAND"; eval "$HARN_BUMP_FORMAT_COMMAND"; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_complete='printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
           if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then

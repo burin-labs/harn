@@ -22,7 +22,7 @@ declared refresh and validation commands.
 
 Drop this into the consuming repo. The only repo-specific parts are the trigger
 schedule and, when the default lock refresh is insufficient, the
-`refresh-command` and `validate-command`.
+`refresh-command`, `format-command`, and `validate-command`.
 
 ```yaml
 name: Bump Harn Runtime
@@ -54,6 +54,12 @@ jobs:
       refresh-command: |
         harn install --locked
         ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"
+      # Optional repository-owned valid-source boundary. The default is
+      # `harn fmt .`; repositories that intentionally keep invalid `.harn`
+      # fixtures must point this at their authoritative formatter command.
+      # Empty commands fail closed. Formatting always runs after regeneration
+      # and before refresh success is recorded.
+      format-command: ./scripts/format-harn-sources
       # Optional, when the repository owner commands require Node. The shared
       # workflow installs this exact version rather than trusting runner state.
       # If package.json declares an exact npm, pnpm, or yarn `packageManager`,
@@ -145,9 +151,10 @@ release, so this holds in practice.)
   setup; unsupported or non-exact declarations fail before caller commands run.
 - **No package-domain logic in the shared workflow.** The reusable workflow
   never encodes a package's code-generation or build/test knowledge. Repos
-  expose their existing owner commands through `refresh-command` and
-  `validate-command`; the shared workflow only sequences them. Consumers copy
-  no orchestration, release-readiness, signing, branch, or PR machinery.
+  expose their existing owner commands through `refresh-command`,
+  `format-command`, and `validate-command`; the shared workflow only sequences
+  them. Consumers copy no orchestration, release-readiness, signing, branch, or
+  PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
   because it must reach git, the GitHub API through the connector, and the
   caller's refresh and validation commands. It carries no secret beyond the
