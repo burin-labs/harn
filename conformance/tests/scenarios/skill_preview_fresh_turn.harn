@@ -1,38 +1,114 @@
 import { agent_skills_match, agent_skills_preview } from "std/agent/skills"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-fn tool_names(options) -> list {
+fn tool_names(options) -> list<string> {
   return (options?.tools?.tools ?? []).map(
     { entry -> to_string(entry?.function?.name ?? entry?.name ?? "") },
   )
     .to_list()
 }
 
+fn active_skill(options, id) {
+  for entry in options?.active_skills ?? [] {
+    if entry?.id == id {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn fragment_by_id(fragments, id) {
+  for fragment in fragments {
+    if fragment?.id == id {
+      return fragment
+    }
+  }
+  return nil
+}
+
+fn git_context_profile() -> dict {
+  return {
+    skills: ["git"],
+    tool_groups: ["git"],
+    profiles: [{id: "git", skills: ["git"], tool_groups: ["git"]}],
+    prompt_fragments: [
+      {
+        id: "profile:git",
+        source: "project_context_profile",
+        body: "Project profile: Git repository detected.",
+        requires_caps: [],
+      },
+    ],
+  }
+}
+
 pipeline test(harness: Harness, _task) {
-  skill alpha {
-    description "Alpha workflow"
-    when_to_use "Use alpha for alpha-shaped work"
-    prompt "Alpha instructions."
+  skill git {
+    description "Git repository and pull request workflow"
+    when_to_use "Use for Git branches, commits, pull requests, and repository history"
+    prompt "Full Git workflow instructions."
   }
-  const options = {
-    skills: alpha,
+  const explicit_patch_options = {
+    skills: git,
     skill_match: {strategy: "manual"},
-    context_profile: {skills: ["alpha"]},
+    context_profile: git_context_profile(),
   }
-  const preview = agent_skills_preview(harness.agent, options)
+  const preview = agent_skills_preview(harness.agent, explicit_patch_options)
   assert(tool_names(preview).contains("load_skill"), "preview advertises Harn's load_skill tool")
   assert(
-    to_string(harness.agent.prompt_explain(preview)?.system ?? "").contains("Alpha instructions."),
-    "preview applies context-profile skill activation",
+    active_skill(preview, "git") == nil,
+    "project detection alone does not activate the full Git skill",
   )
-  const session_id = "skill-preview-live"
-  harness.agent.open(session_id)
-  const live = agent_skills_match(harness.agent, {session_id: session_id}, options, 0)
-  assert(tool_names(preview) == tool_names(live), "fresh preview and live tool projections match")
+  const explained = harness.agent.prompt_explain(
+    {
+      _system_fragments: preview.context_profile.prompt_fragments,
+      context_profile: preview.context_profile,
+    },
+  )
+  const fact = fragment_by_id(explained.fragments, "profile:git")
   assert(
-    to_string(harness.agent.prompt_explain(preview)?.system ?? "")
-      == to_string(harness.agent.prompt_explain(live)?.system ?? ""),
-    "fresh preview and live skill prompts match",
+    fact != nil && fact?.included,
+    "the concise Git project fact remains in the composed prompt",
   )
-  harness.agent.close(session_id)
+  const session = agent_session_init(harness.agent, "Apply the supplied patch exactly", "", {})
+  const live = agent_skills_match(harness.agent, session, explicit_patch_options, 0)
+  assert(tool_names(preview) == tool_names(live), "fresh preview and live tool projections match")
+  assert(active_skill(live, "git") == nil, "explicit-patch live turn keeps Git inactive")
+  agent_session_finalize(harness.agent, session.session_id, "done")
+  let git_tools = tool_registry()
+  git_tools = tool_define(
+    git_tools,
+    "git_status",
+    "Inspect repository status",
+    {namespace: "git", handler: { _args -> "clean" }},
+  )
+  const served_preview = agent_skills_preview(
+    harness.agent,
+    explicit_patch_options + {tools: git_tools},
+  )
+  const served_git = active_skill(served_preview, "git")
+  assert(served_git != nil, "a served Git tool group activates the Git skill")
+  assert(
+    served_git?.trigger == "served_tool_group" && served_git?.tool_group == "git",
+    "served-tool activation records typed group evidence",
+  )
+  const intent_session = agent_session_init(harness.agent, "Prepare a Git pull request", "", {})
+  const intent = agent_skills_match(
+    harness.agent,
+    intent_session,
+    {
+      skills: git,
+      skill_match: {strategy: "metadata", sticky: false},
+      context_profile: git_context_profile(),
+    },
+    0,
+  )
+  const intent_git = active_skill(intent, "git")
+  assert(intent_git != nil, "Git pull-request intent activates the Git skill")
+  assert(
+    intent_git?.trigger != "served_tool_group",
+    "task intent owns activation without Git tools",
+  )
+  agent_session_finalize(harness.agent, intent_session.session_id, "done")
   harness.stdio.log("skill_preview_fresh_turn passed")
 }
