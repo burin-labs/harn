@@ -158,7 +158,7 @@ async fn metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch
     assert_eq!(outgoing_read["method"], "host/call");
     assert_eq!(outgoing_read["params"]["name"], "project.metadata_get");
     assert_eq!(
-        outgoing_read["params"]["params"],
+        outgoing_read["params"]["args"],
         serde_json::json!({ "dir": "src/nested" }),
         "the VM must fetch one namespace-free directory snapshot"
     );
