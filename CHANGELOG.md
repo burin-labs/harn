@@ -9,6 +9,62 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.114
+
+### Added
+
+- **harnlang.com now ships `llms.txt` and per-page Markdown for agents
+  (#7081).** The docs build writes `/llms.txt`, `/llms-full.txt`, and one
+  include-resolved `.md` file per page, each with a one-line summary, a
+  canonical Website URL, a pre-1.0 version notice, and a Read-next list
+  of `.md` links. The landing page puts the agent path next to Get
+  started.
+- **The end-of-turn review announces itself before it runs.** The completion
+  judge emits a new `judge_started` agent event, and the reserved terminal
+  verifier emits its existing `reserved_terminal_verify` with a new
+  `verify_started` phase, both immediately before the work begins. Previously
+  only terminal verdicts were emitted, so a host had nothing to show between
+  the agent's last edit and the verdict — a window that ran to a third of the
+  wall clock on an observed trial. Every started window is closed by a
+  decision, including one refused at admission (#7103).
+
+### Fixed
+
+- Retry pinned Rust toolchain downloads triggered by the final `rustc` and `cargo` probes in CI.
+- **Code-index warm now persists across short runs and refuses a snapshot
+  that does not describe the current tree (#7053, #7054, #7055).** Sync
+  `code_index.rebuild` writes the snapshot it just built, embedders can
+  `wait_until_idle` so a background warm finishes instead of vanishing at
+  process exit, a reader that joins an in-flight build reports the wait in
+  `elapsed_ms` and emits `tool_progress` heartbeats, and restore ignores a
+  snapshot whose workspace root or git `HEAD` does not match — including
+  linked worktrees whose `.git` is a file.
+- Module bytecode is now cached by the authority it was compiled under. Modules
+  compiled under `[check].trusted_host_dispatch` previously skipped the disk
+  cache in both directions, so a trusted module graph recompiled from source on
+  every run. They now cache like any other module: on a 519-module graph, warm
+  runs went from recompiling 368 modules every time to compiling none.
+- The bytecode cache schema version moved to 12, so artifacts written by an
+  earlier version are ignored and recompiled once.
+- **The completion judge is now shown the deterministic verifier's result, and
+  may no longer refuse a final for a verification the runtime watched pass
+  (#7099).** The completion gate derived "the verifier ran and passed" and then
+  discarded it, so the judge was asked a question the runtime had already
+  answered — with a bounded evidence packet that, for any tool declaring no
+  `completion_evidence_role`, omitted the passing verification entirely. The
+  gate's reading is now threaded onto the evidence snapshot as a typed
+  `verification: {oracle_expected, command, observed, observed_at_evidence_index}`
+  and rendered in the judge's prompt as an explicit deterministic-verification
+  block. The bounded verdict gains `gap_class`, and a `continue` naming
+  `failed_verification` against a positive reading is converted to `done` with a
+  `converted_from: failed_verification_contradicted_by_gate` receipt — but only
+  when the gate actually ran, observed `passed`, and did not report
+  `facts_unavailable`. Every other `gap_class` vetoes exactly as before, so the
+  judge keeps full authority over artifact, manner and negative-clause, and
+  authorization gaps. Projection receipts now name their selected actions and
+  resolved evidence roles, so a host that declared no verification role anywhere
+  is visible at a glance instead of by arithmetic on the counts.
+
 ## v0.10.113
 
 ### Added

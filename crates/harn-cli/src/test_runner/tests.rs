@@ -232,6 +232,32 @@ async fn execute_case_captures_log_output_for_a_passing_case() {
 }
 
 #[tokio::test]
+async fn execute_case_receipt_includes_named_std_timing_spans() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_timed_suboperation",
+        r#"
+import { timed } from "std/timing"
+
+pipeline test_timed_suboperation(harness: Harness, _task) {
+  const measured = timed(harness.clock, "property.sweep.case_17", {case_id: 17}, { -> 42 })
+  assert_eq(measured.result, 42)
+}
+"#,
+    )
+    .await;
+
+    assert!(result.passed, "case should pass: {:?}", result.error);
+    let span = result
+        .timing_spans
+        .iter()
+        .find(|span| span.name == "property.sweep.case_17")
+        .expect("the test receipt must retain the script-owned timing span");
+    assert_eq!(span.attributes.get("case_id"), Some(&serde_json::json!(17)));
+}
+
+#[tokio::test]
 async fn execute_case_captures_log_output_for_a_failing_case() {
     let temp = TempTestDir::new();
     let result = run_single_case(
@@ -794,6 +820,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
             teardown_ms: 2,
             modules: harn_vm::ModulePhaseStats::default(),
         }),
+        timing_spans: Vec::new(),
     }
 }
 

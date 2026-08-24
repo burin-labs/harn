@@ -1,9 +1,9 @@
 # Language basics
 
-This guide covers the core syntax and semantics of Harn. For a runnable
+This reference covers the core syntax and semantics of Harn. For a runnable
 program, start with an explicit entrypoint:
 
-```harn
+```harn title="hello.harn"
 fn main(harness: Harness) {
   harness.stdio.println("Hello from Harn")
 }
@@ -34,19 +34,23 @@ This is convenient for scripts, experiments, and small programs.
 For larger programs, organize code into named pipelines. The runtime
 executes the pipeline named `default`, or the first one declared.
 
-```harn
-pipeline default(harness: Harness, task) {
+```harn,check title="pipelines.harn"
+pipeline default(harness: Harness) {
   harness.stdio.log("Hello from the default pipeline")
 }
 
-pipeline other(harness: Harness, task) {
+pipeline other(harness: Harness) {
   harness.stdio.log("This only runs if called or if there's no default")
 }
 ```
 
-Pipeline parameters `task` and `project` are injected by the host runtime.
-A `context` dict with keys `task`, `project_root`, and `task_type` is
-always available.
+Declare only the pipeline parameters you use. If the entry pipeline declares
+`task`, Harn binds it to `context.task`. If it declares `project`, Harn binds it
+to `context.projectRoot`. There is no single `task` type; the value and its useful
+shape depend on the host. A `context` dict with `task`, `project_root`, and
+`task_type` is always available. See
+[Pipeline parameters](./spec/language/06-evaluation-order.md#pipeline-parameters)
+for typed callable pipelines.
 
 ## Variables
 
@@ -84,23 +88,29 @@ const base = []
 base.appending("a")            // error[HARN-LNT-066]: no effect — `base` is still []
 ```
 
-See [Binding mutability](language-spec.md) in the language spec for the full
-rule and why Harn follows Swift here rather than TypeScript.
+See [Binding mutability](./spec/language/04-scope-rules.md#binding-mutability)
+in the language spec for the full rule.
 
 Bindings are lexically scoped. Each `if` branch, loop body, `catch` body, and
-explicit `{ ... }` block gets its own scope, so inner bindings can shadow outer
-names without colliding:
+explicit `{ ... }` block gets its own scope. A binding declared inside a block
+does not replace a binding outside it:
 
-```harn
-const status = "outer"
+```harn,check title="scope.harn"
+fn main(harness: Harness) {
+  const status = "ready"
+  const detailed = harness.env.get("HARN_VERBOSE") == "1"
 
-if true {
-  const status = "inner"
-  harness.stdio.log(status)  // inner
+  if detailed {
+    const detail = "inputs checked"
+    harness.stdio.log(detail)
+  }
+
+  harness.stdio.log(status)
 }
-
-harness.stdio.log(status)    // outer
 ```
+
+Harn also permits an inner binding to shadow an outer name. `harn lint` reports
+that pattern as `HARN-LNT-009` because distinct names are easier to follow.
 
 If you want to update an outer binding from inside a block, declare it with
 `let` outside the block and assign to it inside the branch or loop body.
@@ -194,8 +204,8 @@ cross the host/JSON boundary as strings to preserve precision, and bind natively
 to Postgres `NUMERIC`/`DECIMAL` columns.
 
 Parameter type annotations for primitive types (`int`, `float`, `string`,
-`bool`, `list`, `dict`, `set`, `nil`, `closure`) are enforced at runtime.
-Calling a function with the wrong type produces a `TypeError`:
+`bool`, `list`, `dict`, `set`, `nil`, `closure`) are checked before the program
+runs. Calling a function with the wrong type reports `HARN-TYP-006`:
 
 ```harn,ignore
 fn add(a: int, b: int) -> int {
@@ -203,7 +213,7 @@ fn add(a: int, b: int) -> int {
 }
 
 add("hello", "world")
-// TypeError: parameter 'a' expected int, got string (hello)
+// error[HARN-TYP-006]: argument 1 `a`: expected int, found string
 ```
 
 ### Structural types (shapes)

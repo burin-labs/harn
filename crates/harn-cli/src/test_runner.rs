@@ -26,8 +26,8 @@ use harn_test_runner::{
     seed_imported_enum_candidates, FixtureScope, TestCase, TestFixture,
 };
 pub use harn_test_runner::{
-    AggregateTimings, PhaseTimings, SuiteCallablePreparation, TestPhase, TestResult, TestSummary,
-    TestTimeout,
+    AggregateTimings, CostRegression, DominantCase, PhaseTimings, ShardPlan,
+    SuiteCallablePreparation, TestPhase, TestResult, TestSummary, TestTimeout, TestTimingSpan,
 };
 pub use harn_test_runner::{TestRunSession, TestRunSessionStats};
 use skill_context::PreparedSkillContexts;
@@ -37,7 +37,6 @@ pub use harn_test_runner::{TestRunEvent, TestRunProgress};
 const LARGE_SEQUENTIAL_TEST_THRESHOLD: usize = 50;
 const LARGE_SEQUENTIAL_FILE_THRESHOLD: usize = 10;
 const DEFAULT_PARALLEL_JOBS_CAP: usize = 8;
-const TIMINGS_CACHE_RELATIVE_PATH: &str = ".harn/test-timings.json";
 const HARN_TEST_JOBS_ENV: &str = "HARN_TEST_JOBS";
 const HARN_TEST_MAX_MS_ENV: &str = "HARN_TEST_MAX_MS";
 const HARN_TEST_MAX_EXECUTE_MS_ENV: &str = "HARN_TEST_MAX_EXECUTE_MS";
@@ -91,6 +90,13 @@ pub struct RunOptions {
     /// Optional 1-based shard selection for CI matrix fan-out. Sharding
     /// happens after discovery/filtering and before execution.
     pub shard: Option<TestShard>,
+    /// Receipt-derived cost baseline. Its case identities are canonical paths;
+    /// callers construct it only after validating the report schema and
+    /// enforcing-environment identity.
+    pub timing_baseline: Option<TimingBaseline>,
+    /// Environment identity emitted into a receipt even on the baseline-
+    /// producing run, where no prior baseline exists yet.
+    pub timing_environment: Option<String>,
     pub cli_skill_dirs: Vec<PathBuf>,
     /// Optional progress callback. When set, the runner emits events as
     /// the suite progresses; consumers (CLI, dev mode) render output.
@@ -102,6 +108,13 @@ pub struct RunOptions {
     /// Run each case in an explicitly trusted host-dispatch VM. This keeps
     /// privileged wire access behind an operator-selected test boundary.
     pub trusted_host_dispatch: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct TimingBaseline {
+    pub environment: String,
+    pub weights_ms: BTreeMap<String, u64>,
+    pub max_regression_percent: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,6 +192,8 @@ pub async fn run_tests(
         fail_fast: false,
         jobs: None,
         shard: None,
+        timing_baseline: None,
+        timing_environment: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress: None,
         diagnose: diagnose_enabled_via_env(),
@@ -205,6 +220,8 @@ pub async fn run_tests_with_progress(
         fail_fast: false,
         jobs: None,
         shard: None,
+        timing_baseline: None,
+        timing_environment: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress,
         diagnose: diagnose_enabled_via_env(),
@@ -315,12 +332,10 @@ async fn run_tests_with_session_impl(
     files.dedup();
 
     let workers = resolve_workers(options);
-    let timings_path = canonical_targets
-        .first()
-        .and_then(|target| timings_cache_path(target));
-    let timings = timings_path
-        .as_deref()
-        .map(load_timings_cache)
+    let timings = options
+        .timing_baseline
+        .as_ref()
+        .map(|baseline| baseline.weights_ms.clone())
         .unwrap_or_default();
 
     let mut discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
@@ -337,10 +352,21 @@ async fn run_tests_with_session_impl(
             .or_insert_with(|| package::load_check_config(Some(&case.file)).trusted_host_dispatch);
         case.trusted_host_dispatch = options.trusted_host_dispatch || declared;
     }
+    if let Some(baseline) = options.timing_baseline.as_ref() {
+        if let Some(error) = stale_baseline_error(&discovery.cases, baseline) {
+            discovery.cases.clear();
+            discovery.discovery_errors.push(error);
+        }
+    }
+    let mut shard_plan = None;
     if let Some(shard) = options.shard {
-        discovery.cases = select_shard_cases(discovery.cases, &timings, shard);
+        let selection = select_shard_cases(discovery.cases, &timings, shard);
+        discovery.cases = selection.cases;
+        shard_plan = Some(selection.plan);
         if shard.index() > 1 {
-            discovery.discovery_errors.clear();
+            discovery
+                .discovery_errors
+                .retain(|error| error.name != "<file error>");
         }
     }
     let skill_contexts = PreparedSkillContexts::prepare(&discovery.cases, &options.cli_skill_dirs);
@@ -405,7 +431,7 @@ async fn run_tests_with_session_impl(
     } else {
         cases.clear();
     }
-    let execution = if !options.fail_fast || all_results.is_empty() {
+    let mut execution = if !options.fail_fast || all_results.is_empty() {
         execute_cases(
             cases,
             workers,
@@ -420,6 +446,11 @@ async fn run_tests_with_session_impl(
         CaseExecutionResults::default()
     };
 
+    let cost_regressions = options
+        .timing_baseline
+        .as_ref()
+        .map(|baseline| enforce_cost_regressions(&mut execution.cases, baseline))
+        .unwrap_or_default();
     let timing = DurationSummary::from_samples(
         &execution
             .cases
@@ -427,15 +458,6 @@ async fn run_tests_with_session_impl(
             .map(|result| result.duration_ms)
             .collect::<Vec<_>>(),
     );
-    // Every sibling shard must select from the same timing snapshot. Writing
-    // partial observations here would make later invocations repartition the
-    // suite, so sharded runs consume timing feedback but only complete,
-    // unsharded runs produce it.
-    if options.shard.is_none() {
-        if let Some(path) = timings_path.as_deref() {
-            update_timings_cache(path, timings, &execution.cases);
-        }
-    }
     all_results.extend(execution.cases);
     all_results.extend(execution.infrastructure_errors);
     let total = all_results.len();
@@ -456,6 +478,14 @@ async fn run_tests_with_session_impl(
         duration_ms: start.elapsed().as_millis() as u64,
         timing,
         aggregate,
+        timing_environment: options.timing_environment.clone().or_else(|| {
+            options
+                .timing_baseline
+                .as_ref()
+                .map(|baseline| baseline.environment.clone())
+        }),
+        shard_plan,
+        cost_regressions,
     }
 }
 
@@ -736,6 +766,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    timing_spans: Vec::new(),
                 });
                 continue;
             }
@@ -753,6 +784,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
+                    timing_spans: Vec::new(),
                 });
                 continue;
             }
@@ -777,6 +809,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 timeout: None,
                 duration_ms: 0,
                 phases: None,
+                timing_spans: Vec::new(),
             }),
         }
     }
@@ -806,13 +839,35 @@ fn sort_cases_longest_first(cases: &mut [TestCase], timings: &BTreeMap<String, u
     });
 }
 
+struct ShardSelection {
+    cases: Vec<TestCase>,
+    plan: ShardPlan,
+}
+
 fn select_shard_cases(
     cases: Vec<TestCase>,
     timings: &BTreeMap<String, u64>,
     shard: TestShard,
-) -> Vec<TestCase> {
+) -> ShardSelection {
     if shard.total() <= 1 {
-        return cases;
+        let estimated_duration_ms = cases
+            .iter()
+            .map(|case| estimated_case_cost_ms(case, timings))
+            .sum();
+        let unknown_cases = cases
+            .iter()
+            .filter(|case| !timings.contains_key(&timings_key(&case.file, &case.name)))
+            .count();
+        return ShardSelection {
+            cases,
+            plan: ShardPlan {
+                index: shard.index(),
+                total: shard.total(),
+                estimated_duration_ms,
+                unknown_cases,
+                dominant_case: None,
+            },
+        };
     }
 
     let mut ranked = cases.into_iter().collect::<Vec<_>>();
@@ -827,17 +882,72 @@ fn select_shard_cases(
     let mut costs = vec![0u64; shard.total()];
     let mut counts = vec![0usize; shard.total()];
 
-    for case in ranked {
-        let bucket_index = (0..shard.total())
+    // When one measured case outweighs the rest of the selected suite, no
+    // balancing algorithm can hide that critical path. Reserve a shard for it
+    // and expose the fact in the receipt instead of padding its bin with work.
+    let dominant_index = ranked.first().and_then(|largest| {
+        let largest_cost = timings.get(&timings_key(&largest.file, &largest.name))?;
+        let rest_cost = ranked
+            .iter()
+            .skip(1)
+            .map(|case| estimated_case_cost_ms(case, timings))
+            .sum::<u64>();
+        (*largest_cost > rest_cost).then_some(0)
+    });
+    let dominant_case = dominant_index.map(|index| {
+        let case = &ranked[index];
+        DominantCase {
+            file: case.file.display().to_string(),
+            name: case.name.clone(),
+            baseline_ms: estimated_case_cost_ms(case, timings),
+        }
+    });
+    if dominant_index.is_some() {
+        let case = ranked.remove(0);
+        costs[0] = estimated_case_cost_ms(&case, timings);
+        counts[0] = 1;
+        buckets[0].push(case);
+    }
+
+    let (known, unknown): (Vec<_>, Vec<_>) = ranked
+        .into_iter()
+        .partition(|case| timings.contains_key(&timings_key(&case.file, &case.name)));
+    for case in known {
+        let first_bucket = usize::from(dominant_index.is_some());
+        let bucket_index = (first_bucket..shard.total())
             .min_by_key(|&index| (costs[index], counts[index], index))
-            .unwrap_or(0);
+            .unwrap_or(first_bucket);
         costs[bucket_index] =
             costs[bucket_index].saturating_add(estimated_case_cost_ms(&case, timings));
         counts[bucket_index] += 1;
         buckets[bucket_index].push(case);
     }
+    for case in unknown {
+        let first_bucket = usize::from(dominant_index.is_some());
+        let bucket_index = (first_bucket..shard.total())
+            .min_by_key(|&index| (counts[index], costs[index], index))
+            .unwrap_or(first_bucket);
+        costs[bucket_index] = costs[bucket_index].saturating_add(case.weight as u64);
+        counts[bucket_index] += 1;
+        buckets[bucket_index].push(case);
+    }
 
-    buckets.swap_remove(shard.index() - 1)
+    let selected_index = shard.index() - 1;
+    let selected = buckets.swap_remove(selected_index);
+    let unknown_cases = selected
+        .iter()
+        .filter(|case| !timings.contains_key(&timings_key(&case.file, &case.name)))
+        .count();
+    ShardSelection {
+        cases: selected,
+        plan: ShardPlan {
+            index: shard.index(),
+            total: shard.total(),
+            estimated_duration_ms: costs[selected_index],
+            unknown_cases,
+            dominant_case,
+        },
+    }
 }
 
 fn estimated_case_cost_ms(case: &TestCase, timings: &BTreeMap<String, u64>) -> u64 {
@@ -860,41 +970,78 @@ fn timings_key(file: &Path, name: &str) -> String {
     format!("{}::{}", file.display(), name)
 }
 
-fn timings_cache_path(target: &Path) -> Option<PathBuf> {
-    // Anchor the cache at the project root if discoverable, otherwise at
-    // the directory the suite was launched from. The cache is shared
-    // across runs in the same workspace, so a per-suite cache would
-    // fragment timings whenever a user runs a subset.
-    let probe_root = if target.is_dir() {
-        target.to_path_buf()
-    } else {
-        target.parent()?.to_path_buf()
-    };
-    let root = harn_vm::stdlib::process::find_project_root(&probe_root)
-        .unwrap_or_else(|| probe_root.clone());
-    Some(root.join(TIMINGS_CACHE_RELATIVE_PATH))
+fn stale_baseline_error(cases: &[TestCase], baseline: &TimingBaseline) -> Option<TestResult> {
+    let discovered = cases
+        .iter()
+        .map(|case| timings_key(&case.file, &case.name))
+        .collect::<BTreeSet<_>>();
+    let stale = baseline
+        .weights_ms
+        .keys()
+        .filter(|key| !discovered.contains(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    (!stale.is_empty()).then(|| TestResult {
+        name: "<timing baseline error>".to_string(),
+        file: String::new(),
+        passed: false,
+        error: Some(format!(
+            "timing baseline contains cases absent from the selected suite: {}",
+            stale.join(", ")
+        )),
+        captured_output: None,
+        timeout: None,
+        duration_ms: 0,
+        phases: None,
+        timing_spans: Vec::new(),
+    })
 }
 
-fn load_timings_cache(path: &Path) -> BTreeMap<String, u64> {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return BTreeMap::new();
-    };
-    serde_json::from_str::<BTreeMap<String, u64>>(&contents).unwrap_or_default()
-}
-
-fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, results: &[TestResult]) {
-    for result in results {
-        existing.insert(
-            timings_key(Path::new(&result.file), &result.name),
-            result.duration_ms,
+fn enforce_cost_regressions(
+    results: &mut [TestResult],
+    baseline: &TimingBaseline,
+) -> Vec<CostRegression> {
+    let mut regressions = Vec::new();
+    for result in results.iter_mut().filter(|result| result.phases.is_some()) {
+        let key = timings_key(Path::new(&result.file), &result.name);
+        let Some(&baseline_ms) = baseline.weights_ms.get(&key) else {
+            continue;
+        };
+        let actual_ms = result
+            .phases
+            .expect("executed results carry phase timings")
+            .execute_ms;
+        let increase_percent = if actual_ms > baseline_ms {
+            (((actual_ms - baseline_ms) as u128 * 100) / baseline_ms.max(1) as u128) as u64
+        } else {
+            0
+        };
+        if increase_percent <= baseline.max_regression_percent {
+            continue;
+        }
+        let regression = CostRegression {
+            file: result.file.clone(),
+            name: result.name.clone(),
+            baseline_ms,
+            actual_ms,
+            increase_percent,
+            limit_percent: baseline.max_regression_percent,
+        };
+        let message = format!(
+            "cost regression: {}ms vs {}ms baseline (+{}%, limit {}%)",
+            regression.actual_ms,
+            regression.baseline_ms,
+            regression.increase_percent,
+            regression.limit_percent
         );
+        result.passed = false;
+        result.error = Some(match result.error.take() {
+            Some(existing) => format!("{existing}; {message}"),
+            None => message,
+        });
+        regressions.push(regression);
     }
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(serialized) = serde_json::to_string(&existing) {
-        let _ = fs::write(path, serialized);
-    }
+    regressions
 }
 
 #[derive(Default)]

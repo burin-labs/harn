@@ -506,10 +506,19 @@ function rehypeScrollableRegions() {
       if (node.tagName !== "table" || parent == null || index == null) return
       if (wrapped.has(node)) return SKIP
       wrapped.add(node)
+      const header = node.children
+        ?.find((child: any) => child.tagName === "thead")
+        ?.children?.find((child: any) => child.tagName === "tr")
+      const columnCount = header?.children?.filter(
+        (child: any) => child.tagName === "th" || child.tagName === "td",
+      ).length ?? 0
       parent.children[index] = {
         type: "element",
         tagName: "div",
-        properties: { className: ["table-scroll"], tabIndex: 0 },
+        properties: {
+          className: columnCount >= 5 ? ["table-scroll", "table-scroll-wide"] : ["table-scroll"],
+          tabIndex: 0,
+        },
         children: [node],
       }
       return SKIP

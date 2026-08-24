@@ -86,6 +86,19 @@ fn command_llm_risk_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     crate::orchestration::command_llm_risk_scan_value(ctx, args.get(1))
 }
 
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "command_workspace_effect(ctx: dict) -> dict",
+    category = "command_policy"
+)]
+fn command_workspace_effect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let ctx = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("command_workspace_effect: ctx is required".to_string()))?;
+    crate::orchestration::command_workspace_effect_value(ctx)
+}
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &COMMAND_POLICY_IMPL_DEF,
     &COMMAND_POLICY_PUSH_IMPL_DEF,
@@ -93,4 +106,5 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &COMMAND_RISK_SCAN_IMPL_DEF,
     &COMMAND_RESULT_SCAN_IMPL_DEF,
     &COMMAND_LLM_RISK_SCAN_IMPL_DEF,
+    &COMMAND_WORKSPACE_EFFECT_IMPL_DEF,
 ];

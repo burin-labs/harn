@@ -74,6 +74,22 @@ pub(crate) async fn run_command(mut args: TestArgs) {
     if args.watch && !args.test_paths.is_empty() {
         command_error("`harn test --watch` does not support --test-path");
     }
+    if args.timing_baseline.is_some() && args.timing_environment.is_none() {
+        command_error("--timing-baseline requires --timing-environment <name>");
+    }
+    if args.watch && args.timing_baseline.is_some() {
+        command_error("--timing-baseline is not supported with --watch");
+    }
+    if (args.timing_baseline.is_some() || args.timing_environment.is_some())
+        && (args.determinism
+            || args.evals
+            || matches!(
+                args.target.as_deref(),
+                Some("agents-conformance" | "conformance" | "protocols" | "package")
+            ))
+    {
+        command_error("timing receipts are supported only for user-test suites");
+    }
     if args.affected_from.is_some()
         && (args.watch
             || args.determinism
@@ -104,6 +120,8 @@ pub(crate) async fn run_command(mut args: TestArgs) {
             || args.jobs.is_some()
             || args.shard_index.is_some()
             || args.shard_total.is_some()
+            || args.timing_baseline.is_some()
+            || args.timing_environment.is_some()
             || args.filter.is_some()
             || args.verbose
             || args.timing
@@ -416,6 +434,18 @@ async fn run_user_test_targets(
         fail_fast: args.fail_fast,
         jobs: args.jobs,
         shard: resolve_test_shard(args.shard_index, args.shard_total),
+        timing_baseline: args.timing_baseline.as_deref().map(|path| {
+            test_report::load_timing_baseline(
+                Path::new(path),
+                report_config.suite_root(),
+                args.timing_environment
+                    .as_deref()
+                    .expect("baseline requires an environment"),
+                args.max_cost_regression_percent,
+            )
+            .unwrap_or_else(|error| command_error(&error))
+        }),
+        timing_environment: args.timing_environment.clone(),
         verbose: args.verbose,
         timing: args.timing,
         diagnose: args.diagnose,
@@ -475,6 +505,7 @@ fn command_error(message: &str) -> ! {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UserTestReportConfig<'a> {
     reports: Option<UserTestReports<'a>>,
+    suite_root: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -490,16 +521,24 @@ impl<'a> UserTestReportConfig<'a> {
         json_out_path: Option<&'a str>,
         requested_targets: &[String],
     ) -> Self {
+        let suite_root = common_report_root(requested_targets);
         let reports = (junit_path.is_some() || json_out_path.is_some()).then(|| UserTestReports {
             junit_path,
             json_out_path,
-            suite_root: common_report_root(requested_targets),
+            suite_root: suite_root.clone(),
         });
-        Self { reports }
+        Self {
+            reports,
+            suite_root,
+        }
     }
 
     fn reports(&self) -> Option<&UserTestReports<'a>> {
         self.reports.as_ref()
+    }
+
+    fn suite_root(&self) -> &Path {
+        &self.suite_root
     }
 }
 
@@ -587,6 +626,8 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub fail_fast: bool,
     pub jobs: Option<usize>,
     pub shard: Option<test_runner::TestShard>,
+    pub timing_baseline: Option<test_runner::TimingBaseline>,
+    pub timing_environment: Option<String>,
     pub verbose: bool,
     pub timing: bool,
     pub diagnose: bool,
@@ -742,6 +783,8 @@ async fn run_user_test_paths_once_with_session(
         fail_fast: args.fail_fast,
         jobs: args.jobs,
         shard: args.shard,
+        timing_baseline: args.timing_baseline.clone(),
+        timing_environment: args.timing_environment.clone(),
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,

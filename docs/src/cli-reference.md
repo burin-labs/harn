@@ -616,9 +616,9 @@ test still receives a fresh VM, module state, and persistence root.
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance`; also read from `HARN_AGENTS_CONFORMANCE_API_KEY` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 3 includes typed timeout, phase, aggregate, latency-distribution, and captured-output data |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 4 includes typed timeout, phase, named `std/timing` spans, shard-plan, cost-regression, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
-| `--parallel` | Run a bounded worker pool. User tests run in-process and front-load slow files using `.harn/test-timings.json`. Conformance tests run in isolated processes because each worker owns process-wide runtime state. |
+| `--parallel` | Run a bounded worker pool. User tests run in-process; conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
 | `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
 | `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
@@ -632,6 +632,9 @@ test still receives a fresh VM, module state, and persistence root.
 | `--trusted-host-dispatch` | Compile the test and its private import graph for a Rust-host-selected route boundary, exposing privileged wire builtins such as `host_call`. Ordinary tests remain unprivileged. |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget; forces a single measurement worker |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget; forces a single measurement worker |
+| `--timing-environment <name>` | Stamp a stable enforcing-environment identity into a user-test JSON receipt; also read from `HARN_TEST_TIMING_ENVIRONMENT` |
+| `--timing-baseline <path>` | Read shard weights and absolute-cost baselines from a schema-v4 Harn user-test receipt. Requires the same `--timing-environment`; stale deleted or renamed cases fail the run. |
+| `--max-cost-regression-percent <percent>` | Fail a case whose execution cost grows beyond this percentage of its receipt baseline (default: 25) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
 | `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |
@@ -641,6 +644,27 @@ When no path is given, `harn test` auto-discovers a `tests/` directory
 in the current folder. Conformance targets must resolve to a file or directory
 inside `conformance/`; the CLI now errors instead of silently falling back to
 the full suite when a requested target is missing.
+
+For timing-aware CI shards, first write an unsharded receipt in the enforcing
+environment, then give every sibling shard that immutable receipt:
+
+```bash
+harn test tests/ --json-out ci-timings.json --timing-environment github-linux-x64
+harn test tests/ --shard-index 1 --shard-total 4 \
+  --timing-baseline ci-timings.json --timing-environment github-linux-x64 \
+  --json-out shard-1.json
+```
+
+Harn validates that the baseline is its own current receipt format and that
+the environment identities match. Known cases use longest-processing-time
+bin packing; new cases fall back to count balancing. A case heavier than the
+rest of the suite receives its own shard and appears as `dominant_case` in the
+shard plan. Rebalancing never masks a slowdown: regressions fail the affected
+case and are also listed under `cost_regressions` in the same JSON report.
+Named `std/timing` spans inside a case are copied to that case's
+`timing_spans` array for sub-operation attribution. Shard weights and
+regressions use the receipt's `phases.execute_ms`, excluding cold setup and
+compile overhead.
 
 ## harn test-bench
 

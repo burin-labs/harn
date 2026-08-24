@@ -83,7 +83,8 @@ pub use lookup::{
 pub use model::{
     CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff,
     LiveEndpointFamily, ProviderDefaults, ProviderLimits, ReasoningHistoryWireField,
-    ReasoningRoundTripPolicy, ScreenshotScaling, SystemMessagePlacement, WireDialect,
+    ReasoningRoundTripPolicy, ScreenshotScaling, SystemMessagePlacement, ToolFormatJustification,
+    ToolFormatMirror, WireDialect,
 };
 
 /// Resolve the effective placement for an interleaved `system`/`developer`

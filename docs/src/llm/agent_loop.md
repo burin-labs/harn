@@ -445,12 +445,20 @@ user-facing wording.
 ### Effect-phased tool batches
 
 The shared dispatcher classifies local calls from tool annotations into
-observation, mutation, process/verification, and terminal phases. A response
-that crosses a phase boundary executes only its maximal first-phase prefix and
-returns synthetic deferred results for the suffix. The next inference therefore
-sees the prefix results before it can re-propose later work. Calls inside an
-independent read-only prefix still fan out up to `max_concurrent_tools`, and one
-tool call containing several atomic same-resource operations remains one call.
+observation, mutation, process/verification, and terminal phases. A process-exec
+call whose resolved command is provably workspace read-only (`git status`,
+`git diff`, or a recognized file-inspection command) joins the observation
+phase. Build, test, lint, and unrecognized commands remain in the process phase.
+A response that mixes phases selects the earliest semantic phase (provider
+native, observation, mutation, process/verification, then terminal), executes
+every call in that phase, and returns synthetic deferred results for the others.
+Model emission order cannot move a mutation ahead of a sibling read. The next
+inference sees those results before it can re-propose later work.
+Calls inside an independent read-only set still fan out up to
+`max_concurrent_tools`, and one tool call containing several atomic
+same-resource operations remains one call. Deferred call signatures survive
+turns that produce no deferrals, so a verbatim re-proposal is marked
+`re_proposed`.
 
 Every proposed call emits a `tool_batch_disposition` event with a typed
 `harn.agent_tool_batch_disposition.v1` receipt. The receipt records its phase,

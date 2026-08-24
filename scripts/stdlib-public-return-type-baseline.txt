@@ -25,11 +25,11 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
-# count   36  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
+# count   30  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
-# count   29  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
+# count   35  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
@@ -260,12 +260,8 @@ crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn::__autocontinue_max_con
 crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn::__autocontinue_raised_cap
 crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn::__autocontinue_should_continue
 crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn::__invoke_llm_with_autocontinue
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__audit_flushes_from_result
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__callable
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__collect_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__dispatch_tool_calls
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__dispatch_tool_calls_with_middleware
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__drain_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_annotation_arg_aliases
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_annotation_dependency_key_params
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_annotation_dependency_range_params
@@ -294,8 +290,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__intra_turn_re
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_with_index
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_intra_turn_failure_fanout_cap
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_max_concurrent_tools
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__spawn_audit_flushes
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__strip_internal_tool_result
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt
@@ -316,8 +310,12 @@ crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_await_res
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_await_resumption_top_level
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_invalid_await_resumption_feedback
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__agent_loop_record_await_tool_results
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__audit_flushes_from_result
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__callable
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__collect_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__default_invoke_tool
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__detect_native_fallback
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__drain_audit_flushes
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__drop_unsafe_recovered_text_batch
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__emit_synthetic_tool_lifecycle_finish
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__emit_tool_lifecycle_finish
@@ -331,6 +329,8 @@ crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_diagn
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_protocol_violations
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__parse_feedback_tool_annotations
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__run_structural_validator
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__spawn_audit_flushes
+crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__strip_internal_tool_result
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__strip_internal_verdict_json
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__structural_validator_pass_result
 crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn::__tool_envelope

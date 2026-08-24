@@ -4,7 +4,7 @@
 
 Harn is a programming language and runtime for building AI agents. Model calls,
 tools, retries, concurrency, transcripts, and workflows are language and
-standard-library features rather than libraries you assemble yourself.
+standard-library features, so programs need less orchestration glue.
 
 ```harn,check title="example.harn"
 fn main(harness: Harness) {
@@ -20,48 +20,52 @@ fn main(harness: Harness) {
 That runs with no API key: the `mock` provider is deterministic and offline.
 [Getting started](./getting-started.md) installs Harn and runs it.
 
-## Is this for you?
+## When Harn helps
 
-Harn is worth your time if you are writing the orchestration yourself and want
-it to be readable: which model runs, when a tool fires, what happens on
-failure, and what got recorded. It expects you have written code in another
-language, and assumes nothing about which one.
+Harn helps when you want agent behavior to read like a program: which model
+runs, when a tool fires, how a failure is handled, and what the run records.
+You do not need experience with an agent framework. Familiarity with one
+programming language or with large language models (LLMs) will make some terms
+feel familiar, but it is not required.
 
-It is probably not what you want if you need a hosted product with a dashboard,
-or if a single model call from an existing SDK already does the job.
+For one model call, an existing SDK may be enough. Harn becomes more useful as
+your program gains tools, retries, multiple providers, concurrency, replay, or
+long-running work. Harn also includes a [portal](./portal.md) for inspecting
+persisted runs.
 
-## Choose the smallest useful building block
+## Building blocks
+
+Harn supports one model request, an agent loop, or a multi-stage workflow.
+Start with the smallest building block that fits the task:
 
 | Need | Start with |
 |---|---|
 | One request and one response | [`harness.llm.call`](./llm/llm_call.md) |
 | A model that can use tools across turns | [`agent_loop`](./llm/agent_loop.md) |
 | Named stages with joins and retries | [`workflow_execute`](./workflow-runtime.md) |
-| A complete Harn program | [`fn main`](./language-basics.md) and [pipelines](./language-basics.md#pipelines) |
 
-You are never forced up that table, and moving up is never a rewrite. [The
-expressiveness spectrum](./concepts/expressiveness-spectrum.md) walks one task
-from three lines to a full workflow to show what each rung costs.
+Put any of these in [`fn main`](./language-basics.md) or a named
+[pipeline](./language-basics.md#pipelines). Add a larger abstraction only when
+the program needs it. [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
+shows the same task as a model call, an agent loop, and a workflow.
 
 ## Where to go next
 
-- **Why does this exist?** [Why Harn?](./why-harn.md) makes the argument, with
-  the same program written in Python and in Harn.
-- **I already use something else.** [Coming from
-  elsewhere](./concepts/sota-comparison.md) maps Harn's vocabulary onto the
-  OpenAI and Anthropic SDKs, LangGraph, Flue, Inngest, Mastra, and the MCP, ACP,
-  and A2A specs.
-- **How does it compare on capabilities?** [Feature
-  matrix](./feature-matrix.md) puts Harn beside Inngest, Temporal, LangGraph,
-  and Cursor Automations, and says where each guarantee actually lives.
-- **How do the pieces fit?** [Mental model](./concepts/mental-model.md), then
-  [Concepts](./concepts/index.md).
-- **I know what I want to build.** [Common tasks](./common-tasks.md).
+- [Why Harn?](./why-harn.md) explains the design with the same program in
+  Python and Harn.
+- [Coming from elsewhere](./concepts/sota-comparison.md) maps Harn terms to
+  other agent tools and protocols.
+- The [feature matrix](./feature-matrix.md) compares runtime guarantees across
+  Harn, Inngest, Temporal, LangGraph, and Cursor Automations.
+- The [mental model](./concepts/mental-model.md) shows how Harn's parts fit.
+- [Common tasks](./common-tasks.md) starts from a goal you want to complete.
 
 Harn owns the reusable agent behavior: orchestration, model and tool calls,
 transcripts, replay and evaluation, worker lineage, and capability policy. Your
 application keeps its own interface, approval flow, file changes, and product
-data. [The host boundary](./host-boundary.md) is the full split.
+data. In practice, you write the steps the agent should take. The Harn virtual
+machine (VM) handles provider adapters, retries, transcripts, and runtime
+policy. [The host boundary](./host-boundary.md) explains the full split.
 
 ## Harn at a glance
 
