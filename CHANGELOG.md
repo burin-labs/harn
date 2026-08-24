@@ -9,6 +9,152 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.115
+
+### Added
+
+- **`std/lifecycle/progress` reports long workflows without flooding the pipe
+  (#6722).** `progress_start` / `progress_tick` / `progress_finish` give a stage a
+  start line, a heartbeat roughly once a minute, an immediate line whenever the
+  observed state changes, and exactly one terminal line for success, failure, or
+  cancellation. A reporter is a value rather than a registered object, so parallel
+  stages keep separate identities by construction.
+- **Provider catalog models can declare `completion_review` (#7091).** The
+  optional object names how much completion-judge scrutiny a model's own
+  output needs (`standard` or `light`), an optional `max_judge_calls` cap, and
+  required `evidence`. Existing rows stay `standard`. Light scrutiny skips the
+  LLM confirmation only when the deterministic gate already passed and the
+  turn carries a terminal sentinel. No shipped row is `light` yet.
+- Documentation examples can now render compiler- and linter-checked source spans, stable diagnostic codes, help, and
+  registry-owned repairs without duplicating diagnostic metadata in the website.
+
+### Changed
+
+- Release tags now select the matching squash commit on `main`. Publication
+  rejects orphaned release-attempt tags, and binary artifacts are rebuilt from
+  the immutable merged source instead of promoted from a divergent candidate.
+- **Self-hosted native/text tool-format decisions must carry a justification
+  (#6829).** Each `ollama` / `llamacpp` / `local` / `mlx` row that sets
+  `native_tools` or `preferred_tool_format` now records
+  `tool_format_justification` in one of three evidence tiers: `measured` (a
+  probe of that runtime), `assumed` (no probe yet — the row states what the
+  pin rests on and how to roll it back), or a structural `mirrors` link. A
+  comment that cites a sibling is not a receipt; if a linked row later flips,
+  the catalog audit fails the dependant. The four Qwen3.6 self-hosted pins are
+  independently justified and are allowed to disagree. Two rows carry real
+  receipts today and the rest are marked `assumed`, so the table's unmeasured
+  debt is visible rather than implied.
+- Test sharding now consumes validated Harn JSON timing receipts instead of an
+  untyped local cache. Receipt-backed shards use LPT balancing, isolate and
+  report a dominant case, reject stale case identities and environment drift,
+  and fail absolute execution-cost regressions even when rebalancing keeps a shard within
+  its aggregate budget. User-test JSON receipts also include named `std/timing`
+  spans from inside each case.
+- Polished the introduction and language reference with clearer agent-building
+  guidance, lint-clean examples, exact diagnostic and specification links, a
+  readable comparison matrix, and code operators shown without font ligatures.
+
+### Fixed
+
+- **Keychain smoke tests now prove their own teardown (#6709).** Both live
+  secret-store tests deleted their entries with the result discarded, so an item
+  that survived teardown was indistinguishable from one that was removed. Cleanup
+  now reads the key back and fails the test when it is still there, reporting
+  rather than re-panicking when the test is already unwinding.
+- **Queued mock responses are now visible inside `pool.submit` (#6726).** A
+  pooled task inherits its submitter's full ambient execution scope, captured at
+  submit time alongside the execution context it already carried. The mock queue
+  lives in a thread-local, so a task dispatched onto a work-stealing worker
+  previously fell through to the default mock — as did the submitter's command
+  policy, dynamic permissions, and run event sink.
+- **Run records no longer report a cancelled or stopped run as completed
+  (#6741).** A session's final status is projected through the vocabularies that
+  own it — `AgentTerminalKind::lifecycle_state` for producer-owned terminals,
+  then `AgentLifecycleState` for lifecycle spellings and their aliases — instead
+  of collapsing every non-error status to `completed`.
+- **The `tool_format_override` warning now says what was applied, and every host
+  prints it (#6756).** When the route's recommendation wins, the line reads
+  `requested native, route pins text, steering to text` instead of describing the
+  request as though it had been honored; the event carries `applied_format` and
+  `steered` to match. The warning is emitted from the agent loop rather than from
+  one CLI call site, so it reaches stderr on every surface instead of living only
+  in the event log.
+- Crystallization now treats missing side-effect evidence as unknown and only
+  emits `plan_only` when every step has a complete, internal-only effect record.
+  Release fixture ingest now consumes the v3 typed side-effect contract.
+- The agent-loop monologue detector now compares normalized turn content. Distinct
+  planning messages no longer accumulate a false no-progress streak, while
+  repeated narration variants still trigger bounded recovery.
+- **Revoking a delivered reminder now stops it and says so (#7050).**
+  `agent_session_revoke_reminder` reaches transcript-injected reminders, not just
+  the pending bridge queue: revoking one removes its event so later turns stop
+  re-projecting it. A reminder whose TTL has run out reports `already_delivered`
+  and a second revoke reports `already_revoked`, so a live reminder, a spent one,
+  and a typo are no longer all reported as `unknown_reminder_id`.
+- **Bytecode cache directory contract (#7066, #7067).** `$HARN_CACHE_DIR`
+  must be a non-empty absolute path; an empty or relative override is a
+  startup error instead of a silent write to the empty path or a
+  working-directory-relative cache. When no home directory, XDG cache
+  home, or override resolves, caching is off for that process rather
+  than falling back to `./.harn-cache`.
+- **Structured envelopes salvage trailing commas and similar JSON
+  mistakes locally before spending a second model call (#7077).**
+  `llm_call_structured_result` now tries a mechanical repair tier
+  (trailing commas, unquoted keys, prose preambles, truncated closers)
+  and only then the existing LLM reissue. `repaired` stays a bool;
+  `repair_tier` is `"local"`, `"llm"`, or `nil` so the two paths stay
+  observable. Schema-invalid JSON is still rejected.
+- **Provider dispatch-audit no longer transcribes catalog structured-output
+  modes into an ungated E2E test (#7086).** The merge-gated lib suite now
+  compares audit rows and tool-probe plans to `capabilities::lookup`, and the
+  nightly E2E assertions derive the same values instead of copying them.
+- **Tool-batch planning now classifies process calls by workspace effect and
+  keeps same-phase siblings (#7090).** A `run` whose every stage is a
+  recognized read-only program — `git status`, `rg`, `ls`, `cat` — joins the
+  observation phase instead of deferring. Recognition is an allowlist: build
+  and package commands, and anything unfamiliar, stay out of that phase, so a
+  command that quietly writes the workspace can never run ahead of the
+  observation meant to justify it. Phase selection now follows semantic
+  dependency order instead of model emission order, and later same-phase calls
+  are no longer truncated when a different phase appears in the middle of a
+  batch. Results are still returned in the model's original call order, and
+  deferred signatures survive quiet turns so a verbatim re-proposal is marked
+  `re_proposed`.
+- Mid-cycle source builds now report the next patch's `-dev` version instead of
+  claiming to be the previous stable release. Release preparation strips that
+  exact suffix, then post-release automation advances main to the following
+  development version.
+- **Warm stdlib loads no longer re-parse the stdlib (#7104).** Deriving an
+  embedded stdlib module's cache identity required resolving its imported
+  interface, which lexes and parses the module, and that ran ahead of the
+  cache lookup. Every process therefore parsed the whole stdlib closure to
+  compute keys for artifacts it then loaded from disk without parsing
+  anything. The embedded stdlib table already determines that interface and
+  is already folded into the key, so these modules now key on their bytes
+  alone and resolve the interface only when a miss has to compile. User
+  modules are unchanged: their dependencies are mutable files the rest of
+  the key cannot see.
+- ACP agent-event projection now rejects payloads that claim the `kind` or
+  `sessionId` envelope keys instead of silently overwriting them. The
+  `reserved_terminal_verify` payload discriminator is now `reserveKind`, and
+  the host-tool classification is now `toolKind`. Boundary failures use
+  `failureKind`, while loop checkpoints use `checkpointKind`.
+- Wait-heavy conformance fixtures can now declare a bounded per-case hang deadline, preventing slow runners from
+  misclassifying healthy suspend/resume coverage as a hang.
+- Isolate durable agent state per user test so parallel suites no longer contend on or inherit another case's session database.
+- **Project detection no longer injects an unrelated full skill body (#7142).**
+  Context profiles keep projecting their concise repository facts, while their
+  full skills activate only for matching task intent, an explicit `load_skill`,
+  or a currently served tool whose typed namespace matches the profile's tool
+  group.
+- Retry transient GitHub 5xx failures while publishing an already validated
+  runtime-bump worktree instead of discarding the bump and starting over.
+- Reusable runtime bumps now format package sources with the target Harn version
+  after repository-owned regeneration and before validation, even when optional
+  behavior-preserving repairs are disabled.
+- Workflow stages now retain subprocess roots granted by the invoking host while
+  still narrowing capabilities through workflow, node, and tool policy.
+
 ## v0.10.114
 
 ### Added
