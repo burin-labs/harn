@@ -1,0 +1,56 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Local salvage runs before any LLM repair reissue. Trailing commas,
+ * unquoted keys, a prose-wrapped trailing comma, and truncated
+ * closers succeed with one provider call. A second queued mock must
+ * stay unused. Plain prose around already-valid JSON is covered by
+ * llm_call_structured_result_prose (extract, not this tier).
+ *
+ * Unrecoverable prose and schema-invalid JSON still fail rather than
+ * being coerced into a plausible shape. Those two spend the LLM repair
+ * call and still fail.
+ */
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  const opts = {provider: "mock", retries: 0, repair: {enabled: true}}
+
+  for raw in [
+    "{\"verdict\": \"PASS\",}",
+    "{verdict: \"PASS\"}",
+    "Here you go: {\"verdict\": \"PASS\",} thanks.",
+    "{\"verdict\": \"PASS\"",
+  ] {
+    with_llm_script(
+      harness.llm,
+      [llm_text(raw), llm_text("{\"verdict\": \"SHOULD_NOT_RUN\"}")],
+      { ->
+        const r = harness.llm.call_structured_result("Grade", schema, opts)
+        harness.stdio.println(r.ok)
+        harness.stdio.println(r.data.verdict)
+        harness.stdio.println(r.repaired)
+        harness.stdio.println(r.repair_tier)
+        harness.stdio.println(r.attempts)
+        harness.stdio.println(len(harness.llm.mock_calls()))
+        harness.stdio.println(r.usage.provider_call_count)
+      },
+    )
+  }
+
+  for raw in ["nothing useful here at all", "{\"note\": \"nope\"}"] {
+    with_llm_script(
+      harness.llm,
+      [llm_text(raw), llm_text("{\"note\": \"still nope\"}")],
+      { ->
+        const r = harness.llm.call_structured_result("Grade", schema, opts)
+        harness.stdio.println(r.ok)
+        harness.stdio.println(r.error_category)
+        harness.stdio.println(r.repaired)
+        harness.stdio.println(r.repair_tier == nil)
+        harness.stdio.println(r.attempts)
+        harness.stdio.println(len(harness.llm.mock_calls()))
+        harness.stdio.println(r.usage.provider_call_count)
+      },
+    )
+  }
+}

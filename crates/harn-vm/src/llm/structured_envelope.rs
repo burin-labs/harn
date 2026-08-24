@@ -1,13 +1,14 @@
 //! Result-envelope variant of `llm_call_structured`. Where
 //! `llm_call_structured` throws on schema-retry exhaustion, this surface
 //! always returns a `{ok, data, raw_text, error, error_category,
-//! attempts, repaired, extracted_json, usage, model, provider}` dict so
+//! attempts, repaired, repair_tier, extracted_json, usage, model,
+//! provider}` dict so
 //! production agent pipelines can preserve diagnostics, attempt counts,
 //! and raw model text without hand-rolling parse/repair chains.
 //!
 //! Implemented as a thin wrapper over `execute_schema_retry_loop`, with
-//! an optional repair pass that reissues a separate LLM call on
-//! malformed JSON. Repair config:
+//! an optional repair ladder: local mechanical JSON salvage first, then
+//! a single LLM reissue on malformed JSON. Repair config:
 //!
 //! ```harn
 //! let result = llm_call_structured_result(prompt, schema, {
@@ -35,7 +36,8 @@ use super::helpers::{extract_llm_options, vm_value_to_json};
 use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcome};
 
 /// Build the `{ok, data, raw_text, error, error_category, attempts,
-/// repaired, extracted_json, usage, model, provider}` envelope. Never
+/// repaired, repair_tier, extracted_json, usage, model, provider}`
+/// envelope. Never
 /// throws on transport / schema failures — the caller dispatches on
 /// `ok` / `error_category`.
 pub(crate) async fn run_structured_envelope(
@@ -139,7 +141,14 @@ pub(crate) async fn run_structured_envelope(
     };
 
     if main_outcome.errors.is_empty() {
-        return Ok(envelope_success(&main_outcome, false));
+        return Ok(envelope_success(&main_outcome, false, None));
+    }
+
+    // Local salvage before any extra provider call. Trailing commas,
+    // unquoted keys, prose preambles, and truncated closers are free;
+    // a schema miss still falls through so we never invent a shape.
+    if let Some(data) = try_local_schema_repair(&main_outcome.raw_text, &schema) {
+        return Ok(envelope_local_success(&main_outcome, data));
     }
 
     // Schema/JSON failure — try repair if configured.
@@ -158,7 +167,7 @@ pub(crate) async fn run_structured_envelope(
                 combined_usages.append(&mut repair_outcome.usages);
                 if repair_outcome.errors.is_empty() {
                     repair_outcome.usages = combined_usages;
-                    return Ok(envelope_success(&repair_outcome, true));
+                    return Ok(envelope_success(&repair_outcome, true, Some("llm")));
                 }
                 main_outcome.usages = combined_usages;
             }
@@ -429,36 +438,119 @@ impl EnvelopeFailureKind {
     }
 }
 
-fn envelope_success(outcome: &SchemaLoopOutcome, repaired: bool) -> VmValue {
+fn try_local_schema_repair(raw_text: &str, schema: &VmValue) -> Option<VmValue> {
+    let repaired = crate::stdlib::json::locally_repair_json(raw_text)?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&repaired).ok()?;
+    let vm_value = crate::schema::json_to_vm_value(&parsed);
+    let result = crate::stdlib::schema_result_value(&vm_value, schema, false);
+    match result {
+        VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name("Result") => {
+            match enum_variant.variant.as_ref() {
+                "Ok" => Some(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn envelope_local_success(outcome: &SchemaLoopOutcome, data: VmValue) -> VmValue {
+    let (model, provider) = result_model_provider(outcome);
+    finish_success_envelope(SuccessEnvelope {
+        data,
+        raw_text: &outcome.raw_text,
+        attempts: outcome.attempts,
+        repaired: true,
+        repair_tier: Some("local"),
+        extracted_json: raw_needed_extraction(&outcome.raw_text),
+        usage: build_usage_dict(outcome),
+        model: &model,
+        provider: &provider,
+    })
+}
+
+fn raw_needed_extraction(raw_text: &str) -> bool {
+    let trimmed = raw_text.trim();
+    if trimmed.is_empty() || serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return false;
+    }
+    let extracted = crate::stdlib::json::extract_json_from_text(raw_text);
+    extracted != trimmed
+}
+
+fn envelope_success(
+    outcome: &SchemaLoopOutcome,
+    repaired: bool,
+    repair_tier: Option<&str>,
+) -> VmValue {
     let data = match outcome.vm_result.as_dict() {
         Some(d) => d.get("data").cloned().unwrap_or(VmValue::Nil),
         None => VmValue::Nil,
     };
-    let extracted_json = detect_extracted_json(outcome);
-    let usage = build_usage_dict(outcome);
     let (model, provider) = result_model_provider(outcome);
+    finish_success_envelope(SuccessEnvelope {
+        data,
+        raw_text: &outcome.raw_text,
+        attempts: outcome.attempts,
+        repaired,
+        repair_tier,
+        extracted_json: detect_extracted_json(outcome),
+        usage: build_usage_dict(outcome),
+        model: &model,
+        provider: &provider,
+    })
+}
 
+struct SuccessEnvelope<'a> {
+    data: VmValue,
+    raw_text: &'a str,
+    attempts: usize,
+    repaired: bool,
+    repair_tier: Option<&'a str>,
+    extracted_json: bool,
+    usage: VmValue,
+    model: &'a str,
+    provider: &'a str,
+}
+
+fn finish_success_envelope(parts: SuccessEnvelope<'_>) -> VmValue {
+    let SuccessEnvelope {
+        data,
+        raw_text,
+        attempts,
+        repaired,
+        repair_tier,
+        extracted_json,
+        usage,
+        model,
+        provider,
+    } = parts;
     let mut env = crate::value::DictMap::new();
     env.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
     env.insert(crate::value::intern_key("data"), data);
-    env.put_str("raw_text", outcome.raw_text.as_str());
+    env.put_str("raw_text", raw_text);
     env.put_str("error", "");
     env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
     env.insert(
         crate::value::intern_key("attempts"),
-        VmValue::Int(outcome.attempts as i64),
+        VmValue::Int(attempts as i64),
     );
     env.insert(
         crate::value::intern_key("repaired"),
         VmValue::Bool(repaired),
     );
+    if let Some(tier) = repair_tier {
+        env.put_str("repair_tier", tier);
+    } else {
+        env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
+    }
     env.insert(
         crate::value::intern_key("extracted_json"),
         VmValue::Bool(extracted_json),
     );
     env.insert(crate::value::intern_key("usage"), usage);
-    env.put_str("model", model.as_str());
-    env.put_str("provider", provider.as_str());
+    env.put_str("model", model);
+    env.put_str("provider", provider);
     VmValue::dict(env)
 }
 
@@ -490,6 +582,7 @@ fn envelope_failure(
         crate::value::intern_key("repaired"),
         VmValue::Bool(repaired),
     );
+    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
     env.insert(
         crate::value::intern_key("extracted_json"),
         VmValue::Bool(extracted_json),
@@ -519,6 +612,7 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
     env.put_str("error_category", category.as_str());
     env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
     env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
     env.insert(
         crate::value::intern_key("extracted_json"),
         VmValue::Bool(false),
@@ -549,6 +643,7 @@ fn envelope_from_operation_timeout(timeout_ms: u64) -> VmValue {
     env.put_str("error_category", "timeout");
     env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
     env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("repair_tier"), VmValue::Nil);
     env.insert(
         crate::value::intern_key("extracted_json"),
         VmValue::Bool(false),
@@ -823,7 +918,7 @@ mod tests {
         )
         .expect("catalog-priced result");
 
-        let success = envelope_success(&outcome, false);
+        let success = envelope_success(&outcome, false, None);
         let failure = envelope_failure(&outcome, EnvelopeFailureKind::SchemaValidation, false);
 
         let success_usage =
@@ -851,7 +946,7 @@ mod tests {
         outcome.usages.push(outcome.usages[0].clone());
         outcome.attempts = 2;
 
-        let envelope = envelope_success(&outcome, false);
+        let envelope = envelope_success(&outcome, false, None);
         let usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&envelope).clone().into()));
         assert_eq!(usage["input_tokens"], 2_000);
@@ -876,7 +971,7 @@ mod tests {
         unknown.usage_unknown_calls = 1;
         outcome.usages.push(unknown);
 
-        let envelope = envelope_success(&outcome, false);
+        let envelope = envelope_success(&outcome, false, None);
         let usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&envelope).clone().into()));
         assert_eq!(usage["cost_usd"], serde_json::Value::Null);
@@ -1079,5 +1174,56 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Return only JSON that conforms to this JSON Schema"));
+    }
+
+    fn verdict_schema() -> VmValue {
+        VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("type"),
+                VmValue::String(arcstr::ArcStr::from("object")),
+            ),
+            (
+                crate::value::intern_key("required"),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    arcstr::ArcStr::from("verdict"),
+                )])),
+            ),
+            (
+                crate::value::intern_key("properties"),
+                VmValue::dict(crate::value::DictMap::from_iter([(
+                    crate::value::intern_key("verdict"),
+                    VmValue::dict(crate::value::DictMap::from_iter([(
+                        crate::value::intern_key("type"),
+                        VmValue::String(arcstr::ArcStr::from("string")),
+                    )])),
+                )])),
+            ),
+        ]))
+    }
+
+    #[test]
+    fn local_repair_recovers_mechanical_json_mistakes() {
+        let schema = verdict_schema();
+        for raw in [
+            r#"{"verdict": "PASS",}"#,
+            "{verdict: \"PASS\"}",
+            "Here you go: {\"verdict\": \"PASS\",} thanks.",
+            r#"{"verdict": "PASS""#,
+        ] {
+            let data = try_local_schema_repair(raw, &schema)
+                .unwrap_or_else(|| panic!("local repair should accept {raw}"));
+            assert_eq!(
+                data.as_dict().unwrap().get("verdict").unwrap().display(),
+                "PASS"
+            );
+        }
+    }
+
+    #[test]
+    fn local_repair_does_not_invent_a_schema_shape() {
+        let schema = verdict_schema();
+        assert!(try_local_schema_repair(r#"{"note": "nope"}"#, &schema).is_none());
+        assert!(try_local_schema_repair("nothing useful here at all", &schema).is_none());
+        assert!(try_local_schema_repair(r#"{"verdict":"#, &schema).is_none());
     }
 }
