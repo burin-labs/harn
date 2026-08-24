@@ -1727,6 +1727,7 @@ set under `[provider_defaults.<name>]`:
 | `preferred_tool_format` | string | Default preset tool mode: `native` or `text`. |
 | `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
 | `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
+| `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. `{ measured = "..." }`, `{ assumed = "..." }`, or `{ mirrors = { provider, model_match } }`. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |

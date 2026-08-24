@@ -12,6 +12,41 @@ use serde::Deserialize;
 
 use super::rule::ProviderRule;
 
+/// Why a self-hosted row chose native vs text tools.
+///
+/// A capability row is a decision about how every request on that route is
+/// shaped. Sibling runtimes must not inherit that decision by comment
+/// (#6829): either measure this runtime, or name the cited row so a later
+/// flip surfaces the dependants.
+///
+/// The three variants are evidence tiers, and the tier is the point. A row
+/// that has never been probed must say so under [`Self::Assumed`] rather than
+/// dressing its reasoning up as a receipt — a catalog where `measured`
+/// sometimes means "not measured" is exactly the unfalsifiable table #6829
+/// was filed about.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolFormatJustification {
+    /// A measurement of THIS runtime, not a sibling. Name the receipt: what
+    /// was run, when, and on what. Vendor documentation is not a measurement.
+    Measured(String),
+    /// No probe of this runtime exists yet. The text states the reasoning the
+    /// pin rests on and, where the pin could be wrong, the rollback. Honest
+    /// debt: greppable, countable, and safe to promote to [`Self::Measured`]
+    /// once a receipt exists.
+    Assumed(String),
+    /// Structural link to another row. The catalog audit requires the cited
+    /// row to exist and to carry the same resolved native/text decision.
+    Mirrors(ToolFormatMirror),
+}
+
+/// Target of a [`ToolFormatJustification::Mirrors`] link.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ToolFormatMirror {
+    pub provider: String,
+    pub model_match: String,
+}
+
 /// Parsed on-disk capabilities schema. Public so harn-cli can
 /// construct one directly when wiring harn.toml overrides.
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -596,6 +596,7 @@ accepts these fields:
 | `preferred_tool_format` | string | Optional preset default, `native` or `text`; inferred from `native_tools` when omitted. |
 | `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
 | `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
+| `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. One of `{ measured = "<receipt of THIS runtime>" }`, `{ assumed = "<why the pin holds, and the rollback>" }`, or `{ mirrors = { provider = "...", model_match = "..." } }`. A comment that cites a sibling is not a receipt. A `mirrors` link must stay in sync with the cited row (#6829). |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
@@ -669,6 +670,23 @@ lands in `tool_support.empirical_parity`, which carries the verdict together
 with native/text pass rates, a sample size, a confidence, and when it was
 run. `harn check --provider-matrix --empirical <overlay>` fills it. A guard
 that needs empirical grounding should read `empirical_parity`, not `parity`.
+
+Self-hosted rows that set `native_tools` or `preferred_tool_format` must
+also set `tool_format_justification`. A comment that cites a sibling is
+not a receipt: if the cited row later flips, the dependant has to fail the
+catalog audit or be re-measured (#6829). The field has three tiers:
+
+- `measured` — a probe of THIS runtime. Name what was run and when.
+- `assumed` — no probe exists yet. State what the pin rests on and how to
+  roll it back. Vendor documentation is `assumed`, not `measured`.
+- `mirrors` — a structural link to another row, which must exist and must
+  resolve to the same native/text decision.
+
+The tier is the point. The gate cannot tell a real probe from invented
+prose, so the invariant it can hold is that an unprobed row says so.
+Most self-hosted rows are honestly `assumed` today; that debt is meant to
+be visible and greppable, and a row is promoted to `measured` only when a
+receipt actually exists.
 
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters

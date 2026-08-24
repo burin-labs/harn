@@ -45,18 +45,36 @@
 //!     unreliability reproduced across independent hosts, never one rehoster's
 //!     flakiness (which belongs in that host's own row).
 //!
+//!   * **self-hosted tool-format justification** — a self-hosted row that
+//!     sets `native_tools` or `preferred_tool_format` is a decision about how
+//!     every request on that runtime is shaped. It must carry
+//!     `tool_format_justification`, in one of three evidence tiers: a
+//!     `measured` receipt of THIS runtime, an `assumed` pin that admits no
+//!     probe has been run, or a structural `mirrors` link to another row.
+//!     Prose that cites a sibling is not a receipt. A `mirrors` target must
+//!     exist, and the dependant's resolved native/text decision must match
+//!     the cited row so a later flip surfaces the dependants (#6829).
+//!
+//!     The tiers are load-bearing: the gate cannot tell a real probe from
+//!     invented prose, so the one thing it can enforce is that a row with no
+//!     probe says `assumed` instead of claiming `measured`. That keeps the
+//!     table's unmeasured debt greppable rather than laundering it into
+//!     receipts.
+//!
 //! The first three checks are driven entirely by capability-row fields and the
 //! fourth by a tiny evidence-gated family list, so adding/closing a footgun
 //! route is a data edit (set the flag / forget the pin / pin native for an
 //! unreliable family) rather than a code change — and the mistake trips this
-//! gate.
+//! gate. The fifth is the same shape: a missing or stale justification is a
+//! data edit, not a new code path.
 //!
 //! The audit is wired into `harn provider catalog generate --check` (see
 //! `harn-cli`), which runs under `make check-provider-catalog` /
 //! `make check-provider-matrix`, so the matrix cannot drift into a footgun
 //! state without failing CI.
 
-use crate::llm::capabilities::CapabilitiesFile;
+use crate::llm::capabilities::{CapabilitiesFile, ProviderRule, ToolFormatJustification};
+use crate::llm_config::provider_is_self_hosted;
 
 /// Tool-bearing reasoning tasks. These are the tasks whose auto reasoning level
 /// must never resolve to `"off"` on a route that calls tools in its reasoning
@@ -290,9 +308,124 @@ fn audit_capabilities_with_families(
                     }
                 }
             }
+
+            // Footgun 5: a self-hosted native/text decision without a receipt
+            // of THIS runtime, or a stale structural sibling link (#6829).
+            if provider_is_self_hosted(provider) && decides_tool_format(rule) {
+                match &rule.tool_format_justification {
+                    None => {
+                        report.footguns.push(CapabilityFootgun {
+                            provider: provider.clone(),
+                            model_match: rule.match_label(),
+                            message: "is a self-hosted native/text decision without \
+                                tool_format_justification. Record a measurement of THIS \
+                                runtime (`tool_format_justification = { measured = \"...\" }`) \
+                                or a structural sibling link (`{ mirrors = { provider, \
+                                model_match } }`). A comment that cites another row is not a \
+                                receipt."
+                                .to_string(),
+                        });
+                    }
+                    Some(ToolFormatJustification::Measured(receipt))
+                        if receipt.trim().is_empty() =>
+                    {
+                        report.footguns.push(CapabilityFootgun {
+                            provider: provider.clone(),
+                            model_match: rule.match_label(),
+                            message: "declares tool_format_justification.measured but the \
+                                receipt is empty. Write the measurement of THIS runtime, or \
+                                use mirrors to name the cited row."
+                                .to_string(),
+                        });
+                    }
+                    Some(ToolFormatJustification::Assumed(rationale))
+                        if rationale.trim().is_empty() =>
+                    {
+                        report.footguns.push(CapabilityFootgun {
+                            provider: provider.clone(),
+                            model_match: rule.match_label(),
+                            message: "declares tool_format_justification.assumed but the \
+                                rationale is empty. State what the pin rests on and how to \
+                                roll it back, so the next reader knows this row was never \
+                                probed."
+                                .to_string(),
+                        });
+                    }
+                    Some(ToolFormatJustification::Mirrors(target)) => {
+                        match find_rule(file, &target.provider, &target.model_match) {
+                            None => {
+                                report.footguns.push(CapabilityFootgun {
+                                    provider: provider.clone(),
+                                    model_match: rule.match_label(),
+                                    message: format!(
+                                        "mirrors provider.{} model_match=\"{}\", but that row \
+                                         does not exist. Point mirrors at a real row, or \
+                                         replace it with a measurement of THIS runtime.",
+                                        target.provider, target.model_match
+                                    ),
+                                });
+                            }
+                            Some(cited) => {
+                                let ours = resolved_tool_decision(rule);
+                                let theirs = resolved_tool_decision(cited);
+                                if ours != theirs {
+                                    report.footguns.push(CapabilityFootgun {
+                                        provider: provider.clone(),
+                                        model_match: rule.match_label(),
+                                        message: format!(
+                                            "mirrors provider.{} model_match=\"{}\" \
+                                             (native_tools={}, preferred_tool_format={}), but \
+                                             this row resolved to native_tools={}, \
+                                             preferred_tool_format={}. The cited row changed \
+                                             or this runtime diverged; re-measure THIS \
+                                             runtime or update the dependant so the link \
+                                             stays honest.",
+                                            target.provider,
+                                            target.model_match,
+                                            theirs.0,
+                                            theirs.1,
+                                            ours.0,
+                                            ours.1
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Some(ToolFormatJustification::Measured(_))
+                    | Some(ToolFormatJustification::Assumed(_)) => {}
+                }
+            }
         }
     }
     report
+}
+
+fn decides_tool_format(rule: &ProviderRule) -> bool {
+    rule.native_tools.is_some() || rule.preferred_tool_format.is_some()
+}
+
+fn resolved_tool_decision(rule: &ProviderRule) -> (bool, String) {
+    let native = rule.native_tools.unwrap_or(false);
+    let format = rule.preferred_tool_format.clone().unwrap_or_else(|| {
+        if native {
+            "native".to_string()
+        } else {
+            "json".to_string()
+        }
+    });
+    (native, format)
+}
+
+fn find_rule<'a>(
+    file: &'a CapabilitiesFile,
+    provider: &str,
+    model_match: &str,
+) -> Option<&'a ProviderRule> {
+    file.provider.get(provider)?.iter().find(|rule| {
+        rule.match_label() == model_match
+            || rule.match_patterns().any(|pattern| pattern == model_match)
+    })
 }
 
 /// Audit the built-in (shipped) capability matrix. Convenience entry point for
@@ -308,6 +441,21 @@ mod tests {
 
     fn audit_toml(src: &str) -> CapabilityAuditReport {
         audit_capabilities(&parse_capabilities_toml(src).expect("parses"))
+    }
+
+    /// Build one self-hosted row. Assembling fixtures instead of pasting whole
+    /// TOML blocks keeps every literal here short: the long-string lint treats
+    /// a multi-row block as one 200+ char literal, and its allowlist is a
+    /// deliberately small budget that test fixtures should not spend.
+    fn row(provider: &str, native: bool, justification: &str) -> String {
+        format!(
+            "[[provider.{provider}]]\nmodel_match = \"q*\"\nnative_tools = {native}\n\
+             tool_format_justification = {justification}\n\n"
+        )
+    }
+
+    fn mirrors(provider: &str) -> String {
+        format!("{{ mirrors = {{ provider = \"{provider}\", model_match = \"q*\" }} }}")
     }
 
     /// A synthetic native-unreliable family, so the family-consistency gate is
@@ -329,6 +477,63 @@ mod tests {
             report.is_clean(),
             "shipped capability matrix has footguns:\n{}",
             report.render()
+        );
+    }
+
+    #[test]
+    fn shipped_self_hosted_qwen36_rows_are_independently_justified_and_not_unanimous() {
+        let file = crate::llm::capabilities::builtin_file();
+        let mut native_votes = Vec::new();
+        let mut measured = Vec::new();
+        for provider in ["ollama", "llamacpp", "local", "mlx"] {
+            let rule = file
+                .provider
+                .get(provider)
+                .into_iter()
+                .flatten()
+                .find(|rule| {
+                    rule.match_patterns()
+                        .any(|pattern| pattern.contains("qwen3.6"))
+                })
+                .unwrap_or_else(|| panic!("{provider} is missing a qwen3.6 capability row"));
+            match &rule.tool_format_justification {
+                Some(ToolFormatJustification::Measured(receipt)) => {
+                    assert!(
+                        !receipt.trim().is_empty(),
+                        "{provider} qwen3.6 measured receipt is empty"
+                    );
+                    measured.push(provider);
+                }
+                Some(ToolFormatJustification::Assumed(rationale)) => {
+                    assert!(
+                        !rationale.trim().is_empty(),
+                        "{provider} qwen3.6 assumed rationale is empty"
+                    );
+                }
+                Some(ToolFormatJustification::Mirrors(_)) => {
+                    panic!("{provider} qwen3.6 must carry its own receipt, not a sibling link");
+                }
+                None => panic!("{provider} qwen3.6 is missing tool_format_justification"),
+            }
+            native_votes.push((
+                provider,
+                rule.native_tools
+                    .unwrap_or_else(|| panic!("{provider} qwen3.6 must set native_tools")),
+            ));
+        }
+        assert!(
+            native_votes.iter().any(|(_, native)| *native)
+                && native_votes.iter().any(|(_, native)| !*native),
+            "the four self-hosted qwen3.6 rows must not all agree; runtimes differ: {native_votes:?}"
+        );
+        // The divergence is only meaningful if at least one side rests on a
+        // real probe. Four mutually disagreeing guesses would satisfy every
+        // assertion above while leaving the table exactly as unfalsifiable as
+        // #6829 found it.
+        assert!(
+            !measured.is_empty(),
+            "no self-hosted qwen3.6 row carries a measured receipt; the split is \
+             then four assumptions, not four findings"
         );
     }
 
@@ -537,5 +742,151 @@ allowed_tool_choice_modes = ["auto", "none"]
         assert!(report.footguns[0]
             .message
             .contains("allowed_tool_choice_modes"));
+    }
+
+    #[test]
+    fn flags_self_hosted_tool_format_decision_without_justification() {
+        let report = audit_toml(
+            r#"
+[[provider.mlx]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(
+            report.footguns[0]
+                .message
+                .contains("tool_format_justification"),
+            "{}",
+            report.render()
+        );
+    }
+
+    #[test]
+    fn measured_self_hosted_tool_format_decision_is_clean() {
+        let report = audit_toml(
+            r#"
+[[provider.llamacpp]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+tool_format_justification = { measured = "2026-08-19 CUDA receipt" }
+"#,
+        );
+        assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn flags_empty_measured_receipt() {
+        let report = audit_toml(
+            r#"
+[[provider.local]]
+model_match = "*qwen3.6*"
+native_tools = true
+tool_format_justification = { measured = "   " }
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(
+            report.footguns[0].message.contains("receipt is empty"),
+            "{}",
+            report.render()
+        );
+    }
+
+    #[test]
+    fn assumed_self_hosted_tool_format_decision_is_clean() {
+        let report = audit_toml(&row("mlx", true, r#"{ assumed = "no probe yet" }"#));
+        assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn flags_empty_assumed_rationale() {
+        let report = audit_toml(
+            r#"
+[[provider.local]]
+model_match = "*qwen3*"
+native_tools = true
+tool_format_justification = { assumed = "  " }
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(
+            report.footguns[0].message.contains("rationale is empty"),
+            "{}",
+            report.render()
+        );
+    }
+
+    #[test]
+    fn flags_mirror_whose_cited_row_diverged() {
+        // The original #6829 shape: mlx cites llama.cpp in prose (now a
+        // structural link) after llama.cpp flipped to text and mlx stayed native.
+        let report = audit_toml(
+            &(row("llamacpp", false, r#"{ measured = "sweep" }"#)
+                + &row("mlx", true, &mirrors("llamacpp"))),
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert_eq!(report.footguns[0].provider, "mlx");
+        assert!(
+            report.footguns[0].message.contains("cited row changed"),
+            "{}",
+            report.render()
+        );
+    }
+
+    #[test]
+    fn matching_mirror_is_clean() {
+        let report = audit_toml(
+            &(row("llamacpp", true, r#"{ measured = "receipt" }"#)
+                + &row("mlx", true, &mirrors("llamacpp"))),
+        );
+        assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn flags_mirror_to_missing_row() {
+        let report = audit_toml(
+            r#"
+[[provider.mlx]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+tool_format_justification = { mirrors = { provider = "llamacpp", model_match = "*qwen3.6*" } }
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(
+            report.footguns[0].message.contains("does not exist"),
+            "{}",
+            report.render()
+        );
+    }
+
+    #[test]
+    fn hosted_tool_format_decision_does_not_need_justification() {
+        let report = audit_toml(
+            r#"
+[[provider.openrouter]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+"#,
+        );
+        assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn self_hosted_row_without_a_tool_format_decision_is_clean() {
+        let report = audit_toml(
+            r#"
+[[provider.ollama]]
+model_match = "llava*"
+vision_supported = true
+"#,
+        );
+        assert!(report.is_clean(), "{}", report.render());
     }
 }

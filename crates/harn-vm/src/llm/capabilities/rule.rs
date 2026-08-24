@@ -13,7 +13,8 @@ use serde::Deserialize;
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
     LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
-    ScreenshotScaling, SystemMessagePlacement, ToolModeParitySource, WireDialect,
+    ScreenshotScaling, SystemMessagePlacement, ToolFormatJustification, ToolModeParitySource,
+    WireDialect,
 };
 use super::pattern::{rule_matches, ModelPatterns};
 
@@ -427,6 +428,11 @@ pub struct ProviderRule {
     /// Short human-readable note explaining `tool_mode_parity`.
     #[serde(default)]
     pub tool_mode_parity_notes: Option<String>,
+    /// Receipt or structural sibling link for this row's native/text
+    /// decision. Required on self-hosted rows that set `native_tools` or
+    /// `preferred_tool_format` (#6829).
+    #[serde(default)]
+    pub tool_format_justification: Option<ToolFormatJustification>,
     /// In-prompt directive that disables this model's "thinking" mode when
     /// the API doesn't expose a first-class field (or exposes it
     /// inconsistently across templates / quantizations). For Qwen3 family
@@ -637,6 +643,7 @@ impl ProviderRule {
             preferred_tool_format,
             tool_mode_parity,
             tool_mode_parity_notes,
+            tool_format_justification,
             thinking_disable_directive,
             auto_reasoning_overrides,
             provider_route_denylist,
@@ -798,6 +805,10 @@ impl ProviderRule {
         fill_opt(&mut self.preferred_tool_format, preferred_tool_format);
         fill_opt(&mut self.tool_mode_parity, tool_mode_parity);
         fill_opt(&mut self.tool_mode_parity_notes, tool_mode_parity_notes);
+        fill_opt(
+            &mut self.tool_format_justification,
+            tool_format_justification,
+        );
         fill_opt(
             &mut self.thinking_disable_directive,
             thinking_disable_directive,
@@ -1162,6 +1173,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         preferred_tool_format: None,
         tool_mode_parity: None,
         tool_mode_parity_notes: None,
+        tool_format_justification: None,
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
         provider_route_denylist: None,
