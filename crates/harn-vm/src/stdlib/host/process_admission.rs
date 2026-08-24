@@ -8,7 +8,6 @@
 //! separately from user-code execution.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use harn_clock::Clock;
@@ -40,7 +39,76 @@ impl ProcessAdmissionGate {
 #[derive(Clone)]
 struct ProcessAdmissionContext {
     gate: Arc<ProcessAdmissionGate>,
-    waited_ms: Arc<AtomicU64>,
+    receipt: Arc<ProcessAdmissionReceipt>,
+}
+
+#[derive(Debug)]
+struct ProcessAdmissionReceipt {
+    clock: Arc<dyn Clock>,
+    state: parking_lot::Mutex<ProcessAdmissionReceiptState>,
+}
+
+#[derive(Debug, Default)]
+struct ProcessAdmissionReceiptState {
+    active_waiters: usize,
+    interval_started_ms: i64,
+    waited_ms: u64,
+}
+
+impl ProcessAdmissionReceipt {
+    fn new(clock: Arc<dyn Clock>) -> Arc<Self> {
+        Arc::new(Self {
+            clock,
+            state: parking_lot::Mutex::new(ProcessAdmissionReceiptState::default()),
+        })
+    }
+
+    fn begin(self: &Arc<Self>) -> ProcessAdmissionWaitGuard {
+        let mut state = self.state.lock();
+        if state.active_waiters == 0 {
+            state.interval_started_ms = self.clock.monotonic_ms();
+        }
+        state.active_waiters = state.active_waiters.saturating_add(1);
+        drop(state);
+        ProcessAdmissionWaitGuard {
+            receipt: Arc::clone(self),
+        }
+    }
+
+    fn waited_ms(&self) -> u64 {
+        let state = self.state.lock();
+        let active_ms = (state.active_waiters != 0)
+            .then(|| {
+                self.clock
+                    .monotonic_ms()
+                    .saturating_sub(state.interval_started_ms)
+            })
+            .and_then(|elapsed| u64::try_from(elapsed).ok())
+            .unwrap_or_default();
+        state.waited_ms.saturating_add(active_ms)
+    }
+}
+
+struct ProcessAdmissionWaitGuard {
+    receipt: Arc<ProcessAdmissionReceipt>,
+}
+
+impl Drop for ProcessAdmissionWaitGuard {
+    fn drop(&mut self) {
+        let mut state = self.receipt.state.lock();
+        debug_assert!(state.active_waiters > 0, "process admission wait underflow");
+        state.active_waiters = state.active_waiters.saturating_sub(1);
+        if state.active_waiters == 0 {
+            let elapsed = self
+                .receipt
+                .clock
+                .monotonic_ms()
+                .saturating_sub(state.interval_started_ms);
+            state.waited_ms = state
+                .waited_ms
+                .saturating_add(u64::try_from(elapsed).unwrap_or_default());
+        }
+    }
 }
 
 thread_local! {
@@ -50,26 +118,23 @@ thread_local! {
 
 pub struct ProcessAdmissionScope {
     previous: Option<ProcessAdmissionContext>,
-    waited_ms: Arc<AtomicU64>,
+    receipt: Arc<ProcessAdmissionReceipt>,
 }
 
 /// Install a case-local receipt over a run-shared process gate.
 pub fn scope_process_admission(gate: Arc<ProcessAdmissionGate>) -> ProcessAdmissionScope {
-    let waited_ms = Arc::new(AtomicU64::new(0));
+    let receipt = ProcessAdmissionReceipt::new(Arc::clone(&gate.clock));
     let current = ProcessAdmissionContext {
         gate,
-        waited_ms: Arc::clone(&waited_ms),
+        receipt: Arc::clone(&receipt),
     };
     let previous = PROCESS_ADMISSION_CONTEXT.with(|slot| slot.replace(Some(current)));
-    ProcessAdmissionScope {
-        previous,
-        waited_ms,
-    }
+    ProcessAdmissionScope { previous, receipt }
 }
 
 impl ProcessAdmissionScope {
     pub fn waited_ms(&self) -> u64 {
-        self.waited_ms.load(Ordering::Acquire)
+        self.receipt.waited_ms()
     }
 }
 
@@ -90,16 +155,12 @@ pub(super) async fn acquire_process_admission(
     };
     let clock = Arc::clone(&admission.gate.clock);
     let deadline_pause = ctx.and_then(|ctx| ctx.pause_execution_deadline(Arc::clone(&clock)));
-    let started_ms = clock.monotonic_ms();
+    let receipt_wait = admission.receipt.begin();
     let permit = Arc::clone(&admission.gate.semaphore)
         .acquire_owned()
         .await
         .map_err(|_| VmError::Runtime("process admission gate closed".to_string()))?;
-    let waited_ms = clock.monotonic_ms().saturating_sub(started_ms);
-    admission.waited_ms.fetch_add(
-        u64::try_from(waited_ms).unwrap_or_default(),
-        Ordering::AcqRel,
-    );
+    drop(receipt_wait);
     drop(deadline_pause);
     Ok(Some(permit))
 }
@@ -146,5 +207,54 @@ mod tests {
         let _second = second.await.expect("gate remains open");
 
         assert_eq!(scope.waited_ms(), 35);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn admission_receipt_counts_overlapping_waits_as_one_wall_interval() {
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let gate_clock: Arc<dyn Clock> = clock.clone();
+        let scope = scope_process_admission(ProcessAdmissionGate::new(1, gate_clock));
+        let first = acquire_process_admission(None)
+            .await
+            .expect("gate is open")
+            .expect("scoped admission returns a permit");
+        let second = acquire_process_admission(None);
+        let third = acquire_process_admission(None);
+        tokio::pin!(second, third);
+        assert!(futures::poll!(&mut second).is_pending());
+        assert!(futures::poll!(&mut third).is_pending());
+
+        clock.advance(Duration::from_millis(20));
+        drop(first);
+        let second = second.await.expect("gate remains open");
+        clock.advance(Duration::from_millis(15));
+        drop(second);
+        let _third = third.await.expect("gate remains open");
+
+        assert_eq!(scope.waited_ms(), 35, "overlapping waits form one interval");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn admission_receipt_closes_a_cancelled_wait_interval() {
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let gate_clock: Arc<dyn Clock> = clock.clone();
+        let scope = scope_process_admission(ProcessAdmissionGate::new(1, gate_clock));
+        let first = acquire_process_admission(None)
+            .await
+            .expect("gate is open")
+            .expect("scoped admission returns a permit");
+        let mut pending = Box::pin(acquire_process_admission(None));
+        assert!(futures::poll!(&mut pending).is_pending());
+
+        clock.advance(Duration::from_millis(12));
+        assert_eq!(scope.waited_ms(), 12, "live intervals remain observable");
+        drop(pending);
+        assert_eq!(scope.waited_ms(), 12);
+
+        drop(first);
+        let _next = acquire_process_admission(None)
+            .await
+            .expect("cancelled waiter releases its receipt depth");
+        assert_eq!(scope.waited_ms(), 12);
     }
 }
