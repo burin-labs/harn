@@ -10,6 +10,20 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
     })
 }
 
+/// Derive expected structured-output fields from the capability lookup that
+/// the CLI already uses. Do not transcribe catalog literals here: this binary
+/// is excluded from every merge-gated nextest profile (#7086).
+fn expected_structured_output(
+    provider: &str,
+    model: &str,
+) -> (serde_json::Value, serde_json::Value) {
+    let caps = harn_vm::llm::capabilities::lookup(provider, model);
+    (
+        serde_json::json!(caps.structured_output),
+        serde_json::json!(caps.structured_output_mode),
+    )
+}
+
 #[test]
 fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
     let argv = [
@@ -83,10 +97,15 @@ fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
         harn.stdout
     );
     assert_eq!(harn_value["rows"][0]["wire_format"], "anthropic_native");
-    assert_eq!(harn_value["rows"][0]["structured_output"], "native");
+    let (structured_output, structured_output_mode) =
+        expected_structured_output("anthropic", "claude-sonnet-4-6");
+    assert_eq!(
+        harn_value["rows"][0]["structured_output"],
+        structured_output
+    );
     assert_eq!(
         harn_value["rows"][0]["structured_output_mode"],
-        "native_json"
+        structured_output_mode
     );
 }
 
@@ -176,10 +195,15 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
         plan["readiness_commands"][0]["route"],
         "anthropic:claude-sonnet-4-6"
     );
-    assert_eq!(plan["readiness_commands"][0]["structured_output"], "native");
+    let (structured_output, structured_output_mode) =
+        expected_structured_output("anthropic", "claude-sonnet-4-6");
+    assert_eq!(
+        plan["readiness_commands"][0]["structured_output"],
+        structured_output
+    );
     assert_eq!(
         plan["readiness_commands"][0]["structured_output_mode"],
-        "native_json"
+        structured_output_mode
     );
     assert_eq!(
         plan["readiness_commands"][0]["secret_envs"],
@@ -220,8 +244,11 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     assert_eq!(plan["commands"][0]["provider"], "anthropic");
     assert_eq!(plan["commands"][0]["model"], "claude-sonnet-4-6");
     assert_eq!(plan["commands"][0]["route"], "anthropic:claude-sonnet-4-6");
-    assert_eq!(plan["commands"][0]["structured_output"], "native");
-    assert_eq!(plan["commands"][0]["structured_output_mode"], "native_json");
+    assert_eq!(plan["commands"][0]["structured_output"], structured_output);
+    assert_eq!(
+        plan["commands"][0]["structured_output_mode"],
+        structured_output_mode
+    );
     assert_eq!(
         plan["commands"][0]["secret_envs"],
         serde_json::json!(["ANTHROPIC_API_KEY"])
@@ -403,11 +430,13 @@ fn provider_dispatch_audit_tool_probe_plan_marks_signed_thinking_not_applicable(
         profiles,
         std::collections::BTreeSet::from(["catalog_default", "parameter_edges"])
     );
+    let (structured_output, structured_output_mode) =
+        expected_structured_output("ollama", "devstral-small-2:24b");
     assert!(not_applicable.iter().all(|c| {
         c["route"] == "ollama:devstral-small-2:24b"
             && c["case"] == "signed_thinking_tool_result_followup"
-            && c["structured_output"] == "format_kw"
-            && c["structured_output_mode"] == "delimited"
+            && c["structured_output"] == structured_output
+            && c["structured_output_mode"] == structured_output_mode
             && c["reason"] == "route_has_no_signed_thinking_tool_history_surface"
     }));
 }
