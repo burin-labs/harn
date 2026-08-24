@@ -66,7 +66,7 @@ pub fn __judge_emit_started(
   agent: HarnessAgent,
   session_id: string,
   iteration: int,
-  trigger: string,
+  trigger: string?,
 ) -> nil {
   agent_emit_event(agent, session_id, "judge_started", {iteration: iteration, trigger: trigger})
   return nil
