@@ -10,6 +10,7 @@ pub mod asset_paths;
 mod declarations;
 pub mod fingerprint;
 pub mod host_capabilities;
+pub mod host_capability_config;
 mod import_recording;
 pub mod manifest_walk;
 mod namespace_imports;

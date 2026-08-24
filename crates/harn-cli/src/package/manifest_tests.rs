@@ -278,6 +278,7 @@ preflight_allow = ["custom.scan", "runtime.*"]
 host_capabilities_path = "./schemas/host-caps.json"
 host_served_capabilities_path = "./schemas/host-served.json"
 runtime_installed_host_operations = ["project.runtime_handler"]
+require_declared_operations_served = true
 
 [workspace]
 pipelines = ["pipelines", "scripts"]
@@ -292,13 +293,14 @@ pipelines = ["pipelines", "scripts"]
     let cfg = load_check_config(Some(&harn_file));
     assert_eq!(cfg.preflight_severity.as_deref(), Some("warning"));
     assert_eq!(cfg.preflight_allow, vec!["custom.scan", "runtime.*"]);
-    let caps_path = cfg.host_capabilities_path.expect("host caps path");
+    let caps_path = cfg.host.host_capabilities_path.expect("host caps path");
     assert!(
         caps_path.ends_with("schemas/host-caps.json")
             || caps_path.ends_with("schemas\\host-caps.json"),
         "unexpected absolutized path: {caps_path}"
     );
     let served_path = cfg
+        .host
         .host_served_capabilities_path
         .expect("served host caps path");
     assert!(
@@ -307,9 +309,10 @@ pipelines = ["pipelines", "scripts"]
         "unexpected absolutized served path: {served_path}"
     );
     assert_eq!(
-        cfg.runtime_installed_host_operations,
+        cfg.host.runtime_installed_host_operations,
         ["project.runtime_handler"]
     );
+    assert!(cfg.host.require_declared_operations_served);
 
     let (workspace, manifest_dir) =
         load_workspace_config(Some(&harn_file)).expect("workspace manifest");
