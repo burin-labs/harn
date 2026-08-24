@@ -245,7 +245,8 @@ import "std/edit"
 pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
-    query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+    query: "(function_item name: (identifier) @name (#eq? @name \"greet\") "
+      + "body: (block) @target)",
     replacement: "{ format!(\"hi {name}!\") }",
   })
 
@@ -344,7 +345,8 @@ pipeline default(harness: Harness) {
   //
   const result = edit_insert_at_anchor(harness.ast, {
     path: "src/lib.rs",
-    query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+    query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") "
+      + "body: (declaration_list) @anchor)",
     position: "last_child",
     content: "#[test]\nfn two() {}",
   })
@@ -380,7 +382,8 @@ pipeline default(harness: Harness) {
     path: "src/index.ts",
     // Anchor on the last existing import so the new line lands right
     // below it (and above any code).
-    query: "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./b\")) @anchor",
+    query: "(import_statement source: (string (string_fragment) @src) "
+      + "(#eq? @src \"./b\")) @anchor",
     position: "after",
     content: "import { c } from \"./c\";",
   })
@@ -424,7 +427,9 @@ pipeline default(harness: Harness) {
     return
   }
   if result.result == "hunk_conflict" {
-    harness.stdio.log("hunk ${result.failed_hunk_index} rejected: ${result.failed_hunk_error_code}")
+    harness.stdio.log(
+      "hunk ${result.failed_hunk_index} rejected: ${result.failed_hunk_error_code}",
+    )
     return
   }
   harness.stdio.log("applied ${result.hunks_count} hunks")
@@ -462,7 +467,12 @@ pipeline default(harness: Harness) {
         replacement: "{ format!(\"hi {name}!\") }",
         select: "first",
       },
-      {op: "safe_text_patch", path: "src/lib.rs", old_text: "fn greet", new_text: "fn greeter"},
+      {
+        op: "safe_text_patch",
+        path: "src/lib.rs",
+        old_text: "fn greet",
+        new_text: "fn greeter",
+      },
       {
         op: "rename_symbol",
         symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
@@ -476,7 +486,9 @@ pipeline default(harness: Harness) {
     // least resistance: pipe the bundle to a HITL reviewer, then
     // re-run the same ops without dry_run to commit them.
     for file in bundle.per_file_unified_diff {
-      harness.stdio.log("---- ${file.path} (+${file.lines_added} / -${file.lines_removed})")
+      harness.stdio.log(
+        "---- ${file.path} (+${file.lines_added} / -${file.lines_removed})",
+      )
       harness.stdio.log(file.diff)
     }
   } else {
@@ -578,7 +590,10 @@ pipeline default(harness: Harness) {
     path: "CHANGELOG.md",
     expected_hash: snapshot.sha256,
     hunks: [
-      {old_text: "## Unreleased\n", new_text: "## Unreleased\n\n- Fixed onboarding race.\n"},
+      {
+        old_text: "## Unreleased\n",
+        new_text: "## Unreleased\n\n- Fixed onboarding race.\n",
+      },
     ],
   })
   harness.stdio.log(result.result)
@@ -641,7 +656,10 @@ them. This example uses the filesystem MCP server.
 
 ```harn
 pipeline default(harness: Harness) {
-  const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+  const client = harness.tools.mcp_connect(
+    "npx",
+    ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+  )
 
   const info = harness.tools.mcp_server_info(client)
   harness.stdio.log("Connected to: ${info.name}")
@@ -651,7 +669,9 @@ pipeline default(harness: Harness) {
     harness.stdio.log("Tool: ${t.name} - ${t.description}")
   }
 
-  harness.tools.mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
+  harness.tools.mcp_call(
+    client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"},
+  )
   const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
   harness.stdio.log("File content: ${content}")
 
@@ -680,7 +700,10 @@ chooses which to call.
 
 ```harn
 pipeline default(harness: Harness) {
-  const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+  const client = harness.tools.mcp_connect(
+    "npx",
+    ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+  )
   const mcp_tool_list = harness.tools.mcp_list_tools(client)
 
   let tools = tool_registry()
@@ -878,8 +901,12 @@ pipeline default(harness: Harness) {
   } catch (e) {
     if type_of(e) == "enum" {
       match e.variant {
-        "LlmFailure" -> { harness.stdio.log("LLM failed after retries: ${e.fields[0]}") }
-        "ParseFailure" -> { harness.stdio.log("Could not parse LLM output: ${e.fields[0]}") }
+        "LlmFailure" -> {
+          harness.stdio.log("LLM failed after retries: ${e.fields[0]}")
+        }
+        "ParseFailure" -> {
+          harness.stdio.log("Could not parse LLM output: ${e.fields[0]}")
+        }
         "Timeout" -> { harness.stdio.log("Timed out after ${e.fields[0]}s") }
       }
     } else {
@@ -931,7 +958,10 @@ pipeline default(harness: Harness) {
     prompt += "=== ${entry.key} ===\n${entry.value}\n\n"
   }
 
-  const result = harness.llm.call(prompt, "You are a helpful assistant. Use the provided files as context.")
+  const result = harness.llm.call(
+    prompt,
+    "You are a helpful assistant. Use the provided files as context.",
+  )
   harness.stdio.log(result)
 }
 ```

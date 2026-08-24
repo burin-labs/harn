@@ -263,7 +263,8 @@ const receipt = schema_contract(
     }),
   ],
 )
-const checked: Result<Receipt, SchemaContractFailure> = schema_contract_check(input, receipt)
+const checked: Result<Receipt, SchemaContractFailure> =
+  schema_contract_check(input, receipt)
 ```
 
 Composition helpers:
@@ -792,7 +793,8 @@ harness.stdio.log(base64_decode(encoded))   // Hello, World!
 harness.stdio.log(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
 const raw = bytes_from_hex("0001ff80")
 harness.stdio.log(bytes_to_base64url(raw))           // AAH_gA
-harness.stdio.log(bytes_to_hex(bytes_from_base64url("AAH_gA=="))) // 0001ff80 (padded ok)
+// 0001ff80 (padded ok)
+harness.stdio.log(bytes_to_hex(bytes_from_base64url("AAH_gA==")))
 harness.stdio.log(base32_encode("foobar"))           // MZXW6YTBOI======
 harness.stdio.log(hex_encode("hello"))               // 68656c6c6f
 harness.stdio.log(hex_decode("68656c6c6f"))          // hello
@@ -818,7 +820,8 @@ Example:
 
 ```harn
 fn main(harness: Harness) {
-  harness.stdio.log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+  harness.stdio.log(sha256("hello"))
   harness.stdio.log(harness.crypto.sha256(bytes_from_string("hello")))
   harness.stdio.log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 }
@@ -1076,7 +1079,9 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 pipeline summarize(harness: Harness) {
   const xml = harness.fs.read_text("build/test-results/test-results.xml")
   const cases = parse_junit_xml(xml)
-  const failed = cases.filter({ case -> case.status == "failed" || case.status == "errored" })
+  const failed = cases.filter({ case ->
+    case.status == "failed" || case.status == "errored"
+  })
   harness.stdio.log("failures: ${len(failed)} of ${len(cases)}")
   for case in failed {
     harness.stdio.log("  ${case.name}: ${case.message}")
@@ -1297,7 +1302,14 @@ Allow/Disallow decisions use longest-prefix matching with Allow winning ties.
 
 ```harn
 import { mem_cache } from "std/cache"
-import { verify_imports, web_fetch, web_parse_html, web_search, robots_allowed, sitemap_urls } from "std/web"
+import {
+  verify_imports,
+  web_fetch,
+  web_parse_html,
+  web_search,
+  robots_allowed,
+  sitemap_urls,
+} from "std/web"
 
 const store = mem_cache({namespace: "weekly-doc-monitor"})
 const page = web_fetch("https://docs.example.com/models", {store: store})
@@ -1357,7 +1369,11 @@ Minimal inbound echo:
 ```harn
 pipeline websocket_echo(harness: Harness) {
   const server = harness.net.websocket_server("127.0.0.1:8787", {})
-  harness.net.websocket_route(server, "/acp", {auth: {bearer: harness.env.get("ACP_TOKEN")}})
+  harness.net.websocket_route(
+    server,
+    "/acp",
+    {auth: {bearer: harness.env.get("ACP_TOKEN")}},
+  )
 
   while true {
     const accepted = harness.net.websocket_accept(server, 30000)
@@ -1948,8 +1964,12 @@ harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: tru
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
 // `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
 // it the same way they would a live provider failure.
-harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429 Too Many Requests"}})
-harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+harness.llm.mock_enqueue(
+  {error: {category: "rate_limit", message: "429 Too Many Requests"}},
+)
+harness.llm.mock_enqueue(
+  {error: {status: 503, kind: "transient", reason: "upstream_unavailable"}},
+)
 
 // Scope larger fixtures with std/testing::with_llm_script so installation and
 // cleanup stay attached to this HarnessLlm instead of process state.
@@ -2393,7 +2413,10 @@ MCP servers.
 Example:
 
 ```harn
-const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect(
+  "npx",
+  ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+)
 const tools = harness.tools.mcp_list_tools(client)
 harness.stdio.log(tools)
 
@@ -2718,7 +2741,10 @@ const ci_headless_policy = {
 
 const managed_enterprise_policy = {
   rules: [
-    {ask: {side_effect: ["workspace_write", "process_exec", "network"]}, reason: "managed approval"},
+    {
+      ask: {side_effect: ["workspace_write", "process_exec", "network"]},
+      reason: "managed approval",
+    },
     {deny: {domain: ["*.pastebin.com", "*.ngrok.io"]}},
     {deny: {path: ["**/.env*", "**/.aws/credentials"]}}
   ],

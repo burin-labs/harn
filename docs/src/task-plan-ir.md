@@ -97,7 +97,10 @@ promote it into the IR.
 ## API
 
 ```harn
-import { task_plan_compile, task_plan_render_mermaid, task_plan_schema, task_plan_validate } from "std/agent/task_plan"
+import {
+  task_plan_compile, task_plan_render_mermaid, task_plan_schema,
+  task_plan_validate,
+} from "std/agent/task_plan"
 ```
 
 * `task_plan_schema()` — `std/schema` dict; safe to feed to

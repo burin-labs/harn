@@ -97,10 +97,16 @@ pipeline default(harness: Harness) {
   const timezone = "America/New_York"
   const window = {timezone: timezone, start: "09:00", end: "17:00"}
 
-  harness.stdio.log(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
-  harness.stdio.log(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
-  harness.stdio.log(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
-  harness.stdio.log(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window))
+  const next = next_business_day("2026-07-03", calendar, timezone)
+  harness.stdio.log(date_format(next, "%Y-%m-%d", timezone))
+  const later = add_business_days("2026-07-01", 3, calendar, timezone)
+  harness.stdio.log(date_format(later, "%Y-%m-%d", timezone))
+  harness.stdio.log(
+    business_days_between("2026-07-01", "2026-07-08", calendar, timezone),
+  )
+  harness.stdio.log(
+    is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window),
+  )
 }
 ```
 
@@ -128,7 +134,9 @@ country has a single unambiguous entry; multi-timezone countries return `nil`
 instead of picking an arbitrary default.
 
 ```harn
-import { country_info, country_timezones, default_timezone_for_country } from "std/calendar"
+import {
+  country_info, country_timezones, default_timezone_for_country,
+} from "std/calendar"
 
 pipeline default(harness: Harness) {
   const us = country_info("US")

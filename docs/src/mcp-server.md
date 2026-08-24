@@ -435,7 +435,9 @@ pub fn import_records(rows: list) -> string {
   for row in rows {
     i = i + 1
     process(row)
-    harness.tools.mcp_report_progress(i, {total: len(rows), message: "imported " + to_string(i)})
+    harness.tools.mcp_report_progress(i, {
+      total: len(rows), message: "imported " + to_string(i),
+    })
   }
   return "imported " + to_string(i) + " records"
 }

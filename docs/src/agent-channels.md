@@ -330,7 +330,8 @@ trigger_register({
   batch: {count: 30, window: "1h"},
   handler: ReminderInject({
     target: "current",
-    body: "You've used 30 tools without a checkpoint. Take a turn to reflect on progress and adjust the plan.",
+    body: "You've used 30 tools without a checkpoint. Take a turn to reflect"
+      + " on progress and adjust the plan.",
     tags: ["reflection_nudge"],
     ttl_turns: 1,
     dedupe_key: "reflection_nudge",

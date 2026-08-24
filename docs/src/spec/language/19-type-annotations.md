@@ -693,7 +693,9 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-const answer = harness.interaction.ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const answer = harness.interaction.ask_user(
+  prompt: "deploy now?", schema: schema_of(Choice),
+)
 const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
 const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
@@ -1243,8 +1245,10 @@ fn process(user: {name: string, age: int}) {
 }
 
 process({name: "Alice", age: 30})     // OK
-process({name: "Alice"})              // Error: parameter 'user': missing field 'age' (int)
-process({name: "Alice", age: "old"})  // Error: parameter 'user': field 'age' expected int, got string
+// Error: parameter 'user': missing field 'age' (int)
+process({name: "Alice"})
+// Error: parameter 'user': field 'age' expected int, got string
+process({name: "Alice", age: "old"})
 ```
 
 Shape validation works with both plain dicts and struct instances. Extra

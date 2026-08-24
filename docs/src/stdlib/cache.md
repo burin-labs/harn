@@ -52,7 +52,9 @@ fn deep_scan_repo() -> dict {
 
 pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "scan-results", ttl: "1h"})
-  const scan = with_cache("repo:abc123", fn() { return deep_scan_repo() }, {store: store})
+  const scan = with_cache(
+    "repo:abc123", fn() { return deep_scan_repo() }, {store: store},
+  )
   harness.stdio.log(json_stringify(scan))
 }
 ```

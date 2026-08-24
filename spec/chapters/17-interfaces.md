@@ -160,10 +160,12 @@ substitute.
 
 ```harn,ignore
 const wide = fn(x: float) { return 0 }
-const cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
+// OK: float-accepting closure stands in for int-accepting
+const cb: fn(int) -> int = wide
 
 const narrow = fn(x: int) { return 0 }
-const bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
+// ERROR: narrow cannot accept the float a caller may pass
+const bad: fn(float) -> int = narrow
 ```
 
 #### Declaration-site checking

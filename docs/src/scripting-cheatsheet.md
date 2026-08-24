@@ -33,13 +33,13 @@ when the template should live inline in the module:
 
 ```harn
 const template = """
-pub fn {{ fn_name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }}) {
-  return "{{ fn_name }}"
+pub fn {{ name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }}) {
+  return "{{ name }}"
 }
 """
 
 const src = harness.fs.render_template(template, {
-  fn_name: "hello",
+  name: "hello",
   params: ["name", "title = nil"],
 })
 ```

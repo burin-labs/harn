@@ -238,7 +238,8 @@ A script rule can also delegate to the structural engine and return the
 import { rules_diagnostics } from "std/rules"
 
 pub fn lint(source) {
-  const rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n"
+  const rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n"
+    + "[rule]\npattern = \"foo()\"\n"
   return rules_diagnostics({language: "harn", rule: rule, source: source})
 }
 ```

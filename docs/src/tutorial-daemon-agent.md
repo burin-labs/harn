@@ -230,7 +230,9 @@ pipeline main(harness: Harness) {
       },
     }],
   })
-  harness.llm.mock_enqueue({text: "Release cut; tagged v0.9.0 and posted to the changelog."})
+  harness.llm.mock_enqueue({
+    text: "Release cut; tagged v0.9.0 and posted to the changelog.",
+  })
 
   const worker = sub_agent_run(
     harness,
@@ -240,7 +242,8 @@ pipeline main(harness: Harness) {
 
   const parked = wait_agent(harness.agent, worker)
   harness.stdio.log("parked_status=" + parked.status)
-  harness.stdio.log("waiting_on=" + parked.suspension.conditions.trigger.match.events[0])
+  const waiting = parked.suspension.conditions.trigger.match.events[0]
+  harness.stdio.log("waiting_on=" + waiting)
 
   harness.channels.append("release.cut", {tag: "v0.9.0"})
 

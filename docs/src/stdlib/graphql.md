@@ -33,7 +33,10 @@ import {
 
 const issues = graphql_operation(
   "ListIssues",
-  "query ListIssues($first: Int, $after: String) { issues(first: $first, after: $after) { nodes { id identifier title } pageInfo { hasNextPage endCursor } } }",
+  "query ListIssues($first: Int, $after: String) {"
+    + " issues(first: $first, after: $after) {"
+    + " nodes { id identifier title }"
+    + " pageInfo { hasNextPage endCursor } } }",
   {root_field: "issues"},
 )
 

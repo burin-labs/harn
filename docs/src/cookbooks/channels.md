@@ -117,7 +117,9 @@ pipeline reflection_agent(harness: Harness, task) {
     batch: {count: 30, window: "1h", key: "session"},
     handler: ReminderInject({
       target: "current",
-      body: "You have used 30 tools without a checkpoint. Take this turn to summarize progress, re-read the spec, and adjust the plan if needed.",
+      body: "You have used 30 tools without a checkpoint. Take this turn to"
+        + " summarize progress, re-read the spec, and adjust the plan if"
+        + " needed.",
       tags: ["reflection_nudge"],
       ttl_turns: 1,
       dedupe_key: "reflection_nudge",
@@ -165,7 +167,9 @@ pipeline planner_loop(harness: Harness, task) {
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:plan.feedback"]},
-    when: { _harness, event -> event.provider_payload.payload.target_session == session },
+    when: { _harness, event ->
+      event.provider_payload.payload.target_session == session
+    },
     handler: ReminderInject({
       target: session,
       body: "Reviewer feedback: {{ event.provider_payload.payload.critique }}",
@@ -174,7 +178,13 @@ pipeline planner_loop(harness: Harness, task) {
     }),
   })
 
-  agent_loop(harness, task, "Revise the plan when reminders arrive. Re-emit plan.draft when revision is complete.", {session_id: session})
+  agent_loop(
+    harness,
+    task,
+    "Revise the plan when reminders arrive. Re-emit plan.draft when revision"
+      + " is complete.",
+    {session_id: session},
+  )
 }
 
 // --- reviewers ---
@@ -311,7 +321,9 @@ pipeline settlement_setup(harness: Harness) {
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:pipeline.drained"]},
-    when: { _harness, event -> event.provider_payload.payload.source_pipeline == "ingest" },
+    when: { _harness, event ->
+      event.provider_payload.payload.source_pipeline == "ingest"
+    },
     handler: { harness, event ->
       const bucket = event.provider_payload.payload.deferred_payload
       for deferred in bucket {

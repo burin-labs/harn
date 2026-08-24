@@ -684,7 +684,8 @@ let x: string? = "config"
 const clear = { -> x = nil }
 if x != nil {
   clear()          // x may be nil again after this call
-  harness.stdio.log(x?.len())    // x is not narrowed here; use ?. (or x!) rather than x.len()
+  // x is not narrowed here; use ?. (or x!) rather than x.len()
+  harness.stdio.log(x?.len())
 }
 ```
 

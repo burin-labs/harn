@@ -123,7 +123,11 @@ provided:
 
 ```harn
 const db = sqlite_mock_db([
-  {sql: "select id from events where topic = ?", params: ["agent_events"], rows: [{id: 1}]},
+  {
+    sql: "select id from events where topic = ?",
+    params: ["agent_events"],
+    rows: [{id: 1}],
+  },
 ])
 
 const rows = sqlite_query(db, "select id from events where topic = ?", ["agent_events"])

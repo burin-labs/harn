@@ -318,7 +318,11 @@ const chain = first_handled([RB.cloud_harness, RB.local_runtime, RB.parent_llm])
 
 const request = agent_await_resumption(
   "wait for upstream merge",
-  {trigger: {kind: "channel.emit", provider: "channel", match: {events: ["channel:upstream.merged"]}}},
+  {trigger: {
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:upstream.merged"]},
+  }},
   chain,
 )
 ```

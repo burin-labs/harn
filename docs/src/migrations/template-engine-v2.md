@@ -83,7 +83,8 @@ Call it from each repair stage:
 Pass stage-specific overrides with `with`:
 
 ```harn-prompt
-{{ include "partials/self-verify.harn.prompt" with { verification_hint: "compile output" } }}
+{{ include "partials/self-verify.harn.prompt"
+   with { verification_hint: "compile output" } }}
 ```
 
 ## Filters instead of pre-processing

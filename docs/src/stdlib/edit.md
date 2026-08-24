@@ -134,7 +134,8 @@ pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
-      query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+      query: "(function_item name: (identifier) @name (#eq? @name \"greet\") "
+        + "body: (block) @target)",
       replacement: "{ format!(\"hi {name}!\") }",
     },
   )
@@ -321,7 +322,8 @@ pipeline default(harness: Harness) {
   //
   const result = edit_insert_at_anchor(harness.ast, {
     path: "src/lib.rs",
-    query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+    query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") "
+      + "body: (declaration_list) @anchor)",
     position: "last_child",
     content: "#[test]\nfn two() {}",
   })
@@ -344,7 +346,8 @@ pipeline default(harness: Harness) {
     path: "src/index.ts",
     // Anchor on the last existing import. `select` is not exposed —
     // tighten the query if you need a specific one.
-    query: "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./util\")) @anchor",
+    query: "(import_statement source: (string (string_fragment) @src) "
+      + "(#eq? @src \"./util\")) @anchor",
     position: "after",
     content: "import { extra } from \"./extra\";",
   })
@@ -495,7 +498,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(losing.result)                 // "stale_base"
 
   // Retry against the now-current overlay hash.
-  const refreshed = harness.fs.staged_read_text({path: "src/main.rs", session_id: session})
+  const refreshed = harness.fs.staged_read_text({
+    path: "src/main.rs", session_id: session,
+  })
   const winner = edit_safe_text_patch(harness.fs, harness.random,
     {
       path: "src/main.rs",
@@ -690,7 +695,8 @@ the lower-level stale-base / hunk-conflict counters.
 import { edit_fast_apply } from "std/edit"
 
 pipeline default(harness: Harness) {
-    const preview = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
+    const preview = edit_fast_apply(
+      harness.fs, harness.random, harness.ast, harness.llm, {
     path: "src/lib.rs",
     intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     dry_run: true,
@@ -699,7 +705,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(preview.per_file_unified_diff[0].diff)
 
   if user_approves(preview.per_file_unified_diff[0].diff) {
-    const applied = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
+    const applied = edit_fast_apply(
+      harness.fs, harness.random, harness.ast, harness.llm, {
       path: "src/lib.rs",
       intent: "Change answer() to return 42 and keep the rest of the file untouched.",
     })
@@ -845,7 +852,12 @@ pipeline default(harness: Harness) {
           replacement: "{ format!(\"hi {name}!\") }",
           select: "first",
         },
-        {op: "safe_text_patch", path: "src/lib.rs", old_text: "fn greet", new_text: "fn greeter"},
+        {
+          op: "safe_text_patch",
+          path: "src/lib.rs",
+          old_text: "fn greet",
+          new_text: "fn greeter",
+        },
       ],
     },
   )

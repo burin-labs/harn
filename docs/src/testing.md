@@ -464,7 +464,9 @@ import {
 } from "std/context/eval"
 
 fn smoke_manifest() -> ContextEvalManifest {
-  const mode: ContextEvalMode = context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
+  const mode: ContextEvalMode = context_eval_mode(
+    "pack", "hud_pack", {budget_tokens: 1600},
+  )
   const task: ContextEvalTask = context_eval_task(
     "incident",
     "Find the failing service",

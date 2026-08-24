@@ -40,7 +40,9 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   )
 
   if !plan.ok {
-    harness.stdio.println("rename refused: " + plan.result + " — " + (plan.details ?? ""))
+    harness.stdio.println(
+      "rename refused: " + plan.result + " — " + (plan.details ?? ""),
+    )
     return plan
   }
 
