@@ -1,6 +1,7 @@
 use super::*;
 use crate::{execute_with_skill_dirs_and_options, SourceExecutionOptions};
 
+mod case_config;
 mod lint;
 mod parallel;
 mod sharding;
@@ -834,11 +835,12 @@ fn conformance_snapshot_key(suite_root: &Path, selected_files: &[(PathBuf, Strin
             suite_root,
             &harn_file.with_extension("annotations.jsonl"),
         );
-        hash_file_if_present(
-            &mut hasher,
-            suite_root,
-            &harn_file.with_extension("harness.json"),
-        );
+        for path in [
+            harn_file.with_extension("harness.json"),
+            case_config::config_path(harn_file),
+        ] {
+            hash_file_if_present(&mut hasher, suite_root, &path);
+        }
         hash_dir_if_present(
             &mut hasher,
             suite_root,
@@ -883,6 +885,10 @@ async fn evaluate_conformance_case(
                 0,
             );
         }
+    };
+    let deadline = match case_config::resolve_deadline(harn_file, timeout_ms) {
+        Ok(deadline) => deadline,
+        Err(error) => return ConformanceCaseEvaluation::fail(format!("{rel_path}: {error}"), 0),
     };
     let diagnostics = match harn_parser::parse_source(&source) {
         Ok(program) => harn_lint::lint_with_source(&program, &source),
@@ -961,7 +967,7 @@ async fn evaluate_conformance_case(
         let run = match execute_conformance_source(
             &source,
             harn_file,
-            timeout_ms,
+            deadline.limit_ms,
             &llm_mock_mode,
             &testbench_config,
             options.cli_skill_dirs,
@@ -988,7 +994,7 @@ async fn evaluate_conformance_case(
                     if options.differential_optimizations {
                         if let Err(error) = verify_unoptimized_conformance_subprocess(
                             harn_file,
-                            timeout_ms,
+                            deadline.limit_ms,
                             options.cli_skill_dirs,
                         )
                         .await
@@ -1021,10 +1027,9 @@ async fn evaluate_conformance_case(
                 format!("{rel_path}: {}: {}", e.stage.label(), e.message),
                 duration_ms,
             ),
-            ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
-                format!("{rel_path}: timed out after {timeout_ms}ms"),
-                timeout_ms,
-            ),
+            ConformanceExecution::TimedOut => {
+                ConformanceCaseEvaluation::fail(deadline.hang_message(rel_path), deadline.limit_ms)
+            }
         };
     }
 
@@ -1044,7 +1049,7 @@ async fn evaluate_conformance_case(
         let run = match execute_conformance_source(
             &source,
             harn_file,
-            timeout_ms,
+            deadline.limit_ms,
             &llm_mock_mode,
             &testbench_config,
             options.cli_skill_dirs,
@@ -1071,7 +1076,7 @@ async fn evaluate_conformance_case(
                 if options.differential_optimizations {
                     if let Err(error) = verify_unoptimized_conformance_subprocess(
                         harn_file,
-                        timeout_ms,
+                        deadline.limit_ms,
                         options.cli_skill_dirs,
                     )
                     .await
@@ -1098,8 +1103,8 @@ async fn evaluate_conformance_case(
                 duration_ms,
             ),
             ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
-                format!("{rel_path}: timed out after {timeout_ms}ms"),
-                timeout_ms,
+                deadline.hang_message(rel_path),
+                deadline.limit_ms,
             ),
         };
     }

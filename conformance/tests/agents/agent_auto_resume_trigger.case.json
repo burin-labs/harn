@@ -1,0 +1,6 @@
+{
+  "deadline": {
+    "cost_class": "external_wait",
+    "timeout_ms": 120000
+  }
+}
