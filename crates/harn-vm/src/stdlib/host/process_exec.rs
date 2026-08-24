@@ -71,12 +71,10 @@ pub(super) async fn dispatch_process_exec_after_policy(
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
 ) -> Result<VmValue, VmError> {
-    let _process_admission =
-        if super::process_admission::process_requires_admission(&command_policy_context) {
-            super::process_admission::acquire_process_admission(ctx).await?
-        } else {
-            None
-        };
+    // Workspace effects govern mutation and approval, not host resource cost.
+    // Read-only compilers and formatters still contend for the same process,
+    // CPU, and toolchain lanes as writers, so every spawned command participates.
+    let _process_admission = super::process_admission::acquire_process_admission(ctx).await?;
     let (tape_program, tape_args) = process_exec_argv(params)?;
     let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
     let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");

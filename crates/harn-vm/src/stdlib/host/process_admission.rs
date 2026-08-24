@@ -1,9 +1,10 @@
 //! Test-host process admission without product-runtime policy leakage.
 //!
 //! Embedders that fan out independent VMs may install one shared gate per
-//! worker pool. The local `process.exec` path consults it after command policy
-//! has resolved the request. Proven read-only commands bypass the gate; every
-//! other subprocess acquires the bounded lane before spawn. Waiting for that
+//! worker pool. Every local `process.exec` acquires the bounded lane before
+//! spawn. Workspace effects still own mutation and approval policy, but they
+//! do not describe host resource contention: a read-only compiler or formatter
+//! can starve its siblings just as effectively as a writer. Waiting for the
 //! host resource pauses the VM's outer execution safety rail and is reported
 //! separately from user-code execution.
 
@@ -15,11 +16,6 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::value::VmError;
 use crate::vm::AsyncBuiltinCtx;
-
-pub(super) fn process_requires_admission(command_policy_context: &serde_json::Value) -> bool {
-    crate::orchestration::command_workspace_effect_json(command_policy_context)["effect"]
-        != "read_effect"
-}
 
 #[derive(Debug)]
 pub struct ProcessAdmissionGate {
@@ -179,25 +175,6 @@ mod tests {
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
-    #[test]
-    fn resolved_effect_is_the_single_admission_classifier() {
-        let context = |argv: &[&str]| {
-            serde_json::json!({
-                "request": { "mode": "argv", "argv": argv },
-            })
-        };
-
-        assert!(!process_requires_admission(&context(&[
-            "git", "status", "--short"
-        ])));
-        assert!(process_requires_admission(&context(&[
-            "rustfmt",
-            "--emit",
-            "stdout",
-            "source.rs"
-        ])));
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn admission_receipt_uses_the_injected_monotonic_clock() {
         let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
@@ -294,15 +271,9 @@ mod tests {
         assert_eq!(scope.waited_ms(), 17);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn harness_process_run_pauses_the_calling_vm_deadline_while_admission_waits() {
+    async fn assert_harness_process_run_waits_for_shared_lane(source: &str) {
         tokio::task::LocalSet::new()
             .run_until(async {
-                let source = r#"
-pipeline blocked(harness: Harness) {
-  harness.process.run({program: "rustc", args: ["--version"]})
-}
-"#;
                 let mut lexer = Lexer::new(source);
                 let tokens = lexer.tokenize().expect("tokenize process fixture");
                 let mut parser = Parser::new(tokens);
@@ -336,7 +307,7 @@ pipeline blocked(harness: Harness) {
                 }
                 assert!(
                     caller_deadline.is_active() && caller_deadline.current().is_none(),
-                    "the canonical HarnessProcess.run wait must pause the caller's outer deadline"
+                    "HarnessProcess.run must wait for the shared host lane and pause the caller's outer deadline"
                 );
 
                 clock.advance(Duration::from_millis(25));
@@ -348,5 +319,29 @@ pipeline blocked(harness: Harness) {
                 assert_eq!(scope.waited_ms(), 25);
             })
             .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_only_harness_process_run_waits_for_shared_lane() {
+        assert_harness_process_run_waits_for_shared_lane(
+            r#"
+pipeline blocked(harness: Harness) {
+  harness.process.run({program: "git", args: ["status", "--short"]})
+}
+"#,
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn unknown_effect_harness_process_run_waits_for_shared_lane() {
+        assert_harness_process_run_waits_for_shared_lane(
+            r#"
+pipeline blocked(harness: Harness) {
+  harness.process.run({program: "rustc", args: ["--version"]})
+}
+"#,
+        )
+        .await;
     }
 }
