@@ -427,6 +427,40 @@ fn from_host_judge_decision_preserves_source() {
 }
 
 #[test]
+fn judge_started_enters_the_host_boundary_with_its_trigger() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "judge_started",
+        &json!({ "iteration": 4, "trigger": "verify_completion" }),
+    )
+    .expect("judge_started");
+    match event {
+        AgentEvent::JudgeStarted {
+            session_id,
+            iteration,
+            trigger,
+        } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(iteration, 4);
+            assert_eq!(trigger.as_deref(), Some("verify_completion"));
+        }
+        other => panic!("expected JudgeStarted, got {other:?}"),
+    }
+}
+
+#[test]
+fn judge_started_without_a_trigger_still_opens_the_window() {
+    // The window a host renders must not depend on an optional label; a judge
+    // invoked without a named trigger still costs the user the same wait.
+    let event = AgentEvent::from_host_payload("s1", "judge_started", &json!({ "iteration": 0 }))
+        .expect("judge_started");
+    match event {
+        AgentEvent::JudgeStarted { trigger, .. } => assert_eq!(trigger, None),
+        other => panic!("expected JudgeStarted, got {other:?}"),
+    }
+}
+
+#[test]
 fn from_host_stance_events_map_to_stance_transition() {
     let event = AgentEvent::from_host_payload(
         "s1",

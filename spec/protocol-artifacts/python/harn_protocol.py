@@ -271,6 +271,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "iteration_end",
     "iteration_start",
     "judge_decision",
+    "judge_started",
     "loop_control_decision",
     "loop_stuck",
     "mcp_auth_required",

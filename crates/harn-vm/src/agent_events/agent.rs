@@ -330,6 +330,23 @@ pub enum AgentEvent {
         compacted: bool,
         reason: Option<String>,
     },
+    /// Emitted immediately before the completion judge's model call begins,
+    /// so a host can say the turn is being reviewed while it happens instead
+    /// of only after the verdict lands.
+    ///
+    /// [`JudgeDecision`] is the closing half of the same episode and is the
+    /// only one of the pair that carries an outcome. A run whose judge call
+    /// errors or times out emits this start with no matching decision, which
+    /// is the point: the window it opens is exactly the one a user otherwise
+    /// experiences as an unexplained pause.
+    JudgeStarted {
+        session_id: String,
+        iteration: usize,
+        /// What asked for this judgement (`verify_completion`, a done-sentinel
+        /// claim, and so on), matching [`JudgeDecision::trigger`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<String>,
+    },
     JudgeDecision {
         session_id: String,
         iteration: usize,
@@ -1300,6 +1317,7 @@ impl AgentEvent {
             | Self::IterationEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::AnchorChanged { session_id, .. }
+            | Self::JudgeStarted { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
             | Self::StructuralValidatorDecision { session_id, .. }

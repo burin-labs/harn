@@ -8,6 +8,8 @@ import {
   __completion_judge_gap_class,
   __completion_verification_evidence_index,
   __completion_verification_state_read,
+  __judge_emit_decision,
+  __judge_emit_started,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
 import { __normalize_judge_config } from "std/agent/options_formats"
@@ -1039,36 +1041,6 @@ pub fn agent_has_done_judge(judge_cfg) -> bool {
   return agent_judge_config(judge_cfg) != nil
 }
 
-fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
-  agent_emit_event(
-    agent,
-    session_id,
-    "judge_decision",
-    {
-      iteration: iteration,
-      verdict: verdict?.verdict
-        ?? if verdict.vetoed {
-          "continue"
-        } else {
-          "done"
-        },
-      reasoning: verdict?.reasoning ?? "",
-      next_step: verdict?.next_step ?? "",
-      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
-      source: verdict?.source ?? "unknown",
-      trigger: verdict?.trigger,
-      reason: verdict?.reason,
-      gap_class: verdict?.gap_class,
-      confirm: verdict?.confirm ?? !verdict.vetoed,
-      converted_from: verdict?.converted_from,
-      escalation_recommended: verdict?.escalation_recommended,
-      escalation_target: verdict?.escalation_target,
-      judge_outcome: verdict?.judge_outcome,
-      terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
-    },
-  )
-}
-
 fn __done_contract_primary_prompt(opts) {
   const marker = to_string(opts?.done_sentinel ?? "the configured done sentinel")
   return join(
@@ -1378,7 +1350,7 @@ fn __completion_policy_run_stage(
   match stage {
     Deterministic(check) -> {
       const verdict = __judge_invoke_closure(check, payload)
-      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       return evaluation
         + {
           verdict: verdict,
@@ -1391,9 +1363,10 @@ fn __completion_policy_run_stage(
       if max_invocations != nil && prior_invocations >= max_invocations {
         return __completion_policy_mark_cap(evaluation, slot)
       }
+      __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
       verdict = __completion_arbitrate_verification(verdict, evaluation) + {trigger: trigger}
-      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       const next = evaluation + {verdict: verdict}
       return __completion_policy_mark_model_invoked(
         next,
