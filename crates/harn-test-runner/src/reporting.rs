@@ -111,6 +111,9 @@ pub struct PhaseTimings {
     pub setup_ms: u64,
     /// `Compiler::compile_named` time for this test's chunk.
     pub compile_ms: u64,
+    /// Time parked behind an embedder-owned host resource before it was runnable.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub admission_ms: u64,
     /// `vm.execute(chunk)` wall time, i.e. the actual user-test body.
     pub execute_ms: u64,
     /// VM/LocalSet task cancellation and `reset_thread_local_state` between tests.
@@ -134,11 +137,17 @@ pub struct AggregateTimings {
     pub test_file_compile_ms: u64,
     pub test_files_compiled: usize,
     pub test_entries_compiled: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub admission_ms: u64,
     pub execute_ms: u64,
     pub teardown_ms: u64,
     /// Suite preparation plus per-case module attribution. Overlaps compile,
     /// setup, and execute.
     pub modules: harn_vm::ModulePhaseStats,
+}
+
+const fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -183,6 +192,7 @@ impl AggregateTimings {
                 test_file_compile_ms: acc.test_file_compile_ms,
                 test_files_compiled: acc.test_files_compiled,
                 test_entries_compiled: acc.test_entries_compiled,
+                admission_ms: acc.admission_ms.saturating_add(phases.admission_ms),
                 execute_ms: acc.execute_ms.saturating_add(phases.execute_ms),
                 teardown_ms: acc.teardown_ms.saturating_add(phases.teardown_ms),
                 modules: acc.modules.saturating_add(phases.modules),
@@ -202,11 +212,12 @@ impl TestResult {
             .phases
             .expect("diagnostics are emitted only for executed cases");
         eprintln!(
-            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms module_compile={}ms module_load={}ms modules_compiled={} modules_loaded={} total={}ms",
+            "[harn test diag] {} {} setup={}ms compile={}ms admission={}ms execute={}ms teardown={}ms module_compile={}ms module_load={}ms modules_compiled={} modules_loaded={} total={}ms",
             outcome,
             self.name,
             phases.setup_ms,
             phases.compile_ms,
+            phases.admission_ms,
             phases.execute_ms,
             phases.teardown_ms,
             phases.modules.module_compile_ms,

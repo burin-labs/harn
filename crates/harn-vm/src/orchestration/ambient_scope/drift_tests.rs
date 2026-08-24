@@ -127,6 +127,7 @@ fn captured_catalog_matches_scope_fields() {
         "VM_SOURCE_DIR",
         "CURRENT_MUTATION_SESSION",
         "SESSION_ENVIRONMENT_CONTEXT",
+        "PROCESS_ADMISSION_CONTEXT",
         "CURRENT_HOST_BRIDGE",
         "CURRENT_SESSION_STACK",
         "LLM_CONFIG_OVERRIDES_CONTEXT",
