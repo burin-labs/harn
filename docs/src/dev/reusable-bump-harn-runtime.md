@@ -47,9 +47,10 @@ jobs:
       version: ${{ inputs.version }}
       # Optional repository-owned materialization. The target tag is inherited
       # as HARN_BUMP_TARGET_TAG. The reusable workflow first applies the target
-      # runtime's deterministic capability migrations, then runs this refresh.
-      # All mutations are included in the one signed commit; a non-zero exit
-      # blocks it.
+      # runtime's deterministic capability migrations, then runs this refresh,
+      # then applies the target runtime's formatter before validation. All
+      # mutations are included in the one signed commit; a non-zero exit blocks
+      # it.
       refresh-command: |
         harn install --locked
         ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"
@@ -78,9 +79,10 @@ jobs:
       # behavior-preserving` to your sources before your refresh command, so a
       # bump can normalize its own fallout. Set false to decline that pass and
       # keep the bump limited to the version change plus your own commands.
-      # Capability migrations are applied either way — they are what keeps a
-      # bump compiling — so declining this does not strand you on a keyword or
-      # capability break. Defaults to true.
+      # Capability migrations and deterministic formatting are applied either
+      # way — they are what keeps a bump compiling and formatted under the
+      # target runtime — so declining this does not strand you on a keyword,
+      # capability, or formatter change. Defaults to true.
       apply-behavior-preserving-fixes: true
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}

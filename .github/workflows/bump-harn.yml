@@ -227,25 +227,30 @@ jobs:
           # that deterministic codemod before the caller-owned refresh so a
           # runtime bump can carry source compatibility forward in the same
           # signed PR. Normalize only behavior-preserving fallout after the
-          # migration has settled, before caller-owned generation and strict
-          # validation. This callback is reached only after a real version
-          # change; the already-current path remains mutation-free.
+          # migration has settled. After caller-owned generation, apply the
+          # target formatter unconditionally before strict validation. This
+          # callback is reached only after a real version change; the
+          # already-current path remains mutation-free.
           #
           # The behavior-preserving pass is separable because it rewrites
           # caller-owned source under a safety contract the caller may not be
           # willing to take unattended. Capability migrations are not gated:
-          # they are what keeps a bump compiling.
+          # they are what keeps a bump compiling. Formatting is likewise an
+          # unconditional version migration, not an optional repair pass.
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_migrations='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_behavior_preserving='harn fix --apply --safety behavior-preserving .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
-          refresh_caller='eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          refresh_caller='eval "$HARN_BUMP_REFRESH_COMMAND"; '
+          refresh_format='harn fmt .; '
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_complete='printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
           if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then
             refresh_behavior_preserving=''
             echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."
           fi
-          export HARN_BUMP_REFRESH="${refresh_migrations}${refresh_behavior_preserving}${refresh_caller}"
+          export HARN_BUMP_REFRESH="${refresh_migrations}${refresh_behavior_preserving}${refresh_caller}${refresh_format}${refresh_complete}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
