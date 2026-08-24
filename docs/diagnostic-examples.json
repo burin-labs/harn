@@ -1,0 +1,53 @@
+{
+  "examples": [
+    {
+      "blockIndex": 8,
+      "command": "check",
+      "diagnostic": {
+        "code": "HARN-TYP-007",
+        "help": "did you mean `to_string(42)`?",
+        "message": "const binding `value`: expected string, found int",
+        "repairs": [
+          {
+            "id": "casts/insert-explicit-conversion",
+            "safety": "scope-local",
+            "summary": "Insert an explicit conversion or correct the operand type"
+          }
+        ],
+        "severity": "error",
+        "source": "type",
+        "span": {
+          "end": 54,
+          "start": 52
+        }
+      },
+      "source": "fn main(harness: Harness) {\n  const value: string = 42\n  harness.stdio.println(value)\n}\n",
+      "sourcePath": "docs/src/language-basics.md"
+    },
+    {
+      "blockIndex": 9,
+      "command": "lint",
+      "diagnostic": {
+        "code": "HARN-LNT-018",
+        "help": "use `const` instead of `let`",
+        "message": "variable `total` is declared as `let` but never reassigned",
+        "repairs": [
+          {
+            "id": "bindings/make-immutable",
+            "safety": "behavior-preserving",
+            "summary": "Declare the never-reassigned binding with `const` instead of `let`"
+          }
+        ],
+        "severity": "warning",
+        "source": "lint",
+        "span": {
+          "end": 43,
+          "start": 30
+        }
+      },
+      "source": "fn main(harness: Harness) {\n  let total = 2\n  harness.stdio.println(total)\n}\n",
+      "sourcePath": "docs/src/language-basics.md"
+    }
+  ],
+  "schemaVersion": 1
+}

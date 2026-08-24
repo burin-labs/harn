@@ -1,0 +1,5 @@
+export const DIAGNOSTIC_FIGURE_CLASS = "diagnostic-example"
+export const DIAGNOSTIC_SPAN_CLASS = "diagnostic-span"
+export const DIAGNOSTIC_DETAIL_CLASS = "diagnostic-detail"
+export const DIAGNOSTIC_HELP_CLASS = "diagnostic-help"
+export const DIAGNOSTIC_REPAIR_CLASS = "diagnostic-repair"
