@@ -288,16 +288,14 @@ impl CacheKey {
     /// parsing the module.
     ///
     /// Every input to a stdlib module's imported interface is already part of
-    /// this key. Its own bytes arrive as `content_hash`, and the rest of the
-    /// closure it can import is the embedded stdlib table, whose
-    /// [`embedded_stdlib_digest`] is folded into the context hash for every
-    /// module key. The interface digest therefore adds no discriminating
-    /// power here, while deriving it costs a full lex and parse in front of
-    /// the lookup that exists to avoid one.
-    ///
-    /// User files keep the real interface digest: their dependencies are
-    /// mutable files on disk that no other field of the key can see, which is
-    /// the aliasing this field was added to prevent.
+    /// this key: its own bytes as `content_hash`, and the rest of the closure
+    /// it can import as the embedded stdlib table, whose
+    /// [`embedded_stdlib_digest`] every module key's context hash folds in. The
+    /// interface digest adds no discriminating power here, while deriving it
+    /// costs a full lex and parse in front of the lookup that exists to avoid
+    /// one. User files keep the real digest: their dependencies are mutable
+    /// files no other field of the key can see, which is the aliasing that
+    /// field was added to prevent.
     pub fn from_embedded_stdlib_module_content_hash(
         content_hash: [u8; 32],
         provenance: ModuleProvenance,
@@ -1158,10 +1156,9 @@ fn module_compilation_context_hash(compilation_context: &ModuleCompilationContex
 ///
 /// See [`CacheKey::from_embedded_stdlib_module_content_hash`] for why these
 /// modules need no interface digest. It is a fixed domain separator rather
-/// than a real digest so that a stdlib artifact can never land on the same
-/// identity as a user module that happens to share its bytes:
-/// [`ModuleCompilationContext::digest`] is a SHA-256 over the interface, and
-/// reproducing this value would take a preimage.
+/// than a real digest so a stdlib artifact can never land on the identity of a
+/// user module that shares its bytes: [`ModuleCompilationContext::digest`] is a
+/// SHA-256 over the interface, so reproducing this value would take a preimage.
 const EMBEDDED_STDLIB_INTERFACE_DIGEST: [u8; 32] = *b"harn.embedded-stdlib.interface\0\0";
 
 fn module_compilation_context_hash_fingerprinted(
