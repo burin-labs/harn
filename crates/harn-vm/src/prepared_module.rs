@@ -4,11 +4,11 @@
 //! still receives fresh closures, function registries, module state, and init
 //! execution; only the serialized-to-runtime bytecode conversion is reused.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use harn_modules::DefKind;
 use quick_cache::sync::{Cache, GuardResult};
@@ -24,6 +24,11 @@ use crate::module_artifact::{
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
 const DEFAULT_MAX_ENTRIES: usize = 512;
+/// Ceiling on remembered imported interfaces. Independent of the artifact
+/// capacity above: an interface is a small projection of names, and one is
+/// worth keeping for every module a tree contains, not just for the artifacts
+/// that fit in the bounded cache.
+const MAX_REMEMBERED_INTERFACES: usize = 8192;
 
 /// Immutable runtime form of one compiled module artifact.
 pub(crate) struct PreparedModuleArtifact {
@@ -182,6 +187,30 @@ pub struct PreparedModuleCacheStats {
 pub struct PreparedModuleCache {
     entries: Arc<PreparedArtifactCache>,
     counters: Arc<PreparedModuleCacheCounters>,
+    /// Imported interfaces already derived for a module's exact bytes.
+    ///
+    /// The interface is part of an entry's key, so it has to be in hand before
+    /// this cache can be asked whether it holds that entry — and deriving one
+    /// lexes and parses the module. That put a full parse of every module in
+    /// front of every lookup, which is most of what this cache exists to
+    /// avoid: a suite that prepares its import graph once then re-derives the
+    /// same interfaces for every VM that imports them.
+    ///
+    /// Keyed by the module's own bytes, so an edited module derives afresh.
+    /// It is scoped to this cache handle rather than the process, and
+    /// [`PreparedModuleCache::prepare_import_graph`] clears it before seeding
+    /// from a freshly walked graph, so a run that re-prepares its graph starts
+    /// from current interfaces rather than a previous generation's.
+    interfaces: Arc<Mutex<HashMap<InterfaceMemoKey, ModuleCompilationContext>>>,
+}
+
+/// One module's bytes under one authority — everything a derived interface is
+/// a function of, apart from its dependencies' bytes.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct InterfaceMemoKey {
+    canonical_path: PathBuf,
+    source_hash: [u8; 32],
+    provenance: ModuleProvenance,
 }
 
 impl Default for PreparedModuleCache {
@@ -208,7 +237,33 @@ impl PreparedModuleCache {
                 lifecycle,
             )),
             counters,
+            interfaces: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn remembered_interface(&self, key: &InterfaceMemoKey) -> Option<ModuleCompilationContext> {
+        self.interfaces
+            .lock()
+            .expect("interface memo lock poisoned")
+            .get(key)
+            .cloned()
+    }
+
+    fn remember_interface(&self, key: InterfaceMemoKey, context: &ModuleCompilationContext) {
+        let mut interfaces = self
+            .interfaces
+            .lock()
+            .expect("interface memo lock poisoned");
+        // A handle held across many generations of an edited tree would
+        // otherwise accumulate one entry per version of every module ever
+        // prepared. Start over rather than grow without bound: the entries are
+        // derivable, so the cost of dropping them is bounded by re-deriving the
+        // ones still in use. The bound is far above the module count of a real
+        // tree, so an ordinary run never reaches it.
+        if interfaces.len() >= MAX_REMEMBERED_INTERFACES {
+            interfaces.clear();
+        }
+        interfaces.insert(key, context.clone());
     }
 
     pub fn stats(&self) -> PreparedModuleCacheStats {
@@ -251,6 +306,13 @@ impl PreparedModuleCache {
             return ModulePhaseStats::default();
         }
 
+        // This walk reads every reachable file, so the interfaces it derives
+        // supersede anything remembered from an earlier generation of the same
+        // tree.
+        self.interfaces
+            .lock()
+            .expect("interface memo lock poisoned")
+            .clear();
         let graph = harn_modules::build(roots);
         let root_paths = roots
             .iter()
@@ -416,9 +478,25 @@ impl PreparedModuleCache {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
             source.sha256()
         };
+        let memo_key = InterfaceMemoKey {
+            canonical_path: canonical_path.to_path_buf(),
+            source_hash,
+            provenance,
+        };
         let compilation_context = match compilation_context {
-            Some(context) => context.clone(),
-            None => module_compilation_context_for_source(source_path, source.as_str())?,
+            Some(context) => {
+                self.remember_interface(memo_key, context);
+                context.clone()
+            }
+            None => match self.remembered_interface(&memo_key) {
+                Some(context) => context,
+                None => {
+                    let context =
+                        module_compilation_context_for_source(source_path, source.as_str())?;
+                    self.remember_interface(memo_key, &context);
+                    context
+                }
+            },
         };
         let key = PreparedModuleCacheKey::with_context(
             canonical_path.to_path_buf(),
@@ -525,6 +603,52 @@ mod tests {
 
     fn empty_artifact() -> Arc<PreparedModuleArtifact> {
         empty_artifact_with_provenance(ModuleProvenance::User)
+    }
+
+    #[test]
+    fn repeated_preparation_derives_one_modules_interface_once() {
+        // Every VM that imports a module asks this cache for it, and the
+        // interface is needed to form the key it asks with. Deriving one costs
+        // a full lex and parse, so re-deriving it per VM put the cache's own
+        // cost back in front of every hit it served.
+        let dir = tempfile::tempdir().expect("temp module dir");
+        let module = dir.path().join("library.harn");
+        std::fs::write(&module, "pub fn value() { return 1 }\n").expect("write module");
+        let source = crate::module_source::read(&module).expect("read module");
+        let canonical = harn_modules::canonical_path(&module);
+        let cache = PreparedModuleCache::default();
+
+        let resolutions = |prepare: &dyn Fn()| {
+            let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
+            prepare();
+            crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get) - before
+        };
+        let prepare = || {
+            cache
+                .prepare(
+                    &module,
+                    &canonical,
+                    &source,
+                    None,
+                    None,
+                    ModuleProvenance::User,
+                )
+                .expect("module prepares");
+        };
+
+        // The first caller has nothing to reuse. This arm is the counter's
+        // positive control: without it, a seam that never increments would
+        // satisfy the assertion below vacuously.
+        assert_eq!(
+            resolutions(&prepare),
+            1,
+            "the first preparation of a module must derive its interface"
+        );
+        assert_eq!(
+            resolutions(&prepare),
+            0,
+            "the same bytes must not be re-parsed to re-derive the same interface"
+        );
     }
 
     #[test]

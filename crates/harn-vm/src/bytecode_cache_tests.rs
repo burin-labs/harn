@@ -9,6 +9,44 @@ use crate::compile_source;
 use crate::module_artifact::ModuleProvenance;
 
 #[test]
+fn embedded_stdlib_identity_separates_bytes_and_never_aliases_a_user_module() {
+    // Stdlib keys drop the imported-interface digest because the embedded
+    // stdlib table already determines it. Two properties have to survive that:
+    // distinct stdlib sources must stay distinct, and a stdlib artifact must
+    // not become reachable as some user module's artifact.
+    let first = ModuleSource::from_text("pub fn value() { return 1 }");
+    let second = ModuleSource::from_text("pub fn value() { return 2 }");
+    let stdlib_first =
+        CacheKey::from_embedded_stdlib_module_content_hash(first.sha256(), ModuleProvenance::User);
+    let stdlib_second =
+        CacheKey::from_embedded_stdlib_module_content_hash(second.sha256(), ModuleProvenance::User);
+    assert_eq!(
+        stdlib_first.module_filename(),
+        CacheKey::from_embedded_stdlib_module_content_hash(first.sha256(), ModuleProvenance::User)
+            .module_filename(),
+        "the same embedded bytes must resolve to one artifact"
+    );
+    assert_ne!(
+        stdlib_first.module_filename(),
+        stdlib_second.module_filename(),
+        "different embedded bytes must not share an artifact"
+    );
+
+    // Same bytes, reached as an ordinary user module: its interface digest is
+    // real, so it must land somewhere else even though everything else matches.
+    let user = CacheKey::from_module_source(
+        &first,
+        &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
+    );
+    assert_ne!(
+        stdlib_first.module_filename(),
+        user.module_filename(),
+        "a stdlib artifact must not be reachable as a user module's artifact"
+    );
+}
+
+#[test]
 fn header_round_trips_chunk() {
     let source = "fn main(harness: Harness) { harness.stdio.println(\"hello\") }";
     let chunk = compile_source(source).expect("compile");

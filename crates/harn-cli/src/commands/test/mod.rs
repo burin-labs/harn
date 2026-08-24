@@ -180,7 +180,7 @@ pub(crate) async fn run_command(mut args: TestArgs) {
         }
         crate::run_package_evals();
     } else if args.determinism {
-        run_determinism_command(args, shard_requested).await;
+        run_determinism_command(Box::new(args), shard_requested).await;
     } else {
         run_standard_command(args, operator_approval_grant).await;
     }
@@ -251,7 +251,7 @@ fn run_protocols_command(args: TestArgs, shard_requested: bool) {
     );
 }
 
-async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
+async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
     if !args.test_paths.is_empty() {
         command_error("`harn test --determinism` does not support --test-path");
     }
