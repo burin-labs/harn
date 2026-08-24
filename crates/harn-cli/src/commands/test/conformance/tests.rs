@@ -1,6 +1,7 @@
 use super::{
-    collect_harn_files_sorted, evaluate_conformance_case, lint_expectation_error, logical_path,
-    parse_xfail_marker, resolve_conformance_selection, ConformanceRunOptions,
+    collect_harn_files_sorted, conformance_snapshot_key, evaluate_conformance_case,
+    lint_expectation_error, logical_path, parse_xfail_marker, resolve_conformance_selection,
+    ConformanceRunOptions,
 };
 use std::fs;
 use std::path::Path;
@@ -90,6 +91,24 @@ fn resolve_conformance_selection_rejects_paths_outside_suite_root() {
             .unwrap_err();
 
     assert!(error.contains("must be inside"));
+}
+
+#[test]
+fn conformance_snapshot_includes_case_execution_policy() {
+    let temp = TempTestDir::new();
+    temp.write_content("conformance/wait.harn", "pipeline main() {}\n");
+    temp.write_content("conformance/wait.expected", "");
+    let harn_file = temp.path().join("conformance/wait.harn");
+    let selected = vec![(harn_file, "wait.harn".to_string())];
+    let before = conformance_snapshot_key(&temp.path().join("conformance"), &selected);
+
+    temp.write_content(
+        "conformance/wait.case.json",
+        r#"{"deadline":{"cost_class":"external_wait","timeout_ms":120000}}"#,
+    );
+    let after = conformance_snapshot_key(&temp.path().join("conformance"), &selected);
+
+    assert_ne!(before, after);
 }
 
 #[test]
@@ -202,6 +221,15 @@ async fn evaluate_case_serialized(
     rel_path: &str,
     options: &ConformanceRunOptions<'_>,
 ) -> super::ConformanceCaseEvaluation {
+    evaluate_case_with_timeout_serialized(harn_file, rel_path, 2_000, options).await
+}
+
+async fn evaluate_case_with_timeout_serialized(
+    harn_file: &Path,
+    rel_path: &str,
+    timeout_ms: u64,
+    options: &ConformanceRunOptions<'_>,
+) -> super::ConformanceCaseEvaluation {
     let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     evaluate_conformance_case(
         harn_file,
@@ -209,10 +237,38 @@ async fn evaluate_case_serialized(
         &harn_file.with_extension("error"),
         &harn_file.with_extension("lint"),
         rel_path,
-        2_000,
+        timeout_ms,
         options,
     )
     .await
+}
+
+#[tokio::test]
+async fn declared_wait_cost_still_terminates_a_genuine_hang() {
+    let temp = TempTestDir::new();
+    temp.write_content(
+        "conformance/tests/hang.harn",
+        "pipeline main(harness: Harness) { harness.clock.sleep_ms(5000) }\n",
+    );
+    temp.write_content("conformance/tests/hang.expected", "");
+    temp.write_content(
+        "conformance/tests/hang.case.json",
+        r#"{"deadline":{"cost_class":"external_wait","timeout_ms":25}}"#,
+    );
+    let harn_file = temp.path().join("conformance/tests/hang.harn");
+
+    let evaluation = evaluate_case_with_timeout_serialized(
+        &harn_file,
+        "tests/hang.harn",
+        1,
+        &conformance_options(),
+    )
+    .await;
+
+    assert!(!evaluation.passed);
+    let message = evaluation.message.unwrap_or_default();
+    assert!(message.contains("hang deadline exceeded after 25ms"));
+    assert!(message.contains("cost class external_wait"));
 }
 
 #[tokio::test]

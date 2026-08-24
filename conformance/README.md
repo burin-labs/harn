@@ -127,6 +127,25 @@ sharing a stem:
 | `.process-tape.json`   | Subprocess output tape for the testbench shim       |
 | `.fs-overlay/`         | Files materialized into a tempdir before the test   |
 | `.harness.json`        | Per-test harness sidecar config                     |
+| `.case.json`           | Per-test execution-cost and hang-deadline contract  |
+
+A `.case.json` file is reserved for cases whose canonical behavior waits on an
+external process, trigger, or equivalent scheduler boundary. Declare that cost
+structurally, for example:
+
+```json
+{
+  "deadline": {
+    "cost_class": "external_wait",
+    "timeout_ms": 120000
+  }
+}
+```
+
+The declared deadline is bounded at ten minutes and can only raise the suite's
+`--timeout` backstop, never weaken it. Reaching either deadline is reported as
+a hang. Do not add a sidecar to disguise CPU-bound work or a performance
+regression; those cases should become cheaper.
 
 A test must have `.expected`, `.error`, or `.lint`. `.expected` and `.error`
 are mutually exclusive; `.lint` is additive to either one, so a fixture can
