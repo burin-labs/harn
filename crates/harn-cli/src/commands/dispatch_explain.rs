@@ -1294,4 +1294,124 @@ mod tests {
         assert!(!request_audit.argv.contains(&"--repeat".to_string()));
         assert!(!request_audit.argv.contains(&"--timeout-secs".to_string()));
     }
+
+    /// Keep the ungated E2E binary's route pins from rotting. The `ci` profile
+    /// excludes `harn_cli_e2e`, so anything asserted only there can go stale
+    /// after a catalog change, pass every required check, and ship — #7086 did
+    /// exactly that after #6993. This guard runs in the harn-cli lib suite.
+    ///
+    /// Two different strengths of claim live here, and it is worth being clear
+    /// about which is which. The `structured_output` equalities are agreement
+    /// by construction — `audit()` resolves those fields through `lookup()`
+    /// itself, so they can only fail if someone reintroduces a transcribed
+    /// literal into the audit path. That is a narrow but real guard, not a
+    /// catalog check.
+    ///
+    /// The assertion that actually bites is that every route the E2E binary
+    /// pins still resolves in the catalog. That is the rot vector #7086
+    /// describes: a catalog edit renames or drops a route, the merge-gated
+    /// lanes never run the E2E binary, and the stale pin ships.
+    #[test]
+    fn dispatch_audit_structured_output_matches_capability_lookup() {
+        let all = audit(&ProviderDispatchAuditArgs {
+            providers: Vec::new(),
+            models: Vec::new(),
+            routes: Vec::new(),
+            capabilities: Vec::new(),
+            variants: vec![ProviderDispatchAuditVariantArg::Default],
+            include_tool_probe_plan: false,
+            tool_probe_cases: Vec::new(),
+            tool_probe_mode: ProviderToolProbeModeArg::NonStreaming,
+            tool_probe_repeat: 1,
+            tool_probe_timeout_secs: 45,
+            tool_probe_output_dir: None,
+            json: true,
+        });
+        assert_eq!(all.fail_count, 0, "{:?}", all.failures);
+        assert!(
+            !all.rows.is_empty(),
+            "dispatch-audit should cover catalog routing routes"
+        );
+        for row in &all.rows {
+            let provider = row.explanation.provider.as_str();
+            let model = row.explanation.model.as_str();
+            let caps = harn_vm::llm::capabilities::lookup(provider, model);
+            assert_eq!(
+                row.explanation.structured_output, caps.structured_output,
+                "{provider}:{model} dispatch-audit row"
+            );
+            assert_eq!(
+                row.explanation.structured_output_mode, caps.structured_output_mode,
+                "{provider}:{model} dispatch-audit row"
+            );
+        }
+
+        // The nightly E2E binary still asserts these routes. Keep the
+        // tool-probe plan on the same lookup() values so a catalog change
+        // cannot update the merge-gated row and leave the plan literals stale.
+        const E2E_ROUTES: [(&str, &str); 2] = [
+            ("anthropic", "claude-sonnet-4-6"),
+            ("ollama", "devstral-small-2:24b"),
+        ];
+
+        // The non-vacuous half: a route the ungated binary pins must still be
+        // a route the catalog produces. Renaming or dropping one of these is
+        // invisible to every merge-gated lane, so fail here instead.
+        for (provider, model) in E2E_ROUTES {
+            assert!(
+                all.rows.iter().any(|row| {
+                    row.explanation.provider == provider && row.explanation.model == model
+                }),
+                "{provider}:{model} is pinned by crates/harn-cli/tests/harn_cli_e2e/\
+                 provider_dispatch_audit.rs but no longer appears in the catalog dispatch \
+                 audit. Update that E2E binary's routes in the same change as the catalog, \
+                 or its assertions will pass by never running."
+            );
+        }
+
+        for (provider, model) in E2E_ROUTES {
+            let report = audit(&ProviderDispatchAuditArgs {
+                providers: Vec::new(),
+                models: Vec::new(),
+                routes: vec![format!("{provider}:{model}")],
+                capabilities: Vec::new(),
+                variants: vec![ProviderDispatchAuditVariantArg::Default],
+                include_tool_probe_plan: true,
+                tool_probe_cases: vec![ProviderToolProbeCaseArg::ToolResultFollowup],
+                tool_probe_mode: ProviderToolProbeModeArg::NonStreaming,
+                tool_probe_repeat: 1,
+                tool_probe_timeout_secs: 45,
+                tool_probe_output_dir: None,
+                json: true,
+            });
+            assert_eq!(
+                report.fail_count, 0,
+                "{provider}:{model}: {:?}",
+                report.failures
+            );
+            let caps = harn_vm::llm::capabilities::lookup(provider, model);
+            let plan = report
+                .tool_probe_plan
+                .as_ref()
+                .expect("tool probe plan emitted");
+            let readiness = &plan.readiness_commands[0];
+            assert_eq!(
+                readiness.structured_output, caps.structured_output,
+                "{provider}:{model} readiness command"
+            );
+            assert_eq!(
+                readiness.structured_output_mode, caps.structured_output_mode,
+                "{provider}:{model} readiness command"
+            );
+            let live = &plan.commands[0];
+            assert_eq!(
+                live.structured_output, caps.structured_output,
+                "{provider}:{model} live command"
+            );
+            assert_eq!(
+                live.structured_output_mode, caps.structured_output_mode,
+                "{provider}:{model} live command"
+            );
+        }
+    }
 }
