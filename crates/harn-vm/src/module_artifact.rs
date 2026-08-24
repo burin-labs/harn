@@ -627,6 +627,18 @@ pub fn compile_module_artifact_from_source(
     )
 }
 
+// Test seam: how many times an imported interface has been resolved from
+// source on this thread.
+//
+// Resolving one costs a full lex and parse of the module. A cache hit that
+// still pays for it produces exactly the same artifact as one that does not,
+// so no output distinguishes them; only the work differs, and this counts it.
+// Thread-local so tests running in parallel cannot perturb each other.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static INTERFACE_RESOLUTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Resolve the exact imported interface consulted while lowering `source`.
 /// Callers that cache or precompile the resulting artifact must carry this
 /// value alongside the source identity rather than reconstructing it later.
@@ -634,6 +646,8 @@ pub fn module_compilation_context_for_source(
     source_path: &Path,
     source: &str,
 ) -> Result<ModuleCompilationContext, VmError> {
+    #[cfg(test)]
+    INTERFACE_RESOLUTIONS.with(|count| count.set(count.get() + 1));
     let program = parse_module_source(source_path, source)?;
     Ok(imported_symbol_projection_for_program(
         source_path,

@@ -83,20 +83,29 @@ pub(super) fn stdlib_module_artifact(
         // for stdlib can use a synthetic source_path. The harn_version field
         // of the cache key gates correctness across releases.
         let embedded = ModuleSource::from_text(source);
-        let compilation_context = module_compilation_context_for_source(synthetic, source)?;
+        // Identity here is derived from the embedded bytes alone. Resolving the
+        // imported interface first would lex and parse every stdlib module in
+        // the closure on the warm path, in front of the lookup whose whole
+        // purpose is to skip exactly that work.
         let lookup = {
             let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-            bytecode_cache::load_module(
+            bytecode_cache::load_module_for_key(
                 synthetic,
-                &embedded,
-                &compilation_context,
-                ModuleProvenance::User,
+                bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
+                    embedded.sha256(),
+                    ModuleProvenance::User,
+                ),
             )
         };
         let artifact = if let Some(artifact) = lookup.artifact {
             artifact
         } else {
             let mut compile_span = recorder.map(super::ModulePhaseRecorder::compile_span);
+            // Only a miss needs the interface, and only because the compile
+            // below consumes it. Keeping it inside the compile span also keeps
+            // its cost attributable, which it was not when it ran ahead of the
+            // lookup.
+            let compilation_context = module_compilation_context_for_source(synthetic, source)?;
             let compiled = compile_module_artifact_from_source_with_context(
                 synthetic,
                 source,
