@@ -6,8 +6,9 @@
 //! moved for every failure would satisfy it.
 
 use super::{
-    execute_run, execute_run_with_eager_project_handlers, write_manifest_trigger_project,
-    CliLlmMockMode, RunProfileOptions,
+    execute_run, execute_run_with_eager_project_handlers, execute_standalone_run,
+    execute_standalone_run_with_denied, write_manifest_trigger_project, CliLlmMockMode,
+    RunProfileOptions,
 };
 use std::collections::HashSet;
 
@@ -62,6 +63,14 @@ pipeline main(harness: Harness) {
             outcome.stderr
         );
     }
+
+    let standalone = execute_standalone_run(&script.to_string_lossy()).await;
+    assert_eq!(
+        standalone.exit_code, 0,
+        "standalone must not materialize ambient dependencies: {}",
+        standalone.stderr
+    );
+    assert_eq!(standalone.stdout.trim(), "target-ran");
 
     // Negative control 1: same project shape, preparable, program returns a
     // failure. The program is what failed.
@@ -147,6 +156,103 @@ pipeline main(harness: Harness) {
         outcome
             .stderr
             .contains("failed to install manifest triggers"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn standalone_run_ignores_broken_project_handlers() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("harn.toml"),
+        r#"
+[package]
+name = "broken-project-handler-fixture"
+
+[exports]
+hook_handlers = "hook_handlers.harn"
+
+[[hooks]]
+event = "PreToolUse"
+handler = "hook_handlers::before_tool"
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(project.path().join("hook_handlers.harn"), "fn broken(")
+        .expect("write broken handler");
+    let script = project.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println("standalone-ran")
+}
+"#,
+    )
+    .expect("write main script");
+
+    let project_outcome = execute_run_default(&script.to_string_lossy()).await;
+    assert_ne!(
+        project_outcome.exit_code, 0,
+        "project handler must be reached"
+    );
+
+    let standalone_outcome = execute_standalone_run(&script.to_string_lossy()).await;
+    assert_eq!(
+        standalone_outcome.exit_code, 0,
+        "stderr:\n{}",
+        standalone_outcome.stderr
+    );
+    assert_eq!(standalone_outcome.stdout.trim(), "standalone-ran");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn standalone_run_keeps_relative_imports_and_explicit_denials() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("value.harn"),
+        "pub fn imported_value() -> int { return 42 }\n",
+    )
+    .expect("write relative module");
+    let script = project.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { imported_value } from "./value"
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(imported_value())
+}
+"#,
+    )
+    .expect("write main script");
+
+    let outcome = execute_standalone_run(&script.to_string_lossy()).await;
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "42");
+
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println(command_risk_scan({request: {mode: "shell", command: "git status"}}))
+}
+"#,
+    )
+    .expect("write denied script");
+    let outcome = execute_standalone_run_with_denied(
+        &script.to_string_lossy(),
+        HashSet::from(["command_risk_scan".to_string()]),
+    )
+    .await;
+    assert_ne!(outcome.exit_code, 0, "explicit denial must remain active");
+    assert!(
+        outcome.stderr.contains("command_risk_scan") && outcome.stderr.contains("tool_rejected"),
         "stderr:\n{}",
         outcome.stderr
     );

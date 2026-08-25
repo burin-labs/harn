@@ -13,8 +13,25 @@ use harn_parser::TypeChecker;
 /// Configure `checker` with the resolved imports of the module rooted at
 /// `path`, so a call to an imported symbol is checked against its real
 /// signature (and an imported name shadows a same-named builtin).
-pub(crate) fn checker_with_resolved_imports(mut checker: TypeChecker, path: &Path) -> TypeChecker {
+pub(crate) fn checker_with_resolved_imports(checker: TypeChecker, path: &Path) -> TypeChecker {
     let graph = harn_modules::build(&[path.to_path_buf()]);
+    checker_with_graph(checker, path, &graph)
+}
+
+pub(crate) fn checker_with_standalone_imports(
+    checker: TypeChecker,
+    path: &Path,
+    source: &str,
+) -> TypeChecker {
+    let graph = harn_modules::build_with_standalone_source(path, source);
+    checker_with_graph(checker, path, &graph)
+}
+
+fn checker_with_graph(
+    mut checker: TypeChecker,
+    path: &Path,
+    graph: &harn_modules::ModuleGraph,
+) -> TypeChecker {
     if let Some(imported) = graph.imported_names_for_file(path) {
         checker = checker.with_imported_names(imported);
     }

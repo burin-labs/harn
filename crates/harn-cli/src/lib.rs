@@ -40,7 +40,7 @@ pub mod tests;
 mod typecheck_imports;
 pub use commands::dispatch_explain::DISPATCH_AUDIT_SCHEMA_VERSION;
 pub(crate) use compiler_context::{
-    compiler_for_source, compiler_with_imported_enum_candidates,
+    compiler_for_source, compiler_for_standalone_source, compiler_with_imported_enum_candidates,
     ensure_builtin_signatures_installed,
 };
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};

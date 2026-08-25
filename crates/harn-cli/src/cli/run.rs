@@ -30,6 +30,23 @@ pub(crate) struct RunArgs {
     /// only when their trigger or hook fires.
     #[arg(long = "eager-project-handlers")]
     pub eager_project_handlers: bool,
+    /// Run without inheriting ambient project configuration.
+    ///
+    /// Standalone runs do not load a surrounding `harn.toml`, project skills,
+    /// project handlers, or manifest-derived authority. Explicit imports and
+    /// CLI capability flags still apply.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "eager_project_handlers",
+            "resume",
+            "as_job",
+            "explain_cost",
+            "allow_unsigned",
+            "dry_run_verify"
+        ]
+    )]
+    pub standalone: bool,
     /// Explicitly authorize a named risky operation for this run. Repeatable.
     ///
     /// This is operator authority, not pipeline configuration: names are exact

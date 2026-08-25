@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
 
+use super::ProjectContextMode;
 use crate::commands::time::RunTiming;
 use crate::package;
 
@@ -81,7 +82,7 @@ pub(crate) fn compile_or_load_chunk_for_run(
     path: &str,
     stderr: &mut String,
 ) -> Result<LoadedChunk, ChunkLoadFailure> {
-    compile_or_load_chunk_with_timing(path, stderr, None)
+    compile_or_load_chunk_with_timing(path, stderr, None, ProjectContextMode::Project)
 }
 
 /// Like [`compile_or_load_chunk_for_run`] but lets the caller observe
@@ -98,6 +99,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     path: &str,
     stderr: &mut String,
     mut timing: Option<&mut RunTiming>,
+    project_context: ProjectContextMode,
 ) -> Result<LoadedChunk, ChunkLoadFailure> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -111,8 +113,12 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let compile_phase_start = Instant::now();
-    let lookup = harn_vm::bytecode_cache::load(Path::new(path), &source);
-    if let Some(chunk) = lookup.chunk {
+    // Project cache entries incorporate manifest-derived compilation
+    // authority. Standalone mode cannot safely consume or populate that cache:
+    // the same source path may otherwise reuse a privileged project chunk.
+    let mut lookup = (project_context == ProjectContextMode::Project)
+        .then(|| harn_vm::bytecode_cache::load(Path::new(path), &source));
+    if let Some(chunk) = lookup.as_mut().and_then(|lookup| lookup.chunk.take()) {
         if let Some(t) = timing.as_deref_mut() {
             t.cache_hit = true;
             t.bytecode_compile = compile_phase_start.elapsed();
@@ -120,7 +126,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         return Ok(LoadedChunk {
             source,
             chunk,
-            link_table: lookup.link_table,
+            link_table: lookup.and_then(|lookup| lookup.link_table),
         });
     }
     if let Some(t) = timing.as_deref_mut() {
@@ -140,13 +146,14 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // Materializing the import graph's packages happens inside the type check,
     // so a dependency that could not be prepared surfaces here rather than as a
     // diagnostic about the program's own text.
-    let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
-        Ok(diagnostics) => diagnostics,
-        Err(error) => {
-            stderr.push_str(&format!("error: {error}\n"));
-            return Err(ChunkLoadFailure::PackageMaterialization);
-        }
-    };
+    let type_diagnostics =
+        match typecheck_with_imports(&program, Path::new(path), &source, project_context) {
+            Ok(diagnostics) => diagnostics,
+            Err(error) => {
+                stderr.push_str(&format!("error: {error}\n"));
+                return Err(ChunkLoadFailure::PackageMaterialization);
+            }
+        };
     for diag in &type_diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
@@ -162,7 +169,13 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let compile_step_start = Instant::now();
-    let chunk = match crate::compiler_for_source(Path::new(path), &source).compile(&program) {
+    let compiler = match project_context {
+        ProjectContextMode::Project => crate::compiler_for_source(Path::new(path), &source),
+        ProjectContextMode::Standalone => {
+            crate::compiler_for_standalone_source(Path::new(path), &source)
+        }
+    };
+    let chunk = match compiler.compile(&program) {
         Ok(c) => c,
         Err(e) => {
             stderr.push_str(&format!("error: compile error: {e}\n"));
@@ -174,9 +187,11 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // sandboxes are common in CI environments. Surface the failure as a
     // single-line warning when explicitly requested via the audit hook;
     // otherwise stay quiet to avoid bloating happy-path output.
-    if let Err(err) = lookup.store(&chunk) {
-        if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
-            eprintln!("[harn] bytecode cache write skipped: {err}");
+    if let Some(lookup) = &lookup {
+        if let Err(err) = lookup.store(&chunk) {
+            if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
+                eprintln!("[harn] bytecode cache write skipped: {err}");
+            }
         }
     }
     if let Some(t) = timing.as_deref_mut() {
@@ -186,7 +201,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     Ok(LoadedChunk {
         source,
         chunk,
-        link_table: lookup.link_table,
+        link_table: lookup.and_then(|lookup| lookup.link_table),
     })
 }
 
@@ -282,11 +297,23 @@ pub(super) fn typecheck_with_imports(
     program: &[harn_parser::SNode],
     path: &Path,
     source: &str,
+    project_context: ProjectContextMode,
 ) -> Result<Vec<harn_parser::TypeDiagnostic>, package::PackageError> {
-    package::ensure_dependencies_materialized(path)?;
-    let checker = crate::typecheck_imports::checker_with_resolved_imports(
-        harn_parser::TypeChecker::new(),
-        path,
-    );
+    let checker = match project_context {
+        ProjectContextMode::Project => {
+            package::ensure_dependencies_materialized(path)?;
+            crate::typecheck_imports::checker_with_resolved_imports(
+                harn_parser::TypeChecker::new(),
+                path,
+            )
+        }
+        ProjectContextMode::Standalone => {
+            crate::typecheck_imports::checker_with_standalone_imports(
+                harn_parser::TypeChecker::new(),
+                path,
+                source,
+            )
+        }
+    };
     Ok(checker.check_with_source(program, source))
 }

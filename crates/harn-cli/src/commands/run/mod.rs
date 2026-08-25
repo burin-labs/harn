@@ -150,6 +150,16 @@ pub struct RunInterruptTokens {
     pub signal_token: Arc<Mutex<Option<String>>>,
 }
 
+/// Whether a run inherits configuration discovered from the entry file's
+/// surrounding project. This is deliberately a mode rather than a collection
+/// of booleans so every ambient project surface follows one decision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectContextMode {
+    #[default]
+    Project,
+    Standalone,
+}
+
 struct ExecuteRunInputs<'a> {
     path: &'a str,
     trace: bool,
@@ -166,6 +176,7 @@ struct ExecuteRunInputs<'a> {
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
     eager_project_handlers: bool,
+    project_context: ProjectContextMode,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -261,6 +272,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         timing: None,
         harnpack,
         eager_project_handlers: control.eager_project_handlers,
+        project_context: control.project_context,
     })
     .await;
     if let Some(guard) = &deadline_guard {
@@ -375,7 +387,12 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
     };
 
     let mut had_type_error = false;
-    let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
+    let type_diagnostics = match typecheck_with_imports(
+        &program,
+        Path::new(path),
+        &source,
+        ProjectContextMode::Project,
+    ) {
         Ok(diagnostics) => diagnostics,
         Err(error) => {
             stderr.push_str(&format!("error: {error}\n"));
@@ -557,6 +574,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         timing: None,
         harnpack,
         eager_project_handlers: false,
+        project_context: ProjectContextMode::Project,
     })
     .await
 }
@@ -595,6 +613,7 @@ pub async fn execute_run_json(
         timing: None,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: false,
+        project_context: ProjectContextMode::Project,
     })
     .await
 }
@@ -624,6 +643,7 @@ pub(crate) async fn execute_run_with_timing(
         timing,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: false,
+        project_context: ProjectContextMode::Project,
     })
     .await
 }
@@ -681,6 +701,7 @@ async fn execute_run_inner_scoped(
         timing,
         harnpack,
         eager_project_handlers,
+        project_context,
     } = inputs;
     let RunAuxOptions {
         summary,
@@ -790,7 +811,12 @@ async fn execute_run_inner_scoped(
             link_table: None,
         })
     } else {
-        compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
+        compile_or_load_chunk_with_timing(
+            resolved_path,
+            &mut stderr,
+            timing.as_deref_mut(),
+            project_context,
+        )
     };
     let LoadedChunk {
         source,
@@ -874,19 +900,23 @@ async fn execute_run_inner_scoped(
     // own trigger handlers were compiled without the authority and refused
     // every `host_call` before the script body ever ran. Enable it here, ahead
     // of the first import, so one declaration means one thing everywhere.
-    if let Err(error) = crate::compiler_context::enable_trusted_host_dispatch_for_source(
-        &mut vm,
-        std::path::Path::new(path),
-    ) {
-        stderr.push_str(&format!(
-            "warning: failed to enable trusted host dispatch: {error}\n"
-        ));
+    if project_context == ProjectContextMode::Project {
+        if let Err(error) = crate::compiler_context::enable_trusted_host_dispatch_for_source(
+            &mut vm,
+            std::path::Path::new(path),
+        ) {
+            stderr.push_str(&format!(
+                "warning: failed to enable trusted host dispatch: {error}\n"
+            ));
+        }
     }
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
     // Metadata/store rooted at harn.toml when present; source dir otherwise.
-    let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+    let project_root = (project_context == ProjectContextMode::Project)
+        .then(|| harn_vm::stdlib::process::find_project_root(source_parent))
+        .flatten();
     let store_base = project_root.as_deref().unwrap_or(source_parent);
     let sandbox_root = sandbox
         .workspace_root
@@ -979,7 +1009,8 @@ async fn execute_run_inner_scoped(
     let cli_dirs = canonicalize_cli_dirs(&skill_dirs_raw, None);
     let loaded = load_skills(&SkillLoaderInputs {
         cli_dirs,
-        source_path: Some(std::path::PathBuf::from(path)),
+        source_path: (project_context == ProjectContextMode::Project)
+            .then(|| std::path::PathBuf::from(path)),
     });
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
@@ -1028,34 +1059,40 @@ async fn execute_run_inner_scoped(
     // Declarations and callable signatures are validated during installation.
     // Handler module graphs initialize only when an event dispatches to them,
     // unless the operator explicitly requests fail-fast initialization.
-    let _manifest_runtime = match manifest_runtime::install_manifest_runtime(
-        Path::new(path),
-        &mut vm,
-        handler_initialization,
-    )
-    .await
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            stderr.push_str(&format!("error: failed to {}: {error}\n", error.label()));
-            time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-            return finalize_run_error(
-                stdout,
-                stderr,
-                json_session,
-                summary.as_ref(),
-                phase.as_ref(),
-                rusage.as_ref(),
-                run_started,
-                None,
-                timing.as_deref(),
-                0,
-                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-                crate::exit::RunFailure::Setup,
-                error.phase(),
-                error.to_string(),
-            );
-        }
+    let _manifest_runtime = if project_context == ProjectContextMode::Project {
+        Some(
+            match manifest_runtime::install_manifest_runtime(
+                Path::new(path),
+                &mut vm,
+                handler_initialization,
+            )
+            .await
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    stderr.push_str(&format!("error: failed to {}: {error}\n", error.label()));
+                    time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
+                    return finalize_run_error(
+                        stdout,
+                        stderr,
+                        json_session,
+                        summary.as_ref(),
+                        phase.as_ref(),
+                        rusage.as_ref(),
+                        run_started,
+                        None,
+                        timing.as_deref(),
+                        0,
+                        cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                        crate::exit::RunFailure::Setup,
+                        error.phase(),
+                        error.to_string(),
+                    );
+                }
+            },
+        )
+    } else {
+        None
     };
 
     let local = tokio::task::LocalSet::new();
