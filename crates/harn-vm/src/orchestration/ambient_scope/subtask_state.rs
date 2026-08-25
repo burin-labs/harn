@@ -26,6 +26,12 @@ pub(super) struct SubtaskAmbientState {
     mcp_call_budget: Option<CallBudget>,
     pg_query_budget: Option<CallBudget>,
     tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
+    worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
+    daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
+    trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
+    session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
+    tracing_runtime: Arc<crate::tracing::TracingRuntime>,
+    agent_host_session_runtime: Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
 }
 
 impl SubtaskAmbientState {
@@ -44,6 +50,20 @@ impl SubtaskAmbientState {
             tool_call_cancellations: clone_via_swap(
                 crate::tool_call_cancellations::swap_active_registry,
             ),
+            worker_registry: clone_via_swap(
+                crate::stdlib::agents::agents_workers::swap_active_worker_registry,
+            ),
+            daemon_registry: clone_via_swap(
+                crate::stdlib::agents_daemon::swap_active_daemon_registry,
+            ),
+            trigger_registry: clone_via_swap(
+                crate::triggers::registry::swap_active_trigger_registry,
+            ),
+            session_runtime: clone_via_swap(crate::agent_sessions::swap_active_session_runtime),
+            tracing_runtime: clone_via_swap(crate::tracing::swap_active_tracing_runtime),
+            agent_host_session_runtime: clone_via_swap(
+                crate::llm::agent_session_host::swap_active_agent_host_session_runtime,
+            ),
         }
     }
 
@@ -56,6 +76,45 @@ impl SubtaskAmbientState {
         registry: Arc<crate::tool_call_cancellations::CancellationRegistry>,
     ) {
         self.tool_call_cancellations = registry;
+    }
+
+    pub(super) fn set_worker_registry(
+        &mut self,
+        registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
+    ) {
+        self.worker_registry = registry;
+    }
+
+    pub(super) fn set_daemon_registry(
+        &mut self,
+        registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
+    ) {
+        self.daemon_registry = registry;
+    }
+
+    pub(super) fn set_trigger_registry(
+        &mut self,
+        registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
+    ) {
+        self.trigger_registry = registry;
+    }
+
+    pub(super) fn set_session_runtime(
+        &mut self,
+        runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
+    ) {
+        self.session_runtime = runtime;
+    }
+
+    pub(super) fn set_tracing_runtime(&mut self, runtime: Arc<crate::tracing::TracingRuntime>) {
+        self.tracing_runtime = runtime;
+    }
+
+    pub(super) fn set_agent_host_session_runtime(
+        &mut self,
+        runtime: Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
+    ) {
+        self.agent_host_session_runtime = runtime;
     }
 
     pub(super) fn swap_in_place(&mut self) {
@@ -92,6 +151,30 @@ impl SubtaskAmbientState {
         swap_slot(
             &mut self.tool_call_cancellations,
             crate::tool_call_cancellations::swap_active_registry,
+        );
+        swap_slot(
+            &mut self.worker_registry,
+            crate::stdlib::agents::agents_workers::swap_active_worker_registry,
+        );
+        swap_slot(
+            &mut self.daemon_registry,
+            crate::stdlib::agents_daemon::swap_active_daemon_registry,
+        );
+        swap_slot(
+            &mut self.trigger_registry,
+            crate::triggers::registry::swap_active_trigger_registry,
+        );
+        swap_slot(
+            &mut self.session_runtime,
+            crate::agent_sessions::swap_active_session_runtime,
+        );
+        swap_slot(
+            &mut self.tracing_runtime,
+            crate::tracing::swap_active_tracing_runtime,
+        );
+        swap_slot(
+            &mut self.agent_host_session_runtime,
+            crate::llm::agent_session_host::swap_active_agent_host_session_runtime,
         );
     }
 }

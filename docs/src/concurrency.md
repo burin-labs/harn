@@ -19,24 +19,24 @@ fan out, wait, collect, and clean up.
 
 ## Where branches run
 
-By default, `spawn`, every `parallel` form, and `pool.submit` keep child
-interpreters on the thread that created them. This preserves thread-affine host
-capabilities, cancellation registries, and `LocalSet` tasks while branches
-still overlap at await points.
+By default, `spawn`, every `parallel` form, and `pool.submit` place child
+interpreters on the runtime's worker threads. CPU-bound branches can therefore
+execute on separate cores. Harn carries host capability state through typed,
+execution-scoped owners, so task migration does not expose another execution's
+registries or silently fall back to empty thread-local state.
 
-Set `HARN_VM_SUBTASK_PLACEMENT=worker` before starting Harn to opt an audited
-CPU-only workload into runtime-worker placement. CPU-bound branches can then
-execute on separate cores. Do not enable worker placement for an execution
-tree that reaches thread-affine host capabilities. A host built on a
-single-thread Tokio runtime still has only one runtime worker; the setting does
-not create host threads. `HARN_VM_SUBTASK_PLACEMENT=current_thread` names the
-safe default explicitly.
+A host built on a single-thread Tokio runtime still has only one runtime worker;
+placement does not create host threads. Set
+`HARN_VM_SUBTASK_PLACEMENT=current_thread` before starting Harn only when an
+embedding host deliberately requires creating-thread execution.
+`HARN_VM_SUBTASK_PLACEMENT=worker` names the default explicitly.
 Any other value is a startup configuration error rather than a scheduling
 fallback.
 
 The placement choice does not change the migrated context a child inherits.
 Harn captures session attribution, event logging, security and egress policy,
-redaction rules, call budgets, and the pool registry at the subtask boundary.
+redaction rules, call budgets, cancellation state, worker and managed-daemon
+lifecycle state, and the pool registry at the subtask boundary.
 Mutable Harn values remain isolated unless the program passes one of the shared
 handles described below.
 

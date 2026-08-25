@@ -77,9 +77,9 @@ pub mod host_attachments;
 
 /// Placement policy for child-interpreter subtasks.
 ///
-/// Current-thread placement is the safe default. Embedders may scope an
-/// audited execution tree to worker placement when every reachable capability
-/// supports crossing a runtime thread boundary.
+/// Worker placement is the default. Embedders with a deliberately
+/// single-threaded host may scope an execution tree to current-thread
+/// placement explicitly.
 pub mod subtask {
     pub use crate::vm::subtask::{
         placement, scope_placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV,

@@ -72,18 +72,12 @@ fn seed_test_worker(name: &str) -> (String, std::path::PathBuf) {
         snapshot_path,
         audit: MutationSessionRecord::default().normalize(),
     }));
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
-    });
+    active_worker_registry().insert(worker_id.clone(), state);
     (worker_id, dir)
 }
 
 fn teardown(dir: &Path, worker_id: &str) {
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().remove(worker_id);
-    });
+    active_worker_registry().remove(worker_id);
     let _ = std::fs::remove_dir_all(dir);
     unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
 }
@@ -186,11 +180,11 @@ fn auto_resume_trigger_id(summary: &VmValue) -> String {
 }
 
 fn worker_status_and_task(worker_id: &str) -> (String, String) {
-    WORKER_REGISTRY.with(|registry| {
-        let state = registry.borrow().get(worker_id).cloned().unwrap();
+    {
+        let state = active_worker_registry().get(worker_id).unwrap();
         let worker = state.lock();
         (worker.status.clone(), worker.task.clone())
-    })
+    }
 }
 
 fn assert_error_code(error: VmError, code: Code) {
@@ -605,6 +599,7 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
             // worker uses after resume.
             let mut base_vm = crate::Vm::new();
             crate::register_vm_stdlib(&mut base_vm);
+            base_vm.worker_registry = active_worker_registry();
             let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
             let outcomes = dispatcher
                 .dispatch_event(event)
@@ -644,8 +639,8 @@ async fn resume_can_drop_transcript_history_to_summary() {
     let _guard = suspend_test_lock().await;
     let (worker_id, dir) = seed_test_worker("worker-resume-summary-only");
 
-    WORKER_REGISTRY.with(|registry| {
-        let state = registry.borrow().get(&worker_id).cloned().unwrap();
+    {
+        let state = active_worker_registry().get(&worker_id).unwrap();
         state.lock().transcript = Some(crate::llm::helpers::new_transcript_with(
             Some(format!("session_{worker_id}")),
             vec![
@@ -655,7 +650,7 @@ async fn resume_can_drop_transcript_history_to_summary() {
             Some("Prior digest".to_string()),
             None,
         ));
-    });
+    }
     suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
         vec![
@@ -684,15 +679,12 @@ async fn resume_can_drop_transcript_history_to_summary() {
         Some("fresh prompt".to_string())
     );
 
-    let transcript = WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .get(&worker_id)
-            .unwrap()
-            .lock()
-            .transcript
-            .clone()
-    });
+    let transcript = active_worker_registry()
+        .get(&worker_id)
+        .unwrap()
+        .lock()
+        .transcript
+        .clone();
     let transcript = transcript.expect("summary-only transcript");
     let dict = transcript.as_dict().expect("transcript dict");
     let messages = crate::llm::helpers::transcript_message_list(dict).expect("messages");
@@ -704,16 +696,15 @@ async fn resume_can_drop_transcript_history_to_summary() {
             .map(VmValue::display),
         Some("Prior digest".to_string())
     );
-    let resume_context = WORKER_REGISTRY
-        .with(|registry| {
-            let state = registry.borrow().get(&worker_id).cloned().unwrap();
-            let worker = state.lock();
-            match &worker.config {
-                WorkerConfig::SubAgent { spec } => spec.options.get("_resume_continuity").cloned(),
-                _ => None,
-            }
-        })
-        .expect("resume continuity payload");
+    let resume_context = {
+        let state = active_worker_registry().get(&worker_id).unwrap();
+        let worker = state.lock();
+        match &worker.config {
+            WorkerConfig::SubAgent { spec } => spec.options.get("_resume_continuity").cloned(),
+            _ => None,
+        }
+    }
+    .expect("resume continuity payload");
     let resume_context = crate::llm::vm_value_to_json(&resume_context);
     assert_eq!(
         resume_context["continue_transcript"],
@@ -757,15 +748,12 @@ async fn suspend_then_close_transitions_to_cancelled() {
 async fn suspended_worker_survives_process_restart_via_snapshot() {
     let _guard = suspend_test_lock().await;
     let (worker_id, dir) = seed_test_worker("worker-suspend-restart");
-    let snapshot_path = WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .get(&worker_id)
-            .unwrap()
-            .lock()
-            .snapshot_path
-            .clone()
-    });
+    let snapshot_path = active_worker_registry()
+        .get(&worker_id)
+        .unwrap()
+        .lock()
+        .snapshot_path
+        .clone();
 
     suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
@@ -782,9 +770,7 @@ async fn suspended_worker_survives_process_restart_via_snapshot() {
     // contract is that suspended status survives the round trip;
     // `interrupted` would be a regression because cooperative
     // suspends are not synonymous with crash-while-running.
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().remove(&worker_id);
-    });
+    active_worker_registry().remove(&worker_id);
     let reloaded =
         agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
     assert_eq!(reloaded.status, "suspended");
@@ -799,12 +785,10 @@ async fn suspended_worker_survives_process_restart_via_snapshot() {
 
     // Rehydrate into the registry and warm-resume — the operator
     // wakes the worker back up after restart.
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(
-            worker_id.clone(),
-            Arc::new(parking_lot::Mutex::new(reloaded)),
-        );
-    });
+    active_worker_registry().insert(
+        worker_id.clone(),
+        Arc::new(parking_lot::Mutex::new(reloaded)),
+    );
     let resumed = resume_agent_for_test(vec![handle_value(&worker_id)])
         .await
         .expect("resume after restart");
@@ -830,15 +814,12 @@ async fn suspended_worker_snapshot_preserves_sub_agent_workspace_anchor() {
         }],
         anchored_at: "2026-06-29T00:00:00Z".to_string(),
     };
-    let snapshot_path = WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .get(&worker_id)
-            .unwrap()
-            .lock()
-            .snapshot_path
-            .clone()
-    });
+    let snapshot_path = active_worker_registry()
+        .get(&worker_id)
+        .unwrap()
+        .lock()
+        .snapshot_path
+        .clone();
     with_worker_state(&worker_id, |state| {
         let mut worker = state.lock();
         match &mut worker.config {
@@ -861,9 +842,7 @@ async fn suspended_worker_snapshot_preserves_sub_agent_workspace_anchor() {
     .await
     .expect("suspend");
 
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().remove(&worker_id);
-    });
+    active_worker_registry().remove(&worker_id);
     let reloaded =
         agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
     let restored_anchor = match &reloaded.config {
@@ -885,15 +864,12 @@ async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
     crate::tracing::reset_tracing();
     crate::tracing::set_tracing_enabled(true);
     let (worker_id, dir) = seed_test_worker("worker-suspend-resume-trace-link");
-    let snapshot_path = WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .get(&worker_id)
-            .unwrap()
-            .lock()
-            .snapshot_path
-            .clone()
-    });
+    let snapshot_path = active_worker_registry()
+        .get(&worker_id)
+        .unwrap()
+        .lock()
+        .snapshot_path
+        .clone();
 
     let pipeline_span_id =
         crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "pipeline".to_string());
@@ -910,9 +886,7 @@ async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
     .expect("suspend");
     crate::tracing::span_end(pipeline_span_id);
 
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().remove(&worker_id);
-    });
+    active_worker_registry().remove(&worker_id);
     let reloaded =
         agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
     let suspension_record = reloaded.suspension.as_ref().expect("snapshot suspension");
@@ -935,12 +909,10 @@ async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
         pipeline_span_link.span_id
     );
 
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(
-            worker_id.clone(),
-            Arc::new(parking_lot::Mutex::new(reloaded)),
-        );
-    });
+    active_worker_registry().insert(
+        worker_id.clone(),
+        Arc::new(parking_lot::Mutex::new(reloaded)),
+    );
     resume_agent_for_test(vec![handle_value(&worker_id)])
         .await
         .expect("resume after restart");
@@ -1414,10 +1386,10 @@ async fn raw_suspend_timeout_action_reports_sus_008() {
 async fn suspend_rejects_terminal_workers() {
     let _guard = suspend_test_lock().await;
     let (worker_id, dir) = seed_test_worker("worker-suspend-terminal");
-    WORKER_REGISTRY.with(|registry| {
-        let state = registry.borrow().get(&worker_id).cloned().unwrap();
+    {
+        let state = active_worker_registry().get(&worker_id).unwrap();
         state.lock().status = "completed".to_string();
-    });
+    }
 
     let err = suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),

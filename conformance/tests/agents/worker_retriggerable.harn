@@ -67,11 +67,13 @@ pipeline main(harness: Harness) {
       harness.stdio.println(len(first_messages) >= 2)
       harness.stdio.println(contains(first_snapshot_text, "Answer the first question."))
       const waiter = harness.runtime.channel("waiter")
+      const waiter_ready = harness.runtime.channel("waiter-ready")
       const _wait_task = spawn {
+        harness.runtime.send(waiter_ready, true)
         let done = wait_agent(harness.agent, loop)
         harness.runtime.send(waiter, done?.status)
       }
-      harness.clock.sleep_ms(20ms)
+      harness.runtime.receive(waiter_ready)
       harness.stdio.println(harness.runtime.try_receive(waiter) == nil)
       const retriggered = worker_trigger(harness.agent, loop, {follow_up: "Need one more detail"})
       harness.stdio.println(retriggered?.status == "running")

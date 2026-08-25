@@ -6,9 +6,9 @@ use std::sync::Arc;
 use harn_parser::diagnostic_codes::Code;
 
 use super::agents_workers::{
-    emit_worker_event, ensure_worker_config_session_ids, load_worker_state_snapshot,
-    persist_worker_state_snapshot, with_worker_state, worker_event_snapshot, worker_summary,
-    WorkerConfig, WorkerState, WorkerSuspension, WORKER_REGISTRY,
+    active_worker_registry, emit_worker_event, ensure_worker_config_session_ids,
+    load_worker_state_snapshot, persist_worker_state_snapshot, with_worker_state,
+    worker_event_snapshot, worker_summary, WorkerConfig, WorkerState, WorkerSuspension,
 };
 use super::{diagnostic_error, is_nil, replay::*};
 use crate::value::{VmError, VmValue};
@@ -657,11 +657,7 @@ pub(super) fn cold_load_worker(
         let mut worker = state.lock();
         ensure_worker_config_session_ids(&mut worker.config, &worker_id);
     }
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
-    });
+    active_worker_registry().insert(worker_id, state.clone());
     if state.lock().carry_policy.persist_state {
         persist_worker_state_snapshot(&state.lock())?;
     }

@@ -308,13 +308,17 @@ impl Clock for HarnessClockRouter {
             .expect("harness clock override poisoned")
             .is_some()
         {
-            if let Some(paused) = self
+            let paused = self
                 .override_clock
                 .lock()
                 .expect("harness clock override poisoned")
-                .clone()
-            {
+                .clone();
+            if let Some(paused) = paused {
                 paused.advance(duration);
+                // Virtual sleep still represents a scheduling boundary. Give
+                // worker-thread children woken by the advance a chance to
+                // observe it before the caller performs its next snapshot.
+                tokio::task::yield_now().await;
                 return;
             }
         }

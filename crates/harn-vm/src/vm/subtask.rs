@@ -19,9 +19,9 @@
 //! # Placement
 //!
 //! [`SubtaskPlacement`] selects between the creating thread and the runtime's
-//! worker threads. Current-thread placement is the safe default because some
-//! host capabilities still own thread-affine registries and `LocalSet` tasks.
-//! Explicit worker placement gives audited CPU-only fan-out real parallelism:
+//! worker threads. Worker placement is the default now that every capability
+//! reachable from a child interpreter has an execution-scoped cross-thread
+//! owner. It gives CPU-bound fan-out real parallelism:
 //! a tight compute loop never yields, so pinned subtasks run one at a time no
 //! matter how many workers are idle.
 //!
@@ -79,12 +79,11 @@ pub enum SubtaskPlacement {
     /// Run on the thread that created the subtask. Branches interleave at
     /// await points and never migrate, preserving thread-affine capability and
     /// embedding-host contracts.
-    #[default]
     CurrentThread,
     /// Run on the runtime's worker threads. CPU-bound branches of one fan-out
-    /// then run at the same time on different cores. Callers opt into this
-    /// only when every capability reachable from the child has a migrated
-    /// cross-thread owner.
+    /// then run at the same time on different cores. `current_thread` remains
+    /// an explicit compatibility mode for deliberately single-threaded hosts.
+    #[default]
     Worker,
 }
 
@@ -231,7 +230,20 @@ where
 {
     match placement() {
         SubtaskPlacement::Worker => set.spawn(future),
-        SubtaskPlacement::CurrentThread => set.spawn_local(future),
+        SubtaskPlacement::CurrentThread => {
+            // A current-thread execution tree is the deterministic placement.
+            // Give each child its first poll in source order before admitting
+            // the next child; Tokio's local ready queue does not promise the
+            // same order across separately constructed runtimes. A pending
+            // future is polled again immediately by the spawned task, replacing
+            // this noop waker with its real scheduler waker.
+            let mut future = Box::pin(future);
+            let mut context = Context::from_waker(std::task::Waker::noop());
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => set.spawn_local(async move { value }),
+                Poll::Pending => set.spawn_local(future),
+            }
+        }
     }
 }
 
@@ -246,6 +258,24 @@ where
     F::Output: Send + 'static,
 {
     spawn(prepare(registry, future))
+}
+
+/// Spawn a long-lived child that inherits execution policy but owns an
+/// independent session lifecycle.
+pub(crate) fn spawn_inherited_child<F>(
+    registry: Arc<PoolRegistry>,
+    future: F,
+) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    spawn(PreparedSubtask {
+        inner: scope_ambient(
+            AmbientExecutionScope::capture_inherited(),
+            with_pool_registry_scope(registry, future),
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -277,10 +307,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn scoped_placement_reaches_the_spawn_seam() {
-        assert_eq!(placement(), SubtaskPlacement::CurrentThread);
-        let observed = scope_placement(SubtaskPlacement::Worker, async { placement() }).await;
-        assert_eq!(observed, SubtaskPlacement::Worker);
-        assert_eq!(placement(), SubtaskPlacement::CurrentThread);
+        assert_eq!(placement(), SubtaskPlacement::Worker);
+        let observed =
+            scope_placement(SubtaskPlacement::CurrentThread, async { placement() }).await;
+        assert_eq!(observed, SubtaskPlacement::CurrentThread);
+        assert_eq!(placement(), SubtaskPlacement::Worker);
     }
 
     #[test]

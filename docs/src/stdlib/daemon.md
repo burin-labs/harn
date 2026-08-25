@@ -78,6 +78,29 @@ Return the latest persisted daemon snapshot plus live queue metadata:
 The rest of the payload mirrors `agent_loop` daemon snapshots, including
 `daemon_state`, `recorded_messages`, `total_iterations`, and `saved_at`.
 
+### `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)`
+
+Wait until the daemon is idle, its trigger queue is empty, and its persisted
+snapshot has reached `min_iterations`. The defaults are `0` iterations and a
+5,000 ms timeout.
+
+The builtin returns the same closed snapshot record as
+`managed_daemon_snapshot`. It throws if the daemon stops, fails, or doesn't
+meet all three conditions before the timeout. Use it after `daemon_trigger`
+when later work depends on the trigger's completed turn:
+
+```harn
+const before = harness.agent.managed_daemon_wait(reviewer)
+harness.agent.daemon_trigger(reviewer, {
+  kind: "file_changed",
+  path: "src/lib.rs",
+})
+const after = harness.agent.managed_daemon_wait(
+  reviewer,
+  before.total_iterations + 1,
+)
+```
+
 ### `harness.agent.daemon_stop(handle)`
 
 Stop a daemon and preserve its state on disk. The runtime waits briefly for an
@@ -102,5 +125,7 @@ and replayed after resume.
 - Trigger payloads are handed to the daemon only from an idle boundary, so a
   persisted snapshot always reflects the pre-trigger or post-trigger state and
   never an ambiguous half-consumed queue.
+- `managed_daemon_wait` observes idle transitions directly. It doesn't poll
+  the daemon or require a caller-owned sleep loop.
 - Forced stop/restart is intentionally at-least-once: an in-flight trigger is
   re-queued on stop/resume instead of being dropped silently.

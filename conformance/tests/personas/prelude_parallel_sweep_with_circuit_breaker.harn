@@ -22,11 +22,10 @@ pipeline test(harness: Harness, task: unknown) {
   )
   harness.stdio.println(result.status)
   harness.stdio.println(result.circuit_open)
-  harness.stdio.println(result.succeeded)
-  harness.stdio.println(result.failed)
-  harness.stdio.println(result.skipped)
-  harness.stdio.println(len(result.results))
-  harness.stdio.println(result.results[0].value)
-  harness.stdio.println(result.results[1].ok)
+  // Siblings may finish before the failing branch trips the circuit, or the
+  // failure may win immediately. Assert conservation, not completion order.
+  harness.stdio.println(result.failed == 1)
+  harness.stdio.println(result.succeeded + result.skipped == 3)
+  harness.stdio.println(len(result.results) == result.succeeded + result.failed)
   harness.stdio.println(result.receipt.status)
 }

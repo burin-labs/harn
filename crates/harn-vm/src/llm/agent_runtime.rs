@@ -46,6 +46,12 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+pub(crate) fn swap_current_loop_sinks(
+    next: Vec<Arc<dyn AgentEventSink>>,
+) -> Vec<Arc<dyn AgentEventSink>> {
+    CURRENT_LOOP_SINKS.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
 /// Registry of hooks called when an agent-loop session ends. Each hook
 /// receives the `session_id` so it can release resources scoped to that
 /// session (e.g. cancelling orphaned long-running handles).

@@ -237,6 +237,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("mailbox_receive", "harness.runtime.mailbox_receive"),
     ("mailbox_send", "harness.runtime.mailbox_send"),
     ("mailbox_try_receive", "harness.runtime.mailbox_try_receive"),
+    ("managed_daemon_wait", "harness.agent.managed_daemon_wait"),
     ("metadata_entries", "harness.project.metadata_entries"),
     ("metadata_get", "harness.project.metadata_get"),
     ("metadata_refresh_hashes", "harness.project.metadata_refresh_hashes"),

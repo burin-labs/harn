@@ -1,6 +1,5 @@
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,17 +12,6 @@ use crate::value::{
 };
 use crate::vm::Vm;
 use crate::wait_for_graph::{channel_target, ChannelTarget, WaitGuard};
-
-struct CircuitState {
-    failures: usize,
-    threshold: usize,
-    reset_ms: u64,
-    opened_at: Option<std::time::Instant>,
-}
-
-thread_local! {
-    static CIRCUITS: RefCell<HashMap<String, CircuitState>> = RefCell::new(HashMap::new());
-}
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // sync
@@ -1721,28 +1709,23 @@ fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     exposure = "harness.runtime.circuit_breaker",
     effects = ["state.mutate@const=circuits"],
     sig = "circuit_breaker(name: string, threshold?: int, reset_ms?: int) -> nil",
+    kind = "async",
     category = "concurrency",
     doc = "Create or reset a named circuit breaker."
 )]
-fn circuit_breaker_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args
-        .first()
-        .map(|a| a.display())
-        .unwrap_or_else(|| "default".to_string());
+async fn circuit_breaker_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = circuit_name(&args, "circuit_breaker")?;
     let threshold = optional_positive_usize_arg(args.get(1), 5, "circuit_breaker", "threshold")?;
     let reset_ms =
         optional_non_negative_u64_arg(args.get(2), 30000, "circuit_breaker", "reset_ms")?;
-    CIRCUITS.with(|circuits| {
-        circuits.borrow_mut().insert(
-            name.clone(),
-            CircuitState {
-                failures: 0,
-                threshold,
-                reset_ms,
-                opened_at: None,
-            },
-        );
-    });
+    ctx.child_vm().shared_state_runtime.configure_circuit(
+        name.clone(),
+        threshold,
+        Duration::from_millis(reset_ms),
+    );
     Ok(VmValue::String(arcstr::ArcStr::from(name)))
 }
 
@@ -1776,57 +1759,46 @@ fn optional_non_negative_u64_arg(
         .map_err(|_| ArgError::constraint(builtin, ErrorKind::Runtime, key, "must be >= 0"))
 }
 
+fn circuit_name(args: &[VmValue], builtin: &str) -> Result<String, VmError> {
+    Ok(Args::runtime(builtin, args).string(0, "name")?.to_owned())
+}
+
 #[harn_builtin(
     exposure = "harness.runtime.circuit_check",
     effects = ["state.read@arg0", "clock.read@const=monotonic"],
     sig = "circuit_check(name: string) -> string",
+    kind = "async",
     category = "concurrency",
     doc = "Return the state of a named circuit breaker."
 )]
-fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args
-        .first()
-        .map(|a| a.display())
-        .unwrap_or_else(|| "default".to_string());
-    let state = CIRCUITS.with(|circuits| {
-        let circuits = circuits.borrow();
-        let Some(cs) = circuits.get(&name) else {
-            return "closed".to_string();
-        };
-        match cs.opened_at {
-            None => "closed".to_string(),
-            Some(opened) => {
-                let elapsed = opened.elapsed().as_millis() as u64;
-                if elapsed >= cs.reset_ms {
-                    "half_open".to_string()
-                } else {
-                    "open".to_string()
-                }
-            }
-        }
-    });
-    Ok(VmValue::String(arcstr::ArcStr::from(state)))
+async fn circuit_check_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = circuit_name(&args, "circuit_check")?;
+    let state = ctx
+        .child_vm()
+        .shared_state_runtime
+        .circuit_status(&name, std::time::Instant::now());
+    Ok(VmValue::String(arcstr::ArcStr::from(state.as_str())))
 }
 
 #[harn_builtin(
     exposure = "harness.runtime.circuit_record_success",
     effects = ["state.mutate@arg0"],
     sig = "circuit_record_success(name: string) -> nil",
+    kind = "async",
     category = "concurrency",
     doc = "Record a successful call for a named circuit breaker."
 )]
-fn circuit_record_success_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args
-        .first()
-        .map(|a| a.display())
-        .unwrap_or_else(|| "default".to_string());
-    CIRCUITS.with(|circuits| {
-        let mut circuits = circuits.borrow_mut();
-        if let Some(cs) = circuits.get_mut(&name) {
-            cs.failures = 0;
-            cs.opened_at = None;
-        }
-    });
+async fn circuit_record_success_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = circuit_name(&args, "circuit_record_success")?;
+    ctx.child_vm()
+        .shared_state_runtime
+        .record_circuit_success(&name);
     Ok(VmValue::Nil)
 }
 
@@ -1834,25 +1806,19 @@ fn circuit_record_success_builtin(args: &[VmValue], _out: &mut String) -> Result
     exposure = "harness.runtime.circuit_record_failure",
     effects = ["state.mutate@arg0", "clock.read@const=monotonic"],
     sig = "circuit_record_failure(name: string) -> bool",
+    kind = "async",
     category = "concurrency",
     doc = "Record a failed call and return whether the circuit opened."
 )]
-fn circuit_record_failure_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args
-        .first()
-        .map(|a| a.display())
-        .unwrap_or_else(|| "default".to_string());
-    let is_open = CIRCUITS.with(|circuits| {
-        let mut circuits = circuits.borrow_mut();
-        if let Some(cs) = circuits.get_mut(&name) {
-            cs.failures += 1;
-            if cs.failures >= cs.threshold && cs.opened_at.is_none() {
-                cs.opened_at = Some(std::time::Instant::now());
-                return true;
-            }
-        }
-        false
-    });
+async fn circuit_record_failure_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = circuit_name(&args, "circuit_record_failure")?;
+    let is_open = ctx
+        .child_vm()
+        .shared_state_runtime
+        .record_circuit_failure(&name, std::time::Instant::now());
     Ok(VmValue::Bool(is_open))
 }
 
@@ -1860,21 +1826,16 @@ fn circuit_record_failure_builtin(args: &[VmValue], _out: &mut String) -> Result
     exposure = "harness.runtime.circuit_reset",
     effects = ["state.mutate@arg0"],
     sig = "circuit_reset(name: string) -> nil",
+    kind = "async",
     category = "concurrency",
     doc = "Reset a named circuit breaker to closed."
 )]
-fn circuit_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = args
-        .first()
-        .map(|a| a.display())
-        .unwrap_or_else(|| "default".to_string());
-    CIRCUITS.with(|circuits| {
-        let mut circuits = circuits.borrow_mut();
-        if let Some(cs) = circuits.get_mut(&name) {
-            cs.failures = 0;
-            cs.opened_at = None;
-        }
-    });
+async fn circuit_reset_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = circuit_name(&args, "circuit_reset")?;
+    ctx.child_vm().shared_state_runtime.reset_circuit(&name);
     Ok(VmValue::Nil)
 }
 
@@ -2019,102 +1980,6 @@ mod tests {
         let atom = call(&mut vm, "atomic", vec![VmValue::Bool(true)]).unwrap();
         let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
         assert_eq!(val.display(), "1");
-    }
-
-    #[test]
-    fn circuit_breaker_starts_closed() {
-        let mut vm = vm();
-        call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("test_cb"), VmValue::Int(3)],
-        )
-        .unwrap();
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb")]).unwrap();
-        assert_eq!(state.display(), "closed");
-    }
-
-    #[test]
-    fn circuit_opens_at_threshold() {
-        let mut vm = vm();
-        call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("test_cb2"), VmValue::Int(2)],
-        )
-        .unwrap();
-        let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
-        assert_eq!(opened.display(), "false");
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
-        assert_eq!(state.display(), "closed");
-
-        let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
-        assert_eq!(opened.display(), "true");
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
-        assert_eq!(state.display(), "open");
-    }
-
-    #[test]
-    fn circuit_success_resets() {
-        let mut vm = vm();
-        call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("test_cb3"), VmValue::Int(2)],
-        )
-        .unwrap();
-        call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
-        call(&mut vm, "circuit_record_success", vec![s("test_cb3")]).unwrap();
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
-        assert_eq!(state.display(), "closed");
-        // Success must reset the counter — one more failure should stay closed.
-        call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
-        assert_eq!(state.display(), "closed");
-    }
-
-    #[test]
-    fn circuit_reset_clears_state() {
-        let mut vm = vm();
-        call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("test_cb4"), VmValue::Int(1)],
-        )
-        .unwrap();
-        call(&mut vm, "circuit_record_failure", vec![s("test_cb4")]).unwrap();
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb4")]).unwrap();
-        assert_eq!(state.display(), "open");
-        call(&mut vm, "circuit_reset", vec![s("test_cb4")]).unwrap();
-        let state = call(&mut vm, "circuit_check", vec![s("test_cb4")]).unwrap();
-        assert_eq!(state.display(), "closed");
-    }
-
-    #[test]
-    fn circuit_unknown_name_defaults_closed() {
-        let mut vm = vm();
-        let state = call(&mut vm, "circuit_check", vec![s("nonexistent")]).unwrap();
-        assert_eq!(state.display(), "closed");
-    }
-
-    #[test]
-    fn circuit_breaker_rejects_invalid_numeric_config() {
-        let mut vm = vm();
-        let threshold_err = call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("bad_threshold"), VmValue::Int(0)],
-        )
-        .expect_err("zero threshold must fail");
-        assert!(threshold_err.to_string().contains("threshold"));
-
-        let reset_err = call(
-            &mut vm,
-            "circuit_breaker",
-            vec![s("bad_reset"), VmValue::Int(1), VmValue::Int(-1)],
-        )
-        .expect_err("negative reset must fail");
-        assert!(reset_err.to_string().contains("reset_ms"));
     }
 
     #[test]

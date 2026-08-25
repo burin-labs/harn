@@ -164,8 +164,11 @@ impl Dispatcher {
             }
             DispatchUri::AutoResume { worker_id } => {
                 let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.base_vm.child_vm());
-                let value = crate::stdlib::agents::resume_worker_from_auto_resume_trigger(
-                    &ctx, worker_id, event,
+                let value = crate::stdlib::agents::agents_workers::scope_worker_registry(
+                    self.base_vm.worker_registry.clone(),
+                    crate::stdlib::agents::resume_worker_from_auto_resume_trigger(
+                        &ctx, worker_id, event,
+                    ),
                 )
                 .await
                 .map_err(|error| DispatchError::Local(error.to_string()))?;

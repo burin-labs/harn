@@ -136,6 +136,7 @@ fn captured_catalog_matches_scope_fields() {
         "SESSION_ENVIRONMENT_CONTEXT",
         "PROCESS_ADMISSION_CONTEXT",
         "CURRENT_HOST_BRIDGE",
+        "CURRENT_LOOP_SINKS",
         "CURRENT_SESSION_STACK",
         "LLM_CONFIG_OVERRIDES_CONTEXT",
         "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
@@ -154,6 +155,12 @@ fn captured_catalog_matches_scope_fields() {
         "MCP_CALL_BUDGET",
         "PG_QUERY_BUDGET",
         "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+        "ACTIVE_WORKER_REGISTRY",
+        "ACTIVE_DAEMON_REGISTRY",
+        "ACTIVE_TRIGGER_REGISTRY",
+        "ACTIVE_SESSION_RUNTIME",
+        "ACTIVE_TRACING_RUNTIME",
+        "ACTIVE_AGENT_HOST_SESSION_RUNTIME",
     ]);
     assert_eq!(
         captured, expected,

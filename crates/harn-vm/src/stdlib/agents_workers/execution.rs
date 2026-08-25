@@ -9,9 +9,9 @@ use super::worktree::{
     cleanup_worker_execution, ensure_worker_worktree, WorkerMutationSessionResetGuard,
 };
 use super::{
-    clone_worker_state, compact_worker_transcript, next_worker_id, worker_provenance,
-    worker_request_for_config, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile,
-    WorkerExecutionResult, WorkerState, WORKER_REGISTRY,
+    active_worker_registry, clone_worker_state, compact_worker_transcript, next_worker_id,
+    worker_provenance, worker_request_for_config, WorkerCarryPolicy, WorkerConfig,
+    WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
 };
 use crate::agent_events::WorkerEvent;
 use crate::orchestration::{
@@ -345,190 +345,182 @@ pub(in super::super) fn spawn_worker_task(
     };
 
     let state_for_task = state.clone();
-    // Snapshot the parent's inherited ambient context (command/permission
-    // policies + runtime-context overlay) so the worker runs with its OWN
-    // isolated copy. Workers are spawned with `spawn_local`, so without this a
-    // child holding its policy across an `.await` would read a sibling's
-    // top-of-stack. `scope_ambient` swaps the task's scope in/out around every
-    // poll; the worker's own execution/approval pushes below land on that
-    // isolated scope. See `orchestration::ambient_scope`.
-    let inherited_scope = crate::orchestration::AmbientExecutionScope::capture_inherited();
-    let handle = tokio::task::spawn_local(crate::orchestration::scope_ambient(
-        inherited_scope,
-        async move {
-            if cancel_token.load(Ordering::SeqCst) {
-                return Err(VmError::CategorizedError {
-                    message: "worker cancelled before start".to_string(),
-                    category: crate::value::ErrorCategory::Cancelled,
-                });
-            }
-            let spawned_snapshot = {
-                let worker = state_for_task.lock();
-                worker_event_snapshot(&worker)
-            };
-            emit_worker_event(
-                Some(&worker_ctx),
-                &spawned_snapshot,
-                WorkerEvent::WorkerSpawned,
-            )
-            .await?;
+    // Long-lived workers inherit policy but own an independent session. Route
+    // them through the same placement seam as inline child interpreters so a
+    // resume issued by a worker-thread subtask never requires a LocalSet.
+    let pool_registry = worker_ctx.child_vm().pool_registry.clone();
+    let handle = crate::vm::subtask::spawn_inherited_child(pool_registry, async move {
+        if cancel_token.load(Ordering::SeqCst) {
+            return Err(VmError::CategorizedError {
+                message: "worker cancelled before start".to_string(),
+                category: crate::value::ErrorCategory::Cancelled,
+            });
+        }
+        let spawned_snapshot = {
+            let worker = state_for_task.lock();
+            worker_event_snapshot(&worker)
+        };
+        emit_worker_event(
+            Some(&worker_ctx),
+            &spawned_snapshot,
+            WorkerEvent::WorkerSpawned,
+        )
+        .await?;
 
-            if let Some(ref policy) = worker_policy {
-                push_execution_policy(policy.clone());
-            }
-            let worker_approval = audit.approval_policy.clone();
-            if let Some(ref approval) = worker_approval {
-                crate::orchestration::push_approval_policy(approval.clone());
-            }
-            let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
-                crate::runtime_context::RuntimeContextOverlay {
-                    workflow_id: None,
-                    run_id: audit.run_id.clone(),
-                    stage_id: None,
-                    worker_id: Some(worker_id.clone()),
-                },
-            );
-            let mut result = execute_worker_config(
-                &worker_ctx,
-                worker_id,
-                task,
-                config,
-                prior_transcript,
-                execution,
-                audit,
-            )
-            .await;
-            if worker_approval.is_some() {
-                crate::orchestration::pop_approval_policy();
-            }
-            if worker_policy.is_some() {
-                pop_execution_policy();
-            }
-            if transcript_mode == "compact" {
-                if let Ok(executed) = &mut result {
-                    if let Some(transcript) = executed.transcript.take() {
-                        match compact_worker_transcript(&worker_ctx, transcript).await {
-                            Ok(compacted) => {
-                                if let Some(object) = executed.payload.as_object_mut() {
-                                    object.insert(
-                                        "transcript".to_string(),
-                                        crate::llm::helpers::vm_value_to_json(&compacted),
-                                    );
-                                }
-                                executed.transcript = Some(compacted);
+        if let Some(ref policy) = worker_policy {
+            push_execution_policy(policy.clone());
+        }
+        let worker_approval = audit.approval_policy.clone();
+        if let Some(ref approval) = worker_approval {
+            crate::orchestration::push_approval_policy(approval.clone());
+        }
+        let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
+            crate::runtime_context::RuntimeContextOverlay {
+                workflow_id: None,
+                run_id: audit.run_id.clone(),
+                stage_id: None,
+                worker_id: Some(worker_id.clone()),
+            },
+        );
+        let mut result = execute_worker_config(
+            &worker_ctx,
+            worker_id,
+            task,
+            config,
+            prior_transcript,
+            execution,
+            audit,
+        )
+        .await;
+        if worker_approval.is_some() {
+            crate::orchestration::pop_approval_policy();
+        }
+        if worker_policy.is_some() {
+            pop_execution_policy();
+        }
+        if transcript_mode == "compact" {
+            if let Ok(executed) = &mut result {
+                if let Some(transcript) = executed.transcript.take() {
+                    match compact_worker_transcript(&worker_ctx, transcript).await {
+                        Ok(compacted) => {
+                            if let Some(object) = executed.payload.as_object_mut() {
+                                object.insert(
+                                    "transcript".to_string(),
+                                    crate::llm::helpers::vm_value_to_json(&compacted),
+                                );
                             }
-                            Err(error) => {
-                                result = Err(error);
-                            }
-                        }
-                    }
-                }
-            }
-            {
-                let completion = {
-                    let mut worker = state_for_task.lock();
-                    worker.awaiting_since = None;
-                    worker.awaiting_started_at = None;
-                    match &result {
-                        Ok(executed) => {
-                            let suspended = executed
-                                .payload
-                                .get("status")
-                                .and_then(|value| value.as_str())
-                                == Some("suspended");
-                            worker.latest_payload = Some(executed.payload.clone());
-                            worker.latest_error = None;
-                            worker.transcript = executed.transcript.clone();
-                            worker.artifacts = executed.artifacts.clone();
-                            worker.execution = executed.execution.clone();
-                            worker.child_run_id = executed.child_run_id.clone();
-                            worker.child_run_path = executed.child_run_path.clone();
-                            if let Some(run_id) = &worker.child_run_id {
-                                worker.audit.run_id = Some(run_id.clone());
-                            }
-                            if suspended {
-                                worker.status = crate::agent_events::AgentLifecycleState::Suspended
-                                    .wire_name()
-                                    .to_string();
-                                worker.finished_at = None;
-                            } else if worker.carry_policy.retriggerable {
-                                // Canonical wire name from the shared lifecycle
-                                // registry; `awaiting` remains a parse alias only.
-                                worker.status =
-                                    crate::agent_events::AgentLifecycleState::AwaitingInput
-                                        .wire_name()
-                                        .to_string();
-                                worker.finished_at = None;
-                                worker.awaiting_started_at = Some(uuid::Uuid::now_v7().to_string());
-                                worker.awaiting_since = Some(std::time::Instant::now());
-                            } else {
-                                worker.status = crate::agent_events::AgentLifecycleState::Completed
-                                    .wire_name()
-                                    .to_string();
-                                worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
-                            }
-                            if worker.carry_policy.persist_state || suspended {
-                                persist_worker_state_snapshot(&worker).ok();
-                            }
+                            executed.transcript = Some(compacted);
                         }
                         Err(error) => {
-                            if matches!(
-                                error,
-                                VmError::CategorizedError {
-                                    category: crate::value::ErrorCategory::Cancelled,
-                                    ..
-                                }
-                            ) {
-                                worker.status = crate::agent_events::AgentLifecycleState::Cancelled
-                                    .wire_name()
-                                    .to_string();
-                            } else {
-                                worker.status = crate::agent_events::AgentLifecycleState::Failed
-                                    .wire_name()
-                                    .to_string();
-                            }
-                            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
-                            worker.latest_error = Some(error.to_string());
-                            if worker.carry_policy.persist_state {
-                                persist_worker_state_snapshot(&worker).ok();
-                            }
+                            result = Err(error);
                         }
                     }
-                    let snapshot = worker_event_snapshot(&worker);
-                    let event = match &result {
-                        Ok(executed)
-                            if executed
-                                .payload
-                                .get("status")
-                                .and_then(|value| value.as_str())
-                                == Some("suspended") =>
-                        {
-                            None
-                        }
-                        // Retriggerable workers don't terminate when their
-                        // current cycle completes; they go into
-                        // `awaiting_input` and wait for the next host
-                        // trigger. Surface that explicitly so observers see
-                        // the state transition rather than radio silence.
-                        Ok(_) if worker.carry_policy.retriggerable => {
-                            Some(WorkerEvent::WorkerWaitingForInput)
-                        }
-                        Ok(_) => Some(WorkerEvent::WorkerCompleted),
-                        Err(VmError::CategorizedError {
-                            category: crate::value::ErrorCategory::Cancelled,
-                            ..
-                        }) => Some(WorkerEvent::WorkerCancelled),
-                        Err(_) => Some(WorkerEvent::WorkerFailed),
-                    };
-                    (snapshot, event)
-                };
-                if let Some(event) = completion.1 {
-                    emit_worker_event(Some(&worker_ctx), &completion.0, event).await?;
                 }
             }
-            result
-        },
-    ));
+        }
+        {
+            let completion = {
+                let mut worker = state_for_task.lock();
+                worker.awaiting_since = None;
+                worker.awaiting_started_at = None;
+                match &result {
+                    Ok(executed) => {
+                        let suspended = executed
+                            .payload
+                            .get("status")
+                            .and_then(|value| value.as_str())
+                            == Some("suspended");
+                        worker.latest_payload = Some(executed.payload.clone());
+                        worker.latest_error = None;
+                        worker.transcript = executed.transcript.clone();
+                        worker.artifacts = executed.artifacts.clone();
+                        worker.execution = executed.execution.clone();
+                        worker.child_run_id = executed.child_run_id.clone();
+                        worker.child_run_path = executed.child_run_path.clone();
+                        if let Some(run_id) = &worker.child_run_id {
+                            worker.audit.run_id = Some(run_id.clone());
+                        }
+                        if suspended {
+                            worker.status = crate::agent_events::AgentLifecycleState::Suspended
+                                .wire_name()
+                                .to_string();
+                            worker.finished_at = None;
+                        } else if worker.carry_policy.retriggerable {
+                            // Canonical wire name from the shared lifecycle
+                            // registry; `awaiting` remains a parse alias only.
+                            worker.status = crate::agent_events::AgentLifecycleState::AwaitingInput
+                                .wire_name()
+                                .to_string();
+                            worker.finished_at = None;
+                            worker.awaiting_started_at = Some(uuid::Uuid::now_v7().to_string());
+                            worker.awaiting_since = Some(std::time::Instant::now());
+                        } else {
+                            worker.status = crate::agent_events::AgentLifecycleState::Completed
+                                .wire_name()
+                                .to_string();
+                            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+                        }
+                        if worker.carry_policy.persist_state || suspended {
+                            persist_worker_state_snapshot(&worker).ok();
+                        }
+                    }
+                    Err(error) => {
+                        if matches!(
+                            error,
+                            VmError::CategorizedError {
+                                category: crate::value::ErrorCategory::Cancelled,
+                                ..
+                            }
+                        ) {
+                            worker.status = crate::agent_events::AgentLifecycleState::Cancelled
+                                .wire_name()
+                                .to_string();
+                        } else {
+                            worker.status = crate::agent_events::AgentLifecycleState::Failed
+                                .wire_name()
+                                .to_string();
+                        }
+                        worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+                        worker.latest_error = Some(error.to_string());
+                        if worker.carry_policy.persist_state {
+                            persist_worker_state_snapshot(&worker).ok();
+                        }
+                    }
+                }
+                let snapshot = worker_event_snapshot(&worker);
+                let event = match &result {
+                    Ok(executed)
+                        if executed
+                            .payload
+                            .get("status")
+                            .and_then(|value| value.as_str())
+                            == Some("suspended") =>
+                    {
+                        None
+                    }
+                    // Retriggerable workers don't terminate when their
+                    // current cycle completes; they go into
+                    // `awaiting_input` and wait for the next host
+                    // trigger. Surface that explicitly so observers see
+                    // the state transition rather than radio silence.
+                    Ok(_) if worker.carry_policy.retriggerable => {
+                        Some(WorkerEvent::WorkerWaitingForInput)
+                    }
+                    Ok(_) => Some(WorkerEvent::WorkerCompleted),
+                    Err(VmError::CategorizedError {
+                        category: crate::value::ErrorCategory::Cancelled,
+                        ..
+                    }) => Some(WorkerEvent::WorkerCancelled),
+                    Err(_) => Some(WorkerEvent::WorkerFailed),
+                };
+                (snapshot, event)
+            };
+            if let Some(event) = completion.1 {
+                emit_worker_event(Some(&worker_ctx), &completion.0, event).await?;
+            }
+        }
+        result
+    });
 
     state.lock().handle = Some(handle);
 }
@@ -675,11 +667,7 @@ pub(in super::super) async fn execute_delegated_stage(
             persist_worker_state_snapshot(&worker)?;
         }
     }
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
-    });
+    active_worker_registry().insert(worker_id.clone(), state.clone());
     spawn_worker_task(state.clone(), ctx.child_ctx());
     let handle = state
         .lock()

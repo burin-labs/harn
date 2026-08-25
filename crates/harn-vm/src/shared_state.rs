@@ -43,16 +43,96 @@ struct Mailbox {
     depth: Arc<AtomicI64>,
 }
 
+struct CircuitState {
+    failures: usize,
+    threshold: usize,
+    reset_after: std::time::Duration,
+    opened_at: Option<std::time::Instant>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CircuitStatus {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+impl CircuitStatus {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Open => "open",
+            Self::HalfOpen => "half_open",
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct VmSharedStateRuntime {
     cells: parking_lot::Mutex<BTreeMap<ScopedKey, SharedCell>>,
     maps: parking_lot::Mutex<BTreeMap<ScopedKey, SharedMap>>,
     mailboxes: parking_lot::Mutex<BTreeMap<ScopedKey, Mailbox>>,
+    circuits: parking_lot::Mutex<BTreeMap<String, CircuitState>>,
 }
 
 impl VmSharedStateRuntime {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn configure_circuit(
+        &self,
+        name: String,
+        threshold: usize,
+        reset_after: std::time::Duration,
+    ) {
+        self.circuits.lock().insert(
+            name,
+            CircuitState {
+                failures: 0,
+                threshold,
+                reset_after,
+                opened_at: None,
+            },
+        );
+    }
+
+    pub(crate) fn circuit_status(&self, name: &str, now: std::time::Instant) -> CircuitStatus {
+        let circuits = self.circuits.lock();
+        let Some(state) = circuits.get(name) else {
+            return CircuitStatus::Closed;
+        };
+        match state.opened_at {
+            None => CircuitStatus::Closed,
+            Some(opened_at) if now.saturating_duration_since(opened_at) >= state.reset_after => {
+                CircuitStatus::HalfOpen
+            }
+            Some(_) => CircuitStatus::Open,
+        }
+    }
+
+    pub(crate) fn record_circuit_success(&self, name: &str) {
+        if let Some(state) = self.circuits.lock().get_mut(name) {
+            state.failures = 0;
+            state.opened_at = None;
+        }
+    }
+
+    pub(crate) fn record_circuit_failure(&self, name: &str, now: std::time::Instant) -> bool {
+        let mut circuits = self.circuits.lock();
+        let Some(state) = circuits.get_mut(name) else {
+            return false;
+        };
+        state.failures = state.failures.saturating_add(1);
+        if state.failures >= state.threshold && state.opened_at.is_none() {
+            state.opened_at = Some(now);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn reset_circuit(&self, name: &str) {
+        self.record_circuit_success(name);
     }
 
     pub(crate) fn open_cell(&self, scoped: ScopedKey, initial: VmValue) -> VmValue {

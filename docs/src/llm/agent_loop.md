@@ -1059,6 +1059,7 @@ options manually, use the daemon builtins:
 - `daemon_spawn(config)`
 - `daemon_trigger(handle, event)`
 - `daemon_snapshot(handle)`
+- `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)`
 - `daemon_stop(handle)`
 - `daemon_resume(path)`
 
@@ -1078,7 +1079,7 @@ const daemon = daemon_spawn({
 })
 
 daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
-const snap = daemon_snapshot(daemon)
+const snap = managed_daemon_wait(daemon, 2)
 harness.stdio.log(snap.pending_event_count)
 daemon_stop(daemon)
 const resumed = daemon_resume(".harn/daemons/reviewer")

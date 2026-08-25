@@ -387,8 +387,15 @@ impl<'a> Linter<'a> {
                 for type_arg in type_args {
                     self.record_type_expr_references(type_arg);
                 }
-                if name == "schema_of" && args.len() == 1 {
-                    if let Node::Identifier(type_name) = &args[0].node {
+                let schema_type_token = match (name.as_str(), args.as_slice()) {
+                    ("schema_of", [type_token]) => Some(type_token),
+                    ("schema_is" | "schema_expect" | "is_type", [_, type_token]) => {
+                        Some(type_token)
+                    }
+                    _ => None,
+                };
+                if let Some(type_token) = schema_type_token {
+                    if let Node::Identifier(type_name) = &type_token.node {
                         self.type_references.insert(type_name.clone());
                     }
                 }

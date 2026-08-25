@@ -37,6 +37,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "lifecycle_replay_resume_input"),
     ("agent", "load_skill"),
     ("agent", "managed_daemon_snapshot"),
+    ("agent", "managed_daemon_wait"),
     ("agent", "notify_file_edited"),
     ("agent", "pipeline_on_finish"),
     ("agent", "pop_llm_render_context"),
