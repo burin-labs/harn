@@ -1,26 +1,19 @@
 //! Flow-sensitive narrowing: refinement extraction and exhaustiveness checks.
 //!
-//! `extract_refinements` is the dispatch entry — given a condition AST node
-//! it yields a `Refinements` describing the narrowings to apply on the
-//! truthy and falsy branches. The supporting `extract_*_refinements`
-//! helpers cover the specific patterns the type checker recognises:
-//! `x != nil`, `type_of(x) == "T"`, `x.has("k")`, `schema_is(x, S)`, and
-//! their negations.
-//!
-//! Match exhaustiveness and the `unknown`-variant fallback check live here
-//! too, sharing the same flow facts that refinement extraction populates.
+//! `extract_refinements` turns a condition into truthy and falsy facts for
+//! nil, runtime type, field-presence, and schema checks. Match exhaustiveness
+//! and the `unknown` fallback share those facts here.
 
 use crate::ast::*;
 use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
-use std::collections::HashSet;
 
 use super::super::exits::block_definitely_exits;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{PathNarrowing, Refinements, TypeScope};
 use super::super::union::{
     discriminant_field, extract_type_of_arg, intersect_types, narrow_shape_union_by_tag,
-    narrow_to_single, reference_path_key, remove_from_union, subtract_type, DiscriminantValue,
+    narrow_to_single, reference_path_key, remove_from_union, DiscriminantValue,
 };
 use super::super::TypeChecker;
 
@@ -331,60 +324,6 @@ pub(in crate::typechecker) fn vars_reassigned_in_nested_closures(
 }
 
 impl TypeChecker {
-    /// Resolve an immutable expression alias at a condition leaf. The depth
-    /// visited-name set is defensive; source-order const binding already
-    /// prevents a user-written cycle.
-    pub(in crate::typechecker) fn resolve_flow_alias_node(
-        &self,
-        node: &SNode,
-        scope: &TypeScope,
-    ) -> (SNode, bool) {
-        let mut resolved = node.clone();
-        let mut used_alias = false;
-        let mut visited = HashSet::new();
-        while let Node::Identifier(name) = &resolved.node {
-            let name = name.clone();
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            let Some(expression) = scope.get_flow_alias(&name) else {
-                break;
-            };
-            resolved = expression.clone();
-            used_alias = true;
-        }
-        (resolved, used_alias)
-    }
-
-    /// Resolve only aliases that preserve a `type_of` discriminant. A normal
-    /// const still owns its value: `const result = lookup(); result != nil`
-    /// must narrow `result`, not replace it with the call expression. In
-    /// contrast, `const kind = type_of(value); kind == "string"` carries a
-    /// stable fact about `value` and may expose that `type_of` call here.
-    fn resolve_typeof_alias_node(&self, node: &SNode, scope: &TypeScope) -> (SNode, bool) {
-        let original = node.clone();
-        let mut resolved = node.clone();
-        let mut visited = HashSet::new();
-        while let Node::Identifier(name) = &resolved.node {
-            let name = name.clone();
-            if !visited.insert(name.clone()) {
-                return (original, false);
-            }
-            let Some(expression) = scope.get_flow_alias(&name) else {
-                return (original, false);
-            };
-            resolved = expression.clone();
-        }
-        if matches!(
-            &resolved.node,
-            Node::FunctionCall { name, .. } if name == "type_of"
-        ) {
-            (resolved, true)
-        } else {
-            (original, false)
-        }
-    }
-
     /// Invalidate every narrowing (variable or reference path) whose subject is
     /// reassigned in a branch or loop body that can continue in the current
     /// callable.
@@ -1138,147 +1077,6 @@ impl TypeChecker {
             )]);
             return Refinements {
                 truthy_paths: vec![(path_key, PathNarrowing::Intersect(schema))],
-                ..Refinements::default()
-            };
-        }
-        Refinements::empty()
-    }
-
-    /// Extract `schema_is(x, S)` / `is_type(x, S)` refinements for a bare
-    /// variable (resolved intersect/subtract) or a reference path (deferred
-    /// `Intersect`/`Subtract` directives re-applied to the path's type).
-    fn extract_schema_refinements(&self, args: &[SNode], scope: &TypeScope) -> Refinements {
-        let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) else {
-            return Refinements::empty();
-        };
-        if let Node::Identifier(var_name) = &args[0].node {
-            let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
-                return Refinements::empty();
-            };
-            let truthy = intersect_types(&var_type, &schema_type)
-                .map(|ty| vec![(var_name.clone(), Some(ty))])
-                .unwrap_or_default();
-            let falsy = subtract_type(&var_type, &schema_type)
-                .map(|ty| vec![(var_name.clone(), Some(ty))])
-                .unwrap_or_default();
-            return Refinements {
-                truthy,
-                falsy,
-                ..Refinements::default()
-            };
-        }
-        if let Some(key) = reference_path_key(&args[0]) {
-            return Refinements {
-                truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(schema_type.clone()))],
-                falsy_paths: vec![(key, PathNarrowing::Subtract(schema_type))],
-                ..Refinements::default()
-            };
-        }
-        Refinements::empty()
-    }
-
-    fn extract_declared_predicate_refinements(
-        &self,
-        name: &str,
-        args: &[SNode],
-        type_args: &[TypeExpr],
-        scope: &TypeScope,
-    ) -> Refinements {
-        let Some(signature) = scope.get_fn(name) else {
-            return Refinements::empty();
-        };
-        let Some(predicate) = &signature.type_predicate else {
-            return Refinements::empty();
-        };
-        let Some(parameter_index) = signature
-            .params
-            .iter()
-            .position(|(parameter, _)| parameter == &predicate.parameter)
-        else {
-            return Refinements::empty();
-        };
-        let Some(subject) = args.get(parameter_index) else {
-            return Refinements::empty();
-        };
-        let bindings = self.infer_function_call_type_bindings(signature, type_args, args, scope);
-        let target = super::super::substitute_type_expr(&predicate.type_expr, &bindings);
-        let target = self.resolve_alias(&target, scope);
-        self.extract_subject_type_refinements(subject, &target, !predicate.one_sided, scope)
-    }
-
-    fn extract_namespace_predicate_refinements(
-        &self,
-        object: &SNode,
-        member: &str,
-        args: &[SNode],
-        scope: &TypeScope,
-    ) -> Refinements {
-        let Node::Identifier(alias) = &object.node else {
-            return Refinements::empty();
-        };
-        let Some(binding) = self.namespace_imports.get(alias) else {
-            return Refinements::empty();
-        };
-        let Some(predicate) = binding.member_type_predicates.get(member) else {
-            return Refinements::empty();
-        };
-        let Some(parameter_index) = binding
-            .member_param_names
-            .get(member)
-            .and_then(|names| names.iter().position(|name| name == &predicate.parameter))
-        else {
-            return Refinements::empty();
-        };
-        let Some(subject) = args.get(parameter_index) else {
-            return Refinements::empty();
-        };
-        self.extract_subject_type_refinements(
-            subject,
-            &predicate.type_expr,
-            !predicate.one_sided,
-            scope,
-        )
-    }
-
-    /// Apply a validated predicate contract to one call argument. This is the
-    /// same intersect/subtract operation used by `schema_is`, so predicates do
-    /// not create a second narrowing model.
-    fn extract_subject_type_refinements(
-        &self,
-        subject: &SNode,
-        target: &TypeExpr,
-        two_sided: bool,
-        scope: &TypeScope,
-    ) -> Refinements {
-        if let Node::Identifier(var_name) = &subject.node {
-            let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
-                return Refinements::empty();
-            };
-            let current = self.resolve_alias(&var_type, scope);
-            let truthy = intersect_types(&current, target)
-                .map(|ty| vec![(var_name.clone(), Some(ty))])
-                .unwrap_or_default();
-            let falsy = if two_sided {
-                subtract_type(&current, target)
-                    .map(|ty| vec![(var_name.clone(), Some(ty))])
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            return Refinements {
-                truthy,
-                falsy,
-                ..Refinements::default()
-            };
-        }
-        if let Some(key) = reference_path_key(subject) {
-            return Refinements {
-                truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(target.clone()))],
-                falsy_paths: if two_sided {
-                    vec![(key, PathNarrowing::Subtract(target.clone()))]
-                } else {
-                    Vec::new()
-                },
                 ..Refinements::default()
             };
         }

@@ -19,6 +19,8 @@ mod decls;
 mod entry;
 mod expressions;
 mod flow;
+mod flow_aliases;
+mod flow_predicates;
 mod generic_bindings;
 mod literal_union;
 mod match_patterns;
