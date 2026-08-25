@@ -1078,6 +1078,7 @@ impl Vm {
                         None,
                         self.module_phase_recorder.as_ref(),
                         ModuleProvenance::TrustedHostDispatch,
+                        &self.prepared_module_validation,
                     )?,
                     ModuleProvenance::User
                     | ModuleProvenance::EmbeddedStdlib
@@ -1088,6 +1089,7 @@ impl Vm {
                         None,
                         self.module_phase_recorder.as_ref(),
                         ModuleProvenance::User,
+                        &self.prepared_module_validation,
                     )?,
                 }
             };

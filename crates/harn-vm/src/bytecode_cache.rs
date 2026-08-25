@@ -60,6 +60,10 @@ use crate::context_manifest::{
 use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext, ModuleProvenance};
 use crate::module_source::{self, ModuleSource};
 
+mod graph;
+pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
+use graph::relative_path_label;
+
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
@@ -647,7 +651,12 @@ impl<'a> GraphWalk<'a> {
 
     fn run(&mut self) -> &GraphHashes {
         self.result.get_or_insert_with(|| {
-            walk_import_graph_fingerprinted(self.source_path, self.source, CODEGEN_FINGERPRINT)
+            walk_import_graph_fingerprinted(
+                self.source_path,
+                self.source,
+                CODEGEN_FINGERPRINT,
+                false,
+            )
         })
     }
 
@@ -1206,7 +1215,7 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
 /// Root-relative companion to [`hash_transitive_user_imports`]. Only closed,
 /// packaged source trees use this identity; shared host caches stay canonical.
 fn hash_relocatable_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
-    walk_import_graph_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).relocatable
+    walk_import_graph_fingerprinted(source_path, source, CODEGEN_FINGERPRINT, false).relocatable
 }
 
 /// As [`hash_transitive_user_imports`], but also returns the manifest that
@@ -1227,7 +1236,7 @@ fn hash_transitive_user_imports_fingerprinted(
     source: &str,
     codegen_fingerprint: &str,
 ) -> ([u8; 32], Option<ContextManifest>) {
-    let result = walk_import_graph_fingerprinted(source_path, source, codegen_fingerprint);
+    let result = walk_import_graph_fingerprinted(source_path, source, codegen_fingerprint, false);
     (result.canonical, result.manifest)
 }
 
@@ -1235,12 +1244,14 @@ struct GraphHashes {
     canonical: [u8; 32],
     relocatable: [u8; 32],
     manifest: Option<ContextManifest>,
+    entry_compilation_context: Option<ModuleCompilationContext>,
 }
 
 fn walk_import_graph_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
+    capture_entry_compilation_context: bool,
 ) -> GraphHashes {
     #[cfg(test)]
     WALKS_PERFORMED.with(|c| c.set(c.get() + 1));
@@ -1341,8 +1352,13 @@ fn walk_import_graph_fingerprinted(
     // the imported-interface projection once for the complete graph and carry
     // it beside each source digest; content alone has not been a complete
     // module compilation identity since imported callable lowering shipped.
+    let mut entry_compilation_context = None;
     if let Some(recorded) = manifest.as_ref() {
         let graph = harn_modules::build_with_source(source_path, source);
+        if capture_entry_compilation_context {
+            entry_compilation_context =
+                ModuleCompilationContext::for_source_in_graph(&graph, source_path, source).ok();
+        }
         let contexts = recorded
             .files
             .iter()
@@ -1373,6 +1389,7 @@ fn walk_import_graph_fingerprinted(
             // Drop only the optimization; the canonical graph hash still owns
             // entry compilation's diagnostic path.
             manifest = None;
+            entry_compilation_context = None;
         }
     }
 
@@ -1420,6 +1437,7 @@ fn walk_import_graph_fingerprinted(
         canonical: canonical_hasher.finalize().into(),
         relocatable: relocatable_hasher.finalize().into(),
         manifest,
+        entry_compilation_context,
     }
 }
 
@@ -1451,42 +1469,6 @@ fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
             hasher.update(kind.as_bytes());
         }
     }
-}
-
-/// Render `target` relative to `base` with `/` separators. Both inputs are
-/// canonical identities in production, so differing roots are the only case
-/// that cannot produce a relocatable label.
-fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
-    let base_components = base.components().collect::<Vec<_>>();
-    let target_components = target.components().collect::<Vec<_>>();
-    let common = base_components
-        .iter()
-        .zip(&target_components)
-        .take_while(|(left, right)| left == right)
-        .count();
-    if common == 0 && (base.is_absolute() || target.is_absolute()) {
-        return None;
-    }
-
-    let mut parts = Vec::new();
-    for component in &base_components[common..] {
-        if matches!(component, std::path::Component::Normal(_)) {
-            parts.push("..".to_string());
-        }
-    }
-    for component in &target_components[common..] {
-        match component {
-            std::path::Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-            std::path::Component::ParentDir => parts.push("..".to_string()),
-            std::path::Component::CurDir => {}
-            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
-        }
-    }
-    Some(if parts.is_empty() {
-        ".".to_string()
-    } else {
-        parts.join("/")
-    })
 }
 
 enum ImportNode {
