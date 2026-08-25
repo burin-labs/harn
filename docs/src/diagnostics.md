@@ -145,7 +145,7 @@ A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-v
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
-| [`HARN-LLM-002`](#harn-llm-002) | LLM option key is deprecated | `llm/migrate-deprecated-option` | `scope-local` |
+| [`HARN-LLM-002`](#harn-llm-002) | LLM option key is deprecated | `llm/migrate-removed-option` | `scope-local` |
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
@@ -300,7 +300,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-047`](#harn-lnt-047) | import order lint | `imports/reorder` | `format-only` |
 | [`HARN-LNT-048`](#harn-lnt-048) | prefer optional shorthand lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-049`](#harn-lnt-049) | legacy doc comment lint | `doc/migrate-comment-style` | `format-only` |
-| [`HARN-LNT-050`](#harn-lnt-050) | deprecated LLM options lint | `llm/migrate-deprecated-option` | `scope-local` |
+| [`HARN-LNT-050`](#harn-lnt-050) | removed LLM options lint | `llm/migrate-removed-option` | `scope-local` |
 | [`HARN-LNT-051`](#harn-lnt-051) | unnecessary safe navigation lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-052`](#harn-lnt-052) | ambient clock builtin replaced by `harness.clock.*` | `bindings/thread-harness-clock` | `scope-local` |
 | [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness` | `scope-local` |
@@ -1257,8 +1257,8 @@ contract.
 
 LLM option key is deprecated
 
-- **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the deprecated option with its supported equivalent
+- **Repair:** `llm/migrate-removed-option` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the removed option with its supported equivalent
 - **See also:** [`HARN-LNT-050`](#harn-lnt-050)
 
 #### How to fix
@@ -3106,10 +3106,10 @@ legacy doc comment lint
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
 
-deprecated LLM options lint
+removed LLM options lint
 
-- **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the deprecated option with its supported equivalent
+- **Repair:** `llm/migrate-removed-option` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the removed option with its supported equivalent
 - **See also:** [`HARN-LLM-002`](#harn-llm-002)
 
 #### How to fix

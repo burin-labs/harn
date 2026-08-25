@@ -814,9 +814,9 @@
       "summary": "LLM option key is deprecated",
       "repairs": [
         {
-          "id": "llm/migrate-deprecated-option",
+          "id": "llm/migrate-removed-option",
           "safety": "scope-local",
-          "summary": "Replace the deprecated option with its supported equivalent"
+          "summary": "Replace the removed option with its supported equivalent"
         }
       ],
       "related": [
@@ -2149,12 +2149,12 @@
     {
       "code": "HARN-LNT-050",
       "category": "LNT",
-      "summary": "deprecated LLM options lint",
+      "summary": "removed LLM options lint",
       "repairs": [
         {
-          "id": "llm/migrate-deprecated-option",
+          "id": "llm/migrate-removed-option",
           "safety": "scope-local",
-          "summary": "Replace the deprecated option with its supported equivalent"
+          "summary": "Replace the removed option with its supported equivalent"
         }
       ],
       "related": [
