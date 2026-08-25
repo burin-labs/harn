@@ -76,4 +76,23 @@ pipeline default(harness: Harness) {
       )
     },
   )
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const sid = "blank-primary-system-fragments-" + harness.random.uuid()
+      const opts = with_system_fragments(
+        {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
+        [
+          system_before("Leading fragment marker."),
+          {content: "Trailing fragment marker.", position: "after"},
+        ],
+      )
+      let _ = agent_loop(harness, "blank primary", "", opts)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls) == 1)
+      harness.stdio.println(occurrences(calls[0].system, "Leading fragment marker.") == 1)
+      harness.stdio.println(occurrences(calls[0].system, "Trailing fragment marker.") == 1)
+    },
+  )
 }
