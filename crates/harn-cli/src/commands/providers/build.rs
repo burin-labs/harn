@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use harn_clock::Clock;
+
 use crate::cli::ProvidersGenerateArgs;
 use crate::commands::providers::artifacts::{
     artifact_drift_from_generated, generated_artifacts_from_artifact, validate_artifact_contract,
@@ -178,6 +180,16 @@ fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfi
         return Err(format!(
             "generated provider config has invalid model defaults:\n{}",
             default_issues.join("\n")
+        ));
+    }
+    let audit_date = harn_clock::RealClock::new().now_utc().date().to_string();
+    let accounting_audit =
+        harn_vm::llm_config::validate_usage_accounting_audit(&parsed.config, &audit_date);
+    if !accounting_audit.is_clean() {
+        return Err(format!(
+            "generated provider config has invalid usage-accounting audit coverage ({} OpenAI-SSE providers reached):\n{}",
+            accounting_audit.openai_sse_provider_count,
+            accounting_audit.errors.join("\n")
         ));
     }
 
@@ -489,6 +501,12 @@ _unset = ["not_a_generation_default"]
         fs::write(
             catalog_source.join("00-base/private.toml"),
             r#"
+[usage_accounting_audit]
+reviewed_on = "2026-08-25"
+expires_on = "2026-10-31"
+tracking_issue = 7320
+unverified = ["private"]
+
 [providers.private]
 display_name = "Private"
 base_url = "http://127.0.0.1:9000"

@@ -5,6 +5,81 @@
 # specific [models.X] entry has no `pricing` table.
 # `cache_usage_accounting` records whether zero cache fields are a real miss.
 
+# Usage-accounting declarations are fail-closed, but absence must not look like
+# a researched `false`. This typed registry makes every OpenAI-SSE provider
+# either evidence-backed or part of one explicit, expiring audit queue.
+[usage_accounting_audit]
+reviewed_on = "2026-08-25"
+expires_on = "2026-10-31"
+tracking_issue = 7320
+unverified = [
+  "atlas",
+  "azure_openai",
+  "baseten",
+  "cerebras",
+  "cloudflare_ai_gateway",
+  "cohere",
+  "dashscope",
+  "deepinfra",
+  "fireworks",
+  "flexai",
+  "friendli",
+  "github_models",
+  "groq",
+  "huggingface",
+  "hunyuan",
+  "hyperbolic",
+  "inception",
+  "local",
+  "minimax",
+  "mistral",
+  "mlx",
+  "moonshot",
+  "nebius",
+  "nvidia",
+  "parasail",
+  "qianfan",
+  "sambanova",
+  "siliconflow",
+  "tgi",
+  "together",
+  "vercel_ai_gateway",
+  "vllm",
+  "volcengine_ark",
+  "xai",
+  "zai",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "deepseek"
+checked_on = "2026-08-25"
+sources = [
+  "https://api-docs.deepseek.com/api/create-chat-completion",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "llamacpp"
+checked_on = "2026-08-25"
+sources = [
+  "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+  "https://github.com/burin-labs/harn/pull/7311",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "openai"
+checked_on = "2026-08-25"
+sources = [
+  "https://platform.openai.com/docs/api-reference/chat/create#chat-create-stream_options",
+  "https://platform.openai.com/docs/guides/prompt-caching#monitoring-cache-usage",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "openrouter"
+checked_on = "2026-08-25"
+sources = [
+  "https://openrouter.ai/docs/cookbook/administration/usage-accounting",
+]
+
 [providers.anthropic]
 cache_usage_accounting = true
 base_url = "https://api.anthropic.com/v1"
