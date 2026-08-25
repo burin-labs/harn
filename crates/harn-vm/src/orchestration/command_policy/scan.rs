@@ -4,6 +4,7 @@ mod request;
 use request::*;
 
 pub(super) const EXECUTION_SEMANTICS_UNRESOLVED_LABEL: &str = "execution_semantics_unresolved";
+pub(super) const SHELL_DIALECT_UNKNOWN_LABEL: &str = "shell_dialect_unknown";
 
 pub(super) fn scan_command_risk_scan_json(
     ctx: &JsonValue,
@@ -11,7 +12,7 @@ pub(super) fn scan_command_risk_scan_json(
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
-    let command_analysis = security_command_analysis(ctx);
+    let (command_analysis, execution_semantics) = security_command_analysis_with_metadata(ctx);
     let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
         .into_iter()
         .map(|group| {
@@ -84,6 +85,10 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert(EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string());
         rationale.push("execution syntax, dialect, or dynamic dispatch left semantics unresolved");
     }
+    if execution_semantics["unresolved_reason"].as_str() == Some(SHELL_DIALECT_UNKNOWN_LABEL) {
+        labels.insert(SHELL_DIALECT_UNKNOWN_LABEL.to_string());
+        rationale.push("the requested shell dialect is not supported by the command analyzer");
+    }
     if has_network_exfil(&lower) {
         labels.insert("network_exfil".to_string());
         rationale.push("network transfer primitive detected");
@@ -142,6 +147,7 @@ pub(super) fn scan_command_risk_scan_json(
         } else {
             rationale.join("; ")
         },
+        "execution_semantics": execution_semantics,
         "shell_command_groups": shell_command_groups,
     });
     if let Some(reason) = catastrophe {
@@ -290,23 +296,100 @@ pub(super) fn command_text(ctx: &JsonValue) -> String {
 /// the sole security-semantic entry point for a process request; display and
 /// compatibility projections may keep their historical string shape.
 pub(super) fn security_command_analysis(ctx: &JsonValue) -> super::catastrophic::ShellAnalysis {
+    security_command_analysis_with_metadata(ctx).0
+}
+
+fn security_command_analysis_with_metadata(
+    ctx: &JsonValue,
+) -> (super::catastrophic::ShellAnalysis, JsonValue) {
     match request_mode(ctx) {
         Some("argv") => match request_argv(ctx) {
-            Ok(Some(argv)) => return super::catastrophic::analyze_argv(&argv),
-            Ok(None) | Err(()) => return super::catastrophic::ShellAnalysis::unresolved(),
+            Ok(Some(argv)) => {
+                let analysis = super::catastrophic::analyze_argv(&argv);
+                let unresolved_reason = analysis
+                    .unresolved
+                    .then_some("dynamic_or_invalid_execution_syntax");
+                return (
+                    analysis,
+                    execution_semantics_json("argv", None, "request", None, unresolved_reason),
+                );
+            }
+            Ok(None) | Err(()) => {
+                return (
+                    super::catastrophic::ShellAnalysis::unresolved(),
+                    execution_semantics_json(
+                        "argv",
+                        None,
+                        "request",
+                        None,
+                        Some("argv_missing_or_invalid"),
+                    ),
+                );
+            }
         },
         Some("shell") => {}
-        _ => return super::catastrophic::ShellAnalysis::unresolved(),
+        _ => {
+            return (
+                super::catastrophic::ShellAnalysis::unresolved(),
+                execution_semantics_json(
+                    "unknown",
+                    None,
+                    "request",
+                    None,
+                    Some("execution_mode_unknown"),
+                ),
+            );
+        }
     }
-    let Some(dialect) = request_shell_dialect(ctx) else {
-        return super::catastrophic::ShellAnalysis::unresolved();
+    let resolution = request_shell_dialect(ctx);
+    let Some(dialect) = resolution.dialect else {
+        return (
+            super::catastrophic::ShellAnalysis::unresolved(),
+            execution_semantics_json(
+                "shell",
+                None,
+                &resolution.source,
+                resolution.shell_id.as_deref(),
+                resolution.unresolved_reason,
+            ),
+        );
     };
-    super::catastrophic::analyze_shell_dialect(
+    let analysis = super::catastrophic::analyze_shell_dialect(
         dialect,
         ctx.pointer("/request/command")
             .and_then(|value| value.as_str())
             .unwrap_or_default(),
+    );
+    let unresolved_reason = analysis
+        .unresolved
+        .then_some("dynamic_or_invalid_execution_syntax");
+    (
+        analysis,
+        execution_semantics_json(
+            "shell",
+            Some(dialect),
+            &resolution.source,
+            resolution.shell_id.as_deref(),
+            unresolved_reason,
+        ),
     )
+}
+
+fn execution_semantics_json(
+    mode: &str,
+    dialect: Option<crate::shells::ShellDialect>,
+    source: &str,
+    shell_id: Option<&str>,
+    unresolved_reason: Option<&str>,
+) -> JsonValue {
+    serde_json::json!({
+        "mode": mode,
+        "dialect": dialect.map(crate::shells::ShellDialect::as_str),
+        "source": source,
+        "shell_id": shell_id,
+        "resolved": unresolved_reason.is_none(),
+        "unresolved_reason": unresolved_reason,
+    })
 }
 
 /// Reconstruct the command line the catastrophic floor classifies, PRESERVING

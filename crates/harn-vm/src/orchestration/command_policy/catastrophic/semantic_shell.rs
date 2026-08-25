@@ -36,13 +36,7 @@ pub(crate) struct ShellAnalysis {
     pub(crate) unresolved: bool,
 }
 
-/// Shell grammars owned by the command-safety parser registry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ShellDialect {
-    Posix,
-    PowerShell,
-    Cmd,
-}
+use crate::shells::ShellDialect;
 
 #[derive(Debug)]
 pub(crate) struct ShellRedirect {

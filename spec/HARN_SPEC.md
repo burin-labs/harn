@@ -7029,9 +7029,12 @@ each integration.
   has `id`, `label`, `path`, `platform`, `available`, `supports_login`,
   `supports_interactive`, `default_args`, `login_args`, and `source`.
 - `process.get_default_shell` returns the selected shell object for the
-  current host/session.
+  current host/session. Harn only chooses a shell whose command syntax its
+  safety analyzer supports. An unrecognized login shell remains listed but
+  can't become the implicit default.
 - `process.set_default_shell` may be implemented by stateful hosts. Harn's
-  standalone fallback stores the selection for the current thread/session.
+  standalone fallback stores a supported selection for the current
+  thread/session and rejects an unsupported shell.
 - `process.shell_invocation` resolves `{shell_id?, shell?, command?, login?,
   interactive?}` into `{program, args, command_arg_index, shell}`. When neither
   `shell_id` nor `shell` is supplied, it uses the selected default shell.
@@ -7041,6 +7044,11 @@ this capability, and otherwise use the selected default shell. `argv` mode
 remains preferred for programmatic execution; shell mode is for user-authored
 commands and interactive shell semantics. The normative schema is
 `spec/schemas/host-shell-discovery.schema.json`.
+
+Command-risk scans include `execution_semantics` with the request mode,
+resolved dialect, resolution source, shell ID, and unresolved reason. An
+explicit unsupported shell adds both `shell_dialect_unknown` and
+`execution_semantics_unresolved`, so command policy still fails closed.
 
 ## Workspace manifest (`harn.toml`)
 

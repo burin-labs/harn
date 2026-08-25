@@ -215,8 +215,21 @@ fn canonical_context_binds_mode_argv_shape_and_resolved_shell_once() {
     shell.insert(crate::value::intern_key("shell"), VmValue::dict(fish));
     let shell_context = command_context_json(&shell, &CommandPolicy::default(), JsonValue::Null);
     assert_eq!(shell_context["request"]["shell"]["id"], "fish");
-    assert!(labels(&command_risk_scan_json(&shell_context, None))
-        .contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    let scan = command_risk_scan_json(&shell_context, None);
+    assert!(labels(&scan).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    assert!(labels(&scan).contains(&SHELL_DIALECT_UNKNOWN_LABEL.to_string()));
+    assert_eq!(scan["execution_semantics"]["mode"], "shell");
+    assert_eq!(scan["execution_semantics"]["source"], "host");
+    assert_eq!(scan["execution_semantics"]["shell_id"], "fish");
+    assert_eq!(
+        scan["execution_semantics"]["unresolved_reason"],
+        SHELL_DIALECT_UNKNOWN_LABEL
+    );
+
+    let known_scan = command_risk_scan_json(&shell_ctx("echo safe"), None);
+    assert_eq!(known_scan["execution_semantics"]["dialect"], "posix");
+    assert_eq!(known_scan["execution_semantics"]["source"], "request");
+    assert_eq!(known_scan["execution_semantics"]["resolved"], true);
 }
 
 #[test]
