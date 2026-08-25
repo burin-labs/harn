@@ -251,13 +251,22 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
+# Groq announced both Compound systems by developer email (2026-08-25 for
+# Compound, 2026-08-24 for Compound Mini); both stop serving requests after
+# 2026-09-21. Groq's documented process emails first and updates the public
+# deprecations page afterwards, so the rows stay listed upstream for now. Keep
+# them here through the shutdown so in-flight callers still resolve pricing,
+# context, and a migration target instead of hitting an unknown-model error.
 [models."groq/compound"]
 name = "Groq Compound"
 provider = "groq"
 wire_model = "groq/compound"
 context_window = 131072
 capabilities = ["streaming"]
-rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-07-09", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-08-25", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+deprecated = true
+deprecation_note = "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-25 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-120b, the Groq route that keeps built-in web search and code execution."
+superseded_by = "groq/openai/gpt-oss-120b"
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "agentic"]
@@ -268,7 +277,10 @@ provider = "groq"
 wire_model = "groq/compound-mini"
 context_window = 131072
 capabilities = ["streaming"]
-rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-07-09", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-08-25", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
+deprecated = true
+deprecation_note = "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-24 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-20b, Groq's recommended replacement for its retired small routes."
+superseded_by = "groq/openai/gpt-oss-20b"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "agentic"]

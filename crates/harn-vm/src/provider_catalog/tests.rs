@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 static RUNTIME_REFRESH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-struct OverrideGuard;
+pub(super) struct OverrideGuard;
 
 impl Drop for OverrideGuard {
     fn drop(&mut self) {
@@ -90,7 +90,7 @@ fn restore_env_var(name: &str, value: Option<&str>) {
     }
 }
 
-fn install_overlay(toml_src: &str) -> OverrideGuard {
+pub(super) fn install_overlay(toml_src: &str) -> OverrideGuard {
     let overlay = llm_config::parse_config_toml(toml_src).expect("overlay parses");
     llm_config::set_user_overrides(Some(overlay));
     OverrideGuard
@@ -1175,49 +1175,6 @@ fn serving_tiers_and_supersession_surface_in_contract() {
     assert!(swift.contains("case supersededBy = \"superseded_by\""));
     assert!(swift.contains("public let family: String"));
     assert!(swift.contains("public let lineage: String"));
-}
-
-#[test]
-fn dangling_superseded_by_and_unknown_serving_tier_status_warn() {
-    let _guard = install_overlay(
-        r#"
-[providers.warn_co]
-display_name = "Warn Co"
-base_url = "https://example.test/v1"
-auth_style = "bearer"
-auth_env = "WARN_API_KEY"
-chat_endpoint = "/chat/completions"
-
-[models."warn/old"]
-name = "Warn Old"
-provider = "warn_co"
-context_window = 4096
-deprecated = true
-deprecation_note = "Retiring soon."
-superseded_by = "warn/does-not-exist"
-serving_tiers = [
-  { id = "fast", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast" }, status = "turbo", pricing = { input_per_mtok = 1.0, output_per_mtok = 2.0 } },
-]
-"#,
-    );
-    let report = validate_current();
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|message| message.contains("superseded_by warn/does-not-exist")),
-        "expected dangling superseded_by warning, got {:?}",
-        report.warnings
-    );
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|message| message.contains("serving_tiers[fast].status")
-                && message.contains("turbo")),
-        "expected serving_tiers status warning, got {:?}",
-        report.warnings
-    );
 }
 
 /// A providers.toml overlay declaring a provider/alias/model that a developer

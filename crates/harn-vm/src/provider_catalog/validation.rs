@@ -313,11 +313,31 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
     // `superseded_by` can be trusted as a migration target by downstream
     // tooling. A dangling pointer is a soft warning (the row is still
     // usable) rather than a hard error, mirroring how `note` is advisory.
+    //
+    // Existing but *deprecated* is the more dangerous shape: the pointer
+    // resolves, so every downstream consumer treats it as a live migration
+    // target, and the caller is routed from one dead model onto another. That
+    // stays advisory too — the target is usually still serving when it is
+    // first marked — but it has to be visible, because nothing else in the
+    // pipeline distinguishes a good pointer from one that has rotted behind
+    // a later deprecation.
+    let deprecated_ids: BTreeSet<&str> = artifact
+        .models
+        .iter()
+        .filter(|model| matches!(model.deprecation.status, DeprecationStatus::Deprecated))
+        .map(|model| model.id.as_str())
+        .collect();
     for model in &artifact.models {
         if let Some(target) = model.deprecation.superseded_by.as_deref() {
             if !model_ids.contains(target) {
                 result.warnings.push(format!(
                     "model {} declares superseded_by {} with no matching catalog row",
+                    model.id, target
+                ));
+            } else if deprecated_ids.contains(target) {
+                result.warnings.push(format!(
+                    "model {} declares superseded_by {}, which is itself deprecated; \
+                     migration targets must name a route that outlives the row they replace",
                     model.id, target
                 ));
             }
