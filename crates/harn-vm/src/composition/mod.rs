@@ -1223,10 +1223,50 @@ fn validate_composition_program(
                     });
                 }
             }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. } => {
+                if let Some(receiver) = harness_receiver_path(object) {
+                    error = Some(format!(
+                        "composition snippets cannot call `{receiver}.{method}`: they run \
+                         without harness capabilities, and their only egress is a manifest \
+                         binding"
+                    ));
+                }
+            }
             _ => {}
         }
     });
     error.map_or(Ok(()), Err)
+}
+
+/// Render the receiver of a method call when it is the composition pipeline's
+/// own `harness` parameter, so `harness.interaction.ask_user(...)` yields
+/// `"harness.interaction"` and `harness.stop(...)` yields `"harness"`.
+///
+/// `DENIED_COMPOSITION_CALLS` catches the bare spellings the ambient-to-harness
+/// migration removed. This catches the spelling that migration tells authors to
+/// use, so both produce a validation error rather than one of them reaching the
+/// null harness and failing later with a runtime denial.
+///
+/// The root is matched against the literal name `harness` because
+/// [`composition_source`] always emits `pipeline main(harness: Harness)`
+/// — a composition snippet has no other way to name the host handle.
+fn harness_receiver_path(object: &harn_parser::SNode) -> Option<String> {
+    use harn_parser::Node;
+
+    let is_harness = |node: &harn_parser::SNode| matches!(&node.node, Node::Identifier(name) if name == "harness");
+    match &object.node {
+        Node::PropertyAccess {
+            object: root,
+            property,
+        }
+        | Node::OptionalPropertyAccess {
+            object: root,
+            property,
+        } if is_harness(root) => Some(format!("harness.{property}")),
+        _ if is_harness(object) => Some("harness".to_string()),
+        _ => None,
+    }
 }
 
 const DENIED_COMPOSITION_CALLS: &[&str] = &[
