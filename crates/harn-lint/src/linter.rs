@@ -8,9 +8,7 @@ use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::find_closest_match;
-use harn_parser::{
-    lexical::BindingId, BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam,
-};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
@@ -20,11 +18,13 @@ use crate::fixes::{
 };
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rule::{Rule, RuleCtx};
+use harness_facts::HarnessFacts;
 
 mod ambient;
 mod connector_effects;
 mod discarded_result;
 mod execution_safety;
+pub(crate) mod harness_facts;
 mod parameters;
 mod program;
 mod spans;
@@ -115,11 +115,10 @@ pub(crate) struct Linter<'a> {
     /// A local binding named `harness` is not enough to safely rewrite
     /// capability calls to `harness.*`.
     pub(super) harness_param_stack: Vec<Option<String>>,
-    /// Exact identifier-use resolution for Harness receiver policy. The
-    /// declaration identity prevents nested parameters and locals with the
-    /// same spelling from inheriting host authority.
-    pub(super) resolved_identifier_bindings: HashMap<(usize, usize), BindingId>,
-    pub(super) harness_bindings: HashSet<BindingId>,
+    /// Which receivers in this file are the host `Harness`, and the
+    /// spelling-independent call recognizer built on them. Collected in a
+    /// prepass so the registry rules can consult the same facts the walk does.
+    pub(super) harness_facts: HarnessFacts,
     /// Tracks how many enclosing `@complexity(allow)` attributes are
     /// active. When > 0, the cyclomatic-complexity rule is suppressed
     /// for the contained function.
@@ -202,8 +201,7 @@ impl<'a> Linter<'a> {
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
             harness_param_stack: Vec::new(),
-            resolved_identifier_bindings: HashMap::new(),
-            harness_bindings: HashSet::new(),
+            harness_facts: HarnessFacts::default(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
             impl_method_names: HashSet::new(),
@@ -231,6 +229,7 @@ impl<'a> Linter<'a> {
             source: self.source,
             file_path: self.file_path.as_deref(),
             connector_runtime_module: self.connector_runtime_module,
+            harness: &self.harness_facts,
         };
         for rule in &mut rules {
             hook(rule.as_mut(), &ctx, &mut self.diagnostics);

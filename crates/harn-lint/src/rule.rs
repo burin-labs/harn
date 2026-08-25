@@ -28,6 +28,7 @@ use harn_parser::SNode;
 use std::path::Path;
 
 use crate::diagnostic::LintDiagnostic;
+use crate::linter::harness_facts::HarnessFacts;
 
 /// Read-only context shared with every rule hook. Carries the inputs a
 /// rule needs beyond the node/program it is handed; today that is just
@@ -38,6 +39,11 @@ pub(crate) struct RuleCtx<'a> {
     /// Whether the package manifest declares this file as a provider's
     /// connector module. See [`crate::LintOptions::connector_runtime_module`].
     pub connector_runtime_module: bool,
+    /// Which receivers in this file are the host `Harness`. A rule keyed on a
+    /// builtin's name needs these to recognize the typed
+    /// `harness.<capability>.<method>` spelling that replaced it; without
+    /// them it silently stops applying once a call site migrates.
+    pub harness: &'a HarnessFacts,
 }
 
 /// A single lint rule plugged into the registry.
@@ -199,12 +205,34 @@ program_rule!(
     src,
     crate::rules::unnecessary_parentheses::check_unnecessary_parentheses
 );
-program_rule!(
-    DeprecatedLlmOptions,
-    "deprecated_llm_options",
-    ast,
-    crate::rules::deprecated_llm_options::check_deprecated_llm_options
-);
+/// Removed LLM option keys need more than the AST.
+///
+/// The rule is keyed on the names of the LLM surfaces that take an options
+/// dict, and `harness.llm.call(...)` names `llm_call` just as much as
+/// `llm_call(...)` does. Recognizing only the ambient spelling makes the rule
+/// stop reporting the moment a call site migrates — silently (harn#7280). So
+/// it needs the file's harness receiver facts, which the `ast` macro arm does
+/// not pass along.
+struct DeprecatedLlmOptions;
+
+impl Rule for DeprecatedLlmOptions {
+    fn id(&self) -> &'static str {
+        "deprecated_llm_options"
+    }
+
+    fn check_program(
+        &mut self,
+        program: &[SNode],
+        ctx: &RuleCtx<'_>,
+        out: &mut Vec<LintDiagnostic>,
+    ) {
+        crate::rules::deprecated_llm_options::check_deprecated_llm_options(
+            program,
+            ctx.harness,
+            out,
+        );
+    }
+}
 program_rule!(
     UnnormalizedOptions,
     "unnormalized-options",
