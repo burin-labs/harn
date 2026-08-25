@@ -12,322 +12,105 @@
 //!
 //! The runtime rejects these keys too (the extractor's unknown-key gate);
 //! this rule surfaces them at `harn check` time for dict-literal call sites.
+//!
+//! A call site names its surface in either spelling — `llm_call(...)` or the
+//! typed `harness.llm.call(...)` that replaced it — so the surface is
+//! recognized through [`HarnessFacts`] rather than by matching call syntax.
+//! A key removed from the options dict is removed either way, and a rule that
+//! only sees the ambient spelling goes silent as call sites migrate rather
+//! than reporting anything (harn#7280).
 
 use harn_lexer::Span;
-use harn_parser::{DiagnosticCode as Code, DictEntry, MatchArm, Node, SNode, SelectCase};
+use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
+use crate::linter::harness_facts::HarnessFacts;
 
 const RULE_NAME: &str = "deprecated_llm_options";
 
 const LEGACY_RETRY_KEYS: &[&str] = &["llm_retries", "llm_backoff_ms"];
 
-fn options_arg_index(name: &str) -> Option<usize> {
-    match name {
-        "llm_completion" => Some(3),
-        "llm_call"
-        | "llm_call_safe"
-        | "llm_call_structured"
-        | "llm_call_structured_safe"
-        | "llm_call_structured_result"
-        | "llm_stream"
-        | "llm_stream_call"
-        | "agent_loop" => Some(2),
-        _ => None,
-    }
-}
+/// The LLM surfaces that take an options dict, and where in the argument list
+/// it sits.
+///
+/// Written out rather than derived from the builtin signatures, because the
+/// set is not all builtins: `agent_loop` is a Harn function from
+/// `std/agent/loop` with no `BuiltinSignature` to read a parameter list from.
+/// Deriving the index would drop it — the same silent narrowing this rule is
+/// being fixed for.
+const OPTION_SURFACES: &[(&str, usize)] = &[
+    ("llm_completion", 3),
+    ("llm_call", 2),
+    ("llm_call_safe", 2),
+    ("llm_call_structured", 2),
+    ("llm_call_structured_safe", 2),
+    ("llm_call_structured_result", 2),
+    ("llm_stream", 2),
+    ("llm_stream_call", 2),
+    ("agent_loop", 2),
+];
 
 /// Walk the program looking for calls to LLM surfaces whose dict-literal
 /// options argument contains removed keys. Emits one Error per offending
 /// key occurrence, anchored to the key's span.
 pub(crate) fn check_deprecated_llm_options(
     program: &[SNode],
+    harness: &HarnessFacts,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    for node in program {
-        visit_node(node, diagnostics);
-    }
+    harn_parser::visit::walk_program(program, &mut |node| {
+        if let Some(entries) = options_entries(node, harness) {
+            scan_entries(entries, diagnostics);
+        }
+    });
 }
 
-fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
-    match &node.node {
-        Node::FunctionCall { name, args, .. } => {
-            if let Some(index) = options_arg_index(name) {
-                if let Some(SNode {
-                    node: Node::DictLiteral(entries),
-                    ..
-                }) = args.get(index)
-                {
-                    scan_entries(entries, diagnostics);
-                }
-            }
-            for arg in args {
-                visit_node(arg, diagnostics);
-            }
-        }
-        Node::AttributedDecl { attributes, inner } => {
-            for attr in attributes {
-                for arg in &attr.args {
-                    visit_node(&arg.value, diagnostics);
-                }
-            }
-            visit_node(inner, diagnostics);
-        }
-        Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
-            visit_nodes(body, diagnostics);
-        }
-        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
-            visit_node(value, diagnostics);
-        }
-        Node::ImplBlock { methods, .. } => visit_nodes(methods, diagnostics),
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
+/// The dict-literal options argument of `node`, when `node` calls one of the
+/// [`OPTION_SURFACES`] in either spelling and passes its options inline.
+fn options_entries<'node>(
+    node: &'node SNode,
+    harness: &HarnessFacts,
+) -> Option<&'node [DictEntry]> {
+    // Resolving the receiver once rejects the ordinary method call —
+    // `items.map(...)`, `client.send(...)` — before the scan below asks the
+    // migration recipe about each surface name in turn.
+    if matches!(
+        &node.node,
+        Node::MethodCall { .. } | Node::OptionalMethodCall { .. }
+    ) && !harness.is_capability_method_call(node)
+    {
+        return None;
+    }
+    let (args, index) = OPTION_SURFACES.iter().find_map(|(name, index)| {
+        harness
+            .call_names_builtin(node, name)
+            .map(|args| (args, *index))
+    })?;
+    match args.get(index) {
+        Some(SNode {
+            node: Node::DictLiteral(entries),
             ..
-        } => {
-            visit_node(condition, diagnostics);
-            visit_nodes(then_body, diagnostics);
-            if let Some(body) = else_body {
-                visit_nodes(body, diagnostics);
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            visit_node(iterable, diagnostics);
-            visit_nodes(body, diagnostics);
-        }
-        Node::WhileLoop { condition, body } => {
-            visit_node(condition, diagnostics);
-            visit_nodes(body, diagnostics);
-        }
-        Node::Retry { count, body } => {
-            visit_node(count, diagnostics);
-            visit_nodes(body, diagnostics);
-        }
-        Node::CostRoute { options, body } => {
-            for (_, value) in options {
-                visit_node(value, diagnostics);
-            }
-            visit_nodes(body, diagnostics);
-        }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            visit_nodes(body, diagnostics);
-            visit_nodes(catch_body, diagnostics);
-            if let Some(body) = finally_body {
-                visit_nodes(body, diagnostics);
-            }
-        }
-        Node::TryExpr { body }
-        | Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::DeferStmt { body }
-        | Node::MutexBlock { body, .. }
-        | Node::Block(body)
-        | Node::Closure { body, .. } => visit_nodes(body, diagnostics),
-        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => visit_nodes(body, diagnostics),
-        Node::SkillDecl { fields, .. } => {
-            for (_, value) in fields {
-                visit_node(value, diagnostics);
-            }
-        }
-        Node::EvalPackDecl {
-            fields,
-            body,
-            summarize,
-            ..
-        } => {
-            for (_, value) in fields {
-                visit_node(value, diagnostics);
-            }
-            visit_nodes(body, diagnostics);
-            if let Some(body) = summarize {
-                visit_nodes(body, diagnostics);
-            }
-        }
-        Node::RangeExpr { start, end, .. } => {
-            visit_node(start, diagnostics);
-            visit_node(end, diagnostics);
-        }
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            visit_node(condition, diagnostics);
-            visit_nodes(else_body, diagnostics);
-        }
-        Node::RequireStmt { condition, message } => {
-            visit_node(condition, diagnostics);
-            if let Some(message) = message {
-                visit_node(message, diagnostics);
-            }
-        }
-        Node::DeadlineBlock { duration, body } => {
-            visit_node(duration, diagnostics);
-            visit_nodes(body, diagnostics);
-        }
-        Node::ReturnStmt { value } | Node::YieldExpr { value } => {
-            if let Some(value) = value {
-                visit_node(value, diagnostics);
-            }
-        }
-        Node::EmitExpr { value }
-        | Node::ThrowStmt { value }
-        | Node::Spread(value)
-        | Node::TryOperator { operand: value }
-        | Node::NonNullAssert { operand: value }
-        | Node::TryStar { operand: value }
-        | Node::UnaryOp { operand: value, .. } => visit_node(value, diagnostics),
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            visit_node(expr, diagnostics);
-            for (_, value) in options {
-                visit_node(value, diagnostics);
-            }
-            visit_nodes(body, diagnostics);
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            for case in cases {
-                visit_select_case(case, diagnostics);
-            }
-            if let Some((duration, body)) = timeout {
-                visit_node(duration, diagnostics);
-                visit_nodes(body, diagnostics);
-            }
-            if let Some(body) = default_body {
-                visit_nodes(body, diagnostics);
-            }
-        }
-        Node::EnumConstruct { args, .. } => visit_nodes(args, diagnostics),
-        Node::ValueCall { callee, args } => {
-            visit_node(callee, diagnostics);
-            visit_nodes(args, diagnostics);
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            visit_node(object, diagnostics);
-            visit_nodes(args, diagnostics);
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            visit_node(object, diagnostics);
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            visit_node(object, diagnostics);
-            visit_node(index, diagnostics);
-        }
-        Node::SliceAccess { object, start, end } => {
-            visit_node(object, diagnostics);
-            if let Some(start) = start {
-                visit_node(start, diagnostics);
-            }
-            if let Some(end) = end {
-                visit_node(end, diagnostics);
-            }
-        }
-        Node::BinaryOp { left, right, .. } => {
-            visit_node(left, diagnostics);
-            visit_node(right, diagnostics);
-        }
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            visit_node(condition, diagnostics);
-            visit_node(true_expr, diagnostics);
-            visit_node(false_expr, diagnostics);
-        }
-        Node::Assignment { target, value, .. } => {
-            visit_node(target, diagnostics);
-            visit_node(value, diagnostics);
-        }
-        Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-            visit_dict_entries(fields, diagnostics);
-        }
-        Node::ListLiteral(items) | Node::OrPattern(items) => visit_nodes(items, diagnostics),
-        Node::MatchExpr { value, arms } => {
-            visit_node(value, diagnostics);
-            for arm in arms {
-                visit_match_arm(arm, diagnostics);
-            }
-        }
-        // Leaf / no-child nodes.
-        Node::EnumDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::InterfaceDecl { .. }
-        | Node::ImportDecl { .. }
-        | Node::NamespaceImport { .. }
-        | Node::SelectiveImport { .. }
-        | Node::TypeDecl { .. }
-        | Node::BreakStmt
-        | Node::ContinueStmt
-        | Node::InterpolatedString(_)
-        | Node::StringLiteral(_)
-        | Node::RawStringLiteral(_)
-        | Node::IntLiteral(_)
-        | Node::FloatLiteral(_)
-        | Node::BoolLiteral(_)
-        | Node::NilLiteral
-        | Node::Identifier(_)
-        | Node::DurationLiteral(_) => {}
+        }) => Some(entries.as_slice()),
+        _ => None,
     }
-}
-
-fn visit_nodes(nodes: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
-    for node in nodes {
-        visit_node(node, diagnostics);
-    }
-}
-
-fn visit_dict_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
-    for entry in entries {
-        visit_node(&entry.key, diagnostics);
-        visit_node(&entry.value, diagnostics);
-    }
-}
-
-fn visit_match_arm(arm: &MatchArm, diagnostics: &mut Vec<LintDiagnostic>) {
-    visit_node(&arm.pattern, diagnostics);
-    if let Some(guard) = &arm.guard {
-        visit_node(guard, diagnostics);
-    }
-    visit_nodes(&arm.body, diagnostics);
-}
-
-fn visit_select_case(case: &SelectCase, diagnostics: &mut Vec<LintDiagnostic>) {
-    visit_node(&case.channel, diagnostics);
-    visit_nodes(&case.body, diagnostics);
 }
 
 /// Scan an LLM call's dict-literal options and emit an Error for every key
-/// matching a removed name. Also recurses into
-/// each value so a nested `{opts: {llm_retries: ...}}` is still flagged
-/// in the unlikely case it appears at this level.
+/// matching a removed name.
+///
+/// Only this dict's own keys: a nested `{opts: {llm_retries: ...}}` is not an
+/// options bag, and a call appearing inside a value is reached by the walk in
+/// its own right.
 fn scan_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
     for entry in entries {
-        if let Node::StringLiteral(name) = &entry.key.node {
-            if LEGACY_RETRY_KEYS.contains(&name.as_str()) {
-                diagnostics.push(make_diagnostic(name, entry.key.span));
-            } else if let Some(removed) = harn_builtin_meta::llm_options::removed_llm_option(name) {
-                diagnostics.push(make_registry_diagnostic(name, removed.fix, entry.key.span));
-            }
+        let Node::StringLiteral(name) = &entry.key.node else {
+            continue;
+        };
+        if LEGACY_RETRY_KEYS.contains(&name.as_str()) {
+            diagnostics.push(make_diagnostic(name, entry.key.span));
+        } else if let Some(removed) = harn_builtin_meta::llm_options::removed_llm_option(name) {
+            diagnostics.push(make_registry_diagnostic(name, removed.fix, entry.key.span));
         }
-        // Walk the value so nested dict literals or other call sites
-        // inside the value still get linted normally.
-        visit_node(&entry.value, diagnostics);
     }
 }
 
@@ -370,8 +153,9 @@ mod tests {
     fn lint(source: &str) -> Vec<LintDiagnostic> {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
+        let harness = HarnessFacts::collect(&program);
         let mut diags = Vec::new();
-        check_deprecated_llm_options(&program, &mut diags);
+        check_deprecated_llm_options(&program, &harness, &mut diags);
         diags
     }
 
@@ -567,5 +351,142 @@ pipeline default(task) {
             .find(|d| d.rule == RULE_NAME)
             .expect("diagnostic present");
         assert_eq!(our_diag.severity, LintSeverity::Error);
+    }
+
+    // The migrated spelling. Each of these is the same call the ambient test
+    // above makes, written the way `HARN-LNT-071` asks for it.
+
+    #[test]
+    fn triggers_on_migrated_llm_call() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    harness.llm.call("hi", nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
+        assert!(
+            message_for(&diags, 0).contains("`llm_retries` was removed in v0.10"),
+            "msg: {}",
+            message_for(&diags, 0)
+        );
+    }
+
+    #[test]
+    fn triggers_on_migrated_registry_removal() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    harness.llm.call("hi", nil, {json_schema: "x"})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
+        assert!(
+            message_for(&diags, 0).contains("option `json_schema` was removed"),
+            "msg: {}",
+            message_for(&diags, 0)
+        );
+    }
+
+    /// `llm_completion` keeps its options at index 3, not 2. The migration
+    /// forwards arguments unchanged, so the migrated call must read the same
+    /// position — reading index 2 would silently scan the system prompt.
+    #[test]
+    fn migrated_completion_reads_its_own_options_index() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    harness.llm.completion("hi", nil, nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
+    }
+
+    #[test]
+    fn triggers_on_migrated_call_safe_and_structured() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    harness.llm.call_safe("hi", nil, {llm_retries: 3})
+    harness.llm.call_structured("hi", {schema: "x"}, {llm_retries: 3})
+    harness.llm.call_structured_safe("hi", {type: "string"}, {llm_retries: 3})
+    harness.llm.call_structured_result("hi", {schema: "x"}, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 4, "diags: {diags:?}");
+    }
+
+    /// `llm_stream` reaches the manifest as an alias of `__cap_llm_stream`, so
+    /// this also pins that an aliased ambient name resolves to its harness
+    /// method rather than falling through to the ambient-only path.
+    #[test]
+    fn triggers_on_migrated_stream() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    harness.llm.stream("hi", nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
+    }
+
+    /// The falsifier for the whole approach: a same-named method on a receiver
+    /// that is not the host handle must stay silent. Without this, teaching
+    /// the rule the migrated spelling would turn every `x.llm.call(...)` into
+    /// a false positive.
+    #[test]
+    fn does_not_trigger_on_non_harness_receiver() {
+        let diags = lint(
+            r#"
+pipeline p(proxy: LlmProxy) {
+    proxy.llm.call("hi", nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
+    }
+
+    /// A local that merely spells its name `harness` carries no host
+    /// authority, so its `llm.call` is not the migrated surface.
+    #[test]
+    fn does_not_trigger_on_local_named_harness() {
+        let diags = lint(
+            r#"
+pipeline p(task) {
+    const harness = make_proxy()
+    harness.llm.call("hi", nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
+    }
+
+    /// The walk reaches call sites nested anywhere the AST allows, not just
+    /// statements directly in a pipeline body.
+    #[test]
+    fn reaches_nested_call_sites() {
+        let diags = lint(
+            r#"
+pipeline p(harness: Harness) {
+    const run = fn(kind: string) {
+        return match kind {
+            "a" -> { harness.llm.call("hi", nil, {llm_retries: 3}) }
+            _ -> { llm_call("hi", nil, {llm_backoff_ms: 250}) }
+        }
+    }
+    try {
+        run("a")
+    } catch (e) {
+        llm_call("hi", nil, {llm_retries: 1})
+    }
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 3, "diags: {diags:?}");
     }
 }

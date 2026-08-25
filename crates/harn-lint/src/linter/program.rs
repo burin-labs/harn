@@ -9,38 +9,15 @@ use crate::diagnostic::{LintDiagnostic, LintSeverity};
 impl Linter<'_> {
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {
         self.collect_hoisted_callable_names(nodes);
-        self.collect_harness_binding_facts(nodes);
+        // Before `run_program_rules`, so a registry rule sees the same harness
+        // receiver facts the walk does.
+        self.harness_facts = super::harness_facts::HarnessFacts::collect(nodes);
         self.collect_persona_step_metadata(nodes);
         self.collect_impl_method_names(nodes);
         self.run_program_rules(nodes);
         for node in nodes {
             self.lint_node(node);
         }
-    }
-
-    fn collect_harness_binding_facts(&mut self, nodes: &[SNode]) {
-        harn_parser::visit::walk_program(nodes, &mut |node| {
-            let (params, body) = match &node.node {
-                Node::Pipeline { params, body, .. }
-                | Node::FnDecl { params, body, .. }
-                | Node::ToolDecl { params, body, .. }
-                | Node::Closure { params, body, .. } => (params.as_slice(), body.as_slice()),
-                _ => return,
-            };
-            self.resolved_identifier_bindings.extend(
-                harn_parser::lexical::resolved_identifier_bindings(params, body),
-            );
-            let Some(harness_name) = Self::callable_harness_param(params) else {
-                return;
-            };
-            if let Some(param) = params.iter().find(|param| param.name == harness_name) {
-                self.harness_bindings
-                    .insert(harn_parser::lexical::BindingId::from_declaration(
-                        &param.name,
-                        param.span,
-                    ));
-            }
-        });
     }
 
     /// Collect source-level callables before the order-sensitive lint walk.
