@@ -48,6 +48,8 @@ pub(super) fn worker_secret_provider(
 /// harness" -- the same missing wiring the connector context had, wearing a
 /// second symptom. Both take the provider from one place so they cannot drift
 /// into disagreeing about which credentials a worker can see.
-pub(super) fn worker_job_harness() -> Result<harn_vm::Harness, DispatchError> {
-    Ok(harn_vm::Harness::real().with_secret_provider(worker_secret_provider()?))
+pub(super) fn worker_job_harness(
+    provider: Arc<dyn harn_vm::secrets::SecretProvider>,
+) -> harn_vm::Harness {
+    harn_vm::Harness::real().with_secret_provider(provider)
 }

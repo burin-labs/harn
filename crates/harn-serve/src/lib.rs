@@ -69,9 +69,9 @@ pub use adapters::site::{
     SiteStreamProvider,
 };
 pub use adapters::worker::{
-    run_job_from_files, run_job_once, run_job_once_with, run_job_once_with_options,
-    start_worker_server, JobRunOptions, JobRunOutcome, WorkerJobRegistration, WorkerServeOptions,
-    WorkerServer, WorkerShutdownReport,
+    run_job_from_files, run_job_from_files_with_options, run_job_once, run_job_once_with,
+    run_job_once_with_options, start_worker_server, JobRunOptions, JobRunOutcome,
+    WorkerJobRegistration, WorkerServeOptions, WorkerServer, WorkerShutdownReport,
 };
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,

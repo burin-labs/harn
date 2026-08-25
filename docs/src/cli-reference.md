@@ -3486,8 +3486,16 @@ harn serve api agent.harn                  # local OpenAPI + SSE Agents API
 harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
+harn serve worker jobs.harn                # scheduled and queued @job functions
 harn serve test                            # reusable user-test worker over stdio
 ```
+
+`harn serve worker` and `harn run --as-job` load connectors declared by the
+nearest `harn.toml`. A job can call them through
+`harness.net.connector_call(...)`. The worker resolves each connector's
+declared credentials through the same secret providers used by direct Harn
+runs. Startup reports a connector load or initialization error before it
+accepts work; a missing credential remains a call error from that connector.
 
 `harn serve test` lets a caller retain one isolated test-run session instead
 of spawning a fresh Harn process for every suite. It accepts JSON-RPC 2.0 as

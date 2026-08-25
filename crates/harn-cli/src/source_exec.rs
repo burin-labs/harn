@@ -384,14 +384,6 @@ pub(crate) fn is_conformance_path(path: &Path) -> bool {
         .any(|component| component.as_os_str() == "conformance")
 }
 
-pub(crate) struct ActiveConnectorClientsGuard;
-
-impl Drop for ActiveConnectorClientsGuard {
-    fn drop(&mut self) {
-        harn_vm::clear_active_connector_clients();
-    }
-}
-
 /// The credentials a provider's manifest declared it needs, as secret ids the
 /// runtime resolves at dispatch.
 pub(crate) fn declared_connector_secrets(
@@ -405,14 +397,38 @@ pub(crate) fn declared_connector_secrets(
 
 pub(crate) async fn install_connector_clients(
     provider_connectors: &[package::ResolvedProviderConnectorConfig],
-) -> Result<ActiveConnectorClientsGuard, String> {
+) -> Result<harn_vm::ActiveConnectorClientsGuard, String> {
+    let registry = build_connector_registry(provider_connectors).await?;
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
     let secrets: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(
         harn_vm::secrets::configured_secret_chain()
             .map_err(|error| format!("failed to configure secret providers: {error}"))?,
     );
+    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
+    let inbox = Arc::new(
+        harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .map_err(|error| error.to_string())?,
+    );
+    let context = harn_vm::ConnectorCtx {
+        event_log,
+        secrets,
+        inbox,
+        metrics,
+        rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
+    };
+    registry
+        .init_all(context)
+        .await
+        .map_err(|error| error.to_string())?;
+    let clients = registry.client_map().await;
+    Ok(harn_vm::scope_active_connector_clients(clients))
+}
 
+pub(crate) async fn build_connector_registry(
+    provider_connectors: &[package::ResolvedProviderConnectorConfig],
+) -> Result<harn_vm::ConnectorRegistry, String> {
     let mut registry = harn_vm::ConnectorRegistry::default();
     for config in provider_connectors {
         if let Some(connector) = package::load_provider_connector(config)
@@ -426,25 +442,7 @@ pub(crate) async fn install_connector_clients(
         }
         registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
     }
-    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
-    let inbox = Arc::new(
-        harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
-            .await
-            .map_err(|error| error.to_string())?,
-    );
-    registry
-        .init_all(harn_vm::ConnectorCtx {
-            event_log,
-            secrets,
-            inbox,
-            metrics,
-            rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-    let clients = registry.client_map().await;
-    harn_vm::install_active_connector_clients(clients);
-    Ok(ActiveConnectorClientsGuard)
+    Ok(registry)
 }
 
 pub(crate) fn default_harness() -> Result<harn_vm::Harness, String> {

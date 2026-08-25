@@ -1078,12 +1078,27 @@ pub(crate) async fn run_as_job(args: &cli::RunArgs) {
     let local = tokio::task::LocalSet::new();
     let outcome = local
         .run_until(async move {
-            harn_serve::run_job_from_files(
+            let extensions =
+                crate::package::try_load_runtime_extensions(&script_path).map_err(|error| {
+                    harn_serve::DispatchError::Validation(format!(
+                        "failed to load job package: {error}"
+                    ))
+                })?;
+            let connector_registry =
+                crate::build_connector_registry(&extensions.provider_connectors)
+                    .await
+                    .map_err(|error| {
+                        harn_serve::DispatchError::Validation(format!(
+                            "failed to load job connectors: {error}"
+                        ))
+                    })?;
+            harn_serve::run_job_from_files_with_options(
                 &script_path,
                 &job,
                 &request,
                 result_out.as_deref(),
                 false,
+                harn_serve::JobRunOptions::default().with_connector_registry(connector_registry),
             )
             .await
         })

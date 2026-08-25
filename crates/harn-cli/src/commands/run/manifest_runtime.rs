@@ -72,7 +72,7 @@ pub(crate) async fn install_manifest_runtime(
     path: &Path,
     vm: &mut harn_vm::Vm,
     handler_initialization: package::ManifestHandlerInitialization,
-) -> Result<crate::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
+) -> Result<harn_vm::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
     // Report rather than leave. `load_runtime_extensions` exits the process on
     // failure, which on this path would cut a `--json` stream off before its
     // terminal event and skip the run's own summary and timing output. The

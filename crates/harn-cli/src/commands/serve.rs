@@ -289,15 +289,25 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
 pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), String> {
     apply_obs_mode(args.obs)?;
     let script_path = Path::new(&args.file).to_path_buf();
-    let options = harn_serve::WorkerServeOptions {
-        consumer_id: args.consumer_id.clone(),
-        claim_ttl: StdDuration::from_secs(args.claim_ttl_secs),
-        drain_timeout: StdDuration::from_secs(args.drain_timeout_secs),
-    };
+    let consumer_id = args.consumer_id.clone();
+    let claim_ttl = StdDuration::from_secs(args.claim_ttl_secs);
+    let drain_timeout = StdDuration::from_secs(args.drain_timeout_secs);
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
+            let extensions = crate::package::try_load_runtime_extensions(&script_path)
+                .map_err(|error| format!("failed to load worker package: {error}"))?;
+            let connector_registry =
+                crate::build_connector_registry(&extensions.provider_connectors)
+                    .await
+                    .map_err(|error| format!("failed to load worker connectors: {error}"))?;
+            let options = harn_serve::WorkerServeOptions {
+                consumer_id,
+                claim_ttl,
+                drain_timeout,
+                connector_registry: Some(connector_registry),
+            };
             let server = harn_serve::start_worker_server(&script_path, options)
                 .await
                 .map_err(|error| error.to_string())?;
