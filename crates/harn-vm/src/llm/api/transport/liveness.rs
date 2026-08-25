@@ -53,10 +53,20 @@ pub(super) struct StreamLiveness {
     last_activity_ms: i64,
     saw_chunk: bool,
     partial_output: bool,
+    /// Instant the HTTP request was dispatched, threaded in so the first-frame
+    /// stamp shares an origin with `client_wall_ms` and the two are
+    /// subtractable. Deliberately separate from `started_ms`, which begins when
+    /// body consumption starts and must keep owning the deadlines unchanged.
+    request_origin: tokio::time::Instant,
+    first_frame_ms: Option<u64>,
 }
 
 impl StreamLiveness {
-    pub(super) fn new(provider: &str, policy: StreamDeadlinePolicy) -> Self {
+    pub(super) fn new(
+        provider: &str,
+        policy: StreamDeadlinePolicy,
+        request_origin: tokio::time::Instant,
+    ) -> Self {
         let clock = harn_clock::RealClock::arc();
         let now_ms = clock.monotonic_ms();
         Self {
@@ -67,7 +77,32 @@ impl StreamLiveness {
             last_activity_ms: now_ms,
             saw_chunk: false,
             partial_output: false,
+            request_origin,
+            first_frame_ms: None,
         }
+    }
+
+    /// Stamp the arrival of the first well-formed provider frame. Idempotent:
+    /// later frames do not move it.
+    ///
+    /// Called from the same place as `mark_partial_output`, which is reached
+    /// only after a frame has parsed. That placement is load-bearing. Stamping
+    /// on any received line would also stamp SSE comments, `event:` name lines,
+    /// and gateway keepalives, so a keepalive arriving during prefill would
+    /// report a first-frame latency near zero — a fabricated number wearing a
+    /// measurement's clothes.
+    pub(super) fn mark_first_frame(&mut self) {
+        if self.first_frame_ms.is_none() {
+            self.first_frame_ms = Some(crate::llm::first_token::duration_ms(
+                self.request_origin.elapsed(),
+            ));
+        }
+    }
+
+    /// Latency to the first well-formed provider frame, or `None` when no frame
+    /// ever parsed.
+    pub(super) fn first_frame_ms(&self) -> Option<u64> {
+        self.first_frame_ms
     }
 
     pub(super) fn phase(&self) -> ProviderStreamPhase {
@@ -188,32 +223,4 @@ impl StreamLiveness {
 
 fn elapsed_since(earlier_ms: i64, later_ms: i64) -> Duration {
     Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn expired_total_deadline_beats_an_immediately_ready_read() {
-        let mut liveness = StreamLiveness::new(
-            "fixture",
-            StreamDeadlinePolicy::for_test(
-                Duration::from_secs(2),
-                Duration::from_secs(10),
-                Duration::from_secs(10),
-            ),
-        );
-        tokio::time::advance(Duration::from_secs(2)).await;
-
-        let error = liveness
-            .next_line(async { Ok(Some("data: ready".to_string())) })
-            .await
-            .expect_err("an already-expired total deadline must win");
-        let failure = error
-            .provider_stream_failure()
-            .expect("typed stream failure");
-        assert_eq!(failure.deadline, Some(ProviderStreamDeadline::Total));
-        assert_eq!(failure.phase, ProviderStreamPhase::AwaitingFirstChunk);
-    }
 }

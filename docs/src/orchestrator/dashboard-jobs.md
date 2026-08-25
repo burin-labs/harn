@@ -85,7 +85,11 @@ import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 const events = [
   dashboard_job_event(
     "run.succeeded",
-    {job_id: "daily-digest", run_id: "run-001", source_timestamp: "2026-05-11T14:03:00Z"},
+    {
+      job_id: "daily-digest",
+      run_id: "run-001",
+      source_timestamp: "2026-05-11T14:03:00Z",
+    },
   ),
 ]
 const view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})

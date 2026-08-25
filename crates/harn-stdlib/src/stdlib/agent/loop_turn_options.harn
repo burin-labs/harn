@@ -19,6 +19,7 @@ pub type AgentIterationInfo = {
   cache_read_tokens: int,
   cache_write_tokens: int,
   response_ms: int,
+  client_first_frame_ms?: int,
   input_tokens: int,
   output_tokens: int,
   thinking_chars: int,
@@ -342,7 +343,8 @@ pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = 
 /**
  * Build the `iteration_info` payload for the `iteration_end` event from
  * the LLM result plus the loop's per-iteration aggregates. Carries `provider`,
- * `model`, `response_ms`, token and cache counts, and `thinking_chars` so live
+ * `model`, `response_ms`, `client_first_frame_ms` (streamed calls only),
+ * token and cache counts, and `thinking_chars` so live
  * pulse-check consumers (fleet hooks, ACP clients) can attribute
  * latency and surface "still working" indicators without re-parsing
  * the transcript JSONL. Empty/missing fields are dropped so the event
@@ -373,6 +375,15 @@ pub fn __iteration_info_payload(
   } else {
     {}
   }
+  // Same absence rule, for the same reason: a streamed call reports how long
+  // the first provider frame took, and a single-shot call has no first frame.
+  // Defaulting to 0 would make "not streamed" read as "arrived instantly".
+  const first_frame_ms = telemetry?.client_first_frame_ms
+  const first_frame_latency = if type_of(first_frame_ms) == "int" {
+    {client_first_frame_ms: first_frame_ms}
+  } else {
+    {}
+  }
   return {
     tool_count: tool_count,
     text: visible_text,
@@ -388,6 +399,7 @@ pub fn __iteration_info_payload(
     thinking_chars: thinking_chars,
   }
     + serving_identity
+    + first_frame_latency
     + extra
 }
 

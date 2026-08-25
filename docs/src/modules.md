@@ -612,8 +612,9 @@ pipeline default(harness: Harness) {
   const current = report.current
   require current != nil, "chain should have a current subject"
   harness.stdio.log(current.subject)                    // "agent:reviewer"
-  harness.stdio.log(actor_chain_format(chain))          // "agent:reviewer for user:owner"
-  harness.stdio.log(actor_chain_format(chain, {style: "arrow"})) // "agent:reviewer -> user:owner"
+  harness.stdio.log(actor_chain_format(chain))   // "agent:reviewer for user:owner"
+  // "agent:reviewer -> user:owner"
+  harness.stdio.log(actor_chain_format(chain, {style: "arrow"}))
 }
 ```
 
@@ -858,7 +859,8 @@ import "std/path"
 harness.stdio.log(ext("main.harn"))          // "harn"
 harness.stdio.log(stem("/src/main.harn"))    // "main"
 harness.stdio.log(is_absolute("/usr/bin"))   // true
-harness.stdio.log(workspace_normalize("/packages/app/SKILL.md", harness.fs.cwd())) // "packages/app/SKILL.md"
+// "packages/app/SKILL.md"
+harness.stdio.log(workspace_normalize("/packages/app/SKILL.md", harness.fs.cwd()))
 
 const files = list_files("src")
 const dirs = list_dirs(".")
@@ -901,12 +903,13 @@ import "std/json"
 
 const parsed: Result<unknown, JsonParseFailure> = try { json_parse("{\"x\": 1}") }
 const data = parsed?   // {x: 1}; malformed JSON propagates Err
-const validator = stream_validator({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
+const schema = {type: "dict", required: ["x"], properties: {x: {type: "int"}}}
+const validator = stream_validator(schema)
 const status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
 const parsed = validator.value()             // {x: 1}
 
 // std/json/stream_validate — plain-dict verdicts for streaming agents:
-const handle = stream_validate_create({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
+const handle = stream_validate_create(schema)
 const r1 = stream_validate_chunk(handle, "{\"x\":")    // {verdict: "pending"}
 const r2 = stream_validate_chunk(handle, "1}")          // {verdict: "valid"}
 const r3 = stream_validate_finalize(handle)             // {verdict: "valid"}
@@ -1572,7 +1575,9 @@ import { command_cancel, command_run, command_wait_for_output } from "std/comman
 
 const server = command_run(harness.tools, ["my-server"], {background: true})
 defer { command_cancel(server, {wait_result_ms: 5000}) }
-const ready = command_wait_for_output(harness.tools, server, "ready", {timeout_ms: 10000})
+const ready = command_wait_for_output(
+  harness.tools, server, "ready", {timeout_ms: 10000},
+)
 if !ready.matched { throw "server exited or timed out before readiness" }
 ```
 
@@ -1594,7 +1599,9 @@ manager, or host:
 ```harn,ignore
 import { command_step } from "std/command"
 
-const step = command_step(harness.tools, harness.clock, "verify package", ["cargo", "test", "-p", "harn-vm"], {
+const step = command_step(
+  harness.tools, harness.clock, "verify package",
+  ["cargo", "test", "-p", "harn-vm"], {
   cwd: repo_root,
   capture: {max_inline_bytes: 12000},
   tail_bytes: 8000,
@@ -1626,12 +1633,16 @@ delegates retries and recovery metadata to `command_json_step`:
 ```harn,ignore
 import { command_json, command_json_step } from "std/command"
 
-const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(
+  harness.agent, harness.tools, harness.clock,
+  ["gh", "api", "repos/burin-labs/harn"], {
   timeout_ms: 10000,
   capture: {max_inline_bytes: 65536},
 })
 
-const probe = command_json_step(harness.agent, harness.tools, harness.clock, "read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const probe = command_json_step(
+  harness.agent, harness.tools, harness.clock, "read repo metadata",
+  ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 ```
@@ -1646,7 +1657,12 @@ import { command_json, command_try } from "std/command"
 const repo = command_try(harness.agent, harness.tools, harness.clock,
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
-    {source: "cli", run: fn() { return command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"]) }},
+    {source: "cli", run: fn() {
+      return command_json(
+        harness.agent, harness.tools, harness.clock,
+        ["gh", "api", "repos/burin-labs/harn"],
+      )
+    }},
   ],
   {normalize: { value, source -> return {source: source, name: value.name} }},
 )

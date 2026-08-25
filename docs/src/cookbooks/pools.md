@@ -87,7 +87,9 @@ queues rather than spilling onto non-GPU hosts.
 
 ```harn,ignore
 import { SpawnToPool } from "std/triggers"
-import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+import {
+  Backpressure, fair_round_robin, pool_create, pool_wait,
+} from "std/lifecycle/pool"
 
 pipeline inference_pool_setup(harness: Harness) {
   const bp = Backpressure()

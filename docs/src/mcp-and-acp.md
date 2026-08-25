@@ -20,7 +20,10 @@ servers and remote HTTP MCP servers.
 Use `mcp_connect` to spawn an MCP server process and negotiate the connection:
 
 ```harn
-const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect(
+  "npx",
+  ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+)
 
 const info = harness.tools.mcp_server_info(client)
 harness.stdio.log("Connected to: ${info.name}")
@@ -259,7 +262,9 @@ Use them in your pipeline:
 ```harn
 pipeline default(harness: Harness, task) {
   const tools = harness.tools.mcp_list_tools(mcp.filesystem)
-  const content = harness.tools.mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
+  const content = harness.tools.mcp_call(
+    mcp.filesystem, "read_file", {path: "/tmp/data.txt"},
+  )
   harness.stdio.log(content)
 }
 ```
@@ -395,9 +400,14 @@ A complete example connecting to the filesystem MCP server, writing a
 file, and reading it back:
 
 ```harn
-const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect(
+  "npx",
+  ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+)
 
-harness.tools.mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
+harness.tools.mcp_call(
+  client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"},
+)
 const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
 harness.stdio.log(content)
 

@@ -68,7 +68,7 @@ const __JSON_SHAPE: ToolCallShape = {
   call_syntax: "a ```tool fenced block wrapping one JSON object with `name` and `args` keys",
   final_answer: "as plain text",
   body_hint:
-    "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. For a multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a verbatim body instead of escaping: set the value to `\"<<BODY\"`, then put the raw text after the JSON object INSIDE the same ```tool fence, ending with a line that is exactly `BODY`. A verbatim body needs NO escaping at all — quotes, backslashes, newlines, and backticks are literal bytes. Use `\"<<BODY:N\"`, where N is the exact number of body lines, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\). For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never wrap the call itself in a Markdown fence other than ```tool, and never use a triple-quoted string.",
+    "For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`, put the raw bytes after the JSON object inside the same ```tool fence, and end them with a line that is exactly `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings.",
 }
 
 const __TEXT_SHAPE: ToolCallShape = {

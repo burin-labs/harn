@@ -48,7 +48,9 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust", "python"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -193,15 +195,20 @@ are matched first regardless of stack scoping, so they're the right
 place for harness-level overrides:
 
 ```harn,ignore
-import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+import {
+  preset_run_command, tool_hooks_mode_deny_with_explanation,
+} from "std/tool_hooks"
 
 const no_curl_pipe_sh = tool_rule({
   id: "harness.curl_pipe_sh",
   pattern: "curl[^|]+\\|\\s*(?:sudo\\s+)?(?:ba)?sh\\b",
   applies_to: [],
   severity: "error",
-  explanation: "Pipe-to-shell installs run unreviewed remote code. Download, inspect, then run.",
-  references: ["https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/"],
+  explanation: "Pipe-to-shell installs run unreviewed remote code. Download,"
+    + " inspect, then run.",
+  references: [
+    "https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/",
+  ],
 })
 
 const wrapper = preset_run_command({
@@ -216,7 +223,9 @@ To compose a registry by hand (e.g. drop a shipped catalogue and
 substitute your own), build one from scratch:
 
 ```harn,ignore
-import { preset_run_command, tool_hooks_catalogue_universal } from "std/tool_hooks_catalogues"
+import {
+  preset_run_command, tool_hooks_catalogue_universal,
+} from "std/tool_hooks_catalogues"
 import { tool_hooks_register, tool_hooks_registry } from "std/tool_hooks"
 
 const vendor_rust = catalogue({
@@ -395,7 +404,9 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 

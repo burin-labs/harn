@@ -156,7 +156,8 @@ Then hand the registry to `agent_loop(harness, ...)`:
 ```harn,ignore
 const result = agent_loop(harness,
   "Read the screenshot, hash the extracted order id, and summarize the UI state.",
-  "Use deterministic tools first. Prefer pure stdlib tools over free-form reasoning when possible.",
+  "Use deterministic tools first. Prefer pure stdlib tools over free-form"
+    + " reasoning when possible.",
   {
     loop_until_done: true,
     tools: deterministic_tools(),
@@ -215,7 +216,10 @@ const tools = agent_command_tools(nil, {
 agent_loop(harness, task, system, {
   tools: tools,
   tool_format: "native",
-  require_successful_tools: ["run_command", ["read_command_output", "read_command_output_tail"]],
+  require_successful_tools: [
+    "run_command",
+    ["read_command_output", "read_command_output_tail"],
+  ],
 })
 ```
 
@@ -309,7 +313,9 @@ when a loop should be allowed to change the workspace:
 ```harn,ignore
 import { agent_edit_tools, agent_host_tools } from "std/agent/host_tools"
 
-const tools = agent_edit_tools(agent_host_tools(nil, {root: repo_root}), {root: repo_root})
+const tools = agent_edit_tools(
+  agent_host_tools(nil, {root: repo_root}), {root: repo_root},
+)
 ```
 
 Every edit tool is annotated honestly as mutating (`kind: edit`/`delete`,
@@ -321,7 +327,9 @@ access, and tool-surface narrowing classifies them correctly. Because they are p
 
 ```harn,ignore
 import { agent_edit_tools } from "std/agent/host_tools"
-import { compose_tool_callers, default_tool_caller, with_audit_log, with_consent } from "std/llm/tool_middleware"
+import {
+  compose_tool_callers, default_tool_caller, with_audit_log, with_consent,
+} from "std/llm/tool_middleware"
 
 agent_loop(harness, task, system, {
   tools: agent_edit_tools(nil, {root: repo_root}),
@@ -353,7 +361,9 @@ of open-coding process execution plus `json_parse`:
 ```harn,ignore
 import { command_json } from "std/command"
 
-const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(
+  harness.agent, harness.tools, harness.clock,
+  ["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 ```
@@ -606,7 +616,12 @@ const result = harness.llm.call("Find the current policy and summarize it.", nil
   api_mode: "responses",
   provider_tools: [
     {type: "web_search"},
-    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+    {
+      type: "mcp",
+      server_label: "docs",
+      server_url: "https://mcp.example.com",
+      require_approval: "always",
+    },
   ],
 })
 ```

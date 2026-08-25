@@ -47,7 +47,9 @@ pipeline default(harness: Harness) {
     {root: "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"},
   )
 
-  const callers: list<LibrarianCallSite> = code_librarian_who_calls(harness.code_index, "fetchUser")
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls(
+    harness.code_index, "fetchUser",
+  )
   harness.stdio.println("fetchUser has " + to_string(len(callers)) + " call sites:")
   for c in callers {
     harness.stdio.println("  " + c.path)
@@ -70,7 +72,8 @@ resolved defining path when it is known so a same-named type elsewhere in the
 workspace cannot contaminate the result:
 
 ```harn
-const surface: LibrarianMemberSurface = code_librarian_member_surface(harness.code_index,
+const surface: LibrarianMemberSurface = code_librarian_member_surface(
+  harness.code_index,
   "StatusOr",
   "include/status.hpp",
 )
@@ -94,7 +97,8 @@ record `result.ok()` as a call to `ok` even when it could not resolve a typed
 files, and bounds the returned sites independently:
 
 ```harn
-const consumers: LibrarianExternalConsumers = code_librarian_external_consumers(harness.code_index,
+const consumers: LibrarianExternalConsumers = code_librarian_external_consumers(
+  harness.code_index,
   "ok",
   "include/status.hpp",
   5,

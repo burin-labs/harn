@@ -90,8 +90,14 @@ fn review_tools() {
 // `workflow_stage_spec(...)` constructor) from `std/workflow/options`
 // so stage-spec typos fail at check time.
 const act: StageSpec = {kind: "stage", mode: "agent", tools: review_tools()}
-const verify: StageSpec = {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
-const repair: StageSpec = {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
+const verify: StageSpec = {
+  kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"]),
+}
+const repair: StageSpec = {
+  kind: "stage",
+  mode: "agent",
+  tools: tool_select(review_tools(), ["edit", "run"]),
+}
 
 const graph = workflow_graph({
   name: "repair_loop",
@@ -136,7 +142,12 @@ import "std/agents"
 
 const raw_plan = {
   steps: [
-    {id: "inspect", kind: "research", title: "Inspect parser", tools: ["read", "search"]},
+    {
+      id: "inspect",
+      kind: "research",
+      title: "Inspect parser",
+      tools: ["read", "search"],
+    },
     {id: "patch", title: "Patch diagnostics", tools: ["edit"]},
     {id: "docs", title: "Update release notes", tools: ["edit"]}
   ]
@@ -261,7 +272,10 @@ goal: {
   retry_policy: {max_attempts: 3, feedback: true},
   verify: { result ->
     const text = to_string(result?.artifacts[0]?.text)
-    return {ok: contains(text, "SUMMARY:"), findings: ["output is missing a SUMMARY: section"]}
+    return {
+      ok: contains(text, "SUMMARY:"),
+      findings: ["output is missing a SUMMARY: section"],
+    }
   },
 }
 ```
@@ -391,7 +405,7 @@ these keys:
 {
   task,                // the (possibly repaired) task string for this attempt
   attempt,             // 1-based attempt number
-  prior_findings,      // list<string> of findings from the previous attempt, [] on the first
+  prior_findings,      // list<string> from the previous attempt, [] on the first
   prior_verification,  // the previous attempt's verification dict, nil on the first
   prior_text,          // the previous attempt's visible text, "" on the first
   artifacts,           // the artifacts selected for this stage

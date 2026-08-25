@@ -150,10 +150,14 @@ for the full surface area and `HARN-PROBE-NNN` diagnostics.
 recall:
 
 ```harn
-import { pattern_learning_observe, pattern_learning_pending } from "std/agent/pattern_knowledge"
+import {
+  pattern_learning_observe, pattern_learning_pending,
+} from "std/agent/pattern_knowledge"
 
 const options = {allow_manual_evidence: true}
-pattern_learning_observe("session-1", "Refactor the auth refresh tests", ["read", "edit"], options)
+pattern_learning_observe(
+  "session-1", "Refactor the auth refresh tests", ["read", "edit"], options,
+)
 const proposals = pattern_learning_pending(options)
 ```
 

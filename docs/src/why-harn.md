@@ -56,7 +56,10 @@ readable:
 ```harn
 pipeline analyze(harness: Harness, task) {
   const context = harness.fs.read_text("README.md")
-  const plan = harness.llm.call("${task}\n\nContext:\n${context}", "Break this into steps.")
+  const plan = harness.llm.call(
+    "${task}\n\nContext:\n${context}",
+    "Break this into steps.",
+  )
   const steps = json_parse(plan.text)
 
   const results = parallel each steps { step ->
@@ -81,7 +84,10 @@ The CLI handles standalone OAuth for remote HTTP MCP servers, so cloud MCP
 integrations can be ordinary runtime dependencies instead of host-specific glue.
 
 ```harn
-const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+const client = harness.tools.mcp_connect(
+  "npx",
+  ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+)
 const tools = harness.tools.mcp_list_tools(client)
 const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/data.txt"})
 harness.tools.mcp_disconnect(client)

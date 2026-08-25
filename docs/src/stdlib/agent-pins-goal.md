@@ -15,7 +15,9 @@ agent must not relitigate), `artifact_ref` (a live file view or path the work
 hinges on), and `no_compact` (a block marked keep-verbatim).
 
 ```harn,ignore
-import { pin, pin_reminder, with_pin_roots, pin_compaction_policy } from "std/agent/pins"
+import {
+  pin, pin_reminder, with_pin_roots, pin_compaction_policy,
+} from "std/agent/pins"
 
 const pins = [
   pin("goal", "Ship the auth migration", {dedupe_key: "pin/goal"}),
@@ -28,7 +30,9 @@ const policy = pin_compaction_policy(pins)
 
 // (2) Double as reachability-GC roots: any stale tool result that references a
 //     pinned path/identifier is kept, not reclaimed.
-const projected = transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
+const projected = transcript_project(
+  t, with_pin_roots({policy: "reachability_gc"}, pins),
+)
 ```
 
 `pin(kind, content, opts?)` validates the kind and normalizes the value;
@@ -71,14 +75,21 @@ const g = goal({
   objective: "Fix the flaky login test",
   success_criteria: [
     "the suite passes twice in a row",
-    {id: "green", description: "CI is green", check: { facts -> return facts?.ci_green == true }},
+    {
+      id: "green",
+      description: "CI is green",
+      check: { facts -> return facts?.ci_green == true },
+    },
   ],
   constraints: ["do not touch auth.go"],
   budget: {max_cost_usd: 5.0},
 })
 
 // Render the goal into every outbound request (existing fragment channel):
-const result = agent_loop(harness, "Proceed.", nil, with_goal({provider: "anthropic", done_judge: goal_judge(g)}, g))
+const goal_opts = with_goal(
+  {provider: "anthropic", done_judge: goal_judge(g)}, g,
+)
+const result = agent_loop(harness, "Proceed.", nil, goal_opts)
 
 // The machine-checkable floor:
 const floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green"], ...}

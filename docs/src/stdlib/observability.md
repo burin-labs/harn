@@ -40,10 +40,15 @@ import { obs } from "std/observability"
 const B = obs().Backend
 
 obs().configure({backend: B.otel(harness.env.get("OTEL_EXPORTER_OTLP_ENDPOINT"))})
-obs().configure({backend: B.splunk_hec(harness.env.get("SPLUNK_HEC_ENDPOINT"), harness.env.get("SPLUNK_HEC_TOKEN"))})
+obs().configure({backend: B.splunk_hec(
+  harness.env.get("SPLUNK_HEC_ENDPOINT"),
+  harness.env.get("SPLUNK_HEC_TOKEN"),
+)})
 obs().configure({backend: B.honeycomb(harness.env.get("HONEYCOMB_API_KEY"), "harn")})
 obs().configure({backend: B.pretty_stderr})
-obs().configure({backend: B.compose([B.otel("http://collector:4318"), B.pretty_stderr])})
+obs().configure({
+  backend: B.compose([B.otel("http://collector:4318"), B.pretty_stderr]),
+})
 ```
 
 ## Routing
@@ -59,7 +64,10 @@ const B = o.Backend
 o.configure({
   backends: {
     otel: B.otel("http://collector:4318"),
-    splunk: B.splunk_hec("https://splunk.example/services/collector", harness.env.get("SPLUNK_HEC_TOKEN")),
+    splunk: B.splunk_hec(
+      "https://splunk.example/services/collector",
+      harness.env.get("SPLUNK_HEC_TOKEN"),
+    ),
     honeycomb: B.honeycomb(harness.env.get("HONEYCOMB_API_KEY"), "harn"),
   },
   routes: [

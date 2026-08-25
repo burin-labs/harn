@@ -342,27 +342,43 @@ when you only need one synchronous subprocess capture record:
 `{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
 
 ```harn,ignore
-import { command_cancel, command_json, command_json_step, command_run, command_try, command_wait_for_output } from "std/command"
+import {
+  command_cancel, command_json, command_json_step, command_run, command_try,
+  command_wait_for_output,
+} from "std/command"
 
-const server = command_run(harness.tools, ["my-server", "--port", "8080"], {background: true})
+const server = command_run(
+  harness.tools, ["my-server", "--port", "8080"], {background: true},
+)
 defer { command_cancel(server, {wait_result_ms: 5000}) }
-const ready = command_wait_for_output(harness.tools, server, "listening on 8080", {timeout_ms: 10000})
+const ready = command_wait_for_output(
+  harness.tools, server, "listening on 8080", {timeout_ms: 10000},
+)
 if !ready.matched {
   throw "server readiness failed: " + ready.status
 }
 
-const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
+const repo = command_json(
+  harness.agent, harness.tools, harness.clock,
+  ["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
 })
 
-const step = command_json_step(harness.agent, harness.tools, harness.clock, "repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+const step = command_json_step(
+  harness.agent, harness.tools, harness.clock, "repo metadata",
+  ["gh", "api", "repos/burin-labs/harn"], {
   retry: {max_attempts: 2, delay_ms: 0},
 })
 
 const fallback = command_try(harness.agent, harness.tools, harness.clock,
   [
     {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
-    {source: "cli", run: fn() { return command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"]) }},
+    {source: "cli", run: fn() {
+      return command_json(
+        harness.agent, harness.tools, harness.clock,
+        ["gh", "api", "repos/burin-labs/harn"],
+      )
+    }},
   ],
   {normalize: { value, source -> return {source: source, name: value.name} }},
 )
@@ -554,7 +570,10 @@ unless the name is a sink such as `collect`, `fold`, or `first`.
 ```harn
 // LLM token feed -> tap to log, then keep a bounded transcript.
 const chunks = stream.collect(
-  stream.tap(harness.llm.stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> harness.stdio.log(chunk.visible_delta) }),
+  stream.tap(
+    harness.llm.stream_call("Summarize logs", nil, {provider: "mock"}),
+    { chunk -> harness.stdio.log(chunk.visible_delta) },
+  ),
   {max: 200}
 )
 
@@ -1007,7 +1026,9 @@ blocked inside one long call is not interrupted; the abort lands at the next
 checkpoint the branch itself checks.
 
 ```harn,ignore
-import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, decisive_error, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   if abort_requested(token) {           // your own safe checkpoint
@@ -1024,7 +1045,8 @@ const outcome = settle_with_abort(lanes, { lane, token ->
 // A branch fails when it throws OR returns Result.Err — plain `parallel settle`
 // would record a returned Err as Ok(Err(..)) and count it a success.
 harness.stdio.log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
-harness.stdio.log(decisive_error(outcome))  // first non-abandoned failure: the real cause
+// first non-abandoned failure: the real cause
+harness.stdio.log(decisive_error(outcome))
 ```
 
 `max_failures: N` trips the token automatically after N failures;
@@ -1216,7 +1238,9 @@ dynamic values still go through Postgres bind parameters.
 
 ```harn,ignore
 import "std/postgres"
-import { ident, many, named_sql, run, sql, uuid_text, nullable_timestamptz_json } from "std/postgres/query"
+import {
+  ident, many, named_sql, run, sql, uuid_text, nullable_timestamptz_json,
+} from "std/postgres/query"
 
 fn list_receipts_query(tenant_id: string, limit: int) {
   return named_sql(
@@ -1242,7 +1266,9 @@ LIMIT {limit}
 }
 
 const rows = run(db, list_receipts_query(tenant_id, 50))
-const direct = many(db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}))
+const direct = many(
+  db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}),
+)
 ```
 
 Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
@@ -1266,14 +1292,17 @@ for source-controlled fragments no typed helper covers.
 
 ```harn
 const response = harness.llm.call(prompt, system, options)
-harness.stdio.log(response.text)           // the public answer (after tool/protocol projection)
-harness.stdio.log(response.raw_text)       // pre-projection source (protocol tags intact)
+harness.stdio.log(response.text)           // public answer, post-projection
+harness.stdio.log(response.raw_text)       // pre-projection source, tags intact
 harness.stdio.log(response.visible_text)   // sanitized human-visible output
 harness.stdio.log(response.canonical_text) // canonical replay form of a tagged response
 harness.stdio.log(response.usage.input_tokens)
 harness.stdio.log(response.usage.output_tokens)
-harness.stdio.log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
-harness.stdio.log(response.blocks)         // canonical blocks; may contain private signed reasoning
+// outcome.kind is "complete" | "tool_use" | "truncated" | "refused"
+//                 | "paused" | "empty"
+harness.stdio.log(response.outcome.kind)
+// canonical blocks; may contain private signed reasoning
+harness.stdio.log(response.blocks)
 harness.stdio.log(response.logprobs)       // present when requested and returned
 ```
 
@@ -1365,7 +1394,12 @@ const r = harness.llm.call(prompt, sys, {
   output: {schema: schema, strict: true, validation: "error"},
   provider_tools: [
     {type: "web_search"},
-    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+    {
+      type: "mcp",
+      server_label: "docs",
+      server_url: "https://mcp.example.com",
+      require_approval: "always",
+    },
   ],
   truncation: "auto",
 })
@@ -1447,9 +1481,10 @@ convo = add_system(convo, "For the rest of this conversation, reply only in Fren
 convo = add_user(convo, "What is my name?")
 
 // Same script on every route:
-harness.llm.call("", nil, {provider: "anthropic", model: "claude-opus-4-8", messages: transcript_messages(convo)})
-harness.llm.call("", nil, {provider: "anthropic", model: "claude-haiku-4-5", messages: transcript_messages(convo)})
-harness.llm.call("", nil, {provider: "openai",    model: "gpt-5.4",          messages: transcript_messages(convo)})
+const base = {messages: transcript_messages(convo)}
+harness.llm.call("", nil, base + {provider: "anthropic", model: "claude-opus-4-8"})
+harness.llm.call("", nil, base + {provider: "anthropic", model: "claude-haiku-4-5"})
+harness.llm.call("", nil, base + {provider: "openai", model: "gpt-5.4"})
 ```
 
 Per-route behavior (capability-driven, not hardcoded):
@@ -2813,7 +2848,12 @@ to `act_with_approval`:
 import { AgentSpec } from "std/agent/options"
 
 const budgeted_opts: AgentSpec = {
-  autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
+  autonomy_budget: {
+    per_hour: 10,
+    per_day: 100,
+    key: "captain.persona",
+    reviewer: "oncall",
+  },
 }
 agent_loop(harness, task, system, budgeted_opts)
 ```
@@ -3386,9 +3426,13 @@ Each primitive accepts named arguments (preferred) or the legacy
 positional form. Both lower to the same VM-enforced runtime.
 
 ```harn,ignore
-const answer  = harness.interaction.ask_user(prompt: "choose A or B", schema: schema_of(Choice))
-const record  = harness.interaction.request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
-                               reviewers: ["alice", "bob", "carol"])
+const answer  = harness.interaction.ask_user(
+  prompt: "choose A or B", schema: schema_of(Choice),
+)
+const record  = harness.interaction.request_approval(
+  action: "merge_pr", args: {pr: 123}, quorum: 2,
+  reviewers: ["alice", "bob", "carol"],
+)
 const result  = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
                            approvers: ["alice", "bob", "carol"])
 const handle  = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
@@ -3568,7 +3612,9 @@ Use `std/ui_resource` to package interactive widgets as `ui://` resources for
 MCP Apps hosts while keeping text/structured fallbacks first-class:
 
 ```harn
-import { ui_resource, ui_select_for_host, ui_structured_fallback, ui_tool_result } from "std/ui_resource"
+import {
+  ui_resource, ui_select_for_host, ui_structured_fallback, ui_tool_result,
+} from "std/ui_resource"
 
 const resource = ui_resource(
   "ui://harn-dashboard/kpis@v1",
@@ -3576,7 +3622,9 @@ const resource = ui_resource(
   weekly_kpi_html,
   {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
 )
-const result = ui_tool_result(resource, {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})})
+const result = ui_tool_result(resource, {
+  structured_fallback: ui_structured_fallback({signups: 42, churn: 3}),
+})
 const rendered = ui_select_for_host(result, host_capabilities)
 ```
 
@@ -3622,7 +3670,9 @@ enter durable context, and hosts emit separate decision events so the review
 trail is replayable:
 
 ```harn
-import { bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt } from "std/personas/bulletins"
+import {
+  bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt,
+} from "std/personas/bulletins"
 
 const bulletin = bulletin_propose(
   {
@@ -3666,12 +3716,18 @@ const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
 ### Durable memory (`std/memory`)
 
 ```harn
-import { memory_open, memory_store, memory_recall, memory_summarize, memory_forget } from "std/memory"
+import {
+  memory_open, memory_store, memory_recall, memory_summarize, memory_forget,
+} from "std/memory"
 
 // Optional: configure the namespace once. Defaults to deterministic BM25.
-harness.memory.open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
+harness.memory.open("workspace/acme", {
+  backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2",
+})
 
-harness.memory.store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
+harness.memory.store(
+  "workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"],
+)
 const hits = harness.memory.recall("workspace/acme", "rust", 5, {mode: "semantic"})
 const summary = harness.memory.summarize("workspace/acme", {limit: 10})
 harness.memory.forget("workspace/acme", {tag: "stale"})
@@ -3917,7 +3973,9 @@ leak.
 | `on_finish_handoff_to(target_pipeline, options?)` | Packages unsettled state into a typed envelope and hands it to `target_pipeline` via `harness.handoff_to`. |
 
 ```harn,ignore
-import { on_finish_drain, on_finish_handoff_to, on_finish_block_until_settled } from "std/lifecycle"
+import {
+  on_finish_drain, on_finish_handoff_to, on_finish_block_until_settled,
+} from "std/lifecycle"
 
 pipeline_on_finish(on_finish_drain)
 pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
@@ -3939,7 +3997,9 @@ handlers, `resume_by`, custom drain). All six are pure factories:
 
 ```harn,ignore
 import { on_finish_drain } from "std/lifecycle"
-import { compose, if_unsettled, with_telemetry, with_timeout } from "std/lifecycle/combinators"
+import {
+  compose, if_unsettled, with_telemetry, with_timeout,
+} from "std/lifecycle/combinators"
 
 pipeline_on_finish(
   if_unsettled(with_telemetry(with_timeout(on_finish_drain, 30000), "drain")),
@@ -4019,7 +4079,9 @@ Use a pool when many independent call sites need to share a cap; use
 needs a local cap.
 
 ```harn
-import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+import {
+  Backpressure, fair_round_robin, pool_create, pool_wait,
+} from "std/lifecycle/pool"
 
 const backpressure = Backpressure()
 const pool = pool_create(harness.agent, {
@@ -4029,7 +4091,8 @@ const pool = pool_create(harness.agent, {
   backpressure: backpressure.queue(100, "fail_submitter"),
 })
 
-const handle = pool.submit({ -> agent_loop(harness, "review", "You are a reviewer.") }, {
+const handle = pool.submit(
+  { -> agent_loop(harness, "review", "You are a reviewer.") }, {
   tenant_id: "acme",
   priority: 10,
   idempotency_key: "review-pr-1984",
@@ -4281,7 +4344,9 @@ the provider-envelope form
 to write deterministic tests for either helper's error path:
 
 ```harn
-harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
+harness.llm.mock_enqueue({
+  error: {category: "rate_limit", message: "429", retry_after_ms: 2500},
+})
 try {
   harness.llm.call("hi", nil, {provider: "mock"})
 } catch (e) {
@@ -4296,7 +4361,9 @@ const r = harness.llm.call_safe("hi", nil, {provider: "mock"})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
 
-harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+harness.llm.mock_enqueue({
+  error: {status: 503, kind: "transient", reason: "upstream_unavailable"},
+})
 const recovered = harness.llm.call_safe("hi", nil, {provider: "mock"})
 assert(!recovered.ok)
 assert(recovered.error.status == 503)
@@ -4344,7 +4411,10 @@ const route = agent_model_options({
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
 })
 const caller = with_retry(default_llm_caller(), {max_attempts: 3})
-agent_loop(harness, task, system, route.options + {loop_until_done: true, llm_caller: caller})
+agent_loop(
+  harness, task, system,
+  route.options + {loop_until_done: true, llm_caller: caller},
+)
 ```
 
 `agent_model_options` resolves explicit options, role env overrides such as
@@ -4413,7 +4483,9 @@ const policy = routing_policy({
 })
 
 const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
-// result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?, verifier_outcome?, verifier_signals?}], selected, session_cost_usd}
+// result.routing = {policy, selected, session_cost_usd, attempts: [{provider,
+//   model, status, duration_ms, cost_usd, error?, verifier_outcome?,
+//   verifier_signals?}]}
 ```
 
 Semantics:
@@ -4482,7 +4554,7 @@ the schema-retry composition described above.
 // Inline ladder: ordered steps, cheapest first.
 const result = harness.llm.call("Summarize this PR.", nil, {
   models: [
-    "haiku",                                          // string sugar for {model: "haiku"}
+    "haiku",                              // string sugar for {model: "haiku"}
     {model: "sonnet", label: "mid"},
     {model: "opus", provider: "anthropic", label: "frontier",
      options: {max_tokens: 4096}},                    // per-step generation overrides
@@ -4806,9 +4878,9 @@ const policy = create({
     host("api.anthropic.com", [443]),
   ],
   deny: [domain_wildcard("*.competitor.com")],
-  default: "deny",                                    // or "allow"
-  on_violation: "error",                              // or "audit_only", "quarantine",
-                                                      // or a fn(req) returning one of those
+  default: "deny",              // or "allow"
+  on_violation: "error",        // or "audit_only", "quarantine", or a
+                                // fn(req) returning one of those
 })
 const restricted = harness.with_net_policy(policy)
 restricted.net.get("https://github.com/foo")          // allowed
@@ -4840,14 +4912,13 @@ token-redaction catalog. The five modules under `std/oauth/*` compose
 freely — pick a provider, pick a storage, then pick a grant.
 
 ```harn,ignore
-import { providers } from "std/oauth/providers"             // github, slack, linear, notion,
-                                                            // google, microsoft, atlassian,
-                                                            // discord, gitlab, bitbucket,
-                                                            // github_enterprise, custom
-import { memory } from "std/oauth/storage"                  // memory, file, harn_cloud_*,
-                                                            // custom
+// github, slack, linear, notion, google, microsoft, atlassian, discord,
+// gitlab, bitbucket, github_enterprise, custom
+import { providers } from "std/oauth/providers"
+// memory, file, harn_cloud_*, custom
+import { memory } from "std/oauth/storage"
+// RFC 6749 + 7636 + 8693 + 9700
 import { client, request, token, token_exchange } from "std/oauth/client"
-                                                            // RFC 6749 + 7636 + 8693 + 9700
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
 import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / headless)
 import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
@@ -4865,7 +4936,9 @@ backend it's holding.
 ```harn
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
-import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization, token, token_exchange,
+} from "std/oauth/client"
 
 const cli = client(
   providers().github,
@@ -4879,7 +4952,8 @@ const cli = client(
 )
 
 // One-shot authorization-code dance (host drives the browser):
-const pkce = start_authorization(cli)            // pkce.url, pkce.state, pkce.code_verifier
+// pkce.url, pkce.state, pkce.code_verifier
+const pkce = start_authorization(cli)
 const token_set = exchange_code(cli, pkce, code, state)
 
 // Subsequent calls auto-refresh past 75% TTL:
@@ -4957,7 +5031,9 @@ the client doesn't know the difference between in-process memory, an
 encrypted file, a cloud platform, or a vault.
 
 ```harn
-import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
+import {
+  memory, file, harn_cloud_session, harn_cloud_org, custom,
+} from "std/oauth/storage"
 
 const mem = memory()                                       // ephemeral
 const disk = file("/var/lib/harn/oauth.bin", harness.env.get("KEY"))   // AES-256-GCM
@@ -5034,8 +5110,11 @@ import {
   register_client, validate_metadata, well_known_paths, well_known_response,
 } from "std/oauth/dynamic_registration"
 
-const paths = well_known_paths()  // {client_metadata, authorization_server_metadata, registration}
-const oas = authorization_server_metadata(providers().github, {registration_endpoint: paths.registration})
+// {client_metadata, authorization_server_metadata, registration}
+const paths = well_known_paths()
+const oas = authorization_server_metadata(
+  providers().github, {registration_endpoint: paths.registration},
+)
 const envelope = well_known_response(oas)  // {status, content_type, headers, body}
 
 const store = dynamic_registration_store()
@@ -5065,7 +5144,9 @@ OTel attrs / system reminders replace matches with
 underlying tool — redaction is display-only.
 
 ```harn,ignore
-import { default_patterns, drain_audit, redact, register_pattern } from "std/oauth/redaction"
+import {
+  default_patterns, drain_audit, redact, register_pattern,
+} from "std/oauth/redaction"
 
 register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
 const display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -5131,8 +5212,10 @@ project root (nearest `harn.toml`) so refactors that move callers don't
 break asset references:
 
 ```harn,ignore
-harness.fs.render_prompt("@/prompts/tool-examples.harn.prompt", bindings)  // project-root
-harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)  // [asset_roots] alias
+// project-root
+harness.fs.render_prompt("@/prompts/tool-examples.harn.prompt", bindings)
+// [asset_roots] alias
+harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)
 ```
 
 Define aliases in `harn.toml`:

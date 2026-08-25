@@ -115,7 +115,9 @@ import { lane_policy } from "std/agent/lanes"
 import { with_overlay } from "std/agent/overlays"
 
 // Start from the preset, then layer control onto it.
-let opts = agent_preset("repair", {provider: "ollama", model: "qwen3-coder", tools: repair_tools})
+let opts = agent_preset("repair", {
+  provider: "ollama", model: "qwen3-coder", tools: repair_tools,
+})
 
 // Bound cost and cadence; add a stall detector that fires when the agent
 // keeps editing but nothing verifies as progress.

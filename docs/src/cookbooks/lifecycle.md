@@ -200,7 +200,8 @@ pipeline supervised_agents(harness: Harness) {
       block: true,
       reason: "agents may not self-park during business hours; ask on-call",
       reminder: {
-        body: "Your suspend was denied (business-hours policy). Continue working or escalate via the on-call channel.",
+        body: "Your suspend was denied (business-hours policy). Continue"
+          + " working or escalate via the on-call channel.",
         tags: ["policy_violation", "business_hours_no_suspend"],
         ttl_turns: 1,
         dedupe_key: "policy.no_suspend_business_hours",

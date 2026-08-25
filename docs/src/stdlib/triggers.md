@@ -219,9 +219,18 @@ pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
   const forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
   const windowed = window_by(
     [event.provider_payload.raw],
-    {mode: "sliding", key: "event.provider_payload.key", size: "5m", every: "1m", gap: nil, max_items: 500},
+    {
+      mode: "sliding",
+      key: "event.provider_payload.key",
+      size: "5m",
+      every: "1m",
+      gap: nil,
+      max_items: 500,
+    },
   )
-  const classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"})
+  const classified = llm_classify(
+    event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"},
+  )
   return {forked: forked, windowed: windowed, classified: classified}
 }
 ```

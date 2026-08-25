@@ -420,3 +420,45 @@ pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness,
     + "}\n"
   assert_eq(duplicate_leading_args(snippet), [])
 }
+
+// --- overlong_lines ---------------------------------------------------------
+@test
+pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task) {
+  // A line exactly at the limit is fine; one column past it is not. The
+  // off-by-one here is the whole contract, so pin both sides.
+  const at_limit = "x".repeat(88)
+  const over = "x".repeat(89)
+  assert_eq(overlong_lines(at_limit + "\n", 88), [])
+  const found = overlong_lines(over + "\n", 88)
+  assert_eq(found.count, 1)
+  assert_eq(found[0].line, 1)
+  assert_eq(found[0].width, 89)
+  assert_eq(found[0].text, over)
+}
+
+@test
+pipeline test_overlong_lines_ignores_trailing_whitespace(harness: Harness, task) {
+  // Trailing blanks cost the reader nothing, so they must not trip the budget.
+  assert_eq(overlong_lines("x".repeat(88) + "    \n", 88), [])
+}
+
+@test
+pipeline test_overlong_lines_reports_every_offender(harness: Harness, task) {
+  const md = "ok\n" + "y".repeat(90) + "\nfine\n" + "z".repeat(95) + "\n"
+  const found = overlong_lines(md, 88)
+  assert_eq(found.count, 2)
+  assert_eq(found[0].line, 2)
+  assert_eq(found[1].line, 4)
+}
+
+@test
+pipeline test_ignored_block_still_carries_content(harness: Harness, task) {
+  // An ```harn,ignore block is exempt from type checking, never from the
+  // reading budget: it still renders, so extract_blocks must hand back its
+  // body for the width pass.
+  const md = "```harn,ignore\n" + "w".repeat(120) + "\n```\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "skip")
+  assert_eq(overlong_lines(events[0].content, 88).count, 1)
+}

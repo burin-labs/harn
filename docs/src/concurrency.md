@@ -216,7 +216,9 @@ missing combination: run everything, record every outcome, and let a branch
 that knows the run is doomed stop the ones that have not started.
 
 ```harn,ignore
-import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, decisive_error, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   let polls = 0
@@ -242,7 +244,8 @@ const outcome = settle_with_abort(lanes, { lane, token ->
 
 harness.stdio.log(outcome.aborted)                 // true
 harness.stdio.log(outcome.reason?.code)            // "lane_failed"
-harness.stdio.log(decisive_error(outcome)?.code)   // "terminal" — never the lane that just stopped waiting
+// "terminal" — never the lane that just stopped waiting
+harness.stdio.log(decisive_error(outcome)?.code)
 ```
 
 `settle_with_abort(items, body, options?)` returns one `Result` per input item
@@ -472,7 +475,11 @@ Examples:
 const tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
 const lock = harness.runtime.sync_mutex_acquire("token:acme:slack", 2s)
 guard lock != nil else { throw "token refresh busy" }
-try { shared_map_set(tokens, "slack", refresh_slack_token()) } finally { sync_release(lock) }
+try {
+  shared_map_set(tokens, "slack", refresh_slack_token())
+} finally {
+  sync_release(lock)
+}
 
 // Workflow memoization: cache pure stage output for this run.
 const memo = shared_map({scope: "workflow_run", key: "stage_memo"})
@@ -884,7 +891,15 @@ const _streams = supervisor_start({
   children: [{
     name: "github-events",
     kind: "connector_stream",
-    restart: {mode: "on_failure", max_restarts: 8, window_ms: 60000, backoff_ms: 250, factor: 2, jitter_ms: 100, circuit_open_ms: 300000},
+    restart: {
+      mode: "on_failure",
+      max_restarts: 8,
+      window_ms: 60000,
+      backoff_ms: 250,
+      factor: 2,
+      jitter_ms: 100,
+      circuit_open_ms: 300000,
+    },
     task: { _ctx ->
       const stream = harness.net.sse_connect("https://example.invalid/events")
       while !is_cancelled() {
@@ -909,7 +924,9 @@ const _persona = supervisor_start({
     kind: "persona_loop",
     active_lease: "persona:review-captain",
     restart: {mode: "always", max_restarts: 10, window_ms: 300000, backoff_ms: 1000},
-    task: { _ctx -> agent_loop(harness, "watch the review inbox", nil, {mode: "daemon"}) },
+    task: { _ctx ->
+      agent_loop(harness, "watch the review inbox", nil, {mode: "daemon"})
+    },
   }],
 })
 ```

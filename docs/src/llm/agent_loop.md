@@ -27,7 +27,8 @@ const result = agent_loop(harness,
   opts,
 )
 harness.stdio.log(result.text)           // the accumulated output
-harness.stdio.log(result.status)         // "done", "completion_unverified", "stuck", or another terminal state
+// "done", "completion_unverified", "stuck", or another terminal state
+harness.stdio.log(result.status)
 harness.stdio.log(result.llm.iterations) // number of LLM round-trips
 ```
 
@@ -163,7 +164,8 @@ import {
 
 const answerer = agentic_user(
   "Provide a simple prompt to create ./index.test.ts with full edge coverage.",
-  "Research the codebase only if needed. Answer clarification questions with plausible user preferences. If the agent is done, stop.",
+  "Research the codebase only if needed. Answer clarification questions with"
+    + " plausible user preferences. If the agent is done, stop.",
   simulated_user_read_tools(),
   "ollama:devstral-small-2",
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
@@ -189,7 +191,10 @@ import { AgentSpec } from "std/agent/options"
 import { scripted_user, user_tools } from "std/agent/user"
 
 const answerer = scripted_user([
-  {match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."},
+  {
+    match: "*test runner*",
+    reply: "Use Vitest and cover empty, invalid, and boundary inputs.",
+  },
   {match: "*done*", action: "stop", reason: "complete"},
 ], {max_replies: 2})
 
@@ -652,7 +657,8 @@ const auto_compact_opts: AgentSpec = {
     policy: compact_for_bug_fix_resumption({author: "host"})
   },
   compact_callback: { archived, _reminders, policy ->
-    {summary: "resume with " + policy.mode + " over " + to_string(len(archived)) + " messages"}
+    {summary: "resume with " + policy.mode + " over "
+      + to_string(len(archived)) + " messages"}
   },
 }
 const result = agent_loop(harness, task, system, auto_compact_opts)
@@ -788,7 +794,9 @@ All decisions are recorded:
 ```harn
 import { AgentSpec } from "std/agent/options"
 
-const adaptive_opts: AgentSpec = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
+const adaptive_opts: AgentSpec = {
+  iteration_budget: {mode: "adaptive", initial: 4, max: 12},
+}
 const result = agent_loop(harness, prompt, system, adaptive_opts)
 harness.stdio.log(result.adaptive_budget.extensions_used)
 harness.stdio.log(result.adaptive_budget.final_limit)
@@ -879,7 +887,9 @@ const opts = agent_preset("repair", {
 const result = agent_loop(harness, prompt, system, opts)
 
 // Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
-const summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-5.4-mini"})
+const summary_opts = agent_preset("summary", {
+  provider: "openai", model: "gpt-5.4-mini",
+})
 const summary = agent_loop(harness, "Summarize the audit findings.", nil, summary_opts)
 
 // Local/configured route. The audit preset keeps its audit behavior,
@@ -889,7 +899,10 @@ const local_opts = agent_preset("audit", {
   llm_options: {provider: "llamacpp", model: "gemma4-local"},
   tools: release_tools,
 })
-const local_audit = agent_loop(harness, "Audit with the configured local model.", local_opts?.system, local_opts)
+const local_audit = agent_loop(
+  harness, "Audit with the configured local model.",
+  local_opts?.system, local_opts,
+)
 ```
 
 Preset roles, defaults summarized:
@@ -938,7 +951,9 @@ const triage_opts = agent_preset("oncall_captain", {
   tools: oncall_tools,
   rate_limit: {max_calls: 100, message: "alert-loop cap"},
 })
-const triaged = agent_loop(harness, "Triage paging alerts.", triage_opts?.system, triage_opts)
+const triaged = agent_loop(
+  harness, "Triage paging alerts.", triage_opts?.system, triage_opts,
+)
 
 // Release Captain: long checkpointed budget; pass `dry_run: true` (or
 // a `with_dry_run` opts dict) to layer a shadow-run gate.

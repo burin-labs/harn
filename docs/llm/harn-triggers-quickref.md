@@ -95,8 +95,10 @@ fn register_release_reminder(runtime: HarnessRuntime) {
     provider: "channel",
     match: {events: ["channel:pr.merged"]},
     handler: ReminderInject({
-      target: "current",                     // "current", "parent", a literal session id, or a closure
-      body: "PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.",
+      // "current", "parent", a literal session id, or a closure
+      target: "current",
+      body: "PR {{ event.provider_payload.payload.number }} merged."
+        + " Consider cutting a patch release.",
       tags: ["release_reminder"],
       ttl_turns: 1,
       dedupe_key: "release_reminder",

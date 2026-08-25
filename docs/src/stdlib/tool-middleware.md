@@ -206,7 +206,9 @@ before either does expensive work:
 ```harn,ignore
 const caller = compose_tool_callers([
   with_audit_log({...}),
-  with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]}),
+  with_scoped_executor({
+    stage: "research", allowed_tools: ["search_files", "read_file"],
+  }),
   with_consent(prompt),
   default_tool_caller(),
 ])
