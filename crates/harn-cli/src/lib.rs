@@ -18,6 +18,8 @@ pub use commands::check::{
     decode_lint_envelope, decode_lint_json, lint_json_schema, DecodedLintEnvelope, LintDecodeError,
     LintDecodeOptions, LintReportWire,
 };
+#[cfg(feature = "hostlib")]
+mod local_embed;
 mod net;
 pub mod package;
 mod path_policy;
@@ -74,7 +76,8 @@ static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
-    let _ = harn_hostlib::install_default(vm);
+    let embed = crate::local_embed::resolve_embed_capability();
+    let _ = harn_hostlib::install_default_with_embed(vm, embed);
     // The `rules` capability lives in its own crate (it depends on
     // `harn-rules`, which depends on `harn-hostlib`, so it can't ship inside
     // `install_default`). Wire it in alongside the defaults.

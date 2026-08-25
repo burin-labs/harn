@@ -111,5 +111,7 @@ pub(super) fn test_equivalent_model_with_context(
         released: None,
         row_kind: None,
         current_snapshot: None,
+        embedding_dim: None,
+        embedding_max_tokens: None,
     }
 }

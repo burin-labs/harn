@@ -101,6 +101,8 @@ impl CatalogModel {
 
 /// The default injection-classification model: ungated and permissively licensed.
 pub const DEFAULT_MODEL: &str = "deberta-v3-prompt-injection-v2";
+/// Opt-in local text encoder. Not bundled; `harn guard install` fetches it.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "minilm-l6-v2";
 
 // ProtectAI DeBERTa-v3 prompt-injection classifier — Apache-2.0, ungated. The
 // ONNX weight + tokenizer + config are everything the inference backend needs.
@@ -150,6 +152,27 @@ const PROMPT_GUARD_2_86M_FILES: &[CatalogFile] = &[
     },
 ];
 
+const MINILM_L6_V2_FILES: &[CatalogFile] = &[
+    CatalogFile {
+        remote: "onnx/model_quantized.onnx",
+        dest: "model.onnx",
+        sha256: Some("afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1"),
+        size: Some(22_972_370),
+    },
+    CatalogFile {
+        remote: "tokenizer.json",
+        dest: "tokenizer.json",
+        sha256: None,
+        size: Some(711_661),
+    },
+    CatalogFile {
+        remote: "config.json",
+        dest: "config.json",
+        sha256: None,
+        size: Some(650),
+    },
+];
+
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         name: DEFAULT_MODEL,
@@ -178,6 +201,20 @@ const CATALOG: &[CatalogModel] = &[
         format: ModelFormat::Onnx,
         files: PROMPT_GUARD_2_86M_FILES,
     },
+    CatalogModel {
+        name: DEFAULT_EMBEDDING_MODEL,
+        purpose: ModelPurpose::Embedding,
+        display_name: "all-MiniLM-L6-v2 (quantized ONNX)",
+        description:
+            "Apache-2.0, ungated. Opt-in local encoder — fetched on install, never bundled.",
+        repo: "Xenova/all-MiniLM-L6-v2",
+        base_url: "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main",
+        license_id: "Apache-2.0",
+        license_url: "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2",
+        gated: false,
+        format: ModelFormat::Onnx,
+        files: MINILM_L6_V2_FILES,
+    },
 ];
 
 /// Catalog models registered for `purpose`.
@@ -188,6 +225,16 @@ pub fn for_purpose(purpose: ModelPurpose) -> impl Iterator<Item = &'static Catal
 /// Find a catalog model by its purpose and stable `name`.
 pub fn find(purpose: ModelPurpose, name: &str) -> Option<&'static CatalogModel> {
     for_purpose(purpose).find(|model| model.name == name)
+}
+
+/// Find a catalog model by stable `name` across every purpose.
+pub fn find_by_name(name: &str) -> Option<&'static CatalogModel> {
+    CATALOG.iter().find(|model| model.name == name)
+}
+
+/// Every catalog row, regardless of purpose.
+pub fn all() -> &'static [CatalogModel] {
+    CATALOG
 }
 
 /// The recommended default model entry.
@@ -251,14 +298,32 @@ mod tests {
     #[test]
     fn listing_and_lookup_are_scoped_by_purpose() {
         let injection_models: Vec<_> = for_purpose(ModelPurpose::InjectionClassification).collect();
-        assert_eq!(injection_models.len(), CATALOG.len());
+        assert_eq!(
+            injection_models.len(),
+            CATALOG
+                .iter()
+                .filter(|model| model.purpose == ModelPurpose::InjectionClassification)
+                .count()
+        );
         assert!(injection_models
             .iter()
             .all(|model| model.purpose == ModelPurpose::InjectionClassification));
 
-        assert!(for_purpose(ModelPurpose::Embedding).next().is_none());
+        let embedding = find(ModelPurpose::Embedding, DEFAULT_EMBEDDING_MODEL)
+            .expect("opt-in local encoder is cataloged");
+        assert_eq!(embedding.purpose, ModelPurpose::Embedding);
+        assert!(!embedding.gated);
+        assert_eq!(embedding.license_id, "Apache-2.0");
+        assert!(embedding
+            .files
+            .iter()
+            .any(|file| { file.dest.ends_with(".onnx") && file.sha256.is_some() }));
         assert!(find(ModelPurpose::Embedding, DEFAULT_MODEL).is_none());
         assert!(find(ModelPurpose::InjectionClassification, DEFAULT_MODEL).is_some());
+        assert_eq!(
+            find_by_name(DEFAULT_EMBEDDING_MODEL).map(|model| model.purpose),
+            Some(ModelPurpose::Embedding)
+        );
     }
 
     #[test]

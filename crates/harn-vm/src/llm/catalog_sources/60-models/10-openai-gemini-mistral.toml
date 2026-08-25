@@ -215,6 +215,19 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "tool_use", "long_context", "vision"]
+
+[models."text-embedding-3-small"]
+name = "Text Embedding 3 Small"
+provider = "openai"
+context_window = 8191
+capabilities = ["embeddings"]
+embedding_dim = 1536
+embedding_max_tokens = 8191
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.00 }
+tier = "small"
+open_weight = false
+strengths = ["embeddings"]
+
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"
 provider = "openai"

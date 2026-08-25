@@ -154,59 +154,7 @@ impl Compiler {
             self.emit_get_binding(name);
             return self.compile_value_call(args);
         }
-        let runtime_name = if self.options.legacy_ambient_capabilities() {
-            harn_parser::builtin_signatures::legacy_ambient_runtime_name(name).unwrap_or(name)
-        } else {
-            name
-        };
-        if !self.source_callable_names.contains(name) {
-            let contract = harn_builtin_registry::builtin_entry(runtime_name);
-            let callable = contract.is_some_and(|entry| {
-                matches!(
-                    entry.contract.exposure,
-                    harn_builtin_meta::BuiltinExposure::PureGlobal
-                        | harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
-                ) || (matches!(
-                    entry.contract.exposure,
-                    harn_builtin_meta::BuiltinExposure::PrivilegedWire
-                ) && self.options.privileged_wire_authority())
-                    || (matches!(
-                        entry.contract.exposure,
-                        harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
-                            | harn_builtin_meta::BuiltinExposure::PrivilegedWire
-                            | harn_builtin_meta::BuiltinExposure::RuntimeInternal
-                    ) && self.options.legacy_ambient_capabilities())
-            });
-            if contract.is_some() && !callable {
-                return Err(CompileError {
-                    message: format!(
-                        "`{name}` is not callable source API; effects must flow through a typed Harness capability"
-                    ),
-                    line: self.line,
-                });
-            }
-            if contract.is_none()
-                && harn_parser::builtin_signatures::is_builtin(name)
-                && !harn_parser::builtin_signatures::is_language_intrinsic(name)
-                && !self.options.defers_builtin_linking()
-                && !(self.options.legacy_ambient_capabilities()
-                    && (harn_parser::is_registered_legacy_hostlib_name(name)
-                        || harn_parser::builtin_signatures::legacy_capability_method_entry(name)
-                            .is_some()
-                        || harn_parser::builtin_signatures::legacy_ambient_cap_global_entry(name)
-                            .is_some()
-                        || harn_parser::builtin_signatures::legacy_privileged_wire_entry(name)
-                            .is_some()))
-            {
-                return Err(CompileError {
-                    message: format!(
-                        "`{name}` has a legacy parser signature but no typed runtime contract; \
-                         declare it in the builtin manifest or route it through Harness"
-                    ),
-                    line: self.line,
-                });
-            }
-        }
+        let runtime_name = self.checked_runtime_call_name(name)?;
 
         // Schema lowering: `schema_of(TypeAlias)` emits a composable schema
         // expression. Falls through to
@@ -249,6 +197,73 @@ impl Compiler {
             self.emit_named_call(runtime_name, args.len());
         }
         Ok(())
+    }
+
+    /// Resolve a global callable through one source-authority gate for ordinary
+    /// calls and optimized tail calls.
+    pub(super) fn checked_runtime_call_name<'a>(
+        &self,
+        name: &'a str,
+    ) -> Result<&'a str, CompileError> {
+        let runtime_name = if self.options.legacy_ambient_capabilities() {
+            harn_parser::builtin_signatures::legacy_ambient_runtime_name(name).unwrap_or(name)
+        } else {
+            name
+        };
+        if !self.source_callable_names.contains(name) {
+            let contract = harn_builtin_registry::builtin_entry(runtime_name);
+            let callable = contract.is_some_and(|entry| {
+                matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PureGlobal
+                        | harn_builtin_meta::BuiltinExposure::CapabilityFunction { .. }
+                ) || (matches!(
+                    entry.contract.exposure,
+                    harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                ) && self.options.privileged_wire_authority())
+                    || (matches!(
+                        entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
+                            | harn_builtin_meta::BuiltinExposure::RuntimeInternal
+                    ) && self.options.runtime_owned_source_authority())
+                    || (matches!(
+                        entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
+                            | harn_builtin_meta::BuiltinExposure::PrivilegedWire
+                            | harn_builtin_meta::BuiltinExposure::RuntimeInternal
+                    ) && self.options.legacy_ambient_capabilities())
+            });
+            if contract.is_some() && !callable {
+                return Err(CompileError {
+                    message: format!(
+                        "`{name}` is not callable source API; effects must flow through a typed Harness capability"
+                    ),
+                    line: self.line,
+                });
+            }
+            if contract.is_none()
+                && harn_parser::builtin_signatures::is_builtin(name)
+                && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+                && !self.options.defers_builtin_linking()
+                && !(self.options.legacy_ambient_capabilities()
+                    && (harn_parser::is_registered_legacy_hostlib_name(name)
+                        || harn_parser::builtin_signatures::legacy_capability_method_entry(name)
+                            .is_some()
+                        || harn_parser::builtin_signatures::legacy_ambient_cap_global_entry(name)
+                            .is_some()
+                        || harn_parser::builtin_signatures::legacy_privileged_wire_entry(name)
+                            .is_some()))
+            {
+                return Err(CompileError {
+                    message: format!(
+                        "`{name}` has a legacy parser signature but no typed runtime contract; \
+                         declare it in the builtin manifest or route it through Harness"
+                    ),
+                    line: self.line,
+                });
+            }
+        }
+        Ok(runtime_name)
     }
 
     fn compile_value_call(&mut self, args: &[SNode]) -> Result<(), CompileError> {

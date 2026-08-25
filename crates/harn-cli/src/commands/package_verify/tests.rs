@@ -572,13 +572,13 @@ pub fn provider_id() { return "echo" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "EchoEventPayload" }
 
-fn read_indirect() {
-  return read_file("ambient.txt")
+fn read_indirect(harness: Harness) {
+  return harness.fs.read_text("ambient.txt")
 }
 
-pub fn normalize_inbound(_harness: Harness, raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const _body = raw.body_json
-  read_indirect()
+  read_indirect(harness)
   return {type: "reject", status: 400}
 }
 "#,

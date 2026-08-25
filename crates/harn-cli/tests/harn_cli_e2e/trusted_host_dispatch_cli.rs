@@ -1,5 +1,19 @@
 use crate::test_util;
 
+fn write_imported_host_dispatch_graph(root: &std::path::Path) {
+    std::fs::create_dir_all(root).expect("create project");
+    std::fs::write(
+        root.join("helper.harn"),
+        "pub fn dispatch(payload) { return host_call(\"cloud.echo\", payload) }\n",
+    )
+    .expect("write helper");
+    std::fs::write(
+        root.join("route.harn"),
+        "import { dispatch } from \"./helper\"\n\npub fn route(payload) { return dispatch(payload) }\n",
+    )
+    .expect("write route");
+}
+
 #[test]
 fn check_requires_explicit_trusted_host_dispatch_authority() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -45,6 +59,55 @@ fn check_requires_explicit_trusted_host_dispatch_authority() {
         trusted.status.success(),
         "trusted check failed:\n{}",
         String::from_utf8_lossy(&trusted.stderr)
+    );
+}
+
+#[test]
+fn manifest_authority_stays_inside_its_own_project_graph() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(temp.path().join(".git")).expect("project boundary");
+    let trusted = temp.path().join("trusted");
+    let ordinary = temp.path().join("ordinary");
+    write_imported_host_dispatch_graph(&trusted);
+    write_imported_host_dispatch_graph(&ordinary);
+    std::fs::write(
+        trusted.join("harn.toml"),
+        "[check]\ntrusted_host_dispatch = true\n",
+    )
+    .expect("write trusted manifest");
+
+    let allowed = test_util::process::harn_e2e_command()
+        .arg("check")
+        .args(["--preflight", "off", "helper.harn"])
+        .current_dir(&trusted)
+        .env("HARN_CHECK_RESULT_CACHE", "0")
+        .output()
+        .expect("check trusted graph");
+    assert!(
+        allowed.status.success(),
+        "trusted graph failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&allowed.stdout),
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+
+    let denied = test_util::process::harn_e2e_command()
+        .arg("check")
+        .args(["--preflight", "off", "helper.harn"])
+        .current_dir(&ordinary)
+        .env("HARN_CHECK_RESULT_CACHE", "0")
+        .output()
+        .expect("check ordinary sibling graph");
+    assert!(
+        !denied.status.success(),
+        "manifest authority escaped into a sibling project:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&denied.stdout),
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    let denied_stderr = String::from_utf8_lossy(&denied.stderr);
+    assert!(denied_stderr.contains("host_call"), "{denied_stderr}");
+    assert!(
+        denied_stderr.contains("HARN-NAM-002") || denied_stderr.contains("not callable source API"),
+        "{denied_stderr}"
     );
 }
 

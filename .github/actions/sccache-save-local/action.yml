@@ -18,7 +18,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         HARN_CACHE_FAMILY_PREFIX: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-
-      run: ./scripts/prune_ci_cache_generations.sh --family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+      run: ./scripts/prune_ci_cache_generations.sh --local-sccache-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
 
     - name: Save local sccache directory
       uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5

@@ -16,8 +16,8 @@ use quick_cache::sync::{Cache, GuardResult};
 
 use crate::bytecode_cache;
 use crate::module_artifact::{
-    compile_module_artifact_from_source_with_context, module_compilation_context_for_source,
-    ModuleProvenance,
+    compile_embedded_stdlib_module_artifact_from_source_with_context,
+    module_compilation_context_for_source, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::prepared_module::PreparedModuleArtifact;
@@ -106,7 +106,7 @@ pub(super) fn stdlib_module_artifact(
             // its cost attributable, which it was not when it ran ahead of the
             // lookup.
             let compilation_context = module_compilation_context_for_source(synthetic, source)?;
-            let compiled = compile_module_artifact_from_source_with_context(
+            let compiled = compile_embedded_stdlib_module_artifact_from_source_with_context(
                 synthetic,
                 source,
                 &compilation_context,

@@ -39,6 +39,14 @@ impl Compiler {
         }
     }
 
+    #[doc(hidden)]
+    pub fn new_runtime_owned_source() -> Self {
+        install_native_builtin_contracts();
+        Self {
+            inner: harn_kernel::Compiler::new_runtime_owned_source(),
+        }
+    }
+
     pub fn with_options(options: CompilerOptions) -> Self {
         install_native_builtin_contracts();
         Self {

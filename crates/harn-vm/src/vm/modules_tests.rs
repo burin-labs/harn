@@ -55,18 +55,10 @@ fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
     runtime.block_on(async {
         let mut ordinary = Vm::new();
         crate::stdlib::register_vm_stdlib(&mut ordinary);
-        let ordinary_exports = ordinary
+        let error = ordinary
             .load_module_exports(&entry)
             .await
-            .expect("ordinary graph may load until the unresolved call executes");
-        let ordinary_route = ordinary_exports.get("route").expect("route exported");
-        let error = ordinary
-            .call_closure_pub(
-                ordinary_route,
-                &[VmValue::dict(crate::value::DictMap::default())],
-            )
-            .await
-            .expect_err("ordinary module graph must reject host_call at execution");
+            .expect_err("ordinary module graph must reject host_call while compiling");
         assert!(error.to_string().contains("host_call"), "{error}");
 
         let local = tokio::task::LocalSet::new();

@@ -594,7 +594,8 @@ impl Compiler {
                         if self.has_local_binding(name) {
                             self.emit_get_binding(name);
                         } else {
-                            let name_idx = self.string_constant(name);
+                            let runtime_name = self.checked_runtime_call_name(name)?;
+                            let name_idx = self.string_constant(runtime_name);
                             self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                         }
                         for arg in args {
