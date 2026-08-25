@@ -12,7 +12,7 @@ use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
     empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
-    pipeline_parameter_removal_fix, unnecessary_cast_fix,
+    unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
 use crate::naming::simplify_bool_comparison;
@@ -55,29 +55,9 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                for (index, parameter) in params.iter().enumerate() {
-                    let removal = (!*is_pub
-                        && extends.is_none()
-                        && !self.pipeline_parameter_removal_blocked
-                        && !parameter.rest
-                        && parameter.default_value.is_none())
-                    .then(|| pipeline_parameter_removal_fix(self.source, params, index))
-                    .flatten();
-                    if let Some((fix, fix_after_removed_previous)) = removal {
-                        self.declare_removable_pipeline_parameter(
-                            &parameter.name,
-                            parameter.span,
-                            name,
-                            fix,
-                            index
-                                .checked_sub(1)
-                                .map(|previous| params[previous].name.clone()),
-                            fix_after_removed_previous,
-                        );
-                    } else {
-                        self.declare_parameter(&parameter.name, parameter.span);
-                    }
-                }
+                let removal_allowed =
+                    !*is_pub && extends.is_none() && !self.pipeline_parameter_removal_blocked;
+                self.declare_pipeline_parameters(params, name, removal_allowed);
                 self.references.insert(name.clone());
                 if Self::is_test_pipeline_name(name) {
                     self.test_pipeline_depth += 1;

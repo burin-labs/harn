@@ -254,6 +254,7 @@ impl Code {
             Code::LintUnusedVariable
             | Code::LintUnusedPatternBinding
             | Code::LintUnusedParameter => Some(&REPAIR_BINDINGS_RENAME_UNUSED),
+            Code::LintUnusedPipelineInput => Some(&REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT),
             Code::LintCapabilityParameterName => Some(&REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER),
             Code::LintUnusedImport => Some(&REPAIR_IMPORTS_REMOVE_UNUSED),
             Code::LintUnusedFunction | Code::LintUnusedType => {
@@ -378,8 +379,14 @@ const REPAIR_BINDINGS_MAKE_IMMUTABLE: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
-    summary: "Remove an unused private pipeline input or mark a fixed-arity slot unused",
+    summary: "Mark an unused binding without changing callable arity",
     safety: RepairSafety::BehaviorPreserving,
+};
+
+const REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT: RepairTemplate = RepairTemplate {
+    id: "bindings/remove-unused-pipeline-input",
+    summary: "Remove an explicitly unused private pipeline input",
+    safety: RepairSafety::SurfaceChanging,
 };
 
 const REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER: RepairTemplate = RepairTemplate {
@@ -668,6 +675,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_MAKE_MUTABLE,
     &REPAIR_BINDINGS_MAKE_IMMUTABLE,
     &REPAIR_BINDINGS_RENAME_UNUSED,
+    &REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT,
     &REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER,
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,

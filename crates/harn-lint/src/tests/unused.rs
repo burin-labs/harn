@@ -218,7 +218,7 @@ fn unused_runtime_pipeline_slot_is_removed_instead_of_renamed() {
 }"#;
     let diagnostics = lint_source(source);
     assert!(
-        has_rule(&diagnostics, "unused-parameter"),
+        has_rule(&diagnostics, "unused-pipeline-input"),
         "legacy underscore slots should participate in pipeline removal: {diagnostics:?}"
     );
     assert_eq!(
@@ -231,7 +231,7 @@ fn unused_runtime_pipeline_slot_is_removed_instead_of_renamed() {
 
 #[test]
 fn pipeline_slot_removal_preserves_neighbors_and_their_comments() {
-    let source = r"pipeline default(first: int, unused: int, last: int) {
+    let source = r"pipeline default(first: int, _unused: int, last: int) {
   log(first + last)
 }";
     assert_eq!(
@@ -241,7 +241,7 @@ fn pipeline_slot_removal_preserves_neighbors_and_their_comments() {
 }"
     );
 
-    let documented_next = r"pipeline default(unused: int, // belongs to value
+    let documented_next = r"pipeline default(_unused: int, // belongs to value
   value: int) {
   log(value)
 }";
@@ -253,7 +253,7 @@ fn pipeline_slot_removal_preserves_neighbors_and_their_comments() {
 }"
     );
 
-    let all_unused = r"pipeline default(first: int, second: int) {
+    let all_unused = r"pipeline default(_first: int, _second: int) {
   return 1
 }";
     assert_eq!(
@@ -282,7 +282,7 @@ pipeline test_ready() {
 
 #[test]
 fn caller_and_table_bound_pipeline_slots_keep_positional_arity() {
-    let called = r"pipeline helper(value: int) {
+    let called = r"pipeline helper(_value: int) {
   return 1
 }
 

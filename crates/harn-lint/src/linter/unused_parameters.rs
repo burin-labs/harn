@@ -27,11 +27,20 @@ impl Linter<'_> {
             {
                 continue;
             }
+            if decl
+                .removable_pipeline
+                .as_ref()
+                .is_some_and(|candidate| self.function_references.contains(&candidate.owner))
+            {
+                // The underscore already records that this retained caller-
+                // owned positional slot is intentionally unused.
+                continue;
+            }
             let removable = decl
                 .removable_pipeline
                 .as_ref()
                 .filter(|candidate| !self.function_references.contains(&candidate.owner));
-            let (suggestion, fix) = if let Some(candidate) = removable {
+            let (code, rule, suggestion, fix) = if let Some(candidate) = removable {
                 let previous_will_be_removed =
                     candidate.previous_name.as_ref().is_some_and(|previous| {
                         removable_parameters.contains(&(candidate.owner.clone(), previous.clone()))
@@ -45,6 +54,8 @@ impl Linter<'_> {
                     &candidate.fix
                 };
                 (
+                    Code::LintUnusedPipelineInput,
+                    "unused-pipeline-input",
                     "remove the unused pipeline input; pipelines declare only the inputs they use"
                         .to_string(),
                     Some(fix.clone()),
@@ -54,6 +65,8 @@ impl Linter<'_> {
                 // pipelines, and referenced pipelines keep their positional
                 // contract. A name prefix declares the slot unused.
                 (
+                    Code::LintUnusedParameter,
+                    "unused-parameter",
                     format!(
                         "rename the parameter to `_{}` to preserve positional arity",
                         decl.name
@@ -67,8 +80,8 @@ impl Linter<'_> {
                 )
             };
             self.diagnostics.push(LintDiagnostic {
-                code: Code::LintUnusedParameter,
-                rule: "unused-parameter".into(),
+                code,
+                rule: rule.into(),
                 message: format!("parameter `{}` is declared but never used", decl.name),
                 span: decl.span,
                 severity: LintSeverity::Warning,

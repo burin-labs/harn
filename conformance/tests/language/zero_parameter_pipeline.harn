@@ -1,5 +1,5 @@
 pipeline default() {
-  assert("truthy")
+  require "truthy"
 }
 
 pipeline test_zero_parameter() {

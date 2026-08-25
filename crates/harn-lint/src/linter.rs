@@ -13,10 +13,7 @@ use harn_parser::{
 };
 
 use crate::complexity::cyclomatic_complexity;
-use crate::decls::{
-    Declaration, FnDeclaration, ImportInfo, ParamDeclaration, RemovablePipelineParam,
-    TypeDeclaration,
-};
+use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 use crate::fixes::{
     append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix, simple_ident_discard_fix,
@@ -28,6 +25,7 @@ mod ambient;
 mod connector_effects;
 mod discarded_result;
 mod execution_safety;
+mod parameters;
 mod program;
 mod spans;
 mod type_facts;
@@ -1049,40 +1047,10 @@ impl<'a> Linter<'a> {
         });
     }
 
-    /// Declare a pipeline parameter whose positional slot can be deleted when
-    /// no body or caller reference survives the full-program walk.
-    pub(super) fn declare_removable_pipeline_parameter(
-        &mut self,
-        name: &str,
-        span: Span,
-        owner: &str,
-        fix: Vec<FixEdit>,
-        previous_name: Option<String>,
-        fix_after_removed_previous: Option<Vec<FixEdit>>,
-    ) {
-        if name == "_" {
-            return;
-        }
-        self.warn_if_shadows_outer_scope(name, span);
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string());
-        }
-        self.param_declarations.push(ParamDeclaration {
-            name: name.to_string(),
-            span,
-            removable_pipeline: Some(RemovablePipelineParam {
-                owner: owner.to_string(),
-                fix,
-                previous_name,
-                fix_after_removed_previous,
-            }),
-        });
-    }
-
     /// Emit a `shadow-variable` warning when `name` is already bound in any
     /// enclosing (non-current) scope. Shared by variable and parameter
     /// declaration so the two stay in lockstep.
-    fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
+    pub(super) fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
         // Lifecycle callbacks bind their own root `harness` at execution boundaries.
         // runtime-supplied `harness`, so warning about that nested authority
         // boundary would force authors away from the canonical spelling.
