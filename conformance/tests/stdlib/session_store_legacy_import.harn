@@ -34,7 +34,9 @@ pipeline default(harness: Harness) {
   }
   harness.fs.write_text(legacy_path, json_stringify(legacy_event) + "\n")
   const legacy_before = harness.fs.read_text(legacy_path)
-  const first = session_store_events(harness.agent, sid, {root: root})
+  const first_read = session_store_events(harness.agent, sid, {root: root})
+  harness.stdio.println(first_read.state)
+  const first = first_read.value
   if harness.fs.exists(path_join(root, ".harn", "session-store.sqlite")) {
     throw "legacy inspection must project in memory instead of migrating durably"
   }
@@ -44,14 +46,14 @@ pipeline default(harness: Harness) {
     throw "legacy import did not produce an event"
   }
   harness.stdio.println(imported.payload.record.title)
-  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root})))
+  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root}).value))
   session_store_append(
     harness.agent,
     sid,
     {operation: "upsert", record: {id: "canonical", title: "new"}},
     {root: root, tenant_id: "tenant-a"},
   )
-  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root})))
+  harness.stdio.println(len(session_store_events(harness.agent, sid, {root: root}).value))
   harness.stdio.println(harness.fs.read_text(legacy_path) == legacy_before)
   harness.stdio.println(
     ends_with(session_store_path(harness.agent, sid, {root: root}), legacy_path)

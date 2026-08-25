@@ -12,6 +12,8 @@ pipeline default(harness: Harness) {
   )
   const sid = "burin.agent_context.memories.project"
   const opts = {root: root, kind_type: "AgentMemory"}
+  const absent = harness.agent.session_store_list({root: root})
+  harness.stdio.println(absent.state)
   const first = session_store_append(
     harness.agent,
     sid,
@@ -39,12 +41,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(starts_with(first.record_hash, "sha256:"))
   harness.stdio.println(first.kind.type)
   // Projection: m1 updated to v2, m2 deleted → only m1 survives.
-  const records = session_store_project(harness.agent, sid, {root: root})
+  const direct = harness.agent.session_store_events(sid, {root: root})
+  harness.stdio.println(direct.state)
+  const records = session_store_project(harness.agent, sid, {root: root}).value
   harness.stdio.println(len(records))
   harness.stdio.println(records[0].id)
   harness.stdio.println(records[0].title)
   // Verification of the canonical SQLite chain.
-  const report = session_store_verify(harness.agent, sid, {root: root})
+  const report = session_store_verify(harness.agent, sid, {root: root}).value
   harness.stdio.println(report.ok)
   harness.stdio.println(report.count)
   // Search crosses the public Harn facade and reports the actual fallback.
@@ -52,7 +56,7 @@ pipeline default(harness: Harness) {
     harness.agent,
     "one v2",
     {root: root, session_id: sid, mode: "hybrid"},
-  )
+  ).value
   harness.stdio.println(len(search.hits))
   harness.stdio.println(unwrap(search.hits[0]).session_id)
   harness.stdio.println(search.effective_mode)
@@ -60,7 +64,9 @@ pipeline default(harness: Harness) {
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
   session_store_append(harness.agent, vsid, {operation: "replace", value: "hello"}, {root: root})
-  harness.stdio.println(session_store_project_value(harness.agent, vsid, "fallback", {root: root}))
+  harness.stdio.println(
+    session_store_project_value(harness.agent, vsid, "fallback", {root: root}).value,
+  )
   harness.stdio.println(
     ends_with(
       session_store_path(harness.agent, sid, {root: root}),

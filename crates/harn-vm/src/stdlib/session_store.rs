@@ -1,8 +1,8 @@
 //! `std/session-store` adapter over the canonical `harn-session-store` crate.
 //!
 //! SQLite owns event allocation, canonical hashes, persistence, and
-//! verification. This module only maps Harn values to that typed contract and
-//! imports the retired per-session JSONL format on first access.
+//! verification. This module maps Harn values to that typed contract, projects
+//! retired per-session JSONL data on reads, and imports it on the first write.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -123,7 +123,7 @@ async fn session_store_append_impl(
 #[harn_builtin(
     exposure = "harness.agent.session_store_events",
     effects = ["fs.read@dynamic", "state.read@arg0"],
-    sig = "__session_store_events(session_id: string, options?: dict) -> list",
+    sig = "__session_store_events(session_id: string, options?: dict) -> SessionStoreRead<list<dict>>",
     kind = "async",
     category = "session_store"
 )]
@@ -137,21 +137,27 @@ async fn session_store_events_impl(
     let options = Args::runtime("__session_store_events", &args).opt_dict(1, "options")?;
     let tenant_id = option_string(options, "tenant_id")?;
     let state_dir = store_state_dir(options)?;
-    let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
-        return Ok(VmValue::List(Arc::new(Vec::new())));
+    let store = match open_read_session(&state_dir, &session_id, tenant_id).await? {
+        StoreRead::Absent => return Ok(store_read_absent_value()),
+        StoreRead::Present(None) => {
+            return Ok(store_read_present_value(VmValue::List(
+                Arc::new(Vec::new()),
+            )));
+        }
+        StoreRead::Present(Some(store)) => store,
     };
     let events = read_all_events(&store, &session_id).await?;
     let values = events
         .into_iter()
         .map(stored_event_value)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(VmValue::List(Arc::new(values)))
+    Ok(store_read_present_value(VmValue::List(Arc::new(values))))
 }
 
 #[harn_builtin(
     exposure = "harness.agent.session_store_list",
     effects = ["fs.read@dynamic", "state.read@dynamic"],
-    sig = "__session_store_list(options?: dict) -> list",
+    sig = "__session_store_list(options?: dict) -> SessionStoreRead<list<dict>>",
     kind = "async",
     category = "session_store"
 )]
@@ -201,7 +207,10 @@ async fn session_store_list_impl(
             )));
         }
     };
-    let store = open_read_or_empty_store(&store_state_dir(options)?)?;
+    let store = match open_read_store(&store_state_dir(options)?)? {
+        StoreRead::Absent => return Ok(store_read_absent_value()),
+        StoreRead::Present(store) => store,
+    };
     let sessions = store
         .list(ListFilter {
             tenant_id: option_string(options, "tenant_id")?,
@@ -221,13 +230,13 @@ async fn session_store_list_impl(
             "session_store: failed to encode session list: {error}"
         ))
     })?;
-    Ok(json_to_vm_value(&value))
+    Ok(store_read_present_value(json_to_vm_value(&value)))
 }
 
 #[harn_builtin(
     exposure = "harness.agent.session_store_verify",
     effects = ["fs.read@dynamic", "state.read@arg0"],
-    sig = "__session_store_verify(session_id: string, options?: dict) -> dict",
+    sig = "__session_store_verify(session_id: string, options?: dict) -> SessionStoreRead<dict>",
     kind = "async",
     category = "session_store"
 )]
@@ -241,14 +250,18 @@ async fn session_store_verify_impl(
     let options = Args::runtime("__session_store_verify", &args).opt_dict(1, "options")?;
     let tenant_id = option_string(options, "tenant_id")?;
     let state_dir = store_state_dir(options)?;
-    let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
-        return Ok(json_to_vm_value(&json!({
-            "_type": "session_store_verify",
-            "session_id": session_id,
-            "ok": true,
-            "count": 0,
-            "signed_event_count": 0,
-        })));
+    let store = match open_read_session(&state_dir, &session_id, tenant_id).await? {
+        StoreRead::Absent => return Ok(store_read_absent_value()),
+        StoreRead::Present(None) => {
+            return Ok(store_read_present_value(json_to_vm_value(&json!({
+                "_type": "session_store_verify",
+                "session_id": session_id,
+                "ok": true,
+                "count": 0,
+                "signed_event_count": 0,
+            }))));
+        }
+        StoreRead::Present(Some(store)) => store,
     };
     let report = store.verify(&session_id).await.map_err(store_error)?;
     let broken_at = if let Some(failure) = report.failures.first() {
@@ -260,13 +273,13 @@ async fn session_store_verify_impl(
     } else {
         None
     };
-    verify_report_value(report, broken_at)
+    verify_report_value(report, broken_at).map(store_read_present_value)
 }
 
 #[harn_builtin(
     exposure = "harness.agent.session_store_search",
     effects = ["fs.read@dynamic", "state.read@dynamic"],
-    sig = "__session_store_search(query: string, options?: dict) -> dict",
+    sig = "__session_store_search(query: string, options?: dict) -> SessionStoreRead<dict>",
     kind = "async",
     category = "session_store"
 )]
@@ -287,7 +300,10 @@ async fn session_store_search_impl(
         }
     };
     let limit = option_positive_usize(options, "limit")?;
-    let store = open_read_or_empty_store(&store_state_dir(options)?)?;
+    let store = match open_read_store(&store_state_dir(options)?)? {
+        StoreRead::Absent => return Ok(store_read_absent_value()),
+        StoreRead::Present(store) => store,
+    };
     let response = store
         .search(SearchQuery {
             query: query.to_string(),
@@ -306,7 +322,7 @@ async fn session_store_search_impl(
             "session_store: failed to encode search response: {error}"
         ))
     })?;
-    Ok(json_to_vm_value(&value))
+    Ok(store_read_present_value(json_to_vm_value(&value)))
 }
 
 #[harn_builtin(
@@ -366,34 +382,57 @@ fn store_hooks() -> StoreHooks {
     }
 }
 
-fn open_read_store(state_dir: &SessionStoreDir) -> Result<Option<SqliteSessionStore>, VmError> {
-    let path = store_path(state_dir);
-    if !path.is_file() {
-        return Ok(None);
-    }
-    SqliteSessionStore::open_read_only_with_hooks(path, store_hooks())
-        .map(Some)
-        .map_err(store_error)
+enum StoreRead<T> {
+    Absent,
+    Present(T),
 }
 
-fn open_read_or_empty_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
-    match open_read_store(state_dir)? {
-        Some(store) => Ok(store),
-        None => SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error),
+impl<T> StoreRead<T> {
+    fn into_option(self) -> Option<T> {
+        match self {
+            Self::Absent => None,
+            Self::Present(value) => Some(value),
+        }
     }
+}
+
+fn store_read_absent_value() -> VmValue {
+    json_to_vm_value(&json!({"state": "absent"}))
+}
+
+fn store_read_present_value(value: VmValue) -> VmValue {
+    let mut result = DictMap::new();
+    result.insert(
+        crate::value::intern_key("state"),
+        VmValue::String(arcstr::ArcStr::from("present")),
+    );
+    result.insert(crate::value::intern_key("value"), value);
+    VmValue::dict(result)
+}
+
+fn open_read_store(state_dir: &SessionStoreDir) -> Result<StoreRead<SqliteSessionStore>, VmError> {
+    let path = store_path(state_dir);
+    if !path.is_file() {
+        return Ok(StoreRead::Absent);
+    }
+    SqliteSessionStore::open_read_only_with_hooks(path, store_hooks())
+        .map(StoreRead::Present)
+        .map_err(store_error)
 }
 
 async fn open_read_session(
     state_dir: &SessionStoreDir,
     session_id: &str,
     tenant_id: Option<String>,
-) -> Result<Option<SqliteSessionStore>, VmError> {
+) -> Result<StoreRead<Option<SqliteSessionStore>>, VmError> {
     validate_session_id(session_id)?;
-    if let Some(store) = open_read_store(state_dir)? {
+    let canonical_store = open_read_store(state_dir)?;
+    let canonical_present = matches!(canonical_store, StoreRead::Present(_));
+    if let StoreRead::Present(store) = canonical_store {
         match store.describe(session_id).await {
             Ok(meta) => {
                 validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
-                return Ok(Some(store));
+                return Ok(StoreRead::Present(Some(store)));
             }
             Err(StoreError::NotFound(_)) => {}
             Err(error) => return Err(store_error(error)),
@@ -402,16 +441,20 @@ async fn open_read_session(
 
     let legacy_path = legacy_session_path(state_dir, session_id)?;
     if !legacy_path.is_file() {
-        return Ok(None);
+        return Ok(if canonical_present {
+            StoreRead::Present(None)
+        } else {
+            StoreRead::Absent
+        });
     }
     let source = read_legacy_events(state_dir, session_id)?;
     if source.events.is_empty() {
-        return Ok(None);
+        return Ok(StoreRead::Present(None));
     }
     let store =
         SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error)?;
     import_legacy_events(&store, session_id, source, tenant_id.as_deref()).await?;
-    Ok(Some(store))
+    Ok(StoreRead::Present(Some(store)))
 }
 
 fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
@@ -433,7 +476,7 @@ pub fn open_canonical_store(root: &Path) -> Result<SqliteSessionStore, VmError> 
 pub(crate) fn open_existing_canonical_store(
     root: &Path,
 ) -> Result<Option<SqliteSessionStore>, VmError> {
-    open_read_store(&SessionStoreDir::under_root(root))
+    open_read_store(&SessionStoreDir::under_root(root)).map(StoreRead::into_option)
 }
 
 async fn ensure_session(

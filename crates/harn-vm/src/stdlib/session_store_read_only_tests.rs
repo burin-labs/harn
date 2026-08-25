@@ -30,25 +30,26 @@ fn root_options(root: &Path) -> VmValue {
     json_to_vm_value(&json!({"root": root.to_string_lossy()}))
 }
 
+fn assert_read_state<'a>(value: &'a VmValue, expected: &str) -> &'a DictMap {
+    let fields = value.as_dict().expect("session-store read envelope");
+    assert!(matches!(
+        fields.get("state"),
+        Some(VmValue::String(state)) if state.as_str() == expected
+    ));
+    fields
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     let dir = tempfile::tempdir().unwrap();
     let options = root_options(dir.path());
     let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
 
-    assert!(matches!(
-        session_store_list_impl(ctx(), vec![options.clone()]).await,
-        Ok(VmValue::List(items)) if items.is_empty()
-    ));
-    assert!(matches!(
-        session_store_events_impl(
-            ctx(),
-            vec![VmValue::String(arcstr::ArcStr::from("missing")), options.clone()],
-        )
-        .await,
-        Ok(VmValue::List(items)) if items.is_empty()
-    ));
-    session_store_verify_impl(
+    let list = session_store_list_impl(ctx(), vec![options.clone()])
+        .await
+        .unwrap();
+    assert!(assert_read_state(&list, "absent").get("value").is_none());
+    let events = session_store_events_impl(
         ctx(),
         vec![
             VmValue::String(arcstr::ArcStr::from("missing")),
@@ -57,11 +58,22 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     )
     .await
     .unwrap();
+    assert!(assert_read_state(&events, "absent").get("value").is_none());
+    let verify = session_store_verify_impl(
+        ctx(),
+        vec![
+            VmValue::String(arcstr::ArcStr::from("missing")),
+            options.clone(),
+        ],
+    )
+    .await
+    .unwrap();
+    assert!(assert_read_state(&verify, "absent").get("value").is_none());
     let search_options = json_to_vm_value(&json!({
         "root": dir.path().to_string_lossy(),
         "project_scope": "missing-project",
     }));
-    session_store_search_impl(
+    let search = session_store_search_impl(
         ctx(),
         vec![
             VmValue::String(arcstr::ArcStr::from("anything")),
@@ -70,7 +82,20 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     )
     .await
     .unwrap();
+    assert!(assert_read_state(&search, "absent").get("value").is_none());
     assert!(durable_inventory(dir.path()).is_empty());
+
+    let state_dir = SessionStoreDir::under_root(dir.path());
+    drop(open_store(&state_dir).unwrap());
+    let before = durable_inventory(dir.path());
+    let list = session_store_list_impl(ctx(), vec![options.clone()])
+        .await
+        .unwrap();
+    let value = assert_read_state(&list, "present")
+        .get("value")
+        .expect("present read value");
+    assert!(matches!(value, VmValue::List(items) if items.is_empty()));
+    assert_eq!(durable_inventory(dir.path()), before);
 
     let malformed = json_to_vm_value(&json!({
         "root": dir.path().to_string_lossy(),
@@ -79,7 +104,7 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     assert!(session_store_list_impl(ctx(), vec![malformed])
         .await
         .is_err());
-    assert!(durable_inventory(dir.path()).is_empty());
+    assert_eq!(durable_inventory(dir.path()), before);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -117,10 +142,11 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
 
     let options = root_options(dir.path());
     let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
-    session_store_list_impl(ctx(), vec![options.clone()])
+    let list = session_store_list_impl(ctx(), vec![options.clone()])
         .await
         .unwrap();
-    session_store_events_impl(
+    assert_read_state(&list, "present");
+    let events = session_store_events_impl(
         ctx(),
         vec![
             VmValue::String(arcstr::ArcStr::from("inspect")),
@@ -129,7 +155,8 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
     )
     .await
     .unwrap();
-    session_store_verify_impl(
+    assert_read_state(&events, "present");
+    let verify = session_store_verify_impl(
         ctx(),
         vec![
             VmValue::String(arcstr::ArcStr::from("inspect")),
@@ -138,11 +165,12 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
     )
     .await
     .unwrap();
+    assert_read_state(&verify, "present");
     let search_options = json_to_vm_value(&json!({
         "root": dir.path().to_string_lossy(),
         "project_scope": "inspect-project",
     }));
-    session_store_search_impl(
+    let search = session_store_search_impl(
         ctx(),
         vec![
             VmValue::String(arcstr::ArcStr::from("inspection")),
@@ -151,6 +179,7 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
     )
     .await
     .unwrap();
+    assert_read_state(&search, "present");
 
     assert_eq!(durable_inventory(dir.path()), before);
     assert!(!lock_path.exists());

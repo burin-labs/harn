@@ -80,7 +80,11 @@ pub fn hypothesis_get(
   options: HypothesisOptions? = nil,
 ) -> any? {
   const target = to_string(id)
-  for record in session_store_project(agent, hypothesis_stream(session_id), options ?? {}) {
+  const read = session_store_project(agent, hypothesis_stream(session_id), options ?? {})
+  if read.state == "absent" {
+    return nil
+  }
+  for record in read.value {
     if to_string(record?.id ?? "") == target {
       return record
     }
@@ -127,7 +131,11 @@ pub fn hypothesis_list(
   session_id: string?,
   options: HypothesisOptions? = nil,
 ) -> list<any> {
-  const records = session_store_project(agent, hypothesis_stream(session_id), options ?? {})
+  const read = session_store_project(agent, hypothesis_stream(session_id), options ?? {})
+  if read.state == "absent" {
+    return []
+  }
+  const records = read.value
   const status = to_string((options ?? {})?.status ?? "")
   if status == "" {
     return records
