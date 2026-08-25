@@ -148,9 +148,9 @@ import {
 } from "std/tool_hooks"
 
 const warn_then_run = { rule, args, inner ->
-  const cmd = type_of(args) == "string" ? args : to_string(
-    args?.command ?? ""
-  )
+  const cmd = type_of(args) == "string"
+    ? args
+    : to_string(args?.command ?? "")
   tool_hooks_emit_audit(
     "custom.tool_warn", {rule_id: rule.rule_id, command: cmd},
   )

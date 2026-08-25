@@ -51,9 +51,8 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   // exposes byte and (row, col) spans on both sides of the edit.
   for file in plan.touched_files {
     harness.stdio.println(
-      "would rewrite " + file.path + " (" + str(
-        len(file.edits)
-      ) + " edits)",
+      "would rewrite " + file.path
+        + " (" + str(len(file.edits)) + " edits)",
     )
   }
 
@@ -97,9 +96,8 @@ pipeline rename_would_shadow(harness: Harness) {
   assert(result.result == "conflict")
   for site in result.conflicts {
     harness.stdio.println(
-      "shadow at " + site.path + ":" + str(
-        site.row + 1
-      ) + ":" + str(site.col + 1),
+      "shadow at " + site.path
+        + ":" + str(site.row + 1) + ":" + str(site.col + 1),
     )
   }
   return result

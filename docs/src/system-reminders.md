@@ -430,9 +430,8 @@ const compacted = transcript_compact(snapshot, {
       messages: [
         {
           role: "system",
-          content: "Summary plus " + str(
-            len(reminders)
-          ) + " active reminders.",
+          content: "Summary plus " + str(len(reminders))
+            + " active reminders.",
         },
       ],
     })

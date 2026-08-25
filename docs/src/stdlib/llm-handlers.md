@@ -222,9 +222,8 @@ const router = with_routing({
   routes: [
     {name: "frontier",
      when: { call ->
-       call?.opts?.reasoning_task == "judge" || (
-         call?.opts?.escalate ?? false
-       )
+       call?.opts?.reasoning_task == "judge"
+         || (call?.opts?.escalate ?? false)
      },
      caller: frontier},
   ],

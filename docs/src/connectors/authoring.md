@@ -511,9 +511,8 @@ keyed by the secret name with `-` replaced by `_`. A manifest declaring
 `args.secrets.api_key`, so `call` should read that first:
 
 ```harn
-const api_key = args?.api_key ?? args?.secrets?.api_key ?? env.get(
-  "EXAMPLE_API_KEY"
-)
+const api_key = args?.api_key ?? args?.secrets?.api_key
+  ?? env.get("EXAMPLE_API_KEY")
 ```
 
 A credential the caller passed explicitly wins over the stored one, and a

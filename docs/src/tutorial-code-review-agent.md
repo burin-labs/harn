@@ -92,9 +92,8 @@ pipeline default(harness: Harness, task) {
     {temperature: 0.2}
   )
 
-  const has_issue = review.text.contains(
-    "issue"
-  ) || review.text.contains("bug")
+  const has_issue = review.text.contains("issue")
+    || review.text.contains("bug")
   eval_metric("review_has_issue", has_issue)
   eval_metric("review_chars", review.text.count)
 
