@@ -162,7 +162,7 @@ log("hello")
 fn test_unused_discard_parameter_ignored() {
     let diags = lint_source(
         r#"
-pipeline default(task) {
+pipeline default() {
 fn greet(name, _) {
     log(name)
 }
@@ -212,6 +212,194 @@ greet("hi", "there")
 }
 
 #[test]
+fn unused_runtime_pipeline_slot_is_removed_instead_of_renamed() {
+    let source = r#"@test
+pipeline test_runtime(harness: Harness, _task: unknown) {
+  harness.stdio.println("ready")
+}"#;
+    let diagnostics = lint_source(source);
+    assert!(
+        has_rule(&diagnostics, "unused-pipeline-input"),
+        "legacy underscore slots should participate in pipeline removal: {diagnostics:?}"
+    );
+    assert_eq!(
+        apply_fixes(source, &diagnostics),
+        r#"@test
+pipeline test_runtime(harness: Harness) {
+  harness.stdio.println("ready")
+}"#
+    );
+}
+
+#[test]
+fn externally_selectable_pipeline_slots_keep_positional_arity() {
+    for name in ["default", "main", "auto", "helper", "test_helper"] {
+        let source = format!(
+            "pipeline {name}(harness: Harness, _task: unknown) {{\n  harness.stdio.println(\"ready\")\n}}"
+        );
+        let diagnostics = lint_source(&source);
+        assert!(
+            !has_rule(&diagnostics, "unused-pipeline-input"),
+            "host-selected pipeline `{name}` must retain its out-of-band argument contract: {diagnostics:?}"
+        );
+        assert_eq!(apply_fixes(&source, &diagnostics), source);
+    }
+}
+
+#[test]
+fn pipeline_slot_removal_preserves_neighbors_and_their_comments() {
+    let source = r"@test
+pipeline test_values(first: int, _unused: int, last: int) {
+  log(first + last)
+}";
+    assert_eq!(
+        apply_fixes(source, &lint_source(source)),
+        r"@test
+pipeline test_values(first: int, last: int) {
+  log(first + last)
+}"
+    );
+
+    let documented_next = r"@test
+pipeline test_documented(_unused: int, // belongs to value
+  value: int) {
+  log(value)
+}";
+    assert_eq!(
+        apply_fixes(documented_next, &lint_source(documented_next)),
+        r"@test
+pipeline test_documented( // belongs to value
+  value: int) {
+  log(value)
+}"
+    );
+
+    let all_unused = r"@test
+pipeline test_all_unused(_first: int, _second: int) {
+  return 1
+}";
+    assert_eq!(
+        apply_fixes(all_unused, &lint_source(all_unused)),
+        r"@test
+pipeline test_all_unused() {
+  return 1
+}",
+        "one fix pass must remove adjacent unused slots without overlap"
+    );
+}
+
+#[test]
+fn pipeline_slot_removal_ignores_commas_inside_trivia() {
+    let first = r"@test
+pipeline test_first(_unused: int /* current note, still current */, value: int) {
+  return value
+}";
+    let first_fixed = apply_fixes(first, &lint_source(first));
+    assert_eq!(
+        first_fixed,
+        r"@test
+pipeline test_first(value: int) {
+  return value
+}"
+    );
+    let _ = lint_source(&first_fixed);
+
+    let last = r"@test
+pipeline test_last(value: int, /* removed note, with comma */ _unused: int) {
+  return value
+}";
+    let last_fixed = apply_fixes(last, &lint_source(last));
+    assert_eq!(
+        last_fixed,
+        r"@test
+pipeline test_last(value: int) {
+  return value
+}"
+    );
+    let _ = lint_source(&last_fixed);
+
+    let adjacent = r"@test
+pipeline test_adjacent(_first: int /* first, note */, _second: int) {
+  return 1
+}";
+    let adjacent_fixed = apply_fixes(adjacent, &lint_source(adjacent));
+    assert_eq!(
+        adjacent_fixed,
+        r"@test
+pipeline test_adjacent() {
+  return 1
+}"
+    );
+    let _ = lint_source(&adjacent_fixed);
+}
+
+#[test]
+fn unused_bare_test_pipeline_slot_is_removed() {
+    let source = r"@test
+pipeline test_ready(_task: unknown) {
+  assert(true)
+}";
+    assert_eq!(
+        apply_fixes(source, &lint_source(source)),
+        r"@test
+pipeline test_ready() {
+  assert(true)
+}"
+    );
+}
+
+#[test]
+fn caller_and_table_bound_pipeline_slots_keep_positional_arity() {
+    let called = r"@test
+pipeline test_helper(_value: int) {
+  return 1
+}
+
+pipeline default() {
+  return test_helper(2)
+}";
+    assert_eq!(
+        apply_fixes(called, &lint_source(called)),
+        called,
+        "a local caller owns the helper's positional slot and its binding name"
+    );
+
+    let table = r#"@test(cases: [{name: "one", args: [1]}])
+pipeline test_case(value: int) {
+  assert(true)
+}"#;
+    assert_eq!(
+        apply_fixes(table, &lint_source(table)),
+        table,
+        "table rows own the test pipeline's positional slots and binding names"
+    );
+}
+
+#[test]
+fn extended_pipeline_slots_keep_positional_arity() {
+    let extended = r"pipeline child(value: int) extends base {
+  return 1
+}";
+    assert_eq!(
+        apply_fixes(extended, &lint_source(extended)),
+        extended,
+        "an extended pipeline inherits an opaque positional contract"
+    );
+}
+
+#[test]
+fn public_pipeline_slots_keep_positional_arity() {
+    let source = r"pub pipeline exported(value: int) {
+  return 1
+}";
+    assert_eq!(
+        apply_fixes(source, &lint_source(source)),
+        source,
+        "external callers may depend on a public pipeline's full declaration contract"
+    );
+}
+
+#[test]
 fn test_unused_closure_param() {
     let diags = lint_source(
         r"
@@ -231,7 +419,7 @@ f(1, 2)
 fn test_unused_param_underscore_prefix_ignored() {
     let diags = lint_source(
         r#"
-pipeline default(task) {
+pipeline default() {
 fn greet(name, _unused) {
     log(name)
 }
@@ -249,7 +437,7 @@ greet("hi", "there")
 fn test_used_fn_param_ok() {
     let diags = lint_source(
         r"
-pipeline default(task) {
+pipeline default() {
 fn add(a, b) {
     return a + b
 }

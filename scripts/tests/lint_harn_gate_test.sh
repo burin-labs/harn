@@ -102,6 +102,17 @@ run_gate() {
     "$repo_root/scripts/check-conformance-lint-baseline.sh"
 }
 
+run_update() {
+  : > "$calls_file"
+  FAKE_HARN_MODE="$mode_file" \
+    FAKE_HARN_CALLS="$calls_file" \
+    HARN_BIN="$fake_harn" \
+    CONFORMANCE_LINT_ROOT="$tmp/conformance/tests" \
+    CONFORMANCE_LINT_BASELINE="$baseline" \
+    HARN_CHECK_JOBS=1 \
+    "$repo_root/scripts/check-conformance-lint-baseline.sh" --update
+}
+
 printf '%s\n' clean > "$mode_file"
 run_gate > "$tmp/clean.log" 2>&1
 test "$(grep -c '^call$' "$calls_file")" -eq 2
@@ -122,6 +133,14 @@ if run_gate > "$tmp/checker-failure.log" 2>&1; then
   exit 1
 fi
 grep -q '__CHECK_FAILED__' "$tmp/checker-failure.log"
+
+printf '%s\n' 'reviewed baseline' > "$baseline"
+if run_update > "$tmp/checker-failure-update.log" 2>&1; then
+  echo "lint-harn update replaced its baseline after diagnostic collection failed" >&2
+  exit 1
+fi
+grep -q 'Refusing to replace the reviewed conformance baseline' "$tmp/checker-failure-update.log"
+grep -Fxq 'reviewed baseline' "$baseline"
 
 printf '%s\n' warning > "$mode_file"
 if run_gate > "$tmp/warning.log" 2>&1; then

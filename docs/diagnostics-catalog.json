@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 72
+      "count": 73
     },
     {
       "id": "FMT",
@@ -2460,6 +2460,21 @@
           "id": "bindings/name-capability-parameter",
           "safety": "surface-changing",
           "summary": "Rename the capability parameter and its references after the capability it carries"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-074",
+      "category": "LNT",
+      "summary": "explicitly unused test pipeline input can be removed",
+      "repairs": [
+        {
+          "id": "bindings/remove-unused-pipeline-input",
+          "safety": "surface-changing",
+          "summary": "Remove an explicitly unused test pipeline input"
         }
       ],
       "related": [],

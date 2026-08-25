@@ -3,7 +3,7 @@ import { probe, probe_eval, probe_typecheck } from "std/agent/probe"
 import { assert_error_contains } from "std/testing"
 import "../_common"
 
-pipeline test_agent_probe(harness: Harness, _task: unknown) {
+pipeline test_agent_probe(harness: Harness) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-agent-probe-" + harness.random.uuid(),

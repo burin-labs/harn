@@ -127,7 +127,7 @@ fn finding_messages(result: dict) -> string {
   return join(lines, "\n")
 }
 
-pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness, _task: unknown) {
+pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness) {
   with_temp_dir(
     harness.fs,
     { task_dir ->
@@ -141,7 +141,7 @@ pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness, _task: unknow
   )
 }
 
-pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness, _task: unknown) {
+pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness) {
   with_temp_dir(
     harness.fs,
     { task_dir ->
@@ -169,7 +169,7 @@ pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness, _task: 
   )
 }
 
-pipeline test_qmode_inspect_cli_exit_code_and_output(harness: Harness, _task: unknown) {
+pipeline test_qmode_inspect_cli_exit_code_and_output(harness: Harness) {
   with_temp_dir(
     harness.fs,
     { task_dir ->

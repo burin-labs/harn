@@ -1,6 +1,6 @@
 import { invalidate_facts, recall_facts, store_fact } from "std/agent/fact"
 
-pipeline test_agent_fact_store(harness: Harness, _task: unknown) {
+pipeline test_agent_fact_store(harness: Harness) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-agent-facts-" + harness.random.uuid(),

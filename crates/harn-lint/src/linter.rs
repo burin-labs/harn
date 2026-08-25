@@ -25,6 +25,7 @@ mod ambient;
 mod connector_effects;
 mod discarded_result;
 mod execution_safety;
+mod parameters;
 mod program;
 mod spans;
 mod type_facts;
@@ -98,6 +99,9 @@ pub(crate) struct Linter<'a> {
     pub(crate) externally_imported_names: HashSet<String>,
     /// Track whether the current traversal is inside a test pipeline body.
     pub(super) test_pipeline_depth: usize,
+    /// Whether a bare `@test` declaration owns this pipeline's inputs.
+    /// Owned inputs may be removed when no caller survives the full walk.
+    pub(super) test_pipeline_input_owned: bool,
     /// Track type declarations for the `unused-type` lint rule.
     pub(super) type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
@@ -193,6 +197,7 @@ impl<'a> Linter<'a> {
             connector_runtime_module: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
+            test_pipeline_input_owned: false,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
@@ -1038,13 +1043,14 @@ impl<'a> Linter<'a> {
         self.param_declarations.push(ParamDeclaration {
             name: name.to_string(),
             span,
+            removable_pipeline: None,
         });
     }
 
     /// Emit a `shadow-variable` warning when `name` is already bound in any
     /// enclosing (non-current) scope. Shared by variable and parameter
     /// declaration so the two stay in lockstep.
-    fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
+    pub(super) fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
         // Lifecycle callbacks bind their own root `harness` at execution boundaries.
         // runtime-supplied `harness`, so warning about that nested authority
         // boundary would force authors away from the canonical spelling.

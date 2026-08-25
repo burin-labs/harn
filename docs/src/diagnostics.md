@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 72 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 73 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -323,6 +323,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-071`](#harn-lnt-071) | global builtin has moved to a Harness capability method | `bindings/thread-harness-method` | `scope-local` |
 | [`HARN-LNT-072`](#harn-lnt-072) | call names a builtin whose declared exposure keeps Harn source from naming it | — | — |
 | [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
+| [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused test pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 
 ## FMT — Formatter
 
@@ -2619,6 +2620,8 @@ unused parameter lint
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
+- Functions, closures, public or extended pipelines, and fixture- or table-bound
+  tests keep positional arity and prefix the unused parameter with `_`.
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
 
 ### `HARN-LNT-017`
@@ -3958,6 +3961,29 @@ nothing when:
 A dict key that happens to share the parameter's name is a record field, not a
 reference, so `{harness: harness}` becomes `{harness: net}` and the record's
 shape is unchanged.
+
+### `HARN-LNT-074`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+explicitly unused test pipeline input can be removed
+
+- **Repair:** `bindings/remove-unused-pipeline-input` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Remove an explicitly unused test pipeline input
+
+#### What it means
+
+An underscore-prefixed input on a private pipeline structurally marked with a
+bare `@test` is not used by its body or a local caller and is not bound by a
+fixture or table-driven case. The Harn test runner derives its invocation from
+that declaration, but another host can still select any named pipeline.
+
+#### How to fix
+
+Review external host callers, then apply the surface-changing fix explicitly to
+remove the input. Keep and type a named input when the test uses the value.
+Unattributed, extended, called, fixture-bound, and table-bound pipelines preserve
+their positional contracts.
 
 ### `HARN-FMT-001`
 

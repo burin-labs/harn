@@ -96,7 +96,8 @@ pub struct TypeDiagnostic {
     pub span: Option<Span>,
     pub help: Option<String>,
     pub related: Vec<RelatedDiagnostic>,
-    /// Machine-applicable fix edits.
+    /// Concrete fix edits. The structured repair safety class decides whether
+    /// bulk autofix may apply them.
     pub fix: Option<Vec<FixEdit>>,
     /// Optional structured payload that higher-level tooling (e.g. the
     /// LSP code-action provider) can consume to synthesise fixes that
@@ -109,6 +110,19 @@ pub struct TypeDiagnostic {
     /// registered for this code; populated automatically from
     /// [`Code::repair_template`] by the builder helpers.
     pub repair: Option<Repair>,
+}
+
+impl TypeDiagnostic {
+    /// Return concrete edits only when their structured safety class permits
+    /// automatic application. Unclassified legacy edits retain their existing
+    /// machine-applicable contract.
+    pub fn machine_applicable_fix(&self) -> Option<&[FixEdit]> {
+        let fix = self.fix.as_deref()?;
+        self.repair
+            .as_ref()
+            .is_none_or(|repair| repair.safety.is_machine_applicable())
+            .then_some(fix)
+    }
 }
 
 #[derive(Debug, Clone)]

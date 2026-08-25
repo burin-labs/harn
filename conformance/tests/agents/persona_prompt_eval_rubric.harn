@@ -84,7 +84,7 @@ fn comparison(baseline: list, treatment: list, split: string = "meter-holdout") 
 }
 
 @test
-pipeline test_persona_prompt_eval_rubric(harness: Harness, _task: unknown) {
+pipeline test_persona_prompt_eval_rubric(harness: Harness) {
   with_llm_script(
     harness.llm,
     [

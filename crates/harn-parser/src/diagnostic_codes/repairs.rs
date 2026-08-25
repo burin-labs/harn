@@ -78,6 +78,12 @@ impl RepairSafety {
     pub const fn is_at_most(self, ceiling: RepairSafety) -> bool {
         (self as u8) <= (ceiling as u8)
     }
+
+    /// Whether an editor or `harn lint --fix` may apply this repair without
+    /// an explicit safety opt-in.
+    pub const fn is_machine_applicable(self) -> bool {
+        self.is_at_most(RepairSafety::BehaviorPreserving)
+    }
 }
 
 impl fmt::Display for RepairSafety {
@@ -254,6 +260,7 @@ impl Code {
             Code::LintUnusedVariable
             | Code::LintUnusedPatternBinding
             | Code::LintUnusedParameter => Some(&REPAIR_BINDINGS_RENAME_UNUSED),
+            Code::LintUnusedPipelineInput => Some(&REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT),
             Code::LintCapabilityParameterName => Some(&REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER),
             Code::LintUnusedImport => Some(&REPAIR_IMPORTS_REMOVE_UNUSED),
             Code::LintUnusedFunction | Code::LintUnusedType => {
@@ -380,6 +387,12 @@ const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
     summary: "Mark an unused binding without changing callable arity",
     safety: RepairSafety::BehaviorPreserving,
+};
+
+const REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT: RepairTemplate = RepairTemplate {
+    id: "bindings/remove-unused-pipeline-input",
+    summary: "Remove an explicitly unused test pipeline input",
+    safety: RepairSafety::SurfaceChanging,
 };
 
 const REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER: RepairTemplate = RepairTemplate {
@@ -668,6 +681,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_MAKE_MUTABLE,
     &REPAIR_BINDINGS_MAKE_IMMUTABLE,
     &REPAIR_BINDINGS_RENAME_UNUSED,
+    &REPAIR_BINDINGS_REMOVE_UNUSED_PIPELINE_INPUT,
     &REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER,
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
@@ -821,6 +835,20 @@ mod tests {
             );
             assert!(window[0].is_at_most(window[1]));
             assert!(!window[1].is_at_most(window[0]));
+        }
+    }
+
+    #[test]
+    fn only_behavior_preserving_repairs_are_machine_applicable() {
+        assert!(RepairSafety::FormatOnly.is_machine_applicable());
+        assert!(RepairSafety::BehaviorPreserving.is_machine_applicable());
+        for safety in [
+            RepairSafety::ScopeLocal,
+            RepairSafety::SurfaceChanging,
+            RepairSafety::CapabilityChanging,
+            RepairSafety::NeedsHuman,
+        ] {
+            assert!(!safety.is_machine_applicable(), "{safety}");
         }
     }
 

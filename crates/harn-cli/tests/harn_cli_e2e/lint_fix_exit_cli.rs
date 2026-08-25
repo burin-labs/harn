@@ -48,6 +48,9 @@ const FIXABLE_WARNING_SOURCE: &str =
 const FIXABLE_PLUS_ERROR_SOURCE: &str =
     "pipeline default(_) {\n  const x = true\n  const y = x == false\n  break\n  return y\n}\n";
 
+const SURFACE_CHANGING_SOURCE: &str =
+    "@test\npipeline test_ready(_task: unknown) {\n  assert(true)\n}\n";
+
 #[test]
 fn fix_fails_on_unfixable_error() {
     let dir = temp_root("unfixable-error");
@@ -102,6 +105,55 @@ fn fix_passes_on_fully_fixable_file() {
     assert!(
         stdout.is_empty(),
         "no --json flag, so stdout must stay empty:\n{stdout}"
+    );
+}
+
+#[test]
+fn lint_fix_does_not_apply_surface_changing_repairs() {
+    let dir = temp_root("surface-changing");
+    let path = dir.join("surface.harn");
+    std::fs::write(&path, SURFACE_CHANGING_SOURCE).unwrap();
+
+    let (_stdout, stderr, code) = run(&dir, &["lint", "--fix", "surface.harn"]);
+
+    assert_eq!(code, 0, "advisory warning should not fail lint: {stderr}");
+    assert!(
+        stderr.contains("unused-pipeline-input"),
+        "the explicit repair must remain discoverable: {stderr}"
+    );
+    assert!(
+        !stderr.contains("applied"),
+        "lint --fix must respect the machine-applicable safety ceiling: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        SURFACE_CHANGING_SOURCE
+    );
+}
+
+#[test]
+fn explicit_fix_applies_surface_changing_pipeline_repair() {
+    let dir = temp_root("explicit-surface-changing");
+    let path = dir.join("surface.harn");
+    std::fs::write(&path, SURFACE_CHANGING_SOURCE).unwrap();
+
+    let (_stdout, stderr, code) = run(
+        &dir,
+        &[
+            "fix",
+            "--apply",
+            "--safety",
+            "surface-changing",
+            "--code",
+            "HARN-LNT-074",
+            "surface.harn",
+        ],
+    );
+
+    assert_eq!(code, 0, "explicit repair must succeed: {stderr}");
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "@test\npipeline test_ready() {\n  assert(true)\n}\n"
     );
 }
 

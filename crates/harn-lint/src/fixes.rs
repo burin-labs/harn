@@ -2,8 +2,8 @@
 //! AST nodes and raw source so it can be unit-tested without `Linter`
 //! state.
 
-use harn_lexer::{FixEdit, Span};
-use harn_parser::{Node, SNode};
+use harn_lexer::{FixEdit, Lexer, Span, TokenKind};
+use harn_parser::{Node, SNode, TypedParam};
 
 /// Replace a simple `let`/`const` binding's identifier with the discard binding
 /// `_`. Returns `None` for destructuring patterns, unusual formatting, or
@@ -75,6 +75,74 @@ pub(crate) fn replace_identifier_text_fix(
         span: Span::with_offsets(start, start + old.len(), span.line, span.column + offset),
         replacement: new.to_string(),
     }])
+}
+
+/// Remove one parameter and its adjacent comma from a pipeline signature.
+///
+/// Parameter spans include defaults but exclude separators. The neighboring
+/// spans therefore bound the one comma that belongs to this slot. Comments
+/// after a non-final comma are retained because they may document the next
+/// parameter; comments before a final parameter leave with that parameter.
+pub(crate) fn pipeline_parameter_removal_fix(
+    source: Option<&str>,
+    params: &[TypedParam],
+    index: usize,
+) -> Option<(Vec<FixEdit>, Option<Vec<FixEdit>>)> {
+    let source = source?;
+    let current = params.get(index)?;
+    if current.span == Span::dummy() || current.span.end > source.len() {
+        return None;
+    }
+
+    let (start, end, after_removed_previous) = if params.len() == 1 {
+        (current.span.start, current.span.end, None)
+    } else if let Some(next) = params.get(index + 1) {
+        let between = source.get(current.span.end..next.span.start)?;
+        let comma = separator_comma_offset(between)?;
+        let after_comma = between.get(comma + 1..)?;
+        let end = if after_comma.chars().all(char::is_whitespace) {
+            next.span.start
+        } else {
+            current.span.end + comma + 1
+        };
+        (current.span.start, end, None)
+    } else {
+        let previous = params.get(index.checked_sub(1)?)?;
+        let between = source.get(previous.span.end..current.span.start)?;
+        let comma = separator_comma_offset(between)?;
+        (
+            previous.span.end + comma,
+            current.span.end,
+            Some(vec![FixEdit {
+                span: Span::with_offsets(
+                    current.span.start,
+                    current.span.end,
+                    current.span.line,
+                    current.span.column,
+                ),
+                replacement: String::new(),
+            }]),
+        )
+    };
+
+    Some((
+        vec![FixEdit {
+            span: Span::with_offsets(start, end, current.span.line, current.span.column),
+            replacement: String::new(),
+        }],
+        after_removed_previous,
+    ))
+}
+
+/// Find the syntactic separator in a trivia-only parameter gap. Lexing the
+/// bounded gap prevents commas inside line and block comments from becoming
+/// edit boundaries.
+fn separator_comma_offset(between: &str) -> Option<usize> {
+    Lexer::new(between)
+        .tokenize()
+        .ok()?
+        .into_iter()
+        .find_map(|token| matches!(token.kind, TokenKind::Comma).then_some(token.span.start))
 }
 
 fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {

@@ -21,7 +21,8 @@ pub struct LintDiagnostic {
     pub span: Span,
     pub severity: LintSeverity,
     pub suggestion: Option<String>,
-    /// Machine-applicable fix edits (applied in order, non-overlapping).
+    /// Concrete fix edits (applied in order, non-overlapping). The repair
+    /// safety class decides whether bulk autofix may apply them.
     pub fix: Option<Vec<FixEdit>>,
 }
 
@@ -36,6 +37,17 @@ impl LintDiagnostic {
     /// drift. Callers that need the dispatch handle ask for it here.
     pub fn repair(&self) -> Option<Repair> {
         self.code.repair_template().map(Repair::from_template)
+    }
+
+    /// Return concrete edits only when the repair registry permits automatic
+    /// application. Higher-safety edits remain available to explicit
+    /// `harn fix --safety ...` and IDE quick-fix flows.
+    pub fn machine_applicable_fix(&self) -> Option<&[FixEdit]> {
+        let fix = self.fix.as_deref()?;
+        self.code
+            .repair_template()
+            .is_none_or(|repair| repair.safety.is_machine_applicable())
+            .then_some(fix)
     }
 }
 
