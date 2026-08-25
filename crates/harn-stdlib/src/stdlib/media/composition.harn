@@ -65,7 +65,7 @@ pub type DesignExport = {
 fn __design_failure(
   kind: DesignDocumentFailureKind,
   message: string,
-  details = {},
+  details: dict? = {},
 ) -> DesignDocumentFailure {
   return {kind: kind, message: message} + (details ?? {})
 }
@@ -144,7 +144,7 @@ fn __design_validate_layer(layer: DesignLayer) -> Result<DesignLayer, DesignDocu
  * @effects: []
  * @errors: []
  */
-pub fn design_document_result(raw) -> Result<DesignDocument, DesignDocumentFailure> {
+pub fn design_document_result(raw: any) -> Result<DesignDocument, DesignDocumentFailure> {
   if raw == nil || type_of(raw) != "dict" {
     return Err(__design_failure("invalid", "design document must be a record"))
   }
@@ -224,7 +224,7 @@ pub fn design_document_with_exact_text(
   id: string,
   image: MediaAsset,
   text: string,
-  options = {},
+  options: dict? = {},
 ) -> Result<DesignDocument, DesignDocumentFailure> {
   const opts = options ?? {}
   const width = to_int(opts.width ?? image.width) ?? 0
@@ -401,7 +401,7 @@ pub fn design_document_export_result(
   document: DesignDocument,
   assets: list<MediaAsset>,
   output_stem: string,
-  options = {},
+  options: dict? = {},
 ) -> Result<DesignExport, DesignDocumentFailure> {
   const checked = design_document_result(document)
   if !is_ok(checked) {

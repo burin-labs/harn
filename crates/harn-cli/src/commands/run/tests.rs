@@ -132,7 +132,7 @@ fn split_eval_header_does_not_lift_imports_after_other_statements() {
 fn eval_source_wraps_pipeline_body_snippets() {
     assert_eq!(
         eval_source_for_code("let x = 1\n__io_println(x)"),
-        "pipeline main(harness: Harness, task) {\nlet x = 1\n__io_println(x)\n}"
+        "pipeline main(harness: Harness, task: unknown) {\nlet x = 1\n__io_println(x)\n}"
     );
 }
 

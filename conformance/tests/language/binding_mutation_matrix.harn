@@ -21,7 +21,7 @@ struct Point {
  * Assigning through an immutable binding is rejected at runtime, whatever the
  * collection type or the assignment form. Returns the error text.
  */
-fn rejected(body) -> string {
+fn rejected(body: unknown) -> string {
   return try {
     body()
     "NOT REJECTED"
@@ -30,7 +30,7 @@ fn rejected(body) -> string {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // ---- const + every assignment form: uniformly rejected -----------------
   const frozen_list = [0]
   const frozen_dict = {k: 0}

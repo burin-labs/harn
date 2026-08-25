@@ -3,7 +3,7 @@ import { merge } from "std/json"
 
 let notion_connector_config = {}
 
-pub fn configure(config) {
+pub fn configure(config: dict?) {
   notion_connector_config = filter_nil(config ?? {})
   return notion_connector_config
 }
@@ -12,7 +12,7 @@ pub fn reset() {
   notion_connector_config = {}
 }
 
-fn __call(net: HarnessNet, method, params = {}) {
+fn __call(net: HarnessNet, method: string, params: dict? = {}) {
   return net.connector_call(
     "notion",
     method,
@@ -20,19 +20,25 @@ fn __call(net: HarnessNet, method, params = {}) {
   )
 }
 
-pub fn get_page(net: HarnessNet, id, options = nil) {
+pub fn get_page(net: HarnessNet, id: any, options: dict? = nil) {
   return __call(net, "get_page", (options ?? {}) + {id: id})
 }
 
-pub fn update_page(net: HarnessNet, id, properties, options = nil) {
+pub fn update_page(net: HarnessNet, id: any, properties: any, options: dict? = nil) {
   return __call(net, "update_page", (options ?? {}) + {id: id, properties: properties})
 }
 
-pub fn append_blocks(net: HarnessNet, page_id, blocks, options = nil) {
+pub fn append_blocks(net: HarnessNet, page_id: any, blocks: any, options: dict? = nil) {
   return __call(net, "append_blocks", (options ?? {}) + {page_id: page_id, blocks: blocks})
 }
 
-pub fn query_database(net: HarnessNet, id, filter = nil, sorts = nil, options = nil) {
+pub fn query_database(
+  net: HarnessNet,
+  id: any,
+  filter: any = nil,
+  sorts: any = nil,
+  options: dict? = nil,
+) {
   return __call(
     net,
     "query_database",
@@ -40,15 +46,15 @@ pub fn query_database(net: HarnessNet, id, filter = nil, sorts = nil, options = 
   )
 }
 
-pub fn search(net: HarnessNet, query, options = nil) {
+pub fn search(net: HarnessNet, query: any, options: dict? = nil) {
   return __call(net, "search", (options ?? {}) + {query: query})
 }
 
-pub fn create_comment(net: HarnessNet, page_id, rich_text, options = nil) {
+pub fn create_comment(net: HarnessNet, page_id: any, rich_text: any, options: dict? = nil) {
   return __call(net, "create_comment", (options ?? {}) + {page_id: page_id, rich_text: rich_text})
 }
 
-pub fn api_call(net: HarnessNet, path, method, body = nil, options = nil) {
+pub fn api_call(net: HarnessNet, path: any, method: any, body: any = nil, options: dict? = nil) {
   return __call(
     net,
     "api_call",

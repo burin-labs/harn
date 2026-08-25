@@ -39,7 +39,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(present)
   harness.stdio.println(missing)
   // Nested usage in function body
-  fn configure(opts = {}) {
+  fn configure(opts: dict = {}) {
     const {max = 100, min = 0} = opts
     return max - min
   }

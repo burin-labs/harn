@@ -57,7 +57,7 @@ fn __spec_validate(spec: list) -> list<string> {
   return errors
 }
 
-fn __initial_value(entry) {
+fn __initial_value(entry: dict) {
   if entry.kind == "flag" {
     return entry?.default ?? false
   }
@@ -123,7 +123,7 @@ fn __positional_entries(spec: list) -> list {
   return out
 }
 
-fn __consume_value(args: list, cursor: int, entry, errors_in) -> dict {
+fn __consume_value(args: list, cursor: int, entry: dict, errors_in: any) -> dict {
   const next = cursor + 1
   let errors = errors_in
   if next >= len(args) {
@@ -142,7 +142,7 @@ fn __consume_value(args: list, cursor: int, entry, errors_in) -> dict {
   return {value: parsed, cursor: next, errors: errors}
 }
 
-fn __apply_long_eq(arg: string, flag_index, current, errors_in) -> dict {
+fn __apply_long_eq(arg: string, flag_index: any, current: dict, errors_in: any) -> dict {
   const eq_idx = arg.index_of("=")
   if eq_idx < 0 {
     return {matched: false, current: current, errors: errors_in}
@@ -179,7 +179,7 @@ fn __apply_long_eq(arg: string, flag_index, current, errors_in) -> dict {
   return {matched: true, current: current + {[entry.name]: parsed}, errors: errors}
 }
 
-fn __step_long_eq(arg, flag_index, state) {
+fn __step_long_eq(arg: string, flag_index: any, state: dict) {
   const outcome = __apply_long_eq(arg, flag_index, state.current, state.errors)
   if outcome.matched {
     return state + {current: outcome.current, errors: outcome.errors, advance: 1}
@@ -187,7 +187,7 @@ fn __step_long_eq(arg, flag_index, state) {
   return state + {extras: state.extras + [arg], advance: 1}
 }
 
-fn __step_dash_arg(arg, raw_argv, flag_index, cursor, state) {
+fn __step_dash_arg(arg: any, raw_argv: list, flag_index: any, cursor: int, state: dict) {
   const entry = flag_index[arg]
   if entry == nil {
     return state + {extras: state.extras + [arg], advance: 1}
@@ -205,7 +205,7 @@ fn __step_dash_arg(arg, raw_argv, flag_index, cursor, state) {
   return state + {current: resolved, errors: captured.errors, advance: captured.cursor - cursor + 1}
 }
 
-fn __step_positional(arg, positional_specs, state) {
+fn __step_positional(arg: string, positional_specs: any, state: dict) {
   if state.positional_cursor < len(positional_specs) {
     const pspec = positional_specs[state.positional_cursor]
     const parsed = __parse_typed(arg, pspec?.parse ?? "string", pspec?.separator ?? ",")
@@ -219,7 +219,14 @@ fn __step_positional(arg, positional_specs, state) {
   return state + {positional: state.positional + [arg], advance: 1}
 }
 
-fn __dispatch(arg, raw_argv, flag_index, positional_specs, cursor, state) {
+fn __dispatch(
+  arg: any,
+  raw_argv: list,
+  flag_index: any,
+  positional_specs: string | bytes | list | dict | set | range | nil,
+  cursor: int,
+  state: any,
+) {
   if !state.terminated && arg == "--" {
     return state + {terminated: true, advance: 1}
   }

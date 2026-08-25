@@ -1,4 +1,8 @@
 // @harn-entrypoint-category agent.stdlib
+import { ToolRegistry } from "std/tools"
+
+pub type RuntimeIntrospectionOptions = {only?: list<string>, exclude?: list<string>}
+
 /**
  * runtime_introspection_tools attaches the model-callable runtime
  * introspection bundle to a tool registry.
@@ -45,7 +49,10 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn runtime_introspection_tools(registry = nil, options = nil) {
+pub fn runtime_introspection_tools(
+  registry: ToolRegistry? = nil,
+  options: RuntimeIntrospectionOptions? = nil,
+) -> ToolRegistry {
   const base = registry ?? tool_registry()
   const selected = __introspection_selected_names(options)
   let tools = base
@@ -154,15 +161,15 @@ fn __introspection_all_names() {
   return collected
 }
 
-fn __introspection_selected_names(options) {
-  if type_of(options) != "dict" {
+fn __introspection_selected_names(options: RuntimeIntrospectionOptions?) -> list<string> {
+  if options == nil {
     return __introspection_all_names()
   }
-  const only = options?.only
+  const only = options.only
   if type_of(only) == "list" && len(only) > 0 {
     return only
   }
-  const exclude = options?.exclude
+  const exclude = options.exclude
   if type_of(exclude) != "list" || len(exclude) == 0 {
     return __introspection_all_names()
   }
@@ -175,7 +182,7 @@ fn __introspection_selected_names(options) {
   return keep
 }
 
-fn __introspection_in_set(names, candidate) {
+fn __introspection_in_set(names: list, candidate: string) {
   if type_of(names) != "list" {
     return false
   }
@@ -187,7 +194,7 @@ fn __introspection_in_set(names, candidate) {
   return false
 }
 
-fn __introspection_registry_has(registry, name) {
+fn __introspection_registry_has(registry: dict, name: string) {
   const entries = registry?.tools ?? []
   if type_of(entries) != "list" {
     return false

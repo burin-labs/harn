@@ -3,7 +3,12 @@
 // without the raw token leaking through.
 import { default_patterns, redact } from "std/oauth/redaction"
 
-fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
+fn expect_redacted(
+  label: string,
+  input: string,
+  expected_pattern: string,
+  expected_raw_substring: any,
+) {
   const out = redact(input)
   if contains(out, expected_raw_substring) {
     throw label + ": raw token leaked into redacted output: " + out
@@ -14,7 +19,7 @@ fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // The catalog must include every default provider so audit
   // consumers can rely on the names being stable across releases.
   const catalog = default_patterns()

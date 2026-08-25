@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * This is the abstraction that lets script authors say `thinking: false`
  * uniformly without learning per-template prompt directives.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("ok")],

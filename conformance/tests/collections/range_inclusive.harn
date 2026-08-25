@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `to` is inclusive by default
   const nums = 1 to 5
   harness.stdio.log(nums)

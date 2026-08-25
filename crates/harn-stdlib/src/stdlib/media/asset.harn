@@ -52,7 +52,7 @@ pub type MediaAssetFailure = {
 fn __media_failure(
   kind: MediaAssetFailureKind,
   message: string,
-  details = {},
+  details: dict? = {},
 ) -> MediaAssetFailure {
   return {kind: kind, message: message} + (details ?? {})
 }
@@ -146,7 +146,7 @@ fn __media_magic_matches(content: bytes, mime_type: string) -> bool {
   return false
 }
 
-fn __media_positive(value, label: string) -> Result<int?, MediaAssetFailure> {
+fn __media_positive(value: any, label: string) -> Result<int?, MediaAssetFailure> {
   if value == nil {
     return Ok(nil)
   }
@@ -157,7 +157,7 @@ fn __media_positive(value, label: string) -> Result<int?, MediaAssetFailure> {
   return Ok(number)
 }
 
-fn __media_validate_parents(parents) -> Result<list<string>?, MediaAssetFailure> {
+fn __media_validate_parents(parents: any) -> Result<list<string>?, MediaAssetFailure> {
   if parents == nil {
     return Ok(nil)
   }

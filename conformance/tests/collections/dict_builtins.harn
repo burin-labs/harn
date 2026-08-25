@@ -1,4 +1,4 @@
-pipeline test_dict_builtin_keys_values_entries(harness: Harness, task) {
+pipeline test_dict_builtin_keys_values_entries(harness: Harness, task: unknown) {
   const d = {b: 2, a: 1}
   assert_eq(keys(d), ["a", "b"])
   assert_eq(values(d), [1, 2])

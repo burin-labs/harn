@@ -149,7 +149,7 @@ pub fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
 }
 
 /** Address setup steps by id so inserting one cannot silently shift a fixture. */
-pub fn setup_step_by_id(workflow, id: string) {
+pub fn setup_step_by_id(workflow: dict, id: string) {
   return (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == id }).to_list()[0]
 }
 

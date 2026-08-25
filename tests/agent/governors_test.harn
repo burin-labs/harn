@@ -11,7 +11,7 @@ fn __live_payload() {
   return {iteration: 2, session_id: "gov-test", successful_tool_names: ["edit"]}
 }
 
-pipeline test_unrecognized_signal_throws(harness: Harness, task) {
+pipeline test_unrecognized_signal_throws(harness: Harness, task: unknown) {
   const cb = governor_post_turn(harness.agent, {budget: 5.0, signal: "iteration"})
   const outcome = try {
     cb(__live_payload())
@@ -19,7 +19,7 @@ pipeline test_unrecognized_signal_throws(harness: Harness, task) {
   assert(is_err(outcome), "governor rejects an unrecognized policy.signal")
 }
 
-pipeline test_recognized_signal_ok(harness: Harness, task) {
+pipeline test_recognized_signal_ok(harness: Harness, task: unknown) {
   const cb = governor_post_turn(harness.agent, {budget: 100.0, signal: "iterations"})
   const outcome = try {
     cb(__live_payload())
@@ -27,7 +27,7 @@ pipeline test_recognized_signal_ok(harness: Harness, task) {
   assert(!is_err(outcome), "governor accepts a recognized policy.signal")
 }
 
-pipeline test_default_signal_ok(harness: Harness, task) {
+pipeline test_default_signal_ok(harness: Harness, task: unknown) {
   // Absent signal defaults to "iterations" and must not trip the guard.
   const cb = governor_post_turn(harness.agent, {budget: 100.0})
   const outcome = try {
@@ -36,7 +36,7 @@ pipeline test_default_signal_ok(harness: Harness, task) {
   assert(!is_err(outcome), "governor accepts an absent (defaulted) policy.signal")
 }
 
-pipeline test_pace_action_of_maps_vocabulary(harness: Harness, task) {
+pipeline test_pace_action_of_maps_vocabulary(harness: Harness, task: unknown) {
   assert_eq(pace_action_of({action: "cut"}), "abort")
   assert_eq(pace_action_of({action: "pace_check"}), "warn")
   assert_eq(pace_action_of({action: "extend", new_budget_ms: 10}), "proceed")
@@ -45,7 +45,7 @@ pipeline test_pace_action_of_maps_vocabulary(harness: Harness, task) {
   assert_eq(pace_action_of(nil), "proceed")
 }
 
-pipeline test_pace_action_of_over_real_decision(harness: Harness, task) {
+pipeline test_pace_action_of_over_real_decision(harness: Harness, task: unknown) {
   // Armed budget, past the checkpoint, no progress -> native `cut` -> "abort".
   const decision = governor_pace_decision(
     {},

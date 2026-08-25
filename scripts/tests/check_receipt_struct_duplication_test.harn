@@ -3,7 +3,7 @@
 import "../check_receipt_struct_duplication.harn"
 
 @test
-pipeline test_is_skipped_matches_components(harness: Harness, task) {
+pipeline test_is_skipped_matches_components(harness: Harness, task: unknown) {
   assert_eq(is_skipped("target/debug/foo.rs"), true)
   assert_eq(is_skipped("crates/x/node_modules/y.rs"), true)
   assert_eq(is_skipped("docs/whatever.rs"), true)
@@ -11,7 +11,7 @@ pipeline test_is_skipped_matches_components(harness: Harness, task) {
 }
 
 @test
-pipeline test_strip_comments_removes_line_and_block(harness: Harness, task) {
+pipeline test_strip_comments_removes_line_and_block(harness: Harness, task: unknown) {
   const src = "pub a; // trailing\n/* block\nspanning */ pub b;"
   const out = strip_comments(src)
   assert_eq(out.contains("trailing"), false)
@@ -21,19 +21,19 @@ pipeline test_strip_comments_removes_line_and_block(harness: Harness, task) {
 }
 
 @test
-pipeline test_brace_body_balances(harness: Harness, task) {
+pipeline test_brace_body_balances(harness: Harness, task: unknown) {
   // open brace at index 0; matching close at the final '}'.
   const text = "{ a { b } c }X"
   assert_eq(brace_body(text, 0), "{ a { b } c ")
 }
 
 @test
-pipeline test_brace_body_unbalanced_returns_nil(harness: Harness, task) {
+pipeline test_brace_body_unbalanced_returns_nil(harness: Harness, task: unknown) {
   assert_eq(brace_body("{ a { b }", 0), nil)
 }
 
 @test
-pipeline test_find_public_structs_name_and_line(harness: Harness, task) {
+pipeline test_find_public_structs_name_and_line(harness: Harness, task: unknown) {
   const text = "// header\npub struct Foo {\n  pub x: int,\n}\n"
   const structs = find_public_structs(text)
   assert_eq(structs.count, 1)
@@ -43,7 +43,7 @@ pipeline test_find_public_structs_name_and_line(harness: Harness, task) {
 }
 
 @test
-pipeline test_body_has_full_trio(harness: Harness, task) {
+pipeline test_body_has_full_trio(harness: Harness, task: unknown) {
   const full = "pub parent_run_id: string, pub trace_id: string, pub cost_usd: float"
   assert_eq(body_has_full_trio(full), true)
   // Missing cost_usd → not a full envelope copy.
@@ -52,7 +52,7 @@ pipeline test_body_has_full_trio(harness: Harness, task) {
 }
 
 @test
-pipeline test_violations_in_text_flags_envelope_copy(harness: Harness, task) {
+pipeline test_violations_in_text_flags_envelope_copy(harness: Harness, task: unknown) {
   const src =
     "pub struct Dup {\n  pub parent_run_id: string,\n  pub trace_id: string,\n  pub cost_usd: float,\n}\n"
   const v = violations_in_text("crates/x/src/dup.rs", src)
@@ -61,13 +61,13 @@ pipeline test_violations_in_text_flags_envelope_copy(harness: Harness, task) {
 }
 
 @test
-pipeline test_violations_in_text_ignores_partial_struct(harness: Harness, task) {
+pipeline test_violations_in_text_ignores_partial_struct(harness: Harness, task: unknown) {
   const src = "pub struct Partial {\n  pub parent_run_id: string,\n  pub trace_id: string,\n}\n"
   assert_eq(violations_in_text("a.rs", src).count, 0)
 }
 
 @test
-pipeline test_violations_in_text_ignores_commented_fields(harness: Harness, task) {
+pipeline test_violations_in_text_ignores_commented_fields(harness: Harness, task: unknown) {
   // The trio appears only inside a block comment → stripped → no violation.
   const src =
     "pub struct Looks {\n  /* pub parent_run_id: string, pub trace_id: string, pub cost_usd: f64 */\n  pub other: int,\n}\n"
@@ -75,7 +75,7 @@ pipeline test_violations_in_text_ignores_commented_fields(harness: Harness, task
 }
 
 @test
-pipeline test_rel_path_extracts_suffix(harness: Harness, task) {
+pipeline test_rel_path_extracts_suffix(harness: Harness, task: unknown) {
   assert_eq(rel_path("/abs/root/./crates/foo.rs"), "crates/foo.rs")
   assert_eq(rel_path("plain/relative.rs"), "plain/relative.rs")
 }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Default behavior: repeated children of the same tag collapse into
   // a bare list because the convention is render-side symmetric
   // (`<list><item>...</item></list>`). The inner tag is dropped.

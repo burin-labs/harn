@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // snake ↔ camel
   harness.stdio.log(snake_to_camel("test_file_patterns"))
   harness.stdio.log(snake_to_camel("a"))

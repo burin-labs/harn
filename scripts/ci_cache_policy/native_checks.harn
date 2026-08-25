@@ -1,8 +1,8 @@
 import "./policy_core.harn"
 
 fn native_shared_cache_errors(
-  ci_workflow,
-  nightly_workflow,
+  ci_workflow: dict,
+  nightly_workflow: dict,
   platform: string,
   cache_key: string,
   expected_source_key: string,
@@ -71,19 +71,19 @@ fn native_shared_cache_errors(
   return errors
 }
 
-fn step_run_contains(step, marker: string) -> bool {
+fn step_run_contains(step: dict, marker: string) -> bool {
   return contains(trim(step?.run ?? ""), marker)
 }
 
-fn matching_run_steps(job, marker: string) -> list {
+fn matching_run_steps(job: dict, marker: string) -> list {
   return (job?.steps ?? []).filter({ step -> return step_run_contains(step, marker) }).to_list()
 }
 
-fn matching_named_steps(job, name: string) -> list {
+fn matching_named_steps(job: dict, name: string) -> list {
   return (job?.steps ?? []).filter({ step -> return trim(step?.name ?? "") == name }).to_list()
 }
 
-fn matching_upload_steps(job, artifact_name: string) -> list {
+fn matching_upload_steps(job: dict, artifact_name: string) -> list {
   return (job?.steps ?? []).filter(
     { step ->
       return step_uses(step).starts_with("actions/upload-artifact@")
@@ -95,7 +95,7 @@ fn matching_upload_steps(job, artifact_name: string) -> list {
 }
 
 /** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
-pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+pub fn windows_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> list<string> {
   let errors = native_shared_cache_errors(
     ci_workflow,
     nightly_workflow,
@@ -140,7 +140,7 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
 /** Exact candidates warm from a main-produced artifact outside the Actions cache pool. */
 pub fn windows_release_certify_warm_errors(
   policy: CiCachePolicy,
-  nightly_workflow,
+  nightly_workflow: dict,
 ) -> list<string> {
   const warm = policy.windows_workspace_warm
   const job = nightly_workflow?.jobs?.[warm.job]
@@ -229,12 +229,12 @@ fn windows_nightly_dev_drive_guard() -> string {
   return "$" + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}"
 }
 
-fn exact_step_env(job, step_name: string, key: string) -> string {
+fn exact_step_env(job: dict, step_name: string, key: string) -> string {
   const step = step_by_name(job?.steps ?? [], step_name)
   return trim(to_string(step?.env?.[key] ?? "<unset>"))
 }
 
-fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string> {
+fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) -> list<string> {
   let errors: list<string> = []
   if policy.windows_workspace_warm.workflow != "windows-nightly.yml"
     || policy.windows_workspace_warm.job
@@ -292,7 +292,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
   return errors
 }
 
-fn windows_storage_budget_errors(job) -> list<string> {
+fn windows_storage_budget_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   const expected = [
     {name: WINDOWS_STORAGE_INITIAL_STEP, phase: "initial"},
@@ -376,7 +376,7 @@ fn windows_storage_budget_errors(job) -> list<string> {
   return errors
 }
 
-fn windows_nightly_storage_budget_errors(job) -> list<string> {
+fn windows_nightly_storage_budget_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   for receipt in [
     {name: WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP, phase: "before_build"},
@@ -397,7 +397,7 @@ fn windows_nightly_storage_budget_errors(job) -> list<string> {
   return errors
 }
 
-fn windows_pr_warm_restore_errors(policy: CiCachePolicy, job) -> list<string> {
+fn windows_pr_warm_restore_errors(policy: CiCachePolicy, job: dict) -> list<string> {
   let errors: list<string> = []
   const steps = job?.steps ?? []
   const restore = step_by_name(steps, WINDOWS_WARM_RESTORE_STEP)
@@ -453,7 +453,12 @@ fn windows_pr_warm_restore_errors(policy: CiCachePolicy, job) -> list<string> {
   return errors
 }
 
-fn windows_test_runtime_errors(ci_workflow, nightly_workflow, job, producer) -> list<string> {
+fn windows_test_runtime_errors(
+  ci_workflow: dict,
+  nightly_workflow: dict,
+  job: dict,
+  producer: dict,
+) -> list<string> {
   let errors: list<string> = []
   if effective_job_env(ci_workflow, job, "RUST_MIN_STACK") != "<unset>"
     || effective_job_env(nightly_workflow, producer, "RUST_MIN_STACK")
@@ -480,8 +485,8 @@ fn windows_test_runtime_errors(ci_workflow, nightly_workflow, job, producer) -> 
  */
 pub fn windows_pr_native_feedback_errors(
   policy: CiCachePolicy,
-  ci_workflow,
-  nightly_workflow,
+  ci_workflow: dict,
+  nightly_workflow: dict,
 ) -> list<string> {
   const job = ci_workflow?.jobs?.windows
   const producer = nightly_workflow?.jobs?.[policy.windows_workspace_warm.job]
@@ -545,7 +550,7 @@ pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
 }
 
 /** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */
-pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> list<string> {
   const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
   let errors = native_shared_cache_errors(
     ci_workflow,

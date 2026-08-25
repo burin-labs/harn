@@ -3,42 +3,42 @@
 import "../sync_tree_sitter_keywords.harn"
 
 @test
-pipeline test_quoted_strings_extracts_bodies(harness: Harness, task) {
+pipeline test_quoted_strings_extracts_bodies(harness: Harness, task: unknown) {
   const text = "foo \"a\" bar \"bee\" \"\""
   assert_eq(quoted_strings(text), ["a", "bee", ""])
 }
 
 @test
-pipeline test_dedup_preserves_first_seen_order(harness: Harness, task) {
+pipeline test_dedup_preserves_first_seen_order(harness: Harness, task: unknown) {
   assert_eq(dedup(["x", "y", "x", "z", "y"]), ["x", "y", "z"])
 }
 
 @test
-pipeline test_difference(harness: Harness, task) {
+pipeline test_difference(harness: Harness, task: unknown) {
   assert_eq(difference(["a", "b", "c"], ["b"]), ["a", "c"])
   assert_eq(difference(["a"], ["a", "b"]), [])
 }
 
 @test
-pipeline test_lexer_keywords_parses_const(harness: Harness, task) {
+pipeline test_lexer_keywords_parses_const(harness: Harness, task: unknown) {
   const src = "pub const KEYWORDS: &[&str] = &[\n  \"let\",\n  \"fn\",\n  \"if\",\n];\n"
   assert_eq(lexer_keywords(src), ["let", "fn", "if"])
 }
 
 @test
-pipeline test_lexer_keywords_missing_returns_nil(harness: Harness, task) {
+pipeline test_lexer_keywords_missing_returns_nil(harness: Harness, task: unknown) {
   assert_eq(lexer_keywords("no keywords const here"), nil)
 }
 
 @test
-pipeline test_grammar_keywords_strips_line_comments(harness: Harness, task) {
+pipeline test_grammar_keywords_strips_line_comments(harness: Harness, task: unknown) {
   // A `//`-commented string must not be scanned as a keyword.
   const js = "module.exports = [\n  \"let\",\n  // \"ghost\",\n  \"fn\",\n];\n"
   assert_eq(grammar_keywords(js), ["let", "fn"])
 }
 
 @test
-pipeline test_render_keywords_js_sorted_and_shaped(harness: Harness, task) {
+pipeline test_render_keywords_js_sorted_and_shaped(harness: Harness, task: unknown) {
   const out = render_keywords_js(["fn", "let", "if"])
   // Sorted membership lines.
   assert_eq(out.contains("module.exports = ["), true)

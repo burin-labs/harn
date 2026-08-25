@@ -37,7 +37,7 @@ pub fn classify(x: int) -> string {
   return "other"
 }
 
-pipeline test_complexity(harness: Harness, task) {
+pipeline test_complexity(harness: Harness, task: unknown) {
   assert(classify(1) == "one", "branch 1")
   assert(classify(10) == "ten", "branch 10")
   assert(classify(99) == "other", "default branch")

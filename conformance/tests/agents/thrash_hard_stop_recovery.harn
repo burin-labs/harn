@@ -35,15 +35,15 @@ fn toolset() {
   return tools
 }
 
-fn run_call(id) {
+fn run_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "run", arguments: {command: "ls -R"}}]}
 }
 
-fn look_call(id) {
+fn look_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "app/Models/Entry.php"}}]}
 }
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 

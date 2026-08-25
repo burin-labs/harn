@@ -441,7 +441,7 @@ pub fn supported_release_path_pattern(pattern: string) -> bool {
 }
 
 /** Parse the one path policy consumed by the release workflow. */
-pub fn release_warm_cache_path_policy_parse(value) -> ReleaseWarmCachePathPolicy? {
+pub fn release_warm_cache_path_policy_parse(value: any) -> ReleaseWarmCachePathPolicy? {
   const report = schema_validator(release_warm_cache_path_policy_schema()).report(value)
   if !report.ok {
     return nil
@@ -526,7 +526,7 @@ pub fn release_path_filter_action_is_pinned(uses: string) -> bool {
  */
 pub fn release_warm_cache_path_policy_errors(
   policy: ReleaseWarmCachePathPolicy,
-  workflow,
+  workflow: dict,
 ) -> list<string> {
   let errors: list<string> = []
   for required in REQUIRED_RELEASE_BUILD_INPUTS {
@@ -590,7 +590,7 @@ pub fn release_warm_cache_path_policy_errors(
  * Let only real warm builds supersede real warm builds. Setup-only branch
  * pushes must never enter the preemptible per-target lanes.
  */
-pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
+pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != RELEASE_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
@@ -636,7 +636,7 @@ pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
   return errors
 }
 
-pub fn release_aot_runner_errors(workflow) -> list<string> {
+pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
   if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
@@ -664,7 +664,7 @@ pub fn release_aot_runner_errors(workflow) -> list<string> {
 }
 
 /** Keep budget enforcement live after partial failures, but never prune from a superseded warm. */
-pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
+pub fn release_warm_cache_prune_errors(workflow: dict) -> list<string> {
   if trim(workflow?.jobs?.cache_budget?.if ?? "") != RELEASE_CACHE_BUDGET_IF {
     return [
       "${RELEASE_BINARY_WORKFLOW}:cache_budget must skip cancelled warms and enforce every other completed warm",
@@ -673,7 +673,7 @@ pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
   return []
 }
 
-pub fn policy_from_validated(value) -> CiCachePolicy {
+pub fn policy_from_validated(value: dict) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
   return {
     schema_version: 5,
@@ -709,7 +709,7 @@ pub fn writer_key(workflow: string, job: string, shared_key: string) -> string {
 }
 
 /** Validate the closed cache-policy document at its owning boundary. */
-pub fn ci_cache_policy_parse(value) -> CiCachePolicy? {
+pub fn ci_cache_policy_parse(value: any) -> CiCachePolicy? {
   const report = schema_validator(policy_schema()).report(value)
   if !report.ok {
     return nil
@@ -729,11 +729,11 @@ pub fn workflow_name(path: string) -> string {
   return basename(path)
 }
 
-pub fn step_uses(step) -> string {
+pub fn step_uses(step: dict) -> string {
   return trim(step?.uses ?? "")
 }
 
-pub fn save_requested(step) -> bool {
+pub fn save_requested(step: dict) -> bool {
   const value = step?.with?.save
   return value != nil && lowercase(trim(to_string(value))) != "false"
 }
@@ -751,7 +751,7 @@ pub fn writer_allowed(
   )
 }
 
-pub fn remote_sccache_errors(value, path: string = "") -> list<string> {
+pub fn remote_sccache_errors(value: any, path: string = "") -> list<string> {
   if type_of(value) == "list" {
     let errors: list<string> = []
     for {index, value: item} in value.enumerate() {
@@ -777,7 +777,7 @@ pub fn remote_sccache_errors(value, path: string = "") -> list<string> {
   return errors
 }
 
-pub fn cache_target_input_errors(action, step) -> list<string> {
+pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
   const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
   const expected_cache_directories = "$" + "{{ inputs.target-dir }}"
   if trim(action?.inputs?.["target-dir"]?.default ?? "") != ""
@@ -790,7 +790,7 @@ pub fn cache_target_input_errors(action, step) -> list<string> {
   return []
 }
 
-pub fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
+pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> {
   let errors: list<string> = []
   const steps = action?.runs?.steps ?? []
   const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) })
@@ -892,7 +892,7 @@ pub fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   return errors
 }
 
-pub fn node_cache_action_errors(action) -> list<string> {
+pub fn node_cache_action_errors(action: dict) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const setup =
     steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_NODE_PREFIX) }).to_list()
@@ -930,7 +930,7 @@ pub fn node_cache_action_errors(action) -> list<string> {
 }
 
 /** Keep immutable setup archives reusable without copying them onto every ephemeral ref. */
-pub fn setup_harn_cache_action_errors(action) -> list<string> {
+pub fn setup_harn_cache_action_errors(action: dict) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const restores = steps.filter(
     { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
@@ -980,7 +980,7 @@ pub fn setup_harn_cache_action_errors(action) -> list<string> {
 pub fn ephemeral_cache_writer_error(
   workflow: string,
   job: string,
-  step,
+  step: dict,
   policy: CiCachePolicy,
 ) -> string? {
   const uses = step_uses(step)
@@ -1156,11 +1156,11 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   return errors
 }
 
-pub fn matching_steps(job, uses: string) -> list {
+pub fn matching_steps(job: dict, uses: string) -> list {
   return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
 }
 
-pub fn effective_job_env(workflow, job, key: string) -> string {
+pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
   const value = job?.env?.[key] ?? workflow?.env?.[key]
   if value == nil {
     return "<unset>"
@@ -1168,7 +1168,11 @@ pub fn effective_job_env(workflow, job, key: string) -> string {
   return trim(to_string(value))
 }
 
-pub fn cache_key_inputs(workflow, job, ignored_step_ids: list<string> = []) -> list<string> {
+pub fn cache_key_inputs(
+  workflow: dict,
+  job: dict,
+  ignored_step_ids: list<string> = [],
+) -> list<string> {
   let inputs = NATIVE_CACHE_INPUTS.map(
     { key -> return key + "=" + effective_job_env(workflow, job, key) },
   )
@@ -1202,8 +1206,8 @@ pub fn cache_key_inputs(workflow, job, ignored_step_ids: list<string> = []) -> l
 /** Return every policy violation without stopping at the first workflow. */
 pub fn ci_cache_policy_errors(
   policy: CiCachePolicy,
-  action,
-  node_action,
+  action: dict,
+  node_action: dict,
   workflows: dict,
 ) -> list<string> {
   let errors = cache_action_errors(policy, action)
@@ -1285,7 +1289,7 @@ pub fn ci_cache_policy_errors(
  * concurrency key. Grouping every push under `refs/heads/main` allows GitHub's
  * one-pending-run rule to evict an older commit before any job starts.
  */
-pub fn ci_workflow_concurrency_errors(workflow) -> list<string> {
+pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors

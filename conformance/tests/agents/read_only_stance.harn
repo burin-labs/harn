@@ -3,7 +3,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_stance_default_consent_check } from "std/agent/stance"
 import { with_llm_script } from "std/testing"
 
-fn has_tool(tools, name) {
+fn has_tool(tools: list?, name: string) {
   for item in tools ?? [] {
     if item?.function?.name == name || item?.name == name {
       return true
@@ -12,7 +12,7 @@ fn has_tool(tools, name) {
   return false
 }
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
@@ -115,7 +115,7 @@ fn policy_annotated_tools() {
  * Deterministic consent check: grant only when the justification cites
  * explicit user consent (stands in for the default LLM verdict).
  */
-fn scripted_consent(justification, _session_id) {
+fn scripted_consent(justification: string | list, _session_id: unknown) {
   if contains(justification, "user said go ahead") {
     return {verdict: "grant", consent: "express", reason: "user approved"}
   }

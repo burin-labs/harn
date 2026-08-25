@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Register a deny hook for a specific pattern
   harness.tools.register_hook({pattern: "blocked_*", deny: "this tool is blocked"})
   // Register a post-hook that limits output size

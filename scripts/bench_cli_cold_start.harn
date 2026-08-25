@@ -89,12 +89,12 @@ pub fn parse_positive_int(name: string, raw: string) {
   return {ok: true, value: value, error: ""}
 }
 
-fn is_number(value) -> bool {
+fn is_number(value: any) -> bool {
   const kind = type_of(value)
   return kind == "int" || kind == "float"
 }
 
-fn number_or(value, fallback: float) -> float {
+fn number_or(value: any, fallback: float) -> float {
   if !is_number(value) {
     return fallback
   }
@@ -142,7 +142,7 @@ fn load_baseline(fs: HarnessFs, path: string) {
   return load_baseline_text(fs.read_text(path))
 }
 
-fn save_baseline(fs: HarnessFs, path: string, payload) {
+fn save_baseline(fs: HarnessFs, path: string, payload: any) {
   fs.write_text(path, json_stringify_pretty(payload) + "\n")
 }
 
@@ -176,7 +176,7 @@ fn host_label(process: HarnessProcess) -> string {
     + command_stdout_or(process, "uname", ["-m"], "unknown")
 }
 
-pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
+pub fn most_recent_baseline_for(payload: dict?, key: string, exclude_sha: string) {
   let found = false
   let best_sha = ""
   let best_captured = ""
@@ -344,7 +344,7 @@ fn measure_with_monotonic(
 
 fn measure_cold_start(
   harness: Harness,
-  cmd,
+  cmd: dict,
   tmp_root: string,
   harn_bin: string,
   iterations: int,
@@ -409,7 +409,7 @@ fn repeat_spaces(count: int) -> string {
   return out
 }
 
-fn pad_left(value, width: int) -> string {
+fn pad_left(value: any, width: int) -> string {
   const text = to_string(value)
   if text.len() >= width {
     return text
@@ -417,7 +417,7 @@ fn pad_left(value, width: int) -> string {
   return repeat_spaces(width - text.len()) + text
 }
 
-fn pad_right(value, width: int) -> string {
+fn pad_right(value: string, width: int) -> string {
   const text = to_string(value)
   if text.len() >= width {
     return text
@@ -425,7 +425,7 @@ fn pad_right(value, width: int) -> string {
   return text + repeat_spaces(width - text.len())
 }
 
-pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
+pub fn failure_reasons(cold_ms: float, budget: dict, baseline: dict) -> list<string> {
   let reasons: list<string> = []
   const budget_ms = number_or(budget?.cold_ms, DEFAULT_COLD_MS)
   const ratio = number_or(budget?.regression_x, DEFAULT_REGRESSION_X)
@@ -461,7 +461,13 @@ pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
   return reasons
 }
 
-fn row_line(key: string, cold_ms: float, budget, baseline, reasons: list<string>) -> string {
+fn row_line(
+  key: string,
+  cold_ms: float,
+  budget: dict,
+  baseline: dict,
+  reasons: list<string>,
+) -> string {
   const baseline_ms = baseline?.cold_ms
   const baseline_str = if baseline_ms == nil {
     "-"

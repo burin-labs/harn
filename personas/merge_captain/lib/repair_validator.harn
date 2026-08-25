@@ -29,7 +29,7 @@ pub fn required_keys() {
   ]
 }
 
-fn _err(messages) {
+fn _err(messages: any) {
   return {ok: len(messages) == 0, errors: messages}
 }
 
@@ -38,7 +38,7 @@ fn _err(messages) {
  * check — that one runs while the model still has room to retry. This
  * is the harness-side belt-and-braces pass.
  */
-pub fn validate_shape(output) {
+pub fn validate_shape(output: dict) {
   if output == nil {
     return _err(["output is nil"])
   }
@@ -75,7 +75,7 @@ pub fn validate_shape(output) {
  * purposes of the harness — we will not push semantic edits if the
  * worker did not prove they pass locally.
  */
-pub fn validate_tests(bundle, output) {
+pub fn validate_tests(bundle: dict, output: dict) {
   const tests = output.tests_run ?? []
   if len(tests) == 0 {
     return _err(
@@ -119,7 +119,7 @@ pub fn validate_tests(bundle, output) {
  * character classes, no negation. Path comparison is exact-prefix with
  * forward-slash boundaries.
  */
-pub fn path_matches_glob(path, glob) {
+pub fn path_matches_glob(path: any, glob: any) {
   if glob == nil || len(to_string(glob)) == 0 {
     return false
   }
@@ -151,7 +151,7 @@ pub fn path_matches_glob(path, glob) {
 }
 
 /** True when path matches any glob in the list. */
-pub fn path_matches_any(path, globs) {
+pub fn path_matches_any(path: any, globs: list) {
   for g in globs {
     if path_matches_glob(path, g) {
       return true
@@ -165,7 +165,7 @@ pub fn path_matches_any(path, globs) {
  * glob in `bundle.allowed_write_scope`. The harness rejects writes
  * outside that scope even when they are syntactically valid.
  */
-pub fn validate_write_scope(bundle, output) {
+pub fn validate_write_scope(bundle: dict, output: dict) {
   const scope = bundle.allowed_write_scope ?? []
   if len(scope) == 0 {
     if len(output.files_changed ?? []) > 0 {
@@ -199,7 +199,7 @@ pub fn validate_write_scope(bundle, output) {
  * "unpushed commits" guard: a worker that committed but did not push
  * leaves the repo in a state Merge Captain cannot reason about.
  */
-pub fn validate_pushed(bundle, output) {
+pub fn validate_pushed(bundle: dict, output: dict) {
   const commits = output.commits_created ?? []
   const push = output.push_result ?? {}
   if len(commits) == 0 {
@@ -234,7 +234,7 @@ pub fn validate_pushed(bundle, output) {
  * combined record. Validators short-circuit on shape failure since the
  * downstream checks all assume a well-formed dict.
  */
-pub fn validate_all(bundle, output) {
+pub fn validate_all(bundle: dict, output: dict) {
   const shape = validate_shape(output)
   if !shape.ok {
     return shape
@@ -255,7 +255,7 @@ pub fn validate_all(bundle, output) {
  * pivot from a path string into arbitrary shell. Callers always set
  * cwd from trusted state, but this is a cheap defence-in-depth.
  */
-pub fn cwd_has_shell_metacharacters(cwd) {
+pub fn cwd_has_shell_metacharacters(cwd: string?) {
   const text = to_string(cwd ?? "")
   const blocked = [";", "|", "&", "$", "`", "<", ">", "\n", "\\r"]
   for ch in blocked {
@@ -272,7 +272,7 @@ pub fn cwd_has_shell_metacharacters(cwd) {
  * any output, the worker left the tree dirty — fail closed. Skipped
  * when `enabled` is false (tests, dry-run sweeps).
  */
-pub fn harness_validate(process: HarnessProcess, bundle, output, options) {
+pub fn harness_validate(process: HarnessProcess, bundle: unknown, output: unknown, options: dict) {
   if !(options.enabled ?? false) {
     return _err([])
   }

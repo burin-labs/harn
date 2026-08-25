@@ -8,7 +8,7 @@ import {
   register_pattern,
 } from "std/oauth/redaction"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Start from a clean thread — prior conformance cases may have
   // installed their own patterns.
   clear_custom_patterns()

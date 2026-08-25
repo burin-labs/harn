@@ -4,7 +4,7 @@
 // type argument pins the value type at the call site.
 import { filter_nil, pick_keys } from "std/collections"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const counts: dict<string, int> = {a: 1, b: 2, c: 3}
   const cleaned: dict<string, int> = filter_nil(counts)
   harness.stdio.println(cleaned.a)

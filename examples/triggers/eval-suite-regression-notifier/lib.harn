@@ -87,8 +87,8 @@ fn load_eval_manifest(fs: HarnessFs) -> dict {
   return eval_pack_manifest(toml_parse(fs.read_text(path)) + {base_dir: fs.source_dir()})
 }
 
-fn notifier_config(event) -> dict {
-  const payload = event?.provider_payload ?? {}
+fn notifier_config(event: TriggerEvent) -> dict {
+  const payload = event.provider_payload ?? {}
   const raw = payload?.config ?? payload?.raw?.config ?? payload
   return compact(
     {
@@ -113,7 +113,7 @@ fn notifier_config(event) -> dict {
   )
 }
 
-fn ledger_options(config) -> dict {
+fn ledger_options(config: dict) -> dict {
   return compact(
     {
       namespace: config.namespace,
@@ -126,7 +126,7 @@ fn ledger_options(config) -> dict {
   )
 }
 
-fn slack_options(config) -> dict {
+fn slack_options(config: dict) -> dict {
   return compact(
     {
       channel: config.slack_channel,
@@ -138,7 +138,7 @@ fn slack_options(config) -> dict {
   )
 }
 
-fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict, options) {
+fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict: dict, options: dict?) {
   const opts = options ?? {}
   const token = trim(to_string(opts?.bot_token ?? ""))
   if token == "" {
@@ -181,7 +181,7 @@ fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict, options) {
   return body + {status: response.status}
 }
 
-fn slack_verdict_payload(verdict, options) -> dict {
+fn slack_verdict_payload(verdict: dict, options: dict) -> dict {
   const title = slack_verdict_title(verdict)
   const summary = slack_verdict_summary(verdict)
   return compact(
@@ -198,7 +198,7 @@ fn slack_verdict_payload(verdict, options) -> dict {
   )
 }
 
-fn slack_verdict_title(verdict) -> string {
+fn slack_verdict_title(verdict: dict) -> string {
   if verdict?.decision == "regression" {
     return "Eval regression detected"
   }
@@ -208,13 +208,13 @@ fn slack_verdict_title(verdict) -> string {
   return "Eval result inconclusive"
 }
 
-fn slack_verdict_summary(verdict) -> string {
+fn slack_verdict_summary(verdict: dict) -> string {
   return to_string(verdict?.suite ?? "eval suite") + " / " + to_string(verdict?.model ?? "model")
     + " / "
     + to_string(verdict?.split ?? "all")
 }
 
-fn slack_verdict_fields(verdict) -> list {
+fn slack_verdict_fields(verdict: dict) -> list {
   return [
     {type: "mrkdwn", text: "*Suite*\n" + to_string(verdict?.suite ?? "unknown")},
     {type: "mrkdwn", text: "*Model*\n" + to_string(verdict?.model ?? "unknown")},
@@ -231,7 +231,7 @@ fn slack_verdict_fields(verdict) -> list {
   ]
 }
 
-fn slack_regressed_cases_text(verdict) -> string {
+fn slack_regressed_cases_text(verdict: dict) -> string {
   const cases = verdict?.top_regressed_cases ?? []
   if len(cases) == 0 {
     return "*Top regressed cases*\nNone"
@@ -251,14 +251,14 @@ fn slack_regressed_cases_text(verdict) -> string {
   return "*Top regressed cases*\n" + join(lines, "\n")
 }
 
-fn slack_rate(value) -> string {
+fn slack_rate(value: any) -> string {
   if value == nil {
     return "unknown"
   }
   return to_string(round((to_float(value) ?? 0.0) * 1000.0) / 10.0) + "%"
 }
 
-fn slack_signed_rate_delta(value) -> string {
+fn slack_signed_rate_delta(value: any) -> string {
   const delta = (to_float(value) ?? 0.0) * 100.0
   const prefix = if delta > 0.0 {
     "+"
@@ -268,7 +268,7 @@ fn slack_signed_rate_delta(value) -> string {
   return prefix + to_string(round(delta * 10.0) / 10.0)
 }
 
-fn rows_for_split(rows, split) -> list {
+fn rows_for_split(rows: any, split: any) -> list {
   if split == nil {
     return rows
   }
@@ -281,7 +281,7 @@ fn rows_for_split(rows, split) -> list {
   return filtered
 }
 
-fn verdict_decision(gate, paired) -> string {
+fn verdict_decision(gate: dict, paired: dict) -> string {
   if !(gate?.passed ?? true) {
     return "regression"
   }
@@ -291,14 +291,14 @@ fn verdict_decision(gate, paired) -> string {
   return "inconclusive"
 }
 
-fn should_notify(decision, config) -> bool {
+fn should_notify(decision: string, config: dict) -> bool {
   const notify_inconclusive = config.notify_inconclusive ?? false
   return decision == "regression" || decision == "improved"
     || (decision == "inconclusive"
       && notify_inconclusive)
 }
 
-fn top_regressed_cases(baseline_rows, current_rows) -> list {
+fn top_regressed_cases(baseline_rows: list?, current_rows: list?) -> list {
   let baseline = {}
   for row in baseline_rows ?? [] {
     baseline[row.case_name ?? row.name] = row
@@ -326,7 +326,7 @@ fn top_regressed_cases(baseline_rows, current_rows) -> list {
   return cases
 }
 
-fn insert_regressed_case(cases, candidate) -> list {
+fn insert_regressed_case(cases: list, candidate: dict) -> list {
   let out = []
   let inserted = false
   for item in cases {
@@ -342,14 +342,14 @@ fn insert_regressed_case(cases, candidate) -> list {
   return out
 }
 
-fn fingerprints_match(left, right) -> bool {
+fn fingerprints_match(left: dict, right: dict) -> bool {
   const left_harness = left?.harness_config_fingerprint ?? ""
   const right_harness = right?.harness_config_fingerprint ?? ""
   return left?.case_fingerprint == right?.case_fingerprint
     && left_harness == right_harness
 }
 
-fn row_pass_rate(row) -> float {
+fn row_pass_rate(row: dict) -> float {
   if row?.pass_rate != nil {
     return row.pass_rate
   }
@@ -362,7 +362,7 @@ fn row_pass_rate(row) -> float {
   return passes * 1.0 / (decided * 1.0)
 }
 
-fn compact(input) -> dict {
+fn compact(input: dict?) -> dict {
   let out = {}
   for entry in (input ?? {}).entries() {
     if entry.value != nil {

@@ -27,10 +27,36 @@ impl TypeChecker {
             return self.bind_from_arg_node(&resolved_param, arg, type_params, bindings, scope);
         }
         match param {
+            TypeExpr::Union(members) => {
+                // A public schema helper commonly accepts `dict | Schema<T>`:
+                // raw inspectable schema literals use the representation arm,
+                // while T still comes from the schema's described value. The
+                // ordinary inferred-type selector correctly chooses `dict`
+                // but cannot recover T after that erasure, so bind schema
+                // witnesses from the argument syntax before the general walk.
+                for member in members {
+                    if matches!(member, TypeExpr::Applied { name, args } if name == "Schema" && args.len() == 1)
+                    {
+                        self.bind_from_arg_node(member, arg, type_params, bindings, scope)?;
+                    }
+                }
+                self.bind_from_inferred_arg(param, arg, type_params, bindings, scope)?;
+            }
             TypeExpr::Applied { name, args } if name == "Schema" && args.len() == 1 => {
                 if let TypeExpr::Named(type_param) = &args[0] {
                     if type_params.contains(type_param) {
-                        if let Some(resolved) = schema_type_expr_from_node(arg, scope) {
+                        let resolved =
+                            schema_type_expr_from_node(arg, scope).or_else(|| {
+                                match self.infer_type(arg, scope) {
+                                    Some(TypeExpr::Applied { name, args })
+                                        if name == "Schema" && args.len() == 1 =>
+                                    {
+                                        args.into_iter().next()
+                                    }
+                                    _ => None,
+                                }
+                            });
+                        if let Some(resolved) = resolved {
                             Self::bind_type_param(type_param, &resolved, bindings)?;
                         }
                     }
@@ -170,7 +196,19 @@ impl TypeChecker {
                     .iter()
                     .filter(|param| Self::contains_type_param(param, type_params))
                     .collect();
-                if generic_members.len() == 1 {
+                let compatible_members: Vec<_> = generic_members
+                    .iter()
+                    .copied()
+                    .filter(|param| Self::binding_shapes_compatible(param, actual, type_params))
+                    .collect();
+                if compatible_members.len() == 1 {
+                    Self::extract_type_bindings(
+                        compatible_members[0],
+                        actual,
+                        type_params,
+                        bindings,
+                    )?;
+                } else if generic_members.len() == 1 {
                     Self::extract_type_bindings(generic_members[0], actual, type_params, bindings)?;
                 }
                 Ok(())
@@ -293,6 +331,42 @@ impl TypeChecker {
                 Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
             }
             _ => Ok(()),
+        }
+    }
+
+    /// Return whether two types have compatible outer structure for generic
+    /// binding. This is intentionally weaker than subtyping: it only
+    /// disambiguates generic-bearing union arms before ordinary compatibility
+    /// checking. For example, `fn() -> T | fn(nil) -> T` against a nullary
+    /// closure has exactly one viable arm.
+    fn binding_shapes_compatible(
+        param: &TypeExpr,
+        actual: &TypeExpr,
+        type_params: &BTreeSet<String>,
+    ) -> bool {
+        match (param, actual) {
+            (TypeExpr::Named(name), _) if type_params.contains(name) => true,
+            (TypeExpr::FnType { params: left, .. }, TypeExpr::FnType { params: right, .. }) => {
+                left.len() == right.len()
+            }
+            (TypeExpr::List(_), TypeExpr::List(_))
+            | (TypeExpr::DictType(_, _), TypeExpr::DictType(_, _))
+            | (TypeExpr::Shape(_), TypeExpr::Shape(_)) => true,
+            (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => left.len() == right.len(),
+            (
+                TypeExpr::Applied {
+                    name: left,
+                    args: left_args,
+                },
+                TypeExpr::Applied {
+                    name: right,
+                    args: right_args,
+                },
+            ) => left == right && left_args.len() == right_args.len(),
+            (TypeExpr::Union(members), actual) => members
+                .iter()
+                .any(|member| Self::binding_shapes_compatible(member, actual, type_params)),
+            (left, right) => left == right,
         }
     }
 

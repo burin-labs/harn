@@ -73,6 +73,28 @@ fn wave_parallel_build_matches_serial_semantics() {
 }
 
 #[test]
+fn graph_only_wave_never_retains_parsed_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths: Vec<PathBuf> = (0..12)
+        .map(|i| {
+            write_file(
+                tmp.path(),
+                &format!("mod{i}.harn"),
+                "pub fn value() { 1 }\n",
+            )
+        })
+        .collect();
+
+    let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+
+    assert_eq!(loaded.len(), paths.len());
+    assert!(
+        loaded.iter().all(|(_, parsed)| parsed.is_none()),
+        "graph-only construction must discard each AST inside its worker"
+    );
+}
+
+#[test]
 fn pub_const_and_let_are_exported() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -498,6 +520,12 @@ fn stdlib_imports_expose_callable_declarations() {
         .map(ToString::to_string)
         .collect();
     assert!(names.contains("select_from"));
+    assert!(decls.iter().all(|decl| match &decl.node {
+        harn_parser::Node::FnDecl { body, .. }
+        | harn_parser::Node::Pipeline { body, .. }
+        | harn_parser::Node::ToolDecl { body, .. } => body.is_empty(),
+        _ => false,
+    }));
 }
 
 #[test]

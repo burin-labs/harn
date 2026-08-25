@@ -8,7 +8,12 @@ import {
 } from "std/agent/loop_turn_options"
 import { agent_tool_format_override_warning_text } from "std/agent/options"
 
-pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
+pub fn __progress_nudge_text(
+  depth: int,
+  has_tools: any,
+  paradigm: dict,
+  made_tool_calls: bool = false,
+) {
   return __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls)
 }
 
@@ -19,7 +24,12 @@ pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil) -> AgentResult {
+pub fn agent_loop(
+  harness: Harness,
+  message: any,
+  system_prompt: any = nil,
+  options: any = nil,
+) -> AgentResult {
   let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
   opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {

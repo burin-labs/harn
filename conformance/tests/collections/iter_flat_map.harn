@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const out = iter([1, 2, 3]).flat_map({ x -> [x, x * 10] }).to_list()
   harness.stdio.log(out)
 }

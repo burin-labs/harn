@@ -628,6 +628,7 @@ mod tests {
             }
             for entry in walkdir::WalkDir::new(source_root)
                 .into_iter()
+                .filter_entry(|entry| !is_pruned_reference_directory(entry))
                 .filter_map(Result::ok)
                 .filter(|entry| {
                     entry.file_type().is_file()
@@ -800,6 +801,7 @@ mod tests {
                 ".build"
                     | ".burin"
                     | ".git"
+                    | ".harn"
                     | ".harn-runs"
                     | ".harn-toolchain-cache"
                     | ".venv"
@@ -811,6 +813,20 @@ mod tests {
                     | "pkg"
                     | "target"
             )
+    }
+
+    #[test]
+    fn generated_harn_state_is_not_an_environment_contract_owner() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let state = root.path().join(".harn");
+        std::fs::create_dir(&state).expect("create generated Harn state");
+        let entry = walkdir::WalkDir::new(root.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .find(|entry| entry.path() == state)
+            .expect("walk generated Harn state");
+
+        assert!(is_pruned_reference_directory(&entry));
     }
 
     /// Generated protocol names describe wire contracts; they are not process

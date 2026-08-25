@@ -22,7 +22,7 @@ fn fixture(fs: HarnessFs, name: string) -> dict {
 }
 
 @test
-pipeline test_carried_update_prepares_patch(harness: Harness, task) {
+pipeline test_carried_update_prepares_patch(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "carried-update")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "patch")
@@ -31,7 +31,7 @@ pipeline test_carried_update_prepares_patch(harness: Harness, task) {
 }
 
 @test
-pipeline test_irrelevant_notice_records_no_op(harness: Harness, task) {
+pipeline test_irrelevant_notice_records_no_op(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "irrelevant")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "no_op")
@@ -39,7 +39,7 @@ pipeline test_irrelevant_notice_records_no_op(harness: Harness, task) {
 }
 
 @test
-pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness, task) {
+pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "new-model")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "incomplete_add")
@@ -47,7 +47,7 @@ pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness
 }
 
 @test
-pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task) {
+pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "ambiguous")
   const catalog = BASE_CATALOG
     + {
@@ -62,7 +62,7 @@ pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task) {
 }
 
 @test
-pipeline test_malformed_notice_fails_closed(harness: Harness, task) {
+pipeline test_malformed_notice_fails_closed(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "malformed")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "rejected")
@@ -70,7 +70,7 @@ pipeline test_malformed_notice_fails_closed(harness: Harness, task) {
 }
 
 @test
-pipeline test_conflicting_current_row_fails_closed(harness: Harness, task) {
+pipeline test_conflicting_current_row_fails_closed(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "conflicting-current-row")
   const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   assert_eq(plan.receipt.disposition, "rejected")
@@ -78,7 +78,7 @@ pipeline test_conflicting_current_row_fails_closed(harness: Harness, task) {
 }
 
 @test
-pipeline test_notice_id_and_classification_are_idempotent(harness: Harness, task) {
+pipeline test_notice_id_and_classification_are_idempotent(harness: Harness, task: unknown) {
   const input = fixture(harness.fs, "carried-update")
   const first = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
   const second = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
@@ -87,7 +87,7 @@ pipeline test_notice_id_and_classification_are_idempotent(harness: Harness, task
 }
 
 @test
-pipeline test_all_typed_mutations_are_narrow(harness: Harness, task) {
+pipeline test_all_typed_mutations_are_narrow(harness: Harness, task: unknown) {
   const source = """
 [providers.anthropic]
 base_url = "https://api.anthropic.com/v1"
@@ -124,7 +124,7 @@ vision = false
 }
 
 @test
-pipeline test_promotion_preserves_the_durable_rate_card(harness: Harness, task) {
+pipeline test_promotion_preserves_the_durable_rate_card(harness: Harness, task: unknown) {
   const candidate = {
     kind: "promotion",
     provider: "anthropic",
@@ -150,7 +150,7 @@ pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00 }
 }
 
 @test
-pipeline test_source_mutation_refuses_ambiguous_owner(harness: Harness, task) {
+pipeline test_source_mutation_refuses_ambiguous_owner(harness: Harness, task: unknown) {
   const candidate = fixture(harness.fs, "carried-update").extraction.candidate
   const duplicate = """
 [models."claude-haiku-4-5-20251001"]
@@ -164,7 +164,10 @@ pricing = { input_per_mtok = 1.0 }
 }
 
 @test
-pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(harness: Harness, task) {
+pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(
+  harness: Harness,
+  task: unknown,
+) {
   const input = fixture(harness.fs, "carried-update")
   const canonical = {
     providers: [

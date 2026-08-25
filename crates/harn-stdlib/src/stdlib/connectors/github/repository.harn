@@ -1,6 +1,6 @@
 pub type GitHubRepoRef = {owner: string, name: string, full_name: string}
 
-fn __github_strip_git_suffix(value) {
+fn __github_strip_git_suffix(value: any) {
   const text = trim(to_string(value ?? ""))
   if ends_with(text, ".git") {
     return substring(text, 0, len(text) - len(".git"))
@@ -8,7 +8,7 @@ fn __github_strip_git_suffix(value) {
   return text
 }
 
-fn __github_slug_match(pattern, text) {
+fn __github_slug_match(pattern: any, text: any) {
   const captures = regex_captures(pattern, text)
   if len(captures) == 0 {
     return nil
@@ -95,7 +95,7 @@ pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
  * @effects: []
  * @errors: [runtime]
  */
-pub fn github_repo_or_throw(repo, name = nil) -> GitHubRepoRef {
+pub fn github_repo_or_throw(repo: string | dict, name: string? = nil) -> GitHubRepoRef {
   const parsed = github_repo(repo, name)
   if parsed == nil {
     throw "std/connectors/github: expected repo as owner/repo, GitHub remote URL, or owner + repo"

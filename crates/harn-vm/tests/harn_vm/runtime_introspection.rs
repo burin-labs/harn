@@ -48,7 +48,7 @@ fn out(source: &str) -> Vec<String> {
 #[test]
 fn runtime_introspection_starts_unresolved() {
     let lines = out(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const snap = harness.runtime.introspection()
   harness.stdio.log(snap.provider == nil)
   harness.stdio.log(snap.model == nil)
@@ -62,7 +62,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn introspection_tools_bundle_adds_all_by_default() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const reg = runtime_introspection_tools(tool_registry())
   const names = []
   let collected = names
@@ -101,7 +101,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn introspection_tools_only_narrows_surface() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const reg = runtime_introspection_tools(
     tool_registry(),
     {only: ["current_model", "current_provider"]},
@@ -125,7 +125,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn introspection_tools_exclude_drops_specified() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const reg = runtime_introspection_tools(
     tool_registry(),
     {exclude: ["current_compaction_policy", "available_runtime_capabilities"]},
@@ -155,7 +155,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn introspection_tools_are_idempotent() {
     let lines = out(r"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const once = runtime_introspection_tools(tool_registry())
   const twice = runtime_introspection_tools(once)
   harness.stdio.log(len(once.tools) == len(twice.tools))
@@ -167,7 +167,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn introspection_tools_executor_is_harn() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const reg = runtime_introspection_tools(tool_registry())
   for entry in reg.tools {
     harness.stdio.log(entry.name + ":" + to_string(entry.executor))
@@ -286,7 +286,7 @@ fn host_disabled_means_no_tools_attached() {
     // The model can only invoke tools that are in the registry, so an
     // empty registry literally cannot expose the introspection surface.
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const reg = tool_registry()
   harness.stdio.log(len(reg.tools))
   harness.stdio.log(tool_find(reg, "current_model") == nil)

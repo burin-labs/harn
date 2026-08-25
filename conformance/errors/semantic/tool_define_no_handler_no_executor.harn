@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // tool_define rejects a registration with no handler and no
   // executor: this is the foot-gun that used to surface as
   // `[builtin_call] unhandled: <name>` at the first model call.

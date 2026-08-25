@@ -1,6 +1,6 @@
 import { verification_diagnostic_delta } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const prior_shifted = {
     diagnostics: [
       {path: "src/a.tx", line: 10, column: 2, code: "E1", message: "error E1: missing Foo"},

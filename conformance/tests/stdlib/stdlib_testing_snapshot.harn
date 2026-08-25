@@ -1,6 +1,6 @@
 import { assert_error_contains, assert_snapshot, with_temp_dir } from "std/testing"
 
-pipeline test_snapshot(harness: Harness, task) {
+pipeline test_snapshot(harness: Harness, task: unknown) {
   // Default path: assert against a committed golden next to this test. The
   // golden lives at __snapshots__/snapshot_demo.harn.snap. This proves
   // harness.fs.source_dir()-anchored path resolution works inside the real test runner

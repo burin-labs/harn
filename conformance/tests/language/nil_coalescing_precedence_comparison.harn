@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const classified = false
   const fixture = {expect_missing_dep: nil}
   harness.stdio.println(classified == (fixture.expect_missing_dep ?? false))

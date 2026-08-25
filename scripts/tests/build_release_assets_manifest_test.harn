@@ -4,7 +4,7 @@
 import "../build_release_assets_manifest.harn"
 
 @test
-pipeline test_target_triples_order(harness: Harness, task) {
+pipeline test_target_triples_order(harness: Harness, task: unknown) {
   // Insertion order must match the Python TARGETS dict so unsorted `missing`
   // accumulates in the same order before the final sort.
   assert_eq(
@@ -20,7 +20,7 @@ pipeline test_target_triples_order(harness: Harness, task) {
 }
 
 @test
-pipeline test_target_meta_darwin(harness: Harness, task) {
+pipeline test_target_meta_darwin(harness: Harness, task: unknown) {
   const m = target_meta("aarch64-apple-darwin")
   assert_eq(m.filename, "harn-aarch64-apple-darwin.tar.gz")
   assert_eq(m.format, "tar.gz")
@@ -28,13 +28,13 @@ pipeline test_target_meta_darwin(harness: Harness, task) {
 }
 
 @test
-pipeline test_target_meta_linux_has_container_probe(harness: Harness, task) {
+pipeline test_target_meta_linux_has_container_probe(harness: Harness, task: unknown) {
   const m = target_meta("x86_64-unknown-linux-gnu")
   assert_eq(m.binaries, ["harn", "harn-dap", "harn-lsp", "harn-container-probe"])
 }
 
 @test
-pipeline test_target_meta_windows_zip_exe(harness: Harness, task) {
+pipeline test_target_meta_windows_zip_exe(harness: Harness, task: unknown) {
   const m = target_meta("x86_64-pc-windows-msvc")
   assert_eq(m.filename, "harn-x86_64-pc-windows-msvc.zip")
   assert_eq(m.format, "zip")
@@ -42,12 +42,12 @@ pipeline test_target_meta_windows_zip_exe(harness: Harness, task) {
 }
 
 @test
-pipeline test_target_meta_unknown_is_nil(harness: Harness, task) {
+pipeline test_target_meta_unknown_is_nil(harness: Harness, task: unknown) {
   assert_eq(target_meta("riscv64-unknown-linux-gnu"), nil)
 }
 
 @test
-pipeline test_strip_leading_v(harness: Harness, task) {
+pipeline test_strip_leading_v(harness: Harness, task: unknown) {
   // Single, multiple, none, and all-v cases mirror Python `lstrip("v")`.
   assert_eq(strip_leading_v("v0.8.21"), "0.8.21")
   assert_eq(strip_leading_v("vvv9.9"), "9.9")
@@ -59,7 +59,7 @@ pipeline test_strip_leading_v(harness: Harness, task) {
 }
 
 @test
-pipeline test_posix_path_str_basic(harness: Harness, task) {
+pipeline test_posix_path_str_basic(harness: Harness, task: unknown) {
   assert_eq(posix_path_str("out.json"), "out.json")
   assert_eq(posix_path_str("./out.json"), "out.json")
   assert_eq(posix_path_str("a//b"), "a/b")
@@ -71,7 +71,7 @@ pipeline test_posix_path_str_basic(harness: Harness, task) {
 }
 
 @test
-pipeline test_posix_path_str_keeps_dotdot(harness: Harness, task) {
+pipeline test_posix_path_str_keeps_dotdot(harness: Harness, task: unknown) {
   // `..` is preserved (not collapsed) exactly like PurePosixPath.
   assert_eq(posix_path_str("a/../b"), "a/../b")
   assert_eq(posix_path_str("foo//./bar"), "foo/bar")
@@ -79,7 +79,7 @@ pipeline test_posix_path_str_keeps_dotdot(harness: Harness, task) {
 }
 
 @test
-pipeline test_join_path(harness: Harness, task) {
+pipeline test_join_path(harness: Harness, task: unknown) {
   assert_eq(join_path("artifacts", "harn-x.tar.gz"), "artifacts/harn-x.tar.gz")
   assert_eq(join_path("./artifacts", "f.zip"), "artifacts/f.zip")
   assert_eq(join_path("/tmp/arts", "f.tar.gz"), "/tmp/arts/f.tar.gz")
@@ -89,7 +89,7 @@ pipeline test_join_path(harness: Harness, task) {
 }
 
 @test
-pipeline test_asset_record_shape(harness: Harness, task) {
+pipeline test_asset_record_shape(harness: Harness, task: unknown) {
   const base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
   const rec = asset_record("aarch64-apple-darwin", base, "deadbeef", 1234)
   assert_eq(rec.filename, "harn-aarch64-apple-darwin.tar.gz")
@@ -101,7 +101,7 @@ pipeline test_asset_record_shape(harness: Harness, task) {
 }
 
 @test
-pipeline test_missing_message_sorts(harness: Harness, task) {
+pipeline test_missing_message_sorts(harness: Harness, task: unknown) {
   // Accumulation order is TARGETS order; the message sorts before joining.
   const missing = [
     "harn-x86_64-pc-windows-msvc.zip",
@@ -115,7 +115,7 @@ pipeline test_missing_message_sorts(harness: Harness, task) {
 }
 
 @test
-pipeline test_missing_message_single(harness: Harness, task) {
+pipeline test_missing_message_single(harness: Harness, task: unknown) {
   assert_eq(
     missing_message(["harn-x86_64-pc-windows-msvc.zip"]),
     "release-assets manifest is missing required archives: harn-x86_64-pc-windows-msvc.zip",
@@ -123,7 +123,7 @@ pipeline test_missing_message_single(harness: Harness, task) {
 }
 
 @test
-pipeline test_build_manifest_shape(harness: Harness, task) {
+pipeline test_build_manifest_shape(harness: Harness, task: unknown) {
   const assets = {"aarch64-apple-darwin": {filename: "harn-aarch64-apple-darwin.tar.gz"}}
   const m = build_manifest("0.8.21", "v0.8.21", "https://x/tag", assets)
   assert_eq(m.version, "0.8.21")
@@ -133,7 +133,7 @@ pipeline test_build_manifest_shape(harness: Harness, task) {
 }
 
 @test
-pipeline test_full_manifest_json_byte_format(harness: Harness, task) {
+pipeline test_full_manifest_json_byte_format(harness: Harness, task: unknown) {
   // End-to-end of the pure assembly + serialization: the JSON must match
   // Python `json.dumps(indent=2, sort_keys=True)` (sorted keys, 2-space
   // indent, expanded lists). This locks the on-disk byte format.
@@ -155,7 +155,7 @@ pipeline test_full_manifest_json_byte_format(harness: Harness, task) {
 }
 
 @test
-pipeline test_help_text_starts_with_usage(harness: Harness, task) {
+pipeline test_help_text_starts_with_usage(harness: Harness, task: unknown) {
   const h = help_text()
   assert_eq(
     h.starts_with("usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR"),
@@ -166,7 +166,7 @@ pipeline test_help_text_starts_with_usage(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_success(harness: Harness, task) {
+pipeline test_parse_args_success(harness: Harness, task: unknown) {
   const p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--output", "o.json"])
   assert_eq(p.help, false)
   assert_eq(p.error, nil)
@@ -176,7 +176,7 @@ pipeline test_parse_args_success(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_equals_syntax(harness: Harness, task) {
+pipeline test_parse_args_equals_syntax(harness: Harness, task: unknown) {
   const p = parse_args(["--artifacts-dir=arts", "--tag=v1", "--output=o.json"])
   assert_eq(p.error, nil)
   assert_eq(p.artifacts_dir, "arts")
@@ -185,14 +185,14 @@ pipeline test_parse_args_equals_syntax(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_duplicate_last_wins(harness: Harness, task) {
+pipeline test_parse_args_duplicate_last_wins(harness: Harness, task: unknown) {
   const p = parse_args(["--artifacts-dir", "arts", "--tag", "v1", "--tag", "v2", "--output", "o"])
   assert_eq(p.error, nil)
   assert_eq(p.tag, "v2")
 }
 
 @test
-pipeline test_parse_args_help_flag(harness: Harness, task) {
+pipeline test_parse_args_help_flag(harness: Harness, task: unknown) {
   assert_eq(parse_args(["-h"]).help, true)
   assert_eq(parse_args(["--help"]).help, true)
   // Help wins even when other args are present (argparse short-circuits).
@@ -200,21 +200,21 @@ pipeline test_parse_args_help_flag(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_missing_all_required(harness: Harness, task) {
+pipeline test_parse_args_missing_all_required(harness: Harness, task: unknown) {
   const p = parse_args([])
   assert_eq(p.help, false)
   assert_eq(p.error, "the following arguments are required: --artifacts-dir, --tag, --output")
 }
 
 @test
-pipeline test_parse_args_missing_some_required_in_decl_order(harness: Harness, task) {
+pipeline test_parse_args_missing_some_required_in_decl_order(harness: Harness, task: unknown) {
   // Only --tag given → the other two are reported in declaration order.
   const p = parse_args(["--tag", "v1"])
   assert_eq(p.error, "the following arguments are required: --artifacts-dir, --output")
 }
 
 @test
-pipeline test_parse_args_missing_beats_unrecognized(harness: Harness, task) {
+pipeline test_parse_args_missing_beats_unrecognized(harness: Harness, task: unknown) {
   // When BOTH a required arg is missing AND there are extras, argparse
   // reports the missing-required error first.
   const p = parse_args(["--bogus", "xyz"])
@@ -222,19 +222,19 @@ pipeline test_parse_args_missing_beats_unrecognized(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_args_unrecognized_when_required_present(harness: Harness, task) {
+pipeline test_parse_args_unrecognized_when_required_present(harness: Harness, task: unknown) {
   const p = parse_args(["--artifacts-dir", "a", "--tag", "v1", "--output", "o", "--bogus"])
   assert_eq(p.error, "unrecognized arguments: --bogus")
 }
 
 @test
-pipeline test_parse_args_positional_is_unrecognized(harness: Harness, task) {
+pipeline test_parse_args_positional_is_unrecognized(harness: Harness, task: unknown) {
   const p = parse_args(["foo", "--artifacts-dir", "a", "--tag", "v1", "--output", "o"])
   assert_eq(p.error, "unrecognized arguments: foo")
 }
 
 @test
-pipeline test_parse_args_dangling_value(harness: Harness, task) {
+pipeline test_parse_args_dangling_value(harness: Harness, task: unknown) {
   // A required flag with no following value → "expected one argument".
   const p = parse_args(["--tag"])
   assert_eq(p.error, "argument --tag: expected one argument")

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   interface IntCollection {
     type Item = int
     fn get(self, index: int) -> Item

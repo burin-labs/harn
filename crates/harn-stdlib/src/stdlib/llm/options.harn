@@ -180,7 +180,7 @@ pub type LlmCallOptions = {
  * @effects: []
  * @errors: []
  */
-pub fn llm_call_options(options = nil) {
+pub fn llm_call_options(options: dict? = nil) {
   const base = options ?? {}
   let allowed = __llm_call_option_registry().keys
   for key in keys(base) {
@@ -208,7 +208,7 @@ const __LLM_EXPLICIT_ROUTING_KEYS = [
  * @errors: []
  * @api_stability: experimental
  */
-pub fn llm_has_explicit_routing_owner(options = nil) -> bool {
+pub fn llm_has_explicit_routing_owner(options: any = nil) -> bool {
   const base = if type_of(options) == "dict" {
     options
   } else {
@@ -231,7 +231,7 @@ pub fn llm_has_explicit_routing_owner(options = nil) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn llm_enable_equivalent_failover(options = nil, suppressed = false) -> dict {
+pub fn llm_enable_equivalent_failover(options: any = nil, suppressed: bool = false) -> dict {
   const base = if type_of(options) == "dict" {
     options
   } else {
@@ -243,7 +243,7 @@ pub fn llm_enable_equivalent_failover(options = nil, suppressed = false) -> dict
   return base + {equivalent_failover: {max_routes: 3, on_no_dispatch: true}}
 }
 
-fn __llm_one_shot_prefill_options(options) -> dict {
+fn __llm_one_shot_prefill_options(options: dict) -> dict {
   if type_of(options) == "dict" {
     return options
   }
@@ -260,7 +260,7 @@ fn __llm_one_shot_prefill_options(options) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
+pub fn llm_arm_one_shot_prefill(prefill: string, options: any = nil) -> dict {
   const base = __llm_one_shot_prefill_options(options)
   if prefill == "" {
     return base
@@ -276,7 +276,7 @@ pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn llm_clear_one_shot_prefill(options = nil) -> dict {
+pub fn llm_clear_one_shot_prefill(options: any = nil) -> dict {
   const base = __llm_one_shot_prefill_options(options)
   if base?._harn_one_shot_prefill != true {
     return base

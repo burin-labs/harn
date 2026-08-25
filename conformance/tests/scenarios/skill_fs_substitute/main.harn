@@ -2,7 +2,7 @@
  * `harness.agent.skill_render(skill, args)` — substitute $1 / $2 / $ARGUMENTS /
  * ${HARN_SKILL_DIR} in the discovered SKILL.md body.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const found_ship = skill_find(skills, "ship")
   assert(found_ship != nil, "ship skill discovered")
   const ship = found_ship ?? {}

@@ -28,11 +28,11 @@ import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 // Ships default-OFF and experimental.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
 
-fn __stance_config(opts) {
+fn __stance_config(opts: dict) {
   return opts?.read_only_stance ?? {}
 }
 
-fn __stance_registry_entries(registry) {
+fn __stance_registry_entries(registry: dict | list | nil) {
   if registry == nil {
     return []
   }
@@ -45,11 +45,11 @@ fn __stance_registry_entries(registry) {
   return []
 }
 
-fn __stance_entry_name(entry) {
+fn __stance_entry_name(entry: dict) {
   return entry?.function?.name ?? entry?.name ?? ""
 }
 
-fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
+fn __stance_read_only_names(registry: dict, policy: dict?, hard_keep: list?, escape_tool: string) {
   let names = if escape_tool == "" {
     []
   } else {
@@ -71,7 +71,7 @@ fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
   return names
 }
 
-fn __stance_policy_patch(opts, escape_tool) {
+fn __stance_policy_patch(opts: dict, escape_tool: any) {
   const policy = opts?.policy
   if type_of(policy) != "dict" {
     return {}
@@ -83,7 +83,7 @@ fn __stance_policy_patch(opts, escape_tool) {
   return {policy: policy + {tools: allowed.appending(escape_tool)}}
 }
 
-fn __stance_recent_user_messages(agent: HarnessAgent, session_id, limit = 6) {
+fn __stance_recent_user_messages(agent: HarnessAgent, session_id: any, limit: int = 6) {
   const messages = try {
     agent_session_messages(agent, session_id)
   } catch (e) {
@@ -118,9 +118,9 @@ fn __stance_recent_user_messages(agent: HarnessAgent, session_id, limit = 6) {
 pub fn agent_stance_default_consent_check(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  justification,
-  session_id,
-  options = nil,
+  justification: string,
+  session_id: any,
+  options: dict? = nil,
 ) {
   const recent = __stance_recent_user_messages(agent, session_id)
   const transcript = if len(recent) == 0 {
@@ -160,7 +160,7 @@ pub fn agent_stance_default_consent_check(
   return {verdict: "deny", consent: consent, reason: reasoning}
 }
 
-fn __stance_escape_description(escape_tool) {
+fn __stance_escape_description(escape_tool: unknown) {
   return "Request that write/execute tools be re-enabled for this session. The current task"
     + " was classified as read-only (research/investigation). Call this ONLY when the work"
     + " genuinely requires modifying the workspace AND the user has expressly or implicitly"
@@ -168,7 +168,13 @@ fn __stance_escape_description(escape_tool) {
     + " instruction that grants consent; a justification without user consent is denied."
 }
 
-fn __stance_register_escape_tool(harness: Harness, opts, cfg, session_id, grant_flag) {
+fn __stance_register_escape_tool(
+  harness: Harness,
+  opts: dict,
+  cfg: dict,
+  session_id: any,
+  grant_flag: any,
+) {
   const escape_tool = cfg?.escape_tool ?? "request_write_access"
   const consent = cfg?.consent_check
   const handler = { args ->
@@ -241,7 +247,7 @@ fn __stance_register_escape_tool(harness: Harness, opts, cfg, session_id, grant_
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_prepare(harness: Harness, session, message, opts) {
+pub fn agent_stance_prepare(harness: Harness, session: dict, message: string?, opts: dict) {
   const cfg = __stance_config(opts)
   if !cfg?.enabled ?? false {
     return opts
@@ -295,7 +301,7 @@ pub fn agent_stance_prepare(harness: Harness, session, message, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_apply(turn_opts) {
+pub fn agent_stance_apply(turn_opts: dict) {
   const names = turn_opts?._read_only_stance_tools
   if len(names ?? []) == 0 {
     return turn_opts
@@ -321,7 +327,12 @@ pub fn agent_stance_apply(turn_opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stance_post_turn(agent: HarnessAgent, runtime: HarnessRuntime, session, opts) {
+pub fn agent_stance_post_turn(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  session: dict,
+  opts: dict,
+) {
   if len(opts?._read_only_stance_tools ?? []) == 0 {
     return opts
   }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const body = "{\"hello\":\"world\"}"
   const signed = aws_sigv4_headers(
     {

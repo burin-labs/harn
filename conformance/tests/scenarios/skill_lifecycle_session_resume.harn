@@ -11,7 +11,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * agent_loop invocation and checks the skill stayed hot without
  * re-matching.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill sticky_skill {
     description "Handle every task"
     prompt "Take a careful, confirmed approach."

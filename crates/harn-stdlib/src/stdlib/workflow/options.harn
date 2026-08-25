@@ -246,7 +246,7 @@ type WorkflowStageAgentOptions = {
   agent_loop_options: dict,
 }
 
-fn __workflow_non_empty_string(value) {
+fn __workflow_non_empty_string(value: string?) {
   if type_of(value) != "string" {
     return nil
   }
@@ -276,7 +276,7 @@ fn __workflow_stage_tool_format(
   return "text"
 }
 
-fn __workflow_native_tool_fallback(value) -> string {
+fn __workflow_native_tool_fallback(value: string?) -> string {
   const policy = __workflow_non_empty_string(value)
   if policy != nil {
     return policy
@@ -284,7 +284,7 @@ fn __workflow_native_tool_fallback(value) -> string {
   return "reject"
 }
 
-fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
+fn __workflow_autonomy_tier(value: string?) -> WorkflowAutonomyTier {
   const tier = value ?? "act_auto"
   if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
     return tier

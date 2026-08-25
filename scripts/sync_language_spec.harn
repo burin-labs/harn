@@ -261,7 +261,7 @@ fn stale(fs: HarnessFs, stdio: HarnessStdio, generated: string, path: string) ->
   return false
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const chapters = chapter_paths(harness.fs)
   if chapters.count == 0 {
     harness.stdio.eprintln("error: no chapter files found at ${CHAPTERS_GLOB}")

@@ -15,11 +15,11 @@ import { runtime_state_paths_under } from "std/runtime"
 // `pattern_learning_ensure_migrated`. Current pattern memory has Harn-owned
 // paths. Keep this compatibility reader until that migration contract is
 // deliberately removed; new hosts must not write these names.
-pub fn pl_project_root(fs: HarnessFs, options = nil) -> string {
+pub fn pl_project_root(fs: HarnessFs, options: any = nil) -> string {
   return pl_text(options?.project_root ?? fs.project_root() ?? fs.cwd() ?? ".")
 }
 
-pub fn pl_state_root(fs: HarnessFs, options = nil) -> string {
+pub fn pl_state_root(fs: HarnessFs, options: any = nil) -> string {
   const explicit_project_root = pl_text(options?.project_root)
   if explicit_project_root != "" {
     return runtime_state_paths_under(explicit_project_root).state_root
@@ -27,7 +27,7 @@ pub fn pl_state_root(fs: HarnessFs, options = nil) -> string {
   return fs.runtime_paths().state_root
 }
 
-pub fn pl_memory_root(fs: HarnessFs, options = nil) -> string {
+pub fn pl_memory_root(fs: HarnessFs, options: any = nil) -> string {
   const explicit = pl_text(options?.memory_root ?? options?.root)
   if explicit != "" {
     return explicit
@@ -35,21 +35,21 @@ pub fn pl_memory_root(fs: HarnessFs, options = nil) -> string {
   return path_join(pl_state_root(fs, options), "memory")
 }
 
-pub fn pl_namespace(options = nil) -> string {
+pub fn pl_namespace(options: any = nil) -> string {
   const explicit = pl_text(options?.namespace)
   return explicit == "" ? PATTERN_NAMESPACE : explicit
 }
 
-pub fn pl_memory_options(fs: HarnessFs, options = nil) -> dict {
+pub fn pl_memory_options(fs: HarnessFs, options: any = nil) -> dict {
   return (options ?? {}) + {root: pl_memory_root(fs, options)}
 }
 
-pub fn pl_now(clock: HarnessClock, options = nil) -> string {
+pub fn pl_now(clock: HarnessClock, options: any = nil) -> string {
   const explicit = pl_text(options?.now)
   return explicit == "" ? clock.date_iso() : explicit
 }
 
-pub fn pl_observation_file(fs: HarnessFs, options = nil) -> string {
+pub fn pl_observation_file(fs: HarnessFs, options: any = nil) -> string {
   return path_join(
     pl_state_root(fs, options),
     "session-store",
@@ -57,7 +57,7 @@ pub fn pl_observation_file(fs: HarnessFs, options = nil) -> string {
   )
 }
 
-pub fn pl_pending_file(fs: HarnessFs, options = nil) -> string {
+pub fn pl_pending_file(fs: HarnessFs, options: any = nil) -> string {
   return path_join(
     pl_state_root(fs, options),
     "session-store",
@@ -65,7 +65,7 @@ pub fn pl_pending_file(fs: HarnessFs, options = nil) -> string {
   )
 }
 
-pub fn pl_state_file(fs: HarnessFs, options = nil) -> string {
+pub fn pl_state_file(fs: HarnessFs, options: any = nil) -> string {
   return path_join(
     pl_state_root(fs, options),
     "session-store",
@@ -73,7 +73,7 @@ pub fn pl_state_file(fs: HarnessFs, options = nil) -> string {
   )
 }
 
-pub fn pl_migration_marker(fs: HarnessFs, options = nil) -> string {
+pub fn pl_migration_marker(fs: HarnessFs, options: any = nil) -> string {
   return path_join(
     pl_memory_root(fs, options),
     pl_namespace(options),
@@ -154,7 +154,7 @@ pub fn pl_project_value(mutations: list, fallback: dict) -> dict {
   return value
 }
 
-pub fn pl_tags(kind: string, extra = nil) -> list {
+pub fn pl_tags(kind: string, extra: list? = nil) -> list {
   let tags = ["pattern_learning", "pattern_learning:" + kind, "schema:" + PATTERN_SCHEMA]
   for raw in extra ?? [] {
     const tag = pl_text(raw)
@@ -170,7 +170,7 @@ pub fn pl_store_record(
   kind: string,
   key: string,
   value: dict,
-  options = nil,
+  options: any = nil,
 ) -> dict {
   const opts = pl_memory_options(harness.fs, options)
   const now = pl_now(harness.clock, options)
@@ -194,7 +194,7 @@ pub fn pl_memory_records(
   fs: HarnessFs,
   memory: HarnessMemory,
   kind: string = "",
-  options = nil,
+  options: any = nil,
 ) -> list {
   const window = if kind == "" {
     {limit: options?.record_limit ?? 2000}
@@ -206,14 +206,19 @@ pub fn pl_memory_records(
     ?? []
 }
 
-pub fn pl_record_values(fs: HarnessFs, memory: HarnessMemory, kind: string, options = nil) -> list {
+pub fn pl_record_values(
+  fs: HarnessFs,
+  memory: HarnessMemory,
+  kind: string,
+  options: any = nil,
+) -> list {
   return pl_memory_records(fs, memory, kind, options).map({ record -> record?.value ?? {} }).filter(
     { value -> value?.schema == PATTERN_SCHEMA && (value?.record_kind ?? value?.kind) == kind },
   )
     .to_list()
 }
 
-pub fn pl_replace_state(harness: Harness, state: dict, options = nil) -> dict {
+pub fn pl_replace_state(harness: Harness, state: dict, options: any = nil) -> dict {
   memory_forget(
     harness.memory,
     pl_namespace(options),
@@ -237,7 +242,7 @@ pub fn pl_unique_record_id(
   clock: HarnessClock,
   random: HarnessRandom,
   prefix: string,
-  options = nil,
+  options: any = nil,
 ) -> string {
   return prefix + "_" + pl_short_hash(pl_now(clock, options) + ":" + random.uuid())
 }
@@ -272,7 +277,7 @@ pub fn pl_observation_from_input(
   clock: HarnessClock,
   random: HarnessRandom,
   input: dict,
-  options = nil,
+  options: any = nil,
 ) -> dict {
   const prompt = pl_redact_sensitive(pl_text(input?.prompt ?? input?.message))
   if prompt == "" {
@@ -295,7 +300,7 @@ pub fn pl_observation_from_legacy(
   clock: HarnessClock,
   random: HarnessRandom,
   record: dict,
-  options = nil,
+  options: any = nil,
 ) -> dict {
   return pl_observation_from_input(
     clock,
@@ -311,7 +316,7 @@ pub fn pl_observation_from_legacy(
   )
 }
 
-pub fn pl_store_observation(harness: Harness, record: dict, options = nil) -> dict {
+pub fn pl_store_observation(harness: Harness, record: dict, options: any = nil) -> dict {
   return pl_store_record(
     harness,
     "observation",

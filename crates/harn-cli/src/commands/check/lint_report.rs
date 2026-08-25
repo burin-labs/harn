@@ -38,7 +38,6 @@ pub(crate) struct LintJsonCommandOutcome {
 pub(crate) struct LintJsonOptions {
     pub strict: bool,
     pub require_file_header: bool,
-    pub require_public_api_types: bool,
     pub trusted_host_dispatch: bool,
 }
 
@@ -126,7 +125,6 @@ pub(crate) async fn run_lint_json(
         let mut lint_config = super::load_harn_lint_config(file);
         lint_config.require_file_header |= options.require_file_header;
         config.trusted_host_dispatch |= options.trusted_host_dispatch;
-        lint_config.require_public_api_types |= options.require_public_api_types;
         super::apply_loaded_harn_lint_config(&lint_config, &mut config);
         let script_diagnostics = script_rule_diags
             .get(file)
@@ -330,92 +328,5 @@ fn file_analysis_error_report(path: String, error: FileAnalysisError) -> LintFil
         fixable: 0,
         fixed: 0,
         fixable_diagnostics: Vec::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn write_untyped_api(root: &Path) -> PathBuf {
-        let path = root.join("api.harn");
-        std::fs::write(
-            &path,
-            "pub fn run(value) { return value }\npub pipeline deploy(task) { return task }\n",
-        )
-        .expect("write API fixture");
-        path
-    }
-
-    fn public_api_diagnostics(outcome: &LintJsonCommandOutcome) -> Vec<&CheckDiagnostic> {
-        outcome.envelope.data.as_ref().expect("lint report").files[0]
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code.as_deref() == Some("HARN-LNT-067"))
-            .collect()
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn public_api_type_command_override_emits_structured_diagnostics() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let file = write_untyped_api(temp.path());
-
-        let outcome = run_lint_json(
-            &[file],
-            LintJsonOptions {
-                require_public_api_types: true,
-                ..LintJsonOptions::default()
-            },
-        )
-        .await;
-
-        assert_eq!(outcome.exit_code, 0, "warnings remain advisory");
-        assert!(outcome.envelope.ok);
-        assert!(outcome.envelope.error.is_none());
-        let diagnostics = public_api_diagnostics(&outcome);
-        assert_eq!(diagnostics.len(), 4, "envelope: {:#?}", outcome.envelope);
-        assert!(diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.source == "lint"));
-        assert!(diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.span.is_some()));
-        serde_json::to_value(&outcome.envelope).expect("lint envelope serializes");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn public_api_type_project_policy_and_severity_fail_without_override() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let file = write_untyped_api(temp.path());
-        std::fs::write(
-            temp.path().join("harn.toml"),
-            r#"
-[lint]
-require-public-api-types = true
-
-[lint.severity]
-missing-public-api-type = "error"
-"#,
-        )
-        .expect("write project policy");
-
-        let outcome = run_lint_json(&[file], LintJsonOptions::default()).await;
-
-        assert_eq!(outcome.exit_code, 1);
-        assert!(!outcome.envelope.ok);
-        assert_eq!(
-            outcome
-                .envelope
-                .error
-                .as_ref()
-                .map(|error| error.code.as_str()),
-            Some("lint_failed")
-        );
-        let diagnostics = public_api_diagnostics(&outcome);
-        assert_eq!(diagnostics.len(), 4, "envelope: {:#?}", outcome.envelope);
-        assert!(diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.severity == "error"));
-        serde_json::to_value(&outcome.envelope).expect("lint envelope serializes");
     }
 }

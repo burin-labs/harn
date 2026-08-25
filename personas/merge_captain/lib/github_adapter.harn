@@ -6,7 +6,7 @@
  * the state machine never reaches for `process.exec` or shells out to
  * `gh`.
  */
-fn _gh(harness: Harness, method, params) {
+fn _gh(harness: Harness, method: string, params: dict) {
   return harness.net.connector_call("github", method, params)
 }
 
@@ -16,12 +16,12 @@ pub fn live_adapter() {
 }
 
 /** Construct a fixture adapter from an in-memory snapshot dict. */
-pub fn fixture_adapter(snapshot) {
+pub fn fixture_adapter(snapshot: any) {
   return {mode: "fixture", snapshot: snapshot}
 }
 
 /** List open PRs in a repository. */
-pub fn list_open_prs(harness: Harness, adapter, repo) {
+pub fn list_open_prs(harness: Harness, adapter: dict, repo: string) {
   if adapter.mode == "fixture" {
     const bucket = adapter.snapshot[repo]
     if bucket == nil {
@@ -36,7 +36,7 @@ pub fn list_open_prs(harness: Harness, adapter, repo) {
 }
 
 /** Fetch detailed PR + checks data. */
-pub fn get_pr_details(harness: Harness, adapter, repo, number) {
+pub fn get_pr_details(harness: Harness, adapter: dict, repo: string, number: any) {
   if adapter.mode == "fixture" {
     const bucket = adapter.snapshot[repo]
     if bucket == nil {
@@ -70,7 +70,7 @@ pub fn get_pr_details(harness: Harness, adapter, repo, number) {
 }
 
 /** Normalize a raw GitHub PR API payload into our minimal shape. */
-pub fn normalize_pr(api_pr) {
+pub fn normalize_pr(api_pr: dict) {
   const labels = (api_pr.labels ?? []).map({ l -> l.name })
   return {
     repo: api_pr.base?.repo?.full_name ?? "",
@@ -94,7 +94,7 @@ pub fn normalize_pr(api_pr) {
 }
 
 /** Update a PR branch (rebase/merge from base). */
-pub fn update_branch(harness: Harness, adapter, repo, number, dry_run) {
+pub fn update_branch(harness: Harness, adapter: dict, repo: string, number: any, dry_run: any) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
@@ -105,7 +105,14 @@ pub fn update_branch(harness: Harness, adapter, repo, number, dry_run) {
 }
 
 /** Enqueue a PR onto the merge queue. */
-pub fn enqueue_merge_queue(harness: Harness, adapter, repo, number, merge_method, dry_run) {
+pub fn enqueue_merge_queue(
+  harness: Harness,
+  adapter: dict,
+  repo: any,
+  number: any,
+  merge_method: any,
+  dry_run: any,
+) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
@@ -119,7 +126,14 @@ pub fn enqueue_merge_queue(harness: Harness, adapter, repo, number, merge_method
 }
 
 /** Add a label to a PR. */
-pub fn add_label(harness: Harness, adapter, repo, number, label, dry_run) {
+pub fn add_label(
+  harness: Harness,
+  adapter: dict,
+  repo: any,
+  number: string,
+  label: any,
+  dry_run: any,
+) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
@@ -129,7 +143,14 @@ pub fn add_label(harness: Harness, adapter, repo, number, label, dry_run) {
 }
 
 /** Comment on a PR. */
-pub fn comment(harness: Harness, adapter, repo, number, body, dry_run) {
+pub fn comment(
+  harness: Harness,
+  adapter: dict,
+  repo: any,
+  number: string,
+  body: any,
+  dry_run: any,
+) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }
@@ -139,7 +160,14 @@ pub fn comment(harness: Harness, adapter, repo, number, body, dry_run) {
 }
 
 /** Request reviews on a PR. */
-pub fn request_review(harness: Harness, adapter, repo, number, reviewers, dry_run) {
+pub fn request_review(
+  harness: Harness,
+  adapter: dict,
+  repo: any,
+  number: list,
+  reviewers: any,
+  dry_run: any,
+) {
   if dry_run || adapter.mode == "fixture" {
     return {ok: true, dry_run: true, mode: adapter.mode}
   }

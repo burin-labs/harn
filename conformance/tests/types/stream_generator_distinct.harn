@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   gen fn values() -> Stream<int> {
     emit 1
   }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const recv_ch = harness.runtime.channel("closed-receive", 1)
   harness.runtime.close_channel(recv_ch)
   const recv_result = try {

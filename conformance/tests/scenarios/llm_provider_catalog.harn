@@ -1,6 +1,6 @@
 import "std/collections"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const local = harness.llm.resolve_model("local:gemma-4-e4b-it")
   assert_eq(local.id, "gemma-4-e4b-it")
   assert_eq(local.provider, "ollama")

@@ -19,7 +19,7 @@ pub type NamedModelLadder = {label?: string, steps: list<ModelLadderStep>}
  * @effects: []
  * @errors: []
  */
-pub fn model_info(llm: HarnessLlm, selector) {
+pub fn model_info(llm: HarnessLlm, selector: any) {
   return llm.model_info(selector)
 }
 
@@ -32,7 +32,7 @@ pub fn model_info(llm: HarnessLlm, selector) {
  * @effects: []
  * @errors: ["llm_execution_contract: selector is required"]
  */
-pub fn execution_contract(llm: HarnessLlm, selector) -> dict {
+pub fn execution_contract(llm: HarnessLlm, selector: any) -> dict {
   return llm.execution_contract(selector)
 }
 
@@ -42,7 +42,7 @@ pub fn execution_contract(llm: HarnessLlm, selector) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn resolved_options(llm: HarnessLlm, opts) {
+pub fn resolved_options(llm: HarnessLlm, opts: dict) {
   if type_of(opts) != "dict" {
     throw "resolved_options: opts must be a dict"
   }
@@ -69,7 +69,7 @@ pub fn named_model_ladder(llm: HarnessLlm, name: string) -> NamedModelLadder? {
   return schema_expect(ladder, schema_of(NamedModelLadder))
 }
 
-fn __capability_field(caps, capability) {
+fn __capability_field(caps: dict, capability: string) {
   if capability == "thinking" {
     const direct = caps?.thinking ?? false
     const modes = caps?.thinking_modes ?? []
@@ -117,7 +117,7 @@ fn __capability_field(caps, capability) {
  * @effects: []
  * @errors: []
  */
-pub fn has_capability(llm: HarnessLlm, model, capability) {
+pub fn has_capability(llm: HarnessLlm, model: any, capability: string) {
   const info = llm.model_info(model)
   if type_of(info) != "dict" {
     return false
@@ -137,7 +137,7 @@ pub fn has_capability(llm: HarnessLlm, model, capability) {
  * @effects: []
  * @errors: []
  */
-pub fn family_of(llm: HarnessLlm, model_id) {
+pub fn family_of(llm: HarnessLlm, model_id: any) {
   const info = llm.model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
@@ -165,7 +165,7 @@ pub fn routing_routes(llm: HarnessLlm) {
  * @effects: []
  * @errors: []
  */
-pub fn lineage_of(llm: HarnessLlm, model_id) {
+pub fn lineage_of(llm: HarnessLlm, model_id: any) {
   const info = llm.model_info(model_id)
   if type_of(info) != "dict" {
     return "unknown"
@@ -195,7 +195,7 @@ pub fn lineage_of(llm: HarnessLlm, model_id) {
  * @api_stability: experimental
  * @example: complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
  */
-pub fn complementary_reviewer(llm: HarnessLlm, opts) {
+pub fn complementary_reviewer(llm: HarnessLlm, opts: any) {
   return llm.complementary_reviewer(opts)
 }
 
@@ -209,7 +209,7 @@ pub fn complementary_reviewer(llm: HarnessLlm, opts) {
  * @api_stability: experimental
  * @example: equivalent_models("cerebras/gpt-oss-120b")
  */
-pub fn equivalent_models(llm: HarnessLlm, selector) {
+pub fn equivalent_models(llm: HarnessLlm, selector: any) {
   return llm.equivalent_models(selector)
 }
 
@@ -241,7 +241,10 @@ fn __available_provider_set(llm: HarnessLlm) {
   return available
 }
 
-fn __strengths_match(model_strengths, required) {
+fn __strengths_match(
+  model_strengths: list?,
+  required: string | bytes | list | dict | set | range | nil,
+) {
   if required == nil || len(required) == 0 {
     return true
   }
@@ -254,7 +257,10 @@ fn __strengths_match(model_strengths, required) {
   return true
 }
 
-fn __benchmark_match(model_benchmarks, required) {
+fn __benchmark_match(
+  model_benchmarks: dict?,
+  required: string | bytes | list | dict | set | range | nil,
+) {
   if required == nil || len(required) == 0 {
     return true
   }
@@ -273,7 +279,7 @@ fn __benchmark_match(model_benchmarks, required) {
   return true
 }
 
-fn __score_model(model) {
+fn __score_model(model: dict) {
   // Higher is better. Compose: tier weight + strength count + best
   // benchmark + open-weight bonus + non-deprecated bonus.
   let score = 0.0
@@ -304,7 +310,7 @@ fn __score_model(model) {
   return score
 }
 
-fn __model_matches_identity_filters(model, opts) {
+fn __model_matches_identity_filters(model: dict, opts: dict) {
   const want_tier = opts?.tier
   const want_provider = opts?.provider
   const want_equivalence = opts?.equivalence_group
@@ -332,7 +338,7 @@ fn __model_matches_identity_filters(model, opts) {
   return true
 }
 
-fn __model_matches_catalog_constraints(model, opts, available) {
+fn __model_matches_catalog_constraints(model: dict, opts: dict, available: any) {
   const want_open_weight = opts?.open_weight
   if want_open_weight != nil && model?.open_weight != want_open_weight {
     return false
@@ -366,7 +372,7 @@ fn __model_matches_catalog_constraints(model, opts, available) {
   return true
 }
 
-fn __filter_models(llm: HarnessLlm, opts) {
+fn __filter_models(llm: HarnessLlm, opts: dict) {
   const catalog = llm.catalog()
   const available = if opts?.available_only ?? false {
     __available_provider_set(llm)
@@ -419,11 +425,11 @@ fn __filter_models(llm: HarnessLlm, opts) {
  * @api_stability: experimental
  * @example: models_with({tier: "frontier", strengths: ["coding"], available_only: true})
  */
-pub fn models_with(llm: HarnessLlm, opts = nil) {
+pub fn models_with(llm: HarnessLlm, opts: dict? = nil) {
   return __filter_models(llm, opts ?? {})
 }
 
-fn __relax_step(opts, step) {
+fn __relax_step(opts: any, step: int) {
   // Each relaxation step drops one constraint, from least to most
   // important. Returns nil when no further relaxations are possible
   // (i.e. the empty filter has been reached).
@@ -478,7 +484,7 @@ fn __relax_step(opts, step) {
  * @api_stability: experimental
  * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
  */
-pub fn best_available_models(llm: HarnessLlm, opts = nil) {
+pub fn best_available_models(llm: HarnessLlm, opts: dict? = nil) {
   const original = opts ?? {}
   let step = 0
   while step <= 7 {
@@ -505,7 +511,7 @@ pub fn best_available_models(llm: HarnessLlm, opts = nil) {
  * @api_stability: experimental
  * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})
  */
-pub fn pick_model(llm: HarnessLlm, opts = nil) {
+pub fn pick_model(llm: HarnessLlm, opts: dict? = nil) {
   const result = best_available_models(llm, opts)
   if len(result.models) == 0 {
     return nil
@@ -588,7 +594,7 @@ const MODEL_CATALOG_COLUMNS = [
   "tool_support.parity_notes",
 ]
 
-fn __catalog_query_text(value, label) {
+fn __catalog_query_text(value: string?, label: string) {
   if type_of(value) != "string" {
     throw "model_catalog_query: " + label + " must be a non-empty string"
   }
@@ -599,7 +605,7 @@ fn __catalog_query_text(value, label) {
   return text
 }
 
-fn __catalog_query_string(query, key, value) {
+fn __catalog_query_string(query: dict, key: string, value: any) {
   const existing = query[key]
   if existing != nil && existing != value {
     throw "model_catalog_query: conflicting values for " + key
@@ -607,7 +613,7 @@ fn __catalog_query_string(query, key, value) {
   return query + {[key]: value}
 }
 
-fn __catalog_query_bool(query, key, value) {
+fn __catalog_query_bool(query: dict, key: string, value: any) {
   const existing = query[key]
   if existing != nil && existing != value {
     throw "model_catalog_query: conflicting values for " + key
@@ -615,7 +621,7 @@ fn __catalog_query_bool(query, key, value) {
   return query + {[key]: value}
 }
 
-fn __catalog_query_strengths(query, value) {
+fn __catalog_query_strengths(query: dict, value: any) {
   const existing = query.strengths ?? []
   if existing.contains(value) {
     return query
@@ -623,7 +629,7 @@ fn __catalog_query_strengths(query, value) {
   return query + {strengths: existing.appending(value)}
 }
 
-fn __catalog_query_where_values(raw) {
+fn __catalog_query_where_values(raw: list) {
   if raw == nil {
     return []
   }
@@ -643,7 +649,7 @@ fn __catalog_query_where_values(raw) {
   return values
 }
 
-fn __catalog_query_apply_where(query, raw) {
+fn __catalog_query_apply_where(query: dict, raw: list) {
   let out = query
   for expression in __catalog_query_where_values(raw) {
     for part in split(expression, ",") {
@@ -674,7 +680,7 @@ fn __catalog_query_apply_where(query, raw) {
   return out
 }
 
-fn __catalog_query_columns(raw) {
+fn __catalog_query_columns(raw: string?) {
   if raw == nil {
     return []
   }
@@ -709,7 +715,7 @@ fn __catalog_query_columns(raw) {
  * @effects: []
  * @errors: [validation]
  */
-pub fn normalize_model_catalog_query(raw = nil) -> ModelCatalogQuery {
+pub fn normalize_model_catalog_query(raw: dict? = nil) -> ModelCatalogQuery {
   if raw != nil && type_of(raw) != "dict" {
     throw "model_catalog_query: query must be a dict"
   }
@@ -750,7 +756,7 @@ pub fn normalize_model_catalog_query(raw = nil) -> ModelCatalogQuery {
   return query
 }
 
-fn __catalog_row_string(row, key) {
+fn __catalog_row_string(row: any, key: string) {
   const value = row[key]
   if type_of(value) == "string" {
     return value
@@ -758,7 +764,7 @@ fn __catalog_row_string(row, key) {
   return ""
 }
 
-fn __catalog_row_number(row, key) {
+fn __catalog_row_number(row: any, key: string) {
   const value = row[key]
   if type_of(value) == "int" || type_of(value) == "float" {
     return to_float(value)
@@ -766,7 +772,7 @@ fn __catalog_row_number(row, key) {
   return nil
 }
 
-fn __catalog_pricing_value(row, key) {
+fn __catalog_pricing_value(row: dict, key: string) {
   const pricing = row?.pricing
   if type_of(pricing) != "dict" {
     return nil
@@ -774,7 +780,7 @@ fn __catalog_pricing_value(row, key) {
   return __catalog_row_number(pricing, key)
 }
 
-fn __catalog_row_matches(row, query) {
+fn __catalog_row_matches(row: dict, query: dict) {
   if query?.provider != nil && __catalog_row_string(row, "provider") != query.provider {
     return false
   }
@@ -802,14 +808,14 @@ fn __catalog_row_matches(row, query) {
   return true
 }
 
-fn __catalog_numeric_sort_key(value, id) {
+fn __catalog_numeric_sort_key(value: any, id: any) {
   if value == nil {
     return pair(pair(1, 0.0), id)
   }
   return pair(pair(0, value), id)
 }
 
-fn __catalog_sort_key(row, sort) {
+fn __catalog_sort_key(row: dict, sort: string) {
   const id = __catalog_row_string(row, "id")
   if sort == "pricing.input" {
     return __catalog_numeric_sort_key(__catalog_pricing_value(row, "input_per_mtok"), id)
@@ -907,7 +913,7 @@ pub fn model_catalog_query(catalog: list, query: ModelCatalogQuery = {}) -> dict
   return {schemaVersion: MODEL_CATALOG_QUERY_SCHEMA_VERSION, query: normalized, models: sorted}
 }
 
-fn __catalog_column_value(row, column) {
+fn __catalog_column_value(row: dict, column: string) {
   if column == "pricing.input" {
     return __catalog_pricing_value(row, "input_per_mtok") ?? ""
   }
@@ -937,7 +943,7 @@ fn __catalog_column_value(row, column) {
   return to_string(value)
 }
 
-fn __catalog_column_specs(columns) {
+fn __catalog_column_specs(columns: list) {
   let specs = []
   for column in columns {
     const header = if column == "tool_support.parity" {

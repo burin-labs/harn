@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])
   assert_eq(window([1, 2, 3, 4, 5], 3, 2), [[1, 2, 3], [3, 4, 5]])
   // group_by requires a string discriminator (v0.8.43+); to_string makes the bucket key explicit.

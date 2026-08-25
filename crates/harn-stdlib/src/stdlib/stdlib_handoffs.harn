@@ -6,19 +6,19 @@
  */
 import "std/triggers"
 
-fn __handoff_is_callable(value) -> bool {
+fn __handoff_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __handoff_value_string(value) -> string {
+fn __handoff_value_string(value: any) -> string {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __handoff_kind(payload, context) -> string {
+fn __handoff_kind(payload: dict, context: dict) -> string {
   const kind = __handoff_value_string(payload?.kind ?? context?.kind)
   if kind == "" {
     return "handoff"
@@ -26,18 +26,18 @@ fn __handoff_kind(payload, context) -> string {
   return kind
 }
 
-fn __handoff_source(payload, context) -> string {
+fn __handoff_source(payload: dict, context: dict) -> string {
   return __handoff_value_string(payload?.source_persona ?? context?.source_persona)
 }
 
-fn __handoff_route_matches(route, kind, source) -> bool {
+fn __handoff_route_matches(route: dict, kind: any, source: any) -> bool {
   const route_kind = __handoff_value_string(route?.kind)
   const route_source = __handoff_value_string(route?.from)
   return (route_kind == "*" || route_kind == kind)
     && (route_source == "*" || route_source == source)
 }
 
-fn __handoff_target_record(raw_target, route_target) {
+fn __handoff_target_record(raw_target: any, route_target: dict) {
   const target = __handoff_value_string(raw_target)
   if starts_with(target, "human:") {
     const label = trim(substring(target, len("human:")))
@@ -58,7 +58,7 @@ fn __handoff_target_record(raw_target, route_target) {
   return {kind: route_target?.transport ?? "persona", id: persona, label: persona}
 }
 
-fn __handoff_budget_exhausted(handoff, context) -> bool {
+fn __handoff_budget_exhausted(handoff: dict, context: dict) -> bool {
   if context?.budget_exhausted {
     return true
   }
@@ -69,7 +69,7 @@ fn __handoff_budget_exhausted(handoff, context) -> bool {
     || (budget?.dollars != nil && budget.dollars <= 0.0)
 }
 
-fn __handoff_approval_denied(handoff, context) -> bool {
+fn __handoff_approval_denied(handoff: dict, context: dict) -> bool {
   if context?.approval_denied {
     return true
   }
@@ -79,7 +79,7 @@ fn __handoff_approval_denied(handoff, context) -> bool {
   return status == "denied" || status == "rejected"
 }
 
-fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
+fn __handoff_predicate_matches(raw_when: any, handoff: dict, context: dict) -> bool {
   const when = __handoff_value_string(raw_when)
   if when == "" || when == "always" {
     return true
@@ -100,12 +100,12 @@ fn __handoff_predicate_matches(raw_when, handoff, context) -> bool {
 
 fn __handoff_decision(
   clock: HarnessClock,
-  route,
-  route_index,
-  route_target,
-  target_index,
-  handoff,
-  context,
+  route: dict,
+  route_index: any,
+  route_target: dict,
+  target_index: any,
+  handoff: dict,
+  context: dict,
 ) {
   const raw_target = __handoff_value_string(route_target?.target)
   const target = __handoff_target_record(raw_target, route_target)
@@ -132,7 +132,12 @@ fn __handoff_decision(
  * @effects: []
  * @errors: []
  */
-pub fn handoff_route_select(clock: HarnessClock, handoff_payload, routes = nil, context = nil) {
+pub fn handoff_route_select(
+  clock: HarnessClock,
+  handoff_payload: any,
+  routes: list? = nil,
+  context: any = nil,
+) {
   const route_table = routes ?? handoff_routes()
   const kind = __handoff_kind(handoff_payload, context)
   const source = __handoff_source(handoff_payload, context)
@@ -182,7 +187,12 @@ pub fn handoff_route_select(clock: HarnessClock, handoff_payload, routes = nil, 
  * @effects: []
  * @errors: []
  */
-pub fn handoff_routed(clock: HarnessClock, payload, routes = nil, context = nil) {
+pub fn handoff_routed(
+  clock: HarnessClock,
+  payload: dict?,
+  routes: list? = nil,
+  context: any = nil,
+) {
   const decision = handoff_route_select(clock, payload, routes, context)
   if decision == nil {
     throw "handoff_routed: no matching handoff route"
@@ -198,7 +208,7 @@ pub fn handoff_routed(clock: HarnessClock, payload, routes = nil, context = nil)
   )
 }
 
-fn __handoff_dispatch_topic(decision) -> string {
+fn __handoff_dispatch_topic(decision: dict) -> string {
   if decision.dispatch_kind == "human" {
     return "handoff.human.inbox"
   }
@@ -211,7 +221,7 @@ fn __handoff_dispatch_topic(decision) -> string {
   return "handoff.persona.invocations"
 }
 
-fn __handoff_dispatcher(options, selected) {
+fn __handoff_dispatcher(options: dict, selected: dict) {
   if __handoff_is_callable(options?.dispatcher) {
     return options.dispatcher
   }
@@ -230,11 +240,11 @@ fn __handoff_dispatcher(options, selected) {
   return nil
 }
 
-fn __handoff_dispatch_audit_scope(handoff_value) {
+fn __handoff_dispatch_audit_scope(handoff_value: dict) {
   return {source_handoff: handoff_value?.id}
 }
 
-fn __handoff_policy_override(handoff_value) {
+fn __handoff_policy_override(handoff_value: dict) {
   const policy = handoff_value?.policy_override
   if type_of(policy) == "dict" {
     return policy
@@ -242,7 +252,7 @@ fn __handoff_policy_override(handoff_value) {
   return nil
 }
 
-fn __handoff_invoke_dispatcher(harness: Harness, dispatcher, envelope) {
+fn __handoff_invoke_dispatcher(harness: Harness, dispatcher: unknown, envelope: dict) {
   const policy = __handoff_policy_override(envelope?.handoff)
   if policy == nil {
     return dispatcher(harness, envelope)
@@ -259,7 +269,12 @@ fn __handoff_invoke_dispatcher(harness: Harness, dispatcher, envelope) {
  * @effects: [transcript.write]
  * @errors: []
  */
-pub fn handoff_dispatch(harness: Harness, handoff_payload, decision = nil, options = nil) {
+pub fn handoff_dispatch(
+  harness: Harness,
+  handoff_payload: dict,
+  decision: any = nil,
+  options: any = nil,
+) {
   const handoff_value = handoff(handoff_payload)
   const selected = decision ?? handoff_value?.route_decision
   if selected == nil {

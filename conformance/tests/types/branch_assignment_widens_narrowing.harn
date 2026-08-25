@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn maybe_reset(x: string?, reset: bool) -> string {
     if x != nil {
       if reset {

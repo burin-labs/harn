@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const plain = harness.net.server_tls_plain()
   assert_eq(plain.mode, "plain")
   assert_eq(plain.scheme, "http")

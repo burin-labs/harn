@@ -92,7 +92,7 @@ fn __shell(tools: HarnessTools, repo_dir: string, command: string) {
   return command_run(tools, {mode: "shell", command: command, cwd: repo_dir})
 }
 
-fn __lines(text) -> list<string> {
+fn __lines(text: string?) -> list<string> {
   const value = trim(to_string(text ?? ""))
   return if value == "" {
     []

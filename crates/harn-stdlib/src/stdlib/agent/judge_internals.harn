@@ -83,7 +83,7 @@ pub fn __judge_emit_decision(
   agent: HarnessAgent,
   session_id: string,
   iteration: int,
-  verdict,
+  verdict: dict,
 ) -> nil {
   agent_emit_event(
     agent,
@@ -348,7 +348,7 @@ const __JUDGE_VERDICT_JSON_JUNK = ["\"", ",", "{", "}", ":", "\\"]
  * @api_stability: internal
  * @example: __judge_verdict_token("continue\",,")
  */
-pub fn __judge_verdict_token(raw_verdict) {
+pub fn __judge_verdict_token(raw_verdict: string?) {
   const normalized = lowercase(trim(to_string(raw_verdict ?? "")))
   let cut = len(normalized)
   for junk in __JUDGE_VERDICT_JSON_JUNK {
@@ -384,7 +384,7 @@ const __JUDGE_TOKEN_PUNCT = ".,;:!?\"'`*_-)("
  * @api_stability: internal
  * @example: __judge_leading_word("done.")
  */
-pub fn __judge_leading_word(normalized) {
+pub fn __judge_leading_word(normalized: string) {
   let first = ""
   for piece in normalized.split(" ") {
     if first == "" && trim(piece) != "" {
@@ -422,7 +422,12 @@ pub fn __judge_leading_word(normalized) {
  * @api_stability: internal
  * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
  */
-pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
+pub fn __judge_classify_verdict(
+  raw_verdict: string?,
+  pass_tokens: any,
+  feedback_candidates: list,
+  feedback_default: any,
+) {
   const normalized = __judge_leading_word(__judge_verdict_token(raw_verdict))
   if contains(pass_tokens, normalized) {
     return {vetoed: false, verdict: normalized}
@@ -465,7 +470,7 @@ pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, f
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_classify_writes(writes, classify_write) {
+pub fn __completion_gate_classify_writes(writes: list?, classify_write: any) {
   let source = 0
   let cosmetic = 0
   let other = 0
@@ -498,7 +503,7 @@ pub fn __completion_gate_classify_writes(writes, classify_write) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_combine_verify(verify, veto_combine) {
+pub fn __completion_gate_combine_verify(verify: any, veto_combine: any) {
   if verify == nil {
     return nil
   }
@@ -583,7 +588,7 @@ pub const COMPLETION_JUDGE_GAP_CLASSES = [
  * @api_stability: internal
  * @example: __completion_judge_gap_class("Failed_Verification")
  */
-pub fn __completion_judge_gap_class(value) -> CompletionJudgeGapClass {
+pub fn __completion_judge_gap_class(value: string?) -> CompletionJudgeGapClass {
   const named = lowercase(trim(to_string(value ?? "")))
   if named == "missing_artifact"
     || named == "unmet_manner_clause"
@@ -606,7 +611,7 @@ pub fn __completion_judge_gap_class(value) -> CompletionJudgeGapClass {
  * @api_stability: internal
  * @example: __completion_verification_state_read({observed: "passed"})
  */
-pub fn __completion_verification_state_read(value) -> CompletionVerificationState? {
+pub fn __completion_verification_state_read(value: unknown) -> CompletionVerificationState? {
   if type_of(value) != "dict" {
     return nil
   }
@@ -642,7 +647,7 @@ pub fn __completion_verification_state_read(value) -> CompletionVerificationStat
  * @api_stability: internal
  * @example: __completion_verification_evidence_index([])
  */
-pub fn __completion_verification_evidence_index(selected_actions) -> int? {
+pub fn __completion_verification_evidence_index(selected_actions: list) -> int? {
   let index = nil
   for selection in selected_actions {
     if selection?.evidence_role == "verification" {
@@ -740,7 +745,12 @@ pub fn __completion_gate_feedback_keys() {
  * rules pass non-empty values; for the other rules the defaults carry no tokens, so
  * the substitutions are no-ops.
  */
-fn __completion_gate_render_feedback(templates, key, findings, attempts = "") {
+fn __completion_gate_render_feedback(
+  templates: any,
+  key: any,
+  findings: string,
+  attempts: string = "",
+) {
   return replace(
     replace(to_string(templates[key] ?? ""), "{findings}", findings),
     "{attempts}",
@@ -749,7 +759,7 @@ fn __completion_gate_render_feedback(templates, key, findings, attempts = "") {
 }
 
 /** Build the strict red-verifier verdict, including opt-in streak escalation. */
-fn __completion_gate_red_verdict(derived, templates, detail) {
+fn __completion_gate_red_verdict(derived: dict, templates: any, detail: string) {
   if derived?.consecutive_failed_after_write == nil {
     return {
       ok: false,
@@ -811,7 +821,7 @@ fn __completion_gate_red_verdict(derived, templates, detail) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
+pub fn __completion_gate_ladder(derived: dict, feedback_templates: dict? = nil) {
   const templates = __COMPLETION_GATE_FEEDBACK_DEFAULTS + (feedback_templates ?? {})
   const source_known = derived?.source_known ?? false
   const source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
@@ -897,7 +907,7 @@ pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes) {
+pub fn __completion_gate_apply_budget(verdict: dict, vetoes_used: int, max_vetoes: int) {
   if verdict?.ok ?? false {
     return {verdict: verdict, charge: false}
   }

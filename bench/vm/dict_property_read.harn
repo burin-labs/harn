@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const record = {hot: 7, cold: 2, nested: {value: 3}}
   let i = 0
   let total = 0

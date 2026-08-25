@@ -11,7 +11,7 @@ fn _fixture_request(fs: HarnessFs) {
   return json_parse(raw)
 }
 
-pipeline test_smoke_dry_run_emits_receipt(harness: Harness, task) {
+pipeline test_smoke_dry_run_emits_receipt(harness: Harness, task: unknown) {
   const request = _fixture_request(harness.fs)
   const receipt = review_pr(harness.agent, request, default_policy(), nil)
   assert_eq(receipt.persona, "review_captain")

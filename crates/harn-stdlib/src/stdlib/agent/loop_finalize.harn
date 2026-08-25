@@ -11,7 +11,12 @@ import "std/agent/loop_turn_scope"
  * assembled by loop_run: it keeps this boundary explicit without making the
  * Harn module depend on a second, parallel result schema.
  */
-pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) -> dict {
+pub fn __agent_loop_finalize_session(
+  harness: Harness,
+  message: any,
+  session: dict,
+  state: dict,
+) -> dict {
   let final_status = state.final_status
   let stop_reason = state.stop_reason
   let budget_exhausted_emitted = state.budget_exhausted_emitted
@@ -101,10 +106,10 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
 
 pub fn __agent_loop_project_final_result(
   harness: Harness,
-  result,
-  message,
-  session,
-  state,
+  result: any,
+  message: any,
+  session: dict,
+  state: dict,
 ) -> dict {
   const opts = state.opts
   const final_status = state.final_status

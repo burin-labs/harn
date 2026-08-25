@@ -19,7 +19,7 @@ fn text_paradigm(llm: HarnessLlm) {
  * depth>=4 with NO tool calls this turn: the legacy narration-loop framing is
  * correct (the model is churning pure prose).
  */
-pipeline test_depth4_toolless_keeps_narration_framing(harness: Harness, _task) {
+pipeline test_depth4_toolless_keeps_narration_framing(harness: Harness, _task: unknown) {
   const msg = __progress_nudge_text(4, true, text_paradigm(harness.llm), false)
   assert(
     contains(msg, "narration loop") && contains(msg, "Do not restate the plan"),
@@ -32,7 +32,7 @@ pipeline test_depth4_toolless_keeps_narration_framing(harness: Harness, _task) {
  * accusation must be GONE (it is acting, not narrating), and the nudge must steer
  * toward a DIFFERENT change instead.
  */
-pipeline test_depth4_with_tool_calls_drops_narration_framing(harness: Harness, _task) {
+pipeline test_depth4_with_tool_calls_drops_narration_framing(harness: Harness, _task: unknown) {
   const msg = __progress_nudge_text(4, true, text_paradigm(harness.llm), true)
   assert(
     !contains(msg, "narration loop"),
@@ -52,7 +52,7 @@ pipeline test_depth4_with_tool_calls_drops_narration_framing(harness: Harness, _
  * Below depth 4 the copy is unchanged regardless of the new flag (no narration
  * accusation at depth 2/3 to begin with).
  */
-pipeline test_lower_depths_unchanged(harness: Harness, _task) {
+pipeline test_lower_depths_unchanged(harness: Harness, _task: unknown) {
   const d3 = __progress_nudge_text(3, true, text_paradigm(harness.llm), true)
   assert(contains(d3, "Still no progress after"), "depth 3 copy unchanged; got: ${d3}")
   assert(!contains(d3, "narration loop"), "depth 3 never asserted a narration loop; got: ${d3}")

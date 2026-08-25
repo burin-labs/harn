@@ -18,14 +18,14 @@
 import { web_fetch, web_parse_html } from "std/web"
 import "./provider_catalog_refresh.harn"
 
-fn __row_value(row, index) {
+fn __row_value(row: any, index: any) {
   if index == nil {
     return nil
   }
   return row[index]
 }
 
-fn __mtok_from_string(text) {
+fn __mtok_from_string(text: any) {
   if text == nil {
     return nil
   }
@@ -36,7 +36,7 @@ fn __mtok_from_string(text) {
   return to_float(stripped)
 }
 
-fn __context_window_from_string(text) {
+fn __context_window_from_string(text: any) {
   if text == nil {
     return nil
   }
@@ -409,7 +409,7 @@ pub fn artificialanalysis_adapter(harness: Harness, env: dict, config: dict) -> 
   }
 }
 
-fn __aa_extract_benchmarks(doc) {
+fn __aa_extract_benchmarks(doc: any) {
   // The AA page uses data-* attributes on the model overview block.
   // We accept partial matches (any single numeric attribute is enough)
   // so the adapter still produces observations when only one of the
@@ -433,7 +433,7 @@ fn __aa_extract_benchmarks(doc) {
   return out
 }
 
-fn __aa_to_float(text) {
+fn __aa_to_float(text: any) {
   if text == nil {
     return nil
   }

@@ -7,25 +7,25 @@ import { flag_value } from "../git_base.harn"
 
 // --- heading_version / is_all_digits -------------------------------------
 @test
-pipeline test_heading_version_basic(harness: Harness, task) {
+pipeline test_heading_version_basic(harness: Harness, task: unknown) {
   assert_eq(heading_version("## v0.8.72"), "0.8.72")
   assert_eq(heading_version("## v0.9.0-rc.1"), "0.9.0-rc.1")
 }
 
 @test
-pipeline test_heading_version_multidigit(harness: Harness, task) {
+pipeline test_heading_version_multidigit(harness: Harness, task: unknown) {
   assert_eq(heading_version("## v12.345.6"), "12.345.6")
 }
 
 @test
-pipeline test_heading_version_not_a_heading(harness: Harness, task) {
+pipeline test_heading_version_not_a_heading(harness: Harness, task: unknown) {
   assert_eq(heading_version("### Added"), nil)
   assert_eq(heading_version("## Unreleased"), nil)
   assert_eq(heading_version("regular line"), nil)
 }
 
 @test
-pipeline test_heading_version_rejects_suffix(harness: Harness, task) {
+pipeline test_heading_version_rejects_suffix(harness: Harness, task: unknown) {
   // Anchored to the whole line: trailing content disqualifies it.
   assert_eq(heading_version("## v1.2.3 (beta)"), nil)
   assert_eq(heading_version("## v1.2"), nil)
@@ -34,13 +34,13 @@ pipeline test_heading_version_rejects_suffix(harness: Harness, task) {
 }
 
 @test
-pipeline test_heading_version_rejects_non_digits(harness: Harness, task) {
+pipeline test_heading_version_rejects_non_digits(harness: Harness, task: unknown) {
   assert_eq(heading_version("## v1.2.x"), nil)
   assert_eq(heading_version("## va.b.c"), nil)
 }
 
 @test
-pipeline test_is_all_digits(harness: Harness, task) {
+pipeline test_is_all_digits(harness: Harness, task: unknown) {
   assert_eq(is_all_digits("0123456789"), true)
   assert_eq(is_all_digits("007"), true)
   assert_eq(is_all_digits(""), false)
@@ -50,19 +50,19 @@ pipeline test_is_all_digits(harness: Harness, task) {
 
 // --- version_headings ----------------------------------------------------
 @test
-pipeline test_version_headings_in_order(harness: Harness, task) {
+pipeline test_version_headings_in_order(harness: Harness, task: unknown) {
   const text = "# CL\n\n## v2.0.0\n\nbody\n\n## v1.5.0\n\nbody2\n\n## Unreleased\n\nx\n"
   assert_eq(version_headings(text), ["2.0.0", "1.5.0"])
 }
 
 @test
-pipeline test_version_headings_empty(harness: Harness, task) {
+pipeline test_version_headings_empty(harness: Harness, task: unknown) {
   assert_eq(version_headings("no headings here\n### Added\n"), [])
 }
 
 // --- is_section_boundary -------------------------------------------------
 @test
-pipeline test_is_section_boundary(harness: Harness, task) {
+pipeline test_is_section_boundary(harness: Harness, task: unknown) {
   assert_eq(is_section_boundary("## v1.0.0"), true)
   assert_eq(is_section_boundary("## Unreleased"), true)
   // Subheadings are NOT boundaries (third char is '#', not space).
@@ -73,7 +73,7 @@ pipeline test_is_section_boundary(harness: Harness, task) {
 
 // --- section_body --------------------------------------------------------
 @test
-pipeline test_section_body_basic(harness: Harness, task) {
+pipeline test_section_body_basic(harness: Harness, task: unknown) {
   // Body is everything after the heading's newline up to the next "## " line,
   // each retained line keeping its trailing newline.
   const text = "## v1.0.0\n\nfirst\nsecond\n\n## v0.9.0\n\nother\n"
@@ -81,13 +81,13 @@ pipeline test_section_body_basic(harness: Harness, task) {
 }
 
 @test
-pipeline test_section_body_includes_subheadings(harness: Harness, task) {
+pipeline test_section_body_includes_subheadings(harness: Harness, task: unknown) {
   const text = "## v1.0.0\n\n### Added\n\n- x\n\n## v0.9.0\n\ny\n"
   assert_eq(section_body(text, "1.0.0"), "\n### Added\n\n- x\n\n")
 }
 
 @test
-pipeline test_section_body_last_section_no_trailing_newline(harness: Harness, task) {
+pipeline test_section_body_last_section_no_trailing_newline(harness: Harness, task: unknown) {
   // Final section, end-of-text boundary, source has no trailing newline:
   // the last body line carries no extra newline.
   const text = "## v1.0.0\n\ntail line"
@@ -95,7 +95,7 @@ pipeline test_section_body_last_section_no_trailing_newline(harness: Harness, ta
 }
 
 @test
-pipeline test_section_body_last_section_with_trailing_newline(harness: Harness, task) {
+pipeline test_section_body_last_section_with_trailing_newline(harness: Harness, task: unknown) {
   // Final section, end-of-text, source ends with a newline: the trailing
   // empty split element contributes nothing, matching the regex capture.
   const text = "## v1.0.0\n\ntail line\n"
@@ -103,18 +103,18 @@ pipeline test_section_body_last_section_with_trailing_newline(harness: Harness, 
 }
 
 @test
-pipeline test_section_body_missing(harness: Harness, task) {
+pipeline test_section_body_missing(harness: Harness, task: unknown) {
   assert_eq(section_body("## v1.0.0\n\nx\n", "9.9.9"), nil)
 }
 
 @test
-pipeline test_section_body_heading_is_final_line(harness: Harness, task) {
+pipeline test_section_body_heading_is_final_line(harness: Harness, task: unknown) {
   // A heading with no following newline can't match Python's "^## v..\n".
   assert_eq(section_body("intro\n## v1.0.0", "1.0.0"), nil)
 }
 
 @test
-pipeline test_section_body_empty_body(harness: Harness, task) {
+pipeline test_section_body_empty_body(harness: Harness, task: unknown) {
   // Heading immediately followed by the next heading: empty body.
   const text = "## v1.0.0\n## v0.9.0\n\nx\n"
   assert_eq(section_body(text, "1.0.0"), "")
@@ -122,7 +122,7 @@ pipeline test_section_body_empty_body(harness: Harness, task) {
 
 // --- section_bodies (single-pass map; must equal section_body) -----------
 @test
-pipeline test_section_bodies_matches_section_body(harness: Harness, task) {
+pipeline test_section_bodies_matches_section_body(harness: Harness, task: unknown) {
   const text = "# CL\n\n## v2.0.0\n\nbody A\n\n### Fixed\n\n- f\n\n## v1.0.0\n\nbody B\n"
   const bodies = section_bodies(text)
   assert_eq(bodies["2.0.0"], section_body(text, "2.0.0"))
@@ -130,7 +130,7 @@ pipeline test_section_bodies_matches_section_body(harness: Harness, task) {
 }
 
 @test
-pipeline test_section_bodies_first_occurrence_wins(harness: Harness, task) {
+pipeline test_section_bodies_first_occurrence_wins(harness: Harness, task: unknown) {
   // re.search returns the first match; the map keeps the first occurrence.
   const text = "## v1.0.0\n\nfirst\n\n## v1.0.0\n\nsecond\n"
   assert_eq(section_bodies(text)["1.0.0"], "\nfirst\n\n")
@@ -138,7 +138,7 @@ pipeline test_section_bodies_first_occurrence_wins(harness: Harness, task) {
 
 // --- compute_drift -------------------------------------------------------
 @test
-pipeline test_compute_drift_flags_changed_published(harness: Harness, task) {
+pipeline test_compute_drift_flags_changed_published(harness: Harness, task: unknown) {
   const head = "## v2.0.0\n\nNEW body\n\n## v1.0.0\n\nuntagged\n"
   const base = "## v2.0.0\n\nOLD body\n\n## v1.0.0\n\nuntagged\n"
   // v2.0.0 tagged + changed -> drift; v1.0.0 untagged -> ignored.
@@ -146,7 +146,7 @@ pipeline test_compute_drift_flags_changed_published(harness: Harness, task) {
 }
 
 @test
-pipeline test_compute_drift_ignores_untagged_change(harness: Harness, task) {
+pipeline test_compute_drift_ignores_untagged_change(harness: Harness, task: unknown) {
   const head = "## v2.0.0\n\nbody\n\n## v1.0.0\n\nCHANGED\n"
   const base = "## v2.0.0\n\nbody\n\n## v1.0.0\n\noriginal\n"
   // Only v1.0.0 changed, but it has no tag -> not flagged.
@@ -154,13 +154,13 @@ pipeline test_compute_drift_ignores_untagged_change(harness: Harness, task) {
 }
 
 @test
-pipeline test_compute_drift_ignores_unchanged(harness: Harness, task) {
+pipeline test_compute_drift_ignores_unchanged(harness: Harness, task: unknown) {
   const text = "## v2.0.0\n\nsame\n\n## v1.0.0\n\nsame too\n"
   assert_eq(compute_drift(text, text, ["v2.0.0", "v1.0.0"]), [])
 }
 
 @test
-pipeline test_compute_drift_section_only_in_head(harness: Harness, task) {
+pipeline test_compute_drift_section_only_in_head(harness: Harness, task: unknown) {
   // A published version present in HEAD but absent in base is skipped
   // (base_body == nil), matching Python's `continue`.
   const head = "## v2.0.0\n\nbody\n"
@@ -169,7 +169,7 @@ pipeline test_compute_drift_section_only_in_head(harness: Harness, task) {
 }
 
 @test
-pipeline test_compute_drift_multiple(harness: Harness, task) {
+pipeline test_compute_drift_multiple(harness: Harness, task: unknown) {
   const head = "## v3.0.0\n\nA2\n\n## v2.0.0\n\nB\n\n## v1.0.0\n\nC2\n"
   const base = "## v3.0.0\n\nA1\n\n## v2.0.0\n\nB\n\n## v1.0.0\n\nC1\n"
   // v3 and v1 changed + tagged; v2 unchanged. Document order preserved.
@@ -178,59 +178,59 @@ pipeline test_compute_drift_multiple(harness: Harness, task) {
 
 // --- has_bypass_trailer --------------------------------------------------
 @test
-pipeline test_has_bypass_trailer_present(harness: Harness, task) {
+pipeline test_has_bypass_trailer_present(harness: Harness, task: unknown) {
   const msg = "subject\n\nbody\nAllow-Retroactive-Changelog: fixing a broken link\n"
   assert_eq(has_bypass_trailer(msg), true)
 }
 
 @test
-pipeline test_has_bypass_trailer_absent(harness: Harness, task) {
+pipeline test_has_bypass_trailer_absent(harness: Harness, task: unknown) {
   assert_eq(has_bypass_trailer("subject\n\njust a normal commit\n"), false)
 }
 
 @test
-pipeline test_has_bypass_trailer_requires_value(harness: Harness, task) {
+pipeline test_has_bypass_trailer_requires_value(harness: Harness, task: unknown) {
   // Trailer key with only whitespace after the colon does not count.
   assert_eq(has_bypass_trailer("Allow-Retroactive-Changelog:   \n"), false)
 }
 
 @test
-pipeline test_has_bypass_trailer_must_be_line_start(harness: Harness, task) {
+pipeline test_has_bypass_trailer_must_be_line_start(harness: Harness, task: unknown) {
   // Indented / inline mentions do not match the line-anchored regex.
   assert_eq(has_bypass_trailer("  Allow-Retroactive-Changelog: x\n"), false)
   assert_eq(has_bypass_trailer("see Allow-Retroactive-Changelog: x\n"), false)
 }
 
 @test
-pipeline test_has_bypass_trailer_value_after_newlines(harness: Harness, task) {
+pipeline test_has_bypass_trailer_value_after_newlines(harness: Harness, task: unknown) {
   // Python's `\s*\S` spans newlines: a value on a later line still matches.
   assert_eq(has_bypass_trailer("Allow-Retroactive-Changelog:\n\nreason here\n"), true)
 }
 
 // --- flag_value ----------------------------------------------------------
 @test
-pipeline test_flag_value_space_form(harness: Harness, task) {
+pipeline test_flag_value_space_form(harness: Harness, task: unknown) {
   assert_eq(flag_value(["--base", "abc123"], "--base"), "abc123")
 }
 
 @test
-pipeline test_flag_value_equals_form(harness: Harness, task) {
+pipeline test_flag_value_equals_form(harness: Harness, task: unknown) {
   assert_eq(flag_value(["--base=abc123"], "--base"), "abc123")
 }
 
 @test
-pipeline test_flag_value_absent(harness: Harness, task) {
+pipeline test_flag_value_absent(harness: Harness, task: unknown) {
   assert_eq(flag_value(["--other", "x"], "--base"), nil)
 }
 
 @test
-pipeline test_flag_value_trailing_flag_no_value(harness: Harness, task) {
+pipeline test_flag_value_trailing_flag_no_value(harness: Harness, task: unknown) {
   assert_eq(flag_value(["--base"], "--base"), nil)
 }
 
 // --- drift_report --------------------------------------------------------
 @test
-pipeline test_drift_report_shape(harness: Harness, task) {
+pipeline test_drift_report_shape(harness: Harness, task: unknown) {
   const report = drift_report("BASEREF", ["2.0.0", "1.0.0"])
   const lines = report.split("\n")
   assert_eq(

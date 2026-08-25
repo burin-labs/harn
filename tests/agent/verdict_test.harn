@@ -16,7 +16,7 @@ import {
   verdict_is_pass,
 } from "std/agent/verdict"
 
-pipeline test_fail_disposition(harness: Harness, _task) {
+pipeline test_fail_disposition(harness: Harness, _task: unknown) {
   const v = verdict_fail("evidence_red", "2 tests failing")
   assert_eq(verdict_disposition(v), "fail")
   assert_eq(verdict_is_pass(v), false)
@@ -32,7 +32,7 @@ pipeline test_fail_disposition(harness: Harness, _task) {
   }
 }
 
-pipeline test_indeterminate_disposition(harness: Harness, _task) {
+pipeline test_indeterminate_disposition(harness: Harness, _task: unknown) {
   const v = verdict_indeterminate("judge_unavailable", "model 503")
   assert_eq(verdict_disposition(v), "indeterminate")
   assert_eq(verdict_is_indeterminate(v), true)
@@ -48,7 +48,7 @@ pipeline test_indeterminate_disposition(harness: Harness, _task) {
   }
 }
 
-pipeline test_fail_and_indeterminate_are_distinct_from_pass(harness: Harness, _task) {
+pipeline test_fail_and_indeterminate_are_distinct_from_pass(harness: Harness, _task: unknown) {
   // The class-kill in miniature: neither the negative nor the undecided value
   // ever reports "pass". A pass is obtainable only through host issuance.
   assert_eq(verdict_disposition(verdict_fail("x")), "fail")

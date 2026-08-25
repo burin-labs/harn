@@ -5,7 +5,7 @@
  * `provider_capabilities_install` builtin so the test is self-contained
  * (harn.toml is not loaded by the conformance runner).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Baseline: unknown proxied provider has no capabilities.
   harness.llm.provider_capabilities_clear()
   const baseline = harness.llm.provider_capabilities("my-proxy", "opaque-id-v2")

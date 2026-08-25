@@ -2,7 +2,7 @@
  * read_file_result returns Result.Ok(content) on success and
  * Result.Err({error, kind, message}) on failure (instead of throwing).
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Write a known file, then read it back via read_file_result.
   const fixture = path_join(harness.fs.workspace_temp_dir(), "rfr_fixture.txt")
   harness.fs.write_text(fixture, "hello result")

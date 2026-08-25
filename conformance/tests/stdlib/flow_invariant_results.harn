@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Simple verdicts
   const allow = flow_invariant_allow()
   harness.stdio.log(flow_invariant_kind(allow))

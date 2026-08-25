@@ -1220,7 +1220,7 @@ pub fn run_help(harness: Harness, binary: string) -> int {
         std::fs::write(
             &script,
             r"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(json_stringify({task: task}))
 }
 ",

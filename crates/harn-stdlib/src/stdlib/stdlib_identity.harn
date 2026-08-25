@@ -96,7 +96,7 @@ fn __scope_claims(node: dict, path: string) -> dict {
   return {issues: issues, scopes: scopes}
 }
 
-fn __entry(node, path: string) -> dict {
+fn __entry(node: dict, path: string) -> dict {
   let issues = []
   if type_of(node) != "dict" {
     return {issues: [__issue("actor_chain.node_type", path, "node must be a dict")], entry: nil}
@@ -166,7 +166,7 @@ fn __with_roles(entries: list<dict>) -> list<ActorChainSubject> {
   return subjects
 }
 
-fn __report(issues: list<ActorChainIssue>, entries: list<dict>, may_act) -> ActorChainReport {
+fn __report(issues: list<ActorChainIssue>, entries: list<dict>, may_act: any) -> ActorChainReport {
   const subjects = __with_roles(entries)
   let current = nil
   let origin = nil
@@ -221,7 +221,7 @@ pub fn actor_chain_subject_parts(subject: string) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn actor_chain_report(chain) -> ActorChainReport {
+pub fn actor_chain_report(chain: dict) -> ActorChainReport {
   let issues = []
   let entries = []
   if type_of(chain) != "dict" {
@@ -258,7 +258,7 @@ pub fn actor_chain_report(chain) -> ActorChainReport {
  * @effects: []
  * @errors: [TypeError, ValueError]
  */
-pub fn actor_chain_require(chain) -> ActorChainReport {
+pub fn actor_chain_require(chain: dict) -> ActorChainReport {
   const report = actor_chain_report(chain)
   if report.ok {
     return report
@@ -276,7 +276,7 @@ pub fn actor_chain_require(chain) -> ActorChainReport {
  * @effects: []
  * @errors: [TypeError, ValueError]
  */
-pub fn actor_chain_subjects(chain) -> list<ActorChainSubject> {
+pub fn actor_chain_subjects(chain: dict) -> list<ActorChainSubject> {
   return actor_chain_require(chain).subjects
 }
 
@@ -286,7 +286,7 @@ pub fn actor_chain_subjects(chain) -> list<ActorChainSubject> {
  * @effects: []
  * @errors: [TypeError, ValueError]
  */
-pub fn actor_chain_summary(chain) -> dict {
+pub fn actor_chain_summary(chain: dict) -> dict {
   const report = actor_chain_require(chain)
   let summary = {
     subjects: report.subjects,
@@ -321,7 +321,7 @@ fn __subject_names(subjects: list<ActorChainSubject>) -> list<string> {
  * @effects: []
  * @errors: [TypeError, ValueError]
  */
-pub fn actor_chain_format(chain, options: ActorChainFormatOptions = {}) -> string {
+pub fn actor_chain_format(chain: dict, options: ActorChainFormatOptions = {}) -> string {
   const report = actor_chain_require(chain)
   if report.depth == 0 {
     return ""

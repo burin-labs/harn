@@ -39,7 +39,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
 @test
 pipeline test_workspace_packages_from_metadata_uses_cargo_workspace_members(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const meta = {
     workspace_members: ["id-cli", "id-vm"],
@@ -56,7 +56,10 @@ pipeline test_workspace_packages_from_metadata_uses_cargo_workspace_members(
 }
 
 @test
-pipeline test_filter_for_paths_preserves_binary_and_package_mapping(harness: Harness, task) {
+pipeline test_filter_for_paths_preserves_binary_and_package_mapping(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -94,7 +97,7 @@ pipeline test_filter_for_paths_preserves_binary_and_package_mapping(harness: Har
 // companion dir — maps to `binary(<dir>)`; a shared helper dir with no `main.rs`
 // falls back to the package.
 @test
-pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task) {
+pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -126,7 +129,7 @@ pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task) {
 }
 
 @test
-pipeline test_nextest_filter_for_paths_dedupes_in_order(harness: Harness, task) {
+pipeline test_nextest_filter_for_paths_dedupes_in_order(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->

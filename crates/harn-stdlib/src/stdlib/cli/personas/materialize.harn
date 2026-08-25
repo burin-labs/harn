@@ -3,7 +3,7 @@
 // this script keeps blueprint validation and policy lowering in Harn.
 import { persona_blueprint_compile } from "std/personas/compiler"
 
-fn __write(stdio: HarnessStdio, ok: bool, lowering = nil, error = nil) {
+fn __write(stdio: HarnessStdio, ok: bool, lowering: any = nil, error: any = nil) {
   stdio.println(json_stringify({ok: ok, lowering: lowering, error: error}))
 }
 

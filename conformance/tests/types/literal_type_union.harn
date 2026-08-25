@@ -6,7 +6,7 @@ type Verdict = "pass" | "fail" | "unclear"
 
 type Score = 0 | 1 | 2
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Assignable: a literal flows into its base-typed slot.
   const v: Verdict = "pass"
   const s: Score = 2

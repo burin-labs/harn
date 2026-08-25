@@ -223,7 +223,7 @@ fn test_launch_and_run() {
 
     let (_dir, file) = write_temp_program(
         "test.harn",
-        "pipeline test(harness: Harness, task) { harness.stdio.log(42) }",
+        "pipeline test(harness: Harness, task: unknown) { harness.stdio.log(42) }",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -268,7 +268,7 @@ fn test_parallel_runs_under_debugger_runtime() {
     let responses = run_debug_program(
         "parallel_debugger_runtime.harn",
         r"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const results = parallel 3 { i -> i * 10 }
   harness.stdio.log(results)
 }
@@ -294,7 +294,7 @@ fn test_pool_workers_run_under_debugger_runtime() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "dap-pool-runtime", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
@@ -491,7 +491,7 @@ fn test_source_reads_prompt_template_from_disk() {
 
 #[test]
 fn test_source_decodes_file_uri_paths() {
-    let (dir, file) = write_temp_program("space name.harn", "pipeline test(task) {}\n");
+    let (dir, file) = write_temp_program("space name.harn", "pipeline test(task: unknown) {}\n");
 
     for (seq, uri) in [file_uri(&file), localhost_file_uri(&file)]
         .into_iter()
@@ -505,7 +505,7 @@ fn test_source_decodes_file_uri_paths() {
         assert_eq!(responses.len(), 1);
         assert_eq!(responses[0].success, Some(true), "{responses:?}");
         let body = responses[0].body.as_ref().unwrap();
-        assert_eq!(body["content"], "pipeline test(task) {}\n");
+        assert_eq!(body["content"], "pipeline test(task: unknown) {}\n");
     }
     drop(dir);
 }
@@ -658,7 +658,7 @@ fn test_breakpoint_stop() {
 
     let (_dir, file) = write_temp_program(
         "test_bp.harn",
-        "pipeline test(harness: Harness, task) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}",
+        "pipeline test(harness: Harness, task: unknown) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -707,7 +707,7 @@ fn test_clearing_breakpoints_updates_live_vm() {
 
     let (_dir, file) = write_temp_program(
         "clear_breakpoints.harn",
-        "pipeline test(harness: Harness, task) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}\n",
+        "pipeline test(harness: Harness, task: unknown) {\n  const x = 1\n  const y = 2\n  harness.stdio.log(x + y)\n}\n",
     );
     let path = file.to_string_lossy().to_string();
 
@@ -760,7 +760,7 @@ fn test_pause_interrupts_running_vm() {
 
     let (_dir, file) = write_temp_program(
         "test_pause.harn",
-        "pipeline test(task) {\n  const x = 1\n  const y = 2\n  const z = 3\n}",
+        "pipeline test(task: unknown) {\n  const x = 1\n  const y = 2\n  const z = 3\n}",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -805,7 +805,7 @@ fn test_completions_returns_frame_scope_and_builtins() {
 
     let (_dir, file) = write_temp_program(
         "completions.harn",
-        "pipeline t(harness: Harness, task) { const local_name = 1\nharness.stdio.log(local_name) }",
+        "pipeline t(harness: Harness, task: unknown) { const local_name = 1\nharness.stdio.log(local_name) }",
     );
     dbg.handle_message(make_request(1, "initialize", None));
     dbg.handle_message(make_request(
@@ -1061,7 +1061,7 @@ fn test_function_breakpoint_fires_on_matching_call() {
 
     let (_dir, file) = write_temp_program(
         "fn_bp.harn",
-        "fn helper() -> int { return 42 }\npipeline t(harness: Harness, task) { const x = helper()\n harness.stdio.log(x) }",
+        "fn helper() -> int { return 42 }\npipeline t(harness: Harness, task: unknown) { const x = helper()\n harness.stdio.log(x) }",
     );
 
     dbg.handle_message(make_request(1, "initialize", None));
@@ -1103,22 +1103,22 @@ fn test_step_over_step_stops_on_next_step_boundary() {
         "step_boundary.harn",
         r#"
 @persona(name: "merge_captain")
-fn merge_captain(stdio: HarnessStdio, ctx) {
+fn merge_captain(stdio: HarnessStdio, ctx: string) {
   first_step(stdio, ctx)
   second_step(stdio, ctx)
 }
 
 @step(name: "first")
-fn first_step(stdio: HarnessStdio, ctx) {
+fn first_step(stdio: HarnessStdio, ctx: string) {
   stdio.log(ctx)
 }
 
 @step(name: "second")
-fn second_step(stdio: HarnessStdio, ctx) {
+fn second_step(stdio: HarnessStdio, ctx: string) {
   stdio.log(ctx)
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   merge_captain(harness.stdio, "issue")
 }
 "#,

@@ -9,7 +9,7 @@ import "std/triggers"
  * matches `pool.submit({backpressure: bp.queue(1, "drop_newest")})` —
  * composing triggers with pools shouldn't introduce a parallel audit path.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const bp = Backpressure()
   const gate = harness.runtime.channel(nil, 1)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"

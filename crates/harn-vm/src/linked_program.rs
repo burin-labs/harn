@@ -125,11 +125,19 @@ pub fn link_program(
                 ))
             })?;
         let compile_path = runtime_compile_path(&path);
-        let full = crate::module_artifact::compile_module_artifact_from_source_with_context(
-            &compile_path,
-            &parsed.source,
-            &compilation_context,
-        )
+        let full = if harn_modules::stdlib_module_name(&path).is_some() {
+            crate::module_artifact::compile_embedded_stdlib_module_artifact_from_source_with_context(
+                &compile_path,
+                &parsed.source,
+                &compilation_context,
+            )
+        } else {
+            crate::module_artifact::compile_module_artifact_from_source_with_context(
+                &compile_path,
+                &parsed.source,
+                &compilation_context,
+            )
+        }
         .map_err(|error| {
             LinkedProgramError::invalid(format!(
                 "module compile failed for {}: {error}",
@@ -566,6 +574,7 @@ impl std::error::Error for LinkedProgramError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module_artifact::ModuleProvenance;
     use std::fs;
 
     #[test]
@@ -574,6 +583,26 @@ mod tests {
         identity.codegen_fingerprint.push_str("-different");
         let error = identity.validate_current().unwrap_err();
         assert_eq!(error.code, "linked_program.incompatible");
+    }
+
+    #[test]
+    fn closed_link_preserves_embedded_stdlib_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.harn");
+        fs::write(
+            &entry,
+            r#"
+            import { ansi_enabled } from "std/ansi"
+            fn main() { ansi_enabled() }
+            "#,
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("embedded stdlib link succeeds");
+        assert_eq!(
+            linked.modules[Path::new("<std>/ansi")].provenance,
+            ModuleProvenance::EmbeddedStdlib
+        );
     }
 
     #[test]

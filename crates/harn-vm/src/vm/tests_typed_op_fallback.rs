@@ -65,7 +65,7 @@ fn typed_param_fed_dynamic_float_is_rejected() {
     // rely on `MulInt` falling back. The parameter guard now matches the
     // kernel rule, so the float never reaches the body.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   fn f(n: int) { return n * 2 }
   const cell = harness.runtime.shared_cell("k", 2.5)
   harness.stdio.log("${f(harness.runtime.shared_get(cell))}")
@@ -87,7 +87,7 @@ fn annotated_binding_initializer_is_rejected_not_absorbed() {
     // Both builds must agree on the rejection: the optimizer must not be the
     // difference between a caught and an uncaught type error.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell("k", 2.5)
   const x: int = harness.runtime.shared_get(cell)
   harness.stdio.log("${x + 1}")
@@ -107,7 +107,7 @@ fn annotated_mutable_binding_is_checked_like_an_immutable_one() {
     // for typed-opcode specialization; the binding check is what now makes that
     // trust sound rather than merely convenient.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell("k", 4.5)
   let x: int = harness.runtime.shared_get(cell)
   harness.stdio.log("${x - 1}")
@@ -126,7 +126,7 @@ fn typed_comparison_fed_dynamic_float_is_rejected() {
     // argument to an `int` parameter is rejected at the call, so `LessInt`
     // never sees a drifted operand from this route.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   fn under(n: int) { return n < 3 }
   const cell = harness.runtime.shared_cell("k", 2.5)
   harness.stdio.log("${under(harness.runtime.shared_get(cell))}")
@@ -150,7 +150,7 @@ fn typed_string_equality_fed_dynamic_int_falls_back() {
     // written, and a declared `string` parameter rejects it at the call — but an
     // *inferred* type fact is still only a guess, which is what this guards.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell("k", 7)
   let s = "7"
   s = harness.runtime.shared_get(cell)
@@ -167,7 +167,7 @@ fn genuinely_incompatible_operands_error_identically() {
     // that matters: both builds fail, identically. No optimized-only crash and
     // no silent wrong answer.
     let optimized = run(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell("k", "hi")
   const x: int = harness.runtime.shared_get(cell)
   harness.stdio.log("${x + 1}")
@@ -175,7 +175,7 @@ fn genuinely_incompatible_operands_error_identically() {
         CompilerOptions::optimized(),
     );
     let baseline = run(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell("k", "hi")
   const x: int = harness.runtime.shared_get(cell)
   harness.stdio.log("${x + 1}")
@@ -190,7 +190,7 @@ fn genuinely_incompatible_operands_error_identically() {
 fn monomorphic_fast_path_still_correct() {
     // The hot path (operands match the static guess) is unaffected.
     let result = assert_opt_matches_unopt(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
   let i = 0
   let total = 0
   while i < 10 {

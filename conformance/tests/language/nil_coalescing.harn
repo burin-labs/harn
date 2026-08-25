@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const a = nil ?? "fallback"
   harness.stdio.log(a)
   const b = "present" ?? "fallback"

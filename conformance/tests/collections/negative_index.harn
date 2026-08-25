@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const arr = [10, 20, 30, 40, 50]
   harness.stdio.log(arr[-1])
   harness.stdio.log(arr[-2])

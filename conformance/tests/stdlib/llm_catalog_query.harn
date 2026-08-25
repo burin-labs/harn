@@ -5,7 +5,7 @@ import {
   render_model_catalog_table,
 } from "std/llm/catalog"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const catalog = [
     {
       id: "alpha-expensive",

@@ -1,5 +1,5 @@
 /** Test http_mock with multi-* glob patterns */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Setup mock with multi-glob
   harness.testing.http_mock(
     "GET",

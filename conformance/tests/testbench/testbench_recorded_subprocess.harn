@@ -7,7 +7,7 @@
  * The .process-tape.json sidecar activates subprocess replay mode; the
  * paused clock is installed automatically by the conformance runner.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const git_out = harness.process.exec("git", "status")
   harness.stdio.println(git_out.success)
   harness.stdio.println(trim(git_out.stdout))

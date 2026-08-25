@@ -56,7 +56,7 @@ type GitForgeWritebackRequest = {
   target: GitForgeWritebackTarget,
 }
 
-fn __strip_signature_prefix(signature) {
+fn __strip_signature_prefix(signature: string?) {
   const trimmed = trim(signature ?? "")
   if starts_with(trimmed, "sha256=") {
     return split(trimmed, "sha256=")[1]
@@ -74,7 +74,13 @@ fn __strip_signature_prefix(signature) {
  * @effects: []
  * @errors: []
  */
-pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", options = nil) {
+pub fn verify_hmac_signature(
+  body: string,
+  signature: string?,
+  secret: string,
+  algorithm: string? = "sha256",
+  options: dict? = nil,
+) {
   const alg = lowercase(trim(algorithm ?? "sha256"))
   const provided = __strip_signature_prefix(signature)
   const opts = options ?? {}
@@ -97,7 +103,7 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", opti
  * @effects: [net]
  * @errors: []
  */
-pub fn verify_jwt(net: HarnessNet, token, jwks_url, options = nil) {
+pub fn verify_jwt(net: HarnessNet, token: string, jwks_url: string?, options: dict? = nil) {
   const opts = options ?? {}
   let jwks = opts.inline_jwks
   if jwks == nil {
@@ -136,7 +142,7 @@ pub fn verify_jwt(net: HarnessNet, token, jwks_url, options = nil) {
   return connector_shared_verify_jwt_inline(token, jwks, opts)
 }
 
-fn __form_body(params) {
+fn __form_body(params: any) {
   let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + url_encode(to_string(entry.value))]
@@ -152,11 +158,11 @@ fn __form_body(params) {
  */
 pub fn oauth2_token_refresh(
   net: HarnessNet,
-  client_id,
-  client_secret,
-  refresh_token,
-  token_url,
-  options = nil,
+  client_id: any,
+  client_secret: any,
+  refresh_token: any,
+  token_url: any,
+  options: dict? = nil,
 ) {
   const opts = options ?? {}
   const params = filter_nil(
@@ -206,7 +212,12 @@ pub fn oauth2_token_refresh(
  * @effects: [time]
  * @errors: []
  */
-pub fn rate_limit_token_bucket(clock: HarnessClock, state = nil, config = nil, now_ms = nil) {
+pub fn rate_limit_token_bucket(
+  clock: HarnessClock,
+  state: any = nil,
+  config: dict? = nil,
+  now_ms: int? = nil,
+) {
   const cfg = config ?? {}
   let capacity = cfg.capacity ?? 60
   if capacity < 1 {
@@ -248,7 +259,7 @@ pub fn rate_limit_token_bucket(clock: HarnessClock, state = nil, config = nil, n
   }
 }
 
-fn __page_items(page, items_path) {
+fn __page_items(page: dict, items_path: string?) {
   if items_path != nil {
     return json_pointer(page, items_path) ?? []
   }
@@ -261,7 +272,12 @@ fn __page_items(page, items_path) {
  * @effects: []
  * @errors: []
  */
-pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
+pub fn paginate_cursor(
+  initial_url: any,
+  fetch_fn: unknown,
+  cursor_path: string,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const max_pages = opts.max_pages ?? 100
   const items_path = opts.items_path
@@ -284,7 +300,7 @@ pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
   return {complete: false, pages: pages, items: items, next_cursor: cursor}
 }
 
-fn __git_forge_text(value) {
+fn __git_forge_text(value: any) {
   if value == nil {
     return nil
   }
@@ -295,7 +311,7 @@ fn __git_forge_text(value) {
   return text
 }
 
-fn __git_forge_bool(value) {
+fn __git_forge_bool(value: unknown) {
   if type_of(value) == "bool" {
     return value
   }
@@ -309,7 +325,7 @@ fn __git_forge_bool(value) {
   return nil
 }
 
-fn __git_forge_payload(value) {
+fn __git_forge_payload(value: dict) {
   if value?.payload?.event?.provider_payload != nil {
     return value.payload.event.provider_payload
   }
@@ -322,7 +338,7 @@ fn __git_forge_payload(value) {
   return value
 }
 
-fn __git_forge_provider(provider, payload, options) {
+fn __git_forge_provider(provider: any, payload: dict, options: dict) {
   return lowercase(
     trim(
       to_string(provider ?? options?.provider ?? payload?.provider ?? payload?.raw?.provider ?? ""),
@@ -330,7 +346,7 @@ fn __git_forge_provider(provider, payload, options) {
   )
 }
 
-fn __git_forge_lifecycle(provider, action, change) {
+fn __git_forge_lifecycle(provider: string, action: string?, change: dict) {
   const normalized = lowercase(trim(to_string(action ?? "")))
   if contains(["opened", "open"], normalized) {
     return "opened"
@@ -365,7 +381,12 @@ fn __git_forge_lifecycle(provider, action, change) {
   return "updated"
 }
 
-fn __git_forge_repo_from_full_name(provider, full_name, id, web_url) -> GitForgeRepositoryRef {
+fn __git_forge_repo_from_full_name(
+  provider: string,
+  full_name: any,
+  id: any,
+  web_url: any,
+) -> GitForgeRepositoryRef {
   return filter_nil(
     {
       provider: provider,
@@ -376,14 +397,14 @@ fn __git_forge_repo_from_full_name(provider, full_name, id, web_url) -> GitForge
   )
 }
 
-fn __git_forge_author(user) {
+fn __git_forge_author(user: unknown) {
   if type_of(user) != "dict" {
     return __git_forge_text(user)
   }
   return __git_forge_text(user?.login ?? user?.username ?? user?.name ?? user?.id)
 }
 
-fn __git_forge_delivery_id(raw) {
+fn __git_forge_delivery_id(raw: dict) {
   const headers = raw?.headers ?? {}
   return __git_forge_text(
     raw?.delivery_id
@@ -394,7 +415,14 @@ fn __git_forge_delivery_id(raw) {
   )
 }
 
-fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePullRequestEvent? {
+fn __git_forge_event(
+  provider: string,
+  lifecycle: string,
+  repo: dict,
+  pr: dict,
+  raw: dict,
+  options: dict,
+) -> GitForgePullRequestEvent? {
   const number = to_int(pr?.number ?? pr?.iid ?? pr?.index)
   if number == nil {
     return nil
@@ -450,7 +478,7 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePul
   }
 }
 
-fn __git_forge_github_event(payload, options) {
+fn __git_forge_github_event(payload: dict, options: dict) {
   const raw = payload?.raw ?? payload
   const repo = payload?.repository ?? raw?.repository
   const pr = payload?.pull_request ?? raw?.pull_request
@@ -472,7 +500,7 @@ fn __git_forge_github_event(payload, options) {
   return __git_forge_event("github", lifecycle, repo, normalized_pr, payload, options)
 }
 
-fn __git_forge_gitlab_event(payload, options) {
+fn __git_forge_gitlab_event(payload: dict, options: dict) {
   const raw = payload?.raw ?? payload
   const attrs = raw?.object_attributes ?? raw?.merge_request
   if attrs == nil {
@@ -498,7 +526,7 @@ fn __git_forge_gitlab_event(payload, options) {
   return __git_forge_event("gitlab", lifecycle, repo, pr, payload, options)
 }
 
-fn __git_forge_gitea_event(payload, options) {
+fn __git_forge_gitea_event(payload: dict, options: dict) {
   const raw = payload?.raw ?? payload
   const pr = raw?.pull_request
   if pr == nil {
@@ -543,7 +571,11 @@ pub fn git_forge_pull_request_topic() {
  * @errors: []
  * @example: git_forge_pull_request_event("github", payload)
  */
-pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForgePullRequestEvent? {
+pub fn git_forge_pull_request_event(
+  provider: any,
+  payload: dict,
+  options: dict? = nil,
+) -> GitForgePullRequestEvent? {
   const opts = options ?? {}
   const value = __git_forge_payload(payload)
   const resolved_provider = __git_forge_provider(provider, value, opts)
@@ -570,7 +602,7 @@ pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForg
   return nil
 }
 
-fn __git_forge_repo_parts(full_name) {
+fn __git_forge_repo_parts(full_name: any) {
   const text = __git_forge_text(full_name)
   if text == nil || !contains(text, "/") {
     return nil
@@ -592,7 +624,7 @@ fn __git_forge_repo_parts(full_name) {
 pub fn git_forge_writeback_request(
   event: GitForgePullRequestEvent,
   body: string,
-  options = nil,
+  options: dict? = nil,
 ) -> GitForgeWritebackRequest {
   const opts = options ?? {}
   const provider = lowercase(trim(to_string(opts?.provider ?? event.provider)))
@@ -629,7 +661,7 @@ pub fn git_forge_writeback_comment(
   net: HarnessNet,
   event: GitForgePullRequestEvent,
   body: string,
-  options = nil,
+  options: dict? = nil,
 ) {
   const request = git_forge_writeback_request(event, body, options)
   return net.connector_call(request.provider, request.method, request.params)

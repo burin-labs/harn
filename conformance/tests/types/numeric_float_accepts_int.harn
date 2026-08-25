@@ -2,7 +2,7 @@ fn takes_float(x: float) -> string {
   return "float param ACCEPTED ${x}"
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Widening holds at every site: an int satisfies float / number.
   harness.stdio.log(takes_float(json_parse("3")))
   harness.stdio.log("${schema_is(json_parse("3"), {type: "float"})}")

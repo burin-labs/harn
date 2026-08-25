@@ -4,12 +4,12 @@ import "std/triggers"
  * CH-02 (#1872): tenant wildcard selector (`channel:tenant:*:foo`) matches
  * emits within the trigger's entitled tenant boundary.
  */
-fn handle_any_tenant(harness: Harness, event) {
+fn handle_any_tenant(harness: Harness, event: dict) {
   const payload = event.provider_payload
   harness.channels.append("ch.wild.fired", {scope: payload.scope, scope_id: payload.scope_id})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(

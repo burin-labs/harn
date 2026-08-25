@@ -8,7 +8,7 @@ import { with_llm_script } from "std/testing"
  * as it would without them. The cheap rung returns HTTP 429 and the frontier
  * rung, also carrying family/capabilities, serves the answer.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

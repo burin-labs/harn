@@ -1,19 +1,43 @@
-// Verify checked-in Harn snippets used by the marketing site parse cleanly.
+// Verify the Harn a visitor reads on harnlang.com stays clean.
 //
-// Ported from scripts/check_site_snippets.sh: `harn check` every
-// website/src/examples/*.harn.txt snippet plus the demo gallery scenarios,
-// stream each check's output through, and fail on any broken snippet (or
-// when no site snippets are found at all).
+// Two globbed sets, never a hand-maintained list:
+//
+//   - website/src/examples/*.harn.txt — the homepage hero and friends;
+//   - crates/harn-cli/assets/demo/*/*.harn — every Harn file the bundled demo
+//     scenarios ship, which website/src/examples/gallery.ts imports directly
+//     out of the CLI assets to render the "Examples" tabs.
+//
+// The gallery used to be an enumerated list of three scenario paths while the
+// homepage rendered four tabs, so review-captain — the "Code review agent" tab
+// — was displayed and checked by nothing. Globbing the demo directory removes
+// that failure mode: adding a scenario adds it to this gate, and adding a
+// gallery tab cannot outrun it. The glob takes every `.harn` in a scenario
+// directory rather than just `scenario.harn`, because the gallery already
+// renders sibling files (review-captain's two `.harn.prompt` templates) and a
+// scenario's imported modules are showcase code too.
+//
+// Each snippet must pass `harn check` and a strict `harn lint`. `check` owns
+// mandatory parameter annotations; strict lint holds the rest of the showcase
+// to the style the docs teach.
+//
+// One gap this does not close: HARN-LNT-016 never fires on a *pipeline*
+// parameter, because the linter inserts every pipeline parameter into its
+// reference set before linting the body (crates/harn-lint/src/linter/walk.rs).
+// An unused `pipeline` parameter is invisible to every command here.
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn
 const SITE_SNIPPET_GLOB = "website/src/examples/*.harn.txt"
 
-const GALLERY_SCENARIOS: list<string> = [
-  "crates/harn-cli/assets/demo/mcp-host/scenario.harn",
-  "crates/harn-cli/assets/demo/merge-captain/scenario.harn",
-  "crates/harn-cli/assets/demo/stdlib-toolkit/scenario.harn",
-]
+const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/*.harn"
+
+/**
+ * The argv tail of every command a snippet must survive, in order; the
+ * snippet's path is appended to each. `--strict` makes warnings fatal.
+ * Ordinary typechecking enforces parameter annotations, so showcase code is
+ * held to the same bar as every Harn source.
+ */
+const SNIPPET_CHECKS: list<list<string>> = [["check"], ["lint", "--strict"]]
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {
@@ -29,8 +53,17 @@ pub fn summary_line(checked: int, failures: int) -> string {
   return "site snippets: ${checked} checked, ${failures} failed"
 }
 
+/** Sorted, repo-relative matches for one glob pattern. */
+fn glob_rel(fs: HarnessFs, pattern: string) -> list<string> {
+  let matches: list<string> = []
+  for g in fs.glob(pattern) {
+    matches = matches + [rel_path(g)]
+  }
+  return matches.sorted()
+}
+
 /**
- * Resolve the harn binary used to type-check snippets: $HARN_BIN wins,
+ * Resolve the harn binary used to check snippets: $HARN_BIN wins,
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
  */
@@ -69,21 +102,24 @@ fn resolve_harn_bin(harness: Harness) -> string {
   return bin
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness) {
   const harn_bin = resolve_harn_bin(harness)
-  let site_snippets: list<string> = []
-  for g in harness.fs.glob(SITE_SNIPPET_GLOB) {
-    site_snippets = site_snippets + [rel_path(g)]
-  }
-  site_snippets = site_snippets.sorted()
+  const site_snippets = glob_rel(harness.fs, SITE_SNIPPET_GLOB)
+  const demo_scenarios = glob_rel(harness.fs, DEMO_SCENARIO_GLOB)
   let checked = 0
   let failures = 0
-  for snippet in site_snippets + GALLERY_SCENARIOS {
+  for snippet in site_snippets + demo_scenarios {
     checked = checked + 1
-    const res = harness.process.run({program: harn_bin, args: ["check", snippet]})
-    harness.stdio.print(res.stdout)
-    harness.stdio.eprint(res.stderr)
-    if !res.success {
+    let failed = false
+    for argv in SNIPPET_CHECKS {
+      const res = harness.process.run({program: harn_bin, args: argv + [snippet]})
+      harness.stdio.print(res.stdout)
+      harness.stdio.eprint(res.stderr)
+      if !res.success {
+        failed = true
+      }
+    }
+    if failed {
       failures = failures + 1
     }
   }
@@ -91,6 +127,10 @@ pipeline main(harness: Harness, task) {
   harness.stdio.println(summary_line(checked, failures))
   if site_snippets.count == 0 {
     harness.stdio.println("FAIL: no ${SITE_SNIPPET_GLOB} snippets found")
+    return 1
+  }
+  if demo_scenarios.count == 0 {
+    harness.stdio.println("FAIL: no ${DEMO_SCENARIO_GLOB} scenarios found")
     return 1
   }
   if failures > 0 {

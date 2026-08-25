@@ -5,13 +5,16 @@
 import { empty_scope_failure } from "../guard_scope.harn"
 
 @test
-pipeline test_a_positive_count_is_not_a_failure(harness: Harness, task) {
+pipeline test_a_positive_count_is_not_a_failure(harness: Harness, task: unknown) {
   assert_eq(empty_scope_failure("some check", 1, "**/*.rs"), "")
   assert_eq(empty_scope_failure("some check", 2621, "**/*.rs"), "")
 }
 
 @test
-pipeline test_zero_inspected_produces_a_failure_naming_the_pattern(harness: Harness, task) {
+pipeline test_zero_inspected_produces_a_failure_naming_the_pattern(
+  harness: Harness,
+  task: unknown,
+) {
   const message = empty_scope_failure("some check", 0, ".github/workflows/*.yml")
   assert_eq(message != "", true)
   assert_eq(message.contains("some check"), true)
@@ -21,7 +24,7 @@ pipeline test_zero_inspected_produces_a_failure_naming_the_pattern(harness: Harn
 }
 
 @test
-pipeline test_a_negative_count_is_still_a_failure(harness: Harness, task) {
+pipeline test_a_negative_count_is_still_a_failure(harness: Harness, task: unknown) {
   // Defensive: a caller that subtracts its way below zero inspected nothing.
   assert_eq(empty_scope_failure("some check", -1, "x") != "", true)
 }

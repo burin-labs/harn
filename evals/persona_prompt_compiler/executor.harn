@@ -44,7 +44,7 @@ fn __command_failure_detail(result: dict) -> string {
   return trim(result.combined ?? "")
 }
 
-fn __write_outcome(stdio: HarnessStdio, outcome) -> int {
+fn __write_outcome(stdio: HarnessStdio, outcome: any) -> int {
   stdio.println(json_stringify(outcome))
   return 0
 }

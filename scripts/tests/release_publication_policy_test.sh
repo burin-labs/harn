@@ -71,8 +71,10 @@ grep -Fq "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" "$publish_workflow" \
 grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
   "$publish_workflow" \
   || fail "declared -dev workspace state does not bypass publication"
-grep -Fq 'release_head_is_release_commit_for_version "$version"' "$publish_workflow" \
-  || fail "post-release bump is not bound to the version-changing release commit"
+grep -Fq 'release_development_bump_plan "$version" "$latest_tag"' "$publish_workflow" \
+  || fail "post-release bump bypasses the fixture-backed release-state plan"
+grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$publish_workflow" \
+  || fail "post-release bump skip does not report its typed reason"
 grep -Fq 'HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh' "$publish_workflow" \
   || fail "post-release workflow bypasses the tested development preparation seam"
 grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$publish_workflow" \

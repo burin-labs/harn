@@ -4,11 +4,11 @@ import "std/triggers"
  * CH-02 (#1872): JSON-path-equality filter restricts trigger fires to
  * matching payloads.
  */
-fn handle_match(harness: Harness, event) {
+fn handle_match(harness: Harness, event: dict) {
   harness.channels.append("ch.filter.fired", {repo: event.provider_payload.payload.repo})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(

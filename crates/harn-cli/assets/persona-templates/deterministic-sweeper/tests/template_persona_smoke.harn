@@ -1,6 +1,6 @@
 import { template_persona } from "../src/template_persona"
 
-pipeline test_template_persona_smoke(harness: Harness, task) {
+pipeline test_template_persona_smoke(harness: Harness, task: unknown) {
   const fixture = json_parse(harness.fs.read_text("../fixtures/happy_path.json"))
   const result = template_persona(harness.clock, harness.fs, {fixture: fixture})
   assert_eq(result.status, "completed")

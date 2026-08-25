@@ -99,7 +99,7 @@ fn judge_refusing(gap_class: string, detail: string) {
   return {text: json_stringify({verdict: "continue", detail: detail, gap_class: gap_class})}
 }
 
-fn completion_receipts(events) {
+fn completion_receipts(events: list) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -117,7 +117,7 @@ fn completion_receipts(events) {
  * that asked, so a count keyed on the boundary reads zero while the mechanism
  * works perfectly.
  */
-fn conversions(receipts) -> int {
+fn conversions(receipts: list) -> int {
   let n = 0
   for receipt in receipts {
     if to_string(receipt?.converted_from ?? "") == CONVERSION {
@@ -141,7 +141,7 @@ fn base_opts(session: string) {
   }
 }
 
-fn run_case(harness: Harness, label: string, script, extra) {
+fn run_case(harness: Harness, label: string, script: list, extra: dict) {
   return with_llm_script(
     harness.llm,
     script,
@@ -174,7 +174,7 @@ fn run_case(harness: Harness, label: string, script, extra) {
 }
 
 /** Edit, then verify, then propose completion. */
-fn working_script(judge_turn) {
+fn working_script(judge_turn: dict) -> list {
   return [
     {text: "", tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "the change"}}]},
     {text: "", tool_calls: [{id: "verify-1", name: "verify", arguments: {}}]},

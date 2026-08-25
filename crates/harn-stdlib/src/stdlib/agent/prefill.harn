@@ -16,7 +16,7 @@ pub type AgentOneShotPrefill = {options: dict, prefill: string}
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_take_one_shot_prefill(options = nil) -> AgentOneShotPrefill {
+pub fn agent_take_one_shot_prefill(options: any = nil) -> AgentOneShotPrefill {
   const base = if type_of(options) == "dict" {
     options
   } else {

@@ -11,7 +11,6 @@ pub(crate) struct HarnLintConfig {
     pub(crate) disabled: Vec<String>,
     pub(crate) require_file_header: bool,
     pub(crate) require_docstrings: bool,
-    pub(crate) require_public_api_types: bool,
     pub(crate) complexity_threshold: Option<usize>,
     pub(crate) persona_step_allowlist: Vec<String>,
     pub(crate) template_variant_branch_threshold: Option<usize>,
@@ -24,7 +23,6 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
             disabled: cfg.lint.disabled.unwrap_or_default(),
             require_file_header: cfg.lint.require_file_header.unwrap_or(false),
             require_docstrings: cfg.lint.require_docstrings.unwrap_or(false),
-            require_public_api_types: cfg.lint.require_public_api_types.unwrap_or(false),
             complexity_threshold: cfg.lint.complexity_threshold,
             persona_step_allowlist: cfg.lint.persona_step_allowlist,
             template_variant_branch_threshold: cfg.lint.template_variant_branch_threshold,
@@ -83,7 +81,6 @@ pub(crate) fn lint_options<'a>(
         file_path: Some(path),
         require_file_header: lint_config.require_file_header,
         require_docstrings: lint_config.require_docstrings,
-        require_public_api_types: lint_config.require_public_api_types,
         complexity_threshold: lint_config.complexity_threshold,
         persona_step_allowlist: &lint_config.persona_step_allowlist,
         require_stdlib_metadata: surface == LintSurface::Lint
@@ -135,20 +132,6 @@ pub(crate) fn collect_cross_file_imports(
 pub(crate) fn build_module_graph(files: &[PathBuf]) -> harn_modules::ModuleGraph {
     ensure_module_dependencies(files);
     harn_modules::build(files)
-}
-
-/// Build the module graph and hand back the seed files' parsed ASTs for the
-/// parallel driver to distribute (each worker seeds its own
-/// [`AnalysisDatabase`] from this map instead of re-parsing from disk).
-pub(crate) fn build_module_graph_with_parsed_sources(
-    files: &[PathBuf],
-) -> (
-    harn_modules::ModuleGraph,
-    HashMap<PathBuf, harn_modules::ParsedModuleSource>,
-) {
-    ensure_module_dependencies(files);
-    let build = harn_modules::build_with_parsed_sources(files);
-    (build.graph, build.parsed_sources)
 }
 
 pub(crate) fn build_module_graph_and_seed_analysis(

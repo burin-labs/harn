@@ -1,6 +1,6 @@
 import { agent_emit_event } from "std/agent/state"
 
-fn __tool_search_config(value) {
+fn __tool_search_config(value: dict | bool | string | nil) {
   if value == nil {
     return nil
   }
@@ -39,7 +39,7 @@ fn __tool_search_config(value) {
   }
 }
 
-fn __tool_search_provider_has_native(llm: HarnessLlm, opts, cfg) {
+fn __tool_search_provider_has_native(llm: HarnessLlm, opts: dict, cfg: dict) {
   if type_of(cfg?.strategy) != "string" {
     return false
   }
@@ -73,7 +73,7 @@ fn __tool_search_provider_has_native(llm: HarnessLlm, opts, cfg) {
   return caps != nil && caps?.defer_loading && len(caps?.tool_search ?? []) > 0
 }
 
-fn __tool_search_client_requested(llm: HarnessLlm, opts) {
+fn __tool_search_client_requested(llm: HarnessLlm, opts: dict) {
   const cfg = __tool_search_config(opts?.tool_search)
   if cfg == nil {
     return false
@@ -87,7 +87,7 @@ fn __tool_search_client_requested(llm: HarnessLlm, opts) {
   return !__tool_search_provider_has_native(llm, opts, cfg)
 }
 
-fn __tool_search_tools(registry) {
+fn __tool_search_tools(registry: unknown) {
   if type_of(registry) == "dict" {
     return registry?.tools ?? []
   }
@@ -97,14 +97,14 @@ fn __tool_search_tools(registry) {
   return []
 }
 
-fn __tool_search_registry_like(registry, tools) {
+fn __tool_search_registry_like(registry: unknown, tools: list) {
   if type_of(registry) == "dict" {
     return registry + {tools: tools}
   }
   return {tools: tools}
 }
 
-fn __tool_search_contains(list, name) {
+fn __tool_search_contains(list: list, name: any) {
   for item in list {
     if item == name {
       return true
@@ -113,7 +113,7 @@ fn __tool_search_contains(list, name) {
   return false
 }
 
-fn __tool_search_find_tool(tools, name) {
+fn __tool_search_find_tool(tools: list, name: any) {
   for entry in tools {
     if entry?.name == name {
       return entry
@@ -122,11 +122,11 @@ fn __tool_search_find_tool(tools, name) {
   return nil
 }
 
-fn __tool_search_estimate_tokens(entry) {
+fn __tool_search_estimate_tokens(entry: any) {
   return len(json_stringify(entry)) / 4 + 1
 }
 
-fn __tool_search_strategy(cfg) {
+fn __tool_search_strategy(cfg: any) {
   const strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
   if type_of(strategy) == "closure" {
     return strategy
@@ -143,7 +143,7 @@ fn __tool_search_strategy(cfg) {
   return strategy
 }
 
-fn __tool_search_strategy_label(strategy) {
+fn __tool_search_strategy_label(strategy: unknown) {
   if type_of(strategy) == "string" {
     return strategy
   }
@@ -153,7 +153,7 @@ fn __tool_search_strategy_label(strategy) {
   return "custom"
 }
 
-fn __tool_search_description(strategy) {
+fn __tool_search_description(strategy: unknown) {
   const label = __tool_search_strategy_label(strategy)
   if label == "regex" {
     return "Search for deferred tools. Pass `query` as a case-insensitive regex. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
@@ -164,7 +164,7 @@ fn __tool_search_description(strategy) {
   return "Search for deferred tools. Pass `query` as natural-language keywords. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
 }
 
-fn __tool_search_normalize_result(value) {
+fn __tool_search_normalize_result(value: any) {
   if type_of(value) == "string" {
     const parsed = try {
       json_parse(value)
@@ -209,7 +209,7 @@ fn __tool_search_normalize_result(value) {
   return {tool_names: []}
 }
 
-fn __tool_search_run(args, state) {
+fn __tool_search_run(args: dict, state: dict) {
   const query = args?.query ?? ""
   const raw_result = if type_of(state.strategy) == "closure" {
     state.strategy(query, state.deferred_registry, {variant: state.variant})
@@ -238,7 +238,7 @@ fn __tool_search_run(args, state) {
   return json_stringify({tool_names: names, ranked: ranked, diagnostic: diagnostic})
 }
 
-fn __tool_search_synthetic_tool(registry, state) {
+fn __tool_search_synthetic_tool(registry: any, state: dict) {
   return tool_define(
     registry,
     state.name,
@@ -251,7 +251,7 @@ fn __tool_search_synthetic_tool(registry, state) {
   )
 }
 
-fn __tool_search_initial_state(opts) {
+fn __tool_search_initial_state(opts: dict) {
   const cfg = __tool_search_config(opts?.tool_search)
   const source_tools = __tool_search_tools(opts?.tools)
   let eager = []
@@ -283,7 +283,7 @@ fn __tool_search_initial_state(opts) {
   }
 }
 
-fn __tool_search_build_tools(opts, state) {
+fn __tool_search_build_tools(opts: dict, state: dict) {
   let visible = []
   for entry in state.eager_tools {
     visible = visible.appending(entry)
@@ -305,7 +305,7 @@ fn __tool_search_build_tools(opts, state) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_search_inject_if_needed(llm: HarnessLlm, opts) {
+pub fn agent_tool_search_inject_if_needed(llm: HarnessLlm, opts: dict) {
   if !__tool_search_client_requested(llm, opts) {
     return opts
   }
@@ -313,7 +313,7 @@ pub fn agent_tool_search_inject_if_needed(llm: HarnessLlm, opts) {
   return opts + {_tool_search_client: state, tools: __tool_search_build_tools(opts, state)}
 }
 
-fn __tool_search_call_id(call) {
+fn __tool_search_call_id(call: dict) {
   return call?.id ?? call?.tool_call_id ?? ""
 }
 
@@ -324,7 +324,12 @@ fn __tool_search_call_id(call) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_search_emit_queries(agent: HarnessAgent, session_id, tool_calls, opts) {
+pub fn agent_tool_search_emit_queries(
+  agent: HarnessAgent,
+  session_id: any,
+  tool_calls: list,
+  opts: dict,
+) {
   const state = opts?._tool_search_client
   if state == nil {
     return
@@ -347,7 +352,7 @@ pub fn agent_tool_search_emit_queries(agent: HarnessAgent, session_id, tool_call
   }
 }
 
-fn __tool_search_parse_result(result) {
+fn __tool_search_parse_result(result: string?) {
   if type_of(result) == "dict" {
     return result
   }
@@ -362,7 +367,7 @@ fn __tool_search_parse_result(result) {
   return {tool_names: []}
 }
 
-fn __tool_search_apply_budget(state, names) {
+fn __tool_search_apply_budget(state: dict, names: list) {
   let promoted = state.promoted
   for name in names {
     if !__tool_search_contains(promoted, name)
@@ -396,7 +401,7 @@ fn __tool_search_apply_budget(state, names) {
   return state + {promoted: kept}
 }
 
-fn __tool_search_promoted_names(state, names) {
+fn __tool_search_promoted_names(state: dict, names: list) {
   let out = []
   for name in names {
     if __tool_search_contains(state.promoted, name) {
@@ -415,10 +420,10 @@ fn __tool_search_promoted_names(state, names) {
  */
 pub fn agent_tool_search_record_results(
   agent: HarnessAgent,
-  session_id,
-  tool_calls,
-  dispatch,
-  opts,
+  session_id: any,
+  tool_calls: list | dict | string | set | range | iter | Generator | stream | channel,
+  dispatch: any,
+  opts: dict,
 ) {
   let state = opts?._tool_search_client
   if state == nil {

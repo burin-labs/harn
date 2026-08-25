@@ -9,7 +9,7 @@
  * genuine disk read, and stays gated. Only a path the layer already holds
  * is served from memory.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.fs.source_dir() + "/testbench_fs_overlay_confined.fs-overlay"
   const jail = harness.fs.workspace_temp_dir()
   harness.runtime.with_execution_policy(

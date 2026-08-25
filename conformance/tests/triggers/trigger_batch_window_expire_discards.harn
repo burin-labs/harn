@@ -5,11 +5,11 @@ import "std/triggers"
  * window elapses without reaching `count`. The handler is not invoked
  * and the buffered events are not preserved.
  */
-fn handle_batch(harness: Harness, event) {
+fn handle_batch(harness: Harness, event: unknown) {
   harness.channels.append("batch.discard.fired", {})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(2000000)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

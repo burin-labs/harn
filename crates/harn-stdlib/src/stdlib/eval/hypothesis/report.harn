@@ -47,14 +47,14 @@ fn __inline(values: list<string>) -> string {
   return join(values.map({ value -> __markdown_text(value) }).to_list(), ", ")
 }
 
-fn __adapter(value) -> string {
+fn __adapter(value: any) -> string {
   if value == nil {
     return "not registered"
   }
   return __markdown_text(value.id + "/" + value.variant_id)
 }
 
-fn __outcome(value) -> string {
+fn __outcome(value: any) -> string {
   if value == nil {
     return "not observable"
   }

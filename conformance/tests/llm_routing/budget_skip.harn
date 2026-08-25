@@ -6,7 +6,7 @@ import { with_llm_script } from "std/testing"
  * cheaper link that fits inside the cap. The trace shows both the
  * skipped link and the winning attempt.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Only the cheap link should actually call the mock.
   with_llm_script(
     harness.llm,

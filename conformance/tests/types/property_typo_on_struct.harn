@@ -6,7 +6,7 @@ struct User {
   email: string
 }
 
-pipeline default(harness: Harness, _) {
+pipeline default(harness: Harness, _: unknown) {
   const u = User {name: "Ada", email: "ada@x"}
   harness.stdio.println(u.emial)
 }

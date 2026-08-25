@@ -48,7 +48,7 @@ fn __guardrails_default_meta_prompt() -> string {
     + "Be conservative: when unsure, return `allow` with low confidence."
 }
 
-fn __guardrails_validate_llm_config(cfg) {
+fn __guardrails_validate_llm_config(cfg: dict) {
   if type_of(cfg) != "dict" {
     throw "llm_risk_classifier: config must be a dict"
   }
@@ -87,7 +87,7 @@ fn __guardrails_validate_llm_config(cfg) {
   }
 }
 
-fn __guardrails_classifier_options(classifier_cfg) {
+fn __guardrails_classifier_options(classifier_cfg: dict) {
   /* Merge order: caller llm_options first so they can override; then
    * pin `model` (and `provider` when supplied) so the classifier
    * never silently falls back to the default agent model. */
@@ -98,14 +98,14 @@ fn __guardrails_classifier_options(classifier_cfg) {
   return merged
 }
 
-fn __guardrails_extract_text(envelope) -> string {
+fn __guardrails_extract_text(envelope: dict) -> string {
   if envelope?.ok {
     return to_string(envelope?.response?.text ?? "")
   }
   return ""
 }
 
-fn __guardrails_parse_verdict(text) {
+fn __guardrails_parse_verdict(text: any) {
   const trimmed = trim(to_string(text))
   if len(trimmed) == 0 {
     return {
@@ -181,7 +181,7 @@ fn __guardrails_parse_verdict(text) {
  * @errors: ["channel_guardrail_register: ..."]
  * @example: prompt_injection_scanner({on_hit: "warn"})
  */
-pub fn prompt_injection_scanner(channels: HarnessChannels, opts) -> string {
+pub fn prompt_injection_scanner(channels: HarnessChannels, opts: dict?) -> string {
   const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "prompt_injection_scanner: opts must be a dict or nil"
@@ -228,7 +228,7 @@ pub fn prompt_injection_scanner(channels: HarnessChannels, opts) -> string {
  * @errors: ["llm_risk_classifier: ..."]
  * @example: llm_risk_classifier(harness.channels, harness.llm, {model: "haiku", threshold: 0.8})
  */
-pub fn llm_risk_classifier(channels: HarnessChannels, llm: HarnessLlm, opts) -> string {
+pub fn llm_risk_classifier(channels: HarnessChannels, llm: HarnessLlm, opts: dict?) -> string {
   const cfg = __guardrails_validate_llm_config(opts ?? {})
   const scan_fn = { payload, context ->
     const payload_text = json_stringify(payload)
@@ -291,7 +291,7 @@ pub fn llm_risk_classifier(channels: HarnessChannels, llm: HarnessLlm, opts) -> 
  * @errors: ["channel_guardrail_register: ..."]
  * @example: register_guardrail({scan_fn: my_scanner})
  */
-pub fn register_guardrail(channels: HarnessChannels, opts) -> string {
+pub fn register_guardrail(channels: HarnessChannels, opts: dict?) -> string {
   const resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "register_guardrail: opts must be a dict"

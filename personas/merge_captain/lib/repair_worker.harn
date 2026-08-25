@@ -28,7 +28,7 @@ pub fn default_agent_options() {
  * validate its summary through a typed checkpoint. Any validator retry
  * repairs only the summary text, never the worker actions.
  */
-pub fn default_executor(harness: Harness, bundle, options) {
+pub fn default_executor(harness: Harness, bundle: dict, options: dict?) {
   const supplied = options ?? {}
   const merged = default_agent_options() + supplied
   const schema = output_schema()
@@ -84,7 +84,7 @@ fn _started(clock: HarnessClock) {
   return clock.now_ms()
 }
 
-fn _empty_output_run(clock: HarnessClock, args) {
+fn _empty_output_run(clock: HarnessClock, args: dict) {
   return {
     _type: "merge_captain.repair_run",
     version: 1,
@@ -114,7 +114,7 @@ fn _empty_output_run(clock: HarnessClock, args) {
  *   agent_options        — passthrough to executor (model, profile, etc.)
  *   harness              — optional {enabled, cwd, timeout_ms} for git status check
  */
-pub fn invoke(clock: HarnessClock, process: HarnessProcess, args) {
+pub fn invoke(clock: HarnessClock, process: HarnessProcess, args: dict) {
   const bundle = args.bundle
   const parent_receipt_ref = args.parent_receipt_ref
     ?? {sweep_id: "", repo: bundle.repo, pr_number: bundle.pr_number, prior_state: "discovered"}
@@ -262,7 +262,7 @@ pub fn invoke(clock: HarnessClock, process: HarnessProcess, args) {
  * the worker's deliverable here is a code change + commit + push
  * (not a force push, admin merge, release tag, or branch delete).
  */
-pub fn invoke_for_ci_failure(clock: HarnessClock, process: HarnessProcess, args) {
+pub fn invoke_for_ci_failure(clock: HarnessClock, process: HarnessProcess, args: dict) {
   const observation = args.observation
   const policy = args.policy
   const parent = args.parent_receipt_ref
@@ -318,7 +318,7 @@ pub fn invoke_for_ci_failure(clock: HarnessClock, process: HarnessProcess, args)
  * `["semantic_repair", "force_push"]` (force-with-lease is the typical
  * push for a rewritten conflict).
  */
-pub fn invoke_for_merge_conflict(clock: HarnessClock, process: HarnessProcess, args) {
+pub fn invoke_for_merge_conflict(clock: HarnessClock, process: HarnessProcess, args: dict) {
   const observation = args.observation
   const policy = args.policy
   const parent = args.parent_receipt_ref
@@ -370,7 +370,7 @@ pub fn invoke_for_merge_conflict(clock: HarnessClock, process: HarnessProcess, a
  * acceptable); approvals default to release_tag + semantic_repair
  * because the audit can both edit release notes and request a tag.
  */
-pub fn invoke_for_release_audit(clock: HarnessClock, process: HarnessProcess, args) {
+pub fn invoke_for_release_audit(clock: HarnessClock, process: HarnessProcess, args: dict) {
   const release_facts = args.release_facts
   const policy = args.policy
   const bundle = build(

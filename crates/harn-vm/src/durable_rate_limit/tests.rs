@@ -420,7 +420,7 @@ async fn harn_builtin_returns_structured_timeout_without_real_sleep() {
             let temp = tempfile::tempdir().expect("tempdir");
             let state_path = harn_string_path(temp.path().join("rate.sqlite"));
             let source = r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const first = harness.runtime.durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",
@@ -456,7 +456,7 @@ async fn harn_parallel_tasks_share_one_durable_bucket() {
             let temp = tempfile::tempdir().expect("tempdir");
             let state_path = harn_string_path(temp.path().join("rate.sqlite"));
             let source = r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const attempts = parallel each [1, 2, 3, 4] with { max_concurrent: 4 } { _ ->
     harness.runtime.durable_rate_limit_acquire({
       state_path: "__STATE_PATH__",
@@ -495,7 +495,7 @@ fn harn_vms_on_multiple_threads_share_one_durable_bucket() {
     let state_path = harn_string_path(temp.path().join("rate.sqlite"));
     let source = Arc::new(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const attempt = harness.runtime.durable_rate_limit_acquire({
     state_path: "__STATE_PATH__",
     key: "provider:rpm",

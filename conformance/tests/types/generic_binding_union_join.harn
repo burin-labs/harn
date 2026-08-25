@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn keep<T>(a: T, b: T) -> T {
     return a
   }

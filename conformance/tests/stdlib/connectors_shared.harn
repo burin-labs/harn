@@ -13,7 +13,7 @@ import {
   verify_jwt,
 } from "std/connectors/shared"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const signature = "sha256=" + hmac_sha256("secret", "payload")
   harness.stdio.println(verify_hmac_signature("payload", signature, "secret", "sha256"))
   harness.stdio.println(verify_hmac_signature("payload", signature, "wrong", "sha256"))

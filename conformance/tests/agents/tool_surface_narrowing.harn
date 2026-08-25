@@ -2,11 +2,11 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn has_tool(tools, name) {
+fn has_tool(tools: list?, name: string) {
   for item in tools ?? [] {
     if item?.function?.name == name || item?.name == name {
       return true
@@ -15,7 +15,7 @@ fn has_tool(tools, name) {
   return false
 }
 
-fn detail_for(details, name) {
+fn detail_for(details: list?, name: string) {
   for detail in details ?? [] {
     if detail?.name == name {
       return detail
@@ -24,7 +24,7 @@ fn detail_for(details, name) {
   return nil
 }
 
-fn add_narrowing_tool(tools, name, annotations = nil) {
+fn add_narrowing_tool(tools: any, name: string, annotations: any = nil) {
   let config = {parameters: {}, handler: { _args -> "ok" }}
   if annotations != nil {
     config = config + {annotations: annotations}

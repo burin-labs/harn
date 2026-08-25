@@ -15,7 +15,7 @@ fn __env_int(env: HarnessEnv, name: string) {
   return to_int(value)
 }
 
-fn __env_float(env: HarnessEnv, name: string, fallback) {
+fn __env_float(env: HarnessEnv, name: string, fallback: float) {
   const value = trim(env.get_or(name, ""))
   if value == "" {
     return fallback
@@ -50,7 +50,7 @@ fn __mkdirp(fs: HarnessFs, path: string) {
   }
 }
 
-fn __load_cases(fs: HarnessFs, stdio: HarnessStdio, path: string, max_cases) {
+fn __load_cases(fs: HarnessFs, stdio: HarnessStdio, path: string, max_cases: any) {
   const raw = try {
     fs.read_text(path)
   } catch (e) {
@@ -84,7 +84,7 @@ fn __load_cases(fs: HarnessFs, stdio: HarnessStdio, path: string, max_cases) {
   return cases
 }
 
-fn __contains_any(text, needles) {
+fn __contains_any(text: any, needles: list) {
   for needle in needles {
     if contains(text, needle) {
       return true
@@ -93,7 +93,7 @@ fn __contains_any(text, needles) {
   return false
 }
 
-fn __reference_classifier(payload) {
+fn __reference_classifier(payload: dict) {
   const text = lowercase(to_string(payload?.user_message ?? ""))
   const out_markers = [
     "sibling-ide",
@@ -176,7 +176,7 @@ fn __scope_eval_anchor() {
   }
 }
 
-fn __verdict_event(events) {
+fn __verdict_event(events: any) {
   const verdicts = events.filter({ event -> event.type == "scope_classifier_verdict" })
   if len(verdicts) == 0 {
     return {label: "none", confidence: 0.0, evidence: "no scope_classifier_verdict event"}
@@ -184,7 +184,7 @@ fn __verdict_event(events) {
   return verdicts[0]
 }
 
-fn __run_case(harness: Harness, case, classifier) {
+fn __run_case(harness: Harness, case: dict, classifier: any) {
   const session = "scope-triage-eval-" + to_string(case?.id ?? harness.random.uuid())
   const captured = agent_capture_events(
     harness.agent,
@@ -252,14 +252,22 @@ fn __run_case(harness: Harness, case, classifier) {
   }
 }
 
-fn __rate(n, d) {
+fn __rate(n: any, d: any) {
   if d == 0 {
     return 0.0
   }
   return n * 1.0 / (d * 1.0)
 }
 
-fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports) {
+fn __summarize(
+  dataset_path: any,
+  output_dir: any,
+  live: any,
+  model: any,
+  threshold: any,
+  cases: unknown,
+  reports: any,
+) {
   let correct = 0
   let covered = 0
   let false_positive = 0
@@ -334,7 +342,7 @@ fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports)
   }
 }
 
-fn __jsonl(reports) {
+fn __jsonl(reports: list) {
   let lines = []
   for report in reports {
     lines = lines.appending(json_stringify(report))
@@ -342,11 +350,11 @@ fn __jsonl(reports) {
   return join(lines, "\n") + "\n"
 }
 
-fn __pct(value) {
+fn __pct(value: float) {
   return to_string(round(value * 1000.0) / 10.0) + "%"
 }
 
-fn __markdown(report) {
+fn __markdown(report: dict) {
   const status = if report.pass {
     "PASS"
   } else {

@@ -40,7 +40,7 @@ type ProjectContextProfile = {
  * @effects: []
  * @errors: []
  */
-pub fn metadata_namespace(project: HarnessProject, dir, namespace) {
+pub fn metadata_namespace(project: HarnessProject, dir: any, namespace: any) {
   return project.metadata_get({dir: dir, namespace: namespace}) ?? {}
 }
 
@@ -50,7 +50,7 @@ pub fn metadata_namespace(project: HarnessProject, dir, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn metadata_local_namespace(project: HarnessProject, dir, namespace) {
+pub fn metadata_local_namespace(project: HarnessProject, dir: string, namespace: any) {
   const normalized = if dir == "" {
     "."
   } else {
@@ -70,7 +70,7 @@ pub fn metadata_local_namespace(project: HarnessProject, dir, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_inventory(project: HarnessProject, namespace) {
+pub fn project_inventory(project: HarnessProject, namespace: any) {
   return {
     entries: project.metadata_entries({namespace: namespace}),
     status: project.metadata_status({namespace: namespace}),
@@ -113,7 +113,7 @@ pub fn project_root_package(fs: HarnessFs, project: HarnessProject) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn project_scan(project: HarnessProject, path = ".", options = nil) {
+pub fn project_scan(project: HarnessProject, path: string = ".", options: dict? = nil) {
   return project.scan(path, options ?? {})
 }
 
@@ -126,8 +126,8 @@ pub fn project_scan(project: HarnessProject, path = ".", options = nil) {
  */
 pub fn project_context_profile(
   project: HarnessProject,
-  path = ".",
-  options = nil,
+  path: string = ".",
+  options: dict? = nil,
 ) -> ProjectContextProfile {
   return project.context_profile(path, options ?? {})
 }
@@ -138,7 +138,7 @@ pub fn project_context_profile(
  * @effects: []
  * @errors: []
  */
-pub fn project_scan_tree(project: HarnessProject, path = ".", options = nil) {
+pub fn project_scan_tree(project: HarnessProject, path: string = ".", options: dict? = nil) {
   return project.scan_tree(path, options ?? {})
 }
 
@@ -158,7 +158,7 @@ pub fn project_catalog(project: HarnessProject) {
  * @effects: []
  * @errors: []
  */
-pub fn project_enrich(project: HarnessProject, path = ".", options = nil) {
+pub fn project_enrich(project: HarnessProject, path: string = ".", options: dict? = nil) {
   return project.enrich(path, options ?? {})
 }
 
@@ -168,7 +168,7 @@ pub fn project_enrich(project: HarnessProject, path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_scan_paths(project: HarnessProject, path = ".", options = nil) {
+pub fn project_scan_paths(project: HarnessProject, path: string = ".", options: dict? = nil) {
   return project_scan_tree(project, path, options).keys()
 }
 
@@ -178,7 +178,12 @@ pub fn project_scan_paths(project: HarnessProject, path = ".", options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn project_deep_scan(project: HarnessProject, clock: HarnessClock, path = ".", options = nil) {
+pub fn project_deep_scan(
+  project: HarnessProject,
+  clock: HarnessClock,
+  path: string = ".",
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const namespace = opts?.namespace ?? "project-enrichment"
   const tiers = __project_deep_scan_tiers(opts)
@@ -265,7 +270,7 @@ pub fn project_deep_scan(project: HarnessProject, clock: HarnessClock, path = ".
  * @effects: []
  * @errors: []
  */
-pub fn project_deep_scan_status(project: HarnessProject, namespace, path = ".") {
+pub fn project_deep_scan_status(project: HarnessProject, namespace: any, path: string = ".") {
   const scope_dir = __project_deep_scan_scope_dir(project, path)
   const local = metadata_local_namespace(project, scope_dir, namespace)
   const status = local?._deep_scan_status
@@ -295,7 +300,7 @@ pub fn project_deep_scan_status(project: HarnessProject, namespace, path = ".") 
   }
 }
 
-fn __project_deep_scan_tiers(options) {
+fn __project_deep_scan_tiers(options: dict) {
   if options?.tiers != nil {
     return options.tiers
   }
@@ -305,7 +310,7 @@ fn __project_deep_scan_tiers(options) {
   return ["ambient", "config"]
 }
 
-fn __project_deep_scan_walk_options(options) {
+fn __project_deep_scan_walk_options(options: dict) {
   return {
     depth: if options?.depth == nil {
       nil
@@ -318,7 +323,7 @@ fn __project_deep_scan_walk_options(options) {
   }
 }
 
-fn __project_deep_scan_scope_dir(project: HarnessProject, path) {
+fn __project_deep_scan_scope_dir(project: HarnessProject, path: string) {
   const scope = project.walk_tree(path, {depth: 0})
   if len(scope) == 0 {
     return "."
@@ -326,7 +331,7 @@ fn __project_deep_scan_scope_dir(project: HarnessProject, path) {
   return scope[0].dir
 }
 
-fn __project_deep_scan_cache(project: HarnessProject, namespace) {
+fn __project_deep_scan_cache(project: HarnessProject, namespace: any) {
   let cache = {}
   for entry in project.metadata_entries({namespace: namespace}) {
     if entry.local != nil {
@@ -336,7 +341,7 @@ fn __project_deep_scan_cache(project: HarnessProject, namespace) {
   return cache
 }
 
-fn __project_deep_scan_signature(options, tiers, walk_options) {
+fn __project_deep_scan_signature(options: dict, tiers: any, walk_options: any) {
   const enrichment = options?.enrichment ?? {}
   return sha256(
     json_stringify(
@@ -356,7 +361,7 @@ fn __project_deep_scan_signature(options, tiers, walk_options) {
   )
 }
 
-fn __project_has_tier(tiers, name) {
+fn __project_has_tier(tiers: list, name: string) {
   for tier in tiers {
     if tier == name {
       return true
@@ -365,7 +370,7 @@ fn __project_has_tier(tiers, name) {
   return false
 }
 
-fn __project_deep_scan_deterministic_tiers(tiers) {
+fn __project_deep_scan_deterministic_tiers(tiers: list) {
   let result = []
   if __project_has_tier(tiers, "ambient") {
     result = result + ["ambient"]
@@ -377,13 +382,13 @@ fn __project_deep_scan_deterministic_tiers(tiers) {
 }
 
 fn __project_deep_scan_needs_refresh(
-  cached,
-  entry,
-  signature,
-  tiers,
-  max_staleness_seconds,
-  incremental,
-  now,
+  cached: dict?,
+  entry: dict,
+  signature: any,
+  tiers: list,
+  max_staleness_seconds: any,
+  incremental: any,
+  now: any,
 ) {
   if !incremental {
     return true
@@ -425,12 +430,12 @@ fn __project_deep_scan_needs_refresh(
 
 fn __project_deep_scan_refresh_entry(
   project: HarnessProject,
-  namespace,
-  entry,
-  tiers,
-  enrichment,
-  signature,
-  now,
+  namespace: any,
+  entry: dict,
+  tiers: list,
+  enrichment: dict,
+  signature: any,
+  now: any,
 ) {
   const scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
   const scan = if len(scan_tiers) == 0 {
@@ -457,7 +462,7 @@ fn __project_deep_scan_refresh_entry(
   }
 }
 
-fn __project_deep_scan_evidence(scan, tiers) {
+fn __project_deep_scan_evidence(scan: dict, tiers: list) {
   let evidence = {}
   if __project_has_tier(tiers, "ambient") {
     evidence["ambient"] = __project_scan_ambient(scan)
@@ -468,7 +473,7 @@ fn __project_deep_scan_evidence(scan, tiers) {
   return evidence
 }
 
-fn __project_scan_ambient(scan) {
+fn __project_scan_ambient(scan: dict) {
   return {
     path: scan?.path,
     languages: scan?.languages ?? [],
@@ -481,7 +486,7 @@ fn __project_scan_ambient(scan) {
   }
 }
 
-fn __project_scan_config(scan) {
+fn __project_scan_config(scan: dict) {
   return {
     package_name: scan?.package_name,
     build_commands: scan?.build_commands ?? [],
@@ -492,7 +497,12 @@ fn __project_scan_config(scan) {
   }
 }
 
-fn __project_deep_scan_enrichment_options(namespace, entry, evidence, options) {
+fn __project_deep_scan_enrichment_options(
+  namespace: any,
+  entry: dict,
+  evidence: any,
+  options: dict,
+) {
   return {
     base_evidence: evidence,
     prompt: __project_deep_scan_enrichment_prompt(entry.dir, entry.path, evidence, options),
@@ -506,13 +516,18 @@ fn __project_deep_scan_enrichment_options(namespace, entry, evidence, options) {
   }
 }
 
-fn __project_deep_scan_enrichment_prompt(dir, display_path, evidence, options) {
+fn __project_deep_scan_enrichment_prompt(
+  dir: any,
+  display_path: any,
+  evidence: any,
+  options: dict,
+) {
   const instruction = options?.system ?? options?.prompt
     ?? "Return a compact JSON summary of this directory. No markdown."
   return "${instruction}\n\nDirectory key: ${dir}\nDisplay path: ${display_path}\nDeterministic evidence:\n${json_stringify(evidence)}\nRelevant files:\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}"
 }
 
-fn __project_deep_scan_select_tiers(evidence, tiers) {
+fn __project_deep_scan_select_tiers(evidence: dict, tiers: list) {
   let selected = {}
   if __project_has_tier(tiers, "ambient") && evidence?.ambient != nil {
     selected["ambient"] = evidence.ambient
@@ -526,7 +541,7 @@ fn __project_deep_scan_select_tiers(evidence, tiers) {
   return selected
 }
 
-fn __project_deep_scan_last_refresh(current, next) {
+fn __project_deep_scan_last_refresh(current: any, next: any) {
   if next == nil {
     return current
   }
@@ -545,7 +560,7 @@ fn __project_deep_scan_last_refresh(current, next) {
  * @effects: []
  * @errors: []
  */
-pub fn project_stale(project: HarnessProject, namespace) {
+pub fn project_stale(project: HarnessProject, namespace: any) {
   return project.metadata_status({namespace: namespace}).stale
 }
 
@@ -555,7 +570,7 @@ pub fn project_stale(project: HarnessProject, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_stale_dirs(project: HarnessProject, namespace) {
+pub fn project_stale_dirs(project: HarnessProject, namespace: any) {
   const stale = project_stale(project, namespace)
   let dirs = []
   for dir in stale.tier1 {
@@ -573,7 +588,7 @@ pub fn project_stale_dirs(project: HarnessProject, namespace) {
  * @effects: []
  * @errors: []
  */
-pub fn project_requires_refresh(project: HarnessProject, namespace) {
+pub fn project_requires_refresh(project: HarnessProject, namespace: any) {
   const status = project.metadata_status({namespace: namespace})
   if status.stale.any_stale {
     return true

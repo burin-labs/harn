@@ -8,7 +8,7 @@
  *                      guard is_ok(_r) else { throw unwrap_err(_r) }
  *                      unwrap(_r) }
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn ok() {
     return 42
   }

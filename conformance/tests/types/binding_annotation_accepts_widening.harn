@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // What a binding annotation must keep accepting: records with extra fields
   // (shapes are open), int where float is declared, nil for an optional, and
   // anything at all for `any` — the declared opt-out.

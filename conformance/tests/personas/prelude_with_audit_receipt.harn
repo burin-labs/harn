@@ -1,6 +1,6 @@
 import { with_audit_receipt } from "std/personas/prelude"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const opts = {
     persona: "audit_captain",
     step: "write_receipt",

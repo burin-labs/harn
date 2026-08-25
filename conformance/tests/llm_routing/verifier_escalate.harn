@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * forbidden pattern, so the lint verifier escalates to the frontier
  * link. The frontier candidate passes verification and is returned.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

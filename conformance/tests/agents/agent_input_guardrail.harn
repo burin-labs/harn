@@ -2,11 +2,11 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_input_guardrail, agent_input_guardrail_check } from "std/agent/guardrails"
 import { agent_loop } from "std/agent/loop"
 
-fn guardrail_events(events) {
+fn guardrail_events(events: any) {
   return events.filter({ event -> event.type == "input_guardrail_verdict" })
 }
 
-fn main_caller(text) {
+fn main_caller(text: string) {
   return { call ->
     return {
       ok: true,

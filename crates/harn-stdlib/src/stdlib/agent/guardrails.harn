@@ -1,6 +1,6 @@
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
-fn __input_guardrail_bool(value, fallback) {
+fn __input_guardrail_bool(value: any, fallback: any) {
   if value == nil {
     return fallback
   }
@@ -20,7 +20,7 @@ fn __input_guardrail_bool(value, fallback) {
   return fallback
 }
 
-fn __input_guardrail_action(value) {
+fn __input_guardrail_action(value: string?) {
   const normalized = lowercase(trim(to_string(value ?? "")))
   if contains(["block", "blocked", "deny", "halt", "stop", "tripwire"], normalized) {
     return "tripwire"
@@ -31,7 +31,7 @@ fn __input_guardrail_action(value) {
   return normalized
 }
 
-fn __input_guardrail_reason(raw, fallback) {
+fn __input_guardrail_reason(raw: any, fallback: any) {
   if type_of(raw) == "string" {
     const text = trim(raw)
     if text != "" {
@@ -50,7 +50,7 @@ fn __input_guardrail_reason(raw, fallback) {
   return fallback
 }
 
-fn __input_guardrail_confidence(value) {
+fn __input_guardrail_confidence(value: float?) {
   const parsed = to_float(value ?? 0.0)
   if parsed == nil {
     return 0.0
@@ -64,7 +64,7 @@ fn __input_guardrail_confidence(value) {
   return parsed
 }
 
-fn __input_guardrail_threshold(value) {
+fn __input_guardrail_threshold(value: float?) {
   const threshold = to_float(value ?? 0.0)
   if threshold == nil || threshold < 0.0 || threshold > 1.0 {
     throw "agent_input_guardrail: confidence_threshold must be between 0.0 and 1.0"
@@ -91,7 +91,7 @@ fn __input_guardrail_schema() {
   }
 }
 
-fn __input_guardrail_prompt(payload, opts) {
+fn __input_guardrail_prompt(payload: dict, opts: dict) {
   const policy = trim(to_string(opts?.policy ?? opts?.system ?? ""))
   const prefix = if policy == "" {
     "Classify whether the user request should trip an input guardrail before an agent spends a main model turn."
@@ -107,7 +107,7 @@ fn __input_guardrail_prompt(payload, opts) {
     + "{\"tripwire\":false,\"reason\":\"...\",\"label\":\"safe\",\"confidence\":0.0}\n"
 }
 
-fn __input_guardrail_context_value(raw, context, key, fallback = nil) {
+fn __input_guardrail_context_value(raw: unknown, context: dict, key: string, fallback: any = nil) {
   if context != nil && context[key] != nil {
     return context[key]
   }
@@ -125,7 +125,7 @@ fn __input_guardrail_context_value(raw, context, key, fallback = nil) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
+pub fn __agent_input_guardrail_normalize(raw: any, opts: dict? = nil, context: any = nil) {
   const options = opts ?? {}
   const threshold_source = options?.confidence_threshold
     ?? if type_of(raw) == "dict" {
@@ -195,7 +195,7 @@ pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
+pub fn __agent_input_guardrail_fail_open(err: any, opts: dict? = nil, context: any = nil) {
   const options = opts ?? {}
   if options?.fail_open ?? true {
     return {
@@ -230,8 +230,8 @@ pub fn __agent_input_guardrail_fail_open(err, opts = nil, context = nil) {
 pub fn agent_input_guardrail(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  classifier = nil,
-  options = nil,
+  classifier: any = nil,
+  options: dict? = nil,
 ) {
   const opts = options ?? {}
   if type_of(opts) != "dict" {
@@ -351,9 +351,9 @@ pub fn agent_input_guardrail(
 pub fn agent_input_guardrail_check(
   agent: HarnessAgent,
   llm: HarnessLlm,
-  task,
-  classifier = nil,
-  options = nil,
+  task: any,
+  classifier: any = nil,
+  options: dict? = nil,
 ) {
   const bundle = agent_input_guardrail(agent, llm, classifier, options)
   return bundle.input_guardrail({task: task, user_message: task, messages: [], recent_context: []})

@@ -3,6 +3,6 @@ pub fn greet() {
   return render_greeting("world")
 }
 
-fn render_greeting(name) {
+fn render_greeting(name: string) {
   return "hello " + name
 }

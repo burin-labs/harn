@@ -67,7 +67,7 @@ fn __cc_consume_all_filters() {
   ]
 }
 
-fn __cc_list_has(items, needle) {
+fn __cc_list_has(items: list, needle: any) {
   for item in items {
     if item == needle {
       return true
@@ -76,7 +76,7 @@ fn __cc_list_has(items, needle) {
   return false
 }
 
-fn __cc_basename(word) {
+fn __cc_basename(word: string) {
   const slash = word.last_index_of("/")
   if slash < 0 {
     return word
@@ -84,7 +84,7 @@ fn __cc_basename(word) {
   return word.substring(slash + 1, word.len())
 }
 
-fn __cc_first_token(segment) {
+fn __cc_first_token(segment: string) {
   for raw in segment.split(" ") {
     const token = raw.trim()
     if token != "" {
@@ -99,7 +99,7 @@ fn __cc_first_token(segment) {
  * of these flags. We over-match on purpose: a false bail is harmless, a
  * missed short-circuit would make the "full output" hint a lie.
  */
-fn __cc_grep_short_circuits(segment) {
+fn __cc_grep_short_circuits(segment: string) {
   for raw in segment.split(" ") {
     const token = raw.trim()
     if token != "" {
@@ -123,7 +123,7 @@ fn __cc_grep_short_circuits(segment) {
   return false
 }
 
-fn __cc_filter_allowed(filter) {
+fn __cc_filter_allowed(filter: string) {
   const word = __cc_first_token(filter)
   if word == "" {
     return false
@@ -154,7 +154,7 @@ fn __cc_filter_allowed(filter) {
  * refuse to reason about. Over-bails when these appear inside single
  * quotes (where they would be literal) — which is safe.
  */
-fn __cc_hazardous(command) {
+fn __cc_hazardous(command: string) {
   return command.contains("$(")
     || command.contains("`")
     || command.contains("<(")
@@ -174,7 +174,7 @@ fn __cc_hazardous(command) {
  * (`|`). Returns nil to bail on a subshell group `(`, a background `&`, a
  * `|&` pipe, or unbalanced quotes.
  */
-fn __cc_scan_cuts(command) {
+fn __cc_scan_cuts(command: string) {
   const n = command.len()
   let i = 0
   let squote = false
@@ -255,7 +255,7 @@ fn __cc_scan_cuts(command) {
  * @api_stability: experimental
  * @example: command_capture_detect("seq 100 | tail -3")
  */
-pub fn command_capture_detect(command) {
+pub fn command_capture_detect(command: string) {
   if command == nil {
     return nil
   }
@@ -304,7 +304,7 @@ pub fn command_capture_detect(command) {
 // -------------------------------------------------------------------------------------------------
 
 /** Single-quote a path for POSIX sh, escaping embedded single quotes. */
-fn __cc_shquote(value) {
+fn __cc_shquote(value: string) {
   return "'" + value.replace("'", "'\\''") + "'"
 }
 
@@ -320,7 +320,7 @@ fn __cc_shquote(value) {
  * @api_stability: experimental
  * @example: command_capture_plan("seq 100 | tail -3", "/tmp/out")
  */
-pub fn command_capture_plan(command, capture_path) {
+pub fn command_capture_plan(command: string, capture_path: string) {
   const detected = command_capture_detect(command)
   if detected == nil {
     return nil
@@ -349,7 +349,7 @@ pub fn command_capture_plan(command, capture_path) {
  * @api_stability: experimental
  * @example: command_capture_rewrite("ls | wc -l", "/tmp/out")
  */
-pub fn command_capture_rewrite(command, capture_path) {
+pub fn command_capture_rewrite(command: string, capture_path: string) {
   return command_capture_plan(command, capture_path)?.rewritten
 }
 
@@ -357,7 +357,7 @@ fn __cc_new_capture_path(fs: HarnessFs, random: HarnessRandom) {
   return path_join(fs.workspace_temp_dir(), "harn-capture-" + random.uuid() + ".out")
 }
 
-fn __cc_posix_shell(word) {
+fn __cc_posix_shell(word: string) {
   const name = __cc_basename(word).lowercase()
   return name == "sh" || name == "bash" || name == "zsh" || name == "dash" || name == "ksh"
 }
@@ -375,7 +375,7 @@ fn __cc_posix_shell(word) {
  * @api_stability: experimental
  * @example: command_capture_plan_request(harness, {mode: "shell", command: "ls | wc -l"})
  */
-pub fn command_capture_plan_request(harness: Harness, request) {
+pub fn command_capture_plan_request(harness: Harness, request: dict) {
   if request == nil {
     return nil
   }
@@ -425,7 +425,7 @@ pub fn command_capture_plan_request(harness: Harness, request) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_capture_annotate(fs: HarnessFs, result, plan) {
+pub fn command_capture_annotate(fs: HarnessFs, result: dict, plan: dict) {
   if result == nil || plan == nil {
     return result
   }

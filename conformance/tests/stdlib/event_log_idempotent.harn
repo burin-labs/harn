@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const first = harness.obs.event_log_emit_idempotent(
     "tests.idempotent",
     "hypothesis.plan.registered",

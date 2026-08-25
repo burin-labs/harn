@@ -3,14 +3,14 @@ import "../generated_artifacts_schema.harn"
 import "../warn_generated_artifact_drift.harn"
 
 @test
-pipeline test_path_under_directory_prefix(harness: Harness, task) {
+pipeline test_path_under_directory_prefix(harness: Harness, task: unknown) {
   assert_eq(path_under("crates/harn-lexer/src/token.rs", "crates/harn-lexer/src/"), true)
   assert_eq(path_under("crates/harn-lexer/src", "crates/harn-lexer/src/"), true)
   assert_eq(path_under("crates/harn-other/src/lib.rs", "crates/harn-lexer/src/"), false)
 }
 
 @test
-pipeline test_path_under_exact_and_nested_file(harness: Harness, task) {
+pipeline test_path_under_exact_and_nested_file(harness: Harness, task: unknown) {
   assert_eq(path_under("crates/harn-lexer/src/token.rs", "crates/harn-lexer/src/token.rs"), true)
   assert_eq(
     path_under(
@@ -23,14 +23,14 @@ pipeline test_path_under_exact_and_nested_file(harness: Harness, task) {
 }
 
 @test
-pipeline test_path_under_glob(harness: Harness, task) {
+pipeline test_path_under_glob(harness: Harness, task: unknown) {
   assert_eq(path_under("spec/chapters/07-runtime-values.md", "spec/chapters/*.md"), true)
   assert_eq(path_under("spec/chapters/nested/x.md", "spec/chapters/*.md"), true)
   assert_eq(path_under("spec/other/x.md", "spec/chapters/*.md"), false)
 }
 
 @test
-pipeline test_output_display_single_and_shared_prefix(harness: Harness, task) {
+pipeline test_output_display_single_and_shared_prefix(harness: Harness, task: unknown) {
   assert_eq(output_display(["docs/theme/harn-keywords.js"]), "docs/theme/")
   assert_eq(
     output_display(
@@ -44,7 +44,7 @@ pipeline test_output_display_single_and_shared_prefix(harness: Harness, task) {
 }
 
 @test
-pipeline test_output_display_divergent_trees(harness: Harness, task) {
+pipeline test_output_display_divergent_trees(harness: Harness, task: unknown) {
   assert_eq(
     output_display(
       [
@@ -59,7 +59,7 @@ pipeline test_output_display_divergent_trees(harness: Harness, task) {
 }
 
 @test
-pipeline test_drift_warnings_source_without_output(harness: Harness, task) {
+pipeline test_drift_warnings_source_without_output(harness: Harness, task: unknown) {
   const artifacts = [
     {
       id: "highlight",
@@ -82,7 +82,7 @@ pipeline test_drift_warnings_source_without_output(harness: Harness, task) {
 }
 
 @test
-pipeline test_drift_warnings_silenced_when_output_staged(harness: Harness, task) {
+pipeline test_drift_warnings_silenced_when_output_staged(harness: Harness, task: unknown) {
   const artifacts = [
     {
       id: "highlight",
@@ -99,7 +99,7 @@ pipeline test_drift_warnings_silenced_when_output_staged(harness: Harness, task)
 }
 
 @test
-pipeline test_drift_warnings_language_spec_glob(harness: Harness, task) {
+pipeline test_drift_warnings_language_spec_glob(harness: Harness, task: unknown) {
   const artifacts = [
     {
       id: "language-spec",
@@ -115,7 +115,7 @@ pipeline test_drift_warnings_language_spec_glob(harness: Harness, task) {
 }
 
 @test
-pipeline test_format_warning_names_make_target(harness: Harness, task) {
+pipeline test_format_warning_names_make_target(harness: Harness, task: unknown) {
   const lines = format_warning(
     {id: "highlight", gen: "gen-highlight", output_display: "docs/theme/"},
   )
@@ -125,7 +125,7 @@ pipeline test_format_warning_names_make_target(harness: Harness, task) {
 }
 
 @test
-pipeline test_real_registry_highlight_source_warns(harness: Harness, task) {
+pipeline test_real_registry_highlight_source_warns(harness: Harness, task: unknown) {
   const registry = schema_expect(
     toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
     generated_artifacts_schema(),

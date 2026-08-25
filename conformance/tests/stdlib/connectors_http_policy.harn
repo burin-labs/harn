@@ -5,7 +5,7 @@ import {
   connector_http_request,
 } from "std/connectors/http"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",

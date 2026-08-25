@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unknown = harness.llm.healthcheck("not-a-provider")
   assert_eq(unknown.provider, "not-a-provider")
   assert_eq(unknown.valid, false)

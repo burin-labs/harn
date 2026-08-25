@@ -1,5 +1,5 @@
-pipeline default(harness: Harness, task) {
-  fn countdown(n, acc) {
+pipeline default(harness: Harness, task: unknown) {
+  fn countdown(n: int, acc: int) {
     if n <= 0 {
       return acc
     }

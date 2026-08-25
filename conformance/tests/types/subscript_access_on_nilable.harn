@@ -1,6 +1,6 @@
 // Indexing a `T | nil` receiver may hit nil at runtime. Same diagnostic
 // shape as property access on a nilable value, but for `[]`.
-pipeline default(harness: Harness, _) {
+pipeline default(harness: Harness, _: unknown) {
   const xs: list? = nil
   harness.stdio.println(xs[0])
 }

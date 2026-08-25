@@ -1,5 +1,5 @@
 import "std/math"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   kmeans([[1, 2]], 0)
 }

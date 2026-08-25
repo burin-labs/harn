@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   require harness.agent.exists(s), "open returns an id that exists"
   require s == harness.agent.open(s), "open(id) is idempotent"

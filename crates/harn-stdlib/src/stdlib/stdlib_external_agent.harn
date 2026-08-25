@@ -13,9 +13,9 @@
 pub fn external_agent_delegate(
   agent: HarnessAgent,
   random: HarnessRandom,
-  target,
-  task,
-  options = nil,
+  target: any,
+  task: any,
+  options: dict? = nil,
 ) {
   const opts = options ?? {}
   const key = opts?.idempotency_key ?? ("external-agent-" + random.uuid_v7())
@@ -37,7 +37,7 @@ pub fn external_agent_delegate(
  * @api_stability: experimental
  * @example: external_agent_approve(checkpoint, {checkpoint: {approved_by: "operator"}})
  */
-pub fn external_agent_approve(agent: HarnessAgent, envelope, options = nil) {
+pub fn external_agent_approve(agent: HarnessAgent, envelope: dict, options: dict? = nil) {
   const opts = options ?? {}
   const checkpoint_base = opts?.checkpoint ?? {}
   const checkpoint = checkpoint_base + {approved: true}

@@ -4,31 +4,31 @@ import { parse } from "std/semver"
 import "../detect_bump_type.harn"
 
 @test
-pipeline test_parse_valid_semver(harness: Harness, task) {
+pipeline test_parse_valid_semver(harness: Harness, task: unknown) {
   assert_eq(parse("1.2.3"), {major: 1, minor: 2, patch: 3})
   assert_eq(parse("0.0.0"), {major: 0, minor: 0, patch: 0})
   assert_eq(parse("10.20.30"), {major: 10, minor: 20, patch: 30})
 }
 
 @test
-pipeline test_parse_rejects_non_triple(harness: Harness, task) {
+pipeline test_parse_rejects_non_triple(harness: Harness, task: unknown) {
   assert_eq(parse("1.2"), nil)
   assert_eq(parse("1.2.3.4"), nil)
 }
 
 @test
-pipeline test_parse_rejects_non_numeric(harness: Harness, task) {
+pipeline test_parse_rejects_non_numeric(harness: Harness, task: unknown) {
   assert_eq(parse("1.x.3"), nil)
 }
 
 @test
-pipeline test_detect_strips_declared_development_target(harness: Harness, task) {
+pipeline test_detect_strips_declared_development_target(harness: Harness, task: unknown) {
   assert_eq(detect("0.8.5-dev", "0.8.5"), "patch")
   assert_eq(detect("1.0.0-dev", "1.0.0"), "patch")
 }
 
 @test
-pipeline test_detect_rejects_mismatched_target(harness: Harness, task) {
+pipeline test_detect_rejects_mismatched_target(harness: Harness, task: unknown) {
   const r = try {
     detect("0.8.5-dev", "0.8.6")
   } catch (_) {
@@ -38,7 +38,7 @@ pipeline test_detect_rejects_mismatched_target(harness: Harness, task) {
 }
 
 @test
-pipeline test_detect_rejects_missing_development_suffix(harness: Harness, task) {
+pipeline test_detect_rejects_missing_development_suffix(harness: Harness, task: unknown) {
   const r = try {
     detect("1.0.0", "1.0.0")
   } catch (_) {

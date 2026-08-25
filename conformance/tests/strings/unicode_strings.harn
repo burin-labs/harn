@@ -1,5 +1,5 @@
 /** Unicode string operations: slicing, contains, split, replace, interpolation */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const emoji = "Hello 🌍🔥 World"
   // len counts characters, not bytes
   harness.stdio.log(len(emoji))

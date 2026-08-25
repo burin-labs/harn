@@ -4,7 +4,7 @@
 import { filter_nil } from "std/collections"
 import { merge } from "std/json"
 
-fn __graphql_list(value) {
+fn __graphql_list(value: any) {
   if value == nil {
     return []
   }
@@ -14,7 +14,7 @@ fn __graphql_list(value) {
   return [value]
 }
 
-fn __graphql_payload(response) {
+fn __graphql_payload(response: dict) {
   const body = response?.body ?? response
   if type_of(body) == "string" {
     const parsed = try {
@@ -28,7 +28,7 @@ fn __graphql_payload(response) {
   return body ?? {}
 }
 
-fn __graphql_header(headers, name) {
+fn __graphql_header(headers: unknown, name: any) {
   if headers == nil {
     return nil
   }
@@ -44,7 +44,7 @@ fn __graphql_header(headers, name) {
   return nil
 }
 
-fn __graphql_int_header(headers, name) {
+fn __graphql_int_header(headers: unknown, name: string) {
   const value = __graphql_header(headers, name)
   if value == nil || value == "" {
     return nil
@@ -58,7 +58,7 @@ fn __graphql_int_header(headers, name) {
   return nil
 }
 
-fn __graphql_operation_name(query, fallback = nil) {
+fn __graphql_operation_name(query: string?, fallback: any = nil) {
   const trimmed = trim(query ?? "")
   if trimmed == "" {
     return fallback
@@ -75,7 +75,7 @@ fn __graphql_operation_name(query, fallback = nil) {
   return fallback
 }
 
-fn __graphql_root_field_from_query(query) {
+fn __graphql_root_field_from_query(query: string?) {
   const text = query ?? ""
   const open = text.index_of("{")
   if open < 0 {
@@ -108,7 +108,7 @@ pub fn graphql_introspection_query() {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
+pub fn graphql_auth_headers(auth: any = nil, extra_headers: dict? = nil) {
   let headers = {
     "Content-Type": "application/json",
     Accept: "application/graphql-response+json, application/json",
@@ -136,7 +136,7 @@ pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_rate_limit_meta(headers = nil) {
+pub fn graphql_rate_limit_meta(headers: any = nil) {
   return filter_nil(
     {
       requests_limit: __graphql_int_header(headers, "x-ratelimit-requests-limit")
@@ -166,7 +166,7 @@ pub fn graphql_rate_limit_meta(headers = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_persisted_query(query, options = nil) {
+pub fn graphql_persisted_query(query: string | bytes, options: any = nil) {
   const version = options?.version ?? 1
   const hash = options?.sha256_hash ?? options?.sha256Hash ?? sha256(query)
   return {
@@ -182,7 +182,7 @@ pub fn graphql_persisted_query(query, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_request_body(query, variables = nil, options = nil) {
+pub fn graphql_request_body(query: any, variables: any = nil, options: dict? = nil) {
   let body = {}
   const persisted = options?.persisted_query ?? options?.persistedQuery
   if persisted != nil {
@@ -215,7 +215,7 @@ pub fn graphql_request_body(query, variables = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_normalize_response(response, options = nil) {
+pub fn graphql_normalize_response(response: dict, options: any = nil) {
   const payload = __graphql_payload(response)
   const status = response?.status ?? options?.status ?? 200
   const headers = response?.headers ?? options?.headers ?? {}
@@ -248,7 +248,7 @@ pub fn graphql_normalize_response(response, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_error_messages(envelope) {
+pub fn graphql_error_messages(envelope: dict) {
   return __graphql_list(envelope?.errors).map(
     { error -> return error?.message ?? to_string(error) },
   )
@@ -260,7 +260,7 @@ pub fn graphql_error_messages(envelope) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_assert_ok(envelope) {
+pub fn graphql_assert_ok(envelope: dict) {
   const messages = graphql_error_messages(envelope)
   if envelope?.ok || (envelope?.ok == nil && len(messages) == 0) {
     return envelope
@@ -277,7 +277,7 @@ pub fn graphql_assert_ok(envelope) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_extract(envelope, field, schema = nil) {
+pub fn graphql_extract(envelope: dict, field: any, schema: any = nil) {
   const value = envelope?.data?.[field]
   if schema != nil {
     const checked = schema_check(value, schema)
@@ -295,7 +295,7 @@ pub fn graphql_extract(envelope, field, schema = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_page_info(connection) {
+pub fn graphql_page_info(connection: dict) {
   const page_info = connection?.pageInfo ?? {}
   const nodes = connection?.nodes ?? connection?.edges?.map({ edge -> return edge.node }) ?? []
   return {
@@ -314,7 +314,11 @@ pub fn graphql_page_info(connection) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") {
+pub fn graphql_next_page_variables(
+  variables: dict?,
+  connection: dict,
+  cursor_key: string = "after",
+) {
   const page = graphql_page_info(connection)
   if !page.has_next_page || page.end_cursor == nil {
     return nil
@@ -328,7 +332,13 @@ pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") 
  * @effects: [net]
  * @errors: []
  */
-pub fn graphql_request(net: HarnessNet, endpoint, query, variables = nil, options = nil) {
+pub fn graphql_request(
+  net: HarnessNet,
+  endpoint: any,
+  query: any,
+  variables: any = nil,
+  options: any = nil,
+) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
@@ -359,7 +369,7 @@ pub fn graphql_request(net: HarnessNet, endpoint, query, variables = nil, option
  * @effects: []
  * @errors: []
  */
-pub fn graphql_operation(name, document, options = nil) {
+pub fn graphql_operation(name: any, document: string?, options: dict? = nil) {
   return merge(
     options ?? {},
     {
@@ -381,10 +391,10 @@ pub fn graphql_operation(name, document, options = nil) {
  */
 pub fn graphql_execute_operation(
   net: HarnessNet,
-  client,
-  operation,
-  variables = nil,
-  options = nil,
+  client: dict,
+  operation: dict,
+  variables: dict? = nil,
+  options: dict? = nil,
 ) {
   const endpoint = if type_of(client) == "string" {
     client
@@ -432,7 +442,7 @@ pub fn graphql_execute_operation(
   return merge(envelope, {result: shaped_result})
 }
 
-fn __graphql_type_header(line) {
+fn __graphql_type_header(line: any) {
   for kind in ["type", "input", "interface", "enum", "union", "scalar"] {
     const prefix = kind + " "
     if starts_with(line, prefix) {
@@ -447,7 +457,7 @@ fn __graphql_type_header(line) {
   return nil
 }
 
-fn __graphql_field_from_line(line) {
+fn __graphql_field_from_line(line: any) {
   const clean = trim(split(split(line, "#")[0], "@")[0])
   const name = trim(split(split(clean, "(")[0], ":")[0])
   const field_type = if contains(clean, ":") {
@@ -464,7 +474,7 @@ fn __graphql_field_from_line(line) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_parse_schema(schema_text) {
+pub fn graphql_parse_schema(schema_text: string?) {
   let types = []
   let current: {kind: string, name: string, fields: list}? = nil
   for raw_line in split(schema_text ?? "", "\n") {
@@ -506,7 +516,7 @@ pub fn graphql_parse_schema(schema_text) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_schema_from_introspection(payload) {
+pub fn graphql_schema_from_introspection(payload: dict) {
   const source = __graphql_payload(payload)
   const schema = source?.data?.__schema ?? source?.__schema ?? source
   return {
@@ -519,7 +529,7 @@ pub fn graphql_schema_from_introspection(payload) {
   }
 }
 
-fn __graphql_harn_name(name) {
+fn __graphql_harn_name(name: string?) {
   return replace(replace(name, "-", "_"), " ", "_")
 }
 
@@ -529,7 +539,7 @@ fn __graphql_harn_name(name) {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_codegen_wrapper(operation, client_param = "client") {
+pub fn graphql_codegen_wrapper(operation: dict, client_param: string = "client") {
   const name = __graphql_harn_name(operation.name ?? operation.operation_name)
   const operation_json = json_stringify(operation)
   const operation_literal = json_stringify(operation_json)
@@ -549,7 +559,7 @@ pub fn graphql_codegen_wrapper(operation, client_param = "client") {
  * @effects: []
  * @errors: []
  */
-pub fn graphql_generate_client(operations, options = nil) {
+pub fn graphql_generate_client(operations: list, options: any = nil) {
   let source = "import { graphql_execute_operation } from \"std/graphql\"\n\n"
   for operation in operations {
     source = source + graphql_codegen_wrapper(operation, options?.client_param ?? "client") + "\n"

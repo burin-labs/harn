@@ -127,7 +127,7 @@ fn __install_live_egress_policy(harness: Harness) -> Harness {
   return harness
 }
 
-fn __rate_per_mtok_from_per_token(value) {
+fn __rate_per_mtok_from_per_token(value: any) {
   if value == nil {
     return nil
   }
@@ -137,7 +137,7 @@ fn __rate_per_mtok_from_per_token(value) {
   return round(to_float(value) * 1000000.0 * 1000000.0) / 1000000.0
 }
 
-fn __openrouter_mapper(payload) {
+fn __openrouter_mapper(payload: dict) {
   let entries = []
   for record in payload?.data ?? [] {
     const id = record?.id
@@ -179,7 +179,7 @@ fn __openrouter_mapper(payload) {
   return entries
 }
 
-fn __pricing_from_per_token_record(pricing) {
+fn __pricing_from_per_token_record(pricing: dict) {
   if pricing == nil {
     return nil
   }
@@ -210,7 +210,7 @@ fn __pricing_from_per_token_record(pricing) {
   return pricing_dict
 }
 
-fn __pricing_from_mtok_record(record) {
+fn __pricing_from_mtok_record(record: dict) {
   if record == nil {
     return nil
   }
@@ -237,7 +237,7 @@ fn __pricing_from_mtok_record(record) {
   return pricing_dict
 }
 
-fn __generic_models_mapper(payload) {
+fn __generic_models_mapper(payload: dict) {
   let entries = []
   const records = if type_of(payload) == "list" {
     payload
@@ -269,7 +269,7 @@ fn __generic_models_mapper(payload) {
   return entries
 }
 
-fn __gemini_models_mapper(payload) {
+fn __gemini_models_mapper(payload: dict) {
   let entries = []
   for record in payload?.models ?? [] {
     const resource = record?.name ?? ""
@@ -286,7 +286,7 @@ fn __gemini_models_mapper(payload) {
   return entries
 }
 
-fn __together_models_mapper(payload) {
+fn __together_models_mapper(payload: list?) {
   let entries = []
   for record in payload ?? [] {
     const id = record?.id
@@ -305,7 +305,7 @@ fn __together_models_mapper(payload) {
   return entries
 }
 
-fn __fireworks_mapper(payload) {
+fn __fireworks_mapper(payload: dict) {
   let entries = []
   for record in payload?.data ?? [] {
     if record?.id != nil {
@@ -315,7 +315,7 @@ fn __fireworks_mapper(payload) {
   return entries
 }
 
-fn __fireworks_adapter(harness: Harness, env) {
+fn __fireworks_adapter(harness: Harness, env: dict) {
   const config = {
     id: "fireworks-models-api",
     provider: "fireworks",
@@ -443,7 +443,7 @@ fn __fireworks_spec() {
   }
 }
 
-fn __adapter_specs(live) {
+fn __adapter_specs(live: any) {
   if live {
     return [__openrouter_spec(), __fireworks_spec()]
   }
@@ -749,7 +749,7 @@ fn __check_against_golden(fs: HarnessFs, stdio: HarnessStdio, outcome: dict, upd
   return 0
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const live = argv.contains("--live")
   const check = argv.contains("--check")
   const update = argv.contains("--update")

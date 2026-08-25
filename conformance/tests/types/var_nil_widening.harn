@@ -35,7 +35,7 @@ fn annotated_roundtrip() -> bool {
   return label == nil
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(render_hit(first_hit()))
   harness.stdio.println(widen_direct())
   harness.stdio.println(annotated_roundtrip())

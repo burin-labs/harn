@@ -10,7 +10,7 @@ import { client, exchange_code, start_authorization, token } from "std/oauth/cli
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const topic = "oauth.client.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
   const store = memory(harness.auth)

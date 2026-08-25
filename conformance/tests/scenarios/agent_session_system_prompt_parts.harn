@@ -2,11 +2,11 @@ import { agent_loop } from "std/agent/loop"
 import { system_before, with_system_fragments } from "std/llm/prompts"
 import { with_llm_script } from "std/testing"
 
-fn occurrences(text, needle) {
+fn occurrences(text: any, needle: string) {
   return len(split(text, needle)) - 1
 }
 
-fn events_by_kind(transcript, kind) {
+fn events_by_kind(transcript: list | dict | Transcript, kind: string) {
   return transcript_events(transcript).filter({ event -> event.kind == kind })
 }
 

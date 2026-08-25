@@ -375,12 +375,7 @@ impl TypeChecker {
                             }
                         })
                         .collect();
-                    let names: Vec<String> = info
-                        .type_params
-                        .iter()
-                        .map(|param| param.name.clone())
-                        .collect();
-                    instantiate_alias_distributive(&info.body, &names, &args)
+                    instantiate_alias_by_variance(&info.body, &info.type_params, &args)
                 }
                 _ => return current,
             };
@@ -554,6 +549,15 @@ impl TypeChecker {
         }
 
         match (&expected, &actual) {
+            // `Schema<T>` has a dict runtime representation, but only typed
+            // constructors and compiler-generated `schema_of(...)` values may
+            // mint the witness. The reverse conversion is representation-safe;
+            // accepting an arbitrary dict here would let callers forge T.
+            (TypeExpr::Named(expected_name), TypeExpr::Applied { name, args })
+                if expected_name == "dict" && name == "Schema" && args.len() == 1 =>
+            {
+                true
+            }
             // Reverse direction: `unknown` is not assignable to anything concrete.
             // The `(_, Named("unknown"))` arm deliberately falls through to `=> false`
             // below, producing a "expected T, got unknown" diagnostic.
@@ -959,10 +963,11 @@ impl TypeChecker {
                                 args: resolved_args,
                             };
                         }
-                        let names: Vec<String> =
-                            info.type_params.iter().map(|tp| tp.name.clone()).collect();
-                        let expanded =
-                            instantiate_alias_distributive(&info.body, &names, &resolved_args);
+                        let expanded = instantiate_alias_by_variance(
+                            &info.body,
+                            &info.type_params,
+                            &resolved_args,
+                        );
                         let resolved = self.resolve_alias_inner(&expanded, scope, visiting);
                         visiting.remove(name);
                         return resolved;
@@ -984,27 +989,32 @@ impl TypeChecker {
 }
 
 /// Substitute `param_names[i] := args[i]` into `body`. When an argument is
-/// a `Union`, the body is cloned per union member and each result is
-/// unioned together — the "distributive" instantiation that makes
-/// `Container<A | B>` equal `Container<A> | Container<B>`.
-fn instantiate_alias_distributive(
+/// a `Union`, invariant and contravariant parameters distribute the alias body
+/// over its members. Covariant parameters retain the union intact: a producer
+/// of `A | B` is not a union of two producers that each promise one arm.
+fn instantiate_alias_by_variance(
     body: &TypeExpr,
-    param_names: &[String],
+    type_params: &[TypeParam],
     args: &[TypeExpr],
 ) -> TypeExpr {
-    debug_assert_eq!(param_names.len(), args.len());
+    debug_assert_eq!(type_params.len(), args.len());
     let mut variants: Vec<std::collections::BTreeMap<String, TypeExpr>> =
         vec![std::collections::BTreeMap::new()];
-    for (name, arg) in param_names.iter().zip(args.iter()) {
-        let members: Vec<TypeExpr> = match arg {
-            TypeExpr::Union(items) if !items.is_empty() => items.clone(),
-            other => vec![other.clone()],
+    for (param, arg) in type_params.iter().zip(args.iter()) {
+        let members: Vec<TypeExpr> = match (param.variance, arg) {
+            // A covariant producer of `A | B` is one producer whose output is
+            // the union, not a union of producers that each promise one arm.
+            // Invariant and contravariant aliases keep Harn's deliberate ADT
+            // distribution semantics.
+            (Variance::Covariant, _) => vec![arg.clone()],
+            (_, TypeExpr::Union(items)) if !items.is_empty() => items.clone(),
+            _ => vec![arg.clone()],
         };
         let mut next = Vec::with_capacity(variants.len() * members.len());
         for base in &variants {
             for member in &members {
                 let mut extended = base.clone();
-                extended.insert(name.clone(), member.clone());
+                extended.insert(param.name.clone(), member.clone());
                 next.push(extended);
             }
         }

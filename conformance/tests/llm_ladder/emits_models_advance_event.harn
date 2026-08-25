@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * (surfaced through `harness.obs.agent_trace()`) carrying the from/to models and the
  * transport failure category that drove the escalation.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

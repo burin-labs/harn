@@ -10,7 +10,7 @@ import {
   graphql_schema_from_introspection,
 } from "std/graphql"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.fs.workspace_root()
   const schema_text = harness.fs.read_text(
     path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"),

@@ -38,7 +38,7 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_result() {
         ..Default::default()
     };
     let source = format!(
-        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("printf denied > '{}'") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("printf denied > '{}'") }}"#,
         outside_file.display()
     );
     let (_, result) = run_harn_with_policy(&source, policy)
@@ -134,7 +134,7 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
 
     for command in escapes {
         let source = format!(
-            r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
+            r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("{}") }}"#,
             harn_string_escape(&command)
         );
         let (_, result) = run_harn_with_policy(&source, policy.clone())
@@ -181,7 +181,7 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
     };
     let command = format!("echo allowed>{}", allowed_file.display());
     let source = format!(
-        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("{}") }}"#,
         harn_string_escape(&command)
     );
     let result = run_harn_with_policy(&source, policy);
@@ -207,7 +207,7 @@ fn test_windows_process_sandbox_allows_exec_argv0() {
         ..Default::default()
     };
     let result = run_harn_with_policy(
-        r#"pipeline t(harness: Harness, task) { harness.process.exec("cmd", "/C", "exit 0") }"#,
+        r#"pipeline t(harness: Harness, task: unknown) { harness.process.exec("cmd", "/C", "exit 0") }"#,
         policy,
     );
 
@@ -234,7 +234,7 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
     };
     let command = format!("echo denied>{}", outside_file.display());
     let source = format!(
-        r#"pipeline t(harness: Harness, task) {{ harness.process.shell("{}") }}"#,
+        r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("{}") }}"#,
         harn_string_escape(&command)
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();

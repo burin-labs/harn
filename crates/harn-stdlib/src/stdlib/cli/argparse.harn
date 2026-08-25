@@ -141,7 +141,7 @@ fn __validate_arg_decoder(arg: ArgSpec) {
   }
 }
 
-fn __value_matches_decoder(value, decoder: CliValueParser) -> bool {
+fn __value_matches_decoder(value: any, decoder: CliValueParser) -> bool {
   const value_type = type_of(value)
   if decoder == "string" {
     return value_type == "string"
@@ -166,7 +166,7 @@ fn __value_matches_decoder(value, decoder: CliValueParser) -> bool {
   return true
 }
 
-fn __repeated_default_matches(value, decoder: CliValueParser) -> bool {
+fn __repeated_default_matches(value: any, decoder: CliValueParser) -> bool {
   if type_of(value) != "list" {
     return false
   }

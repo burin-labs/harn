@@ -20,7 +20,7 @@ fn codex_payload(command: string) -> string {
 }
 
 @test
-pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
+pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task: unknown) {
   assert_eq(program_of("cargo test"), "cargo")
   assert_eq(program_of("  cargo   test  "), "cargo")
   assert_eq(program_of("env -u HARN_EGRESS_BLOCK_PRIVATE cargo test"), "cargo")
@@ -34,7 +34,7 @@ pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
 }
 
 @test
-pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, task) {
+pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, task: unknown) {
   for verb in ["build", "check", "clippy", "fmt", "test", "nextest", "bench"] {
     assert(
       cargo_violation("cargo " + verb + " -p harn-vm") != "",
@@ -49,7 +49,7 @@ pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, tas
 }
 
 @test
-pipeline test_one_off_cargo_verbs_pass_through(harness: Harness, task) {
+pipeline test_one_off_cargo_verbs_pass_through(harness: Harness, task: unknown) {
   // No Makefile owner: these are inspection commands, not build/test lanes.
   for command in ["cargo tree -p harn-vm", "cargo add serde", "cargo --version"] {
     assert_eq(cargo_violation(command), "")
@@ -57,7 +57,7 @@ pipeline test_one_off_cargo_verbs_pass_through(harness: Harness, task) {
 }
 
 @test
-pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task) {
+pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task: unknown) {
   assert(cargo_violation("cd /repo && cargo test") != "")
   assert(cargo_violation("make build; cargo test | tail") != "")
   // A `cargo` substring inside another word is not a cargo call.
@@ -65,7 +65,7 @@ pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task) {
 }
 
 @test
-pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, task) {
+pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, task: unknown) {
   const diagnostic = "ps -axo command | rg 'rustc .*harn_vm|cargo build --locked' | head -n 20"
   assert_eq(cargo_violation(diagnostic), "")
   assert_eq(len(segments_of(diagnostic)), 3)
@@ -73,7 +73,7 @@ pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, ta
 }
 
 @test
-pipeline test_piping_a_slow_command_into_a_filter_is_denied(harness: Harness, task) {
+pipeline test_piping_a_slow_command_into_a_filter_is_denied(harness: Harness, task: unknown) {
   for command in [
     "cargo test -p harn-vm | grep FAILED",
     "make test | tail -20",
@@ -88,7 +88,7 @@ pipeline test_piping_a_slow_command_into_a_filter_is_denied(harness: Harness, ta
 }
 
 @test
-pipeline test_redirecting_first_is_allowed(harness: Harness, task) {
+pipeline test_redirecting_first_is_allowed(harness: Harness, task: unknown) {
   for command in [
     "make test > /tmp/out.log 2>&1; grep FAILED /tmp/out.log",
     "cargo test 2>&1 | tee /tmp/out.log | tail",
@@ -109,14 +109,14 @@ pipeline test_redirecting_first_is_allowed(harness: Harness, task) {
 }
 
 @test
-pipeline test_fast_commands_may_pipe_freely(harness: Harness, task) {
+pipeline test_fast_commands_may_pipe_freely(harness: Harness, task: unknown) {
   for command in ["git status --short | head", "ls -la | grep harn", "echo hi | wc -l"] {
     assert_eq(discarded_output_violation(command), "")
   }
 }
 
 @test
-pipeline test_disposable_paths_never_enter_user_trash(harness: Harness, task) {
+pipeline test_disposable_paths_never_enter_user_trash(harness: Harness, task: unknown) {
   // Exact commands recovered from the two sessions that produced the leaked
   // Trash entries in burin-labs/harn#6418.
   for command in [
@@ -133,7 +133,10 @@ pipeline test_disposable_paths_never_enter_user_trash(harness: Harness, task) {
 }
 
 @test
-pipeline test_disposable_path_policy_covers_temp_and_generated_roots(harness: Harness, task) {
+pipeline test_disposable_path_policy_covers_temp_and_generated_roots(
+  harness: Harness,
+  task: unknown,
+) {
   for path in [
     "/tmp/output.log",
     "/private/tmp/probe",
@@ -171,7 +174,7 @@ pipeline test_disposable_path_policy_covers_temp_and_generated_roots(harness: Ha
 }
 
 @test
-pipeline test_user_files_keep_recoverable_trash_path(harness: Harness, task) {
+pipeline test_user_files_keep_recoverable_trash_path(harness: Harness, task: unknown) {
   for command in [
     "trash /Users/alice/Documents/report.txt",
     "/usr/bin/trash './draft notes.txt'",
@@ -182,7 +185,7 @@ pipeline test_user_files_keep_recoverable_trash_path(harness: Harness, task) {
 }
 
 @test
-pipeline test_codex_and_claude_share_one_decision(harness: Harness, task) {
+pipeline test_codex_and_claude_share_one_decision(harness: Harness, task: unknown) {
   for encode in [claude_payload, codex_payload] {
     assert(!decision(encode("cargo test")).allow)
     assert(decision(encode("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)

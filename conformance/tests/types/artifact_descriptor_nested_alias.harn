@@ -13,7 +13,7 @@ fn preserve_descriptor<T>(descriptor: EnvelopeArtifact<T>) -> EnvelopeArtifact<T
   return descriptor
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const contract: SchemaContract<ReceiptEnvelope> = schema_contract(schema_of(ReceiptEnvelope), [])
   const descriptor: EnvelopeArtifact<Receipt> = preserve_descriptor(
     artifact_descriptor("receipt.json", contract),

@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * selection, so combining them is ambiguous and must error up front rather
  * than silently ignoring the ladder.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [{text: "should never run", model: "mock", provider: "mock"}],

@@ -1,5 +1,5 @@
 /** Test "did you mean" suggestions on shape validation errors */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   fn process(data: {name: string, email: string}) {
     harness.stdio.println(data.name)
   }

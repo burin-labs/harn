@@ -4,7 +4,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn edit_capabilities(ast: HarnessAst, params = nil) {
+pub fn edit_capabilities(ast: HarnessAst, params: dict? = nil) {
   const raw = ast.capabilities(params ?? {})
   const payload = raw ?? {}
   return {

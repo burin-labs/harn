@@ -76,7 +76,7 @@ fn bootstrap_snippet(mcp_servers: &str, policy: &str) -> String {
     format!(
         r#"
 import {{ agent_mcp_bootstrap_if_needed }} from "std/agent/mcp"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const session = {{session_id: "sess-mcp-ceiling"}}
   const opts = {{
     mcp_servers: {mcp_servers},

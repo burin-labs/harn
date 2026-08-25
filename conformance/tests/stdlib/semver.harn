@@ -24,7 +24,7 @@ fn typed_bump(current: Version, target: Version) -> BumpKind? {
  * (a bare `harness.stdio.log("")` writes `[harn] ` with a trailing space, which most
  * editors strip on save).
  */
-fn show(value) -> string {
+fn show(value: any) -> string {
   if value == nil {
     return "<nil>"
   }
@@ -34,7 +34,7 @@ fn show(value) -> string {
   return to_string(value)
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // strip_v / add_v
   harness.stdio.log(show(strip_v("v1.2.3")))
   harness.stdio.log(show(strip_v("1.2.3")))

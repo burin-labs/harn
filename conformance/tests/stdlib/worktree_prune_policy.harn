@@ -23,7 +23,7 @@ fn base_entry() {
   }
 }
 
-fn verdict_reason(entry) {
+fn verdict_reason(entry: any) {
   return worktree_prune_classify(entry).reason
 }
 

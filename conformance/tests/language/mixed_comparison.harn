@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // int vs float comparison
   harness.stdio.log(3 < 3.5)
   harness.stdio.log(3.5 > 3)

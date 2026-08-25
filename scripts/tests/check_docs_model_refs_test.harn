@@ -4,29 +4,29 @@ import "../check_docs_model_refs.harn"
 
 // --- is_generated -----------------------------------------------------------
 @test
-pipeline test_generated_marker_in_head(harness: Harness, task) {
+pipeline test_generated_marker_in_head(harness: Harness, task: unknown) {
   assert_eq(is_generated("<!-- GENERATED: do not edit -->\nbody\n"), true)
 }
 
 @test
-pipeline test_generated_marker_on_fifth_line(harness: Harness, task) {
+pipeline test_generated_marker_on_fifth_line(harness: Harness, task: unknown) {
   assert_eq(is_generated("1\n2\n3\n4\nGENERATED\n"), true)
 }
 
 @test
-pipeline test_generated_marker_below_head_ignored(harness: Harness, task) {
+pipeline test_generated_marker_below_head_ignored(harness: Harness, task: unknown) {
   // Only the first five lines count (bash `head -n 5`).
   assert_eq(is_generated("1\n2\n3\n4\n5\nGENERATED\n"), false)
 }
 
 @test
-pipeline test_not_generated(harness: Harness, task) {
+pipeline test_not_generated(harness: Harness, task: unknown) {
   assert_eq(is_generated("# Title\nplain docs\n"), false)
 }
 
 // --- stale_refs -------------------------------------------------------------
 @test
-pipeline test_stale_ref_flagged(harness: Harness, task) {
+pipeline test_stale_ref_flagged(harness: Harness, task: unknown) {
   const refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-4-6")
   assert_eq(refs.count, 1)
   assert_eq(refs[0].model, "claude-sonnet-4-0")
@@ -34,18 +34,18 @@ pipeline test_stale_ref_flagged(harness: Harness, task) {
 }
 
 @test
-pipeline test_current_alias_ok(harness: Harness, task) {
+pipeline test_current_alias_ok(harness: Harness, task: unknown) {
   assert_eq(stale_refs("Use claude-sonnet-4-6 today.\n", "claude-sonnet-4-6"), [])
 }
 
 @test
-pipeline test_allow_stale_marker_suppresses(harness: Harness, task) {
+pipeline test_allow_stale_marker_suppresses(harness: Harness, task: unknown) {
   const text = "old claude-sonnet-4-0 <!-- harn-doc-model-ref: allow-stale -->\n"
   assert_eq(stale_refs(text, "claude-sonnet-4-6"), [])
 }
 
 @test
-pipeline test_multiple_refs_and_line_numbers(harness: Harness, task) {
+pipeline test_multiple_refs_and_line_numbers(harness: Harness, task: unknown) {
   const text = "intro\nclaude-sonnet-4-0 and claude-sonnet-4-1\nfine\nclaude-sonnet-4-2\n"
   const refs = stale_refs(text, "claude-sonnet-4-6")
   assert_eq(refs.count, 3)
@@ -55,14 +55,14 @@ pipeline test_multiple_refs_and_line_numbers(harness: Harness, task) {
 }
 
 @test
-pipeline test_bare_family_name_not_matched(harness: Harness, task) {
+pipeline test_bare_family_name_not_matched(harness: Harness, task: unknown) {
   // `claude-sonnet-4` without a dashed suffix is not a model id ref
   // (the regex requires at least one `-<digit>...` group).
   assert_eq(stale_refs("the claude-sonnet-4 family\n", "claude-sonnet-4-6"), [])
 }
 
 @test
-pipeline test_longest_match_taken(harness: Harness, task) {
+pipeline test_longest_match_taken(harness: Harness, task: unknown) {
   // Greedy matching consumes the full dashed id, so a dated id like
   // claude-sonnet-4-6-20250929 is one ref, not a stale prefix + tail.
   const refs = stale_refs("claude-sonnet-4-6-20250929\n", "claude-sonnet-4-6")
@@ -72,34 +72,34 @@ pipeline test_longest_match_taken(harness: Harness, task) {
 
 // --- rel_path ---------------------------------------------------------------
 @test
-pipeline test_rel_path_strip(harness: Harness, task) {
+pipeline test_rel_path_strip(harness: Harness, task: unknown) {
   assert_eq(rel_path("/repo/./docs/src/a.md"), "docs/src/a.md")
   assert_eq(rel_path("docs/src/a.md"), "docs/src/a.md")
 }
 
 // --- provider-scoped refs ---------------------------------------------------
 @test
-pipeline test_other_provider_route_not_flagged(harness: Harness, task) {
+pipeline test_other_provider_route_not_flagged(harness: Harness, task: unknown) {
   // `aliases.sonnet` is an anthropic alias; a vertex route names vertex's own
   // default model, so the two are not comparable.
   assert_eq(stale_refs("vertex/claude-sonnet-4-6\n", "claude-sonnet-5"), [])
 }
 
 @test
-pipeline test_anthropic_namespaced_ref_still_flagged(harness: Harness, task) {
+pipeline test_anthropic_namespaced_ref_still_flagged(harness: Harness, task: unknown) {
   const refs = stale_refs("Use anthropic/claude-sonnet-4-0 today.\n", "claude-sonnet-5")
   assert_eq(refs.count, 1)
   assert_eq(refs[0].model, "claude-sonnet-4-0")
 }
 
 @test
-pipeline test_bare_ref_still_flagged(harness: Harness, task) {
+pipeline test_bare_ref_still_flagged(harness: Harness, task: unknown) {
   const refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-5")
   assert_eq(refs.count, 1)
 }
 
 @test
-pipeline test_ref_provider_reads_the_namespace(harness: Harness, task) {
+pipeline test_ref_provider_reads_the_namespace(harness: Harness, task: unknown) {
   assert_eq(ref_provider("vertex/claude-sonnet-4-6", "claude-sonnet-4-6"), "vertex")
   assert_eq(ref_provider("bare claude-sonnet-4-6", "claude-sonnet-4-6"), "")
   assert_eq(ref_provider("-> vertex/claude-sonnet-4-6 (x)", "claude-sonnet-4-6"), "vertex")

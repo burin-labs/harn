@@ -7,7 +7,7 @@ import "std/triggers"
  * a single trigger registration route different events to different
  * sessions based on payload contents.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const acme_session = harness.agent.open("trigger-reminder-inject-closure-acme")
   const widget_session = harness.agent.open("trigger-reminder-inject-closure-widget")
   harness.agent.reset(acme_session)

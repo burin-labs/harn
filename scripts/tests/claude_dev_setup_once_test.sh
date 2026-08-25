@@ -44,7 +44,7 @@ lock_dir="$state_dir/warm.lock"
 : > "$record"
 
 hook_message() {
-  "$real_harn_bin" run -e 'pipeline main(harness: Harness, task) { const parsed = json_parse(harness.stdio.read_stdin() ?? ""); harness.stdio.println(parsed?.hookSpecificOutput?.additionalContext ?? "") }' < "$1"
+  "$real_harn_bin" run -e 'pipeline main(harness: Harness, task: unknown) { const parsed = json_parse(harness.stdio.read_stdin() ?? ""); harness.stdio.println(parsed?.hookSpecificOutput?.additionalContext ?? "") }' < "$1"
 }
 
 # Bounded wait: the warm phase is a detached process, so there is no handle to

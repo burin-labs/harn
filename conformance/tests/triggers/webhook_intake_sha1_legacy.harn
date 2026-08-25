@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Legacy webhook providers (older Bitbucket, pre-2018 GitHub) sign with
   // SHA-1. The substrate must let connectors opt in.
   const _intake = harness.runtime.webhook_intake_register(

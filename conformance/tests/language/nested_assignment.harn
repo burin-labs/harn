@@ -3,7 +3,7 @@ fn bump_index(stdio: HarnessStdio) {
   return 1
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Nested property path writes the leaf, not `root.<final>`
   let a = {b: {c: 1}, c: 99}
   a.b.c = 2

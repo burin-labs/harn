@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Basic type validation
   const str_schema = {type: "string"}
   harness.stdio.println(json_validate("hello", str_schema))

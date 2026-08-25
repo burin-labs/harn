@@ -6,7 +6,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/parallel-pipeline.harn
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const prompts = [
     "What is 2 + 2?",
     "Name one planet in our solar system.",

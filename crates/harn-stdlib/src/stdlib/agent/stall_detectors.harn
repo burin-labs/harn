@@ -139,7 +139,7 @@ pub fn token_runaway_decision(config: dict, obs: dict) -> dict {
   return {action: "abort", cap: cap, reason: "token_runaway_no_progress"}
 }
 
-pub fn __token_runaway_is_verification_result(result) -> bool {
+pub fn __token_runaway_is_verification_result(result: dict) -> bool {
   // A verification/check result carries a diagnostics or errors LIST (empty =
   // clean). A plain tool success (edit/read/write/non-verify run) carries
   // neither, so it is NOT verification evidence — the gate helper would
@@ -170,7 +170,7 @@ pub fn __token_runaway_is_verification_result(result) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_made_progress(agent: HarnessAgent, payload) -> bool {
+pub fn token_runaway_made_progress(agent: HarnessAgent, payload: dict) -> bool {
   const results = payload?.tool_results ?? []
   for result in results {
     if !__token_runaway_is_verification_result(result) {
@@ -321,7 +321,7 @@ pub fn unified_detectors_post_turn(agent: HarnessAgent, spec: DetectorSpec) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn detector_action_of(warning) -> string {
+pub fn detector_action_of(warning: dict) -> string {
   if warning == nil {
     return "proceed"
   }

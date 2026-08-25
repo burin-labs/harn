@@ -11,7 +11,7 @@ pub const PATTERN_NAMESPACE: string = "project/pattern-learning"
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pl_text(value) -> string {
+pub fn pl_text(value: string?) -> string {
   return regex_replace(r"\s+", " ", to_string(value ?? "").trim()) ?? to_string(value ?? "").trim()
 }
 
@@ -22,7 +22,7 @@ pub fn pl_text(value) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pl_slugify(raw) -> string {
+pub fn pl_slugify(raw: string?) -> string {
   let slug = regex_replace(r"[^a-z0-9]+", "-", pl_text(raw).lower()) ?? ""
   while slug.starts_with("-") {
     slug = slug[1:]

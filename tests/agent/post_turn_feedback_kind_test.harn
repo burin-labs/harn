@@ -12,7 +12,7 @@ import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn __feedback_event_by_kind(captured, kind: string) {
+fn __feedback_event_by_kind(captured: dict, kind: string) {
   for event in captured.events {
     if event.type == "feedback_injected" {
       const feedback = agent_event_value(event, agent_feedback_injected_event_schema())
@@ -24,7 +24,7 @@ fn __feedback_event_by_kind(captured, kind: string) {
   return nil
 }
 
-fn __feedback_event_count_by_kind(captured, kind: string) -> int {
+fn __feedback_event_count_by_kind(captured: dict, kind: string) -> int {
   let count = 0
   for event in captured.events {
     if event.type == "feedback_injected" {
@@ -37,7 +37,7 @@ fn __feedback_event_count_by_kind(captured, kind: string) -> int {
   return count
 }
 
-pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
+pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("Need one more turn."), llm_text("Finished. ##DONE##")],
@@ -72,7 +72,10 @@ pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
   )
 }
 
-pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Harness, task) {
+pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [llm_text("Keep going."), llm_text("Still going."), llm_text("Finished. ##DONE##")],
@@ -105,7 +108,7 @@ pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Har
   )
 }
 
-pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
+pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("Budget exhausted before done."), llm_text("Finished. ##DONE##")],
@@ -136,7 +139,7 @@ pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
   )
 }
 
-pipeline test_feedback_kind_rejects_non_string(harness: Harness, task) {
+pipeline test_feedback_kind_rejects_non_string(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("The callback will reject.")],

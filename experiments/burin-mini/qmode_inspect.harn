@@ -40,7 +40,7 @@ fn failed(findings: list) -> bool {
   return false
 }
 
-fn string_value(value) -> string {
+fn string_value(value: string) -> string {
   if type_of(value) == "string" {
     return value
   }

@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn count_up(start, end) {
+pipeline test(harness: Harness, task: unknown) {
+  fn count_up(start: int, end: int) {
     let i = start
     while i < end {
       yield i

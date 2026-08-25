@@ -166,7 +166,7 @@ fn __pii_resolve_overlaps(entities: list) -> list {
  * @effects: []
  * @errors: []
  */
-pub fn pii_detect(text, options = nil) -> list {
+pub fn pii_detect(text: string, options: dict? = nil) -> list {
   const source = to_string(text)
   const wanted = (options ?? {})?.entities
   let found = []
@@ -218,7 +218,7 @@ pub fn pii_detect(text, options = nil) -> list {
  * @effects: []
  * @errors: []
  */
-pub fn pii_redact(text, options = nil) -> dict {
+pub fn pii_redact(text: any, options: dict? = nil) -> dict {
   const source = to_string(text)
   const entities = pii_detect(source, options).sorted_by({ e -> e.start })
   let counters = {}
@@ -256,7 +256,7 @@ pub fn pii_redact(text, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn pii_restore(text, restore) -> string {
+pub fn pii_restore(text: any, restore: any) -> string {
   let output = to_string(text)
   const tokens = (restore ?? {}).keys().sorted_by({ token -> 0 - len(token) })
   for token in tokens {

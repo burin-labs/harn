@@ -1330,7 +1330,7 @@ async fn acp_file_backed_pipeline_receives_explicit_harness_argument() {
                 r#"
 import { env_int } from "std/config"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(env_int(harness.env, "HARN_ACP_HARNESS_REGRESSION_UNSET", 7))
   harness.stdio.println("via-harness")
 }"#,
@@ -1372,7 +1372,7 @@ async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
             std::fs::write(
                 &pipeline_path,
                 r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const cell = harness.runtime.shared_cell({scope: "task_group", key: "turn", initial: prompt})
   harness.stdio.println(prompt)
   harness.stdio.println(harness.runtime.shared_get(cell))
@@ -1455,7 +1455,7 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
             std::fs::write(
                 &pipeline_path,
                 r#"import { runtime_prompt_content } from "std/runtime"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.llm.mock_clear()
   harness.llm.mock_enqueue({text: "ok"})
   harness.llm.call("", nil, {provider: "mock", messages: [{role: "user", content: harness.runtime.prompt_content()}]})
@@ -1561,7 +1561,7 @@ async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
             std::fs::write(
                 &pipeline_path,
                 r#"import { runtime_prompt_content } from "std/runtime"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.llm.call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: [{role: "user", content: harness.runtime.prompt_content()}]})
 }"#,
             )

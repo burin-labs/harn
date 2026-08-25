@@ -156,7 +156,12 @@ fixture, unedited:
  * Required secrets: none
  */
 pipeline crystallized_version_bump(
-  harness: Harness, branch_name, path, release_target, repo_path, version,
+  harness: Harness,
+  branch_name: unknown,
+  path: unknown,
+  release_target: unknown,
+  repo_path: unknown,
+  version: unknown,
 ) {
   let review_warnings = []
   // Step 1: tool_call git.checkout_branch

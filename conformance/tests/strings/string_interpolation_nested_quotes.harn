@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _missing = nil
   // A nested string literal inside an interpolation hole uses bare double
   // quotes; its contents — including `}` and `{` — must not end the hole.

@@ -99,7 +99,7 @@ pub fn runtime_approved_plan(runtime: HarnessRuntime) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
+pub fn process_run(process: HarnessProcess, argv: list<string>, options: dict? = nil) {
   if len(argv) == 0 {
     throw "process_run: argv must contain a program"
   }
@@ -113,7 +113,7 @@ pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
  * @effects: [host]
  * @errors: []
  */
-pub fn process_shell(process: HarnessProcess, command: string, options = nil) {
+pub fn process_shell(process: HarnessProcess, command: string, options: dict? = nil) {
   const opts = options ?? {}
   const invocation = process.shell_invocation({command: command})
   return process.run(filter_nil(opts + {program: invocation.program, args: invocation.args}))
@@ -159,7 +159,7 @@ pub fn process_result_success(result: dict) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn shell_quote(value) -> string {
+pub fn shell_quote(value: string?) -> string {
   return "'" + to_string(value ?? "").replace("'", "'\"'\"'") + "'"
 }
 
@@ -169,7 +169,7 @@ pub fn shell_quote(value) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn interaction_ask(interaction: HarnessInteraction, question) -> string {
+pub fn interaction_ask(interaction: HarnessInteraction, question: any) -> string {
   return interaction.ask(question)
 }
 
@@ -179,7 +179,11 @@ pub fn interaction_ask(interaction: HarnessInteraction, question) -> string {
  * @effects: [host]
  * @errors: []
  */
-pub fn interaction_ask_with_kind(interaction: HarnessInteraction, question, kind) -> string {
+pub fn interaction_ask_with_kind(
+  interaction: HarnessInteraction,
+  question: any,
+  kind: any,
+) -> string {
   return interaction.ask(question, kind)
 }
 
@@ -189,7 +193,7 @@ pub fn interaction_ask_with_kind(interaction: HarnessInteraction, question, kind
  * @effects: [host]
  * @errors: []
  */
-pub fn record_run_metadata(runtime: HarnessRuntime, run, workflow_name) {
+pub fn record_run_metadata(runtime: HarnessRuntime, run: dict, workflow_name: any) {
   if run?.path {
     runtime.record_run(
       {

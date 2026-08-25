@@ -19,7 +19,7 @@ pub fn defaults() {
 }
 
 /** Merge per-repo policy.repair_worker on top of the defaults. */
-pub fn with_defaults(repair_policy) {
+pub fn with_defaults(repair_policy: dict) {
   const d = defaults()
   if repair_policy == nil {
     return d
@@ -37,7 +37,7 @@ pub fn with_defaults(repair_policy) {
 }
 
 /** True when the per-repo policy allows the worker to handle this kind at all. */
-pub fn handles_kind(repair_policy, kind) {
+pub fn handles_kind(repair_policy: any, kind: string) {
   const policy = with_defaults(repair_policy)
   if !policy.enabled {
     return false
@@ -46,7 +46,7 @@ pub fn handles_kind(repair_policy, kind) {
 }
 
 /** True when human approval is required for the given action_kind. */
-pub fn requires_human_for(repair_policy, action_kind) {
+pub fn requires_human_for(repair_policy: dict, action_kind: any) {
   if !is_action_kind(action_kind) {
     return true
   }
@@ -72,7 +72,7 @@ pub fn requires_human_for(repair_policy, action_kind) {
  *     approval_state: "needs_human" | "autopilot" | "pre_approved",
  *   }
  */
-pub fn gate(repair_policy, bundle, dry_run) {
+pub fn gate(repair_policy: any, bundle: dict, dry_run: any) {
   const policy = with_defaults(repair_policy)
   if dry_run {
     return {allowed: true, blocking_actions: [], approval_state: "dry_run"}
@@ -100,7 +100,7 @@ pub fn gate(repair_policy, bundle, dry_run) {
 }
 
 /** Validate a repair_worker policy block. Returns nil on success or a string error. */
-pub fn validate_repair_policy(repair_policy) {
+pub fn validate_repair_policy(repair_policy: any) {
   if repair_policy == nil {
     return nil
   }

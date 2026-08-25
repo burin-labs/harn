@@ -9,7 +9,7 @@ import {
   step_assertions_end,
 } from "std/testing"
 
-fn deploy_receipt(clock: HarnessClock, step, result) {
+fn deploy_receipt(clock: HarnessClock, step: string, result: dict) {
   const wrapped = with_audit_receipt(
     clock,
     fn() { return result },
@@ -19,7 +19,7 @@ fn deploy_receipt(clock: HarnessClock, step, result) {
 }
 
 @persona(name: "deploy_captain")
-fn deploy_captain(clock: HarnessClock, ctx) {
+fn deploy_captain(clock: HarnessClock, ctx: dict) {
   const merged = wait_for_pr_merged(clock, ctx)
   const staging = deploy_to_staging(clock, merged.result)
   const smoke = smoke_test(clock, staging.result)
@@ -28,7 +28,7 @@ fn deploy_captain(clock: HarnessClock, ctx) {
 }
 
 @step(name: "wait_for_pr_merged")
-fn wait_for_pr_merged(clock: HarnessClock, ctx) {
+fn wait_for_pr_merged(clock: HarnessClock, ctx: dict) {
   return deploy_receipt(
     clock,
     "wait_for_pr_merged",
@@ -37,7 +37,7 @@ fn wait_for_pr_merged(clock: HarnessClock, ctx) {
 }
 
 @step(name: "deploy_to_staging")
-fn deploy_to_staging(clock: HarnessClock, pr_state) {
+fn deploy_to_staging(clock: HarnessClock, pr_state: dict) {
   return deploy_receipt(
     clock,
     "deploy_to_staging",
@@ -51,7 +51,7 @@ fn deploy_to_staging(clock: HarnessClock, pr_state) {
 }
 
 @step(name: "smoke_test")
-fn smoke_test(clock: HarnessClock, deployment) {
+fn smoke_test(clock: HarnessClock, deployment: dict) {
   return deploy_receipt(
     clock,
     "smoke_test",
@@ -64,7 +64,7 @@ fn smoke_test(clock: HarnessClock, deployment) {
 }
 
 @step(name: "promote_production")
-fn promote_production(clock: HarnessClock, smoke) {
+fn promote_production(clock: HarnessClock, smoke: dict) {
   return deploy_receipt(
     clock,
     "promote_production",

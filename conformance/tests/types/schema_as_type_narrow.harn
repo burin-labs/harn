@@ -1,6 +1,6 @@
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const data: unknown = {verdict: "pass", summary: "looks good"}
   if schema_is(data, GraderOut) {
     // data is narrowed to GraderOut here.

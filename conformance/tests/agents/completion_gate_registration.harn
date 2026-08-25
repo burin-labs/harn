@@ -20,15 +20,15 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn event_field_values(events, field) {
+fn event_field_values(events: any, field: string) {
   return join(events.map({ event -> to_string(event[field] ?? "") }), ",")
 }
 
-fn done_turns(n) {
+fn done_turns(n: int) {
   let turns = []
   for i in range(0, n) {
     turns = turns.appending(

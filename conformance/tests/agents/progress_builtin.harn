@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Basic progress
   harness.stdio.progress("phase1", "Starting work")
   // Progress with numeric percentage

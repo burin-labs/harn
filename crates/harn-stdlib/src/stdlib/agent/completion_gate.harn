@@ -133,13 +133,13 @@ pub type CompletionGateOptions = {
  * reports these as "closure", "function", or "fn" (mirrors std/agent/goal's
  * `__goal_callable`). Gating on "closure" alone would reject named-fn callbacks.
  */
-fn __completion_gate_callable(value) -> bool {
+fn __completion_gate_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
 }
 
 /** Validate a CompletionGateOptions at config time. */
-fn __completion_gate_validate_options(opts) {
+fn __completion_gate_validate_options(opts: dict) {
   for field in ["facts", "classify_write", "verify_command", "veto_combine", "feedback_decorator"] {
     const value = opts[field]
     if value != nil && !__completion_gate_callable(value) {
@@ -191,7 +191,7 @@ fn __completion_gate_validate_options(opts) {
 }
 
 /** Run the host feedback decorator only for a veto that will be delivered. */
-fn __completion_gate_decorate_feedback(verdict, decorator) {
+fn __completion_gate_decorate_feedback(verdict: dict, decorator: any) {
   if decorator == nil || (verdict?.ok ?? false) {
     return verdict
   }
@@ -207,11 +207,11 @@ fn __completion_gate_decorate_feedback(verdict, decorator) {
   return verdict + {feedback: decorated}
 }
 
-fn __completion_gate_veto_key(session_id) {
+fn __completion_gate_veto_key(session_id: string) {
   return "harn.completion_gate." + session_id + ".veto_count"
 }
 
-fn __completion_gate_veto_class_key(session_id, reason) {
+fn __completion_gate_veto_class_key(session_id: string, reason: any) {
   return "harn.completion_gate." + session_id + ".veto_count." + reason
 }
 
@@ -223,14 +223,14 @@ const __COMPLETION_GATE_VETO_CLASSES = [
   "verification_after_write_red",
 ]
 
-fn __completion_gate_vetoes_used(runtime: HarnessRuntime, session_id) {
+fn __completion_gate_vetoes_used(runtime: HarnessRuntime, session_id: string) {
   if session_id == "" {
     return 0
   }
   return to_int(runtime.store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
 }
 
-fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reason) {
+fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id: string, reason: any) {
   if session_id == "" {
     return 0
   }
@@ -245,7 +245,7 @@ fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reas
  * @api_stability: experimental
  * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
  */
-pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) -> dict {
+pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id: string?) -> dict {
   const sid = to_string(session_id ?? "")
   let by_class = {}
   for reason in __COMPLETION_GATE_VETO_CLASSES {
@@ -254,7 +254,7 @@ pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) ->
   return {by_class: by_class, total: __completion_gate_vetoes_used(runtime, sid)}
 }
 
-fn __completion_gate_write_counts(raw, classify_write) {
+fn __completion_gate_write_counts(raw: dict, classify_write: any) {
   if raw?.source_write_count != nil {
     return {
       source_write_count: to_int(raw.source_write_count) ?? 0,
@@ -269,7 +269,12 @@ fn __completion_gate_write_counts(raw, classify_write) {
   return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
 }
 
-fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_available) {
+fn __completion_gate_evaluate(
+  runtime: HarnessRuntime,
+  payload: dict,
+  opts: dict,
+  facts_available: any,
+) {
   const session_id = to_string(payload?.session_id ?? "")
   const classify_write = opts?.classify_write
   const verify_command = opts?.verify_command

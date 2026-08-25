@@ -2,7 +2,7 @@
 import { cache_get, cache_put } from "std/cache"
 import { JsonParseFailure } from "std/json"
 
-fn __web_header(headers, name) {
+fn __web_header(headers: dict?, name: any) {
   const wanted = lowercase(name)
   for entry in headers ?? {} {
     if lowercase(entry.key) == wanted {
@@ -12,18 +12,18 @@ fn __web_header(headers, name) {
   return nil
 }
 
-fn __web_store_options(opts) {
+fn __web_store_options(opts: dict) {
   if opts?.store == nil {
     return nil
   }
   return {store: opts.store}
 }
 
-fn __web_cache_key(method, url, opts) {
+fn __web_cache_key(method: any, url: any, opts: dict) {
   return opts?.cache_key ?? ("std/web:web_fetch:" + uppercase(method) + ":" + url)
 }
 
-fn __web_effective_url(url, http_opts) {
+fn __web_effective_url(url: string, http_opts: dict) {
   const query = http_opts?.query
   if query == nil {
     return url
@@ -49,7 +49,7 @@ fn __web_effective_url(url, http_opts) {
   )
 }
 
-fn __web_base_headers(opts) {
+fn __web_base_headers(opts: dict) {
   const http_headers = opts?.http_options?.headers ?? {}
   const headers = opts?.headers
   if headers == nil {
@@ -58,7 +58,7 @@ fn __web_base_headers(opts) {
   return http_headers + headers
 }
 
-fn __web_conditional_headers(headers, previous, enabled) {
+fn __web_conditional_headers(headers: any, previous: dict?, enabled: any) {
   if !enabled || previous == nil {
     return headers
   }
@@ -72,7 +72,7 @@ fn __web_conditional_headers(headers, previous, enabled) {
   return next
 }
 
-fn __web_fetch_envelope(source_url, response, fetched_at, cache_status) {
+fn __web_fetch_envelope(source_url: any, response: dict, fetched_at: any, cache_status: any) {
   const headers = response?.headers ?? {}
   return {
     ok: response?.ok ?? false,
@@ -90,9 +90,9 @@ fn __web_fetch_envelope(source_url, response, fetched_at, cache_status) {
   }
 }
 
-fn __web_not_modified(source_url, response, previous, fetched_at) {
+fn __web_not_modified(source_url: any, response: dict, previous: dict?, fetched_at: any) {
   const headers = response?.headers ?? {}
-  let next = previous
+  let next = previous ?? {}
   next = next
     + {
       ok: true,
@@ -138,7 +138,7 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
  * @effects: [net, time]
  * @errors: []
  */
-pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
+pub fn web_fetch(harness: Harness, url: string, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const method = uppercase(opts?.method ?? opts?.http_options?.method ?? "GET")
   let http_opts = opts?.http_options ?? opts
@@ -184,7 +184,7 @@ pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
   return envelope
 }
 
-fn __web_search_tokens(query) {
+fn __web_search_tokens(query: string?) {
   const normalized = regex_replace("[^A-Za-z0-9_./@:-]+", " ", lowercase(query ?? ""))
   let out = []
   for token in split(trim(normalized), " ") {
@@ -195,7 +195,7 @@ fn __web_search_tokens(query) {
   return out
 }
 
-fn __web_search_text(entry) {
+fn __web_search_text(entry: dict) {
   return lowercase(
     to_string(entry?.title ?? "")
       + " "
@@ -211,7 +211,7 @@ fn __web_search_text(entry) {
   )
 }
 
-fn __web_search_score(entry, query, tokens) {
+fn __web_search_score(entry: dict, query: string?, tokens: list) {
   const haystack = __web_search_text(entry)
   let score = 0
   const phrase = lowercase(trim(query ?? ""))
@@ -242,7 +242,7 @@ fn __web_search_score(entry, query, tokens) {
   return score
 }
 
-fn __web_search_take(items, limit) {
+fn __web_search_take(items: list, limit: int) {
   let out = []
   for item in items {
     if len(out) >= limit {
@@ -253,7 +253,7 @@ fn __web_search_take(items, limit) {
   return out
 }
 
-fn __web_search_path_get(value, path, fallback = nil) {
+fn __web_search_path_get(value: any, path: any, fallback: any = nil) {
   if path == nil {
     return fallback
   }
@@ -272,19 +272,19 @@ fn __web_search_path_get(value, path, fallback = nil) {
   return current ?? fallback
 }
 
-fn __web_search_merge_headers(left, right) {
+fn __web_search_merge_headers(left: dict?, right: dict?) {
   const merged = left ?? {}
   const extra = right ?? {}
   return merged + extra
 }
 
-fn __web_search_tool_options(base, args) {
+fn __web_search_tool_options(base: dict?, args: dict) {
   const merged = base ?? {}
   const extra = args?.options ?? args ?? {}
   return merged + extra
 }
 
-fn __web_search_backend(env: HarnessEnv, opts) {
+fn __web_search_backend(env: HarnessEnv, opts: dict) {
   const explicit = opts?.backend
   if type_of(explicit) == "dict" {
     return explicit
@@ -342,7 +342,7 @@ fn __web_search_backend(env: HarnessEnv, opts) {
   }
 }
 
-fn __web_search_public_backend(backend) {
+fn __web_search_public_backend(backend: dict) {
   let public = {
     kind: backend.kind,
     id: backend.id,
@@ -358,7 +358,7 @@ fn __web_search_public_backend(backend) {
   return public
 }
 
-fn __web_search_normalize(entry, rank, backend, score = nil) {
+fn __web_search_normalize(entry: dict, rank: int, backend: dict, score: any = nil) {
   const url = entry?.url ?? entry?.href ?? entry?.source_url ?? entry?.docs_url
   return {
     rank: rank,
@@ -385,7 +385,7 @@ fn __web_search_normalize(entry, rank, backend, score = nil) {
   }
 }
 
-fn __web_search_curated(query, opts, backend) {
+fn __web_search_curated(query: string?, opts: dict, backend: dict) {
   const tokens = __web_search_tokens(query)
   const limit = opts?.limit ?? 10
   let scored = []
@@ -411,7 +411,7 @@ fn __web_search_curated(query, opts, backend) {
   }
 }
 
-fn __web_search_provider_results(query, opts, backend) {
+fn __web_search_provider_results(query: string, opts: dict, backend: dict) {
   let results = []
   let rank = 1
   for entry in __web_search_take(opts.provider_results ?? [], opts?.limit ?? 10) {
@@ -427,7 +427,7 @@ fn __web_search_provider_results(query, opts, backend) {
   }
 }
 
-fn __web_search_api_item(item, api) {
+fn __web_search_api_item(item: dict, api: dict) {
   if type_of(item) != "dict" {
     return {title: to_string(item), snippet: to_string(item)}
   }
@@ -448,7 +448,7 @@ fn __web_search_api_item(item, api) {
     }
 }
 
-fn __web_search_api(harness: Harness, query, opts, backend) {
+fn __web_search_api(harness: Harness, query: string, opts: dict, backend: dict) {
   const api = backend.api ?? opts.api
   const limit = opts?.limit ?? api?.limit ?? 10
   let fetch_options = api?.fetch_options ?? {}
@@ -535,7 +535,7 @@ fn __web_search_api(harness: Harness, query, opts, backend) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
+pub fn web_search(harness: Harness, query: string, options: dict? = nil) -> dict {
   const opts = options ?? {}
   const backend = __web_search_backend(harness.env, opts)
   if backend.kind == "api" {
@@ -556,7 +556,7 @@ pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verify_imports(fs: HarnessFs, paths, options = nil) -> dict {
+pub fn verify_imports(fs: HarnessFs, paths: any, options: dict? = nil) -> dict {
   return fs.verify_imports(paths, options ?? {})
 }
 
@@ -568,7 +568,11 @@ pub fn verify_imports(fs: HarnessFs, paths, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn web_grounding_tools(harness: Harness, registry = nil, options = nil) {
+pub fn web_grounding_tools(
+  harness: Harness,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   let tools = registry ?? tool_registry()
   tools = tool_define(
@@ -644,7 +648,7 @@ pub fn web_origin_url(url: string, path: string = "/") -> string {
  * @effects: []
  * @errors: []
  */
-pub fn web_parse_html(html: string, source_url = nil) -> dict {
+pub fn web_parse_html(html: string, source_url: string? = nil) -> dict {
   return __web_extract_html(html, source_url)
 }
 
@@ -674,7 +678,7 @@ pub fn html_meta(html: string) {
  * @effects: []
  * @errors: []
  */
-pub fn html_links(html: string, source_url = nil) {
+pub fn html_links(html: string, source_url: string? = nil) {
   return web_parse_html(html, source_url).links
 }
 
@@ -708,11 +712,11 @@ pub fn html_text(html: string) {
   return web_parse_html(html).text
 }
 
-fn __web_robots_url(url) {
+fn __web_robots_url(url: string) {
   return web_origin_url(url, "/robots.txt")
 }
 
-fn __web_line_value(line) {
+fn __web_line_value(line: any) {
   const parts = split(line, ":")
   if len(parts) < 2 {
     return nil
@@ -720,7 +724,7 @@ fn __web_line_value(line) {
   return {field: lowercase(trim(parts[0])), value: trim(join(parts[1:], ":"))}
 }
 
-fn __web_robots_rows(body) {
+fn __web_robots_rows(body: string?) {
   let rows = []
   for line in split(body ?? "", "\n") {
     const clean = trim(split(line, "#")[0])
@@ -734,7 +738,7 @@ fn __web_robots_rows(body) {
   return rows
 }
 
-fn __web_robots_group_score(agents, target) {
+fn __web_robots_group_score(agents: list, target: string) {
   let score = 0
   for agent in agents {
     const normalized = lowercase(trim(agent))
@@ -747,7 +751,7 @@ fn __web_robots_group_score(agents, target) {
   return score
 }
 
-fn __web_robots_push_group(groups, agents, rules, target) {
+fn __web_robots_push_group(groups: list, agents: any, rules: any, target: string) {
   if len(agents) == 0 || len(rules) == 0 {
     return groups
   }
@@ -758,7 +762,7 @@ fn __web_robots_push_group(groups, agents, rules, target) {
   return groups + [{score: score, rules: rules}]
 }
 
-fn __web_robots_rules(body, user_agent) {
+fn __web_robots_rules(body: string?, user_agent: string?) {
   const target = lowercase(trim(user_agent ?? "*"))
   let groups = []
   let agents = []
@@ -791,7 +795,7 @@ fn __web_robots_rules(body, user_agent) {
   return rules
 }
 
-fn __web_path_for_robots(url) {
+fn __web_path_for_robots(url: string) {
   const parsed = url_parse(url)
   const query = parsed?.query
   if query == nil || query == "" {
@@ -815,7 +819,7 @@ pub fn robots_allowed(
   harness: Harness,
   url: string,
   user_agent: string = "*",
-  options = nil,
+  options: dict? = nil,
 ) -> bool {
   const opts = options ?? {}
   const robots_url = opts?.robots_url ?? __web_robots_url(url)
@@ -841,7 +845,7 @@ pub fn robots_allowed(
   return allowed
 }
 
-fn __web_xml_unescape(text) {
+fn __web_xml_unescape(text: string?) {
   let out = regex_replace("&amp;", "&", text)
   out = regex_replace("&lt;", "<", out)
   out = regex_replace("&gt;", ">", out)
@@ -850,7 +854,7 @@ fn __web_xml_unescape(text) {
   return out
 }
 
-fn __web_sitemap_locs(xml) {
+fn __web_sitemap_locs(xml: string?) {
   let urls = []
   for capture in regex_captures("(?is)<loc\\b[^>]*>(.*?)</loc>", xml ?? "") {
     const loc = trim(__web_xml_unescape(capture.groups[0] ?? ""))
@@ -861,7 +865,7 @@ fn __web_sitemap_locs(xml) {
   return urls
 }
 
-fn __web_sitemap_candidates(harness: Harness, base_url, opts) {
+fn __web_sitemap_candidates(harness: Harness, base_url: string, opts: dict) {
   if opts?.sitemap_urls != nil {
     return opts.sitemap_urls
   }
@@ -892,7 +896,7 @@ fn __web_sitemap_candidates(harness: Harness, base_url, opts) {
  * @effects: [net]
  * @errors: []
  */
-pub fn sitemap_urls(harness: Harness, base_url: string, options = nil) -> list<string> {
+pub fn sitemap_urls(harness: Harness, base_url: string, options: dict? = nil) -> list<string> {
   const opts = options ?? {}
   const max_sitemaps = opts?.max_sitemaps ?? 10
   let found = []

@@ -38,7 +38,10 @@ fn overflow_turn() {
   }
 }
 
-fn transcript_has_event_kind(transcript, kind) {
+fn transcript_has_event_kind(
+  transcript: list | dict | Transcript | SessionSnapshot | nil,
+  kind: string,
+) {
   return len(transcript_events_by_kind(transcript, kind)) > 0
 }
 

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Awaiting a task explicitly deregisters it from the nursery, so scope exit
   // neither double-joins nor cancels it.
   scope {

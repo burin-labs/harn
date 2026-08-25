@@ -293,7 +293,7 @@ fn __open_draft_pr(
   return trim(created.stdout ?? "")
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const spec = arg_spec()
   if help_requested(argv) {
     harness.stdio.println(render_help(spec))

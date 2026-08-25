@@ -42,7 +42,7 @@ fn artifact_groups<T>(_contracts: list<SchemaContract<T>>) -> list<T> {
   return []
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const ints: list<int> = values([int_step()])
   const nullable_ints: list<int> = maybe_values([{value: 1}])
   const receipts: list<Receipt> = artifacts(receipt_contract())

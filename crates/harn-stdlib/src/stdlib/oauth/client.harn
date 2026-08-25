@@ -82,7 +82,7 @@ const __DIAGNOSTIC_REFRESH_EXPIRED = "HARN-OAU-002"
 
 type OAuthClient = dict
 
-fn __require_string(value, field) {
+fn __require_string(value: string?, field: string) {
   const text = to_string(value ?? "")
   if text == "" {
     throw "std/oauth/client: " + field + " is required"
@@ -90,11 +90,11 @@ fn __require_string(value, field) {
   return text
 }
 
-fn __require_url(value, field) {
+fn __require_url(value: string?, field: string) {
   return __require_string(value, field)
 }
 
-fn __require_provider(provider) {
+fn __require_provider(provider: dict) {
   if type_of(provider) != "dict" {
     throw "std/oauth/client: provider must be a dict (use std/oauth/providers)"
   }
@@ -103,7 +103,7 @@ fn __require_provider(provider) {
   return provider
 }
 
-fn __require_storage(storage) {
+fn __require_storage(storage: dict) {
   if type_of(storage) != "dict" {
     throw "std/oauth/client: opts.storage is required (use std/oauth/storage)"
   }
@@ -126,24 +126,24 @@ fn __require_storage(storage) {
   return storage
 }
 
-fn __pkce_verifier_string(random: HarnessRandom, n_bytes) {
+fn __pkce_verifier_string(random: HarnessRandom, n_bytes: any) {
   // base64url-no-pad over CSPRNG bytes. RFC 7636 §4.1 requires 43..128
   // chars from the URL-safe alphabet; 64 random bytes encode to ~86
   // chars, well inside the band.
   return bytes_to_base64url(random.bytes(n_bytes))
 }
 
-fn __pkce_challenge(verifier) {
+fn __pkce_challenge(verifier: string | bytes) {
   // SHA-256 over the ASCII verifier, base64url-no-pad encoded —
   // RFC 7636 §4.2 S256 method.
   return sha256_base64url(verifier)
 }
 
-fn __random_state(random: HarnessRandom, n_bytes) {
+fn __random_state(random: HarnessRandom, n_bytes: any) {
   return bytes_to_base64url(random.bytes(n_bytes))
 }
 
-fn __scope_separator(provider) {
+fn __scope_separator(provider: dict) {
   const id = lowercase(to_string(provider?.id ?? ""))
   if id == "linear" {
     return ","
@@ -151,7 +151,7 @@ fn __scope_separator(provider) {
   return " "
 }
 
-fn __join_scopes(scopes, separator) {
+fn __join_scopes(scopes: list, separator: string) {
   let parts = []
   if scopes != nil {
     for raw in scopes {
@@ -167,11 +167,11 @@ fn __join_scopes(scopes, separator) {
   return join(parts, separator)
 }
 
-fn __url_encode_value(value) {
+fn __url_encode_value(value: string?) {
   return url_encode(to_string(value ?? ""))
 }
 
-fn __form_body(params) {
+fn __form_body(params: list) {
   let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
@@ -179,7 +179,7 @@ fn __form_body(params) {
   return join(parts, "&")
 }
 
-fn __append_query(url, pairs) {
+fn __append_query(url: string | list, pairs: list) {
   let sep = "?"
   if contains(url, "?") {
     sep = "&"
@@ -198,7 +198,7 @@ fn __append_query(url, pairs) {
   return built
 }
 
-fn __token_auth_method(opts, has_secret) {
+fn __token_auth_method(opts: dict, has_secret: any) {
   const explicit = opts?.token_auth_method
   if explicit != nil && to_string(explicit) != "" {
     return to_string(explicit)
@@ -209,7 +209,7 @@ fn __token_auth_method(opts, has_secret) {
   return "none"
 }
 
-fn __validate_auth_method(method) {
+fn __validate_auth_method(method: string) {
   if method == "none" || method == "client_secret_post" || method == "client_secret_basic" {
     return method
   }
@@ -220,7 +220,7 @@ fn __now_seconds(clock: HarnessClock) {
   return to_int(clock.timestamp())
 }
 
-fn __token_expires_at(token, now_s) {
+fn __token_expires_at(token: dict, now_s: int) {
   const stored = token?.expires_at_unix
   if stored != nil {
     return to_int(stored)
@@ -232,7 +232,7 @@ fn __token_expires_at(token, now_s) {
   return nil
 }
 
-fn __token_is_stale(token, now_s) {
+fn __token_is_stale(token: dict, now_s: int) {
   if token == nil {
     return true
   }
@@ -261,7 +261,7 @@ fn __token_is_stale(token, now_s) {
   return now_s >= threshold
 }
 
-fn __redact_token(token) {
+fn __redact_token(token: dict) {
   if token == nil {
     return nil
   }
@@ -275,7 +275,7 @@ fn __redact_token(token) {
   }
 }
 
-fn __redact_endpoint(url) {
+fn __redact_endpoint(url: any) {
   // Token endpoints are not secrets, but we strip query strings just
   // in case a custom provider embeds a tenant token in a query param.
   if url == nil {
@@ -290,11 +290,11 @@ fn __redact_endpoint(url) {
 
 fn __post_token_request(
   net: HarnessNet,
-  token_url,
-  client_id,
-  client_secret,
-  auth_method,
-  form_pairs,
+  token_url: any,
+  client_id: any,
+  client_secret: any,
+  auth_method: string,
+  form_pairs: list,
 ) {
   const method = __validate_auth_method(auth_method)
   let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
@@ -346,7 +346,12 @@ fn __post_token_request(
   return parsed_body
 }
 
-fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
+fn __build_token_set(
+  parsed: any,
+  scopes: string | bytes | list | dict | set | range | nil,
+  issued_at: int,
+  prev_refresh: any,
+) {
   let token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
   const issued_token_type = parsed?.issued_token_type
   if issued_token_type != nil && to_string(issued_token_type) != "" {
@@ -379,7 +384,14 @@ fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
   return token_set
 }
 
-fn __audit_refresh(obs: HarnessObs, provider_id, storage_key, prev, next, reason) {
+fn __audit_refresh(
+  obs: HarnessObs,
+  provider_id: any,
+  storage_key: any,
+  prev: dict,
+  next: dict,
+  reason: string,
+) {
   // Audit MUST NOT include the access token. Only timing and presence.
   const payload = {
     provider: to_string(provider_id),
@@ -396,7 +408,7 @@ fn __audit_refresh(obs: HarnessObs, provider_id, storage_key, prev, next, reason
   )
 }
 
-fn __audit_exchange(obs: HarnessObs, provider_id, storage_key, next) {
+fn __audit_exchange(obs: HarnessObs, provider_id: any, storage_key: any, next: dict) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
@@ -412,11 +424,11 @@ fn __audit_exchange(obs: HarnessObs, provider_id, storage_key, next) {
 
 fn __audit_token_exchange(
   obs: HarnessObs,
-  provider_id,
-  storage_key,
-  next,
-  mode,
-  requested_token_type,
+  provider_id: any,
+  storage_key: any,
+  next: dict,
+  mode: string,
+  requested_token_type: any,
 ) {
   const payload = {
     provider: to_string(provider_id),
@@ -435,7 +447,13 @@ fn __audit_token_exchange(
   )
 }
 
-fn __audit_revoked(obs: HarnessObs, provider_id, storage_key, prev, revoke_url_used) {
+fn __audit_revoked(
+  obs: HarnessObs,
+  provider_id: any,
+  storage_key: any,
+  prev: dict,
+  revoke_url_used: any,
+) {
   // Audit MUST NOT include the access token. Records presence + the
   // (sanitised) endpoint that was contacted so compliance reviewers
   // can confirm the RFC 7009 hint was used.
@@ -453,7 +471,7 @@ fn __audit_revoked(obs: HarnessObs, provider_id, storage_key, prev, revoke_url_u
   )
 }
 
-fn __try_revoke_remote(net: HarnessNet, cfg, token_value) {
+fn __try_revoke_remote(net: HarnessNet, cfg: dict, token_value: string) {
   // Best-effort RFC 7009 revoke. We never let a remote failure block
   // the local storage delete: revocation is a hygiene step on top of
   // discarding the credential locally, and the storage delete is the
@@ -477,7 +495,7 @@ fn __try_revoke_remote(net: HarnessNet, cfg, token_value) {
   return url_text
 }
 
-fn __revoke_locked(net: HarnessNet, obs: HarnessObs, cfg) {
+fn __revoke_locked(net: HarnessNet, obs: HarnessObs, cfg: dict) {
   const prev = cfg.storage.get(cfg.storage_key)
   const access = prev?.access_token
   const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(
@@ -490,7 +508,7 @@ fn __revoke_locked(net: HarnessNet, obs: HarnessObs, cfg) {
   return nil
 }
 
-fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
+fn __refresh_locked(harness: Harness, cfg: dict, prev_token: dict, reason: string) {
   const refresh = prev_token?.refresh_token
   if refresh == nil || to_string(refresh) == "" {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
@@ -526,14 +544,14 @@ fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
   return next_token
 }
 
-fn __same_access_token(stored, observed_token) -> bool {
+fn __same_access_token(stored: dict, observed_token: dict) -> bool {
   if observed_token == nil {
     return true
   }
   return to_string(stored?.access_token ?? "") == to_string(observed_token?.access_token ?? "")
 }
 
-fn __same_token_identity(stored, observed_token) -> bool {
+fn __same_token_identity(stored: dict, observed_token: dict) -> bool {
   if observed_token == nil {
     return true
   }
@@ -542,7 +560,7 @@ fn __same_token_identity(stored, observed_token) -> bool {
       == to_string(observed_token?.refresh_token ?? "")
 }
 
-fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
+fn __refresh_needed(stored: dict, now_s: int, reason: string, observed_token: any = nil) -> bool {
   if reason == "forced" {
     if !__same_token_identity(stored, observed_token) {
       return false
@@ -558,7 +576,7 @@ fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
   return __token_is_stale(stored, now_s)
 }
 
-fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
+fn __maybe_refresh(harness: Harness, cfg: dict, reason: string, observed_token: any = nil) {
   const observed = cfg.storage.get(cfg.storage_key)
   if observed == nil {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
@@ -585,7 +603,7 @@ fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
   )
 }
 
-fn __get_valid_token(harness: Harness, cfg) {
+fn __get_valid_token(harness: Harness, cfg: dict) {
   const stored = cfg.storage.get(cfg.storage_key)
   const now_s = __now_seconds(harness.clock)
   if stored != nil && !__token_is_stale(stored, now_s) {
@@ -594,7 +612,7 @@ fn __get_valid_token(harness: Harness, cfg) {
   return __maybe_refresh(harness, cfg, "ttl_threshold")
 }
 
-fn __start_authorization(random: HarnessRandom, cfg) {
+fn __start_authorization(random: HarnessRandom, cfg: dict) {
   const verifier = __pkce_verifier_string(random, __DEFAULT_PKCE_VERIFIER_BYTES)
   const challenge = __pkce_challenge(verifier)
   const state = __random_state(random, __DEFAULT_STATE_BYTES)
@@ -629,7 +647,7 @@ fn __start_authorization(random: HarnessRandom, cfg) {
   }
 }
 
-fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
+fn __exchange_code(harness: Harness, cfg: dict, pkce: dict, code: string?, state: string?) {
   if pkce == nil || type_of(pkce) != "dict" {
     throw "std/oauth/client: exchange_code requires the pkce dict from start_authorization"
   }
@@ -671,7 +689,11 @@ fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
   return token_set
 }
 
-fn __append_repeated_form_values(form, key, values) {
+fn __append_repeated_form_values(
+  form: list,
+  key: string,
+  values: string | list<string> | nil,
+) -> list {
   if values == nil {
     return form
   }
@@ -690,7 +712,7 @@ fn __append_repeated_form_values(form, key, values) {
   return form + [{key: key, value: values}]
 }
 
-fn __scope_string(scope) {
+fn __scope_string(scope: string | list<string> | nil) -> string? {
   if scope == nil {
     return nil
   }
@@ -701,7 +723,7 @@ fn __scope_string(scope) {
   return text == "" ? nil : text
 }
 
-fn __scope_list(scope) {
+fn __scope_list(scope: string | list<string> | nil) -> list<string>? {
   if scope == nil {
     return nil
   }
@@ -729,7 +751,7 @@ fn __scope_list(scope) {
   return out
 }
 
-fn __list_allows(values, value) {
+fn __list_allows(values: list<string>?, value: string?) -> bool {
   if value == nil {
     return true
   }
@@ -739,7 +761,7 @@ fn __list_allows(values, value) {
   return values.contains(value)
 }
 
-fn __require_token_exchange_capability(cfg) {
+fn __require_token_exchange_capability(cfg: dict) {
   const capability = token_exchange_capability(
     {id: cfg.provider_id, token_exchange: cfg.token_exchange},
   )
@@ -750,10 +772,10 @@ fn __require_token_exchange_capability(cfg) {
 }
 
 fn __validate_token_exchange(
-  capability,
-  subject_token_type,
-  actor_token_type,
-  requested_token_type,
+  capability: any,
+  subject_token_type: string,
+  actor_token_type: any,
+  requested_token_type: any,
 ) {
   if !__list_allows(capability?.subject_token_types, subject_token_type) {
     throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
@@ -777,7 +799,7 @@ fn __validate_token_exchange(
   }
 }
 
-fn __token_exchange(harness: Harness, cfg, opts) {
+fn __token_exchange(harness: Harness, cfg: dict, opts: dict) {
   if type_of(opts) != "dict" {
     throw "std/oauth/client: token_exchange opts must be a dict"
   }
@@ -873,12 +895,12 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   return token_set
 }
 
-fn __with_bearer(headers, access_token) {
+fn __with_bearer(headers: dict?, access_token: any) {
   const base = headers ?? {}
   return merge(base, {Authorization: "Bearer " + to_string(access_token)})
 }
 
-fn __token_request(harness: Harness, cfg, method, url, opts) {
+fn __token_request(harness: Harness, cfg: dict, method: string, url: string, opts: dict?) {
   const opts_dict = opts ?? {}
   const access = __get_valid_token(harness, cfg)
   const headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
@@ -919,7 +941,7 @@ fn __token_request(harness: Harness, cfg, method, url, opts) {
  * @api_stability: experimental
  * @example: client(harness, providers().github, {client_id: id, storage: memory()})
  */
-pub fn client(harness: Harness, provider, opts) -> OAuthClient {
+pub fn client(harness: Harness, provider: dict, opts: dict) -> OAuthClient {
   if type_of(opts) != "dict" {
     throw "std/oauth/client: opts must be a dict"
   }
@@ -982,7 +1004,7 @@ pub fn client(harness: Harness, provider, opts) -> OAuthClient {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn token(cli) -> string {
+pub fn token(cli: dict) -> string {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: token() requires an OAuth client handle"
   }
@@ -998,7 +1020,7 @@ pub fn token(cli) -> string {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn refresh(cli) {
+pub fn refresh(cli: dict) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: refresh() requires an OAuth client handle"
   }
@@ -1017,7 +1039,7 @@ pub fn refresh(cli) {
  * @api_stability: experimental
  * @example: request(cli, "GET", "https://api.github.com/user")
  */
-pub fn request(cli, method, url, opts = nil) {
+pub fn request(cli: dict, method: any, url: any, opts: any = nil) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: request() requires an OAuth client handle"
   }
@@ -1034,7 +1056,7 @@ pub fn request(cli, method, url, opts = nil) {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn start_authorization(cli) {
+pub fn start_authorization(cli: dict) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: start_authorization() requires an OAuth client handle"
   }
@@ -1052,7 +1074,7 @@ pub fn start_authorization(cli) {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn exchange_code(cli, pkce, code, state) {
+pub fn exchange_code(cli: dict, pkce: any, code: any, state: any) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: exchange_code() requires an OAuth client handle"
   }
@@ -1076,7 +1098,7 @@ pub fn exchange_code(cli, pkce, code, state) {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn token_exchange(cli, opts) {
+pub fn token_exchange(cli: dict, opts: any) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: token_exchange() requires an OAuth client handle"
   }
@@ -1098,7 +1120,7 @@ pub fn token_exchange(cli, opts) {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn revoke(cli) {
+pub fn revoke(cli: dict) {
   if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
     throw "std/oauth/client: revoke() requires an OAuth client handle"
   }

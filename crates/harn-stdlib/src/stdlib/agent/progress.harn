@@ -91,7 +91,7 @@ pub fn agent_progress_tool_config_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress_payload_report(value, apply_defaults = false) {
+pub fn agent_progress_payload_report(value: any, apply_defaults: bool = false) {
   return get_typed_report(value, agent_progress_payload_schema(), apply_defaults)
 }
 
@@ -102,7 +102,7 @@ pub fn agent_progress_payload_report(value, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_progress_payload_value(value, apply_defaults = false) {
+pub fn agent_progress_payload_value(value: any, apply_defaults: bool = false) {
   return get_typed_value(value, agent_progress_payload_schema(), apply_defaults)
 }
 
@@ -113,7 +113,7 @@ pub fn agent_progress_payload_value(value, apply_defaults = false) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress_event_report(value, apply_defaults = false) {
+pub fn agent_progress_event_report(value: any, apply_defaults: bool = false) {
   return get_typed_report(value, agent_progress_event_schema(), apply_defaults)
 }
 
@@ -124,7 +124,7 @@ pub fn agent_progress_event_report(value, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_progress_event_value(value, apply_defaults = false) {
+pub fn agent_progress_event_value(value: any, apply_defaults: bool = false) {
   return get_typed_value(value, agent_progress_event_schema(), apply_defaults)
 }
 
@@ -135,7 +135,7 @@ pub fn agent_progress_event_value(value, apply_defaults = false) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress_tool_config_report(value, apply_defaults = false) {
+pub fn agent_progress_tool_config_report(value: any, apply_defaults: bool = false) {
   return get_typed_report(value, agent_progress_tool_config_schema(), apply_defaults)
 }
 
@@ -146,7 +146,7 @@ pub fn agent_progress_tool_config_report(value, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_progress_tool_config_value(value, apply_defaults = false) {
+pub fn agent_progress_tool_config_value(value: any, apply_defaults: bool = false) {
   return get_typed_value(value, agent_progress_tool_config_schema(), apply_defaults)
 }
 
@@ -157,7 +157,7 @@ pub fn agent_progress_tool_config_value(value, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_progress_tool_config_normalize(config = nil) {
+pub fn agent_progress_tool_config_normalize(config: dict? = nil) {
   return __agent_progress_normalize_tool_config_with_prefix(config, "agent_progress_tool_config")
 }
 
@@ -181,7 +181,7 @@ fn __agent_progress_input_schema() {
  * Normalize the obvious synonyms and otherwise fall back to a sane default; never
  * throw. `_label` is retained for signature symmetry with the other validators.
  */
-fn __agent_progress_status(value, _label) {
+fn __agent_progress_status(value: unknown, _label: unknown) {
   if type_of(value) != "string" {
     return "in_progress"
   }
@@ -199,7 +199,7 @@ fn __agent_progress_status(value, _label) {
   return "in_progress"
 }
 
-fn __agent_progress_priority(value, _label) {
+fn __agent_progress_priority(value: unknown, _label: unknown) {
   if type_of(value) != "string" {
     return nil
   }
@@ -220,7 +220,7 @@ fn __agent_progress_priority(value, _label) {
   return nil
 }
 
-fn __agent_progress_entries(value) {
+fn __agent_progress_entries(value: any) {
   if value == nil {
     return []
   }
@@ -256,7 +256,7 @@ fn __agent_progress_entries(value) {
   return entries
 }
 
-fn __agent_progress_payload(input) {
+fn __agent_progress_payload(input: any) {
   const report = get_typed_report(input, __agent_progress_input_schema())
   if !report.ok {
     throw "agent_progress: " + report.message
@@ -281,7 +281,7 @@ fn __agent_progress_payload(input) {
   }
 }
 
-fn __agent_progress_normalize_tool_config_with_prefix(config, error_prefix) {
+fn __agent_progress_normalize_tool_config_with_prefix(config: dict?, error_prefix: string) {
   const report = agent_progress_tool_config_report(config ?? {})
   if !report.ok {
     throw error_prefix + " " + report.message
@@ -298,11 +298,11 @@ fn __agent_progress_normalize_tool_config_with_prefix(config, error_prefix) {
   return typed + {name: name, description: description}
 }
 
-fn __agent_progress_normalize_tool_config(config) {
+fn __agent_progress_normalize_tool_config(config: dict?) {
   return __agent_progress_normalize_tool_config_with_prefix(config, "agent_loop: progress_tool")
 }
 
-fn __agent_progress_tool_nudge(config) {
+fn __agent_progress_tool_nudge(config: dict) {
   const nudge = (config?.system_prompt_nudge
       ?? "When useful, call ")
     + config.name
@@ -317,7 +317,7 @@ fn __agent_progress_tool_nudge(config) {
   return trimmed
 }
 
-fn __agent_progress_tool_config(value) {
+fn __agent_progress_tool_config(value: dict?) {
   if value == nil {
     return nil
   }
@@ -341,7 +341,7 @@ fn __agent_progress_tool_config(value) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress(agent: HarnessAgent, input) {
+pub fn agent_progress(agent: HarnessAgent, input: any) {
   const payload = __agent_progress_payload(input)
   const session_id = agent.current_id()
   if session_id == nil || session_id == "" {
@@ -358,7 +358,11 @@ pub fn agent_progress(agent: HarnessAgent, input) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress_tool(agent: HarnessAgent, registry = nil, options = nil) {
+pub fn agent_progress_tool(
+  agent: HarnessAgent,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const config = __agent_progress_normalize_tool_config(options ?? {})
   return tool_define(
     registry ?? tool_registry(),
@@ -392,7 +396,7 @@ pub fn agent_progress_tool(agent: HarnessAgent, registry = nil, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_progress_apply_options(agent: HarnessAgent, options = nil) {
+pub fn agent_progress_apply_options(agent: HarnessAgent, options: dict? = nil) {
   const opts = options ?? {}
   const config = __agent_progress_tool_config(opts?.progress_tool)
   if config == nil {

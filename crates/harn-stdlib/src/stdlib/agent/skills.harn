@@ -5,7 +5,7 @@ import {
   agent_session_visible_messages,
 } from "std/agent/state"
 
-fn __skills_registry(opts) {
+fn __skills_registry(opts: dict) {
   const registry = opts?.skill_registry ?? opts?.skills
   if type_of(registry) == "list" {
     return {_type: "skill_registry", skills: registry}
@@ -13,18 +13,18 @@ fn __skills_registry(opts) {
   return registry
 }
 
-fn __skills_entries(registry) {
+fn __skills_entries(registry: dict?) {
   if registry == nil {
     return []
   }
   return registry?.skills ?? []
 }
 
-fn __skill_id(entry) {
+fn __skill_id(entry: dict?) {
   return entry?.id ?? entry?.name ?? ""
 }
 
-fn __skill_find(registry, id) {
+fn __skill_find(registry: dict, id: any) {
   for entry in __skills_entries(registry) {
     if __skill_id(entry) == id {
       return entry
@@ -33,7 +33,7 @@ fn __skill_find(registry, id) {
   return nil
 }
 
-fn __skill_ids(entries) {
+fn __skill_ids(entries: list) {
   let ids = []
   for entry in entries {
     const id = __skill_id(entry)
@@ -44,7 +44,7 @@ fn __skill_ids(entries) {
   return ids
 }
 
-fn __tool_registry_has(registry, name) {
+fn __tool_registry_has(registry: dict, name: string) {
   if type_of(registry) != "dict" {
     return false
   }
@@ -56,7 +56,7 @@ fn __tool_registry_has(registry, name) {
   return false
 }
 
-fn __render_loaded_skill(agent: HarnessAgent, entry, request, session_id) {
+fn __render_loaded_skill(agent: HarnessAgent, entry: dict, request: dict, session_id: any) {
   const rendered = try {
     agent.skill_render(entry, request?.arguments ?? request?.args ?? [], {session_id: session_id})
   }
@@ -86,7 +86,7 @@ fn __render_loaded_skill(agent: HarnessAgent, entry, request, session_id) {
   return trim(out)
 }
 
-fn __load_skill_for_session(agent: HarnessAgent, session, opts, args) {
+fn __load_skill_for_session(agent: HarnessAgent, session: dict, opts: dict, args: any) {
   const request = if type_of(args) == "dict" {
     args
   } else {
@@ -126,7 +126,7 @@ fn __load_skill_for_session(agent: HarnessAgent, session, opts, args) {
   return body
 }
 
-fn __with_load_skill_tool(agent: HarnessAgent, session, opts) {
+fn __with_load_skill_tool(agent: HarnessAgent, session: dict, opts: dict) {
   const existing = opts?.tools
   const registry = if type_of(existing) == "dict" {
     existing
@@ -155,7 +155,7 @@ fn __with_load_skill_tool(agent: HarnessAgent, session, opts) {
   return opts + {tools: next_registry}
 }
 
-fn __skills_same_ids(prev, next) {
+fn __skills_same_ids(prev: list, next: list) {
   const prev_ids = __skill_ids(prev)
   const next_ids = __skill_ids(next)
   if len(prev_ids) != len(next_ids) {
@@ -169,7 +169,7 @@ fn __skills_same_ids(prev, next) {
   return true
 }
 
-fn __active_from_ids(registry, ids) {
+fn __active_from_ids(registry: dict, ids: list) {
   let active = []
   for item in ids {
     const id = item?.id ?? item?.name ?? item
@@ -183,11 +183,11 @@ fn __active_from_ids(registry, ids) {
 
 type ContextProfileSkillBinding = {skill_id: string, tool_group: string}
 
-fn __context_profile(opts) {
+fn __context_profile(opts: dict) -> dict {
   return opts?.context_profile ?? opts?.project_context_profile ?? {}
 }
 
-fn __served_tool_groups(opts) -> list<string> {
+fn __served_tool_groups(opts: dict) -> list<string> {
   let groups: list<string> = []
   for tool_entry in opts?.tools?.tools ?? [] {
     const namespace = __tool_namespace(tool_entry)
@@ -198,7 +198,7 @@ fn __served_tool_groups(opts) -> list<string> {
   return groups
 }
 
-fn __context_profile_skill_bindings(opts) -> list<ContextProfileSkillBinding> {
+fn __context_profile_skill_bindings(opts: dict) -> list<ContextProfileSkillBinding> {
   const served_groups = __served_tool_groups(opts)
   let bindings: list<ContextProfileSkillBinding> = []
   for profile in __context_profile(opts)?.profiles ?? [] {
@@ -214,7 +214,7 @@ fn __context_profile_skill_bindings(opts) -> list<ContextProfileSkillBinding> {
   return bindings
 }
 
-fn __active_from_context_profile(registry, opts) {
+fn __active_from_context_profile(registry: dict, opts: dict) {
   let active = []
   for binding in __context_profile_skill_bindings(opts) {
     const entry = __skill_find(registry, binding.skill_id)
@@ -233,7 +233,7 @@ fn __active_from_context_profile(registry, opts) {
   return active
 }
 
-fn __merge_active_skills(left, right) {
+fn __merge_active_skills(left: list?, right: list?) {
   let active = left ?? []
   let ids = __skill_ids(active)
   for entry in right ?? [] {
@@ -246,7 +246,7 @@ fn __merge_active_skills(left, right) {
   return active
 }
 
-fn __latest_user_text(agent: HarnessAgent, session) {
+fn __latest_user_text(agent: HarnessAgent, session: dict) {
   let latest = session?.task ?? ""
   for message in agent_session_visible_messages(agent, session.session_id) {
     if message?.role == "user" {
@@ -256,20 +256,20 @@ fn __latest_user_text(agent: HarnessAgent, session) {
   return latest
 }
 
-fn __match_config(opts) {
+fn __match_config(opts: dict) {
   return opts?.skill_match ?? {}
 }
 
-fn __match_strategy(opts) {
+fn __match_strategy(opts: dict) {
   return __match_config(opts)?.strategy ?? "catalog"
 }
 
-fn __match_strategy_manual(opts) {
+fn __match_strategy_manual(opts: dict) {
   const strategy = __match_strategy(opts)
   return strategy == "manual" || strategy == "none"
 }
 
-fn __match_top_n(opts) {
+fn __match_top_n(opts: dict) {
   const value = __match_config(opts)?.top_n
   if type_of(value) == "int" && value > 0 {
     return value
@@ -277,7 +277,7 @@ fn __match_top_n(opts) {
   return 1
 }
 
-fn __match_sticky(opts) {
+fn __match_sticky(opts: dict) {
   const value = __match_config(opts)?.sticky
   if type_of(value) == "bool" {
     return value
@@ -285,7 +285,7 @@ fn __match_sticky(opts) {
   return true
 }
 
-fn __skill_catalog_limit(opts) {
+fn __skill_catalog_limit(opts: dict) {
   const value = __match_config(opts)?.catalog_limit ?? opts?.skill_catalog_limit ?? 12
   if type_of(value) == "int" && value > 0 {
     return value
@@ -293,7 +293,7 @@ fn __skill_catalog_limit(opts) {
   return 12
 }
 
-fn __skill_catalog_budget(opts) {
+fn __skill_catalog_budget(opts: dict) {
   const value = __match_config(opts)?.catalog_budget ?? opts?.skill_catalog_budget ?? 2000
   if type_of(value) == "int" && value > 0 {
     return value
@@ -301,7 +301,7 @@ fn __skill_catalog_budget(opts) {
   return 2000
 }
 
-fn __skill_catalog_always(opts) {
+fn __skill_catalog_always(opts: dict) {
   const value = __match_config(opts)?.catalog_always ?? opts?.skill_catalog_always
   if type_of(value) == "bool" {
     return value
@@ -309,7 +309,7 @@ fn __skill_catalog_always(opts) {
   return false
 }
 
-fn __skill_catalog_prompt(registry, opts, active) {
+fn __skill_catalog_prompt(registry: dict, opts: dict, active: list?) {
   if __match_strategy(opts) != "catalog" {
     return ""
   }
@@ -328,11 +328,12 @@ fn __skill_catalog_prompt(registry, opts, active) {
   )
 }
 
-fn __skill_model_invocation_disabled(entry) {
-  return (entry["disable-model-invocation"] ?? false) || (entry?.disable_model_invocation ?? false)
+fn __skill_model_invocation_disabled(entry: dict?) {
+  return (entry?.["disable-model-invocation"] ?? false)
+    || (entry?.disable_model_invocation ?? false)
 }
 
-fn __matchable_skill_entries(registry) {
+fn __matchable_skill_entries(registry: dict) {
   let entries = []
   for entry in __skills_entries(registry) {
     if !__skill_model_invocation_disabled(entry) {
@@ -394,7 +395,7 @@ fn __skill_score_stop_words() {
   ]
 }
 
-fn __skill_score_tokens(text) {
+fn __skill_score_tokens(text: string?) {
   const normalized = regex_replace("[^A-Za-z0-9]+", " ", lowercase(to_string(text ?? "")))
   const stop_words = __skill_score_stop_words()
   let out = []
@@ -407,7 +408,7 @@ fn __skill_score_tokens(text) {
   return out
 }
 
-fn __skill_score_term_hits(query_tokens, text) {
+fn __skill_score_term_hits(query_tokens: list, text: string?) {
   const haystack_tokens = __skill_score_tokens(text)
   let hits = 0
   for token in query_tokens {
@@ -418,7 +419,7 @@ fn __skill_score_term_hits(query_tokens, text) {
   return hits
 }
 
-fn __skill_score_id_match(query_tokens, id) {
+fn __skill_score_id_match(query_tokens: string | list, id: string?) {
   const id_tokens = __skill_score_tokens(id)
   if len(id_tokens) == 0 {
     return false
@@ -431,7 +432,7 @@ fn __skill_score_id_match(query_tokens, id) {
   return true
 }
 
-fn __skill_score_glob_match(pattern, path) {
+fn __skill_score_glob_match(pattern: string?, path: string?) {
   const glob = to_string(pattern ?? "")
   const value = to_string(path ?? "")
   if glob == "" || value == "" {
@@ -463,7 +464,7 @@ fn __skill_score_glob_match(pattern, path) {
   return last == "" || ends_with(value, last)
 }
 
-fn __skill_score_path_hits(patterns, working_files) {
+fn __skill_score_path_hits(patterns: list?, working_files: list?) {
   let hits = 0
   for pattern in patterns ?? [] {
     for file in working_files ?? [] {
@@ -476,7 +477,7 @@ fn __skill_score_path_hits(patterns, working_files) {
   return hits
 }
 
-fn __skill_score_metadata(context, registry) {
+fn __skill_score_metadata(context: dict, registry: dict) {
   const query_tokens = __skill_score_tokens(context?.task ?? "")
   const working_files = context?.working_files ?? []
   let scored = []
@@ -518,7 +519,7 @@ fn __skill_score_metadata(context, registry) {
   return scored.sorted_by({ candidate -> 0 - candidate.score })
 }
 
-fn __host_skill_score_candidates(context, registry, opts) {
+fn __host_skill_score_candidates(context: dict, registry: dict, opts: dict) {
   const matchable = {_type: "skill_registry", skills: __matchable_skill_entries(registry)}
   const outcome = try {
     __host_skill_score(context, matchable, __match_config(opts))
@@ -529,7 +530,13 @@ fn __host_skill_score_candidates(context, registry, opts) {
   return unwrap(outcome)?.scored ?? []
 }
 
-fn __score_candidates(agent: HarnessAgent, session, registry, opts, iteration) {
+fn __score_candidates(
+  agent: HarnessAgent,
+  session: dict,
+  registry: dict,
+  opts: dict,
+  iteration: int,
+) {
   const context = {
     task: __latest_user_text(agent, session),
     working_files: opts?.working_files ?? [],
@@ -541,7 +548,7 @@ fn __score_candidates(agent: HarnessAgent, session, registry, opts, iteration) {
   return __host_skill_score_candidates(context, registry, opts)
 }
 
-fn __top_active_from_scores(registry, scored, opts) {
+fn __top_active_from_scores(registry: dict, scored: list, opts: dict) {
   let active = []
   const top_n = __match_top_n(opts)
   const strategy = __match_strategy(opts)
@@ -564,7 +571,7 @@ fn __top_active_from_scores(registry, scored, opts) {
   return active
 }
 
-fn __record_matched(agent: HarnessAgent, session, opts, iteration, scored) {
+fn __record_matched(agent: HarnessAgent, session: dict, opts: dict, iteration: int, scored: any) {
   agent_session_record_skill_event(
     agent,
     session.session_id,
@@ -579,7 +586,13 @@ fn __record_matched(agent: HarnessAgent, session, opts, iteration, scored) {
   )
 }
 
-fn __record_deactivations(agent: HarnessAgent, session, prev, next, iteration) {
+fn __record_deactivations(
+  agent: HarnessAgent,
+  session: dict,
+  prev: list,
+  next: list,
+  iteration: int,
+) {
   const next_ids = __skill_ids(next)
   for entry in prev {
     const id = __skill_id(entry)
@@ -594,7 +607,13 @@ fn __record_deactivations(agent: HarnessAgent, session, prev, next, iteration) {
   }
 }
 
-fn __record_activations(agent: HarnessAgent, session, prev, next, iteration) {
+fn __record_activations(
+  agent: HarnessAgent,
+  session: dict,
+  prev: list,
+  next: list,
+  iteration: int,
+) {
   const prev_ids = __skill_ids(prev)
   for entry in next {
     const id = __skill_id(entry)
@@ -626,7 +645,7 @@ fn __record_activations(agent: HarnessAgent, session, prev, next, iteration) {
   }
 }
 
-fn __allowed_union(active) {
+fn __allowed_union(active: list) {
   let allowed = []
   for active_entry in active {
     for allowed_entry in active_entry?.allowed_tools ?? [] {
@@ -638,7 +657,7 @@ fn __allowed_union(active) {
   return allowed
 }
 
-fn __has_new_skill(prev, active) {
+fn __has_new_skill(prev: list, active: list) {
   const prev_ids = __skill_ids(prev)
   for entry in active {
     const id = __skill_id(entry)
@@ -649,15 +668,15 @@ fn __has_new_skill(prev, active) {
   return false
 }
 
-fn __tool_name(tool_entry) {
+fn __tool_name(tool_entry: dict?) {
   return tool_entry?.name ?? tool_entry?.function?.name ?? ""
 }
 
-fn __tool_namespace(tool_entry) {
+fn __tool_namespace(tool_entry: dict?) {
   return tool_entry?.namespace ?? tool_entry?.function?.namespace ?? ""
 }
 
-fn __allowed_matches_tool(entry, tool_entry) {
+fn __allowed_matches_tool(entry: string?, tool_entry: dict?) {
   if entry == "*" {
     return true
   }
@@ -671,7 +690,7 @@ fn __allowed_matches_tool(entry, tool_entry) {
   return false
 }
 
-fn __skill_scoped_tools(opts, active) {
+fn __skill_scoped_tools(opts: dict, active: list) {
   const allowed = __allowed_union(active)
   if len(allowed) == 0 || contains(allowed, "*") {
     return opts?.tools
@@ -700,7 +719,12 @@ fn __skill_scoped_tools(opts, active) {
   return registry + {tools: kept}
 }
 
-fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false) {
+fn __opts_with_active_skills(
+  opts: dict,
+  registry: dict,
+  active: any,
+  activated_this_turn: bool = false,
+) {
   const scoped_tools = __skill_scoped_tools(opts, active)
   let next = opts + {active_skills: active, _skill_activated_this_turn: activated_this_turn}
   if scoped_tools != nil {
@@ -713,7 +737,7 @@ fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false
   return next
 }
 
-fn __fresh_skill_projection_inputs(agent: HarnessAgent, session, opts, registry) {
+fn __fresh_skill_projection_inputs(agent: HarnessAgent, session: dict, opts: dict, registry: dict) {
   const tool_opts = __with_load_skill_tool(agent, session, opts)
   return {tool_opts: tool_opts, profile_active: __active_from_context_profile(registry, tool_opts)}
 }
@@ -745,7 +769,7 @@ pub fn agent_skills_preview(agent: HarnessAgent, opts: dict) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_skills_match(agent: HarnessAgent, session, opts, iteration) {
+pub fn agent_skills_match(agent: HarnessAgent, session: dict, opts: dict, iteration: int) {
   const registry = __skills_registry(opts)
   if registry == nil || len(__skills_entries(registry)) == 0 {
     return opts

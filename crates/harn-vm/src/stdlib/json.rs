@@ -9,6 +9,8 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
+mod schema_witness;
+
 /// Cap on memoized parses. Each entry holds the original source string as
 /// its key plus the parsed value tree, so the cache can grow large quickly
 /// when a script feeds varied JSON. Mirror the regex-cache bound so the
@@ -188,6 +190,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    schema_witness::register_builtins(vm);
 }
 
 #[harn_builtin(
@@ -436,7 +439,7 @@ fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_report(value: any, schema: any, apply_defaults?: bool) -> dict",
+    sig = "schema_report(value: unknown, schema: dict, apply_defaults?: bool) -> dict",
     category = "json"
 )]
 fn schema_report_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -452,7 +455,7 @@ fn schema_report_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_is(value: any, schema: any) -> bool", category = "json"
+    sig = "schema_is(value: unknown, schema: dict) -> bool", category = "json"
 )]
 fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_is")?;
@@ -494,7 +497,7 @@ fn is_type_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_expect(value: any, schema: any, apply_defaults?: bool) -> any",
+    sig = "<T> schema_expect(value: unknown, schema: dict | Schema<T>, apply_defaults?: bool) -> T",
     category = "json"
 )]
 fn schema_expect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

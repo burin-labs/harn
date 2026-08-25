@@ -1,6 +1,6 @@
 type GraderOut = {verdict: "pass" | "fail" | "unclear", score: 0 | 1 | 2, summary: string}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const s = schema_of(GraderOut)
   harness.stdio.println(s.type)
   harness.stdio.println(s.required)

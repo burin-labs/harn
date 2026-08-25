@@ -5,7 +5,7 @@ import {
   workflow_stage_context_policy,
 } from "std/workflow/context"
 
-fn ids(artifacts) {
+fn ids(artifacts: list) {
   let out = []
   for artifact in artifacts {
     out = out.appending(artifact.id)

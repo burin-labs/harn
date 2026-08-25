@@ -1,15 +1,15 @@
-pipeline test(harness: Harness, task) {
-  fn divide(a, b) {
+pipeline test(harness: Harness, task: unknown) {
+  fn divide(a: int, b: int) {
     if b == 0 {
       return Err("division by zero")
     }
     return Ok(a / b)
   }
-  fn compute(x) {
+  fn compute(x: int) {
     const result = divide(x, 2)?
     return Ok(result + 10)
   }
-  fn compute_fail(x) {
+  fn compute_fail(x: int) {
     const result = divide(x, 0)?
     return Ok(result + 10)
   }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Sets with nested lists
   const l1 = [1, 2]
   const l2 = [3, 4]

@@ -3,20 +3,20 @@
  */
 import { edit_patch_content_hash } from "std/edit/internal"
 
-fn __edit_collapse_ws(text) {
+fn __edit_collapse_ws(text: any) {
   return trim(regex_replace("\\s+", " ", text ?? ""))
 }
 
-fn __edit_normalize_line(line) {
+fn __edit_normalize_line(line: string?) {
   return __edit_collapse_ws(line)
 }
 
-fn __edit_structural_line(line) {
+fn __edit_structural_line(line: string?) {
   const compact = __edit_collapse_ws(line)
   return regex_replace("\\s+", "", compact)
 }
 
-fn __edit_signature(text, structural) {
+fn __edit_signature(text: string?, structural: bool) {
   let lines = []
   for line in split(text ?? "", "\n") {
     const normalized = if structural {
@@ -32,7 +32,7 @@ fn __edit_signature(text, structural) {
   return join(lines, "\n")
 }
 
-fn __edit_nonblank_count(lines) {
+fn __edit_nonblank_count(lines: list) {
   let count = 0
   for line in lines {
     if __edit_structural_line(line) != "" {
@@ -42,14 +42,20 @@ fn __edit_nonblank_count(lines) {
   return count
 }
 
-fn __edit_start_line(prefix) {
+fn __edit_start_line(prefix: any) {
   if prefix == "" {
     return 0
   }
   return len(split(prefix, "\n")) - 1
 }
 
-fn __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind) {
+fn __edit_region(
+  start_line: int,
+  end_line_exclusive: int,
+  old_text: string?,
+  new_text: string?,
+  match_kind: string,
+) {
   const end_line = if end_line_exclusive > start_line {
     end_line_exclusive - 1
   } else {
@@ -67,7 +73,7 @@ fn __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
   }
 }
 
-fn __edit_context(prefix, needle, suffix) {
+fn __edit_context(prefix: any, needle: any, suffix: any) {
   const before_lines = split(prefix, "\n")
   const after_lines = split(suffix, "\n")
   const before = if len(before_lines) > 2 {
@@ -83,7 +89,7 @@ fn __edit_context(prefix, needle, suffix) {
   return trim(before + needle + after)
 }
 
-fn __edit_candidate_contexts(parts, old_text, max_contexts) {
+fn __edit_candidate_contexts(parts: any, old_text: any, max_contexts: int?) {
   let contexts = []
   let prefix = ""
   let idx = 0
@@ -106,7 +112,7 @@ fn __edit_candidate_contexts(parts, old_text, max_contexts) {
   return contexts
 }
 
-fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
+fn __edit_line_candidate_contexts(text: string?, candidates: any, max_contexts: int?) {
   const lines = split(text ?? "", "\n")
   let contexts = []
   const limit = max_contexts ?? 3
@@ -125,7 +131,14 @@ fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
   return contexts
 }
 
-fn __edit_error(code, message, text, old_text, new_text, fields = nil) {
+fn __edit_error(
+  code: any,
+  message: any,
+  text: string?,
+  old_text: string?,
+  new_text: string?,
+  fields: dict? = nil,
+) {
   const base = {
     ok: false,
     changed: false,
@@ -166,7 +179,7 @@ fn __edit_lazy_placeholder_phrases() {
   ]
 }
 
-fn __edit_lazy_match_count(text) {
+fn __edit_lazy_match_count(text: string?) {
   const body = text ?? ""
   if body == "" {
     return 0
@@ -191,11 +204,11 @@ fn __edit_lazy_match_count(text) {
   return total
 }
 
-fn __edit_has_lazy_placeholder(new_text) {
+fn __edit_has_lazy_placeholder(new_text: any) {
   return __edit_lazy_match_count(new_text) > 0
 }
 
-fn __edit_guardrails(old_text, new_text, options) {
+fn __edit_guardrails(old_text: any, new_text: any, options: dict?) {
   const opts = options ?? {}
   if old_text == "" && !(opts?.allow_empty_old_text ?? false) {
     return {code: "empty_old_text", message: "old_text must not be empty"}
@@ -235,14 +248,14 @@ fn __edit_guardrails(old_text, new_text, options) {
 }
 
 fn __edit_success(
-  text,
-  patched,
-  old_text,
-  new_text,
-  match_kind,
-  start_line,
-  end_line_exclusive,
-  options,
+  text: string?,
+  patched: string?,
+  old_text: string?,
+  new_text: string?,
+  match_kind: string,
+  start_line: int,
+  end_line_exclusive: int,
+  options: dict,
 ) {
   const before_hash = edit_patch_content_hash(text)
   const after_hash = edit_patch_content_hash(patched)
@@ -280,7 +293,7 @@ fn __edit_success(
   }
 }
 
-fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
+fn __edit_splice_raw(text: string?, start_line: int, end_line_exclusive: int, new_text: string?) {
   const lines = split(text ?? "", "\n")
   let out = []
   if start_line > 0 {
@@ -295,7 +308,7 @@ fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
   return join(out, "\n")
 }
 
-fn __edit_has_distinctive_token(line, min_chars) {
+fn __edit_has_distinctive_token(line: string?, min_chars: int?) {
   const chars = min_chars ?? 4
   if chars <= 0 {
     return true
@@ -309,7 +322,7 @@ fn __edit_has_distinctive_token(line, min_chars) {
   return false
 }
 
-fn __edit_structural_anchors_ok(old_text, options) {
+fn __edit_structural_anchors_ok(old_text: string?, options: dict?) {
   const opts = options ?? {}
   const min_lines = opts?.structural_min_nonblank_lines ?? 3
   const anchor_chars = opts?.structural_anchor_chars ?? 4
@@ -337,7 +350,7 @@ fn __edit_structural_anchors_ok(old_text, options) {
   return first_ok && last_ok
 }
 
-fn __edit_line_candidates(text, old_text, structural, options) {
+fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, options: dict?) {
   const lines = split(text ?? "", "\n")
   let candidates = []
   const target = __edit_signature(old_text, structural)
@@ -389,7 +402,14 @@ fn __edit_line_candidates(text, old_text, structural, options) {
   return candidates
 }
 
-fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates, options) {
+fn __edit_apply_line_candidate(
+  text: string?,
+  old_text: string?,
+  new_text: string?,
+  match_kind: string,
+  candidates: any,
+  options: dict?,
+) {
   if len(candidates) == 0 {
     return nil
   }
@@ -457,7 +477,12 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
  * @effects: []
  * @errors: []
  */
-pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
+pub fn edit_apply_old_new_patch(
+  text: string?,
+  old_text: string?,
+  new_text: string?,
+  options: dict? = nil,
+) {
   const source = text ?? ""
   const raw_old = old_text ?? ""
   const new = new_text ?? ""
@@ -553,7 +578,13 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options = nil) {
+pub fn edit_splice_lines(
+  text: string?,
+  start_line: int?,
+  end_line_exclusive: any,
+  new_text: string?,
+  options: dict? = nil,
+) {
   const source = text ?? ""
   const lines = split(source, "\n")
   const start = start_line ?? 0
@@ -589,7 +620,7 @@ pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options
   )
 }
 
-fn __edit_find_resync(before_lines, after_lines, before_index, after_index) {
+fn __edit_find_resync(before_lines: any, after_lines: any, before_index: int, after_index: int) {
   const window = 80
   let distance = 1
   while distance <= window {
@@ -610,7 +641,14 @@ fn __edit_find_resync(before_lines, after_lines, before_index, after_index) {
   return {before_index: len(before_lines), after_index: len(after_lines)}
 }
 
-fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, next_after) {
+fn __edit_hunk(
+  before_start: int,
+  after_start: int,
+  before_end: int,
+  after_end: int,
+  next_before: any,
+  next_after: any,
+) {
   return {
     start_line: min(before_start, after_start),
     end_line: max(before_end, after_end),
@@ -630,7 +668,7 @@ fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, ne
  * @effects: []
  * @errors: []
  */
-pub fn edit_changed_regions(before, after) {
+pub fn edit_changed_regions(before: string?, after: string?) {
   const before_lines = split(before ?? "", "\n")
   const after_lines = split(after ?? "", "\n")
   let regions = []
@@ -666,7 +704,7 @@ pub fn edit_changed_regions(before, after) {
   return regions
 }
 
-fn __edit_expected_end(region) {
+fn __edit_expected_end(region: dict) {
   if region?.end_line != nil {
     return region.end_line
   }
@@ -676,7 +714,7 @@ fn __edit_expected_end(region) {
   return region?.start_line ?? 0
 }
 
-fn __edit_region_within(actual, expected) {
+fn __edit_region_within(actual: dict, expected: dict) {
   const expected_start = expected?.start_line ?? 0
   const expected_end = __edit_expected_end(expected)
   return actual.start_line >= expected_start && actual.end_line <= expected_end
@@ -694,7 +732,7 @@ fn __edit_region_within(actual, expected) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_strip_line_number_prefixes(text) {
+pub fn edit_strip_line_number_prefixes(text: string?) {
   const raw = text ?? ""
   if raw == "" {
     return raw
@@ -724,7 +762,7 @@ pub fn edit_strip_line_number_prefixes(text) {
   return join(stripped, "\n")
 }
 
-fn __edit_count_tab_indent(lines) {
+fn __edit_count_tab_indent(lines: list) {
   let total = 0
   for line in lines {
     if (line ?? "").starts_with("\t") {
@@ -734,7 +772,7 @@ fn __edit_count_tab_indent(lines) {
   return total
 }
 
-fn __edit_count_space_indent(lines) {
+fn __edit_count_space_indent(lines: list) {
   let total = 0
   for line in lines {
     const raw = line ?? ""
@@ -748,7 +786,7 @@ fn __edit_count_space_indent(lines) {
   return total
 }
 
-fn __edit_min_indent(lines) {
+fn __edit_min_indent(lines: list) {
   let smallest = -1
   for line in lines {
     const raw = line ?? ""
@@ -763,7 +801,7 @@ fn __edit_min_indent(lines) {
   return smallest
 }
 
-fn __edit_count_blank_lines(lines) {
+fn __edit_count_blank_lines(lines: list) {
   let total = 0
   for line in lines {
     if trim(line ?? "") == "" {
@@ -787,7 +825,7 @@ fn __edit_count_blank_lines(lines) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_explain_whitespace_difference(needle, matched) {
+pub fn edit_explain_whitespace_difference(needle: string?, matched: string?) {
   const needle_text = needle ?? ""
   const matched_text = matched ?? ""
   if needle_text == matched_text {
@@ -838,7 +876,11 @@ pub fn edit_explain_whitespace_difference(needle, matched) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
+pub fn edit_check_lazy_truncation(
+  old_content: string?,
+  new_content: string?,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const {min_old_lines = 10, min_keep_pct = 35} = opts ?? {}
   const old_text = old_content ?? ""
@@ -893,7 +935,12 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_validate_changed_regions(before, after, expected_regions, options = nil) {
+pub fn edit_validate_changed_regions(
+  before: string?,
+  after: string?,
+  expected_regions: list?,
+  options: any = nil,
+) {
   const actual = edit_changed_regions(before ?? "", after ?? "")
   const expected = expected_regions ?? []
   let errors = []
@@ -965,7 +1012,7 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
  * @api_stability: experimental
  * @example: edit_apply_node({path: "src/lib.rs", query: query, replacement: "{ 42 }"})
  */
-pub fn edit_apply_node(ast: HarnessAst, params) {
+pub fn edit_apply_node(ast: HarnessAst, params: dict?) {
   const raw = ast.apply_node(params ?? {})
   const payload = raw ?? {}
   const provenance = {
@@ -1037,7 +1084,7 @@ pub fn edit_apply_node(ast: HarnessAst, params) {
  * @api_stability: experimental
  * @example: edit_insert_at_anchor({path: "src/lib.rs", query: q, position: "after", content: "fn beta() {}"})
  */
-pub fn edit_insert_at_anchor(ast: HarnessAst, params) {
+pub fn edit_insert_at_anchor(ast: HarnessAst, params: dict?) {
   const raw = ast.insert_at_anchor(params ?? {})
   const payload = raw ?? {}
   const provenance = {
@@ -1114,7 +1161,7 @@ pub fn edit_insert_at_anchor(ast: HarnessAst, params) {
  * @api_stability: experimental
  * @example: edit_batch_apply({paths: ["a.rs", "b.rs"], query: q, replacement: "{ 0 }"})
  */
-pub fn edit_batch_apply(ast: HarnessAst, params) {
+pub fn edit_batch_apply(ast: HarnessAst, params: dict?) {
   const payload = ast.batch_apply(params ?? {}) ?? {}
   return payload.merging(
     {

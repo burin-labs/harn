@@ -34,7 +34,7 @@ mod sig_parser;
 /// - `sig_expr = <Rust expr returning BuiltinSignature>` — full struct
 ///   literal used verbatim. Escape hatch for shapes, complex generics, etc.
 /// - `aliases = ["__foo"]` — additional names sharing this impl + signature.
-/// - `exposure = "pure" | "runtime_internal" | "privileged_wire" |
+/// - `exposure = "pure" | "stdlib_internal" | "runtime_internal" | "privileged_wire" |
 ///   "harness.<capability>.<method>"` — closed source-visibility contract.
 /// - `effects = ["fs.read@arg0", "fs.write@arg0+arg1", ...]` — typed effect
 ///   rows. Selectors are `argN`, `argN.field.path`, `eachN`, `const=VALUE`,
@@ -560,6 +560,15 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
             }
             Ok(quote!(#support::BuiltinContract::RUNTIME_INTERNAL))
         }
+        "stdlib_internal" => {
+            if !attrs.effects.is_empty() {
+                return Err(syn::Error::new(
+                    exposure.span(),
+                    "stdlib-internal builtins cannot declare script effects",
+                ));
+            }
+            Ok(quote!(#support::BuiltinContract::STDLIB_INTERNAL))
+        }
         "privileged_wire" => Ok(quote!(#support::BuiltinContract::privileged_wire(#effects))),
         _ => {
             if let Some(index) = raw.strip_prefix("capability_arg:") {
@@ -585,7 +594,7 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
             let Some(rest) = raw.strip_prefix("harness.") else {
                 return Err(syn::Error::new(
                     exposure.span(),
-                    "unknown exposure; expected `pure`, `runtime_internal`, \
+                    "unknown exposure; expected `pure`, `stdlib_internal`, `runtime_internal`, \
                      `privileged_wire`, `capability_arg:<index>`, or \
                      `harness.<capability>.<method>`",
                 ));

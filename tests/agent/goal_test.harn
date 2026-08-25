@@ -9,7 +9,7 @@
 import { goal, goal_check, goal_reloop } from "std/agent/goal"
 import { agent_loop_options } from "std/agent/options"
 
-fn __manual_omit(o, drop) {
+fn __manual_omit(o: dict, drop: any) {
   let out = {}
   for key in o.keys() {
     if !contains(drop, key) {
@@ -19,7 +19,7 @@ fn __manual_omit(o, drop) {
   return out
 }
 
-pipeline test_callable_check_is_kept(harness: Harness, task) {
+pipeline test_callable_check_is_kept(harness: Harness, task: unknown) {
   const g = goal(
     {
       objective: "ship it",
@@ -30,14 +30,14 @@ pipeline test_callable_check_is_kept(harness: Harness, task) {
   assert_eq(goal_check(g, {ok: false}).done, false)
 }
 
-pipeline test_noncallable_check_throws(harness: Harness, task) {
+pipeline test_noncallable_check_throws(harness: Harness, task: unknown) {
   const outcome = try {
     goal({objective: "ship it", success_criteria: [{check: "not-callable", description: "green"}]})
   }
   assert(is_err(outcome), "goal rejects a non-callable criterion check")
 }
 
-pipeline test_missing_check_is_llm_judged_not_rejected(harness: Harness, task) {
+pipeline test_missing_check_is_llm_judged_not_rejected(harness: Harness, task: unknown) {
   // A criterion WITHOUT a `check` is LLM-judged, not machine-checked — it must
   // still normalize cleanly (only a set-but-non-callable check is rejected).
   const g = goal({objective: "ship it", success_criteria: ["works end to end"]})
@@ -45,7 +45,7 @@ pipeline test_missing_check_is_llm_judged_not_rejected(harness: Harness, task) {
   assert_eq(goal_check(g, {}).checkable, 0)
 }
 
-pipeline test_noncallable_facts_fn_throws(harness: Harness, task) {
+pipeline test_noncallable_facts_fn_throws(harness: Harness, task: unknown) {
   const g = goal({objective: "ship it"})
   const outcome = try {
     goal_reloop(g, {facts_fn: 42})
@@ -53,7 +53,7 @@ pipeline test_noncallable_facts_fn_throws(harness: Harness, task) {
   assert(is_err(outcome), "goal_reloop rejects a non-callable facts_fn")
 }
 
-pipeline test_callable_facts_fn_is_accepted(harness: Harness, task) {
+pipeline test_callable_facts_fn_is_accepted(harness: Harness, task: unknown) {
   const g = goal({objective: "ship it"})
   const outcome = try {
     goal_reloop(g, {facts_fn: { _payload -> {} }})
@@ -61,7 +61,7 @@ pipeline test_callable_facts_fn_is_accepted(harness: Harness, task) {
   assert(!is_err(outcome), "goal_reloop accepts a callable facts_fn")
 }
 
-pipeline test_dict_omit_matches_manual_omit(harness: Harness, task) {
+pipeline test_dict_omit_matches_manual_omit(harness: Harness, task: unknown) {
   // Behavior-identical proof for the __goal_without_control_keys -> __dict_omit
   // swap: top-level key exclusion, missing keys are no-ops, order-insensitive.
   const drop = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
@@ -77,7 +77,7 @@ pipeline test_dict_omit_matches_manual_omit(harness: Harness, task) {
   }
 }
 
-pipeline test_goal_reloop_strips_control_keys(harness: Harness, task) {
+pipeline test_goal_reloop_strips_control_keys(harness: Harness, task: unknown) {
   const g = goal({objective: "ship it"})
   const opts = goal_reloop(g, {facts_fn: { _payload -> {} }, max_attempts: 2, provider: "mock"})
   assert_eq(opts?.provider, "mock")
@@ -86,7 +86,7 @@ pipeline test_goal_reloop_strips_control_keys(harness: Harness, task) {
   assert_eq(opts?.max_iterations, 2)
 }
 
-pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, task) {
+pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, task: unknown) {
   const g = goal({objective: "ship it", success_criteria: ["works end to end"]})
   const options = agent_loop_options(harness, goal_reloop(g, {judge: true, provider: "mock"}))
   assert_eq(type_of(options.done_judge), "dict")

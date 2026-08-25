@@ -20,7 +20,7 @@ import {
   safe_string,
 } from "std/cli/render"
 
-fn __percent(value) -> string {
+fn __percent(value: any) -> string {
   const number = (to_float(value) ?? 0.0) * 100.0
   return to_string(number) + "%"
 }

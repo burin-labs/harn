@@ -1,0 +1,121 @@
+import { AgentToolDispatch, __dispatch_results_list } from "std/agent/loop_result_status"
+
+/**
+ * Internal callable predicate for deferred audit work.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __callable(value: any) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/**
+ * Collect deferred audit callbacks from one tool result.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __audit_flushes_from_result(result: any) -> list {
+  let flushes = []
+  const single = result?._audit_flush
+  if __callable(single) {
+    flushes = flushes.appending(single)
+  }
+  const many = result?._audit_flushes
+  if type_of(many) == "list" {
+    for flush in many {
+      if __callable(flush) {
+        flushes = flushes.appending(flush)
+      }
+    }
+  }
+  return flushes
+}
+
+/**
+ * Collect deferred audit callbacks from a dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __collect_audit_flushes(dispatch: AgentToolDispatch) -> list {
+  let flushes = []
+  for result in __dispatch_results_list(dispatch) {
+    for flush in __audit_flushes_from_result(result) {
+      flushes = flushes.appending(flush)
+    }
+  }
+  return flushes
+}
+
+/**
+ * Remove private transport fields from one tool result.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __strip_internal_tool_result(result: unknown) -> unknown {
+  if type_of(result) != "dict" {
+    return result
+  }
+  let clean = {}
+  for key in result.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: result[key]}
+    }
+  }
+  return clean
+}
+
+/**
+ * Remove private transport fields from a dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __strip_internal_dispatch(dispatch: list) -> list {
+  let clean_results = []
+  for result in dispatch {
+    clean_results = clean_results.appending(__strip_internal_tool_result(result))
+  }
+  return clean_results
+}
+
+/**
+ * Spawn every deferred audit callback.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __spawn_audit_flushes(tasks: list, flushes: list) -> list {
+  let out = tasks
+  for flush in flushes {
+    const task = spawn {
+      flush()
+    }
+    out = out.appending(task)
+  }
+  return out
+}
+
+/**
+ * Await every deferred audit callback.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __drain_audit_flushes(tasks: list) -> nil {
+  for task in tasks {
+    await(task)
+  }
+  return nil
+}

@@ -1,14 +1,14 @@
 // Append-owned metadata and exact reader cursors for std/coordination.
 import { filter_nil } from "std/collections"
 
-fn dict(value) -> dict {
+fn dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn nonnegative_int(value, fallback: int, label: string) -> int {
+fn nonnegative_int(value: any, fallback: int, label: string) -> int {
   if value == nil {
     return fallback
   }
@@ -19,7 +19,7 @@ fn nonnegative_int(value, fallback: int, label: string) -> int {
   return parsed
 }
 
-fn since_timestamp(options) {
+fn since_timestamp(options: dict) {
   const value = dict(options)?.since_ts
   if value == nil {
     return nil
@@ -30,7 +30,7 @@ fn since_timestamp(options) {
   return date_parse(value)
 }
 
-pub fn reject_write(message, options) -> nil {
+pub fn reject_write(message: dict, options: dict) -> nil {
   const msg = dict(message)
   const opts = dict(options)
   if msg?.ts != nil || opts?.ts != nil || msg?.created_at != nil || opts?.created_at != nil {
@@ -41,7 +41,7 @@ pub fn reject_write(message, options) -> nil {
   }
 }
 
-pub fn message_from_event(event) -> dict {
+pub fn message_from_event(event: dict) -> dict {
   const row = dict(event)
   const message = dict(row?.payload)
   const ts = row?.emitted_at?.at
@@ -53,7 +53,7 @@ pub fn read_messages(
   channels: HarnessChannels,
   channel_name: string,
   channel_options: dict,
-  options = nil,
+  options: any = nil,
 ) -> list {
   const opts = dict(options)
   const since = since_timestamp(opts)

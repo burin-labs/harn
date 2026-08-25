@@ -201,7 +201,7 @@ fn __session_store_search_response(raw: dict) -> SessionStoreSearchResponse {
 pub fn session_store_append(
   agent: HarnessAgent,
   session_id: string,
-  payload,
+  payload: any,
   options: SessionStoreOptions? = nil,
 ) -> SessionStoreEvent {
   return __session_store_event(agent.session_store_append(session_id, payload, options))
@@ -335,7 +335,7 @@ pub fn session_store_project(
 pub fn session_store_project_value(
   agent: HarnessAgent,
   session_id: string,
-  default_value = nil,
+  default_value: any = nil,
   options: SessionStoreOptions? = nil,
 ) -> any {
   let value = default_value

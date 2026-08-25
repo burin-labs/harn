@@ -37,7 +37,7 @@ fn terminal_callback_tools() {
   return tools
 }
 
-pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness, task) {
+pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

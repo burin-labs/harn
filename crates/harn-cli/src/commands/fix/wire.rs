@@ -37,6 +37,16 @@ pub(crate) struct RepairPlan {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     pub path: String,
+    /// Summary of the parameter-annotation migration: how many parameters got
+    /// an inferred type and how many were left as `unknown`. Omitted when the run
+    /// planned no annotations, so existing consumers see byte-identical
+    /// output.
+    #[serde(
+        rename = "parameterAnnotations",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parameter_annotations: Option<ParameterAnnotationsWire>,
     pub diagnostics: Vec<DiagnosticWire>,
     pub repairs: Vec<RepairWire>,
     #[serde(rename = "skippedFiles")]
@@ -87,6 +97,13 @@ pub(crate) struct ApplyResult {
     pub declared_invalid_files: Vec<SkippedFileWire>,
     #[serde(rename = "post_apply_diagnostics_count")]
     pub post_apply_diagnostics_count: usize,
+    /// See [`RepairPlan::parameter_annotations`].
+    #[serde(
+        rename = "parameterAnnotations",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parameter_annotations: Option<ParameterAnnotationsWire>,
     #[serde(rename = "dryRun")]
     pub dry_run: bool,
     /// Callables the migration froze; see [`RepairPlan::frozen_callables`].
@@ -197,4 +214,18 @@ pub(crate) struct SpanWire {
     pub line: usize,
     pub column: usize,
     pub end_line: usize,
+}
+
+/// What the parameter-annotation migration inferred and what it gave up on.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ParameterAnnotationsWire {
+    pub total: usize,
+    pub inferred: usize,
+    /// Parameters written as `unknown` because nothing proved a type.
+    pub unresolved: usize,
+    /// `unresolved / total`, rounded to four decimal places.
+    #[serde(rename = "unresolvedShare")]
+    pub unresolved_share: f64,
+    /// Count per reason, for both outcomes.
+    pub causes: std::collections::BTreeMap<String, usize>,
 }

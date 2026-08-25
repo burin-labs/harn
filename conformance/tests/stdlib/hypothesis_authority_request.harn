@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   const requested = try {
     harness.obs.hypothesis_event_authority_request(
       "plan_admission",

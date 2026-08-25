@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // model_defaults may be populated or empty depending on harn.toml in the
   // surrounding environment. Assert only that the builtin returns a dict
   // rather than coupling the test to specific user/global config.

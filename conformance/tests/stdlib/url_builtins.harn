@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const parts = url_parse("https://user:pass@api.example.com:8080/v1/items?q=hello&page=2#frag")
   harness.stdio.log(parts["scheme"])
   harness.stdio.log(parts["host"])

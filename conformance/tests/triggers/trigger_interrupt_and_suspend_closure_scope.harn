@@ -11,7 +11,7 @@ import "std/triggers"
  * returned by the closure are skipped as `unknown` rather than failing the
  * dispatch.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

@@ -12,7 +12,7 @@
  * @effects: [time]
  * @errors: []
  */
-pub fn wait_for(clock: HarnessClock, timeout_ms, interval_ms, predicate) {
+pub fn wait_for(clock: HarnessClock, timeout_ms: any, interval_ms: any, predicate: unknown) {
   const end_time = clock.timestamp() * 1000 + timeout_ms
   let interval = interval_ms
   if interval <= 0 {
@@ -42,7 +42,7 @@ pub fn wait_for(clock: HarnessClock, timeout_ms, interval_ms, predicate) {
  * @effects: []
  * @errors: []
  */
-pub fn retry_until(max_attempts, predicate) {
+pub fn retry_until(max_attempts: int, predicate: unknown) {
   let i = 0
   while i < max_attempts {
     const value = predicate()
@@ -63,7 +63,12 @@ pub fn retry_until(max_attempts, predicate) {
  * @effects: []
  * @errors: []
  */
-pub fn retry_predicate_with_backoff(clock: HarnessClock, max_attempts, base_ms, predicate) {
+pub fn retry_predicate_with_backoff(
+  clock: HarnessClock,
+  max_attempts: int,
+  base_ms: any,
+  predicate: unknown,
+) {
   let attempt = 0
   while attempt < max_attempts {
     const value = predicate()
@@ -92,7 +97,7 @@ pub fn retry_predicate_with_backoff(clock: HarnessClock, max_attempts, base_ms, 
  * @effects: []
  * @errors: []
  */
-pub fn circuit_call(runtime: HarnessRuntime, name, closure) {
+pub fn circuit_call(runtime: HarnessRuntime, name: any, closure: unknown) {
   const state = runtime.circuit_check(name)
   if state == "open" {
     return Err("circuit_open")

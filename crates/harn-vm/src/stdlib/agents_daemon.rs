@@ -1123,7 +1123,7 @@ mod tests {
     fn daemon_trigger_reports_queue_overflow() {
         let result = run_harn_result(
             r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-overflow-" + unique)
@@ -1164,7 +1164,7 @@ fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_ite
   return snap
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-requeue-" + unique)

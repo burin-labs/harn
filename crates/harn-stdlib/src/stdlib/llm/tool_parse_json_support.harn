@@ -88,7 +88,7 @@ pub fn json_fields(value: dict) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn json_call(value, allow_flat_argument_string: bool) -> dict {
+pub fn json_call(value: unknown, allow_flat_argument_string: bool) -> dict {
   if type_of(value) != "dict" {
     return {
       ok: false,
@@ -173,7 +173,7 @@ fn __tool_parse_json_error(detail: string) -> string {
  * silently reading it as the terminator-closed form — a downgrade would hand a
  * body different bytes than the one the model declared.
  */
-fn __tool_parse_verbatim_declaration(value) {
+fn __tool_parse_verbatim_declaration(value: any) {
   if type_of(value) != "string" {
     return nil
   }

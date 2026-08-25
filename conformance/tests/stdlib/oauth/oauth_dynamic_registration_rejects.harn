@@ -11,7 +11,7 @@ import {
   validate_metadata,
 } from "std/oauth/dynamic_registration"
 
-fn expect_reject(label, metadata, marker) {
+fn expect_reject(label: string, metadata: dict, marker: string) {
   const validation = validate_metadata(metadata)
   if validation.ok {
     throw label + ": expected validate_metadata to report ok=false"
@@ -28,7 +28,7 @@ fn expect_reject(label, metadata, marker) {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const store = dynamic_registration_store(harness.auth, harness.channels)
   const cursor_before = len(list_clients(harness.auth, store))
   // Missing redirect_uris.

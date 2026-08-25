@@ -40,7 +40,10 @@ harn_bin="$(./scripts/harn_bin.sh --no-build --print)"
 # and drive this gate from the diagnostic codes it owns.
 out="$("$harn_bin" check --strict-types "$STDLIB_DIR" 2>&1 || true)"
 
-mapfile -t type_errors < <(
+type_errors=()
+while IFS= read -r type_error; do
+  type_errors+=("$type_error")
+done < <(
   printf '%s\n' "$out" | awk '
     index($0, "error[HARN-TYP-") { diagnostic = $0; armed = 1; next }
     armed && /-->/ { print diagnostic " @ " $2; armed = 0 }
@@ -57,7 +60,10 @@ fi
 
 # Each finding is a `warning[HARN-OWN-004]: ...` line followed by a
 # `    --> <file>:<line>:<col>` locator. Pull the locators for our code.
-mapfile -t locators < <(
+locators=()
+while IFS= read -r locator; do
+  locators+=("$locator")
+done < <(
   printf '%s\n' "$out" | awk -v code="$CODE" '
     index($0, "[" code "]") { armed = 1; next }
     armed && /-->/ { print $2; armed = 0 }
@@ -65,7 +71,7 @@ mapfile -t locators < <(
 )
 
 violations=()
-for loc in "${locators[@]}"; do
+for loc in "${locators[@]+"${locators[@]}"}"; do
   file="${loc%%:*}"
   skip=""
   for ex in "${EXCLUDE[@]}"; do

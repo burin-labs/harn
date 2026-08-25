@@ -10,12 +10,12 @@ import {
 } from "std/testing"
 
 @persona(name: "test_captain")
-fn test_captain(clock: HarnessClock, ctx) {
+fn test_captain(clock: HarnessClock, ctx: dict) {
   return checked_step(clock, ctx)
 }
 
 @step(name: "checked_step")
-fn checked_step(clock: HarnessClock, ctx) {
+fn checked_step(clock: HarnessClock, ctx: dict) {
   const wrapped = with_audit_receipt(
     clock,
     fn() { return {value: ctx.value + ":done"} },
