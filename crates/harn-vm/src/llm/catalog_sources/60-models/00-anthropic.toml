@@ -239,7 +239,7 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-4-8"
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -249,6 +249,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -259,6 +260,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -284,6 +286,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
