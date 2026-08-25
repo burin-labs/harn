@@ -242,6 +242,20 @@ pub fn credential_environment_names(setup: &ProviderSetupManifest) -> Vec<String
     names
 }
 
+pub(crate) fn credential_environment_names_for_secret(
+    sources: &[ConnectorCredentialEnvironmentManifest],
+    secret: &str,
+) -> Vec<String> {
+    let mut names = sources
+        .iter()
+        .filter(|source| source.secret == secret)
+        .flat_map(|source| source.environment_names.iter().cloned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
 pub fn configuration_environment_names(setup: &ProviderSetupManifest) -> Vec<String> {
     let mut names = setup
         .configuration_environment
@@ -279,6 +293,29 @@ mod tests {
         assert_eq!(
             available_credential_environment_name(&sources, "duffel/live-token", |_| true),
             None
+        );
+    }
+
+    #[test]
+    fn fallback_names_are_exact_secret_scoped_and_deduplicated() {
+        let sources = [
+            ConnectorCredentialEnvironmentManifest {
+                secret: "duffel/test-access-token".to_string(),
+                environment_names: vec!["DUFFEL_TEST_KEY".to_string(), "DUFFEL_BACKUP".to_string()],
+            },
+            ConnectorCredentialEnvironmentManifest {
+                secret: "duffel/test-access-token".to_string(),
+                environment_names: vec!["DUFFEL_TEST_KEY".to_string()],
+            },
+            ConnectorCredentialEnvironmentManifest {
+                secret: "duffel/live-token".to_string(),
+                environment_names: vec!["DUFFEL_LIVE_KEY".to_string()],
+            },
+        ];
+
+        assert_eq!(
+            credential_environment_names_for_secret(&sources, "duffel/test-access-token"),
+            ["DUFFEL_BACKUP", "DUFFEL_TEST_KEY"]
         );
     }
 

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value as JsonValue};
 
-use crate::cli::ConnectApiKeyArgs;
+use crate::{cli::ConnectApiKeyArgs, package};
 use harn_vm::secrets::{
     configured_secret_chain, configured_secret_namespace, ChainSecretProvider,
     KeyringSecretProvider, SecretBytes, SecretId, SecretProvider,
@@ -41,11 +41,16 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
     if value.is_empty() {
         return Err("API key must not be empty".to_string());
     }
+    let environment_fallbacks =
+        declared_credential_environment_names(&args.connector, &secret_id.to_string());
     let provider = connect_secret_provider()?;
-    provider
-        .put(&secret_id, SecretBytes::from(value))
-        .await
-        .map_err(|error| format!("failed to store {secret_id}: {error}"))?;
+    if let Err(error) = provider.put(&secret_id, SecretBytes::from(value)).await {
+        return Err(format_store_failure(
+            &secret_id.to_string(),
+            &error.to_string(),
+            &environment_fallbacks,
+        ));
+    }
     upsert_index_entry(
         &provider,
         ConnectIndexEntry {
@@ -76,6 +81,43 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
         println!("Stored API key for {} as {}.", args.connector, secret_id);
     }
     Ok(())
+}
+
+fn declared_credential_environment_names(connector: &str, secret_id: &str) -> Vec<String> {
+    let Some(extensions) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| package::try_load_runtime_extensions(&cwd).ok())
+    else {
+        return Vec::new();
+    };
+    let Some(setup) = extensions
+        .provider_connectors
+        .iter()
+        .find(|entry| entry.id.as_str() == connector)
+        .and_then(|entry| entry.setup.as_ref())
+    else {
+        return Vec::new();
+    };
+
+    package::credential_environment_names_for_secret(&setup.credential_environment, secret_id)
+}
+
+pub(super) fn format_store_failure(
+    secret_id: &str,
+    error: &str,
+    environment_names: &[String],
+) -> String {
+    let base = format!("failed to store {secret_id}: {error}");
+    match environment_names {
+        [] => base,
+        [name] => format!(
+            "{base}. For unattended setup, export {name} and keep it set when Harn runs; this connector declares it as the environment source for {secret_id}"
+        ),
+        names => format!(
+            "{base}. For unattended setup, export one of {} and keep it set when Harn runs; this connector declares those names as environment sources for {secret_id}",
+            names.join(", ")
+        ),
+    }
 }
 
 pub(super) async fn run_connect_list(json_output: bool) -> Result<(), String> {

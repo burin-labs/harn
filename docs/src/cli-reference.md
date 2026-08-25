@@ -2621,17 +2621,20 @@ flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
 override that metadata for one run.
 
 For `auth_type = "api-key"` with one `required_secrets` entry, the same command
-prompts without echoing the key. Use `--from-env NAME` or `--value-file PATH`
-for unattended setup; the option contains only the source name or path, never
-the secret. A connector with several required secrets returns the exact
-`harn connect api-key` command for each target so their values cannot be mixed
-up.
+prompts without echoing the key. `--from-env NAME` and `--value-file PATH` read
+the value from that source and store it in the configured keyring; the option
+contains only the source name or path, never the secret. A connector with
+several required secrets returns the exact `harn connect api-key` command for
+each target so their values cannot be mixed up.
 
 Connectors can declare `credential_environment` mappings from logical secret
 ids to accepted environment-variable names. `harn connect status` then treats
 a declared, non-blank variable as ready even when the local keyring is not
 available. JSON and table output show the variable name but never its value.
-Undeclared variables are ignored.
+Undeclared variables are ignored. If a keyring write fails, the error names the
+declared variables that can satisfy that exact secret on a headless host. See
+[Headless API-key setup](./connectors/operator-runbook.md#headless-api-key-setup)
+for the operator steps.
 
 Stored OAuth tokens are written under connector-friendly secret ids:
 

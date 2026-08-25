@@ -4,7 +4,7 @@ use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
 #[command(
-    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one required secret prompt for it; use --from-env or --value-file for unattended setup."
+    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one required secret prompt for it. Use --from-env or --value-file for unattended keyring storage. On a headless host, a manifest-declared credential environment variable can be left set instead of using a keyring."
 )]
 pub(crate) struct ConnectArgs {
     /// Show authenticated connector tokens known to the local keyring.
@@ -63,7 +63,7 @@ pub(crate) struct ConnectApiKeyArgs {
     /// File containing the API key value.
     #[arg(long = "value-file", conflicts_with_all = ["value", "from_env"])]
     pub value_file: Option<PathBuf>,
-    /// Read the API key from this environment variable without putting it in argv.
+    /// Read the API key from this variable, then store it in the configured keyring.
     #[arg(long = "from-env", value_name = "NAME", conflicts_with_all = ["value", "value_file"])]
     pub from_env: Option<String>,
     /// Optional scope string associated with this key.

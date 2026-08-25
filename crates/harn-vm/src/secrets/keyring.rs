@@ -18,6 +18,8 @@ pub enum NativeKeyringError {
     Keyring(#[from] KeyringError),
     #[error("credential contains invalid UTF-8: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
+    #[error("credential store verification failed: {0}")]
+    Verification(&'static str),
 }
 
 /// A stable reason that the operating-system credential store cannot service
@@ -168,8 +170,34 @@ impl NativeKeyring {
     }
 
     pub fn healthcheck(&self) -> Result<String, NativeKeyringError> {
-        let _ = self.get("__harn_probe__")?;
-        Ok(format!("service '{}' reachable", self.service))
+        let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
+        self.healthcheck_with_user(&user)
+    }
+
+    fn healthcheck_with_user(&self, user: &str) -> Result<String, NativeKeyringError> {
+        const PROBE_VALUE: &[u8] = b"harn-keyring-healthcheck";
+
+        self.set(user, PROBE_VALUE)?;
+        let read_result = self.get(user);
+        let delete_result = self.delete(user);
+
+        if !delete_result? {
+            return Err(NativeKeyringError::Verification(
+                "stored probe could not be deleted",
+            ));
+        }
+        match read_result? {
+            Some(value) if value == PROBE_VALUE => Ok(format!(
+                "service '{}' passed write, read, and delete checks",
+                self.service
+            )),
+            Some(_) => Err(NativeKeyringError::Verification(
+                "read returned a different value",
+            )),
+            None => Err(NativeKeyringError::Verification(
+                "stored probe could not be read",
+            )),
+        }
     }
 
     fn entry(&self, user: &str) -> Result<Arc<Entry>, NativeKeyringError> {
@@ -376,5 +404,44 @@ mod tests {
         assert_eq!(keyring.list().unwrap(), vec!["alpha", "beta"]);
         assert!(keyring.delete("alpha").unwrap());
         assert!(!keyring.delete("alpha").unwrap());
+    }
+
+    #[test]
+    fn healthcheck_proves_write_read_delete_and_leaves_no_probe() {
+        let keyring = NativeKeyring::with_store(
+            "harn.healthcheck-test",
+            keyring_core::mock::Store::new().unwrap(),
+        );
+
+        let detail = keyring
+            .healthcheck_with_user("__harn_probe__:test")
+            .expect("writable mock keyring");
+
+        assert!(detail.contains("passed write, read, and delete checks"));
+        assert_eq!(keyring.get("__harn_probe__:test").unwrap(), None);
+    }
+
+    #[test]
+    fn healthcheck_rejects_a_store_that_is_reachable_but_not_writable() {
+        let store = keyring_core::mock::Store::new().unwrap();
+        let credential_store: Arc<CredentialStore> = store;
+        let entry = credential_store
+            .build("harn.healthcheck-read-only", "__harn_probe__:test", None)
+            .unwrap();
+        entry
+            .as_any()
+            .downcast_ref::<keyring_core::mock::Cred>()
+            .unwrap()
+            .set_error(KeyringError::Invalid(
+                "mock read-only store".to_string(),
+                "write denied".to_string(),
+            ));
+        let keyring = NativeKeyring::with_store("harn.healthcheck-read-only", credential_store);
+
+        let error = keyring
+            .healthcheck_with_user("__harn_probe__:test")
+            .expect_err("read-only store must fail the healthcheck");
+
+        assert!(error.to_string().contains("mock read-only store"));
     }
 }
