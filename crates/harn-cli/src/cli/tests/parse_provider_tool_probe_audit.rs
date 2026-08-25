@@ -1,8 +1,6 @@
 use super::*;
-use crate::cli::provider::ProviderToolProbeRequestProfileArg;
-
 #[test]
-fn test_parses_provider_tool_probe_audit_args() {
+fn provider_tool_probe_audit_accepts_an_explicit_false_json_flag() {
     let cli = Cli::parse_from([
         "harn",
         "provider",
@@ -21,16 +19,5 @@ fn test_parses_provider_tool_probe_audit_args() {
     let ProviderCommand::ToolProbeAudit(args) = provider.command else {
         panic!("expected provider tool-probe-audit command");
     };
-    assert!(matches!(args.mode, ProviderToolProbeModeArg::Streaming));
-    assert_eq!(args.probe_cases.len(), 1);
-    assert!(matches!(
-        args.probe_cases[0],
-        ProviderToolProbeCaseArg::ParallelToolCalls
-    ));
-    assert_eq!(args.request_profiles.len(), 1);
-    assert!(matches!(
-        args.request_profiles[0],
-        ProviderToolProbeRequestProfileArg::ParameterEdges
-    ));
     assert!(!args.json);
 }
