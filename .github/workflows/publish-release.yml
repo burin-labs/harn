@@ -405,6 +405,11 @@ jobs:
           EXPECTED_DEVELOPMENT_VERSION: ${{ needs.detect-drift.outputs.development_version }}
         run: |
           set -euo pipefail
+          # This step restamps the versioned grammar-fitness receipt, so the
+          # grammars resolved for this build must still satisfy the checked-in
+          # corpus before the receipt is rewritten to describe them. The corpus
+          # gate is an integration test, so the runner is pointed at the
+          # package's integration-test binary rather than its library target.
           HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versioned_fitness_corpus' \
             HARN_TEST_ONE_PACKAGE=harn-hostlib \
             HARN_TEST_ONE_BINARY=harn_hostlib \

@@ -61,6 +61,38 @@ directly, so parentheses, spaces, and other expression syntax do not need an
 extra shell-escaping layer. Keep using `ARGS` with `make test` for general Cargo
 selection that is already safe to express at the Make command line.
 
+## One exact test
+
+`make test-one` runs a single named test and requires a one-test success
+receipt, so it is the narrowest check to reach for when reproducing a specific
+failure or gating a step on one claim:
+
+```bash
+HARN_TEST_ONE_NAME='module::tests::case' \
+  HARN_TEST_ONE_PACKAGE=harn-cli \
+  make test-one
+```
+
+A Rust test name is reachable only through the target that compiled it. Names
+defined under a package's `src/` belong to its library target and need no
+further selector. Names defined under a package's `tests/` belong to an
+integration-test binary, and that binary has to be named:
+
+```bash
+HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versioned_fitness_corpus' \
+  HARN_TEST_ONE_PACKAGE=harn-hostlib \
+  HARN_TEST_ONE_BINARY=harn_hostlib \
+  make test-one
+```
+
+Pointing one kind's selector at the other kind's name produces a filter that
+cannot match, which is a check that can never pass rather than a check that
+fails informatively. The runner therefore resolves the requested target from the
+package manifest and asks that target to list the name before running anything;
+a request no target can serve is refused up front, naming what was asked for and
+what the package actually declares. The one-test receipt check still applies
+afterwards, for a name the target does define but does not run.
+
 Make targets run Harn scripts through `scripts/harn_bin.sh`. The runner exports
 the exact validated executable as `HARN_BIN` to the child process. A Harn script
 that starts a nested Harn check should reuse that path instead of starting a

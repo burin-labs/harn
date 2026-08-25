@@ -7,6 +7,21 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 fake_cargo="$tmp_root/fake cargo"
 args_log="$tmp_root/args.log"
+metadata_json="$tmp_root/metadata.json"
+cat > "$metadata_json" <<'JSON'
+{
+  "packages": [
+    {
+      "name": "harn-cli",
+      "targets": [
+        { "kind": ["lib"], "name": "harn_cli" },
+        { "kind": ["bin"], "name": "harn" },
+        { "kind": ["test"], "name": "harn_cli_fast" }
+      ]
+    }
+  ]
+}
+JSON
 cat > "$fake_cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -15,7 +30,21 @@ if env | grep -q '^HARN_TEST_ONE_'; then
   exit 19
 fi
 : "${TEST_ONE_ARGS_LOG:?}"
+if [[ "${1:-}" == "metadata" ]]; then
+  cat "${TEST_ONE_FAKE_METADATA:?}"
+  exit 0
+fi
 printf '%s\0' "$@" > "$TEST_ONE_ARGS_LOG"
+for argument in "$@"; do
+  if [[ "$argument" == "--list" ]]; then
+    # An empty listing is how a real target reports that it does not define the
+    # requested name, so the fixture passes its listing through verbatim.
+    if [[ -n "${TEST_ONE_FAKE_LISTING:-}" ]]; then
+      printf '%s\n' "$TEST_ONE_FAKE_LISTING"
+    fi
+    exit 0
+  fi
+done
 case "${TEST_ONE_FAKE_MODE:-success}" in
   success)
     printf '%s\n' \
@@ -40,10 +69,13 @@ esac
 SH
 chmod +x "$fake_cargo"
 
+export TEST_ONE_ARGS_LOG="$args_log"
+export TEST_ONE_FAKE_METADATA="$metadata_json"
+export HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo"
+
 injection_target="$tmp_root/should-not-run"
 exact_name="package::module::case; \$(touch $injection_target)"
-TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+TEST_ONE_FAKE_LISTING="$exact_name: test" \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib "$exact_name" \
   > "$tmp_root/success.out"
 printf '%s\0' \
@@ -58,8 +90,7 @@ if [[ -e "$injection_target" ]]; then
   exit 1
 fi
 
-TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+TEST_ONE_FAKE_LISTING='package::module::case: test' \
   "$repo_root/scripts/test_one.sh" --package harn-cli \
   --test harn_cli_fast package::module::case > "$tmp_root/binary.out"
 printf '%s\0' \
@@ -70,8 +101,66 @@ if ! cmp -s "$tmp_root/expected-binary-args.log" "$args_log"; then
   exit 1
 fi
 
-if TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+# A name the requested target does not define is refused before the run, not
+# handed to a filter that cannot match it. The refusal names the request and
+# the package's real targets so the caller can pick a servable one.
+if TEST_ONE_FAKE_LISTING='' \
+  "$repo_root/scripts/test_one.sh" --package harn-cli --lib \
+  parser_corpus::case_defined_in_an_integration_binary \
+  > "$tmp_root/wrong-kind.out" 2> "$tmp_root/wrong-kind.err"; then
+  echo "unservable target kind unexpectedly succeeded" >&2
+  exit 1
+fi
+if ! grep -Fq "defines no test named" "$tmp_root/wrong-kind.err"; then
+  echo "unservable target kind was not attributable" >&2
+  cat "$tmp_root/wrong-kind.err" >&2
+  exit 1
+fi
+if ! grep -Fq "test target: harn_cli_fast" "$tmp_root/wrong-kind.err"; then
+  echo "refusal did not name the package's available targets" >&2
+  cat "$tmp_root/wrong-kind.err" >&2
+  exit 1
+fi
+if ! grep -Fq -- "--test <binary>" "$tmp_root/wrong-kind.err"; then
+  echo "refusal did not name the selector that could serve the request" >&2
+  cat "$tmp_root/wrong-kind.err" >&2
+  exit 1
+fi
+# The refusal must be a refusal: the last thing handed to Cargo is the listing
+# probe, never the run. Without this the case would also pass if the run went
+# ahead and the receipt check caught it afterwards.
+if ! tr '\0' '\n' < "$args_log" | grep -Fqx -- "--list"; then
+  echo "unservable request reached a run instead of stopping at the probe" >&2
+  tr '\0' '\n' < "$args_log" >&2
+  exit 1
+fi
+
+if "$repo_root/scripts/test_one.sh" --package harn-cli --test not_a_target \
+  package::module::case > "$tmp_root/no-target.out" 2> "$tmp_root/no-target.err"; then
+  echo "unknown test binary unexpectedly succeeded" >&2
+  exit 1
+fi
+if ! grep -Fq "has no integration-test binary 'not_a_target'" "$tmp_root/no-target.err"; then
+  echo "unknown test binary was not attributable" >&2
+  cat "$tmp_root/no-target.err" >&2
+  exit 1
+fi
+
+if "$repo_root/scripts/test_one.sh" --package not-a-package --lib \
+  package::module::case > "$tmp_root/no-package.out" 2> "$tmp_root/no-package.err"; then
+  echo "unknown package unexpectedly succeeded" >&2
+  exit 1
+fi
+if ! grep -Fq "no package named 'not-a-package'" "$tmp_root/no-package.err"; then
+  echo "unknown package was not attributable" >&2
+  cat "$tmp_root/no-package.err" >&2
+  exit 1
+fi
+
+# A target that lists the name but then runs nothing is still a failure: the
+# receipt check stays behind the reachability probe rather than being replaced
+# by it.
+if TEST_ONE_FAKE_LISTING='missing::test: test' \
   TEST_ONE_FAKE_MODE=zero \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib missing::test \
   > "$tmp_root/zero.out" 2> "$tmp_root/zero.err"; then
@@ -85,8 +174,7 @@ if ! grep -Fq "did not produce a one-test success receipt" "$tmp_root/zero.err";
 fi
 
 set +e
-TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+TEST_ONE_FAKE_LISTING='package::module::case: test' \
   TEST_ONE_FAKE_MODE=failure \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib package::module::case \
   > "$tmp_root/failure.out" 2> "$tmp_root/failure.err"
@@ -110,21 +198,19 @@ if "$repo_root/scripts/test_one.sh" --package harn-cli --lib \
 fi
 
 HARN_TEST_ONE_NAME=package::module::case \
-  TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+  TEST_ONE_FAKE_LISTING='package::module::case: test' \
   make -s -C "$repo_root" test-one > "$tmp_root/make.out"
 
+# The Make boundary carries the target kind too, so a caller does not have to
+# reach past it to run an integration test.
 HARN_TEST_ONE_NAME=package::module::case \
-  HARN_TEST_ONE_PACKAGE=harn-hostlib \
-  HARN_TEST_ONE_BINARY=harn_hostlib \
-  TEST_ONE_ARGS_LOG="$args_log" \
-  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+  HARN_TEST_ONE_PACKAGE=harn-cli \
+  HARN_TEST_ONE_BINARY=harn_cli_fast \
+  TEST_ONE_FAKE_LISTING='package::module::case: test' \
   make -s -C "$repo_root" test-one > "$tmp_root/make-binary.out"
-printf '%s\0' \
-  test --package harn-hostlib --test harn_hostlib package::module::case \
-  -- --exact --format terse > "$tmp_root/expected-make-binary-args.log"
-if ! cmp -s "$tmp_root/expected-make-binary-args.log" "$args_log"; then
-  echo "Make test-one did not preserve the named integration-test selector" >&2
+if ! cmp -s "$tmp_root/expected-binary-args.log" "$args_log"; then
+  echo "HARN_TEST_ONE_BINARY did not reach the integration-test selector" >&2
+  tr '\0' '\n' < "$args_log" >&2
   exit 1
 fi
 

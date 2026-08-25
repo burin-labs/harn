@@ -149,11 +149,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 ## Verification
 
 - Start with the narrowest check through the owning interface.
-- Run one exact Rust library test without unrelated nextest discovery with
+- Run one exact Rust test without unrelated nextest discovery with
   `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set
-  `HARN_TEST_ONE_PACKAGE` only when the test is outside `harn-cli`; zero matches
-  fail loudly. Set `HARN_TEST_ONE_BINARY` to select a named integration-test
-  binary instead of the package library.
+  `HARN_TEST_ONE_PACKAGE` only when the test is outside `harn-cli`, and
+  `HARN_TEST_ONE_BINARY` when the test lives in the package's `tests/`
+  directory rather than its `src/`. A name the requested target does not define
+  is refused before the run; zero matches from one that does fail loudly.
 - Workspace tests: `make test` (requires cargo-nextest; `make setup` installs it).
 - Full gate: `make all`.
 - Before declaring a change clean, run `make check-drift` and inspect
