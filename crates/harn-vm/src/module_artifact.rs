@@ -397,6 +397,30 @@ fn compile_module_artifact_with_provenance(
     imported_source_callable_names: &[String],
     provenance: ModuleProvenance,
 ) -> Result<ModuleArtifact, VmError> {
+    let options = match provenance {
+        ModuleProvenance::User => crate::CompilerOptions::from_env(),
+        ModuleProvenance::PrivilegedWire | ModuleProvenance::TrustedHostDispatch => {
+            crate::CompilerOptions::privileged_wire()
+        }
+    };
+    compile_module_artifact_with_options(
+        program,
+        module_source_file,
+        imported_enum_candidates,
+        imported_source_callable_names,
+        provenance,
+        options,
+    )
+}
+
+fn compile_module_artifact_with_options(
+    program: &[harn_parser::SNode],
+    module_source_file: Option<String>,
+    imported_enum_candidates: &[String],
+    imported_source_callable_names: &[String],
+    provenance: ModuleProvenance,
+    options: crate::CompilerOptions,
+) -> Result<ModuleArtifact, VmError> {
     let namespace_demands = harn_parser::namespace_import_demands(program);
     let imports: Vec<ModuleImportSpec> = program
         .iter()
@@ -438,15 +462,7 @@ fn compile_module_artifact_with_provenance(
         validate_privileged_wire_surface(program, &imports)?;
     }
 
-    let compiler = || match provenance {
-        ModuleProvenance::User => crate::Compiler::new(),
-        ModuleProvenance::PrivilegedWire => {
-            crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
-        }
-        ModuleProvenance::TrustedHostDispatch => {
-            crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
-        }
-    };
+    let compiler = || crate::Compiler::with_options(options);
 
     let init_nodes: Vec<harn_parser::SNode> = program
         .iter()
@@ -925,6 +941,28 @@ pub fn compile_module_artifact_from_source_with_context(
     )
 }
 
+/// Compile source that is embedded in this Harn binary as part of the stdlib.
+///
+/// The embedded-stdlib cache has its own identity domain. Keeping this entry
+/// point separate prevents filesystem source from requesting runtime-internal
+/// builtin authority while allowing stdlib wrappers to use their private
+/// implementation builtins.
+pub(crate) fn compile_embedded_stdlib_module_artifact_from_source_with_context(
+    source_path: &Path,
+    source: &str,
+    context: &ModuleCompilationContext,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    compile_module_artifact_with_options(
+        &program,
+        Some(source_path.display().to_string()),
+        context.enum_candidates(),
+        context.source_callable_names(),
+        ModuleProvenance::User,
+        crate::CompilerOptions::runtime_owned_source(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1045,11 +1083,9 @@ pub fn call() { return lib.greet() }
 
     #[test]
     fn ordinary_modules_cannot_name_privileged_wire_builtins() {
-        let error = compile_module_artifact_from_source(
-            Path::new("<test>/user.harn"),
-            r#"fn probe() { host_call("project.scan", {}) }"#,
-        )
-        .expect_err("ordinary source must not acquire wire authority");
+        let source = r#"fn probe() { return host_call("project.scan", {}) }"#;
+        let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
+            .expect_err("a tail call must not acquire wire authority");
         assert!(
             error.to_string().contains("not callable source API"),
             "{error}"

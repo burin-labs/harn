@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 mod exit_status;
+mod host_dispatch;
 mod network;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
@@ -1394,67 +1395,4 @@ pipeline main(harness: Harness) {
         outcome.stderr
     );
     assert_eq!(outcome.stdout.trim(), "[harn] ping:active");
-}
-
-/// Write a project whose trigger handler module carries a `host_call`, with
-/// `[check].trusted_host_dispatch` set to `declared`.
-///
-/// The call sits in a function nothing invokes: the refusal under test is a
-/// compile-time one raised while the manifest installs its triggers, which
-/// happens before any script body runs.
-fn write_host_dispatch_trigger_project(root: &Path, declared: bool) -> PathBuf {
-    // The `host_call` lives one import away from the handler, matching a real
-    // host-adapter layout. Trigger installation compiles the handler's whole
-    // import closure, so this is where the refusal actually lands.
-    std::fs::write(
-        root.join("host_adapter.harn"),
-        r#"
-pub fn unreachable_host_read() -> any {
-  return host_call("runtime.pipeline_input", {})
-}
-"#,
-    )
-    .expect("write host adapter");
-    crate::tests::common::host_dispatch_project::write_host_dispatch_trigger_project(
-        root,
-        declared,
-        r#"
-import { unreachable_host_read } from "./host_adapter"
-
-pub fn on_tick(_event) -> nil {
-  const _ = unreachable_host_read
-  return nil
-}
-"#,
-    )
-}
-
-async fn run_host_dispatch_fixture(declared: bool) -> crate::commands::run::RunOutcome {
-    harn_vm::reset_thread_local_state();
-    let project = tempfile::tempdir().expect("temp project");
-    let script = write_host_dispatch_trigger_project(project.path(), declared);
-    let outcome = execute_run(
-        &script.to_string_lossy(),
-        false,
-        HashSet::new(),
-        Vec::new(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-    )
-    .await;
-    harn_vm::reset_thread_local_state();
-    outcome
-}
-
-#[tokio::test]
-async fn execute_run_honors_manifest_trusted_host_dispatch() {
-    let outcome = run_host_dispatch_fixture(true).await;
-    assert_eq!(
-        outcome.exit_code, 0,
-        "stderr:\n{}\nstdout:\n{}",
-        outcome.stderr, outcome.stdout
-    );
-    assert_eq!(outcome.stdout.trim(), "target-ran");
 }
