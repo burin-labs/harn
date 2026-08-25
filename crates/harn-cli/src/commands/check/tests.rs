@@ -1457,3 +1457,4 @@ pipeline main(harness: Harness) {
 
 mod effect_inheritance;
 mod llm_composition;
+mod process_preflight;
