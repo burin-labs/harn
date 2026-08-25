@@ -352,7 +352,6 @@ impl TypeChecker {
             // Expose it as a named `range` type; for-in and method resolution
             // special-case this type where needed.
             Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
-            Node::HitlExpr { kind, args } => Some(self.hitl_expr_inferred_type(*kind, args, scope)),
             Node::DictLiteral(entries) => {
                 // Build the shape by folding entries left-to-right with the
                 // right-biased shape merge, so `{...base, k: v}` and

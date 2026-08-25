@@ -14,7 +14,6 @@ impl<'a> HandlerIrBuilder<'a> {
                 }
                 exits
             }
-            Node::HitlExpr { kind, args } => self.build_hitl_expr(node, *kind, args, incoming),
             Node::MethodCall {
                 object,
                 method,

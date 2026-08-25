@@ -5,7 +5,7 @@
 //! module, which extends this same type.
 
 use harn_lexer::Span;
-use harn_parser::{BindingPattern, HitlArg, HitlKind, Node, SNode};
+use harn_parser::{BindingPattern, Node, SNode};
 
 use crate::classify::*;
 use crate::types::*;
@@ -524,89 +524,6 @@ impl<'a> HandlerIrBuilder<'a> {
             node.span,
             format!("exit {}", scope.label()),
             NodeSemantics::PolicyScopeExit(scope),
-        );
-        self.connect_all(&closure_exits, exit);
-        vec![exit]
-    }
-
-    pub(crate) fn build_hitl_expr(
-        &mut self,
-        node: &SNode,
-        kind: HitlKind,
-        args: &[HitlArg],
-        incoming: Vec<NodeId>,
-    ) -> Vec<NodeId> {
-        match kind {
-            HitlKind::RequestApproval => {
-                let mut exits = incoming;
-                for arg in args {
-                    exits = self.build_expr(&arg.value, exits);
-                }
-                let call = CallSemantics {
-                    name: kind.as_keyword().to_string(),
-                    display_name: kind.as_keyword().to_string(),
-                    classification: CallClassification::ApprovalGate,
-                    literal_args: args
-                        .iter()
-                        .map(|arg| literal_value(&arg.value))
-                        .collect::<Vec<_>>(),
-                };
-                let call_id = self.push_node(
-                    node.span,
-                    format!("call {}", kind.as_keyword()),
-                    NodeSemantics::Call(call),
-                );
-                self.connect_all(&exits, call_id);
-                vec![call_id]
-            }
-            HitlKind::DualControl => self.build_hitl_dual_control(node, args, incoming),
-            HitlKind::AskUser | HitlKind::EscalateTo => {
-                let mut exits = incoming;
-                for arg in args {
-                    exits = self.build_expr(&arg.value, exits);
-                }
-                exits
-            }
-        }
-    }
-
-    fn build_hitl_dual_control(
-        &mut self,
-        node: &SNode,
-        args: &[HitlArg],
-        incoming: Vec<NodeId>,
-    ) -> Vec<NodeId> {
-        let closure_index = args
-            .iter()
-            .position(|arg| arg.name.as_deref() == Some("action"))
-            .or(Some(2));
-        let mut exits = incoming;
-        for (index, arg) in args.iter().enumerate() {
-            if Some(index) == closure_index && matches!(arg.value.node, Node::Closure { .. }) {
-                continue;
-            }
-            exits = self.build_expr(&arg.value, exits);
-        }
-        let enter = self.push_node(
-            node.span,
-            "dual_control approval gate".to_string(),
-            NodeSemantics::ApprovalScopeEnter,
-        );
-        self.connect_all(&exits, enter);
-        let closure_exits = closure_index
-            .and_then(|index| args.get(index))
-            .and_then(|arg| match &arg.value {
-                SNode {
-                    node: Node::Closure { body, .. },
-                    ..
-                } => Some(self.build_block(body, vec![enter])),
-                _ => None,
-            })
-            .unwrap_or_else(|| vec![enter]);
-        let exit = self.push_node(
-            node.span,
-            "end dual_control".to_string(),
-            NodeSemantics::ApprovalScopeExit,
         );
         self.connect_all(&closure_exits, exit);
         vec![exit]

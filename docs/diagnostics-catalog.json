@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 10
+      "count": 8
     },
     {
       "id": "LLM",
@@ -712,24 +712,6 @@
       "code": "HARN-CAP-001",
       "category": "CAP",
       "summary": "capability payload is invalid",
-      "repairs": [],
-      "related": [],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
-      "code": "HARN-CAP-002",
-      "category": "CAP",
-      "summary": "human approval construct is missing policy",
-      "repairs": [],
-      "related": [],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
-      "code": "HARN-CAP-003",
-      "category": "CAP",
-      "summary": "human approval argument is invalid",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

@@ -1021,11 +1021,6 @@ impl TypeChecker {
                     self.visit_for_deprecation(s);
                 }
             }
-            Node::HitlExpr { args, .. } => {
-                for arg in args {
-                    self.visit_for_deprecation(&arg.value);
-                }
-            }
             Node::Pipeline { body, .. }
             | Node::OverrideDecl { body, .. }
             | Node::FnDecl { body, .. }

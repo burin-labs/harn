@@ -217,8 +217,6 @@ diagnostic_codes! {
     InvalidAttributeArgument, "HARN-NAM-012", Nam, "attribute argument is invalid";
     InvalidMainSignature, "HARN-NAM-101", Nam, "`fn main` must take an explicit `harness: Harness` parameter";
     CapabilityPayloadInvalid, "HARN-CAP-001", Cap, "capability payload is invalid";
-    HitlMissingApprovalPolicy, "HARN-CAP-002", Cap, "human approval construct is missing policy";
-    HitlInvalidApprovalArgument, "HARN-CAP-003", Cap, "human approval argument is invalid";
     CapabilityResultUnchecked, "HARN-CAP-004", Cap, "capability result must be checked";
     CapabilityUnknownOperation, "HARN-CAP-005", Cap, "host capability operation is not declared";
     CapabilityCallStaticNameRequired, "HARN-CAP-006", Cap, "host capability call must use a static operation name";

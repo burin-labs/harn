@@ -198,8 +198,7 @@ impl Linter<'_> {
         // `request_approval(...)` call is the removed ambient builtin: it is
         // still matched so that a script mid-migration keeps this warning
         // alongside the HARN-LNT-071 that tells it to move, rather than going
-        // quiet on the way from one spelling to the other. `HitlExpr` is the
-        // reserved-keyword form, which the lexer no longer produces.
+        // quiet on the way from one spelling to the other.
         let name = match &node.node {
             Node::FunctionCall { name, .. } if Self::is_approval_record_builtin(name) => {
                 name.as_str()
@@ -211,10 +210,6 @@ impl Linter<'_> {
             {
                 method.as_str()
             }
-            Node::HitlExpr {
-                kind: harn_parser::HitlKind::RequestApproval,
-                ..
-            } => "request_approval",
             _ => return,
         };
         self.diagnostics.push(LintDiagnostic {

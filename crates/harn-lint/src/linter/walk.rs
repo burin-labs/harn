@@ -1009,12 +1009,6 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
-            Node::HitlExpr { args, .. } => {
-                for arg in args {
-                    self.lint_node(&arg.value);
-                }
-            }
-
             Node::GuardStmt {
                 condition,
                 else_body,

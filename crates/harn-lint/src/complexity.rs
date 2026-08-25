@@ -117,7 +117,6 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
             | Node::SpawnExpr { body }
             | Node::ScopeBlock { body } => body_complexity(body),
             Node::FunctionCall { args, .. } => args.iter().map(node_complexity).sum(),
-            Node::HitlExpr { args, .. } => args.iter().map(|arg| node_complexity(&arg.value)).sum(),
             Node::ValueCall { callee, args } => {
                 node_complexity(callee) + args.iter().map(node_complexity).sum::<usize>()
             }

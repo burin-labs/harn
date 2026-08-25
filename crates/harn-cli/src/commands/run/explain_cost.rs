@@ -100,11 +100,6 @@ impl CostAnalyzer {
                 self.walk_nodes(body);
                 self.inherited_options.pop();
             }
-            Node::HitlExpr { args, .. } => {
-                for arg in args {
-                    self.walk_node(&arg.value);
-                }
-            }
             Node::Pipeline { body, .. }
             | Node::OverrideDecl { body, .. }
             | Node::FnDecl { body, .. }

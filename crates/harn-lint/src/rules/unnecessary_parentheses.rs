@@ -96,10 +96,6 @@ fn opening_is_required_by_context(tokens: &[Token], open_idx: usize) -> bool {
                 | TokenKind::RBrace
                 | TokenKind::Gt
                 | TokenKind::Fn
-                | TokenKind::RequestApproval
-                | TokenKind::DualControl
-                | TokenKind::AskUser
-                | TokenKind::EscalateTo
                 // `mutex(resource) { ... }`: the parens delimit the lock's
                 // resource key and are required grammar, not redundant grouping.
                 | TokenKind::Mutex
@@ -166,7 +162,6 @@ fn is_single_value_expr(node: &Node) -> bool {
             | Node::SliceAccess { .. }
             | Node::EnumConstruct { .. }
             | Node::StructConstruct { .. }
-            | Node::HitlExpr { .. }
             | Node::ListLiteral(_)
             | Node::DictLiteral(_)
             | Node::TryOperator { .. }

@@ -589,7 +589,6 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::ContinueStmt => Vec::new(),
         Node::AttributedDecl { inner, .. } => vec![inner.as_ref()],
         Node::OrPattern(alternatives) => alternatives.iter().collect(),
-        Node::HitlExpr { args, .. } => args.iter().map(|arg| &arg.value).collect(),
     }
 }
 

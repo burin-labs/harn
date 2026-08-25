@@ -38,7 +38,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`TYP`](#typ--type-checker) | Type checker | 28 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
-| [`CAP`](#cap--capabilities) | Capabilities | 10 |
+| [`CAP`](#cap--capabilities) | Capabilities | 8 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
@@ -131,8 +131,6 @@ A host capability call (file I/O, network, HITL approval, tool host, etc.) faile
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-CAP-001`](#harn-cap-001) | capability payload is invalid | — | — |
-| [`HARN-CAP-002`](#harn-cap-002) | human approval construct is missing policy | — | — |
-| [`HARN-CAP-003`](#harn-cap-003) | human approval argument is invalid | — | — |
 | [`HARN-CAP-004`](#harn-cap-004) | capability result must be checked | `errors/check-or-rescue` | `scope-local` |
 | [`HARN-CAP-005`](#harn-cap-005) | host capability operation is not declared | — | — |
 | [`HARN-CAP-006`](#harn-cap-006) | host capability call must use a static operation name | — | — |
@@ -1067,30 +1065,6 @@ If the function does not need to be the entrypoint, rename it (e.g. `helper`,
 **Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
 
 capability payload is invalid
-
-#### How to fix
-
-- Match the capability signature documented in the Harn capability spec.
-- If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-### `HARN-CAP-002`
-
-**Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
-
-human approval construct is missing policy
-
-#### How to fix
-
-- Match the capability signature documented in the Harn capability spec.
-- If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-### `HARN-CAP-003`
-
-**Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
-
-human approval argument is invalid
-
-argument)
 
 #### How to fix
 
