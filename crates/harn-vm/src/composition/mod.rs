@@ -1211,9 +1211,6 @@ fn validate_composition_program(
             Node::SpawnExpr { .. } | Node::Parallel { .. } => {
                 error = Some("composition snippets cannot spawn or parallelize work".to_string());
             }
-            Node::HitlExpr { .. } => {
-                error = Some("composition snippets cannot request HITL directly".to_string());
-            }
             Node::CostRoute { .. } => {
                 error = Some("composition snippets cannot open LLM routing blocks".to_string());
             }

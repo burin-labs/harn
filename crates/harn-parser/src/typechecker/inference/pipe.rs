@@ -35,9 +35,6 @@ impl TypeChecker {
                 Self::contains_pipe_placeholder(object)
                     || args.iter().any(Self::contains_pipe_placeholder)
             }
-            Node::HitlExpr { args, .. } => args
-                .iter()
-                .any(|arg| Self::contains_pipe_placeholder(&arg.value)),
             Node::BinaryOp { left, right, .. } => {
                 Self::contains_pipe_placeholder(left) || Self::contains_pipe_placeholder(right)
             }

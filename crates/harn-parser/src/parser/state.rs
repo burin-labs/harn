@@ -393,10 +393,6 @@ impl Parser {
             TokenKind::Select => "select",
             TokenKind::Impl => "impl",
             TokenKind::Skill => "skill",
-            TokenKind::RequestApproval => "request_approval",
-            TokenKind::DualControl => "dual_control",
-            TokenKind::AskUser => "ask_user",
-            TokenKind::EscalateTo => "escalate_to",
             _ => return Err(self.make_error(expected)),
         };
         let name = name.to_string();

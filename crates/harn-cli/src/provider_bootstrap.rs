@@ -419,9 +419,6 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
                     .as_ref()
                     .is_some_and(|message| node_uses_provider_llm(message, shadows))
         }
-        Node::HitlExpr { args, .. } => args
-            .iter()
-            .any(|arg| node_uses_provider_llm(&arg.value, shadows)),
         Node::ValueCall { callee, args } => {
             node_uses_provider_llm(callee, shadows) || nodes_use_provider_llm(args, shadows)
         }

@@ -338,14 +338,6 @@ pub enum TokenKind {
     Select,
     Impl,
     Skill,
-    /// First-class HITL primitive: `request_approval(...)`.
-    RequestApproval,
-    /// First-class HITL primitive: `dual_control(...)`.
-    DualControl,
-    /// First-class HITL primitive: `ask_user(...)`.
-    AskUser,
-    /// First-class HITL primitive: `escalate_to(...)`.
-    EscalateTo,
 
     Identifier(String),
     StringLiteral(String),
@@ -463,10 +455,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Select => write!(f, "select"),
             TokenKind::Impl => write!(f, "impl"),
             TokenKind::Skill => write!(f, "skill"),
-            TokenKind::RequestApproval => write!(f, "request_approval"),
-            TokenKind::DualControl => write!(f, "dual_control"),
-            TokenKind::AskUser => write!(f, "ask_user"),
-            TokenKind::EscalateTo => write!(f, "escalate_to"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
@@ -542,7 +530,31 @@ impl Token {
 
 #[cfg(test)]
 mod tests {
-    use super::byte_offset_for_position;
+    use super::{byte_offset_for_position, keyword_token_kind, KEYWORDS};
+
+    /// Falsifier for the removed reserved-keyword HITL syntax. These four
+    /// names are ordinary identifiers; HITL is reached only through
+    /// `harness.interaction.*`. Reintroducing any of them as a keyword
+    /// would silently resurrect a second, parallel HITL surface.
+    #[test]
+    fn hitl_names_are_not_reserved_keywords() {
+        for name in [
+            "ask_user",
+            "request_approval",
+            "dual_control",
+            "escalate_to",
+        ] {
+            assert_eq!(
+                keyword_token_kind(name),
+                None,
+                "`{name}` must lex as an identifier, not a keyword"
+            );
+            assert!(
+                !KEYWORDS.contains(&name),
+                "`{name}` must stay out of the canonical keyword vocabulary"
+            );
+        }
+    }
 
     #[test]
     fn source_positions_map_unicode_columns_to_byte_offsets() {

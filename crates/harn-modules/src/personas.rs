@@ -790,11 +790,6 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
             collect_dict_calls(fields, calls);
         }
         Node::ListLiteral(items) | Node::OrPattern(items) => collect_many(items, calls),
-        Node::HitlExpr { args, .. } => {
-            for arg in args {
-                collect_called_functions_node(&arg.value, calls);
-            }
-        }
         Node::AttributedDecl { inner, .. } => collect_called_functions_node(inner, calls),
         Node::Pipeline { body, .. }
         | Node::OverrideDecl { body, .. }

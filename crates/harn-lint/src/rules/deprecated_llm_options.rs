@@ -183,11 +183,6 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         | Node::NonNullAssert { operand: value }
         | Node::TryStar { operand: value }
         | Node::UnaryOp { operand: value, .. } => visit_node(value, diagnostics),
-        Node::HitlExpr { args, .. } => {
-            for arg in args {
-                visit_node(&arg.value, diagnostics);
-            }
-        }
         Node::Parallel {
             expr,
             body,

@@ -1,5 +1,20 @@
+/**
+ * Falsifier for the removed reserved-keyword HITL syntax. `ask_user`,
+ * `request_approval`, `dual_control`, and `escalate_to` are ordinary
+ * identifiers: they bind, shadow, and declare functions like any other
+ * name. HITL itself is reached only through `harness.interaction.*`.
+ * Reintroducing any of them as a lexer keyword breaks this test.
+ */
+fn ask_user(prompt: string) -> string {
+  return "fn:" + prompt
+}
+
 pipeline test(harness: Harness, task: unknown) {
   const request_approval = "ordinary"
-  const ask_user = "identifier"
-  harness.stdio.println(request_approval + " " + ask_user)
+  const dual_control = "identifier"
+  const escalate_to = "names"
+  harness.stdio.println(request_approval + " " + dual_control + " " + escalate_to)
+  harness.stdio.println(ask_user("shadowed"))
+  const ask_user = "rebound"
+  harness.stdio.println(ask_user)
 }

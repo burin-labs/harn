@@ -1,4 +1,4 @@
-use harn_parser::{DictEntry, HitlArg, Node, SNode};
+use harn_parser::{DictEntry, Node, SNode};
 
 /// Check if an AST node contains `_` identifier (pipe placeholder).
 pub(super) fn contains_pipe_placeholder(node: &SNode) -> bool {
@@ -11,7 +11,6 @@ pub(super) fn contains_pipe_placeholder(node: &SNode) -> bool {
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             contains_pipe_placeholder(object) || args.iter().any(contains_pipe_placeholder)
         }
-        Node::HitlExpr { args, .. } => args.iter().any(|arg| contains_pipe_placeholder(&arg.value)),
         Node::BinaryOp { left, right, .. } => {
             contains_pipe_placeholder(left) || contains_pipe_placeholder(right)
         }
@@ -94,17 +93,6 @@ pub(super) fn replace_pipe_placeholder(node: &SNode) -> SNode {
             object: Box::new(replace_pipe_placeholder(object)),
             method: method.clone(),
             args: args.iter().map(replace_pipe_placeholder).collect(),
-        },
-        Node::HitlExpr { kind, args } => Node::HitlExpr {
-            kind: *kind,
-            args: args
-                .iter()
-                .map(|arg| HitlArg {
-                    name: arg.name.clone(),
-                    value: replace_pipe_placeholder(&arg.value),
-                    span: arg.span,
-                })
-                .collect(),
         },
         Node::BinaryOp { op, left, right } => Node::BinaryOp {
             op: op.clone(),

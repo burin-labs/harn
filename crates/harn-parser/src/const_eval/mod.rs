@@ -544,7 +544,6 @@ impl<'a> EvalCtx<'a> {
             | Node::DeferStmt { .. }
             | Node::YieldExpr { .. }
             | Node::EmitExpr { .. }
-            | Node::HitlExpr { .. }
             | Node::TryCatch { .. }
             | Node::TryExpr { .. }
             | Node::TryOperator { .. }

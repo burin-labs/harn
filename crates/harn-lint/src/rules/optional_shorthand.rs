@@ -310,11 +310,6 @@ impl<'a, 'd> State<'a, 'd> {
                     self.visit_match_arm(arm);
                 }
             }
-            Node::HitlExpr { args, .. } => {
-                for arg in args {
-                    self.visit_node(&arg.value);
-                }
-            }
             Node::GuardStmt {
                 condition,
                 else_body,

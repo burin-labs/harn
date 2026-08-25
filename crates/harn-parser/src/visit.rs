@@ -347,11 +347,6 @@ fn collect_children<'a>(node: &'a SNode, children: &mut impl FnMut(&'a SNode)) {
         | Node::TryStar { operand: value }
         | Node::NonNullAssert { operand: value }
         | Node::UnaryOp { operand: value, .. } => children(value),
-        Node::HitlExpr { args, .. } => {
-            for arg in args {
-                children(&arg.value);
-            }
-        }
         Node::Parallel {
             expr,
             body,

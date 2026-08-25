@@ -29,7 +29,6 @@ mod entry;
 mod error;
 mod error_handling;
 mod expressions;
-mod hitl;
 mod module;
 mod optimizer;
 mod patterns;
@@ -982,9 +981,6 @@ impl Compiler {
             }
             Node::SpawnExpr { body } => {
                 self.compile_spawn_expr(body)?;
-            }
-            Node::HitlExpr { kind, args } => {
-                self.compile_hitl_expr(*kind, args)?;
             }
             Node::SelectExpr {
                 cases,

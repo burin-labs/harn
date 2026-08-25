@@ -1997,19 +1997,6 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::HitlExpr { args, .. } => {
-            for arg in args {
-                scan_node_preflight(
-                    &arg.value,
-                    file_path,
-                    source,
-                    config,
-                    host_capabilities,
-                    visited,
-                    diagnostics,
-                );
-            }
-        }
     }
 }
 
