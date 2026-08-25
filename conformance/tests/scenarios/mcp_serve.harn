@@ -7,7 +7,11 @@ pipeline test(harness: Harness, task: unknown) {
     tools,
     "echo",
     "Echo input back",
-    {parameters: {text: "string"}, handler: { args -> args.text }},
+    {
+      parameters: {text: "string"},
+      handler: { args -> args.text },
+      annotations: {readOnlyHint: true, idempotentHint: true, openWorldHint: false},
+    },
   )
   // mcp_serve stores the registry and returns nil
   const result = harness.tools.mcp_tools(tools)

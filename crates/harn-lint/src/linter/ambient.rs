@@ -209,6 +209,56 @@ impl Linter<'_> {
             .flatten()
     }
 
+    /// The arguments of `node` when it calls `builtin`, in either spelling:
+    /// the ambient global itself, or the typed `harness.<capability>.<method>`
+    /// that replaced it.
+    ///
+    /// Rules identify a call by which builtin it names. Matching the syntax
+    /// instead makes them stop applying the moment a call site adopts the
+    /// spelling `HARN-LNT-071` asks for, and a rule that quietly stops
+    /// applying reads exactly like one that found nothing. Routing the
+    /// question here keeps one owner for it — the migration recipe already
+    /// derived from the capability surface — instead of a second name table
+    /// that would drift from it.
+    ///
+    /// A migration that reshapes arguments resolves to `None`: the caller is
+    /// about to read the ambient call's argument positions, and a request
+    /// record or a call-then-property projection no longer has them.
+    pub(super) fn call_names_builtin<'node>(
+        &self,
+        node: &'node SNode,
+        builtin: &str,
+    ) -> Option<&'node [SNode]> {
+        match &node.node {
+            harn_parser::Node::FunctionCall { name, args, .. } => {
+                (name == builtin).then_some(args.as_slice())
+            }
+            harn_parser::Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | harn_parser::Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                let migration = harn_vm::stdlib::harness_migration_for_builtin(builtin)?;
+                if !matches!(
+                    migration.arguments,
+                    harn_vm::stdlib::HarnessBuiltinArgumentMigration::Forward
+                ) {
+                    return None;
+                }
+                (migration.method == method
+                    && self.harness_capability_of(object)
+                        == Some(migration.capability.field_name()))
+                .then_some(args.as_slice())
+            }
+            _ => None,
+        }
+    }
+
     fn has_local_or_imported_name(&self, name: &str) -> bool {
         self.scopes.iter().any(|scope| scope.contains(name))
             || (self.known_functions.contains(name) && !self.builtin_functions.contains(name))
