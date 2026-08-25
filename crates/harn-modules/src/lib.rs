@@ -78,6 +78,16 @@ pub struct ModuleGraphBuild {
     pub parsed_sources: HashMap<PathBuf, ParsedModuleSource>,
 }
 
+/// Whether module resolution may consult package metadata discovered around
+/// the seed files. Standalone callers retain relative and standard-library
+/// imports while making package resolution independent of ambient projects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PackageContext {
+    #[default]
+    Project,
+    Standalone,
+}
+
 #[derive(Debug, Default)]
 struct ModuleInfo {
     /// All declarations visible in this module (for local symbol lookup and
@@ -207,7 +217,13 @@ pub fn read_module_source(path: &Path) -> Option<String> {
 /// graph contains every module reachable from the seed set. Cycles and
 /// already-loaded files are skipped via a visited set.
 pub fn build(files: &[PathBuf]) -> ModuleGraph {
-    build_inner(files, ParsedSourceRetention::None, None).graph
+    build_inner(
+        files,
+        ParsedSourceRetention::None,
+        None,
+        PackageContext::Project,
+    )
+    .graph
 }
 
 /// Build a module graph using caller-owned source for one root file.
@@ -222,6 +238,21 @@ pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
         &[file],
         ParsedSourceRetention::None,
         Some(&source_overrides),
+        PackageContext::Project,
+    )
+    .graph
+}
+
+/// Build a module graph using caller-owned source without discovering package
+/// metadata around the entry file.
+pub fn build_with_standalone_source(file: &Path, source: &str) -> ModuleGraph {
+    let file = normalize_path(file);
+    let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
+    build_inner(
+        &[file],
+        ParsedSourceRetention::None,
+        Some(&source_overrides),
+        PackageContext::Standalone,
     )
     .graph
 }
@@ -237,6 +268,7 @@ pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
         files,
         ParsedSourceRetention::Seeds(&parsed_source_targets),
         None,
+        PackageContext::Project,
     )
 }
 
@@ -246,7 +278,12 @@ pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
 /// package linking consumes every module AST, while ordinary diagnostics should
 /// not retain an entire dependency graph after extracting its public surface.
 pub fn build_closed_program(files: &[PathBuf]) -> ModuleGraphBuild {
-    build_inner(files, ParsedSourceRetention::All, None)
+    build_inner(
+        files,
+        ParsedSourceRetention::All,
+        None,
+        PackageContext::Project,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -277,15 +314,24 @@ pub fn build_for_reference_index(
     files: &[PathBuf],
     source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> ModuleGraphBuild {
-    build_inner(files, ParsedSourceRetention::All, source_overrides)
+    build_inner(
+        files,
+        ParsedSourceRetention::All,
+        source_overrides,
+        PackageContext::Project,
+    )
 }
 
 fn build_inner(
     files: &[PathBuf],
     parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
+    package_context: PackageContext,
 ) -> ModuleGraphBuild {
-    let package_snapshots = acquire_package_snapshots(files);
+    let package_snapshots = match package_context {
+        PackageContext::Project => acquire_package_snapshots(files),
+        PackageContext::Standalone => Vec::new(),
+    };
     let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
     let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();

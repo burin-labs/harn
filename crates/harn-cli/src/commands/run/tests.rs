@@ -4,7 +4,8 @@ use super::{
     eval_source_for_code, execute_explain_cost, execute_run, execute_run_inner,
     execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
     persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
-    ExecuteRunInputs, RunAuxOptions, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    ExecuteRunInputs, ProjectContextMode, RunAuxOptions, RunProfileOptions, RunSandboxOptions,
+    StdoutPassthroughGuard,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -90,8 +91,39 @@ async fn execute_run_with_eager_project_handlers(path: &str) -> super::RunOutcom
         timing: None,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: true,
+        project_context: ProjectContextMode::Project,
     })
     .await
+}
+
+async fn execute_standalone_run_with_denied(
+    path: &str,
+    denied_builtins: HashSet<String>,
+) -> super::RunOutcome {
+    crate::ensure_builtin_signatures_installed();
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace: false,
+        denied_builtins,
+        script_argv: Vec::new(),
+        skill_dirs_raw: Vec::new(),
+        llm_mock_mode: CliLlmMockMode::Off,
+        attestation: None,
+        profile: RunProfileOptions::default(),
+        sandbox: RunSandboxOptions::default(),
+        interrupt_tokens: None,
+        json: None,
+        aux: RunAuxOptions::default(),
+        timing: None,
+        harnpack: HarnpackRunOptions::default(),
+        eager_project_handlers: false,
+        project_context: ProjectContextMode::Standalone,
+    })
+    .await
+}
+
+async fn execute_standalone_run(path: &str) -> super::RunOutcome {
+    execute_standalone_run_with_denied(path, HashSet::new()).await
 }
 
 #[test]

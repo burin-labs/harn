@@ -18,6 +18,7 @@ harn run --profile --profile-json profile.json <file.harn>
 harn run -e 'harness.stdio.log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --standalone --allow json_parse policy.harn
 harn run --approve-risky git.push release.harn
 harn run --no-sandbox <file.harn>
 harn run --write-root /path/to/output main.harn
@@ -47,6 +48,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
+| `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, child traffic stays denied until `HARN_EGRESS_*` or `harness.net.egress_policy(...)` configures an allow decision through the managed proxy. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
@@ -87,6 +89,15 @@ This keeps unrelated project code off the startup path.
 
 Use `--eager-project-handlers` to diagnose failures in top-level handler module
 initialization. It restores fail-fast initialization for every project handler.
+
+Use `--standalone` for latency-sensitive utilities and policy scripts that must
+behave the same regardless of their containing directory. Relative and standard
+library imports still work, and explicit CLI limits such as `--allow`, `--deny`,
+and sandbox roots still apply. Standalone mode does not load a surrounding
+`harn.toml`, project skills, project handlers, project state roots, or
+manifest-derived trusted-host authority. It conflicts with commands whose
+meaning requires project state, including `--eager-project-handlers`,
+`--resume`, and `--as-job`.
 
 ### Environment policies and grants
 

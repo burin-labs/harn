@@ -37,6 +37,28 @@ fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
 }
 
 #[test]
+fn test_run_standalone_is_explicit_and_conflicts_with_project_handlers() {
+    let cli = Cli::parse_from(["harn", "run", "--standalone", "main.harn"]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.standalone);
+
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--standalone",
+            "--eager-project-handlers",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+}
+
+#[test]
 fn test_environment_policy_is_independent_of_no_sandbox() {
     let cli = Cli::parse_from([
         "harn",
