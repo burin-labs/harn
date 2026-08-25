@@ -160,6 +160,43 @@ pub enum ProjectContextMode {
     Standalone,
 }
 
+/// Ambient project runtime surfaces installed for one entrypoint execution.
+///
+/// This is one mode rather than independent booleans so embedded callers cannot
+/// request an invalid combination such as eager trigger handlers without the
+/// trigger registry they belong to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectRuntimeMode {
+    /// Load project imports, skills, and policy hooks; do not mutate durable
+    /// manifest-trigger lifecycle state.
+    #[default]
+    Project,
+    /// Also register manifest triggers, initializing handlers on dispatch.
+    WithTriggers,
+    /// Register triggers and initialize every project handler before execution.
+    EagerHandlers,
+    /// Ignore ambient project configuration.
+    Standalone,
+}
+
+impl ProjectRuntimeMode {
+    fn context(self) -> ProjectContextMode {
+        if self == Self::Standalone {
+            ProjectContextMode::Standalone
+        } else {
+            ProjectContextMode::Project
+        }
+    }
+
+    fn project_triggers(self) -> bool {
+        matches!(self, Self::WithTriggers | Self::EagerHandlers)
+    }
+
+    fn eager_handlers(self) -> bool {
+        self == Self::EagerHandlers
+    }
+}
+
 struct ExecuteRunInputs<'a> {
     path: &'a str,
     trace: bool,
@@ -175,9 +212,7 @@ struct ExecuteRunInputs<'a> {
     aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
-    eager_project_handlers: bool,
-    project_triggers: bool,
-    project_context: ProjectContextMode,
+    project_runtime: ProjectRuntimeMode,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -272,9 +307,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         aux,
         timing: None,
         harnpack,
-        eager_project_handlers: control.eager_project_handlers,
-        project_triggers: control.project_triggers,
-        project_context: control.project_context,
+        project_runtime: control.project_runtime,
     })
     .await;
     if let Some(guard) = &deadline_guard {
@@ -470,8 +503,7 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
-    crate::ensure_builtin_signatures_installed();
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -480,8 +512,7 @@ pub async fn execute_run(
         llm_mock_mode,
         attestation,
         profile,
-        RunSandboxOptions::default(),
-        HarnpackRunOptions::default(),
+        RunExecutionOptions::default(),
     )
     .await
 }
@@ -501,7 +532,7 @@ pub async fn execute_run_with_sandbox_options(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
 ) -> RunOutcome {
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -510,8 +541,10 @@ pub async fn execute_run_with_sandbox_options(
         llm_mock_mode,
         attestation,
         profile,
-        sandbox,
-        HarnpackRunOptions::default(),
+        RunExecutionOptions {
+            sandbox,
+            ..RunExecutionOptions::default()
+        },
     )
     .await
 }
@@ -532,7 +565,7 @@ pub async fn execute_run_with_harnpack_options(
     profile: RunProfileOptions,
     harnpack: HarnpackRunOptions,
 ) -> RunOutcome {
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -541,14 +574,26 @@ pub async fn execute_run_with_harnpack_options(
         llm_mock_mode,
         attestation,
         profile,
-        RunSandboxOptions::default(),
-        harnpack,
+        RunExecutionOptions {
+            harnpack,
+            ..RunExecutionOptions::default()
+        },
     )
     .await
 }
 
+/// Complete in-process execution configuration. Existing convenience wrappers
+/// use its default; embedded and headless hosts use this seam when they need a
+/// non-default project runtime without forking CLI behavior.
+#[derive(Clone, Debug, Default)]
+pub struct RunExecutionOptions {
+    pub sandbox: RunSandboxOptions,
+    pub harnpack: HarnpackRunOptions,
+    pub project_runtime: ProjectRuntimeMode,
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn execute_run_with_harnpack_and_sandbox_options(
+pub async fn execute_run_with_options(
     path: &str,
     trace: bool,
     denied_builtins: HashSet<String>,
@@ -557,9 +602,14 @@ async fn execute_run_with_harnpack_and_sandbox_options(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
-    sandbox: RunSandboxOptions,
-    harnpack: HarnpackRunOptions,
+    options: RunExecutionOptions,
 ) -> RunOutcome {
+    crate::ensure_builtin_signatures_installed();
+    let RunExecutionOptions {
+        sandbox,
+        harnpack,
+        project_runtime,
+    } = options;
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -575,9 +625,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         aux: RunAuxOptions::default(),
         timing: None,
         harnpack,
-        eager_project_handlers: false,
-        project_triggers: false,
-        project_context: ProjectContextMode::Project,
+        project_runtime,
     })
     .await
 }
@@ -600,6 +648,42 @@ pub async fn execute_run_json(
     out: Box<dyn io::Write + Send>,
     options: RunJsonOptions,
 ) -> RunOutcome {
+    execute_run_json_with_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        out,
+        options,
+        RunExecutionOptions::default(),
+    )
+    .await
+}
+
+/// JSON-streaming counterpart to [`execute_run_with_options`].
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_run_json_with_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    out: Box<dyn io::Write + Send>,
+    json_options: RunJsonOptions,
+    execution_options: RunExecutionOptions,
+) -> RunOutcome {
+    let RunExecutionOptions {
+        sandbox,
+        harnpack,
+        project_runtime,
+    } = execution_options;
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -609,15 +693,13 @@ pub async fn execute_run_json(
         llm_mock_mode,
         attestation,
         profile,
-        sandbox: RunSandboxOptions::default(),
+        sandbox,
         interrupt_tokens: None,
-        json: Some(JsonRunSession::new(options, out)),
+        json: Some(JsonRunSession::new(json_options, out)),
         aux: RunAuxOptions::default(),
         timing: None,
-        harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
-        project_triggers: false,
-        project_context: ProjectContextMode::Project,
+        harnpack,
+        project_runtime,
     })
     .await
 }
@@ -630,6 +712,7 @@ pub(crate) async fn execute_run_with_timing(
     script_argv: Vec<String>,
     timing: Option<&mut RunTiming>,
     sandbox: RunSandboxOptions,
+    project_runtime: ProjectRuntimeMode,
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         path,
@@ -646,9 +729,7 @@ pub(crate) async fn execute_run_with_timing(
         aux: RunAuxOptions::default(),
         timing,
         harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
-        project_triggers: false,
-        project_context: ProjectContextMode::Project,
+        project_runtime,
     })
     .await
 }
@@ -705,10 +786,11 @@ async fn execute_run_inner_scoped(
         aux,
         timing,
         harnpack,
-        eager_project_handlers,
-        project_triggers,
-        project_context,
+        project_runtime,
     } = inputs;
+    let eager_project_handlers = project_runtime.eager_handlers();
+    let project_triggers = project_runtime.project_triggers();
+    let project_context = project_runtime.context();
     let RunAuxOptions {
         summary,
         phase,

@@ -98,6 +98,14 @@ Use `--eager-project-handlers` to diagnose failures in top-level handler module
 initialization. It restores fail-fast initialization for every project handler
 and implies `--project-triggers`.
 
+Embedded callers select the same contract with
+`commands::run::RunExecutionOptions::project_runtime`. Use
+`ProjectRuntimeMode::WithTriggers` for lazy trigger dispatch or
+`ProjectRuntimeMode::EagerHandlers` for fail-fast handler initialization; the
+default `Project` mode keeps hooks active without reconciling durable trigger
+state. The JSON execution API has the matching `execute_run_json_with_options`
+entrypoint.
+
 Use `--standalone` for latency-sensitive utilities and policy scripts that must
 behave the same regardless of their containing directory. Relative and standard
 library imports still work, and explicit CLI limits such as `--allow`, `--deny`,

@@ -1,11 +1,10 @@
 use super::harnpack::HarnpackRunOptions;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
-    eval_source_for_code, execute_explain_cost, execute_run, execute_run_inner,
-    execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
-    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
-    ExecuteRunInputs, ProjectContextMode, RunAuxOptions, RunProfileOptions, RunSandboxOptions,
-    StdoutPassthroughGuard,
+    eval_source_for_code, execute_explain_cost, execute_run, execute_run_with_options,
+    install_cli_llm_mock_mode, persist_cli_llm_mock_recording, run_sandbox_attestation,
+    split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProfileOptions,
+    RunSandboxOptions, StdoutPassthroughGuard,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -74,50 +73,69 @@ pub fn after_turn(_event) -> nil {
 }
 
 async fn execute_run_with_eager_project_handlers(path: &str) -> super::RunOutcome {
-    crate::ensure_builtin_signatures_installed();
-    execute_run_inner(ExecuteRunInputs {
+    execute_run_with_options(
         path,
-        trace: false,
-        denied_builtins: HashSet::new(),
-        script_argv: Vec::new(),
-        skill_dirs_raw: Vec::new(),
-        llm_mock_mode: CliLlmMockMode::Off,
-        attestation: None,
-        profile: RunProfileOptions::default(),
-        sandbox: RunSandboxOptions::default(),
-        interrupt_tokens: None,
-        json: None,
-        aux: RunAuxOptions::default(),
-        timing: None,
-        harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: true,
-        project_triggers: true,
-        project_context: ProjectContextMode::Project,
-    })
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunExecutionOptions {
+            project_runtime: ProjectRuntimeMode::EagerHandlers,
+            ..RunExecutionOptions::default()
+        },
+    )
     .await
 }
 
 async fn execute_run_with_project_triggers(path: &str) -> super::RunOutcome {
-    crate::ensure_builtin_signatures_installed();
-    execute_run_inner(ExecuteRunInputs {
+    execute_run_with_options(
         path,
-        trace: false,
-        denied_builtins: HashSet::new(),
-        script_argv: Vec::new(),
-        skill_dirs_raw: Vec::new(),
-        llm_mock_mode: CliLlmMockMode::Off,
-        attestation: None,
-        profile: RunProfileOptions::default(),
-        sandbox: RunSandboxOptions::default(),
-        interrupt_tokens: None,
-        json: None,
-        aux: RunAuxOptions::default(),
-        timing: None,
-        harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
-        project_triggers: true,
-        project_context: ProjectContextMode::Project,
-    })
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunExecutionOptions {
+            project_runtime: ProjectRuntimeMode::WithTriggers,
+            ..RunExecutionOptions::default()
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_run_with_harnpack_and_sandbox_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<super::RunAttestationOptions>,
+    profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
+    harnpack: HarnpackRunOptions,
+) -> super::RunOutcome {
+    execute_run_with_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        RunExecutionOptions {
+            sandbox,
+            harnpack,
+            ..RunExecutionOptions::default()
+        },
+    )
     .await
 }
 
@@ -125,26 +143,20 @@ async fn execute_standalone_run_with_denied(
     path: &str,
     denied_builtins: HashSet<String>,
 ) -> super::RunOutcome {
-    crate::ensure_builtin_signatures_installed();
-    execute_run_inner(ExecuteRunInputs {
+    execute_run_with_options(
         path,
-        trace: false,
+        false,
         denied_builtins,
-        script_argv: Vec::new(),
-        skill_dirs_raw: Vec::new(),
-        llm_mock_mode: CliLlmMockMode::Off,
-        attestation: None,
-        profile: RunProfileOptions::default(),
-        sandbox: RunSandboxOptions::default(),
-        interrupt_tokens: None,
-        json: None,
-        aux: RunAuxOptions::default(),
-        timing: None,
-        harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
-        project_triggers: false,
-        project_context: ProjectContextMode::Standalone,
-    })
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunExecutionOptions {
+            project_runtime: ProjectRuntimeMode::Standalone,
+            ..RunExecutionOptions::default()
+        },
+    )
     .await
 }
 

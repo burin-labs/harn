@@ -143,6 +143,11 @@ pub(crate) async fn run(args: TimeRunArgs) {
     let cpu_start = cpu_ms();
     let wall_start = std::time::Instant::now();
     let sandbox = crate::commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
+    let project_runtime = if args.project_triggers {
+        crate::commands::run::ProjectRuntimeMode::WithTriggers
+    } else {
+        crate::commands::run::ProjectRuntimeMode::Project
+    };
 
     // In `--json` mode stdout is owned by the envelope, so we keep
     // script output buffered (passthrough disabled) and write it to
@@ -167,14 +172,21 @@ pub(crate) async fn run(args: TimeRunArgs) {
                 args.argv.clone(),
                 Some(&mut timing),
                 sandbox.clone(),
+                project_runtime,
             )
             .await;
             drop(tmp);
             (None, outcome)
         }
         (None, Some(file)) => {
-            let outcome =
-                execute_run_with_timing(file, args.argv.clone(), Some(&mut timing), sandbox).await;
+            let outcome = execute_run_with_timing(
+                file,
+                args.argv.clone(),
+                Some(&mut timing),
+                sandbox,
+                project_runtime,
+            )
+            .await;
             (Some(file.to_string()), outcome)
         }
         (Some(_), Some(_)) => {

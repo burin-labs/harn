@@ -44,6 +44,16 @@ fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
 }
 
 #[test]
+fn test_time_run_can_register_project_triggers_explicitly() {
+    let cli = Cli::parse_from(["harn", "time", "run", "--project-triggers", "main.harn"]);
+    let Command::Time(args) = cli.command.unwrap() else {
+        panic!("expected time command");
+    };
+    let TimeCommand::Run(args) = args.command;
+    assert!(args.project_triggers);
+}
+
+#[test]
 fn test_run_standalone_is_explicit_and_conflicts_with_project_handlers() {
     let cli = Cli::parse_from(["harn", "run", "--standalone", "main.harn"]);
     let Command::Run(args) = cli.command.unwrap() else {
