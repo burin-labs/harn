@@ -286,9 +286,15 @@ test:
 test-focused:
 	$(HARN_RUST_TEST_ENV) ./scripts/test_focused.sh
 
-# Run exactly one library test without making nextest enumerate every test
-# binary in the package first. The environment-variable boundary keeps the
+# Run exactly one Rust test without making nextest enumerate every test binary
+# in the package first. The environment-variable boundary keeps the
 # fully-qualified test name opaque to Make and the shell parser.
+#
+# The target kind is part of the request, because a test name is reachable only
+# through the target that defines it. Leave HARN_TEST_ONE_BINARY unset for a
+# library test under the package's src/; set it to the owning integration-test
+# binary for a test under the package's tests/. The runner refuses a name the
+# requested target does not define rather than filtering to zero matches.
 test-one:
 	@ : "$${HARN_TEST_ONE_NAME:?set HARN_TEST_ONE_NAME to the fully-qualified test name}"
 	@if [ -n "$${HARN_TEST_ONE_BINARY:-}" ]; then \
