@@ -30,6 +30,14 @@ only `AuthorityUse`; it calls `authorize` with the exact typed requirement
 immediately before each material operation. Dispatch repeats the canonical
 evaluation and rejects any requirement not fingerprinted into the lease.
 
+`PreparedRunExecutor` has separate `Output` and `Error` associated types.
+`ExecutionOutcome::ExecutorFailed` returns the concrete executor error beside
+the terminal authority receipt, so hosts can retain structured partial-run
+evidence without parsing a rendered string or rereading a shared event store.
+`ExecutionOutcome::AuthorityFailed` is distinct: it reports lease validation
+or receipt persistence failures owned by Harn. Existing string-only executors
+use `type Error = String`; no adapter or side channel is required.
+
 The normative JSON Schema for the normalized plan is
 [`run-authority-plan.v1.json`](../schemas/run-authority-plan.v1.json). The
 serialized contract contains secret references and exact consumer bindings,

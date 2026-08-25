@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::json;
@@ -25,6 +25,7 @@ struct FixtureExecutor {
 
 impl PreparedRunExecutor for FixtureExecutor {
     type Output = &'static str;
+    type Error = String;
 
     fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
         for requirement in &self.requirements {
@@ -42,6 +43,7 @@ struct ExpiringExecutor {
 
 impl PreparedRunExecutor for ExpiringExecutor {
     type Output = ();
+    type Error = String;
 
     fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
         authority.authorize(&AuthorityRequirement::FilesystemWrite {
@@ -51,6 +53,41 @@ impl PreparedRunExecutor for ExpiringExecutor {
         authority.authorize(&AuthorityRequirement::Network(network("api.example.test")))?;
         self.model_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct StructuredExecutorFailure {
+    input_tokens: u64,
+    tool_events: Vec<&'static str>,
+}
+
+struct StructuredFailingExecutor;
+
+impl PreparedRunExecutor for StructuredFailingExecutor {
+    type Output = ();
+    type Error = StructuredExecutorFailure;
+
+    fn execute(&self, _authority: &mut AuthorityUse<'_>) -> Result<Self::Output, Self::Error> {
+        Err(StructuredExecutorFailure {
+            input_tokens: 1_024,
+            tool_events: vec!["read", "test"],
+        })
+    }
+}
+
+#[derive(Default)]
+struct ToggleTerminalReceiptSink {
+    fail: AtomicBool,
+}
+
+impl AuthorityReceiptSink for ToggleTerminalReceiptSink {
+    fn persist(&self, _receipt: &RunAuthorityReceipt) -> Result<(), String> {
+        if self.fail.load(Ordering::SeqCst) {
+            Err("fixture terminal receipt persistence failure".to_string())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -412,7 +449,10 @@ fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
     );
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => panic!("materialized run failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("materialized run failed: {error}")
+        }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 
@@ -499,7 +539,10 @@ fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_author
             assert_eq!(output, "completed");
             receipt
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("steel thread failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("steel thread failed: {error}")
+        }
     };
 
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
@@ -524,6 +567,113 @@ fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_author
 }
 
 #[test]
+fn structured_executor_failure_survives_the_prepared_run_boundary() {
+    let (run, lease, _) = prepared(StructuredFailingExecutor);
+
+    match run.execute(lease) {
+        ExecutionOutcome::ExecutorFailed { error, receipt } => {
+            assert_eq!(
+                error,
+                StructuredExecutorFailure {
+                    input_tokens: 1_024,
+                    tool_events: vec!["read", "test"],
+                }
+            );
+            assert_eq!(receipt.status, AuthorityReceiptStatus::Failed);
+            assert!(receipt.executor_invoked);
+        }
+        ExecutionOutcome::Completed { .. } => panic!("failing executor must not complete"),
+        ExecutionOutcome::AuthorityFailed { .. } => {
+            panic!("executor evidence must not be projected as an authority failure")
+        }
+    }
+}
+
+#[test]
+fn terminal_receipt_failure_stays_separate_from_executor_failures() {
+    let sink = Arc::new(ToggleTerminalReceiptSink::default());
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: Vec::new(),
+            model_calls: Arc::new(AtomicUsize::new(0)),
+        },
+        sink.clone(),
+        Arc::new(|| NOW_MS),
+    );
+    let lease = approved_lease(&run, &intent(), &host_facts());
+    sink.fail.store(true, Ordering::SeqCst);
+
+    match run.execute(lease) {
+        ExecutionOutcome::AuthorityFailed { error, receipt } => {
+            assert_eq!(
+                error,
+                "execution completed but terminal authority receipt was not persisted"
+            );
+            assert!(receipt
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "terminal_receipt_persistence"));
+        }
+        ExecutionOutcome::Completed { .. } => {
+            panic!("unpersisted terminal receipt must prevent completion")
+        }
+        ExecutionOutcome::ExecutorFailed { .. } => {
+            panic!("receipt persistence must not fabricate an executor failure")
+        }
+    }
+
+    let sink = Arc::new(ToggleTerminalReceiptSink::default());
+    let run = PreparedRun::with_clock(StructuredFailingExecutor, sink.clone(), Arc::new(|| NOW_MS));
+    let lease = approved_lease(&run, &intent(), &host_facts());
+    sink.fail.store(true, Ordering::SeqCst);
+
+    match run.execute(lease) {
+        ExecutionOutcome::ExecutorFailed { error, receipt } => {
+            assert_eq!(error.input_tokens, 1_024);
+            assert!(receipt
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "terminal_receipt_persistence"));
+        }
+        ExecutionOutcome::Completed { .. } => panic!("failing executor must not complete"),
+        ExecutionOutcome::AuthorityFailed { .. } => {
+            panic!("receipt failure must not erase the executor's concrete error")
+        }
+    }
+}
+
+#[test]
+fn lease_failure_before_dispatch_is_not_an_executor_failure() {
+    let clock = Arc::new(AtomicU64::new(NOW_MS));
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: Vec::new(),
+            model_calls: model_calls.clone(),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        {
+            let clock = clock.clone();
+            Arc::new(move || clock.load(Ordering::SeqCst))
+        },
+    );
+    let lease = approved_lease(&run, &intent(), &host_facts());
+    clock.store(DEADLINE_MS + 1, Ordering::SeqCst);
+
+    match run.execute(lease) {
+        ExecutionOutcome::AuthorityFailed { error, receipt } => {
+            assert_eq!(error, "authority lease expired before execution");
+            assert!(!receipt.executor_invoked);
+        }
+        ExecutionOutcome::Completed { .. } => panic!("expired lease must not execute"),
+        ExecutionOutcome::ExecutorFailed { .. } => {
+            panic!("an executor that was not invoked cannot own the failure")
+        }
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
     for changed in [
         AuthorityRequirement::Network(network("other.example.test")),
@@ -539,7 +689,10 @@ fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
         };
         let (run, lease, _) = prepared(executor);
         let receipt = match run.execute(lease) {
-            ExecutionOutcome::Failed { receipt, .. } => receipt,
+            ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
+            ExecutionOutcome::AuthorityFailed { .. } => {
+                panic!("executor denial must remain an executor failure")
+            }
             ExecutionOutcome::Completed { .. } => panic!("changed authority must fail"),
         };
         assert_eq!(model_calls.load(Ordering::SeqCst), 0);
@@ -562,7 +715,10 @@ fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
     let (run, lease, _) = prepared(executor);
     let terminal = match run.execute(lease) {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
-        ExecutionOutcome::Failed { error, .. } => panic!("narrow path failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("narrow path failed: {error}")
+        }
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
     assert_eq!(terminal.used.len(), 1);
@@ -609,7 +765,10 @@ fn read_use_attenuates_existing_write_root_grants() {
             assert_eq!(receipt.used.len(), 2);
             assert!(receipt.denied.is_empty());
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("execution failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("execution failed: {error}")
+        }
     }
 }
 
@@ -640,7 +799,10 @@ fn lease_expiry_is_rechecked_at_each_material_operation() {
         other => panic!("expected ready, got {other:?}"),
     };
     let receipt = match run.execute(lease) {
-        ExecutionOutcome::Failed { receipt, .. } => receipt,
+        ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
+        ExecutionOutcome::AuthorityFailed { .. } => {
+            panic!("mid-execution expiry must remain an executor failure")
+        }
         ExecutionOutcome::Completed { .. } => panic!("expired lease must fail"),
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 0);
@@ -798,7 +960,10 @@ fn ten_noninteractive_preparations_and_executions_complete() {
         let (run, lease, _) = prepared(executor);
         match run.execute(lease) {
             ExecutionOutcome::Completed { .. } => {}
-            ExecutionOutcome::Failed { error, .. } => panic!("repeat failed: {error}"),
+            ExecutionOutcome::ExecutorFailed { error, .. }
+            | ExecutionOutcome::AuthorityFailed { error, .. } => {
+                panic!("repeat failed: {error}")
+            }
         }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 10);
@@ -1006,7 +1171,10 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
 
     let terminal = match run.execute(lease) {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
-        ExecutionOutcome::Failed { error, .. } => panic!("discovered root must execute: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("discovered root must execute: {error}")
+        }
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
     assert!(terminal
@@ -1079,7 +1247,8 @@ fn denied_toolchain_discovery_leaves_parent_lease_executable() {
         .contains(SECRET_CANARY));
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => {
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("refused optional discovery invalidated the parent lease: {error}")
         }
     }
@@ -1143,7 +1312,8 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
     }
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => {
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("pending optional discovery invalidated the parent lease: {error}")
         }
     }
@@ -1288,7 +1458,10 @@ async fn identity_broker_is_readiness_bound_and_handle_is_opaque_and_consumer_ex
             assert!(!serialized.contains(SECRET_CANARY));
             assert!(serialized.contains("burin-workload"));
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("identity run failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("identity run failed: {error}")
+        }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 }
