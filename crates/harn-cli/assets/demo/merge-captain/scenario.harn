@@ -9,7 +9,20 @@
  * runs against a real provider when invoked via `harn demo
  * merge-captain --live`.
  */
-fn pull_requests() {
+type PullRequest = {
+  repo: string,
+  number: int,
+  title: string,
+  diff_lines: int,
+  failing_checks: list<string>,
+  stale_threads: list<string>,
+  tag: string,
+}
+
+/** The three outcomes merge_captain can reach for a PR. */
+type Decision = "merge" | "handoff" | "block"
+
+fn pull_requests() -> list<PullRequest> {
   return [
     {
       repo: "burin-labs/widgets",
@@ -41,7 +54,7 @@ fn pull_requests() {
   ]
 }
 
-fn classify(pr: dict) {
+fn classify(pr: PullRequest) -> Decision {
   if len(pr.failing_checks) > 0 {
     return "block"
   }
@@ -62,7 +75,7 @@ review_captain, or block?
   - Diff size: {{ diff_lines }} lines
 """
 
-fn render_pr_prompt(fs: HarnessFs, pr: dict) {
+fn render_pr_prompt(fs: HarnessFs, pr: PullRequest) -> string {
   return fs.render_template(
     PR_PROMPT,
     {
@@ -76,7 +89,7 @@ fn render_pr_prompt(fs: HarnessFs, pr: dict) {
   )
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   const prs = pull_requests()
   let decisions = []
   let merged = 0

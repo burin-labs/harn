@@ -25,8 +25,14 @@ import {
   with_audit_log,
   with_consent,
 } from "std/llm/tool_middleware"
+import { ToolRegistry } from "std/tools"
 
-fn dispatch(harness_tools: HarnessTools, tools: any, name: string, args: any) {
+/**
+ * Dispatch one named tool call against the registry. The result is the host's
+ * open tool-result envelope (`ok`, `status`, `result`, `rendered_result`, …),
+ * so it stays a dict rather than a record that would drift from the host.
+ */
+fn dispatch(harness_tools: HarnessTools, tools: ToolRegistry, name: string, args: dict) -> dict {
   return agent_dispatch_tool_call(
     harness_tools,
     {id: name + "-call", name: name, arguments: args},
@@ -34,7 +40,7 @@ fn dispatch(harness_tools: HarnessTools, tools: any, name: string, args: any) {
   )
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   harness.stdio.println("=== agent-edit-tools demo ===")
   harness.stdio.println("")
   const root = path_join(

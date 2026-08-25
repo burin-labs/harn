@@ -25,7 +25,8 @@
  */
 import { edit_apply_node, edit_capabilities } from "std/edit"
 
-fn count_supporting(rows: list, field: string) {
+/** Count capability rows whose `field` flag is set (`apply_node`, `rename_symbol`, …). */
+fn count_supporting(rows: list<dict>, field: string) -> int {
   let total = 0
   for row in rows {
     if row[field] {
@@ -35,7 +36,7 @@ fn count_supporting(rows: list, field: string) {
   return total
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   // The edit primitives that write to disk share the deterministic-tools
   // gate; enable it once before any apply_node call (even dry-run).
   // 1. Capability matrix — the onboarding contract, queryable.

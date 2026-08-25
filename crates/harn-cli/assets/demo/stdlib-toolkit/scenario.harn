@@ -33,7 +33,7 @@
  * Designed to run fully offline against the bundled (empty) tape —
  * every primitive is local-only.
  */
-fn defaults() {
+fn defaults() -> dict {
   return {
     config: {retries: 3, backoff: 100, retry_on: ["timeout", "rate_limit"]},
     persona: "coding-agent",
@@ -41,7 +41,12 @@ fn defaults() {
   }
 }
 
-fn task_overrides() {
+/**
+ * Defaults and per-task overrides are deliberately different shapes —
+ * `deep_merge` reconciling them is what this half of the demo shows — so both
+ * stay dicts rather than one record neither side actually satisfies.
+ */
+fn task_overrides() -> dict {
   return {
     config: {retries: 5, jitter: true},
     previous_chats: ["x.jsonl", "y.jsonl", "x.jsonl", "z.jsonl"],
@@ -49,7 +54,7 @@ fn task_overrides() {
   }
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   // 1. Decouple shared defaults from per-task mutation so a future
   //    multi-task scheduler can run several `default` pipelines in
   //    parallel against the same defaults binding without

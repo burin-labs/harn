@@ -18,14 +18,23 @@
  * proves the guidance appears only when the tool does, and dumps the
  * provenance an operator would inspect. Fully offline — no LLM, no network.
  */
-fn mk_tool(name: string, description: string, guidance: string?) {
+/**
+ * A tool as `prompt_explain` takes it. `guidance` is omitted rather than set
+ * to nil when absent, so the assembler sees a tool with nothing to say.
+ */
+fn mk_tool(name: string, description: string, guidance: string?) -> dict {
   if guidance == nil {
     return {name: name, description: description}
   }
   return {name: name, description: description, guidance: guidance}
 }
 
-fn included_ids(explained: dict) {
+/**
+ * Ids of the fragments the assembler kept. `prompt_explain` returns the host's
+ * `dict`, so this reads `fragments[].id` / `fragments[].included` off it
+ * directly rather than claiming a record the host does not promise.
+ */
+fn included_ids(explained: dict) -> list<string> {
   let ids = []
   for frag in explained.fragments {
     if frag.included {
@@ -35,7 +44,7 @@ fn included_ids(explained: dict) {
   return ids
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   harness.stdio.println("=== prompt-guidance demo ===")
   harness.stdio.println("")
   const base_system = "You are Ness, a pragmatic engineering partner."

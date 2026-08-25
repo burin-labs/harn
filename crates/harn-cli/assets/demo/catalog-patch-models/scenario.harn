@@ -19,7 +19,7 @@
  * freezing every other field against upstream catalog updates. Fully
  * offline — no LLM calls, no network.
  */
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   const info = harness.llm.model_info("demo/patch-target")
   const row = info.catalog
   require row.stream_timeout == 1200.0
