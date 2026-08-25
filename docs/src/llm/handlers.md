@@ -11,7 +11,9 @@ pipeline default(harness: Harness) {
     return harness.llm.call(call.prompt, call?.system, call.opts)
   }
   const pooled = with_circuit_breaker(raw_handler)
-  const shared = with_circuit_breaker(raw_handler, {name: "primary-llm", threshold: 3})
+  const shared = with_circuit_breaker(
+    raw_handler, {name: "primary-llm", threshold: 3},
+  )
 }
 ```
 

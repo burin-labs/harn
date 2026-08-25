@@ -29,7 +29,9 @@ result. The pipeline returns as soon as the loop completes.
 import { agent_loop } from "std/agent/loop"
 
 pipeline main(harness: Harness) {
-  harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
+  harness.llm.mock_enqueue({
+    text: "Triaged ticket #42 as duplicate of #38."
+  })
 
   const result = agent_loop(harness,
     "Triage ticket #42.",
@@ -67,7 +69,9 @@ import { on_finish_drain } from "std/lifecycle"
 
 pipeline main(harness: Harness) {
   harness.agent.pipeline_on_finish(on_finish_drain)
-  harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
+  harness.llm.mock_enqueue({
+    text: "Triaged ticket #42 as duplicate of #38."
+  })
 
   const result = agent_loop(harness,
     "Triage ticket #42.",
@@ -114,7 +118,8 @@ pipeline main(harness: Harness) {
 
   const result = agent_loop(harness,
     "Triage ticket #42, escalate to a human if you need review.",
-    "If you need a human review before proceeding, call agent_await_resumption.",
+    "If you need a human review before proceeding, call"
+      + " agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 2},
   )
 
@@ -162,11 +167,14 @@ pipeline main(harness: Harness) {
       arguments: {reason: "waiting on maintainer review"},
     }],
   })
-  harness.llm.mock_enqueue({text: "Approved. Triaged ticket #42 as duplicate of #38."})
+  harness.llm.mock_enqueue({
+    text: "Approved. Triaged ticket #42 as duplicate of #38."
+  })
 
   const first = agent_loop(harness,
     "Triage ticket #42, escalate to a human if you need review.",
-    "If you need a human review before proceeding, call agent_await_resumption.",
+    "If you need a human review before proceeding, call"
+      + " agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 3},
   )
 
@@ -237,7 +245,12 @@ pipeline main(harness: Harness) {
   const worker = sub_agent_run(
     harness,
     "Tag the next release once the maintainer signals.",
-    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+    {
+      provider: "mock",
+      background: true,
+      tool_format: "native",
+      max_iterations: 3,
+    },
   )
 
   const parked = wait_agent(harness.agent, worker)
@@ -288,7 +301,9 @@ pipeline main(harness: Harness) {
 
   const tickets = ["t-101", "t-102", "t-103"]
 
-  const pool = pool_create(harness.agent, {name: "ticket-triage", max_concurrent: 2})
+  const pool = pool_create(
+    harness.agent, {name: "ticket-triage", max_concurrent: 2},
+  )
   let handles = []
   for ticket in tickets {
     const t = ticket

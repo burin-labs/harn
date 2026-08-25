@@ -69,7 +69,9 @@ fn fixture() -> dict {
   ],
   fixture: fixture,
 )
-pipeline test_query(harness: Harness, fx: dict, input: string, expected: string) {
+pipeline test_query(
+  harness: Harness, fx: dict, input: string, expected: string,
+) {
   fx.rows.push(input)
   assert_eq("${fx.prefix}:${input}", expected)
 }
@@ -125,7 +127,8 @@ output too. `--json-out` and `--junit` reports include it under
 During `harn test`, the `HARN_LLM_PROVIDER` environment variable is
 automatically set to `"mock"` unless explicitly overridden. The mock
 provider returns deterministic placeholder responses, allowing tests
-that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
+that call `harness.llm.call`, `harness.llm.stream`, or
+`harness.llm.stream_call` to run without API keys.
 
 ### CLI options
 

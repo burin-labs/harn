@@ -58,7 +58,9 @@ Handle canonical help before parsing, then use native `Result` helpers rather
 than inspecting an object envelope:
 
 ```harn
-import { help_requested, parse, parser, render_help } from "std/cli/argparse"
+import {
+  help_requested, parse, parser, render_help,
+} from "std/cli/argparse"
 
 const spec = parser({
   name: "render",
@@ -181,8 +183,20 @@ const spec = parser({
   name: "run",
   args: [
     {name: "input", kind: "positional"},
-    {name: "jobs", kind: "flag", long: "--jobs", parse: "int", default: 1},
-    {name: "tags", kind: "flag", long: "--tags", parse: "list", multi: true},
+    {
+      name: "jobs",
+      kind: "flag",
+      long: "--jobs",
+      parse: "int",
+      default: 1,
+    },
+    {
+      name: "tags",
+      kind: "flag",
+      long: "--tags",
+      parse: "list",
+      multi: true,
+    },
     {name: "verbose", kind: "switch", long: "--verbose", parse: "bool"},
   ],
 })

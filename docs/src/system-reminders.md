@@ -172,23 +172,25 @@ events that support transcript mutation. A hook may return
 effect list.
 
 ```harn,ignore
-register_tool_hook({
-  pattern: "read_file",
-  post: { ctx ->
-    if ctx.result.truncated {
-      return {
-        reminder: {
-          body: "The file read was truncated; inspect the specific range"
-            + " before editing.",
-          tags: ["truncation"],
-          dedupe_key: "read_file:truncated",
-          ttl_turns: 1,
-          propagate: "none",
-        },
+fn install_truncation_hook(harness: Harness) {
+  harness.tools.register_hook({
+    pattern: "read_file",
+    post: { ctx ->
+      if ctx.result.truncated {
+        return {
+          reminder: {
+            body: "The file read was truncated; inspect the"
+              + " specific range before editing.",
+            tags: ["truncation"],
+            dedupe_key: "read_file:truncated",
+            ttl_turns: 1,
+            propagate: "none",
+          },
+        }
       }
-    }
-  },
-})
+    },
+  })
+}
 ```
 
 Worker lifecycle events are observational and reject reminder effects with
@@ -198,42 +200,46 @@ persona hook.
 ### From a provider
 
 `agent_loop(harness, ...)` evaluates canonical reminder providers by default.
-Register a custom provider with `register_reminder_provider({id,
-subscribes_to, evaluate})`. The `evaluate` closure receives
+Register a custom provider with
+`harness.agent.register_reminder_provider({id, subscribes_to, evaluate})`. The `evaluate` closure receives
 `{event, session, session_id, payload, options, config}` and may return
 `nil`, a bare reminder spec, a `{reminder: {...}}` effect, or a list of
 effects.
 
 ```harn,ignore
-register_reminder_provider({
-  id: "workspace_guard",
-  subscribes_to: ["session_idle"],
-  evaluate: { ctx ->
-    if ctx.config?.enabled == false {
-      return nil
-    }
-    return {
-      reminder: {
-        body: "Workspace may have changed while idle; re-check touched files.",
-        tags: ["workspace"],
-        dedupe_key: "workspace:idled",
-        ttl_turns: 1,
-        propagate: "session",
-      },
-    }
-  },
-})
-
-agent_loop(harness, task, system, {
-  reminders: {
-    config: {
-      workspace_guard: {enabled: true},
+fn install_reminder_provider(harness: Harness) {
+  harness.agent.register_reminder_provider({
+    id: "workspace_guard",
+    subscribes_to: ["session_idle"],
+    evaluate: { ctx ->
+      if ctx.config?.enabled == false {
+        return nil
+      }
+      return {
+        reminder: {
+          body: "Workspace may have changed while idle; re-check"
+            + " touched files.",
+          tags: ["workspace"],
+          dedupe_key: "workspace:idled",
+          ttl_turns: 1,
+          propagate: "session",
+        },
+      }
     },
-  },
-})
+  })
+
+  agent_loop(harness, task, system, {
+    reminders: {
+      config: {
+        workspace_guard: {enabled: true},
+      },
+    },
+  })
+}
 ```
 
-`clear_reminder_providers()` removes user-defined providers, mainly for
+`harness.agent.clear_reminder_providers()` removes user-defined providers,
+mainly for
 tests. Canonical stdlib providers remain available through `agent_loop`
 unless disabled with reminder options.
 
@@ -429,7 +435,8 @@ const compacted = transcript_compact(snapshot, {
       messages: [
         {
           role: "system",
-          content: "Summary plus " + str(len(reminders)) + " active reminders.",
+          content: "Summary plus " + str(len(reminders))
+            + " active reminders.",
         },
       ],
     })
@@ -533,7 +540,8 @@ filters per loop when the defaults are too broad.
 ```harn,ignore
 store_fact({
   kind: "Decision",
-  claim: "Build cancels in-flight tool calls on SIGINT before clearing state.",
+  claim: "Build cancels in-flight tool calls on SIGINT before"
+    + " clearing state.",
   confidence: 0.92,
   evidence: [{kind: "FileRange", ref: "crates/harn-vm/src/cancel.rs:1"}],
 })
@@ -558,18 +566,20 @@ one pending nudge.
 
 ```harn,ignore
 pipeline main(harness: Harness) {
-  harness.agent.register_session_hook("file_edited", { _hook_harness, event ->
-    const path = to_string(event?.path ?? "")
-    return {
-      reminder: {
-        body: "File changed externally: " + path + ". Re-read it before editing.",
-        tags: ["workspace", "file_changed"],
-        dedupe_key: "file_changed:" + path,
-        ttl_turns: 2,
-        propagate: "session",
-      },
-    }
-  })
+  harness.agent.register_session_hook(
+    "file_edited", { _hook_harness, event ->
+      const path = to_string(event?.path ?? "")
+      return {
+        reminder: {
+          body: "File changed externally: " + path + ". Re-read it"
+            + " before editing.",
+          tags: ["workspace", "file_changed"],
+          dedupe_key: "file_changed:" + path,
+          ttl_turns: 2,
+          propagate: "session",
+        },
+      }
+    })
 }
 ```
 
@@ -578,7 +588,8 @@ pipeline main(harness: Harness) {
 Use `propagate: "all"` only when downstream agents need the same caution.
 
 ```harn,ignore
-const memory_warning = "Customer prefers patch-sized PRs and explicit verification."
+const memory_warning = "Customer prefers patch-sized PRs and explicit"
+  + " verification."
 const injected = transcript.inject_reminder(transcript(), {
   body: memory_warning,
   tags: ["memory"],

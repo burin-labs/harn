@@ -43,7 +43,8 @@ const intent = external_action_intent({
   display: {summary: "Book SEA to JFK for $245.67"},
 })
 
-// The host supplies these effective authorization facts after evaluating its
+// The host supplies these effective
+// authorization facts after evaluating its
 // local and managed policy. Harn does not infer them from prompt prose.
 const grant = external_action_grant(intent, {
   authorized_by: {kind: "user", id: user_id},
@@ -64,9 +65,11 @@ const managed = external_action_managed_policy({
   allowed_environments: ["test"],
 })
 
-// The product host owns this resolver. It returns requested values only after
+// The product host owns this resolver.
+// It returns requested values only after
 // the exact grant and managed policy pass. The values exist only for this
-// adapter call; Harn checkpoints and receipts retain metadata, never values.
+// adapter call; Harn checkpoints and
+// receipts retain metadata, never values.
 const receipt = external_action_execute(
   harness,
   intent,

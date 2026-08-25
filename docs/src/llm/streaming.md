@@ -2,29 +2,33 @@
 
 ## Streaming responses
 
-`llm_stream` returns a channel that yields response chunks as they
+`harness.llm.stream` returns a channel that yields response chunks as they
 arrive. Iterate over it with a `for` loop:
 
 ```harn
-const stream = harness.llm.stream("Tell me a story", "You are a storyteller")
+const stream = harness.llm.stream(
+  "Tell me a story", "You are a storyteller",
+)
 for chunk in stream {
   harness.stdio.log(chunk)
 }
 ```
 
-`llm_stream` accepts the same options as `llm_call` (provider, model,
+`harness.llm.stream` accepts the same options as `harness.llm.call` (provider, model,
 max_tokens). The channel closes automatically when the response is
 complete. If the provider fails after emitting zero or more string chunks, the
-last item is the same structured error dict used by `llm_call`, including typed
+last item is the same structured error dict used by `harness.llm.call`, including typed
 provider-stream `phase`, `deadline`, and `partial` fields; transport failures
 are never represented as a successful close.
 
-`llm_stream_call` is the script-facing streaming variant of `llm_call`.
+`harness.llm.stream_call` is the script-facing streaming variant of `harness.llm.call`.
 It returns a first-class `Stream` of chunk dicts instead of a channel of
 raw strings:
 
 ```harn
-const chunks = harness.llm.stream_call("Tell me a story", nil, {provider: "openai"})
+const chunks = harness.llm.stream_call(
+  "Tell me a story", nil, {provider: "openai"},
+)
 for chunk in chunks {
   harness.stdio.log(chunk.visible_delta)
   if chunk.partial.contains("REFUSAL") {
@@ -37,11 +41,11 @@ Each chunk has `{delta, visible_delta, partial, role, stop_reason}` (the
 typed shape is `LlmStreamChunk` from `std/llm/envelope`).
 `delta` is the provider text delta, `visible_delta` and `partial` hide
 open internal `<think>` blocks, and the terminal chunk carries
-`stop_reason` — the same spelling as the `llm_call` envelope — when the
+`stop_reason` — the same spelling as the `harness.llm.call` envelope — when the
 provider reports one. Dropping the stream
 aborts the background LLM request. The existing `stream` option on
-`llm_call` and `llm_stream_call` still only controls provider transport
-selection; it does not change `llm_call`'s return type.
+`harness.llm.call` and `harness.llm.stream_call` still only controls provider transport
+selection; it does not change `harness.llm.call`'s return type.
 
 When an app-level persona asks the model to keep a private notebook in tagged
 text, use `std/agent/stream` instead of filtering chunks inline:
@@ -64,7 +68,7 @@ terminal `{ok, status, text, visible_text}` envelope on both success and stream
 interruption.
 
 When the harness runs a full `agent_loop` (tools, transcript, completion policy)
-rather than a single `llm_stream_call`, use the loop's own
+rather than a single `harness.llm.stream_call`, use the loop's own
 [`on_delta` streaming seam](agent_loop.md#streaming-visible-text-deltas) instead
 of dropping to a raw stream. Each per-turn call is issued through the streaming
 transport, and the closure sees one delta per chunk of the assistant's visible
@@ -99,7 +103,7 @@ same execution produce different evidence under headless and interactive hosts;
 that topology-dependent design is intentionally not used.
 
 Final token usage is recorded after the provider response completes. Read it
-from the `llm_call` / `agent_loop` result, from `harness.obs.llm_usage()`, or from the
+from the `harness.llm.call` / `agent_loop` result, from `harness.obs.llm_usage()`, or from the
 workflow session usage summary shown below.
 
 ## Transcript management
@@ -213,7 +217,11 @@ const graph = workflow_graph({
   entry: "act",
   nodes: {
     act: {kind: "stage", mode: "agent", tools: review_tools()},
-    verify: {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
+    verify: {
+      kind: "verify",
+      mode: "agent",
+      tools: tool_select(review_tools(), ["run"]),
+    }
   },
   edges: [{from: "act", to: "verify"}]
 })

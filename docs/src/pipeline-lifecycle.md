@@ -11,7 +11,7 @@
 >   stages executed by `workflow_execute`. See the
 >   [workflow runtime](./workflow-runtime.md).
 >
-> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> On the abstraction ladder: `harness.llm.call` = one request < `agent_loop` = one
 > goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
 > how you build `agent_loop` options, not a tier of its own.) See
 > [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the
@@ -285,7 +285,9 @@ import {
   on_finish_drain,
   on_finish_handoff_to,
 } from "std/lifecycle"
-import { compose, if_unsettled, with_telemetry } from "std/lifecycle/combinators"
+import {
+  compose, if_unsettled, with_telemetry,
+} from "std/lifecycle/combinators"
 
 pipeline default(harness: Harness) {
   pipeline_on_finish(

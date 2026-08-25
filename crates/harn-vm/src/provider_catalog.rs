@@ -252,7 +252,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             .healthcheck
             .clone()
             .map(catalog_provider_healthcheck),
-        cache_usage_accounting: provider.cache_usage_accounting.unwrap_or(false),
+        cache_usage_accounting: provider.cache_usage_accounting,
         stream_usage_accounting: provider.stream_usage_accounting,
         protocols: provider_protocols(&id, &provider),
         features: provider.features.clone(),

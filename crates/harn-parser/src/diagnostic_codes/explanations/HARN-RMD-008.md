@@ -11,8 +11,11 @@ Example fix:
 
 ```harn
 fn main(harness: Harness) {
-  harness.agent.register_session_hook("post_turn", { _hook_harness, _event ->
-    return {reminder: {body: "Review worker progress before continuing."}}
-  })
+  harness.agent.register_session_hook(
+    "post_turn", { _hook_harness, _event ->
+      return {
+        reminder: {body: "Review worker progress before continuing."},
+      }
+    })
 }
 ```

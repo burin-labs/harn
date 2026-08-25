@@ -77,7 +77,9 @@ whether the last fix Harn asked for was actually applied on your side.
 
 ```harn,ignore
 const opts = {...base, stall_diagnostics: {
-  remediation_delivered: { info -> host_last_patch_applied(info.session_id) },
+  remediation_delivered: { info ->
+    host_last_patch_applied(info.session_id)
+  },
 }}
 ```
 

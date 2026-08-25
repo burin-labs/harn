@@ -28,9 +28,11 @@ import { on_finish_handoff_to } from "std/lifecycle"
 pipeline ingest(harness: Harness, events) {
   // Any deferred items become partial-handoff envelopes via
   // harness.handoff_to so they show up in unsettled_state().
-  pipeline_on_finish(on_finish_handoff_to("nightly-settle", {
-    note: "live ingest deferred bucket",
-  }))
+  harness.agent.pipeline_on_finish(
+    on_finish_handoff_to("nightly-settle", {
+      note: "live ingest deferred bucket",
+    }),
+  )
 
   for event in events {
     const outcome = try_process_now(event)
@@ -87,22 +89,23 @@ import { compose, with_telemetry } from "std/lifecycle/combinators"
 
 pipeline triage(harness: Harness, input) {
   // 1. Mirror every drain disposition to our external store.
-  harness.agent.register_session_hook("on_drain_decision", { _hook_harness, event ->
-    audit_store_push({
-      pipeline: event.pipeline_id,
-      bucket: event.bucket,
-      item_id: event.item_id,
-      disposition: event.disposition,
-      seq: event.seq,
-      at_ms: event.at_ms,
+  harness.agent.register_session_hook(
+    "on_drain_decision", { _hook_harness, event ->
+      audit_store_push({
+        pipeline: event.pipeline_id,
+        bucket: event.bucket,
+        item_id: event.item_id,
+        disposition: event.disposition,
+        seq: event.seq,
+        at_ms: event.at_ms,
+      })
+      // Return nil to allow; we are not vetoing or rewriting.
+      return nil
     })
-    // Return nil to allow; we are not vetoing or rewriting.
-    return nil
-  })
 
   // 2. Drain on finish, wrapped in an OTel span so dashboards can
   //    pin on the duration distribution.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "triage_drain"),
   )
 
@@ -141,17 +144,18 @@ pipeline research_runner(harness: Harness, task) {
   // Bracket the suspend / resume gates with telemetry. The runtime
   // also fires its built-in `resume_continuity` reminder; this hook
   // wraps it with structured operator telemetry.
-  harness.agent.register_session_hook("post_resume", { _hook_harness, event ->
-    operator_dashboard_emit("agent.resumed", {
-      handle: event.worker.handle,
-      suspended_at_ms: event.suspended_at_ms,
-      resumed_at_ms: event.resumed_at_ms,
-      duration_ms: event.resumed_at_ms - event.suspended_at_ms,
-      reason: event.suspend_reason,
-      resume_cause: event.resume_cause,
+  harness.agent.register_session_hook(
+    "post_resume", { _hook_harness, event ->
+      operator_dashboard_emit("agent.resumed", {
+        handle: event.worker.handle,
+        suspended_at_ms: event.suspended_at_ms,
+        resumed_at_ms: event.resumed_at_ms,
+        duration_ms: event.resumed_at_ms - event.suspended_at_ms,
+        reason: event.suspend_reason,
+        resume_cause: event.resume_cause,
+      })
+      return nil
     })
-    return nil
-  })
 
   const resume_when = parse_resume_conditions({
     timeout: {duration_minutes: 240, on_timeout: "resume_with_summary"},
@@ -192,22 +196,24 @@ fn during_business_hours(now_ms) -> bool {
 }
 
 pipeline supervised_agents(harness: Harness) {
-  harness.agent.register_session_hook("pre_suspend", { hook_harness, event ->
-    if !during_business_hours(hook_harness.clock.now_ms()) {
-      return nil   // allow
-    }
-    return {
-      block: true,
-      reason: "agents may not self-park during business hours; ask on-call",
-      reminder: {
-        body: "Your suspend was denied (business-hours policy). Continue"
-          + " working or escalate via the on-call channel.",
-        tags: ["policy_violation", "business_hours_no_suspend"],
-        ttl_turns: 1,
-        dedupe_key: "policy.no_suspend_business_hours",
-      },
-    }
-  })
+  harness.agent.register_session_hook(
+    "pre_suspend", { hook_harness, event ->
+      if !during_business_hours(hook_harness.clock.now_ms()) {
+        return nil   // allow
+      }
+      return {
+        block: true,
+        reason: "agents may not self-park during business hours;"
+          + " ask on-call",
+        reminder: {
+          body: "Your suspend was denied (business-hours policy)."
+            + " Continue working or escalate via the on-call channel.",
+          tags: ["policy_violation", "business_hours_no_suspend"],
+          ttl_turns: 1,
+          dedupe_key: "policy.no_suspend_business_hours",
+        },
+      }
+    })
 
   // ... rest of the setup pipeline; agents spawn under this hook
   // chain inherit the deny policy.
@@ -247,7 +253,7 @@ pipeline multi_suspend_fixture(harness: Harness) {
   harness.testing.clock_set(1_700_000_000_000)
 
   // 2. Capture audits via the per-run log instead of wall-clock spans.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "fixture_drain"),
   )
 
@@ -269,7 +275,7 @@ pipeline multi_suspend_fixture(harness: Harness) {
 pipeline assert_replay_determinism(harness: Harness) {
   // 4. Drain the audit log; the conformance harness compares this
   //    byte-for-byte against the recorded fixture.
-  const entries = pipeline_lifecycle_audit_log_take()
+  const entries = harness.obs.pipeline_lifecycle_audit_log_take()
   return {audits: entries, count: len(entries)}
 }
 ```

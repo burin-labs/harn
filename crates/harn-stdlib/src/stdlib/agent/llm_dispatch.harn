@@ -2,6 +2,7 @@ import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_emit_event } from "std/agent/state"
 import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
+import { structured_output_preface } from "std/llm/prompts"
 import { __wrap_llm_result } from "std/llm/safe"
 
 fn __dispatch_reject_removed_options(options) {
@@ -80,9 +81,43 @@ fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts) {
     model: to_string(llm_opts?.model ?? ""),
     tool_format: to_string(llm_opts?.tool_format ?? ""),
     final_wrapup: llm_opts?._final_wrapup ?? false,
+    structured_output_prompt_fallback: llm_opts?._structured_output_prompt_fallback ?? false,
   }
   agent_emit_event(agent, session_id, "typed_checkpoint", checkpoint)
   return nil
+}
+
+fn __dispatch_structured_output_schema(llm_opts) {
+  const output = llm_opts?.output
+  if output == nil || output == "text" {
+    return nil
+  }
+  if output == "json" {
+    return {}
+  }
+  if type_of(output) == "dict" && output?.schema != nil {
+    return output.schema
+  }
+  if type_of(output) == "dict" {
+    return output
+  }
+  return nil
+}
+
+fn __dispatch_prompt_mode_request(harness: Harness, message, llm_opts, schema) -> dict {
+  const prompt = structured_output_preface(
+    harness.fs,
+    schema,
+    {
+      template: "std/llm/prompts/structured_envelope_schema_contract.harn.prompt",
+      prompt: to_string(message),
+    },
+  )
+  return {
+    message: prompt,
+    options: llm_opts
+      + {output: "text", _structured_output_prompt_fallback: true},
+  }
 }
 
 fn __dispatch_validate_caller_result(result) {
@@ -139,9 +174,7 @@ fn __dispatch_default(llm: HarnessLlm, message, turn_system, llm_opts) {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dict {
-  __dispatch_reject_removed_options(llm_opts)
-  __dispatch_emit_call_start(harness.agent, llm_opts)
+fn __dispatch_invoke_once(harness: Harness, message, turn_system, llm_opts) -> dict {
   const call_opts = llm_call_options(llm_opts)
   const caller = llm_opts?._llm_caller
   if caller == nil {
@@ -186,4 +219,31 @@ pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dic
   const result = unwrap(invoked)
   __dispatch_validate_caller_result(result)
   return result
+}
+
+/**
+ * Invoke one agent LLM request, degrading a rejected structured-output
+ * transport to the shared prompt-mode contract exactly once.
+ *
+ * The retry is keyed on the request's structured `output` contract and a
+ * failed provider envelope, never on provider error prose. The fallback
+ * removes the provider response format, carries the same schema in the prompt,
+ * and leaves ordinary text requests unchanged.
+ *
+ * @effects: [agent, llm.call]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dict {
+  __dispatch_reject_removed_options(llm_opts)
+  __dispatch_emit_call_start(harness.agent, llm_opts)
+  const first = __dispatch_invoke_once(harness, message, turn_system, llm_opts)
+  const schema = __dispatch_structured_output_schema(llm_opts)
+  if first.ok || schema == nil || (llm_opts?._structured_output_prompt_fallback ?? false) {
+    return first
+  }
+  const fallback = __dispatch_prompt_mode_request(harness, message, llm_opts, schema)
+  __dispatch_emit_call_start(harness.agent, fallback.options)
+  return __dispatch_invoke_once(harness, fallback.message, turn_system, fallback.options)
+    + {_structured_output_prompt_fallback: true}
 }

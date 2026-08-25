@@ -149,17 +149,17 @@ attenuate it before calling helpers:
 
 - `harness.runtime.handler_context()` to inspect the current dispatch context,
   including `agent`, `action`, `trace_id`, and `autonomy_tier`
-- `trust_record(agent, action, approver, outcome, tier)` to append a manual
-  trust record and return the full finalized record
-- `trust_graph_record(decision)` to append a decision dict and return its
-  `TrustEntryId`
-- `trust_query(filters)` to query historical records from Harn code, including
-  server-side `limit` and `grouped_by_trace` options
-- `trust_graph_query(agent, action)` to return a `TrustScore` summary for
-  handler-side policy decisions
-- `trust_graph_policy_for(agent)` to return a capability policy derived from
-  the agent's effective tier and recent outcomes
-- `trust_graph_verify_chain()` to verify the local hash chain
+- `harness.runtime.trust_record(agent, action, approver, outcome, tier)` to
+  append a manual trust record and return the full finalized record
+- `harness.runtime.trust_graph_record(decision)` to append a decision dict and
+  return its `TrustEntryId`
+- `harness.runtime.trust_query(filters)` to query historical records from Harn
+  code, including server-side `limit` and `grouped_by_trace` options
+- `harness.runtime.trust_graph_query(agent, action)` to return a `TrustScore`
+  summary for handler-side policy decisions
+- `harness.runtime.trust_graph_policy_for(agent)` to return a capability policy
+  derived from the agent's effective tier and recent outcomes
+- `harness.runtime.trust_graph_verify_chain()` to verify the local hash chain
 
 Example:
 
@@ -179,12 +179,14 @@ The legacy trigger API remains available:
 ```harn
 import "std/triggers"
 
-const records = trust_query({
-  agent: "github-triage-bot",
-  outcome: "success",
-  tier: "act_auto",
-  limit: 100,
-})
+fn main(harness: Harness) {
+  const records = harness.runtime.trust_query({
+    agent: "github-triage-bot",
+    outcome: "success",
+    tier: "act_auto",
+    limit: 100,
+  })
+}
 ```
 
 Grouped queries return trace buckets:
@@ -192,11 +194,13 @@ Grouped queries return trace buckets:
 ```harn
 import "std/triggers"
 
-const grouped = trust_query({
-  since: "2026-04-19T18:00:00Z",
-  limit: 500,
-  grouped_by_trace: true,
-})
+fn main(harness: Harness) {
+  const grouped = harness.runtime.trust_query({
+    since: "2026-04-19T18:00:00Z",
+    limit: 500,
+    grouped_by_trace: true,
+  })
+}
 ```
 
 `self_review(...)` also writes trust records with action `pr.self_review`.

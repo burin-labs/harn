@@ -137,7 +137,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             .healthcheck
             .clone()
             .map(healthcheck_def_from_catalog),
-        cache_usage_accounting: Some(provider.cache_usage_accounting),
+        cache_usage_accounting: provider.cache_usage_accounting,
         stream_usage_accounting: provider.stream_usage_accounting,
         features: provider.features.clone(),
         rpm: provider.rpm,

@@ -52,7 +52,9 @@ fn no_raw_tokens(slice, _ctx, _repo_at_base) {
   coverage_examples: ["crates/api/src/auth.rs"]
 )
 fn no_raw_tokens_semantic_review(slice, _ctx, _repo_at_base) {
-  return flow_invariant_warn("semantic review found risky token-like text")
+  return flow_invariant_warn(
+    "semantic review found risky token-like text"
+  )
 }
 ```
 
@@ -104,13 +106,17 @@ typed record set even when only the semantic name was requested. The original
 Harn `ctx` value is preserved, including a callable `semantic_judge`.
 
 ```harn,ignore
-const report = flow_evaluate_invariants("", slice, {
-  path: "invariants.harn",
-  budget_ms: 50,
-})
-const feedback = flow_invariant_feedback(report)
-if feedback != "" {
-  agent_inject_feedback(session_id, "flow_invariants", feedback)
+fn evaluate_flow_invariants(harness: Harness) {
+  const report = flow_evaluate_invariants("", slice, {
+    path: "invariants.harn",
+    budget_ms: 50,
+  })
+  const feedback = flow_invariant_feedback(report)
+  if feedback != "" {
+    harness.agent.inject_feedback(
+      session_id, "flow_invariants", feedback,
+    )
+  }
 }
 ```
 

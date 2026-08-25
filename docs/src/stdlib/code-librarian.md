@@ -43,14 +43,16 @@ Supported node labels are `Function`, `Type`, `Field`, `EnumCase`,
 import "std/code_librarian"
 
 pipeline default(harness: Harness) {
-  const _ = harness.code_index.rebuild(
-    {root: "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"},
-  )
+  const _ = harness.code_index.rebuild({
+    root: "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
+  })
 
   const callers: list<LibrarianCallSite> = code_librarian_who_calls(
     harness.code_index, "fetchUser",
   )
-  harness.stdio.println("fetchUser has " + to_string(len(callers)) + " call sites:")
+  harness.stdio.println(
+    "fetchUser has " + to_string(len(callers)) + " call sites:"
+  )
   for c in callers {
     harness.stdio.println("  " + c.path)
   }
@@ -97,14 +99,17 @@ record `result.ok()` as a call to `ok` even when it could not resolve a typed
 files, and bounds the returned sites independently:
 
 ```harn
-const consumers: LibrarianExternalConsumers = code_librarian_external_consumers(
-  harness.code_index,
-  "ok",
-  "include/status.hpp",
-  5,
-)
+const consumers: LibrarianExternalConsumers =
+  code_librarian_external_consumers(
+    harness.code_index,
+    "ok",
+    "include/status.hpp",
+    5,
+  )
 if consumers.definition_found && consumers.sole_definer {
-  harness.stdio.println(to_string(consumers.file_count) + " files depend on ok")
+  harness.stdio.println(
+    to_string(consumers.file_count) + " files depend on ok"
+  )
 }
 ```
 

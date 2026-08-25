@@ -193,13 +193,23 @@ impl Linter<'_> {
     }
 
     pub(super) fn check_discarded_approval_result(&mut self, node: &SNode) {
-        // The approval primitive is recognized in either form: the
-        // legacy `request_approval(...)` function-call shape (still
-        // valid for back-compat) and the first-class `HitlExpr` form
-        // produced by the reserved-keyword parser.
+        // The canonical shape is the capability method
+        // `harness.interaction.request_approval(...)`. The bare
+        // `request_approval(...)` call is the removed ambient builtin: it is
+        // still matched so that a script mid-migration keeps this warning
+        // alongside the HARN-LNT-071 that tells it to move, rather than going
+        // quiet on the way from one spelling to the other. `HitlExpr` is the
+        // reserved-keyword form, which the lexer no longer produces.
         let name = match &node.node {
             Node::FunctionCall { name, .. } if Self::is_approval_record_builtin(name) => {
                 name.as_str()
+            }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. }
+                if Self::is_approval_record_builtin(method)
+                    && self.harness_capability_of(object) == Some("interaction") =>
+            {
+                method.as_str()
             }
             Node::HitlExpr {
                 kind: harn_parser::HitlKind::RequestApproval,
@@ -358,5 +368,68 @@ mod tests {
                 "`{name}` is too ambiguous to flag as a discarded pure result"
             );
         }
+    }
+
+    /// The spans HARN-LNT-013 flags in `source`, as the names it names.
+    fn approvals_flagged(source: &str) -> Vec<String> {
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        crate::lint(&program)
+            .into_iter()
+            .filter(|d| d.code == Code::LintUnhandledApprovalResult)
+            .map(|d| {
+                d.message
+                    .split('`')
+                    .nth(1)
+                    .expect("approval name in backticks")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn flags_a_discarded_approval_on_the_canonical_harness_path() {
+        // The regression this check exists to prevent: HARN-LNT-071 tells
+        // callers to move from `request_approval(...)` to the capability
+        // method, so the guard has to survive the move. A silent approval
+        // lint is worse than none — it reads as "this code was checked".
+        assert_eq!(
+            approvals_flagged(
+                "fn main(harness: Harness) {\n  harness.interaction.request_approval(\"ship\", {})\n}"
+            ),
+            vec!["request_approval"]
+        );
+    }
+
+    #[test]
+    fn still_flags_the_legacy_ambient_call() {
+        // Mid-migration scripts keep both diagnostics rather than trading
+        // one for the other.
+        assert_eq!(
+            approvals_flagged("fn main(harness: Harness) {\n  request_approval(\"ship\", {})\n}"),
+            vec!["request_approval"]
+        );
+    }
+
+    #[test]
+    fn allows_a_bound_approval_result() {
+        assert!(
+            approvals_flagged(
+                "fn main(harness: Harness) {\n  const r = harness.interaction.request_approval(\"ship\", {})\n  log(r)\n}"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn ignores_request_approval_on_a_receiver_that_is_not_the_harness() {
+        // A user-defined object may legitimately own a method by this name;
+        // only the host capability carries the approver receipts.
+        assert!(
+            approvals_flagged(
+                "fn main(harness: Harness) {\n  const q = my_queue()\n  q.interaction.request_approval(\"ship\", {})\n}"
+            )
+            .is_empty()
+        );
     }
 }

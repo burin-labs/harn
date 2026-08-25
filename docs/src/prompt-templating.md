@@ -304,7 +304,7 @@ Typical cases:
 ## The `llm` scope
 
 When `harness.fs.render_prompt()` / `harness.fs.render_template()` is invoked from
-inside an LLM-aware frame (`llm_call`, the default handler stack, or
+inside an LLM-aware frame (`harness.llm.call`, the default handler stack, or
 `agent_loop`), the engine auto-injects a reserved `llm` binding so a
 single logical template can adapt its wire envelope per provider
 without manual option threading:
@@ -342,7 +342,8 @@ same template works in CI / doc-gen contexts as long as it guards with
 ```harn-prompt
 {{ if llm }}
   Targeting {{ llm.provider }}/{{ llm.model }} — using
-  {{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }} tools.
+  {{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}
+  tools.
 {{ else }}
   Generic prompt — no model selected.
 {{ end }}
@@ -350,7 +351,7 @@ same template works in CI / doc-gen contexts as long as it guards with
 
 The frame is published by:
 
-- the native `llm_call` builtin for its full call duration (covers
+- the native `harness.llm.call` builtin for its full call duration (covers
   middleware-driven re-renders during schema retry),
 - `default_llm_caller` for the entire handler-stack closure (so
   user-authored middleware that renders sees the same context), and
@@ -420,7 +421,7 @@ Capability dispatch is feature-based, not provider-string-based:
 ## Variant resolution in transcripts
 
 Every `harness.fs.render_prompt()` call made under an LLM-aware frame
-(`llm_call`, `default_llm_caller`, `agent_loop`) emits a
+(`harness.llm.call`, `default_llm_caller`, `agent_loop`) emits a
 `template.render` event into the run's `llm_transcript.jsonl`. The event
 captures:
 

@@ -87,7 +87,8 @@ matches the tail without binding it):
 match coords {
   [x, y] -> { "2d: ${x},${y}" }          // matches ONLY length 2
   [x, y, z] -> { "3d" }                   // matches ONLY length 3
-  [first, ...rest] -> { "${first}+${rest}" } // length >= 1; rest is a list
+  // length >= 1; rest is a list
+  [first, ...rest] -> { "${first}+${rest}" }
   [] -> { "empty" }
   _ -> { "other" }
 }

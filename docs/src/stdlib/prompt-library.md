@@ -35,7 +35,9 @@ Embedded stdlib prompt fragments can be loaded directly with `std/...harn.prompt
 paths because `read_file` exposes their raw template source:
 
 ```harn,ignore
-const library = prompt_library_load("std/agent/prompts/tool_contract_text.harn.prompt")
+const library = prompt_library_load(
+  "std/agent/prompts/tool_contract_text.harn.prompt"
+)
 ```
 
 Single `.harn.prompt` files can carry TOML front matter:

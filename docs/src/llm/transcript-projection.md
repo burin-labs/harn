@@ -30,11 +30,16 @@ clean view in a UI).
 const view = transcript_project(transcript, {policy: "clean_tool_repair"})
 harness.stdio.log(view.policy)          // "clean_tool_repair"
 harness.stdio.log(view.kept_count)      // messages surviving
-harness.stdio.log(view.dropped_count)   // messages hidden from the next request
-harness.stdio.log(view.redacted_count)  // tool-result bodies replaced by audit pointers
-harness.stdio.log(view.reclaimed_tokens)// estimated prompt tokens reclaimed
-harness.stdio.log(view.prefix_hash)     // "sha256:..." of the projected prefix
-harness.stdio.log(view.event.kind)      // "transcript.projection" — appendable
+// messages hidden from the next request
+harness.stdio.log(view.dropped_count)
+// tool-result bodies replaced by audit pointers
+harness.stdio.log(view.redacted_count)
+// estimated prompt tokens reclaimed
+harness.stdio.log(view.reclaimed_tokens)
+// "sha256:..." of the projected prefix
+harness.stdio.log(view.prefix_hash)
+// "transcript.projection" — appendable
+harness.stdio.log(view.event.kind)
 harness.stdio.log(view.messages)        // the model-visible prefix
 // true when a signed reasoning block was protected from removal
 harness.stdio.log(view.provider_safety_blocked)
@@ -119,7 +124,8 @@ const view = transcript_project(transcript, {
   require_write_barrier: true,
 })
 harness.stdio.log(view.redacted_count)
-harness.stdio.log(view.redaction_pointers[0].source) // transcript.messages[N].content
+// transcript.messages[N].content
+harness.stdio.log(view.redaction_pointers[0].source)
 ```
 
 Redacted tool-result bodies carry `_harn_projection.redaction_pointer`;
@@ -170,15 +176,25 @@ const result = agent_loop(harness,
     transcript_projection: {policy: "clean_tool_repair"},
   },
 )
-const events = transcript_events_by_kind(result.transcript, "transcript.projection")
-harness.stdio.log(len(events))                                  // one per turn
-harness.stdio.log(events[0].metadata.policy)                    // "clean_tool_repair"
-harness.stdio.log(events[0].metadata.prefix_hash)               // "sha256:..."
-harness.stdio.log(events[0].metadata.kept_indices)      // kept from raw messages
-harness.stdio.log(events[0].metadata.dropped_indices)   // hidden from the prefix
-harness.stdio.log(events[0].metadata.redacted_indices)  // reclaimed in place
-harness.stdio.log(events[0].metadata.reclaimed_tokens)  // est. token savings
-harness.stdio.log(events[0].metadata.provider_safety_blocked) // guardrail state
+const events = transcript_events_by_kind(
+  result.transcript, "transcript.projection",
+)
+// one per turn
+harness.stdio.log(len(events))
+// "clean_tool_repair"
+harness.stdio.log(events[0].metadata.policy)
+// "sha256:..."
+harness.stdio.log(events[0].metadata.prefix_hash)
+// kept from raw messages
+harness.stdio.log(events[0].metadata.kept_indices)
+// hidden from the prefix
+harness.stdio.log(events[0].metadata.dropped_indices)
+// reclaimed in place
+harness.stdio.log(events[0].metadata.redacted_indices)
+// est. token savings
+harness.stdio.log(events[0].metadata.reclaimed_tokens)
+// guardrail state
+harness.stdio.log(events[0].metadata.provider_safety_blocked)
 ```
 
 Projection composes with compaction: compaction rewrites the persistent

@@ -185,7 +185,9 @@ inferred automatically, and an explicit type annotation on the `let` binds
 the result:
 
 ```harn,ignore
-const parsed: dict = try { json_parse(input) } catch (e) { default_config() }
+const parsed: dict = try {
+  json_parse(input)
+} catch (e) { default_config() }
 ```
 
 Typed catches work identically in expression position; when the thrown

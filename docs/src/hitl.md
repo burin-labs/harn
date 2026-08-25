@@ -1,49 +1,40 @@
 # Human in the loop
 
-Harn's human-in-the-loop surface is **first-class typed syntax**.
-`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
-reserved keywords parsed as language-level expressions (not regular
-function calls). The VM enforces waiting, timeouts, quorum,
-escalation, signed receipts, the event log, and replay determinism, and
-since the names are reserved, user code cannot shadow them, redefine
-them, or compose around them to bypass approval.
+Harn's human-in-the-loop surface is a set of typed methods on the
+`interaction` capability: `harness.interaction.ask_user`,
+`.request_approval`, `.dual_control`, and `.escalate_to`. The VM
+enforces waiting, timeouts, quorum, escalation, signed receipts, the
+event log, and replay determinism.
 
 Use `import "std/hitl"` when you want shared type aliases such as
-`ApprovalRecord` or `EscalationHandle`. The keywords themselves are
-always available — no import is required.
+`ApprovalRecord` or `EscalationHandle`. The methods themselves need no
+import — they come with the `Harness` value.
 
-## Call shapes: named or positional
+## Call shape: positional arguments plus an options record
 
-Each primitive accepts either named arguments (the recommended form) or
-the legacy positional shape. Both lower to the same VM-enforced runtime,
-so existing scripts keep working without migration:
+Harn has no keyword-argument call syntax. Every HITL primitive takes its
+required arguments positionally, with the optional settings gathered into
+a trailing options record:
 
 ```harn,ignore
-// Named-argument form (recommended)
-const record = harness.interaction.request_approval(
-  action: "deploy production",
-  quorum: 2,
-  reviewers: ["alice", "bob", "carol"],
-)
-
-// Positional form (kept for back-compat with the original stdlib API)
 const record = harness.interaction.request_approval(
   "deploy production",
   {quorum: 2, reviewers: ["alice", "bob", "carol"]},
 )
 ```
 
-The typechecker validates required arguments and rejects unknown names
-per primitive (e.g. `harness.interaction.request_approval(bogus_arg: 1)` is a compile-time
-error).
+Writing `harness.interaction.request_approval(action: "deploy
+production", quorum: 2)` is a parse error (`HARN-PAR-001: expected
+expression, found :`), not an alternative form. Note also that a key
+the primitive does not recognise is ignored rather than rejected, so a
+misspelled option silently takes no effect — check the option names
+against the signatures below.
 
 ## VM-enforced invariants
 
-Because the four primitives are language-level keywords:
+The primitives are capability methods, so reaching them at all requires
+the `interaction` capability. On top of that:
 
-- **Names cannot be shadowed.** `let request_approval = "fake"` is a
-  syntax error (reserved keyword), so user code cannot replace the
-  primitive with a counterfeit function or value.
 - **Approval cannot be bypassed by composition.** The result envelope is
   produced by the VM, including a SHA-256 receipt over reviewer
   identity, signing time, and the approval verdict. Forging the
@@ -61,7 +52,9 @@ Because the four primitives are language-level keywords:
 
 ## Primitives
 
-### `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
+### `harness.interaction.ask_user<T>(prompt, options?) -> T`
+
+`options` is `{schema?: Schema<T>, timeout?: duration, default?: T}`.
 
 Pause the current dispatch until the host returns a typed response.
 
@@ -87,14 +80,12 @@ const choice: Choice = harness.interaction.ask_user(
 )
 ```
 
-### `harness.interaction.request_approval(...) -> ApprovalRecord`
+### `harness.interaction.request_approval(action, options?) -> ApprovalRecord`
+
+Signature: `(action: string, options?: ApprovalRequestOptions) ->
+ApprovalRecord`.
 
 ```harn,ignore
-harness.interaction.request_approval(
-  action: string,
-  options?: ApprovalRequestOptions,
-) -> ApprovalRecord
-
 type ApprovalRequestOptions = {
   detail?: any,
   args?: any,
@@ -172,7 +163,9 @@ For stdlib HITL events, the durable request envelope stores this under
 `reviewers`, and `deadline_ms` fields remain present so older hosts continue to
 render and resolve existing flows.
 
-### `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
+### `harness.interaction.dual_control<T>(n, m, action, approvers?) -> T`
+
+Signature: `(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`.
 
 Run a closure only after `n` approvals out of `m` named approvers.
 
@@ -217,7 +210,9 @@ type EscalationHandle = {
 }
 ```
 
-### `hitl_pending(filters?: HitlPendingFilters) -> list<HitlPendingRequest>`
+### `harness.interaction.hitl_pending(filters?) -> list<HitlPendingRequest>`
+
+`filters` is a `HitlPendingFilters` record.
 
 Read the active event log and return pending HITL requests as typed rows.
 
@@ -316,8 +311,13 @@ if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
 Gate a destructive step behind dual control:
 
 ```harn,ignore
-const deleted = harness.interaction.dual_control(2, 3, {
-  harness.fs.delete("prod.db")
-  return true
-}, ["alice", "bob", "carol"])
+const deleted = harness.interaction.dual_control(
+  2,
+  3,
+  { ->
+    harness.fs.delete("prod.db")
+    return true
+  },
+  ["alice", "bob", "carol"],
+)
 ```

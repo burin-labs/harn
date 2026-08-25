@@ -28,7 +28,8 @@ The smallest useful thing is a single request. Save this as `fix.harn`:
 
 ```harn
 const answer = harness.llm.call(
-  "The test test_add expects add(2, 2) == 4 but got 5. What's the likely bug?",
+  "The test test_add expects add(2, 2) == 4 but got 5. What's the"
+    + " likely bug?",
   "You are a careful Rust engineer.",
   {provider: "mock"},
 )
@@ -41,7 +42,7 @@ Run it:
 harn run fix.harn
 ```
 
-`llm_call` sends one prompt and returns [a result dict](../llm/llm_call.md#return-value).
+`harness.llm.call` sends one prompt and returns [a result dict](../llm/llm_call.md#return-value).
 The text is in `answer.text`; token counts, the model name, and the full
 transcript are on the same dict when you need them.
 
@@ -59,13 +60,17 @@ loop, the budget, and deciding when "done" means done.
 
 ```harn
 const result = agent_loop(harness,
-  "Fix the failing test test_add in src/math.rs, then run the test to confirm.",
-  "You are a senior engineer. Make the smallest change that turns the test green.",
+  "Fix the failing test test_add in src/math.rs, then run the test"
+    + " to confirm.",
+  "You are a senior engineer. Make the smallest change that turns the"
+    + " test green.",
   {provider: "mock", loop_until_done: true},
 )
-harness.stdio.log(result.status)          // "done", "stuck", "budget_exhausted", ...
+// "done", "stuck", "budget_exhausted", ...
+harness.stdio.log(result.status)
 harness.stdio.log(result.text)            // the agent's final output
-harness.stdio.log(result.llm.iterations)  // how many model round-trips it took
+// how many model round-trips it took
+harness.stdio.log(result.llm.iterations)
 ```
 
 `loop_until_done: true` tells the loop to keep going until the model signals
@@ -107,7 +112,12 @@ import { workflow_stages } from "std/workflow/patterns"
 const graph = workflow_stages({
   name: "fix-the-test",
   stages: [
-    {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
+    {
+      id: "act",
+      kind: "stage",
+      mode: "agent",
+      model_policy: {provider: "mock"},
+    },
     {id: "check", kind: "verify", mode: "command",
       verify: {command: "cargo test test_add --quiet", expect_status: 0}},
   ],
@@ -179,7 +189,7 @@ working exactly as designed. Point `model_policy` at a real model and give the
 
 You climbed the three rungs of the [abstraction ladder](../concepts/abstraction-ladder.md):
 
-- `llm_call` — one request, one answer.
+- `harness.llm.call` — one request, one answer.
 - `agent_loop` — one goal, run to completion with tools.
 - `workflow_stages` — more than one attempt, with an independent verify gate and
   retry-with-feedback.

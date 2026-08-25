@@ -159,7 +159,10 @@ legacy helpers with `[lint].persona_step_allowlist`.
 #### `@command(name?, description?, hint?)`
 
 ```harn,ignore
-@command(name: "review", description: "Review the diff", hint: "(optional focus area)")
+@command(
+  name: "review", description: "Review the diff",
+  hint: "(optional focus area)",
+)
 pipeline review_branch(harness: Harness, task) { ... }
 ```
 
@@ -304,9 +307,12 @@ classifies nominal capability methods such as `harness.mcp.call(...)`,
 `host_call("capability.operation", ...)` wire is additionally classified when
 it appears in a trusted provenance-stamped host module; ordinary modules cannot
 invoke or re-export that wire.
-Calls like `with_execution_policy(...)`, `with_command_policy(...)`,
-`with_approval_policy(...)`, `with_autonomy_policy(...)`,
-`with_dynamic_permissions(...)`, `harness.net.egress_policy(...)`,
+Calls like `harness.runtime.with_execution_policy(...)`,
+`harness.runtime.with_command_policy(...)`,
+`harness.runtime.with_approval_policy(...)`,
+`harness.runtime.with_autonomy_policy(...)`,
+`harness.runtime.with_dynamic_permissions(...)`,
+`harness.net.egress_policy(...)`,
 `harness.interaction.request_approval(...)`, `harness.interaction.dual_control(...)`, and budget-bearing
 `harness.llm.call(..., {budget: ...})` satisfy the corresponding gates.
 

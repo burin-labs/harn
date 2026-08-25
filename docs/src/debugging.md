@@ -63,7 +63,7 @@ standalone fallbacks (`workspace.project_root`, `workspace.cwd`, etc.).
 
 ### LLM telemetry output events
 
-During `run` / step-through, the adapter forwards every `llm_call` the
+During `run` / step-through, the adapter forwards every `harness.llm.call` the
 VM makes as a DAP `output` event with `category: "telemetry"` and a
 JSON body:
 
@@ -74,7 +74,7 @@ JSON body:
 
 IDEs can parse these to show a live LLM-call ledger alongside the
 debug session. These are the same normalized accounting fields returned by
-`llm_call`; the debugger does not re-price or rename them.
+`harness.llm.call`; the debugger does not re-price or rename them.
 
 ## Run views
 
@@ -214,7 +214,9 @@ Track LLM costs during a run:
 
 ```harn
 const usage = harness.obs.llm_usage()
-harness.stdio.log("Tokens used: ${usage.input_tokens + usage.output_tokens}")
+harness.stdio.log(
+  "Tokens used: ${usage.input_tokens + usage.output_tokens}"
+)
 harness.stdio.log("LLM calls: ${usage.total_calls}")
 ```
 

@@ -28,7 +28,7 @@ const hint = harness.llm.call(
 harness.stdio.log(hint.text)
 ```
 
-Three lines. [`llm_call`](../llm/llm_call.md) sends one prompt and hands back a
+Three lines. [`harness.llm.call`](../llm/llm_call.md) sends one prompt and hands back a
 result dict. This is the floor, and most classification, summarization, and
 extraction never needs to leave it. If your whole job is "read this, tell me
 that," stop here.
@@ -57,7 +57,7 @@ harness.stdio.log(triage.severity)
 harness.stdio.log(triage.component)
 ```
 
-Same call underneath. [`llm_call_structured`](../llm/llm_call.md#llm_call_structured)
+Same call underneath. [`harness.llm.call_structured`](../llm/llm_call.md#llm_call_structured)
 just pre-applies the schema-validated-JSON defaults and re-asks once if the model
 returns something off-shape, so `triage.severity` is a string you can switch on
 instead of a paragraph you have to parse. You climbed one rung and wrote two
@@ -126,7 +126,8 @@ opts = with_governance(opts, {
   detectors: {no_progress: {messages: 3}, stuck: {same_diagnostic: 3}},
 })
 
-// An independent "are we actually done?" gate, not the model's own say-so.
+// An independent "are we actually done?"
+// gate, not the model's own say-so.
 opts = {...opts, ...agent_completion_gate(harness.runtime, {
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
@@ -171,7 +172,8 @@ retry. You own what happens inside a try:
   kind: "stage",
   retry_policy: {max_attempts: 3, feedback: true},
   executor: { ctx ->
-    // ctx = {task, attempt, prior_findings, prior_verification, prior_text, artifacts}
+    // ctx = {task, attempt, prior_findings, prior_verification,
+    // prior_text, artifacts}
     const patched = my_patch_step(ctx.task, ctx.prior_findings)
     return {text: patched.summary, artifacts: patched.artifacts}
   },
@@ -184,7 +186,8 @@ runner actually moved. So the host feeds that fact in through a callback. The
 loop supplies the payload; you return the one number that matters:
 
 ```harn,ignore
-// "Writes are not progress." Return the turn's best verify-state — say, the
+// "Writes are not progress." Return the
+// turn's best verify-state — say, the
 // count of passing tests. nil means "no verification evidence this turn."
 const opts = {...base, stall_diagnostics: {
   progress_signal: { payload -> host_passing_test_count() },
@@ -221,8 +224,8 @@ composed on:
 
 | Level | Reach for | You get | You write |
 |---|---|---|---|
-| 1 | `llm_call` | one answer | 3 lines |
-| 2 | `llm_call_structured` | typed, validated output | +2 lines |
+| 1 | `harness.llm.call` | one answer | 3 lines |
+| 2 | `harness.llm.call_structured` | typed, validated output | +2 lines |
 | 3 | `agent_preset(kind)` + `agent_loop` | a tuned tool-using agent | +1 import |
 | 4 | `agent_loop` + governors / judge / lanes / overlays | bounded, gated, narrowed control | one fold per concern |
 | 5 | `workflow_stages` + `executor` + host-fed facts | attempts, verify gates, replay, your code in the loop | a closure and a callback |

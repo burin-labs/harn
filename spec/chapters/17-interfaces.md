@@ -113,7 +113,8 @@ Type parameters on user-defined generics may be marked with `in` or
 `out`:
 
 ```harn,ignore
-type Reader<out T> = fn() -> T          // T appears only in output position
+// T appears only in output position
+type Reader<out T> = fn() -> T
 interface Sink<in T> { fn accept(v: T) -> int }
 fn map<in A, out B>(value: A) -> B { ... }
 ```

@@ -83,10 +83,11 @@ source order. `with { max_concurrent: N }` is honored the same way as
 eager `parallel each`. If a task throws, the error is raised when the
 consumer pulls that stream item and remaining tasks are cancelled.
 
-`parallel_race(items, callable, options?)` is the first-success helper
-for this pattern. It returns the first plain value or `Result.Ok`
-payload produced by `callable`, cancels remaining tasks, and throws an
-aggregate error if every task throws or returns `Result.Err`.
+`harness.runtime.parallel_race(items, callable, options?)` is the
+first-success helper for this pattern. It returns the first plain value
+or `Result.Ok` payload produced by `callable`, cancels remaining tasks,
+and throws an aggregate error if every task throws or returns
+`Result.Err`.
 
 ### parallel settle
 
@@ -122,7 +123,7 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 ```harn
 fn fetch_page(cursor) { cursor }
 const cursors = ["a", "b", "c"]
-const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const pages = parallel settle cursors with {max_concurrent: 4} { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -146,17 +147,23 @@ receipt still needs every lane's structured outcome. `std/abort` is that form,
 built on scoped shared state rather than on new syntax:
 
 ```harn
-import { abort_requested, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   while !lane_terminal(lane) {
     if abort_requested(token) {
-      return Err({code: "stopped_waiting", message: "a sibling lane failed"})
+      return Err(
+        {code: "stopped_waiting", message: "a sibling lane failed"}
+      )
     }
     harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
-    let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
+    let _ = request_abort(
+      token, {code: "doomed", message: "lane ${lane} failed"},
+    )
     return Err({code: "terminal", message: "lane ${lane} failed"})
   }
   return lane_proof(lane)
@@ -225,8 +232,10 @@ defer { close(f) }
 ### owned\<T\> and drop()
 
 ```harn
-const ch: owned<channel> = channel("log", 64)
-// implicit: defer { drop(ch) } registered at this binding
+fn main(harness: Harness) {
+  const ch: owned<channel> = harness.runtime.channel("log", 64)
+  // implicit: defer { drop(ch) } registered at this binding
+}
 ```
 
 `owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
@@ -248,9 +257,9 @@ return type is not also `owned<T>` defeats the auto-drop and fires
 return type as `owned<T>`:
 
 ```harn
-fn open_log() -> owned<channel> {
-  const ch: owned<channel> = channel("log", 64)
-  return ch                              // ownership transfers to caller
+fn open_log(harness: Harness) -> owned<channel> {
+  const ch: owned<channel> = harness.runtime.channel("log", 64)
+  return ch                          // ownership transfers to caller
 }
 ```
 
@@ -335,25 +344,34 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
-const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
-const gate = sync_gate_acquire("workflow-runner", 8, 5s)
+fn main(harness: Harness) {
+  const lock = harness.runtime.sync_mutex_acquire(
+    "state:customer-42", 250ms,
+  )
+  const slot = harness.runtime.sync_semaphore_acquire(
+    "connector:notion", 4, 1, 2s,
+  )
+  const gate = harness.runtime.sync_gate_acquire(
+    "workflow-runner", 8, 5s,
+  )
+}
 ```
 
-- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
-  mutex. Omitting `key` uses `"__default__"`.
-- `sync_semaphore_acquire(key, capacity, permits?, timeout?)` acquires a
-  weighted permit from a named FIFO semaphore.
-- `sync_gate_acquire(key, limit, timeout?)` acquires one fair-admission slot
-  from a named FIFO gate.
-- `sync_release(permit)` releases a named permit and returns `true` only for
-  the first release.
-- Permits returned by `sync_*_acquire` are also owned by the current scope or
-  frame. They are released automatically on scope exit, `return`, and `throw`;
-  explicit `sync_release` is for earlier release and remains idempotent.
-- `sync_metrics(kind?, key?)` returns observability counters for matching
-  primitives. A concrete `(kind, key)` returns a dict; partial or empty
-  filters return a list.
+- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit
+  from a named FIFO mutex. Omitting `key` uses `"__default__"`.
+- `harness.runtime.sync_semaphore_acquire(key, capacity, permits?, timeout?)`
+  acquires a weighted permit from a named FIFO semaphore.
+- `harness.runtime.sync_gate_acquire(key, limit, timeout?)` acquires one
+  fair-admission slot from a named FIFO gate.
+- `harness.runtime.sync_release(permit)` releases a named permit and returns
+  `true` only for the first release.
+- Permits returned by `harness.runtime.sync_*_acquire` are also owned by the
+  current scope or frame. They are released automatically on scope exit,
+  `return`, and `throw`; an explicit `harness.runtime.sync_release` is for
+  earlier release and remains idempotent.
+- `harness.runtime.sync_metrics(kind?, key?)` returns observability counters
+  for matching primitives. A concrete `(kind, key)` returns a dict; partial
+  or empty filters return a list.
 
 Metrics include `acquisition_count`, `timeout_count`, `cancellation_count`,
 `release_count`, `current_held`, `current_queue_depth`, `max_queue_depth`,
@@ -480,13 +498,17 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+fn main(harness: Harness) {
+  const budget = harness.runtime.shared_cell(
+    {scope: "task_group", key: "tokens", initial: 0},
+  )
 
-parallel 10 { i ->
-  let updated = false
-  while !updated {
-    const snap = shared_snapshot(budget)
-    updated = shared_cas(budget, snap, snap.value + 1)
+  parallel 10 { i ->
+    let updated = false
+    while !updated {
+      const snap = harness.runtime.shared_snapshot(budget)
+      updated = harness.runtime.shared_cas(budget, snap, snap.value + 1)
+    }
   }
 }
 ```
@@ -508,40 +530,51 @@ external stores.
 
 Cells:
 
-- `shared_cell(key_or_options, initial?)` opens a scoped cell. Options support
-  `scope`, `key`, `initial`, and `tenant_id`.
-- `shared_get(cell)` reads the value.
-- `shared_snapshot(cell)` returns `{value, version}` for versioned CAS.
-- `shared_set(cell, value)` writes with last-write-wins behavior and returns
-  the previous value.
-- `shared_cas(cell, expected_or_snapshot, value)` writes only when the current
-  value matches the expected value, and when a snapshot is supplied, the
-  version still matches. It returns `true` on success and `false` on conflict.
+- `harness.runtime.shared_cell(key_or_options, initial?)` opens a scoped
+  cell. Options support `scope`, `key`, `initial`, and `tenant_id`.
+- `harness.runtime.shared_get(cell)` reads the value.
+- `harness.runtime.shared_snapshot(cell)` returns `{value, version}` for
+  versioned CAS.
+- `harness.runtime.shared_set(cell, value)` writes with last-write-wins
+  behavior and returns the previous value.
+- `harness.runtime.shared_cas(cell, expected_or_snapshot, value)` writes only
+  when the current value matches the expected value, and when a snapshot is
+  supplied, the version still matches. It returns `true` on success and
+  `false` on conflict.
 
 Maps:
 
-- `shared_map(key_or_options, initial?)` opens a scoped map.
-- `shared_map_get(map, key, default?)`, `shared_map_set(map, key, value)`,
-  `shared_map_delete(map, key)`, and `shared_map_entries(map)` are the
-  last-write-wins map operations.
-- `shared_map_snapshot(map, key)` and
-  `shared_map_cas(map, key, expected_or_snapshot, value)` provide
-  versioned conflict checks.
+- `harness.runtime.shared_map(key_or_options, initial?)` opens a scoped map.
+- `harness.runtime.shared_map_get(map, key, default?)`,
+  `harness.runtime.shared_map_set(map, key, value)`,
+  `harness.runtime.shared_map_delete(map, key)`, and
+  `harness.runtime.shared_map_entries(map)` are the last-write-wins map
+  operations.
+- `harness.runtime.shared_map_snapshot(map, key)` and
+  `harness.runtime.shared_map_cas(map, key, expected_or_snapshot, value)`
+  provide versioned conflict checks.
 
-`shared_metrics(handle)` reports `read_count`, `write_count`,
+`harness.runtime.shared_metrics(handle)` reports `read_count`, `write_count`,
 `cas_success_count`, `cas_failure_count`, `stale_read_count`, and `version`
 for cells and maps.
 
 Use named synchronization around multi-step updates:
 
 ```harn
-const memo = shared_map({scope: "workflow_run", key: "memo"})
-const lock = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
-guard lock != nil else { throw "state lock timeout" }
-try {
-  shared_map_set(memo, "customer-42", "summary")
-} finally {
-  sync_release(lock)
+fn main(harness: Harness) {
+  const memo = harness.runtime.shared_map({
+    scope: "workflow_run",
+    key: "memo",
+  })
+  const lock = harness.runtime.sync_mutex_acquire(
+    "memo:customer-42", 250ms,
+  )
+  guard lock != nil else { throw "state lock timeout" }
+  try {
+    harness.runtime.shared_map_set(memo, "customer-42", "summary")
+  } finally {
+    harness.runtime.sync_release(lock)
+  }
 }
 ```
 
@@ -552,23 +585,31 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
-spawn {
-  mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+fn main(harness: Harness) {
+  const inbox = harness.runtime.mailbox_open(
+    {scope: "task_group", name: "reviewer", capacity: 32},
+  )
+  spawn {
+    harness.runtime.mailbox_send("reviewer", {
+      kind: "work",
+      path: "src/main.rs",
+    })
+  }
+  const msg = harness.runtime.mailbox_receive(inbox)
 }
-const msg = mailbox_receive(inbox)
 ```
 
-- `mailbox_open(name_or_options, capacity?)` opens or creates an inbox.
-- `mailbox_lookup(name_or_handle)` returns a handle or `nil`.
-- `mailbox_send(target, value)` returns `false` when the mailbox is absent or
-  closed.
-- `mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
-  or the task is cancelled.
-- `mailbox_try_receive(target)` is non-blocking.
-- `mailbox_close(target)` closes the inbox to new messages.
-- `mailbox_metrics(target)` reports `depth`, `capacity`, `sent_count`,
-  `received_count`, `failed_send_count`, and `closed`.
+- `harness.runtime.mailbox_open(name_or_options, capacity?)` opens or creates
+  an inbox.
+- `harness.runtime.mailbox_lookup(name_or_handle)` returns a handle or `nil`.
+- `harness.runtime.mailbox_send(target, value)` returns `false` when the
+  mailbox is absent or closed.
+- `harness.runtime.mailbox_receive(target)` blocks until a message arrives,
+  the mailbox closes, or the task is cancelled.
+- `harness.runtime.mailbox_try_receive(target)` is non-blocking.
+- `harness.runtime.mailbox_close(target)` closes the inbox to new messages.
+- `harness.runtime.mailbox_metrics(target)` reports `depth`, `capacity`,
+  `sent_count`, `received_count`, `failed_send_count`, and `closed`.
 
 ### Supervisor trees
 
@@ -582,32 +623,34 @@ fn poll_connector(name) {
   name
 }
 
-const sup = supervisor_start({
-  name: "ops",
-  strategy: "one_for_one",
-  children: [
-    {
-      name: "github-stream",
-      kind: "connector_stream",
-      restart: {
-        mode: "on_failure",
-        max_restarts: 5,
-        window_ms: 60000,
-        backoff_ms: 250,
-        max_backoff_ms: 30000,
-        factor: 2,
-        jitter_ms: 100,
-        circuit_open_ms: 300000,
+fn main(harness: Harness) {
+  const sup = harness.runtime.supervisor_start({
+    name: "ops",
+    strategy: "one_for_one",
+    children: [
+      {
+        name: "github-stream",
+        kind: "connector_stream",
+        restart: {
+          mode: "on_failure",
+          max_restarts: 5,
+          window_ms: 60000,
+          backoff_ms: 250,
+          max_backoff_ms: 30000,
+          factor: 2,
+          jitter_ms: 100,
+          circuit_open_ms: 300000,
+        },
+        task: { ctx -> poll_connector(ctx.child_name) },
       },
-      task: { ctx -> poll_connector(ctx.child_name) },
-    },
-  ],
-})
+    ],
+  })
 
-const _state = supervisor_state(sup)
+  const _state = harness.runtime.supervisor_state(sup)
 
-const _events = supervisor_events(sup)
-supervisor_stop(sup, 2s)
+  const _events = harness.runtime.supervisor_events(sup)
+  harness.runtime.supervisor_stop(sup, 2s)
+}
 ```
 
 `strategy` supports `one_for_one`, `one_for_all`, `rest_for_one`, and
@@ -617,16 +660,21 @@ exponential backoff, deterministic jitter, and circuit-open delay before a
 suppressed child is eligible to restart again. Child status includes `running`,
 `waiting`, `circuit_open`, `stopped`, `failed`, and `suppressed`.
 
-- `supervisor_start(spec)` starts a supervisor and returns a supervisor handle.
-- `supervisor_state(handle_or_id)` returns children, status, restart count,
-  last error, current wait reason, active lease, next restart time, and metrics.
-- `supervisor_events(handle_or_id)` returns lifecycle events for child started,
-  stopped, failed, restarted, suppressed, escalated, and supervisor shutdown.
-- `supervisor_metrics(handle_or_id)` returns lifecycle counters.
-- `supervisor_wait(handle_or_id)` awaits the terminal lifecycle transition and
-  returns the final supervisor state.
-- `supervisor_stop(handle_or_id, timeout?)` requests cooperative child
-  cancellation, waits for drain, then force-aborts any remaining children.
+- `harness.runtime.supervisor_start(spec)` starts a supervisor and returns a
+  supervisor handle.
+- `harness.runtime.supervisor_state(handle_or_id)` returns children, status,
+  restart count, last error, current wait reason, active lease, next restart
+  time, and metrics.
+- `harness.runtime.supervisor_events(handle_or_id)` returns lifecycle events
+  for child started, stopped, failed, restarted, suppressed, escalated, and
+  supervisor shutdown.
+- `harness.runtime.supervisor_metrics(handle_or_id)` returns lifecycle
+  counters.
+- `harness.runtime.supervisor_wait(handle_or_id)` awaits the terminal
+  lifecycle transition and returns the final supervisor state.
+- `harness.runtime.supervisor_stop(handle_or_id, timeout?)` requests
+  cooperative child cancellation, waits for drain, then force-aborts any
+  remaining children.
 
 `runtime_context().debug.supervisors` exposes the same state for runtime
 introspection tooling. Supervisor lifecycle events are also appended to the
@@ -637,9 +685,12 @@ active EventLog topic `supervisor.lifecycle` when an EventLog is installed.
 Channels provide typed message-passing between concurrent tasks.
 
 ```harn
-const ch = channel("name", 10)   // buffered channel with capacity 10
-send(ch, "hello")               // send a value, returns true
-const msg = receive(ch)           // blocking receive
+fn main(harness: Harness) {
+  // buffered channel with capacity 10
+  const ch = harness.runtime.channel("name", 10)
+  harness.runtime.send(ch, "hello")     // send a value, returns true
+  const msg = harness.runtime.receive(ch)   // blocking receive
+}
 ```
 
 #### Channel iteration
@@ -648,16 +699,18 @@ A `for`-`in` loop over a channel asynchronously receives values until the
 channel is closed and drained:
 
 ```harn
-const ch = channel("stream", 10)
-spawn {
-  send(ch, "a")
-  send(ch, "b")
-  close_channel(ch)
+fn main(harness: Harness) {
+  const ch = harness.runtime.channel("stream", 10)
+  spawn {
+    harness.runtime.send(ch, "a")
+    harness.runtime.send(ch, "b")
+    harness.runtime.close_channel(ch)
+  }
+  for item in ch {
+    harness.obs.log(item)    // prints "a", then "b"
+  }
+  // loop exits after channel is closed and all items are consumed
 }
-for item in ch {
-  harness.obs.log(item)    // prints "a", then "b"
-}
-// loop exits after channel is closed and all items are consumed
 ```
 
 When the channel is closed, remaining buffered items are still delivered.
@@ -696,12 +749,15 @@ corresponding body. Only one case fires per select.
 #### timeout case
 
 ```harn
-fn handle(msg) { harness.obs.log(msg) }
-const ch1 = channel("events")
-select {
-  msg from ch1 { handle(msg) }
-  timeout 5s {
-    harness.obs.log("timed out")
+fn handle(harness: Harness, msg) { harness.obs.log(msg) }
+
+fn main(harness: Harness) {
+  const ch1 = harness.runtime.channel("events")
+  select {
+    msg from ch1 { handle(harness, msg) }
+    timeout 5s {
+      harness.obs.log("timed out")
+    }
   }
 }
 ```
@@ -711,12 +767,15 @@ If no channel produces a value within the duration, the timeout body runs.
 #### default case (non-blocking)
 
 ```harn
-fn handle(msg) { harness.obs.log(msg) }
-const ch1 = channel("events")
-select {
-  msg from ch1 { handle(msg) }
-  default {
-    harness.obs.log("nothing ready")
+fn handle(harness: Harness, msg) { harness.obs.log(msg) }
+
+fn main(harness: Harness) {
+  const ch1 = harness.runtime.channel("events")
+  select {
+    msg from ch1 { handle(harness, msg) }
+    default {
+      harness.obs.log("nothing ready")
+    }
   }
 }
 ```
@@ -779,12 +838,12 @@ the consumer at the pull site (`for`, `.next()`, or `.iter()`).
 ### Durable agent channels
 
 Durable agent channels (epic #1870) are distinct from the in-process
-`channel(...)` primitive above. Where in-process channels are typed
-mailboxes between concurrent tasks inside one VM, durable channels are
-a typed pub/sub primitive that writes to the active EventLog and fans
-each emit out to every matching `channel.emit` trigger binding. They
-survive process restarts, feed the replay oracle, and show up in the
-action graph alongside webhook and cron events.
+`harness.runtime.channel(...)` primitive above. Where in-process
+channels are typed mailboxes between concurrent tasks inside one VM,
+durable channels are a typed pub/sub primitive that writes to the
+active EventLog and fans each emit out to every matching `channel.emit`
+trigger binding. They survive process restarts, feed the replay oracle,
+and show up in the action graph alongside webhook and cron events.
 
 #### Emit
 

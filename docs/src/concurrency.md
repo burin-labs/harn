@@ -90,7 +90,8 @@ scope {
     fetch("https://b")
   }
 }
-// Both fetches have finished here — the block did not exit until they did.
+// Both fetches have finished here — the
+// block did not exit until they did.
 ```
 
 - **Joins on exit.** Reaching the end of the block waits for every task spawned
@@ -144,7 +145,7 @@ Use `as stream` when callers need completion-order progress instead of
 an eager list:
 
 ```harn
-const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+const results = parallel each [30, 5, 10] with {max_concurrent: 2} { ms ->
   harness.clock.sleep_ms(ms)
   ms
 } as stream
@@ -212,7 +213,8 @@ const outcome = parallel settle [1, 2, 3] { item ->
 
 harness.stdio.log(outcome.succeeded)  // 3 — not 2
 harness.stdio.log(outcome.failed)     // 0 — not 1
-harness.stdio.log(outcome.results[1])  // Result.Ok(Result.Err({code: "terminal", ...}))
+// Result.Ok(Result.Err({code: "terminal", ...}))
+harness.stdio.log(outcome.results[1])
 ```
 
 This matters whenever a branch reports a failing verdict as data rather than by
@@ -249,15 +251,21 @@ const outcome = settle_with_abort(lanes, { lane, token ->
     const status = poll_lane(lane)
     if status == "failed" {
       // Tell the siblings the run is doomed, then report our own verdict.
-      let _ = request_abort(token, {code: "lane_failed", message: "${lane} went red"})
+      let _ = request_abort(
+        token, {code: "lane_failed", message: "${lane} went red"},
+      )
       return Err({code: "terminal", message: "${lane} went red"})
     }
     if status == "passed" {
       return lane_proof(lane)
     }
-    // The branch chooses its own safe checkpoint: right before the next wait.
+    // The branch chooses its own safe
+    // checkpoint: right before the next wait.
     if abort_requested(token) {
-      return Err({code: "stopped_waiting", message: "a sibling lane already failed"})
+      return Err({
+        code: "stopped_waiting",
+        message: "a sibling lane already failed",
+      })
     }
     harness.clock.sleep_ms(10000)
     polls = polls + 1
@@ -376,11 +384,13 @@ for chunk in ch {
 // prints "chunk 1" then "chunk 2", then the loop ends
 ```
 
-This is especially useful with `llm_stream`, which returns a channel
+This is especially useful with `harness.llm.stream`, which returns a channel
 of response chunks:
 
 ```harn
-const stream = harness.llm.stream("Tell me a story", "You are a storyteller")
+const stream = harness.llm.stream(
+  "Tell me a story", "You are a storyteller",
+)
 for chunk in stream {
   harness.stdio.log(chunk)
 }
@@ -418,7 +428,9 @@ branches run on one thread or several; see [Where branches
 run](#where-branches-run).
 
 ```harn
-const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell({
+  scope: "task_group", key: "tokens", initial: 0,
+})
 
 parallel 10 { i ->
   let updated = false
@@ -462,7 +474,9 @@ critical section:
 
 ```harn,ignore
 const memo = shared_map({scope: "workflow_run", key: "memo"})
-const permit = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
+const permit = harness.runtime.sync_mutex_acquire(
+  "memo:customer-42", 250ms,
+)
 guard permit != nil else { throw "memo lock timeout" }
 try {
   shared_map_set(memo, "customer-42", compute_customer_summary())
@@ -477,7 +491,9 @@ Mailboxes are named inboxes for actor-style communication between tasks and
 long-lived workers. They use explicit messages instead of transcript mutation.
 
 ```harn
-const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open({
+  scope: "task_group", name: "reviewer", capacity: 32,
+})
 
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
@@ -497,7 +513,9 @@ Examples:
 
 ```harn,ignore
 // Connector token refresh: only one task refreshes the token.
-const tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
+const tokens = shared_map({
+  scope: "tenant", tenant_id: "acme", key: "connector_tokens",
+})
 const lock = harness.runtime.sync_mutex_acquire("token:acme:slack", 2s)
 guard lock != nil else { throw "token refresh busy" }
 try {
@@ -518,7 +536,9 @@ const scratch = shared_map({scope: "agent_session", key: "scratchpad"})
 shared_map_set(scratch, "hypothesis", "retry with smaller batch")
 
 // Shared budget counter: CAS avoids lost updates.
-const spent = shared_cell({scope: "task_group", key: "budget_usd_micros", initial: 0})
+const spent = shared_cell({
+  scope: "task_group", key: "budget_usd_micros", initial: 0,
+})
 let ok = false
 while !ok {
   const snap = shared_snapshot(spent)
@@ -572,7 +592,8 @@ mutex {
 }
 
 mutex(account_id) {
-  // serializes only against other `mutex(account_id)` blocks for the same id
+  // serializes only against other
+  // `mutex(account_id)` blocks for the same id
   apply_charge(account_id)
 }
 ```
@@ -646,7 +667,9 @@ try { poll_connector() } finally { sync_release(permit) }
 // Fair workflow runner admission.
 const slot = sync_gate_acquire("workflow-runner", 8, 5s)
 guard slot != nil else { throw "runner queue timed out" }
-try { workflow_execute("task", {}, [], {}) } finally { sync_release(slot) }
+try {
+  workflow_execute("task", {}, [], {})
+} finally { sync_release(slot) }
 
 // Critical-section update.
 const lock = harness.runtime.sync_mutex_acquire("state:account-42", 250ms)
@@ -699,7 +722,9 @@ timeout without real sleeps:
 ```harn
 harness.testing.clock_set(1000)
 
-const first = durable_rate_limit_acquire({key: "test", limit: 1, window_ms: 1s})
+const first = durable_rate_limit_acquire({
+  key: "test", limit: 1, window_ms: 1s,
+})
 const second = durable_rate_limit_acquire({
   key: "test",
   limit: 1,
@@ -789,7 +814,9 @@ frees up — fan-out stays bounded while the total work is unchanged.
 
 ```harn
 // Without a cap: all 200 requests hit the server at once.
-const results = parallel settle paths { p -> harness.llm.call(p, nil, opts) }
+const results = parallel settle paths { p ->
+  harness.llm.call(p, nil, opts)
+}
 
 // With max_concurrent=8: at most 8 in-flight calls at any moment.
 const results = parallel settle paths with { max_concurrent: 8 } { p ->
@@ -814,7 +841,7 @@ parallel 100 with { max_concurrent: 4 } { i ->
 `max_concurrent` bounds *simultaneous* in-flight tasks on the caller's
 side. A provider or model route can additionally be rate-limited at
 the throughput layer. Harn enforces catalog `rate_limits` metadata
-before each `llm_call`: requests per minute (`rpm`), total tokens per
+before each `harness.llm.call`: requests per minute (`rpm`), total tokens per
 minute (`tpm`), split input/output token buckets (`input_tpm`,
 `output_tpm`), and route concurrency. Requests past the budget wait
 for the window to free up rather than error. RPM/TPM buckets are durable
@@ -893,7 +920,9 @@ fn consume_stream(net: HarnessNet, obs: HarnessObs, url) {
   }
 }
 
-const reader = spawn { consume_stream(harness.net, harness.obs, binding.stream_url) }
+const reader = spawn {
+  consume_stream(harness.net, harness.obs, binding.stream_url)
+}
 const shutdown = waitpoint_wait("connector.shutdown", {timeout: 1h})
 if shutdown.status == "completed" {
   cancel_graceful(reader, 2s)
@@ -926,11 +955,15 @@ const _streams = supervisor_start({
       circuit_open_ms: 300000,
     },
     task: { _ctx ->
-      const stream = harness.net.sse_connect("https://example.invalid/events")
+      const stream = harness.net.sse_connect(
+        "https://example.invalid/events"
+      )
       while !is_cancelled() {
         const event = harness.net.sse_receive(stream, 5000)
         if event != nil {
-          harness.obs.event_log_emit("connector.github", event.kind, event.payload)
+          harness.obs.event_log_emit(
+            "connector.github", event.kind, event.payload,
+          )
         }
       }
     },
@@ -948,7 +981,12 @@ const _persona = supervisor_start({
     name: "inbox-loop",
     kind: "persona_loop",
     active_lease: "persona:review-captain",
-    restart: {mode: "always", max_restarts: 10, window_ms: 300000, backoff_ms: 1000},
+    restart: {
+      mode: "always",
+      max_restarts: 10,
+      window_ms: 300000,
+      backoff_ms: 1000,
+    },
     task: { _ctx ->
       agent_loop(harness, "watch the review inbox", nil, {mode: "daemon"})
     },
@@ -963,7 +1001,9 @@ fn handle_patch_message(msg) {
   msg
 }
 
-const inbox = mailbox_open({scope: "task_group", name: "patcher", capacity: 32})
+const inbox = mailbox_open({
+  scope: "task_group", name: "patcher", capacity: 32,
+})
 
 const _actor = supervisor_start({
   name: "patch-actors",
@@ -971,7 +1011,12 @@ const _actor = supervisor_start({
   children: [{
     name: "patcher",
     kind: "actor_mailbox",
-    restart: {mode: "on_failure", max_restarts: 3, window_ms: 60000, backoff_ms: 100},
+    restart: {
+      mode: "on_failure",
+      max_restarts: 3,
+      window_ms: 60000,
+      backoff_ms: 100,
+    },
     task: { _ctx ->
       while !is_cancelled() {
         const msg = mailbox_receive(inbox)

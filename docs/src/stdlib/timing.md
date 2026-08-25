@@ -14,10 +14,11 @@ import { agent_preset } from "std/agent/presets"
 import { timed } from "std/timing"
 
 pipeline default(harness: Harness) {
-  const outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
-    const opts = agent_preset("repair")
-    return agent_loop(harness, task, opts?.system, opts)
-  })
+  const outcome = timed(
+    "benchmark.agent_loop", {case_id: "python-add"}, { ->
+      const opts = agent_preset("repair")
+      return agent_loop(harness, task, opts?.system, opts)
+    })
   __io_println("duration_ms=${outcome.timing.duration_ms}")
   return outcome.result
 }
@@ -74,7 +75,8 @@ that pin wall time align with timing output.
 `timing_event(handle, name, attrs?)` records a sub-phase annotation on the open
 span without allocating a child span for every marker. Events ride along with
 the parent span — they show up in `timing.events` after `end_timing`, in
-`trace_spans()` output, and in OTel exports as native span events. Returns
+`harness.obs.trace_spans()` output, and in OTel exports as native span events.
+Returns
 `true` when the event was attached, `false` when the handle is already closed.
 
 ## Duplicate close is idempotent

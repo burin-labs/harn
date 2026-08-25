@@ -14,7 +14,7 @@ import "std/triggers"
 
 ## Builtins
 
-### `trigger_list()`
+### `harness.runtime.trigger_list()`
 
 Return the current live registry snapshot as `list<TriggerBinding>`.
 
@@ -33,7 +33,7 @@ Each binding includes:
 `metrics` is a typed `TriggerMetrics` record with counters for `received`,
 `dispatched`, `failed`, `dlq`, `in_flight`, and the cost snapshot fields.
 
-### `trigger_register(config)`
+### `harness.runtime.trigger_register(config)`
 
 Register a trigger dynamically and return its `TriggerHandle`.
 
@@ -55,10 +55,10 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `manifest_path`
 - `package_name`
 
-Dynamic `trigger_register(...)` currently supports the legacy budget fields but
-does not yet accept manifest-only flow-control tables such as `concurrency`,
-`throttle`, `rate_limit`, `debounce`, `singleton`, `batch`, or keyed
-`priority`.
+Dynamic `harness.runtime.trigger_register(...)` currently supports the legacy
+budget fields but does not yet accept manifest-only flow-control tables such
+as `concurrency`, `throttle`, `rate_limit`, `debounce`, `singleton`, `batch`,
+or keyed `priority`.
 
 The runtime currently accepts two handler forms:
 
@@ -89,26 +89,28 @@ fn handle_issue(harness: Harness, event: TriggerEvent) -> dict {
   return {kind: event.kind, provider: event.provider}
 }
 
-const handle: TriggerHandle = trigger_register({
-  id: "github-new-issue",
-  kind: "issue.opened",
-  provider: "github",
-  autonomy_tier: "act_with_approval",
-  handler: handle_issue,
-  allow_cleartext: nil,
-  when: nil,
-  when_budget: nil,
-  match: {events: ["issue.opened"]},
-  events: nil,
-  dedupe_key: nil,
-  filter: nil,
-  budget: nil,
-  manifest_path: nil,
-  package_name: nil,
-})
+fn main(harness: Harness) {
+  const handle: TriggerHandle = harness.runtime.trigger_register({
+    id: "github-new-issue",
+    kind: "issue.opened",
+    provider: "github",
+    autonomy_tier: "act_with_approval",
+    handler: handle_issue,
+    allow_cleartext: nil,
+    when: nil,
+    when_budget: nil,
+    match: {events: ["issue.opened"]},
+    events: nil,
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  })
+}
 ```
 
-### `trigger_fire(handle, event)`
+### `harness.runtime.trigger_fire(handle, event)`
 
 Fire a synthetic `TriggerEvent` into a binding and return a
 `DispatchHandle`.
@@ -137,7 +139,7 @@ Current behavior:
 - `worker://...` handlers return an enqueue receipt in `DispatchHandle.result`
   with `{queue, job_event_id, response_topic}`.
 
-### `trigger_replay(event_id)`
+### `harness.runtime.trigger_replay(event_id)`
 
 Replay a previously recorded event from the EventLog by id and return a
 `DispatchHandle`.
@@ -149,11 +151,11 @@ Current replay behavior:
 - Preserve `replay_of_event_id` on the returned `DispatchHandle`
 - Resolve the pending stdlib DLQ entry when a replay succeeds
 
-`trigger_replay(...)` is still not the full deterministic T-14 replay engine.
-It replays the recorded trigger event through the current dispatcher/runtime
-state rather than a sandboxed drift-detecting environment.
+`harness.runtime.trigger_replay(...)` is still not the full deterministic T-14
+replay engine. It replays the recorded trigger event through the current
+dispatcher/runtime state rather than a sandboxed drift-detecting environment.
 
-### `trigger_inspect_dlq()`
+### `harness.runtime.trigger_inspect_dlq()`
 
 Return the current DLQ snapshot as `list<DlqEntry>`.
 
@@ -170,14 +172,14 @@ Each `DlqEntry` includes:
 
 `retry_history` records every DLQ attempt, including replay attempts.
 
-### `trigger_inspect_lifecycle(kind?)`
+### `harness.runtime.trigger_inspect_lifecycle(kind?)`
 
 Return the trigger lifecycle stream as a list of `{kind, headers, payload}`
 records. Pass a kind such as `predicate.evaluated`,
 `predicate.budget_exceeded`, or `DispatchStarted` to filter on the runtime
 side.
 
-### `trigger_inspect_action_graph(trace_id?)`
+### `harness.runtime.trigger_inspect_action_graph(trace_id?)`
 
 Return streamed `observability.action_graph` records as a list of
 `{kind, headers, payload}` records. Pass a `trace_id` to filter the stream to
@@ -216,7 +218,9 @@ and cached classifier steps.
 import "std/triggers"
 
 pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
-  const forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
+  const forked = stream_fork(
+    [event.provider_payload.raw], ["risk", "ledger"],
+  )
   const windowed = window_by(
     [event.provider_payload.raw],
     {
@@ -229,13 +233,15 @@ pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
     },
   )
   const classified = llm_classify(
-    event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"},
+    event.provider_payload.raw, [
+      "ignore", "review",
+    ], {cache: "quotes:v1"},
   )
   return {forked: forked, windowed: windowed, classified: classified}
 }
 ```
 
-### `trust_record(agent, action, approver, outcome, tier)`
+### `harness.runtime.trust_record(agent, action, approver, outcome, tier)`
 
 Append a manual OpenTrustGraph `TrustRecord` to the trust graph. Scripts usually
 rely on the dispatcher's automatic end-of-handler records, but this builtin is
@@ -244,29 +250,29 @@ audit entries. The returned record includes `chain_index`, `previous_hash`, and
 `entry_hash`, and the runtime also mirrors a compact projection to
 `trust_graph.records`.
 
-### `trust_graph_record(decision)`
+### `harness.runtime.trust_graph_record(decision)`
 
 Append a decision dict to the trust graph and return its `TrustEntryId`
 (`record_id`). The dict accepts `agent`/`actor_id`, `action`, `approver`,
 `outcome`, `trace_id`, `autonomy_tier`/`autonomy_tier_at_time` (or `tier`),
 `evidence_refs`, `cost_usd`, and `metadata`.
 
-### `trust_graph_query(agent, action)`
+### `harness.runtime.trust_graph_query(agent, action)`
 
 Return a `TrustScore` for an agent and optional action. Scores include outcome
 counts, success rate, latest outcome, effective autonomy tier, and a capability
 policy that handlers can use as a gate.
 
-### `trust_graph_policy_for(agent)`
+### `harness.runtime.trust_graph_policy_for(agent)`
 
 Return only the derived `CapabilityPolicy` for an agent.
 
-### `trust_graph_verify_chain()`
+### `harness.runtime.trust_graph_verify_chain()`
 
 Verify the active trust graph hash chain and return a report with `verified`,
 `root_hash`, `broken_at_event_id`, and `errors`.
 
-### `trust_query(filters)`
+### `harness.runtime.trust_query(filters)`
 
 Query historical trust records from Harn code.
 
@@ -298,40 +304,48 @@ fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
   throw("manual failure: " + event.kind)
 }
 
-const handle = trigger_register({
-  id: "manual-dlq",
-  kind: "issue.opened",
-  provider: "github",
-  handler: fail_handler,
-  when: nil,
-  when_budget: nil,
-  retry: {max: 1, backoff: "immediate"},
-  match: nil,
-  events: ["issue.opened"],
-  dedupe_key: nil,
-  filter: nil,
-  budget: nil,
-  manifest_path: nil,
-  package_name: nil,
-})
+fn main(harness: Harness) {
+  const handle = harness.runtime.trigger_register({
+    id: "manual-dlq",
+    kind: "issue.opened",
+    provider: "github",
+    handler: fail_handler,
+    when: nil,
+    when_budget: nil,
+    retry: {max: 1, backoff: "immediate"},
+    match: nil,
+    events: ["issue.opened"],
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  })
 
-const fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
-const dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
-const replay = trigger_replay(fired.event_id)
+  const fired = harness.runtime.trigger_fire(
+    handle, {provider: "github", kind: "issue.opened"},
+  )
+  const dlq = harness.runtime.trigger_inspect_dlq().filter({ entry ->
+    entry.binding_id == handle.id
+  })
+  const replay = harness.runtime.trigger_replay(fired.event_id)
 
-harness.stdio.log(fired.status)                  // "dlq"
-harness.stdio.log(len(dlq[0].retry_history))     // 1
-harness.stdio.log(replay.replay_of_event_id)     // original event id
+  harness.stdio.log(fired.status)                // "dlq"
+  harness.stdio.log(len(dlq[0].retry_history))   // 1
+  harness.stdio.log(replay.replay_of_event_id)   // original event id
+}
 ```
 
 ## Notes
 
-- Dynamic registrations are runtime-local. `trigger_register(...)` updates the
-  live registry in the current process; it does not rewrite `harn.toml`.
+- Dynamic registrations are runtime-local.
+  `harness.runtime.trigger_register(...)` updates the live registry in the
+  current process; it does not rewrite `harn.toml`.
 - `a2a://...` bindings default to HTTPS-only. Use `allow_cleartext: true` only
   for intentional local or otherwise trusted HTTP peers.
 - `TriggerConfig.autonomy_tier` defaults to `act_auto` when omitted.
-- `trigger_fire(...)` and `trigger_replay(...)` need an active EventLog to
+- `harness.runtime.trigger_fire(...)` and
+  `harness.runtime.trigger_replay(...)` need an active EventLog to
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the
   current thread.

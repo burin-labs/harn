@@ -133,19 +133,22 @@ top-level `title` and `icons` metadata into the `tools/list` response.
 `tool_define` entry without annotations.
 
 ```harn
-registry = tool_define(registry, "repo.status", "Read repository status", {
-  parameters: {},
-  title: "Repository Status",
-  handler: { _args -> git.status() },
-  annotations: {
+registry = tool_define(
+  registry, "repo.status", "Read repository status", {
+    parameters: {},
     title: "Repository Status",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-  icons: [{src: "https://example.com/repo-status.png", mimeType: "image/png"}],
-})
+    handler: { _args -> git.status() },
+    annotations: {
+      title: "Repository Status",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    icons: [
+      {src: "https://example.com/repo-status.png", mimeType: "image/png"}
+    ],
+  })
 ```
 
 #### Tool surface validation
@@ -348,7 +351,7 @@ registry = tool_define(registry, "rare_admin_action", "...", {
 falling back to eager loading.
 
 Deferred tools are only materialised on the wire when the call opts
-into `tool_search` (see the `llm_call` option of the same name and
+into `tool_search` (see the `harness.llm.call` option of the same name and
 `docs/src/llm-and-agents.md`). Harn supports two native backends plus a
 provider-agnostic client fallback:
 
@@ -386,7 +389,9 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -399,9 +404,12 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   reasoning_effort_supported, reasoning_none_supported,
 //   message_wire_format, native_tool_wire_format,
 //   prefers_xml_scaffolding, prefers_markdown_scaffolding,
-//   structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none",
-//   supports_assistant_prefill, prefers_role_developer, prefers_xml_tools,
-//   thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline",
+//   structured_output_mode:
+//     "native_json" | "delimited" | "xml_tagged" | "none",
+//   supports_assistant_prefill, prefers_role_developer,
+//   prefers_xml_tools,
+//   thinking_block_style:
+//     "none" | "thinking_blocks" | "reasoning_summary" | "inline",
 // }
 ```
 
@@ -488,7 +496,9 @@ including closures.
 Functions can be promoted into skills via the `@acp_skill` attribute:
 
 ```harn,ignore
-@acp_skill(name: "deploy", when_to_use: "User says deploy", invocation: "explicit")
+@acp_skill(
+  name: "deploy", when_to_use: "User says deploy", invocation: "explicit",
+)
 pub fn deploy_run() { ... }
 ```
 

@@ -13,7 +13,9 @@ register_reminder_provider({
   id: "custom",
   subscribes_to: ["session_idle"],
   evaluate: { _ctx ->
-    return {reminder: {body: "Re-check current session state.", ttl_turns: 1}}
+    return {
+      reminder: {body: "Re-check current session state.", ttl_turns: 1},
+    }
   },
 })
 ```

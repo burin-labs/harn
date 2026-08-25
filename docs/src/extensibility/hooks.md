@@ -24,14 +24,14 @@ pass `pre` and/or `post` closures in the config table.
 ```harn
 register_tool_hook({pattern: "exec_*", deny: "exec is gated"})
 register_tool_hook({pattern: "*", max_output: 4000})
-register_tool_hook(
-  {
-    pattern: "fetch_*",
-    pre: { _hook_harness, event ->
-      return {reminder: {body: "Network fetch is about to run", tags: ["tool"]}}
-    },
+register_tool_hook({
+  pattern: "fetch_*",
+  pre: { _hook_harness, event ->
+    return {
+      reminder: {body: "Network fetch is about to run", tags: ["tool"]}
+    }
   },
-)
+})
 ```
 
 ## Persona / step lifecycle hooks (`register_persona_hook`, `register_step_hook`)
@@ -49,11 +49,15 @@ transcript. The reminder spec uses the same keys as
 `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
 
 ```harn,ignore
-register_step_hook("merge_*", "audit", "PreStep", { _hook_harness, ctx ->
-  return {
-    reminder: {body: "Audit step is running", tags: ["audit"]},
-    then: {args: ctx.step.args},
-  }
+fn install_audit_hook(harness: Harness) {
+  harness.agent.register_step_hook(
+    "merge_*", "audit", "PreStep", { _hook_harness, ctx ->
+      return {
+        reminder: {body: "Audit step is running", tags: ["audit"]},
+        then: {args: ctx.step.args},
+      }
+    },
+  )
 }
 ```
 
@@ -108,9 +112,10 @@ fn reject_secret_prompt(stdio: HarnessStdio, event) {
 }
 
 pipeline main(harness: Harness) {
-  harness.agent.register_session_hook("user_prompt_submit", { hook_harness, event ->
-    return reject_secret_prompt(hook_harness.stdio, event)
-  })
+  harness.agent.register_session_hook(
+    "user_prompt_submit", { hook_harness, event ->
+      return reject_secret_prompt(hook_harness.stdio, event)
+    })
 }
 ```
 
@@ -118,12 +123,14 @@ pipeline main(harness: Harness) {
 
 ```harn
 pipeline main(harness: Harness) {
-  harness.agent.register_session_hook("permission_asked", { _hook_harness, event ->
-    if to_string(event?.tool?.name ?? "") == "exec_root" {
-      return {decision: "deny", reason: "exec_root never runs unattended"}
-    }
-    return nil
-  })
+  harness.agent.register_session_hook(
+    "permission_asked", { _hook_harness, event ->
+      if to_string(event?.tool?.name ?? "") == "exec_root" {
+        return {decision: "deny", reason: "exec_root never runs"
+          + " unattended"}
+      }
+      return nil
+    })
 }
 ```
 
@@ -131,13 +138,14 @@ pipeline main(harness: Harness) {
 
 ```harn
 pipeline main(harness: Harness) {
-  harness.agent.register_session_hook("file_edited", { hook_harness, event ->
-    const path = to_string(event?.path ?? "")
-    if path.ends_with(".rs") {
-      hook_harness.stdio.log("re-running clippy after edit to " + path)
-    }
-    return nil
-  })
+  harness.agent.register_session_hook(
+    "file_edited", { hook_harness, event ->
+      const path = to_string(event?.path ?? "")
+      if path.ends_with(".rs") {
+        hook_harness.stdio.log("re-running clippy after edit to " + path)
+      }
+      return nil
+    })
 }
 ```
 

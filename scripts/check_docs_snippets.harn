@@ -55,11 +55,18 @@ const DOCS_GLOBS = [
 
 const DIAGNOSTIC_EXAMPLES_PATH = "docs/diagnostic-examples.json"
 
-// The reading budget for published Harn code, in columns. Chosen from the
-// rendered page rather than taste: docs body text wraps at a 34.5rem measure
-// and code blocks break out past it, so a line beyond this starts costing a
-// horizontal scroll on an ordinary laptop viewport.
-const MAX_SNIPPET_COLUMNS = 88
+// The reading budget for published Harn code, in columns. Measured on the
+// rendered page rather than derived from taste — and specifically not from
+// the prose measure: `website/src/index.css` deliberately leaves code,
+// tables, and diagrams uncapped by `--prose-measure`, so a code block is
+// sized by the article column instead. `website/src/pages/DocPage.tsx`
+// renders the article at `lg:max-w-3xl lg:px-10`: 768px - 80px of article
+// padding - 32px of `pre` padding - 2px of border = 654px of code text. Docs
+// code sets JetBrains Mono at 13.6px, whose character advance is 8.734px, so
+// 654 / 8.734 = 74 columns fit. That is the best case, not a typical one: the
+// article is width-capped, so it never gets wider, and a narrower window
+// still scrolls. A line past 74 columns scrolls even on a wide desktop.
+pub const MAX_SNIPPET_COLUMNS: int = 74
 
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
@@ -459,8 +466,11 @@ pub fn indent_output(output: string) -> list<string> {
  * Resolve the harn binary used to validate snippets: $HARN_BIN wins,
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
+ *
+ * Public because the sibling gates that also need a real binary import it
+ * from here rather than growing another copy of the ladder.
  */
-fn resolve_harn_bin(harness: Harness) -> string {
+pub fn resolve_harn_bin(harness: Harness) -> string {
   const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin

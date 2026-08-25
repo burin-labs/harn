@@ -2074,7 +2074,9 @@ register_reminder_provider({
   id: "custom",
   subscribes_to: ["session_idle"],
   evaluate: { _ctx ->
-    return {reminder: {body: "Re-check current session state.", ttl_turns: 1}}
+    return {
+      reminder: {body: "Re-check current session state.", ttl_turns: 1},
+    }
   },
 })
 ```
@@ -2120,9 +2122,12 @@ Example fix:
 
 ```harn
 fn main(harness: Harness) {
-  harness.agent.register_session_hook("post_turn", { _hook_harness, _event ->
-    return {reminder: {body: "Review worker progress before continuing."}}
-  })
+  harness.agent.register_session_hook(
+    "post_turn", { _hook_harness, _event ->
+      return {
+        reminder: {body: "Review worker progress before continuing."},
+      }
+    })
 }
 ```
 
@@ -3652,11 +3657,13 @@ boundary, so their contract must be visible without inspecting the body or a
 particular caller.
 
 ```harn
-pub fn load(path) {                  // warning: parameter and return are untyped
+// warning: parameter and return are untyped
+pub fn load(path) {
   return {path: path}
 }
 
-pub pipeline deploy(config) {        // warning: parameter and return are untyped
+// warning: parameter and return are untyped
+pub pipeline deploy(config) {
   return true
 }
 ```

@@ -14,22 +14,20 @@ import {
   bulletin_render_for_prompt,
 } from "std/personas/bulletins"
 
-const bulletin = bulletin_propose(
-  {
-    scope: "user",
-    scope_key: "kenneth@example.com",
-    subject: "kenneth",
-    persona: "burin_home",
-    context_key: "preferences",
-    assertion: "prefers concise responses without trailing summaries",
-    confidence: 0.92,
-    source: {agent: "burin_home_curator", workflow: "memory_review"},
-    evidence: [
-      {kind: "user_msg", ref: "msg-42", excerpt: "stop summarizing"},
-    ],
-    privacy: {sync: "local_only"},
-  },
-)
+const bulletin = bulletin_propose({
+  scope: "user",
+  scope_key: "kenneth@example.com",
+  subject: "kenneth",
+  persona: "burin_home",
+  context_key: "preferences",
+  assertion: "prefers concise responses without trailing summaries",
+  confidence: 0.92,
+  source: {agent: "burin_home_curator", workflow: "memory_review"},
+  evidence: [
+    {kind: "user_msg", ref: "msg-42", excerpt: "stop summarizing"},
+  ],
+  privacy: {sync: "local_only"},
+})
 const proposal = bulletin_emit(bulletin)
 const decision = bulletin_accept(bulletin, {decided_by: "user"})
 ```

@@ -62,7 +62,9 @@ let state = {count: 0, revision: 0}
 
 fn handle_event(raw) {
   const input_state = raw.state ?? state
-  const execution = portable.start(program, {state: input_state, event: raw.event})
+  const execution = portable.start(
+    program, {state: input_state, event: raw.event},
+  )
   if execution.status != "completed" {
     throw "reducer failed: " + json_stringify(execution)
   }

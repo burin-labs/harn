@@ -134,8 +134,8 @@ pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast,
     {
       path: "src/lib.rs",
-      query: "(function_item name: (identifier) @name (#eq? @name \"greet\") "
-        + "body: (block) @target)",
+      query: "(function_item name: (identifier) @name (#eq? @name"
+        + " \"greet\") body: (block) @target)",
       replacement: "{ format!(\"hi {name}!\") }",
     },
   )
@@ -198,7 +198,8 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(result.applied)              // false
   harness.stdio.println(result.result)               // "syntax_error"
-  harness.stdio.println(result.details)              // human-readable diagnostic
+  // human-readable diagnostic
+  harness.stdio.println(result.details)
   // src/lib.rs is unchanged on disk.
 }
 ```
@@ -464,7 +465,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(result.hunks_count)             // 2
   // On a stale_base result, re-read snapshot.sha256 and retry.
   if result.result == "stale_base" {
-    harness.stdio.println(result.current_hash)          // overlay's actual hash
+    // overlay's actual hash
+    harness.stdio.println(result.current_hash)
   }
 }
 ```
@@ -480,12 +482,16 @@ import { edit_safe_text_patch } from "std/edit"
 pipeline default(harness: Harness) {
   const session = "demo"
     harness.fs.set_mode({session_id: session, mode: "staged"})
-  const pre = harness.fs.staged_read_text({path: "src/main.rs", session_id: session})
+  const pre = harness.fs.staged_read_text({
+    path: "src/main.rs", session_id: session,
+  })
 
   // Sibling agent stages a competing write — overlay diverges.
-  harness.tools.write_file(
-    {session_id: session, path: "src/main.rs", content: "// sibling won\n"},
-  )
+  harness.tools.write_file({
+    session_id: session,
+    path: "src/main.rs",
+    content: "// sibling won\n",
+  })
 
   const losing = edit_safe_text_patch(harness.fs, harness.random,
     {
@@ -526,7 +532,9 @@ fn rewrite(path, hunks, session_id) {
   let attempt = 0
   const max_attempts = 3
   while attempt < max_attempts {
-    const snapshot = harness.fs.staged_read_text({path: path, session_id: session_id})
+    const snapshot = harness.fs.staged_read_text({
+      path: path, session_id: session_id,
+    })
     const result = edit_safe_text_patch(harness.fs, harness.random,
       {
         path: path,
@@ -565,8 +573,10 @@ pipeline default(harness: Harness) {
       dry_run: true,
     },
   )
-  harness.stdio.println(preview.applied)               // true (matcher succeeded)
-  harness.stdio.println(preview.dry_run)               // true (no write happened)
+  // true (matcher succeeded)
+  harness.stdio.println(preview.applied)
+  // true (no write happened)
+  harness.stdio.println(preview.dry_run)
   harness.stdio.println(preview.bytes_written)         // 0
   // The file on disk is unchanged. `preview.preview` carries the
   // post-image the real apply would produce — show it in a diff UI,
@@ -609,7 +619,7 @@ agent has broad edit intent but not a precise AST query yet. It
 separates "what should change" from "how to rewrite the bytes":
 
 1. Read the current file through `harness.fs.staged_read_text`.
-2. Call `llm_call` with `model_role: "merge"` (or `params.model_role`)
+2. Call `harness.llm.call` with `model_role: "merge"` (or `params.model_role`)
    and ask for complete updated file content.
 3. Reject lazy truncation and syntax errors for supported Tree-Sitter
    languages.
@@ -637,11 +647,12 @@ max_tokens = 12000
 Per-call `llm_options` still win:
 
 ```harn,ignore
-const result = edit_fast_apply(harness.fs, harness.random, harness.ast, harness.llm, {
-  path: "src/lib.rs",
-  intent: "Rename the local variable to make the intent clearer.",
-  llm_options: {provider: "mock", model: "mock"},
-})
+const result = edit_fast_apply(
+  harness.fs, harness.random, harness.ast, harness.llm, {
+    path: "src/lib.rs",
+    intent: "Rename the local variable to make the intent clearer.",
+    llm_options: {provider: "mock", model: "mock"},
+  })
 ```
 
 Operational overrides are available without editing config:
@@ -657,7 +668,7 @@ variables work for other roles.
 | `path` | yes | File to mutate. |
 | `intent` / `edit_intent` / `instruction` | yes | Natural-language edit request. |
 | `model_role` | no, default `"merge"` | Role name resolved before normal provider/model routing. |
-| `llm_options` | no | Extra `llm_call` options. Explicit options win over role defaults. |
+| `llm_options` | no | Extra `harness.llm.call` options. Explicit options win over role defaults. |
 | `dry_run` | no | Return `preview` and `per_file_unified_diff` without writing. |
 | `validate_syntax` | no, default `true` | Parse supported languages and reject `syntax_error`; unsupported paths skip validation. |
 | `session_id` | no | Routes reads and writes through the staged-fs overlay. |
@@ -698,7 +709,8 @@ pipeline default(harness: Harness) {
     const preview = edit_fast_apply(
       harness.fs, harness.random, harness.ast, harness.llm, {
     path: "src/lib.rs",
-    intent: "Change answer() to return 42 and keep the rest of the file untouched.",
+    intent: "Change answer() to return 42 and keep the rest of the file"
+      + " untouched.",
     dry_run: true,
   })
   harness.stdio.println(preview.result)
@@ -708,7 +720,8 @@ pipeline default(harness: Harness) {
     const applied = edit_fast_apply(
       harness.fs, harness.random, harness.ast, harness.llm, {
       path: "src/lib.rs",
-      intent: "Change answer() to return 42 and keep the rest of the file untouched.",
+      intent: "Change answer() to return 42 and keep the rest of the file"
+        + " untouched.",
     })
     harness.stdio.println(applied.telemetry.applied)
   }
@@ -774,7 +787,9 @@ const result = edit_rename_symbol(harness.code_index, {
 })
 if !result.ok && result.result == "conflict" {
   for site in result.conflicts {
-    harness.stdio.println("would shadow " + site.shadow + " at " + site.path)
+    harness.stdio.println(
+      "would shadow " + site.shadow + " at " + site.path
+    )
   }
 }
 ```
@@ -842,25 +857,23 @@ files use `+++ /dev/null`.
 import "std/edit"
 
 pipeline default(harness: Harness) {
-  const bundle = edit_dry_run(
-    {
-      plan: [
-        {
-          op: "apply_node",
-          path: "src/lib.rs",
-          query: "(function_item body: (block) @target)",
-          replacement: "{ format!(\"hi {name}!\") }",
-          select: "first",
-        },
-        {
-          op: "safe_text_patch",
-          path: "src/lib.rs",
-          old_text: "fn greet",
-          new_text: "fn greeter",
-        },
-      ],
-    },
-  )
+  const bundle = edit_dry_run({
+    plan: [
+      {
+        op: "apply_node",
+        path: "src/lib.rs",
+        query: "(function_item body: (block) @target)",
+        replacement: "{ format!(\"hi {name}!\") }",
+        select: "first",
+      },
+      {
+        op: "safe_text_patch",
+        path: "src/lib.rs",
+        old_text: "fn greet",
+        new_text: "fn greeter",
+      },
+    ],
+  })
   harness.stdio.println(bundle.result)                     // "ok"
   harness.stdio.println(bundle.summary.ops_applied == 2)   // true
   harness.stdio.println(bundle.summary.files_touched == 1) // true
@@ -880,22 +893,25 @@ fully-rejected case.
 import "std/edit"
 
 pipeline default(harness: Harness) {
-  const bundle = edit_dry_run(
-    {
-      plan: [
-        // Applied.
-        {
-          op: "apply_node",
-          path: "src/lib.rs",
-          query: "(function_item body: (block) @target)",
-          replacement: "{ 42 }",
-          select: "first",
-        },
-        // Rejected — no_match.
-        {op: "safe_text_patch", path: "src/lib.rs", old_text: "missing", new_text: "x"},
-      ],
-    },
-  )
+  const bundle = edit_dry_run({
+    plan: [
+      // Applied.
+      {
+        op: "apply_node",
+        path: "src/lib.rs",
+        query: "(function_item body: (block) @target)",
+        replacement: "{ 42 }",
+        select: "first",
+      },
+      // Rejected — no_match.
+      {
+        op: "safe_text_patch",
+        path: "src/lib.rs",
+        old_text: "missing",
+        new_text: "x",
+      },
+    ],
+  })
   harness.stdio.println(bundle.result)                       // "partial"
   harness.stdio.println(bundle.ops[0].applied)               // true
   harness.stdio.println(bundle.ops[1].applied)               // false

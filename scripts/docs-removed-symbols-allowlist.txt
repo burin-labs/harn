@@ -1,0 +1,247 @@
+# Documentation mentions of removed runtime APIs that
+# `make check-docs-symbols` accepts. The gate itself, and why it needs a
+# baseline at all, are documented in scripts/check_docs_symbols.harn.
+#
+# Entry forms, one per line; `#` starts a comment:
+#
+#   page <path>       every removed-API mention on that page is fine
+#   <path> <symbol>   that one symbol on that one page is fine
+#
+# This file can only shrink on its own. `check-docs-symbols` fails when an
+# entry goes stale — when the page stops mentioning the symbol, or when the
+# compiler stops calling the symbol removed — so a fixed page forces the
+# line to be deleted rather than leaving a permanent exemption behind.
+# Deleting a line needs no ceremony. Adding one is a reviewed act.
+
+# =====================================================================
+# Reviewed exemptions
+# =====================================================================
+
+# Pages whose subject is the API that was replaced. Naming the old
+# spelling is the point of the page, not a defect.
+page docs/src/migrations/v0.10.md        # ambient -> harness migration guide
+page docs/src/migrations/v0.7.md         # earlier migration guide
+page docs/src/adr/0001-pipe-operator.md  # dated decision record
+
+# docs/llm/harn-quickref.md lines 105-106 are that same migration crib,
+# inlined for an LLM reader: "`platform()` and `arch()` are
+# `harness.system.platform().os` and `.arch`".
+docs/llm/harn-quickref.md                          arch
+docs/llm/harn-quickref.md                          platform
+docs/llm/harn-quickref.md                          hostname
+docs/llm/harn-quickref.md                          pid
+docs/llm/harn-quickref.md                          username
+
+# A removed global whose name a std module also exports. The compiler
+# probe carries no imports, so it reads a documented `exec(handle,
+# query)` as the deleted ambient `exec`. These pages document
+# std/postgres::exec, std/agents::continue_as_new and
+# std/llm::with_rate_limit, which are all live.
+docs/llm/harn-quickref.md                          exec
+docs/src/modules.md                                exec
+docs/src/postgres.md                               exec
+docs/src/builtins.md                               continue_as_new
+docs/src/modules.md                                continue_as_new
+docs/src/workflow-runtime.md                       continue_as_new
+docs/src/llm/agent_loop.md                         with_rate_limit
+docs/src/stdlib/tool-middleware.md                 with_rate_limit
+
+# =====================================================================
+# Baseline: stale references that predate this gate
+# =====================================================================
+#
+# Every line below is a real defect awaiting a content fix. They are held
+# here rather than fixed in the change that added the gate because the
+# fixes touch 56 documentation pages that other work is editing
+# concurrently, and a gate that waits for a 312-site burn-down protects
+# nothing in the meantime. Delete lines as pages are corrected.
+
+docs/llm/harn-quickref.md                          atomic
+docs/llm/harn-quickref.md                          cancel_in_flight_tool_call
+docs/llm/harn-quickref.md                          channel_guardrail_register
+docs/llm/harn-quickref.md                          channel_select
+docs/llm/harn-quickref.md                          clear_path_scope_guard
+docs/llm/harn-quickref.md                          clear_reminder_providers
+docs/llm/harn-quickref.md                          daemon_resume
+docs/llm/harn-quickref.md                          daemon_snapshot
+docs/llm/harn-quickref.md                          daemon_spawn
+docs/llm/harn-quickref.md                          daemon_stop
+docs/llm/harn-quickref.md                          daemon_trigger
+docs/llm/harn-quickref.md                          durable_rate_limit_acquire
+docs/llm/harn-quickref.md                          ed25519_keypair
+docs/llm/harn-quickref.md                          notify_file_edited
+docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_snapshot
+docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_take
+docs/llm/harn-quickref.md                          pipeline_on_finish
+docs/llm/harn-quickref.md                          register_path_scope_guard
+docs/llm/harn-quickref.md                          register_persona_hook
+docs/llm/harn-quickref.md                          register_reminder_provider
+docs/llm/harn-quickref.md                          register_session_hook
+docs/llm/harn-quickref.md                          register_tool_hook
+docs/llm/harn-quickref.md                          routing_policy
+docs/llm/harn-quickref.md                          trace_spans
+docs/llm/harn-quickref.md                          trigger_fire
+docs/llm/harn-quickref.md                          trigger_inspect_dlq
+docs/llm/harn-quickref.md                          trigger_inspect_lifecycle
+docs/llm/harn-quickref.md                          trigger_list
+docs/llm/harn-quickref.md                          trigger_register
+docs/llm/harn-quickref.md                          trigger_replay
+docs/llm/harn-quickref.md                          trust_query
+docs/llm/harn-quickref.md                          trust_record
+docs/llm/harn-quickref.md                          x25519_keypair
+docs/llm/harn-quickref.md                          yield_now
+
+docs/src/builtins.md                               agent_trace
+docs/src/builtins.md                               agent_trace_summary
+docs/src/builtins.md                               artifact_emit
+docs/src/builtins.md                               atomic
+docs/src/builtins.md                               atomic_add
+docs/src/builtins.md                               atomic_cas
+docs/src/builtins.md                               atomic_get
+docs/src/builtins.md                               atomic_set
+docs/src/builtins.md                               channel
+docs/src/builtins.md                               channel_select
+docs/src/builtins.md                               clear_tool_hooks
+docs/src/builtins.md                               close_channel
+docs/src/builtins.md                               cookie_delete
+docs/src/builtins.md                               daemon_resume
+docs/src/builtins.md                               daemon_snapshot
+docs/src/builtins.md                               daemon_spawn
+docs/src/builtins.md                               daemon_stop
+docs/src/builtins.md                               daemon_trigger
+docs/src/builtins.md                               enable_tracing
+docs/src/builtins.md                               eval_ledger_append_rows
+docs/src/builtins.md                               eval_ledger_append_unique_case_rows
+docs/src/builtins.md                               eval_ledger_prior_commit_rows
+docs/src/builtins.md                               eval_ledger_read
+docs/src/builtins.md                               eval_ledger_resolve_resume_plan
+docs/src/builtins.md                               eval_pack_run
+docs/src/builtins.md                               eval_suite_run
+docs/src/builtins.md                               friction_clear
+docs/src/builtins.md                               friction_events
+docs/src/builtins.md                               friction_record
+docs/src/builtins.md                               load_run_tree
+docs/src/builtins.md                               path_workspace_canonicalize_existing
+docs/src/builtins.md                               path_workspace_info
+docs/src/builtins.md                               persona_eval_ladder_run
+docs/src/builtins.md                               pg_mock_pool
+docs/src/builtins.md                               prompt_explain
+docs/src/builtins.md                               receive
+docs/src/builtins.md                               register_tool_hook
+docs/src/builtins.md                               rng_seed
+docs/src/builtins.md                               run_record_load
+docs/src/builtins.md                               run_record_save
+docs/src/builtins.md                               send
+docs/src/builtins.md                               supervisor_events
+docs/src/builtins.md                               supervisor_metrics
+docs/src/builtins.md                               supervisor_start
+docs/src/builtins.md                               supervisor_state
+docs/src/builtins.md                               supervisor_stop
+docs/src/builtins.md                               supervisor_wait
+docs/src/builtins.md                               tool_remove
+docs/src/builtins.md                               tool_synthesis_cache
+docs/src/builtins.md                               tool_synthesis_clear
+docs/src/builtins.md                               tool_synthesize
+docs/src/builtins.md                               trace_end
+docs/src/builtins.md                               trace_id
+docs/src/builtins.md                               trace_spans
+docs/src/builtins.md                               trace_start
+docs/src/builtins.md                               trace_summary
+docs/src/builtins.md                               transcript_auto_compact
+docs/src/builtins.md                               trigger_fire
+docs/src/builtins.md                               trigger_inspect_action_graph
+docs/src/builtins.md                               trigger_inspect_dlq
+docs/src/builtins.md                               trigger_inspect_lifecycle
+docs/src/builtins.md                               trigger_list
+docs/src/builtins.md                               trigger_register
+docs/src/builtins.md                               trigger_replay
+docs/src/builtins.md                               trigger_test_harness
+docs/src/builtins.md                               trust_graph_policy_for
+docs/src/builtins.md                               trust_graph_query
+docs/src/builtins.md                               trust_graph_record
+docs/src/builtins.md                               trust_graph_verify_chain
+docs/src/builtins.md                               trust_query
+docs/src/builtins.md                               trust_record
+docs/src/builtins.md                               try_receive
+docs/src/builtins.md                               verification_profile_matches
+docs/src/builtins.md                               verification_profile_record_run
+docs/src/builtins.md                               verification_profile_resolve
+docs/src/builtins.md                               verification_profiles_get
+docs/src/builtins.md                               verification_profiles_set
+docs/src/builtins.md                               with_approval_policy
+docs/src/builtins.md                               with_autonomy_policy
+docs/src/builtins.md                               with_command_policy
+docs/src/builtins.md                               with_dynamic_permissions
+
+docs/src/concurrency.md                            channel_select
+docs/src/concurrency.md                            close_channel
+docs/src/concurrency.md                            durable_rate_limit_acquire
+docs/src/concurrency.md                            mailbox_metrics
+docs/src/concurrency.md                            mailbox_receive
+docs/src/concurrency.md                            mailbox_send
+docs/src/concurrency.md                            mailbox_try_receive
+docs/src/concurrency.md                            parallel_race
+docs/src/concurrency.md                            receive
+docs/src/concurrency.md                            send
+docs/src/concurrency.md                            shared_cas
+docs/src/concurrency.md                            shared_cell
+docs/src/concurrency.md                            shared_map
+docs/src/concurrency.md                            shared_map_get
+docs/src/concurrency.md                            shared_map_set
+docs/src/concurrency.md                            shared_metrics
+docs/src/concurrency.md                            shared_set
+docs/src/concurrency.md                            shared_snapshot
+docs/src/concurrency.md                            supervisor_events
+docs/src/concurrency.md                            supervisor_state
+docs/src/concurrency.md                            supervisor_stop
+docs/src/concurrency.md                            supervisor_wait
+docs/src/concurrency.md                            sync_gate_acquire
+docs/src/concurrency.md                            sync_metrics
+docs/src/concurrency.md                            sync_release
+docs/src/concurrency.md                            sync_rwlock_acquire
+docs/src/concurrency.md                            sync_semaphore_acquire
+docs/src/concurrency.md                            try_receive
+
+docs/src/hitl.md                                   trigger_replay
+
+docs/src/llm/agent_loop.md                         daemon_resume
+docs/src/llm/agent_loop.md                         daemon_snapshot
+docs/src/llm/agent_loop.md                         daemon_spawn
+docs/src/llm/agent_loop.md                         daemon_stop
+docs/src/llm/agent_loop.md                         daemon_trigger
+docs/src/llm/agent_loop.md                         trigger_register
+
+docs/src/modules.md                                metadata_status
+docs/src/modules.md                                pg_mock_pool
+docs/src/modules.md                                sqlite_mock_db
+
+docs/src/pipeline-lifecycle.md                     pipeline_on_finish
+
+docs/src/prompt-assembly.md                        llm_mock_calls
+docs/src/prompt-assembly.md                        prompt_explain
+
+docs/src/stdlib/llm-handlers.md                    routing_policy
+
+docs/src/tool-hooks.md                             tool_hooks_emit_audit
+docs/src/tool-hooks.md                             tool_hooks_filter
+docs/src/tool-hooks.md                             tool_hooks_inject_reminder
+docs/src/tool-hooks.md                             tool_hooks_list
+docs/src/tool-hooks.md                             tool_hooks_match
+docs/src/tool-hooks.md                             tool_hooks_register
+docs/src/tool-hooks.md                             tool_hooks_registry
+docs/src/tool-hooks.md                             tool_hooks_unregister
+
+docs/src/workflow-runtime.md                       eval_suite_run
+docs/src/workflow-runtime.md                       load_run_tree
+
+spec/chapters/13-functions-and-closures.md         command_policy_pop
+spec/chapters/13-functions-and-closures.md         command_policy_push
+
+
+spec/chapters/26-checkpoint-resume.md              checkpoint
+spec/chapters/26-checkpoint-resume.md              checkpoint_clear
+spec/chapters/26-checkpoint-resume.md              checkpoint_delete
+spec/chapters/26-checkpoint-resume.md              checkpoint_exists
+spec/chapters/26-checkpoint-resume.md              checkpoint_get
+spec/chapters/26-checkpoint-resume.md              checkpoint_list
+spec/chapters/26-checkpoint-resume.md              pg_mock_pool

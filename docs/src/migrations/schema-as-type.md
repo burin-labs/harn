@@ -5,7 +5,7 @@ structured LLM output:
 
 1. **Harn-native types** — `type Foo = {verdict: string, ...}`.
 2. **Raw JSON-Schema dicts** — passed as `output: {type: "dict",
-   properties: {...}, required: [...]}` to `llm_call`, and consumed by
+   properties: {...}, required: [...]}` to `harness.llm.call`, and consumed by
    `schema_is`, `schema_expect`, `schema_parse`, and friends.
 
 The two representations drifted. A grader script that declared a type
@@ -15,7 +15,7 @@ no compile-time check that the two agreed.
 This release unifies them. A single `type` alias now feeds:
 
 - Static type-checking on the values that flow through it.
-- JSON-Schema emission for `llm_call` structured output.
+- JSON-Schema emission for `harness.llm.call` structured output.
 - `schema_is` / `schema_expect` narrowing on runtime-typed values
   (`unknown`, unions, parsed JSON).
 - ACP `ToolAnnotations.args` compatibility (same emitted schema).

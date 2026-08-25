@@ -140,10 +140,14 @@ pipeline default(harness: Harness) {
     },
   )
   if !result.ok {
-    harness.stdio.log("refused: " + result.result + " — " + (result.details ?? ""))
+    harness.stdio.log(
+      "refused: " + result.result + " — " + (result.details ?? "")
+    )
     return
   }
-  harness.stdio.log("updated " + to_string(result.summary.files_touched) + " file(s)")
+  harness.stdio.log(
+    "updated " + to_string(result.summary.files_touched) + " file(s)"
+  )
   // fn scale(value: i64, factor: i64, offset: i64) -> i64 { ... }
   // scale(2, 3, 0), scale(4, 5, 0), scale(6, 7, 0)
 }
@@ -168,7 +172,9 @@ the `scale` example above:
 
 ```harn,ignore
 const check = run_command({ cmd: ["cargo", "check"], cwd: "." })
-harness.stdio.log(check.exit_code == 0 ? "callers still compile" : check.stderr)
+harness.stdio.log(
+  check.exit_code == 0 ? "callers still compile" : check.stderr
+)
 ```
 
 Supported languages for the signature family and return-type rewrites: rust,

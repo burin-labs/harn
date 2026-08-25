@@ -12,7 +12,7 @@ handle to the caller.
 
 ## Builtins
 
-### `daemon_spawn(config)`
+### `harness.agent.daemon_spawn(config)`
 
 Start a daemon-mode agent and return a daemon handle dict.
 
@@ -34,19 +34,21 @@ Useful optional config:
 Example:
 
 ```harn
-const reviewer = daemon_spawn({
-  name: "reviewer",
-  task: "Watch for trigger events and summarize the change.",
-  system: "You are a careful code reviewer.",
-  provider: "mock",
-  persist_path: ".harn/daemons/reviewer",
-  watch_paths: ["src/"],
-  wake_interval_ms: 30000,
-  event_queue_capacity: 256,
-})
+fn main(harness: Harness) {
+  const reviewer = harness.agent.daemon_spawn({
+    name: "reviewer",
+    task: "Watch for trigger events and summarize the change.",
+    system: "You are a careful code reviewer.",
+    provider: "mock",
+    persist_path: ".harn/daemons/reviewer",
+    watch_paths: ["src/"],
+    wake_interval_ms: 30000,
+    event_queue_capacity: 256,
+  })
+}
 ```
 
-### `daemon_trigger(handle, event)`
+### `harness.agent.daemon_trigger(handle, event)`
 
 Queue a trigger event for a running daemon. Events are delivered FIFO, one
 daemon wake at a time, and the queue is durably persisted in the daemon's
@@ -55,13 +57,15 @@ metadata so a stop/resume or crash/recovery cycle does not lose pending work.
 If the queue is full, the builtin throws `VmError::DaemonQueueFull`.
 
 ```harn
-daemon_trigger(reviewer, {
-  kind: "file_changed",
-  path: "src/lib.rs",
-})
+fn wake(harness: Harness, reviewer) {
+  harness.agent.daemon_trigger(reviewer, {
+    kind: "file_changed",
+    path: "src/lib.rs",
+  })
+}
 ```
 
-### `daemon_snapshot(handle)`
+### `harness.agent.managed_daemon_snapshot(handle)`
 
 Return the latest persisted daemon snapshot plus live queue metadata:
 
@@ -74,16 +78,18 @@ Return the latest persisted daemon snapshot plus live queue metadata:
 The rest of the payload mirrors `agent_loop` daemon snapshots, including
 `daemon_state`, `recorded_messages`, `total_iterations`, and `saved_at`.
 
-### `daemon_stop(handle)`
+### `harness.agent.daemon_stop(handle)`
 
 Stop a daemon and preserve its state on disk. The runtime waits briefly for an
 idle boundary when possible; if the daemon is still mid-turn, the current
-in-flight trigger is re-queued so `daemon_resume(...)` can replay it safely.
+in-flight trigger is re-queued so `harness.agent.daemon_resume(...)` can
+replay it safely.
 
-### `daemon_resume(path)`
+### `harness.agent.daemon_resume(path)`
 
 Resume a daemon from its persisted state directory. The path is the same root
-directory you passed as `persist_path` to `daemon_spawn(...)`, not the inner
+directory you passed as `persist_path` to `harness.agent.daemon_spawn(...)`,
+not the inner
 `daemon.json` snapshot file.
 
 If the daemon stopped with queued or in-flight trigger events, they are restored

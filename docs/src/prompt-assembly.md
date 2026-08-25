@@ -99,8 +99,8 @@ a fragment gated on that tool's own presence:
 tool_define(registry, "todo", "Add, update, and complete plan items", {
   parameters: { /* … */ },
   handler: todo_handler,
-  guidance: "When working from a plan or task list, always update the TODO"
-    + " tracker after each item.",
+  guidance: "When working from a plan or task list, always update the"
+    + " TODO tracker after each item.",
 })
 ```
 
@@ -119,7 +119,7 @@ never sent to the provider as part of the tool's schema.
 signals such as Git remotes, language/build files, supplied code-librarian
 signals, and available credential aliases into reducer-ready fragments. Agent
 preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
-direct `llm_call` and `prompt_explain` users pass `context_profile` in
+direct `harness.llm.call` and `prompt_explain` users pass `context_profile` in
 options.
 
 Each profile fragment is capability-gated. For example, a Rust profile fragment
@@ -148,9 +148,10 @@ const explained = prompt_explain({
 })
 // explained.system     → the assembled string
 // explained.root       → "composed" (or "replacement")
-// explained.fragments  → [{ id, source, producer, bucket, included, reason,
-//                           bytes, digest }, …]
-// explained.whole_prompt_digest / system_prompt_bytes → whole-prompt receipt
+// explained.fragments → [{ id, source, producer, bucket,
+//                           included, reason, bytes, digest }, …]
+// explained.whole_prompt_digest /
+// system_prompt_bytes → whole-prompt receipt
 // explained.included / explained.excluded → counts
 ```
 

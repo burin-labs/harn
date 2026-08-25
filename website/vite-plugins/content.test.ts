@@ -346,3 +346,39 @@ describe("heading permalinks", () => {
     expect(h1).not.toContain(HEADING_ANCHOR_CLASS)
   })
 })
+
+describe("navigation sections", () => {
+  const sectionFor = (slug: string) =>
+    docs.nav.find((s) => s.groups.some((g) => g.items.some((i) => i.slug === slug)))
+
+  it("separates deploying Harn from contributing to it", () => {
+    // These were one "Operating Harn" tab, which mixed a reader hosting a
+    // pipeline with a maintainer cutting a release. Assert the split by the
+    // pages that motivated it, not by tab count: a renamed tab that quietly
+    // reabsorbed one audience would still pass a count check.
+    expect(sectionFor("deploy/render")?.title).toBe("Deploy")
+    expect(sectionFor("dev/platform-compatibility")?.title).toBe("Deploy")
+    expect(sectionFor("maintainer-release")?.title).toBe("Contributing")
+    expect(sectionFor("dev/merge-overrides")?.title).toBe("Contributing")
+  })
+
+  it("keeps the playground with the other local-iteration guides", () => {
+    // `harn playground` runs a pipeline in-process for fast iteration, so it
+    // belongs beside Debugging and Editor setup rather than under Deploy.
+    expect(sectionFor("playground")?.title).toBe("Guides")
+  })
+
+  it("gives every section a distinct id and title", () => {
+    const ids = docs.nav.map((s) => s.id)
+    const titles = docs.nav.map((s) => s.title)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(titles).size).toBe(titles.length)
+  })
+
+  it("leaves no section empty", () => {
+    for (const section of docs.nav) {
+      const items = section.groups.reduce((n, g) => n + g.items.length, 0)
+      expect(items, section.title).toBeGreaterThan(0)
+    }
+  })
+})

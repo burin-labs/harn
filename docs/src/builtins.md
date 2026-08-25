@@ -51,7 +51,8 @@ fn greet(u: {name: string, age: int}) {
 }
 
 greet({name: "Alice", age: 30})   // OK
-greet({name: "Alice"})            // Error: parameter 'u': missing field 'age' (int)
+// Error: parameter 'u': missing field 'age' (int)
+greet({name: "Alice"})
 ```
 
 See [Error handling -- Runtime shape validation errors](error-handling.md#runtime-shape-validation-errors)
@@ -231,7 +232,9 @@ import { parse_json_typed } from "std/schema"
 
 type User = {name: string}
 
-const user = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
+const user = parse_json_typed(
+  "{\"name\":\"Ada\"}", User, {name: "fallback"},
+)
 harness.stdio.log(user?.name)
 ```
 
@@ -257,10 +260,17 @@ type Receipt = {id: string, version: int}
 const receipt = schema_contract(
   schema_of(Receipt),
   [
-    validation_rule("id_version", fn(value: Receipt) -> list<ValidationIssue> {
-      if starts_with(value.id, "v" + to_string(value.version) + "-") { return [] }
-      return [validation_issue("receipt.id_version", "id must encode version", "id")]
-    }),
+    validation_rule(
+      "id_version", fn(value: Receipt) -> list<ValidationIssue> {
+        if starts_with(
+          value.id, "v" + to_string(value.version) + "-",
+        ) { return [] }
+        return [
+          validation_issue(
+            "receipt.id_version", "id must encode version", "id",
+          )
+        ]
+      }),
   ],
 )
 const checked: Result<Receipt, SchemaContractFailure> =
@@ -312,8 +322,12 @@ recursive descent. It always returns the emitted stream as a list;
 ```harn
 const api = json_parse(response.body)
 const email = json_pointer(api, "/users/0/email")
-const active_emails = jq(api, ".users[] | select(.active == true) | .email")
-const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+const active_emails = jq(
+  api, ".users[] | select(.active == true) | .email",
+)
+const summary = jq_first(
+  api, "{ count: .users | length, next: .meta.next }",
+)
 ```
 
 ## Multipart forms
@@ -750,16 +764,21 @@ Returns a list of dicts, one per match. Each dict contains:
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // [
-//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
-//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
+//   {match: "alice@example", groups: ["alice", "example"],
+//    start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"],
+//    start: 14, end: 22, line: 1}
 // ]
 ```
 
 Named capture groups are added as top-level keys on each result dict:
 
 ```harn
-const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
-// [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+const named = regex_captures(
+  "(?P<user>\\w+):(?P<role>\\w+)", "alice:admin",
+)
+// [{match: "alice:admin", groups: ["alice", "admin"],
+//   user: "alice", role: "admin"}]
 ```
 
 Returns an empty list if there are no matches. Throws on invalid regex.
@@ -934,7 +953,11 @@ keys throw runtime errors.
 ```harn
 const token = jwt_sign(
   "ES256",
-  {iss: app_id, iat: harness.clock.timestamp(), exp: harness.clock.timestamp() + 600},
+  {
+    iss: app_id,
+    iat: harness.clock.timestamp(),
+    exp: harness.clock.timestamp() + 600,
+  },
   harness.fs.read_text("github-app-private-key.pem"),
 )
 ```
@@ -988,7 +1011,9 @@ an opaque session ID in the cookie and store mutable server-side state with
 ```harn
 const set_cookie = session_cookie("harn_session", {user: "alice"}, secret)
 const next_request = cookie_round_trip(set_cookie)
-const session = session_from_cookies(next_request.cookie_header, "harn_session", secret)
+const session = session_from_cookies(
+  next_request.cookie_header, "harn_session", secret,
+)
 if !session.ok {
   throw "invalid session"
 }
@@ -1220,7 +1245,9 @@ import { host } from "std/net_policy"
 
 pipeline main(harness: Harness) {
   const restricted = harness.with_net_policy({
-    allow: [host("api.example.com", [443]), "*.trusted.example", "10.0.0.0/8"],
+    allow: [
+      host("api.example.com", [443]), "*.trusted.example", "10.0.0.0/8",
+    ],
     deny: ["blocked.trusted.example"],
     default: "deny",
   })
@@ -1330,7 +1357,9 @@ const docs = web_search("fastapi dependency injection", {
   ],
 })
 const imports = verify_imports("app.py", {
-  registry: [{ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}],
+  registry: [
+    {ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}
+  ],
 })
 ```
 
@@ -1413,11 +1442,15 @@ Minimal webhook example:
 
 ```harn
 pipeline default(harness: Harness) {
-  const server = harness.net.server({max_body_bytes: 1048576, retain_raw_body: true})
+  const server = harness.net.server({
+    max_body_bytes: 1048576, retain_raw_body: true,
+  })
 
   harness.net.server_before(server, { req ->
     if http_header(req, "origin") != nil {
-      return http_response_text("browser origins are rejected", {status: 403})
+      return http_response_text(
+        "browser origins are rejected", {status: 403},
+      )
     }
     req
   })
@@ -1430,24 +1463,29 @@ pipeline default(harness: Harness) {
     }
   })
 
-  harness.net.server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
-    const signature = http_header(req, "x-hub-signature-256")
-    const expected = "sha256="
-      + hmac_sha256(harness.secrets.read("github/webhook-secret"), req.body)
-    if signature != expected {
-      return http_response_text("invalid signature", {status: 401})
-    }
+  harness.net.server_route(
+    server, "POST", "/hooks/{tenant}/{trigger}", { req ->
+      const signature = http_header(req, "x-hub-signature-256")
+      const expected = "sha256="
+        + hmac_sha256(
+          harness.secrets.read("github/webhook-secret"), req.body,
+        )
+      if signature != expected {
+        return http_response_text("invalid signature", {status: 401})
+      }
 
-    const payload = json_parse(req.body)
-    trigger_fire("github-webhook", {
-      tenant: req.path_params.tenant,
-      trigger: req.path_params.trigger,
-      payload: payload,
-      raw_body: req.raw_body,
-      client_ip: req.client_ip,
+      const payload = json_parse(req.body)
+      trigger_fire("github-webhook", {
+        tenant: req.path_params.tenant,
+        trigger: req.path_params.trigger,
+        payload: payload,
+        raw_body: req.raw_body,
+        client_ip: req.client_ip,
+      })
+      http_response_json(
+        {accepted: true}, {status: 202, headers: {["retry-after"]: "0"}},
+      )
     })
-    http_response_json({accepted: true}, {status: 202, headers: {["retry-after"]: "0"}})
-  })
 
   const probe = harness.net.server_test(server, {
     method: "POST",
@@ -1478,9 +1516,13 @@ and `harness.net.sse_server_cancelled()` to observe shutdown state.
 ```harn
 pipeline progress_stream(harness: Harness, task) {
   const stream = harness.net.sse_server_response({max_event_bytes: 4096})
-  harness.net.sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
+  harness.net.sse_server_send(
+    stream, {event: "progress", id: "1", data: "queued"},
+  )
   harness.net.sse_server_heartbeat(stream, "still working")
-  harness.net.sse_server_send(stream, {event: "progress", id: "2", data: "done"})
+  harness.net.sse_server_send(
+    stream, {event: "progress", id: "2", data: "done"},
+  )
   harness.net.sse_server_flush(stream)
   return stream
 }
@@ -1527,11 +1569,12 @@ assert_eq(call.headers.authorization, "Bearer test-token")
 ```
 
 ```harn
-const stream = harness.net.stream_open("https://example.com/archive.tar.gz", {
-  decompress: false,
-  connect_timeout_ms: 5000,
-  read_timeout_ms: 30000,
-})
+const stream = harness.net.stream_open(
+  "https://example.com/archive.tar.gz", {
+    decompress: false,
+    connect_timeout_ms: 5000,
+    read_timeout_ms: 30000,
+  })
 const meta = harness.net.stream_info(stream)
 const chunk = harness.net.stream_read(stream, 65536)
 harness.net.stream_close(stream)
@@ -1571,7 +1614,8 @@ Use `params` for every dynamic value:
 ```harn
 const rows = pg_query(
   db,
-  "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
+  "select id, payload from receipts where tenant_id = $1 and id"
+    + " = $2::uuid",
   [tenant_id, receipt_id],
 )
 ```
@@ -1584,10 +1628,11 @@ RLS policies:
 
 ```harn
 pg_transaction(db, { tx ->
-  pg_execute(tx, "insert into event_log(tenant_id, kind) values ($1, $2)", [
-    tenant_id,
-    "receipt.created",
-  ])
+  pg_execute(
+    tx, "insert into event_log(tenant_id, kind) values ($1, $2)", [
+      tenant_id,
+      "receipt.created",
+    ])
 }, {settings: {"app.current_tenant_id": tenant_id}})
 ```
 
@@ -1721,7 +1766,8 @@ deny), that disposition instead routes through the consent gate: an approval let
 the command run, a denial returns a `status: "consent_denied"` envelope without
 spawning. The consent closure receives the command context enriched with
 `consent.reason` and `consent.risk_labels` (the deterministic classification) and
-may call `request_approval` / `ask_user` to block on a human.
+may call `harness.interaction.request_approval` /
+`harness.interaction.ask_user` to block on a human.
 
 The never-approvable command floor runs before consent. It blocks fork bombs;
 `git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
@@ -1853,10 +1899,10 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `harness.llm.call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
-| `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
+| `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `harness.llm.call`. Returns `{ok: bool, response: harness.llm.call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
+| `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `harness.llm.call`; the `stream` option remains the transport toggle |
 | `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
-| `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
+| `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `harness.llm.call` |
 | `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
 | `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
 | `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
@@ -1889,7 +1935,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust.policy_for(actor_id)` | actor_id: string | dict | Return only the derived capability policy |
 | `trust.verify_chain()` | none | dict | Verify the underlying OpenTrustGraph hash chain |
 | `harness.obs.llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
-| `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
+| `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `harness.llm.call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `harness.obs.llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `harness.llm.resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
 | `harness.llm.execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
@@ -1900,7 +1946,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
-| `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `effort` |
+| `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
 | `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
@@ -1943,7 +1989,7 @@ event-log topics, bridge contract, and replay semantics.
 | `harness.interaction.request_approval(action, options?)` | action: string, options: `{detail?: any, args?: any, quorum?: int, reviewers?: list<string>, deadline?: duration, principal?: string, evidence_refs?: list<dict>, undo_metadata?: dict, capabilities_requested?: list<string>}` | `{approved, reviewers, approved_at, reason, signatures}` | Emit a durable approval request, wait for quorum, and return the approval record with signed reviewer timestamp receipts. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
-| `hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
+| `harness.interaction.hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
 
 ```harn
 // Queue specific responses for the mock provider
@@ -1957,21 +2003,29 @@ assert_eq(r.text, "The answer is 42.")
 
 // Pattern-matched mocks (reusable, not consumed)
 harness.llm.mock_enqueue({text: "Hello!", match: "*greeting*"})
-harness.llm.mock_enqueue({text: "step 1", match: "*planner*", consume_match: true})
-harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({
+  text: "step 1", match: "*planner*", consume_match: true,
+})
+harness.llm.mock_enqueue({
+  text: "step 2", match: "*planner*", consume_match: true,
+})
 
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
-// `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
-// it the same way they would a live provider failure.
-harness.llm.mock_enqueue(
-  {error: {category: "rate_limit", message: "429 Too Many Requests"}},
-)
-harness.llm.mock_enqueue(
-  {error: {status: 503, kind: "transient", reason: "upstream_unavailable"}},
-)
+// `try { ... } catch`, `harness.llm.call_safe`, and
+// `with_rate_limit` all see it the same way they would a live
+// provider failure.
+harness.llm.mock_enqueue({
+  error: {category: "rate_limit", message: "429 Too Many Requests"}
+})
+harness.llm.mock_enqueue({
+  error: {
+    status: 503, kind: "transient", reason: "upstream_unavailable",
+  }
+})
 
-// Scope larger fixtures with std/testing::with_llm_script so installation and
+// Scope larger fixtures with
+// std/testing::with_llm_script so installation and
 // cleanup stay attached to this HarnessLlm instead of process state.
 const snapshot = harness.llm.mock_snapshot()
 
@@ -2151,7 +2205,9 @@ after the loop completes.
 Example:
 
 ```harn,ignore
-const result = agent_loop(harness, "summarize this file", nil, {tools: [read_file]})
+const result = agent_loop(
+  harness, "summarize this file", nil, {tools: [read_file]},
+)
 const summary = agent_trace_summary()
 harness.stdio.log("LLM calls: " + str(summary.llm_calls))
 harness.stdio.log("Tools used: " + str(summary.tools_used))
@@ -2420,7 +2476,9 @@ const client = harness.tools.mcp_connect(
 const tools = harness.tools.mcp_list_tools(client)
 harness.stdio.log(tools)
 
-const result = harness.tools.mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
+const result = harness.tools.mcp_call(
+  client, "read_file", {"path": "/tmp/hello.txt"},
+)
 harness.stdio.log(result)
 
 harness.tools.mcp_disconnect(client)
@@ -2500,7 +2558,9 @@ pipeline default(harness: Harness) {
   const tools = harness.tools.mcp_list_tools(mcp.filesystem)
   harness.stdio.log(tools)
 
-  const result = harness.tools.mcp_call(mcp.github, "list_issues", {repo: "harn"})
+  const result = harness.tools.mcp_call(
+    mcp.github, "list_issues", {repo: "harn"},
+  )
   harness.stdio.log(result)
 }
 ```
@@ -2722,8 +2782,14 @@ Example profiles:
 const local_dev_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
-    {ask: {tool_kind: ["edit", "move"], path: "src/**"}, reason: "workspace mutation"},
-    {deny: {command: ["*curl*", "*wget*"]}, reason: "downloaded shell is not allowed"}
+    {
+      ask: {tool_kind: ["edit", "move"], path: "src/**"},
+      reason: "workspace mutation",
+    },
+    {
+      deny: {command: ["*curl*", "*wget*"]},
+      reason: "downloaded shell is not allowed",
+    }
   ],
   repeat_limit: 3
 }
@@ -2731,7 +2797,11 @@ const local_dev_policy = {
 const ci_headless_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
-    {allow: {tool: "run_command", command_identity: ["cargo", "npm", "make"]}},
+    {
+      allow: {
+        tool: "run_command", command_identity: ["cargo", "npm", "make"],
+      }
+    },
     {deny: "*"}
   ],
   allow_sensitive_paths: false,

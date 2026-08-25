@@ -42,9 +42,15 @@ A backend has one ID and three functions:
 ```harn
 type ModelBackend = {
   id: string,
-  submit: fn(Harness, ModelJobRequest) -> Result<ModelJobObservation, ModelJobError>,
-  inspect: fn(Harness, ModelJob) -> Result<ModelJobObservation, ModelJobError>,
-  cancel: fn(Harness, ModelJob) -> Result<ModelJobObservation, ModelJobError>,
+  submit: fn(
+    Harness, ModelJobRequest,
+  ) -> Result<ModelJobObservation, ModelJobError>,
+  inspect: fn(
+    Harness, ModelJob,
+  ) -> Result<ModelJobObservation, ModelJobError>,
+  cancel: fn(
+    Harness, ModelJob,
+  ) -> Result<ModelJobObservation, ModelJobError>,
 }
 ```
 

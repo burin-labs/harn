@@ -639,17 +639,29 @@ fn classify_by_http_status(msg: &str) -> Option<ErrorCategory> {
     // Extract 3-digit HTTP status codes from common patterns:
     // "HTTP 429", "status 429", "429 Too Many", "error: 401"
     for code in extract_http_status_codes(msg) {
-        return Some(match code {
-            401 | 403 => ErrorCategory::Auth,
-            404 | 410 => ErrorCategory::NotFound,
-            408 | 504 | 522 | 524 => ErrorCategory::Timeout,
-            429 => ErrorCategory::RateLimit,
-            503 | 529 => ErrorCategory::Overloaded,
-            500 | 502 => ErrorCategory::ServerError,
-            _ => continue,
-        });
+        if let Some(category) = error_category_for_http_status(code) {
+            return Some(category);
+        }
     }
     None
+}
+
+/// Map an explicit provider HTTP status to the shared runtime category.
+///
+/// Callers that already own a typed status should use this instead of
+/// formatting it into prose and asking [`classify_error_message`] to recover
+/// the same fact. Keeping the mapping here also prevents mock and live provider
+/// envelopes from drifting apart.
+pub(crate) fn error_category_for_http_status(status: u16) -> Option<ErrorCategory> {
+    match status {
+        401 | 403 => Some(ErrorCategory::Auth),
+        404 | 410 => Some(ErrorCategory::NotFound),
+        408 | 504 | 522 | 524 => Some(ErrorCategory::Timeout),
+        429 => Some(ErrorCategory::RateLimit),
+        503 | 529 => Some(ErrorCategory::Overloaded),
+        500 | 502 => Some(ErrorCategory::ServerError),
+        _ => None,
+    }
 }
 
 /// Extract plausible HTTP status codes from an error message.

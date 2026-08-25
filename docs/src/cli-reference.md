@@ -122,7 +122,7 @@ Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`:
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
 | `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
 | `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
-| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `llm_call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
+| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `harness.llm.call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
 
 ```bash
 # Let only `gh` see a vault-backed token; other process.exec calls do not inherit it.
@@ -2445,22 +2445,24 @@ harn models lora preflight --base google/gemma-4-e4b-it \
 ```
 
 The preflight is CPU-only. It resolves the target model route, reads
-`max_seq_length` and `min_fit_ratio` from a lightweight config file when
-provided, then checks record count, approximate sequence-budget fit, hard token
-outliers, source tool-call body format, malformed tool-call blocks, undeclared
-tool names, typed behavior-strata coverage, and an optional caller-supplied
-done marker. Behavior-strata policy defaults to
+`max_seq_length`, `min_fit_ratio`, and `min_records` from a lightweight config
+file when provided, then checks record count, approximate sequence-budget fit,
+hard token outliers, source tool-call body format, malformed tool-call blocks,
+undeclared tool names, typed behavior-strata coverage, and an optional
+caller-supplied done marker. Behavior-strata policy defaults to
 `--behavior-strata-policy strict`. The explicit
 `legacy-unclassified` policy lets an old corpus with no declared behavior
 metadata pass preflight for migration review, but its typed report remains
 `status: "legacy_unclassified"`, retains all five missing classes, lists the
-stable record ids that need review, and prints a warning. If even one trainable
-record declares a behavior class, missing coverage is `incomplete` and remains
-an error under both policies. Export has no migration policy and always
-requires real emitted coverage. Use `--check` to make readiness failures exit
-non-zero. The command intentionally owns reusable LoRA corpus readiness in
-Harn; product-specific markers or thresholds should be passed as flags rather
-than hard-coded into hosts.
+stable record ids that need review, and prints a warning. A command-line
+threshold overrides the matching config value. `--check` requires a record
+floor from `--min-records` or `min_records` in the config, so an unset gate
+cannot report success. If even one trainable record declares a behavior class,
+missing coverage is `incomplete` and remains an error under both policies.
+Export has no migration policy and always requires real emitted coverage. Use
+`--check` to make readiness failures exit non-zero. The command intentionally
+owns reusable LoRA corpus readiness in Harn; product-specific markers or
+thresholds should be passed as flags rather than hard-coded into hosts.
 
 ## harn models lora inspect
 
@@ -3063,7 +3065,7 @@ Render mode never calls a model — it only pushes the LLM render context
 per fleet member and resolves the template so authors can confirm that
 `{{ if llm.capabilities.* }}` branches produce the intended wire
 envelope on each profile. Run mode synthesizes a thin Harn driver and
-routes through the existing `llm_call` infrastructure, so credentials,
+routes through the existing `harness.llm.call` infrastructure, so credentials,
 provider catalog, and `HARN_LLM_PROVIDER=mock` work exactly as in
 `harn run`. Judge mode is run mode plus a final LLM-as-judge call that
 asks for a one-line JSON verdict on cross-model equivalence.

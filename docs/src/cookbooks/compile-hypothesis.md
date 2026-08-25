@@ -52,7 +52,8 @@ if !receipt.ok {
     harness.stdio.eprintln(diagnostic.code + ": " + diagnostic.message)
     if diagnostic.repair != nil {
       harness.stdio.eprintln(
-        "repair " + diagnostic.repair.owner + " " + diagnostic.repair.operation
+        "repair " + diagnostic.repair.owner
+          + " " + diagnostic.repair.operation
           + " " + diagnostic.repair.path,
       )
     }
@@ -164,7 +165,8 @@ const event = hypothesis_event({
   payload: {kind: "plan_registered", plan: plan},
 })
 
-// The native adapter owns this receipt and returns a tagged success only after
+// The native adapter owns this receipt
+// and returns a tagged success only after
 // it verifies that the corresponding plan-admission operation completed.
 const proof = harness.obs.hypothesis_event_authority_request(
   "plan_admission",
@@ -180,7 +182,8 @@ require first.cursor == replay.cursor && !replay.inserted,
   "a retry must return the original durable event"
 
 const read = hypothesis_ledger_snapshot(harness.obs, hypothesis_id)
-require read.integrity.scope == "retained_topic_chain" && read.integrity.verified,
+require read.integrity.scope == "retained_topic_chain"
+  && read.integrity.verified,
   "the retained topic chain must verify before projection"
 const snapshot = read.snapshot
 ```

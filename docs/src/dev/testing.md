@@ -325,7 +325,8 @@ harness.runtime.with_execution_policy(
   {
     sandbox_profile: "worktree",
     workspace_roots: [jail],
-    // Pin reads too: an empty list inherits the runner's broad read scope.
+    // Pin reads too: an empty list inherits
+    // the runner's broad read scope.
     read_only_roots: [jail],
   },
   { -> ... },
@@ -334,8 +335,8 @@ harness.runtime.with_execution_policy(
 
 The fixture's `harness.fs.source_dir()` is a sibling of that jail rather than
 an ancestor or descendant of it, so the out-of-scope assertion holds no matter
-where the checkout lives. `mkdtemp_in_workspace()` gives a unique child of the
-same root when a case needs its own staging directory.
+where the checkout lives. `harness.fs.mkdtemp_in_workspace()` gives a unique
+child of the same root when a case needs its own staging directory.
 
 ## Forbidden patterns
 

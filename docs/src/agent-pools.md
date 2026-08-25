@@ -31,7 +31,8 @@ Three anti-patterns worth calling out:
 
 - **Pools are not message queues.** They submit *closures*, not data.
   If you need a typed mailbox between tasks, use the in-process
-  `channel(...)` primitive (see `docs/src/concurrency.md`).
+  `harness.runtime.channel(...)` primitive (see
+  `docs/src/concurrency.md`).
 - **Pools are not durable workflows.** Pipeline-scope pools persist
   *queued* and *in-flight* state so the pool survives restart, but the
   task closures themselves are not journalled. A task killed mid-run
@@ -104,7 +105,9 @@ pool registry handle.
 
 ```harn,ignore
 const handle = pool.submit({ ->
-  return agent_loop(harness, "review this PR", "You are a careful reviewer.")
+  return agent_loop(
+    harness, "review this PR", "You are a careful reviewer.",
+  )
 }, {
   priority: 10,
   tenant_id: "acme",
@@ -156,7 +159,9 @@ all of them:
 ```harn,ignore
 import { pool_wait } from "std/lifecycle/pool"
 
-const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
+const handles = [
+  pool.submit(work_a), pool.submit(work_b), pool.submit(work_c),
+]
 const outcomes = pool_wait(harness.agent, handles)
 ```
 
@@ -282,8 +287,12 @@ idempotent. Two submits with the same `(pool_id, idempotency_key)`
 return the *same* task handle:
 
 ```harn,ignore
-const first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
-const second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
+const first = pool.submit(
+  { -> review(pr) }, {idempotency_key: "review-pr-1984"},
+)
+const second = pool.submit(
+  { -> review(pr) }, {idempotency_key: "review-pr-1984"},
+)
 harness.stdio.log(first.id == second.id)   // true
 ```
 
@@ -298,27 +307,29 @@ events into a named pool instead of spawning a fresh worker per event.
 Use the `SpawnToPool` handler variant from `std/triggers`:
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 import { pool_create, fair_round_robin } from "std/lifecycle/pool"
 
-const pool = pool_create(harness.agent, {
-  name: "webhook-work",
-  max_concurrent: 10,
-  queue: fair_round_robin("source"),
-})
+fn route_webhooks_to_pool(harness: Harness) {
+  const pool = pool_create(harness.agent, {
+    name: "webhook-work",
+    max_concurrent: 10,
+    queue: fair_round_robin("source"),
+  })
 
-trigger_register({
-  id: "webhook-router",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:webhook.received"]},
-  handler: SpawnToPool({
-    pool: "webhook-work",
-    priority_from: "provider_payload.payload.urgency",
-    key_from: "provider_payload.payload.source",
-    task_factory: { event -> { -> handle_webhook(event) } },
-  }),
-})
+  harness.runtime.trigger_register({
+    id: "webhook-router",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:webhook.received"]},
+    handler: SpawnToPool({
+      pool: "webhook-work",
+      priority_from: "provider_payload.payload.urgency",
+      key_from: "provider_payload.payload.source",
+      task_factory: { event -> { -> handle_webhook(event) } },
+    }),
+  })
+}
 ```
 
 `SpawnToPool` options:
@@ -389,9 +400,21 @@ import { agent_fanout } from "std/agent/workers"
 
 const results = agent_fanout(
   [
-    {task: "Port src/a to the new API", options: child_opts_a, label: "a"},
-    {task: "Port src/b to the new API", options: child_opts_b, label: "b"},
-    {task: "Port src/c to the new API", options: child_opts_c, label: "c"},
+    {
+      task: "Port src/a to the new API",
+      options: child_opts_a,
+      label: "a",
+    },
+    {
+      task: "Port src/b to the new API",
+      options: child_opts_b,
+      label: "b",
+    },
+    {
+      task: "Port src/c to the new API",
+      options: child_opts_c,
+      label: "c",
+    },
   ],
   {max_parallel: 8},
 )

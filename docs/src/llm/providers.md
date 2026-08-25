@@ -36,8 +36,8 @@ Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
 
 On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
-programs that call provider-backed LLM builtins such as `llm_call`,
-`llm_stream_call`, or `agent_loop`. If no user or project provider config is
+programs that call provider-backed LLM builtins such as `harness.llm.call`,
+`harness.llm.stream_call`, or `agent_loop`. If no user or project provider config is
 present and local Ollama responds at
 `http://127.0.0.1:11434/api/tags`, Harn offers to write
 `~/.config/harn/providers.toml` with Ollama as the default provider. Pass
@@ -431,7 +431,9 @@ onto Interactions — so check the route before switching it. The
 honors project overrides:
 
 ```harn
-const caps = harness.llm.provider_capabilities("gemini", "gemini-3.5-flash")
+const caps = harness.llm.provider_capabilities(
+  "gemini", "gemini-3.5-flash",
+)
 // gemini_interactions
 harness.stdio.println(to_string(caps.live_endpoint_family ?? "nil"))
 ```
@@ -472,7 +474,9 @@ The provider support table is generated from
 capability surface without carrying vendor-specific knowledge:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   native_tools: true, text_tool_wire_format_supported: true,
 //   preferred_tool_format: "native", tool_mode_parity: "unknown",
@@ -494,13 +498,19 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   thinking_block_style: "thinking_blocks",
 // }
 
-// Gate on `tools` for "can this route call tools at all" — true for either
+// Gate on `tools` for "can this route
+// call tools at all" — true for either
 // native or text-format tool wire. Inspect `native_tools` or
-// `text_tool_wire_format_supported` directly when you need to distinguish.
-// Presets use `preferred_tool_format` when it is present, which keeps known
-// native/text divergences in capability data instead of provider-name branches.
-// `agent_loop` uses the same field when `tool_format` is unset or `"auto"`;
-// missing recommendations fall back to text tools and emit `capability_gap`.
+// `text_tool_wire_format_supported`
+// directly when you need to distinguish.
+// Presets use `preferred_tool_format`
+// when it is present, which keeps known
+// native/text divergences in capability
+// data instead of provider-name branches.
+// `agent_loop` uses the same field when
+// `tool_format` is unset or `"auto"`;
+// missing recommendations fall back to
+// text tools and emit `capability_gap`.
 if caps.tools && "bm25" in caps.tool_search {
   harness.llm.call(prompt, sys, {
     tools: registry,
@@ -530,7 +540,7 @@ so the requested channel and its tool schemas reach the provider unchanged.
 all literal, so known-bad compositions fail before they consume tokens. Dynamic
 routes stay under the runtime guard. Custom generation routes remain open-world,
 while explicit prompt-cache controls require authored capability facts because
-their lowering is provider-specific. Raw tool-bearing `llm_call` options can use
+their lowering is provider-specific. Raw tool-bearing `harness.llm.call` options can use
 the same reason to force a deliberate probe; they have no agent-loop override
 event, but provider-call records expose the effective `tool_format` and
 `native_tool_count`. Model-catalog display tags are derived
@@ -965,7 +975,7 @@ is whichever release the product pins.
 
 External ACP agents can be registered as LLM providers by declaring
 `protocol = "acp"`. Harn launches the configured command over stdio, performs
-`initialize`, creates a session, sends the `llm_call` prompt as
+`initialize`, creates a session, sends the `harness.llm.call` prompt as
 `session/prompt`, and collects `agent_message_chunk` updates into the normal
 `LlmResult`.
 

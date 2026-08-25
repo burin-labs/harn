@@ -15,7 +15,7 @@ orchestration boundary instead of pushing orchestration logic into app code.
 >   stages (`stage`, `verify`, `join`, `condition`, `fork`, `map`, `reduce`,
 >   `subagent`, `escalation`) executed by `workflow_execute` — this page.
 >
-> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> On the abstraction ladder: `harness.llm.call` = one request < `agent_loop` = one
 > goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
 > how you build `agent_loop` options, not a tier of its own.) See
 > [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the
@@ -89,9 +89,13 @@ fn review_tools() {
 // Build each node through the typed `StageSpec` alias (or the
 // `workflow_stage_spec(...)` constructor) from `std/workflow/options`
 // so stage-spec typos fail at check time.
-const act: StageSpec = {kind: "stage", mode: "agent", tools: review_tools()}
+const act: StageSpec = {
+  kind: "stage", mode: "agent", tools: review_tools(),
+}
 const verify: StageSpec = {
-  kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"]),
+  kind: "verify", mode: "agent", tools: tool_select(
+    review_tools(), ["run"],
+  ),
 }
 const repair: StageSpec = {
   kind: "stage",
@@ -326,7 +330,8 @@ into the next attempt's task:
   ```harn,ignore
   {
     task,          // the original (base) task string
-    attempt,       // the just-failed attempt number (its return runs as attempt N+1)
+    // the just-failed attempt number (its return runs as attempt N+1)
+    attempt,
     findings,      // list<string> of failed verification checks
     verification,  // the prior attempt's verification dict
     error,         // the prior attempt's error message, if any
@@ -403,11 +408,15 @@ these keys:
 
 ```harn,ignore
 {
-  task,                // the (possibly repaired) task string for this attempt
+  // the (possibly repaired) task string for this attempt
+  task,
   attempt,             // 1-based attempt number
-  prior_findings,      // list<string> from the previous attempt, [] on the first
-  prior_verification,  // the previous attempt's verification dict, nil on the first
-  prior_text,          // the previous attempt's visible text, "" on the first
+  // list<string> from the previous attempt, [] on the first
+  prior_findings,
+  // the previous attempt's verification dict, nil on the first
+  prior_verification,
+  // the previous attempt's visible text, "" on the first
+  prior_text,
   artifacts,           // the artifacts selected for this stage
 }
 ```
@@ -424,11 +433,14 @@ the `repair_prompt_builder` context, which keys findings as `findings` and adds
 
 ```harn,ignore
 {
-  result?,        // the full stage result dict; or use `text` for the common case
-  text?,          // convenience: wrapped into {status: "completed", visible_text: text}
+  // the full stage result dict; or use `text` for the common case
+  result?,
+  // convenience: wrapped into {status: "completed", visible_text: text}
+  text?,
   artifacts?,     // produced artifacts, defaults to []
   transcript?,    // falls back to the stage's input transcript
-  verification?,  // a verdict dict {ok, findings?} to self-gate this attempt
+  // a verdict dict {ok, findings?} to self-gate this attempt
+  verification?,
 }
 ```
 
@@ -465,8 +477,18 @@ or runtime concept to learn.
 const graph = workflow_stages({
   name: "implement",
   stages: [
-    {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
-    {id: "check", kind: "verify", mode: "command", verify: {expect_status: 0}},
+    {
+      id: "act",
+      kind: "stage",
+      mode: "agent",
+      model_policy: {provider: "mock"},
+    },
+    {
+      id: "check",
+      kind: "verify",
+      mode: "command",
+      verify: {expect_status: 0},
+    },
   ],
 })
 ```

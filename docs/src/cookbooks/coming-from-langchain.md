@@ -100,7 +100,12 @@ strictness, post-parse validation, and early stream abort:
 type Verdict = {pass: bool, reason: string}
 
 const result = harness.llm.call(prompt, nil, {
-  output: {schema: Verdict, strict: true, validation: "error", stream_abort: true},
+  output: {
+    schema: Verdict,
+    strict: true,
+    validation: "error",
+    stream_abort: true,
+  },
   schema_retries: 1,
 })
 ```
@@ -163,7 +168,9 @@ import { checkpoint_stage } from "std/checkpoint"
 
 fn main(harness: Harness) {
   const data = checkpoint_stage(harness.runtime, "fetch", { -> "raw" })
-  const cleaned = checkpoint_stage(harness.runtime, "clean", { -> data + "-clean" })
+  const cleaned = checkpoint_stage(
+    harness.runtime, "clean", { -> data + "-clean" },
+  )
   harness.stdio.log(cleaned)
 }
 ```

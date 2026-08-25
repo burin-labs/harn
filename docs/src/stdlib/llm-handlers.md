@@ -1,6 +1,6 @@
 # Composable callers and middleware
 
-Harn's `agent_loop` and `llm_call` historically exposed only a flat
+Harn's `agent_loop` and `harness.llm.call` historically exposed only a flat
 options dict for retry / fallback / shadow / budget behavior. v0.8
 opens an explicit **caller seam**: `agent_loop` accepts an
 `llm_caller:` closure that owns the single `harness.llm.call(...)` invocation,
@@ -82,7 +82,7 @@ These bit the implementing agents and will bite users:
 5. **`refine_prompt`'s session cache is best-effort.** Harn does not
    support out-of-closure mutation, so threading a mutable session
    dict requires the caller to do the threading.
-6. **Streaming is out of scope for `llm_caller`.** `llm_stream_call`
+6. **Streaming is out of scope for `llm_caller`.** `harness.llm.stream_call`
    keeps its own surface; a future `llm_streaming_caller` may parallel
    this.
 7. **Off-by-one in retry semantics.** The removed `llm_retries: 3`
@@ -101,7 +101,8 @@ supports two interchangeable call shapes:
 
 ```harn,ignore
 with_retry(next, opts)   // direct: returns a caller
-with_retry(opts)         // curried: returns fn(next) -> caller, drops into compose
+// curried: returns fn(next) -> caller, drops into compose
+with_retry(opts)
 ```
 
 Compose with `compose([with_logging({...}), with_retry({...})])(base)`
@@ -158,7 +159,11 @@ import {compose, with_logging, with_retry} from "std/llm/handlers"
 
 const route = agent_model_options({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-5", reasoning_task: "agent"},
+  defaults: {
+    provider: "anthropic",
+    model: "claude-sonnet-5",
+    reasoning_task: "agent",
+  },
 })
 const middleware = [with_retry({max_attempts: 3}), with_logging({})]
 const caller = compose(middleware)(default_llm_caller())
@@ -217,7 +222,8 @@ const router = with_routing({
   routes: [
     {name: "frontier",
      when: { call ->
-       call?.opts?.reasoning_task == "judge" || (call?.opts?.escalate ?? false)
+       call?.opts?.reasoning_task == "judge"
+         || (call?.opts?.escalate ?? false)
      },
      caller: frontier},
   ],
@@ -262,13 +268,16 @@ const policy = routing_policy({
   latency: {race_after_ms: 5000},
   budget:  {per_call_usd: 0.5, on_exceed: "abort"},
   observe: {emit_event: "billing.routing_decision"},
-  escalate_on: [                                       // optional verifier chain
+  // optional verifier chain
+  escalate_on: [
     {kind: "typecheck"},
     {kind: "lint", forbidden_patterns: ["TODO"], on_fail: "refine"},
   ],
 })
 
-const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
+const result = harness.llm.call(
+  "Summarize this PR.", nil, {routing: policy},
+)
 ```
 
 `escalate_on` makes frontier escalation **conditional on a
@@ -310,7 +319,7 @@ returns a non-dict.
 ### Composition story
 
 The `agent_loop` seam (`opts.llm_caller`) accepts any caller. For
-direct `llm_call`-style usage, callers can invoke their wrapped caller
+direct `harness.llm.call`-style usage, callers can invoke their wrapped caller
 explicitly:
 
 ```harn,ignore
@@ -429,7 +438,9 @@ refinements.
 ### Example
 
 ```harn,ignore
-import {recommend_max_output_tokens, fits_in_context} from "std/llm/budget"
+import {
+  recommend_max_output_tokens, fits_in_context,
+} from "std/llm/budget"
 
 const max_out = recommend_max_output_tokens({
   prompt: long_text,
@@ -447,7 +458,7 @@ if !fits_in_context(long_text, "gpt-5.4-mini") {
 
 ## `std/llm/defaults` — model-aware option packs
 
-`pack_for(opts)` returns a complete `llm_call`-ready options dict resolved
+`pack_for(opts)` returns a complete `harness.llm.call`-ready options dict resolved
 through the runtime catalog and capability matrix, then pinned to a task. User
 options always win.
 
@@ -461,8 +472,8 @@ Layering (low → high):
 
 | Function | Signature | Description |
 |---|---|---|
-| `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `llm_call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` feed the capability-owned reasoning resolver. Direct `thinking` or `effort` bypasses policy lowering. |
-| `harness.llm.apply_reasoning_policy(opts)` | `(dict) -> dict` | Resolves provider-neutral reasoning intent through the model's capability row. Used by `agent_loop`; direct callers can use it before `llm_call`. Explicit `thinking` and `effort` win. |
+| `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `harness.llm.call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` feed the capability-owned reasoning resolver. Direct `thinking` or `effort` bypasses policy lowering. |
+| `harness.llm.apply_reasoning_policy(opts)` | `(dict) -> dict` | Resolves provider-neutral reasoning intent through the model's capability row. Used by `agent_loop`; direct callers can use it before `harness.llm.call`. Explicit `thinking` and `effort` win. |
 | `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `reasoning_task: "chat"`. |
 | `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "agent"`. |
 | `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "refine"`. |
@@ -497,7 +508,7 @@ agent_loop(harness, task, system, opts + {loop_until_done: true})
 
 | Function | Signature | Description |
 |---|---|---|
-| `safe_call(prompt, system, options)` | `(string, string\|nil, dict) -> dict` | Try-wrap `llm_call` into `{ok: true, value}` or `{ok: false, status, error}`. Maps typed llm error dicts onto reserved statuses — `budget_exhausted`, `rate_limited`, `timeout`, `network`, `provider_5xx`, `context_window_exceeded`, `auth`, `policy_blocked`, `transient` (other retryable reasons, e.g. empty generation), `provider_error` (other terminal reasons, `retryable: false`), or `exception`. Same shape as `default_llm_caller`. |
+| `safe_call(prompt, system, options)` | `(string, string\|nil, dict) -> dict` | Try-wrap `harness.llm.call` into `{ok: true, value}` or `{ok: false, status, error}`. Maps typed llm error dicts onto reserved statuses — `budget_exhausted`, `rate_limited`, `timeout`, `network`, `provider_5xx`, `context_window_exceeded`, `auth`, `policy_blocked`, `transient` (other retryable reasons, e.g. empty generation), `provider_error` (other terminal reasons, `retryable: false`), or `exception`. Same shape as `default_llm_caller`. |
 | `safe_field(envelope, names, default)` | `(dict, list<string>, any) -> any` | Try each name (case-insensitive) in order; return first non-nil non-empty value, else default. Top-level keys only. |
 | `dict_get_ci(d, key)` | `(dict, string) -> any` | Single-key case-insensitive lookup. |
 | `with_case_insensitive_keys(envelope)` | `(any) -> any` | Recursively lowercase all dict keys. Idempotent. |
@@ -509,13 +520,19 @@ agent_loop(harness, task, system, opts + {loop_until_done: true})
 ### Example
 
 ```harn,ignore
-import {safe_call, safe_field, with_case_insensitive_keys} from "std/llm/safe"
+import {
+  safe_call, safe_field, with_case_insensitive_keys,
+} from "std/llm/safe"
 
-const r = safe_call(prompt, system, {provider: "auto", model: "gpt-5.4-mini"})
+const r = safe_call(
+  prompt, system, {provider: "auto", model: "gpt-5.4-mini"},
+)
 if !r.ok { return r }
 
 const envelope = with_case_insensitive_keys(parse_json(r.value.text))
-const verdict = safe_field(envelope, ["verdict", "decision", "result"], "unknown")
+const verdict = safe_field(
+  envelope, ["verdict", "decision", "result"], "unknown",
+)
 ```
 
 ---
@@ -537,7 +554,9 @@ const sys = system_prelude({
   persona: "You are a release auditor.",
   tone: "terse",
   constraints: ["Cite evidence by file path", "No speculation"],
-  output_contract: {format: "json", required: ["risks", "recommendation"]},
+  output_contract: {
+    format: "json", required: ["risks", "recommendation"],
+  },
 })
 ```
 
@@ -573,13 +592,15 @@ if has_capability(model, "thinking") {
 
 const fam = family_of(model)       // e.g. "anthropic-claude"
 const routes = named_model_ladder("agent_frontier").steps
-const reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
+const reviewer = complementary_reviewer({
+  author_model: model, intent: "plan_review",
+})
 ```
 
 ---
 
 ## See also
 
-- [LLM calls](../llm/llm_call.md) — `llm_call`, `llm_call_structured`, `llm_call_safe`.
+- [LLM calls](../llm/llm_call.md) — `harness.llm.call`, `harness.llm.call_structured`, `harness.llm.call_safe`.
 - [Agent loops](../llm/agent_loop.md) — `agent_loop` and the `llm_caller:` seam.
 - [LLM quick reference](../docs/llm/harn-quickref.md) — the one-page cheat sheet.

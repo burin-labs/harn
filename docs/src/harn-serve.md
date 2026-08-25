@@ -181,7 +181,9 @@ Each routed `pub fn` receives a request dict and returns a value or an
 ```harn
 @route("POST", "/users/{id}")
 pub fn update_user(req: dict) -> dict {
-  return http_ok({ "id": req.path_params.id, "body": json_parse(req.body) })
+  return http_ok({
+    "id": req.path_params.id, "body": json_parse(req.body),
+  })
 }
 
 // The `handler_*` convention needs no attribute: `handler_health` mounts

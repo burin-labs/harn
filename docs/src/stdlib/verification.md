@@ -19,7 +19,12 @@ pipeline default(harness: Harness) {
     harness.code_index, ["src/main.zig", "build.zig"],
   )
   const verdict = verification_diagnostic_classify(
-    {rung: "R2", rowId: "zig/file", at: snap.captured_at_ms, snapshot: snap.snapshot},
+    {
+      rung: "R2",
+      rowId: "zig/file",
+      at: snap.captured_at_ms,
+      snapshot: snap.snapshot,
+    },
     snap.snapshot,
   )
   return verdict.status
@@ -67,7 +72,9 @@ pipeline default(harness: Harness) {
       {
         id: "web",
         parser_id: "js.workspace_graph.v1",
-        spec: {mode: "shell", command: "pnpm nx graph --file=/dev/stdout"},
+        spec: {
+          mode: "shell", command: "pnpm nx graph --file=/dev/stdout",
+        },
       },
     ],
   )
@@ -102,11 +109,17 @@ shape:
 import { verification_record_check_result } from "std/verification"
 
 pipeline default(harness: Harness) {
-  const result = {success: false, exit_code: 1, duration_ms: 420, stderr: "failed"}
+  const result = {
+    success: false, exit_code: 1, duration_ms: 420, stderr: "failed",
+  }
   const recorded = verification_record_check_result(
     "cargo/test",
     result,
-    {warm: false, snapshot: {"src/lib.rs": "hash1"}, failure_signature_from: "stderr"},
+    {
+      warm: false,
+      snapshot: {"src/lib.rs": "hash1"},
+      failure_signature_from: "stderr",
+    },
   )
   return recorded.row.timings.coldMs.p95
 }
@@ -211,14 +224,20 @@ pipeline default(harness: Harness) {
       name: "sbt",
       warmMode: {
         mode: "build-server",
-        readyProbe: {spec: {mode: "shell", command: "test -S .bloop/socket"}},
+        readyProbe: {
+          spec: {mode: "shell", command: "test -S .bloop/socket"}
+        },
         expectedWarmDeltaMs: 8000,
       },
       cacheIdentity: {BLOOP_HOME: ".bloop"},
     },
   ])
   const plan = verification_ladder_plan(
-    {path: "modules/cart/src/Main.scala", language: "scala", task: "post_edit"},
+    {
+      path: "modules/cart/src/Main.scala",
+      language: "scala",
+      task: "post_edit",
+    },
     {timing_kind: "auto", warm_state_facts: warm},
   )
   return plan.selected
@@ -267,7 +286,9 @@ pipeline default(harness: Harness) {
     warmMode: {
       mode: "build-server",
       startCommand: {mode: "shell", command: "sbt --client"},
-      readyProbe: {spec: {mode: "shell", command: "test -S .bloop/socket"}},
+      readyProbe: {
+        spec: {mode: "shell", command: "test -S .bloop/socket"}
+      },
     },
   }
   const receipt = verification_start_warm_state(row)
@@ -284,7 +305,8 @@ still warming. Teardown cancels the stored background handle through
 
 ## Ladder Planning
 
-`verification_profile_matches(query, dir?)` returns every profile row that
+`harness.runtime.verification_profile_matches(query, dir?)` returns every
+profile row that
 matches `{repo?, path?, language?, task?}`, ordered by the same
 most-specific-wins selector semantics as `verification_profile_resolve`.
 Each result is `{row, specificity, index}` so scheduler code can rank rows
@@ -340,7 +362,9 @@ caller explicitly opts into consuming the plan.
 verification status model from explicit host facts and Harn profile rows:
 
 ```harn
-import { verification_hud_model, verification_hud_text } from "std/verification"
+import {
+  verification_hud_model, verification_hud_text,
+} from "std/verification"
 
 pipeline default(harness: Harness) {
   const model = verification_hud_model(

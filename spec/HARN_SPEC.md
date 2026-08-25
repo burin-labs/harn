@@ -785,9 +785,12 @@ automatically wrapped in a closure where `_` is replaced with the piped
 value:
 
 ```harn
-"hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
-[3, 1, 2] |> _.sorted()             // desugars to: |> { __pipe -> __pipe.sorted() }
-items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
+// desugars to: |> { __pipe -> split(__pipe, " ") }
+"hello world" |> split(_, " ")
+// desugars to: |> { __pipe -> __pipe.sorted() }
+[3, 1, 2] |> _.sorted()
+// desugars to: |> { __pipe -> len(__pipe) }
+items |> len(_)
 ```
 
 Without `_`, the pipe passes the value as the sole argument to the callable on
@@ -859,10 +862,12 @@ value, changing part of it changes the binding's whole value:
 
 ```harn
 const base = [1]
-const appended = base.appending(2)   // fine: base is untouched, base == [1]
+// fine: base is untouched, base == [1]
+const appended = base.appending(2)
 
 let built = []
-built = built.appending(1)           // this is how a collection is built up
+// this is how a collection is built up
+built = built.appending(1)
 ```
 
 Because the methods are pure, discarding a result silently does nothing;
@@ -1514,7 +1519,8 @@ matches the tail without binding it):
 match coords {
   [x, y] -> { "2d: ${x},${y}" }          // matches ONLY length 2
   [x, y, z] -> { "3d" }                   // matches ONLY length 3
-  [first, ...rest] -> { "${first}+${rest}" } // length >= 1; rest is a list
+  // length >= 1; rest is a list
+  [first, ...rest] -> { "${first}+${rest}" }
   [] -> { "empty" }
   _ -> { "other" }
 }
@@ -1620,10 +1626,11 @@ source order. `with { max_concurrent: N }` is honored the same way as
 eager `parallel each`. If a task throws, the error is raised when the
 consumer pulls that stream item and remaining tasks are cancelled.
 
-`parallel_race(items, callable, options?)` is the first-success helper
-for this pattern. It returns the first plain value or `Result.Ok`
-payload produced by `callable`, cancels remaining tasks, and throws an
-aggregate error if every task throws or returns `Result.Err`.
+`harness.runtime.parallel_race(items, callable, options?)` is the
+first-success helper for this pattern. It returns the first plain value
+or `Result.Ok` payload produced by `callable`, cancels remaining tasks,
+and throws an aggregate error if every task throws or returns
+`Result.Err`.
 
 ### parallel settle
 
@@ -1659,7 +1666,7 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 ```harn
 fn fetch_page(cursor) { cursor }
 const cursors = ["a", "b", "c"]
-const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const pages = parallel settle cursors with {max_concurrent: 4} { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -1683,17 +1690,23 @@ receipt still needs every lane's structured outcome. `std/abort` is that form,
 built on scoped shared state rather than on new syntax:
 
 ```harn
-import { abort_requested, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   while !lane_terminal(lane) {
     if abort_requested(token) {
-      return Err({code: "stopped_waiting", message: "a sibling lane failed"})
+      return Err(
+        {code: "stopped_waiting", message: "a sibling lane failed"}
+      )
     }
     harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
-    let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
+    let _ = request_abort(
+      token, {code: "doomed", message: "lane ${lane} failed"},
+    )
     return Err({code: "terminal", message: "lane ${lane} failed"})
   }
   return lane_proof(lane)
@@ -1762,8 +1775,10 @@ defer { close(f) }
 ### owned\<T\> and drop()
 
 ```harn
-const ch: owned<channel> = channel("log", 64)
-// implicit: defer { drop(ch) } registered at this binding
+fn main(harness: Harness) {
+  const ch: owned<channel> = harness.runtime.channel("log", 64)
+  // implicit: defer { drop(ch) } registered at this binding
+}
 ```
 
 `owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
@@ -1785,9 +1800,9 @@ return type is not also `owned<T>` defeats the auto-drop and fires
 return type as `owned<T>`:
 
 ```harn
-fn open_log() -> owned<channel> {
-  const ch: owned<channel> = channel("log", 64)
-  return ch                              // ownership transfers to caller
+fn open_log(harness: Harness) -> owned<channel> {
+  const ch: owned<channel> = harness.runtime.channel("log", 64)
+  return ch                          // ownership transfers to caller
 }
 ```
 
@@ -1872,25 +1887,34 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
-const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
-const gate = sync_gate_acquire("workflow-runner", 8, 5s)
+fn main(harness: Harness) {
+  const lock = harness.runtime.sync_mutex_acquire(
+    "state:customer-42", 250ms,
+  )
+  const slot = harness.runtime.sync_semaphore_acquire(
+    "connector:notion", 4, 1, 2s,
+  )
+  const gate = harness.runtime.sync_gate_acquire(
+    "workflow-runner", 8, 5s,
+  )
+}
 ```
 
-- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
-  mutex. Omitting `key` uses `"__default__"`.
-- `sync_semaphore_acquire(key, capacity, permits?, timeout?)` acquires a
-  weighted permit from a named FIFO semaphore.
-- `sync_gate_acquire(key, limit, timeout?)` acquires one fair-admission slot
-  from a named FIFO gate.
-- `sync_release(permit)` releases a named permit and returns `true` only for
-  the first release.
-- Permits returned by `sync_*_acquire` are also owned by the current scope or
-  frame. They are released automatically on scope exit, `return`, and `throw`;
-  explicit `sync_release` is for earlier release and remains idempotent.
-- `sync_metrics(kind?, key?)` returns observability counters for matching
-  primitives. A concrete `(kind, key)` returns a dict; partial or empty
-  filters return a list.
+- `harness.runtime.sync_mutex_acquire(key?, timeout?)` acquires one permit
+  from a named FIFO mutex. Omitting `key` uses `"__default__"`.
+- `harness.runtime.sync_semaphore_acquire(key, capacity, permits?, timeout?)`
+  acquires a weighted permit from a named FIFO semaphore.
+- `harness.runtime.sync_gate_acquire(key, limit, timeout?)` acquires one
+  fair-admission slot from a named FIFO gate.
+- `harness.runtime.sync_release(permit)` releases a named permit and returns
+  `true` only for the first release.
+- Permits returned by `harness.runtime.sync_*_acquire` are also owned by the
+  current scope or frame. They are released automatically on scope exit,
+  `return`, and `throw`; an explicit `harness.runtime.sync_release` is for
+  earlier release and remains idempotent.
+- `harness.runtime.sync_metrics(kind?, key?)` returns observability counters
+  for matching primitives. A concrete `(kind, key)` returns a dict; partial
+  or empty filters return a list.
 
 Metrics include `acquisition_count`, `timeout_count`, `cancellation_count`,
 `release_count`, `current_held`, `current_queue_depth`, `max_queue_depth`,
@@ -2017,13 +2041,17 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+fn main(harness: Harness) {
+  const budget = harness.runtime.shared_cell(
+    {scope: "task_group", key: "tokens", initial: 0},
+  )
 
-parallel 10 { i ->
-  let updated = false
-  while !updated {
-    const snap = shared_snapshot(budget)
-    updated = shared_cas(budget, snap, snap.value + 1)
+  parallel 10 { i ->
+    let updated = false
+    while !updated {
+      const snap = harness.runtime.shared_snapshot(budget)
+      updated = harness.runtime.shared_cas(budget, snap, snap.value + 1)
+    }
   }
 }
 ```
@@ -2045,40 +2073,51 @@ external stores.
 
 Cells:
 
-- `shared_cell(key_or_options, initial?)` opens a scoped cell. Options support
-  `scope`, `key`, `initial`, and `tenant_id`.
-- `shared_get(cell)` reads the value.
-- `shared_snapshot(cell)` returns `{value, version}` for versioned CAS.
-- `shared_set(cell, value)` writes with last-write-wins behavior and returns
-  the previous value.
-- `shared_cas(cell, expected_or_snapshot, value)` writes only when the current
-  value matches the expected value, and when a snapshot is supplied, the
-  version still matches. It returns `true` on success and `false` on conflict.
+- `harness.runtime.shared_cell(key_or_options, initial?)` opens a scoped
+  cell. Options support `scope`, `key`, `initial`, and `tenant_id`.
+- `harness.runtime.shared_get(cell)` reads the value.
+- `harness.runtime.shared_snapshot(cell)` returns `{value, version}` for
+  versioned CAS.
+- `harness.runtime.shared_set(cell, value)` writes with last-write-wins
+  behavior and returns the previous value.
+- `harness.runtime.shared_cas(cell, expected_or_snapshot, value)` writes only
+  when the current value matches the expected value, and when a snapshot is
+  supplied, the version still matches. It returns `true` on success and
+  `false` on conflict.
 
 Maps:
 
-- `shared_map(key_or_options, initial?)` opens a scoped map.
-- `shared_map_get(map, key, default?)`, `shared_map_set(map, key, value)`,
-  `shared_map_delete(map, key)`, and `shared_map_entries(map)` are the
-  last-write-wins map operations.
-- `shared_map_snapshot(map, key)` and
-  `shared_map_cas(map, key, expected_or_snapshot, value)` provide
-  versioned conflict checks.
+- `harness.runtime.shared_map(key_or_options, initial?)` opens a scoped map.
+- `harness.runtime.shared_map_get(map, key, default?)`,
+  `harness.runtime.shared_map_set(map, key, value)`,
+  `harness.runtime.shared_map_delete(map, key)`, and
+  `harness.runtime.shared_map_entries(map)` are the last-write-wins map
+  operations.
+- `harness.runtime.shared_map_snapshot(map, key)` and
+  `harness.runtime.shared_map_cas(map, key, expected_or_snapshot, value)`
+  provide versioned conflict checks.
 
-`shared_metrics(handle)` reports `read_count`, `write_count`,
+`harness.runtime.shared_metrics(handle)` reports `read_count`, `write_count`,
 `cas_success_count`, `cas_failure_count`, `stale_read_count`, and `version`
 for cells and maps.
 
 Use named synchronization around multi-step updates:
 
 ```harn
-const memo = shared_map({scope: "workflow_run", key: "memo"})
-const lock = harness.runtime.sync_mutex_acquire("memo:customer-42", 250ms)
-guard lock != nil else { throw "state lock timeout" }
-try {
-  shared_map_set(memo, "customer-42", "summary")
-} finally {
-  sync_release(lock)
+fn main(harness: Harness) {
+  const memo = harness.runtime.shared_map({
+    scope: "workflow_run",
+    key: "memo",
+  })
+  const lock = harness.runtime.sync_mutex_acquire(
+    "memo:customer-42", 250ms,
+  )
+  guard lock != nil else { throw "state lock timeout" }
+  try {
+    harness.runtime.shared_map_set(memo, "customer-42", "summary")
+  } finally {
+    harness.runtime.sync_release(lock)
+  }
 }
 ```
 
@@ -2089,23 +2128,31 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
-spawn {
-  mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+fn main(harness: Harness) {
+  const inbox = harness.runtime.mailbox_open(
+    {scope: "task_group", name: "reviewer", capacity: 32},
+  )
+  spawn {
+    harness.runtime.mailbox_send("reviewer", {
+      kind: "work",
+      path: "src/main.rs",
+    })
+  }
+  const msg = harness.runtime.mailbox_receive(inbox)
 }
-const msg = mailbox_receive(inbox)
 ```
 
-- `mailbox_open(name_or_options, capacity?)` opens or creates an inbox.
-- `mailbox_lookup(name_or_handle)` returns a handle or `nil`.
-- `mailbox_send(target, value)` returns `false` when the mailbox is absent or
-  closed.
-- `mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
-  or the task is cancelled.
-- `mailbox_try_receive(target)` is non-blocking.
-- `mailbox_close(target)` closes the inbox to new messages.
-- `mailbox_metrics(target)` reports `depth`, `capacity`, `sent_count`,
-  `received_count`, `failed_send_count`, and `closed`.
+- `harness.runtime.mailbox_open(name_or_options, capacity?)` opens or creates
+  an inbox.
+- `harness.runtime.mailbox_lookup(name_or_handle)` returns a handle or `nil`.
+- `harness.runtime.mailbox_send(target, value)` returns `false` when the
+  mailbox is absent or closed.
+- `harness.runtime.mailbox_receive(target)` blocks until a message arrives,
+  the mailbox closes, or the task is cancelled.
+- `harness.runtime.mailbox_try_receive(target)` is non-blocking.
+- `harness.runtime.mailbox_close(target)` closes the inbox to new messages.
+- `harness.runtime.mailbox_metrics(target)` reports `depth`, `capacity`,
+  `sent_count`, `received_count`, `failed_send_count`, and `closed`.
 
 ### Supervisor trees
 
@@ -2119,32 +2166,34 @@ fn poll_connector(name) {
   name
 }
 
-const sup = supervisor_start({
-  name: "ops",
-  strategy: "one_for_one",
-  children: [
-    {
-      name: "github-stream",
-      kind: "connector_stream",
-      restart: {
-        mode: "on_failure",
-        max_restarts: 5,
-        window_ms: 60000,
-        backoff_ms: 250,
-        max_backoff_ms: 30000,
-        factor: 2,
-        jitter_ms: 100,
-        circuit_open_ms: 300000,
+fn main(harness: Harness) {
+  const sup = harness.runtime.supervisor_start({
+    name: "ops",
+    strategy: "one_for_one",
+    children: [
+      {
+        name: "github-stream",
+        kind: "connector_stream",
+        restart: {
+          mode: "on_failure",
+          max_restarts: 5,
+          window_ms: 60000,
+          backoff_ms: 250,
+          max_backoff_ms: 30000,
+          factor: 2,
+          jitter_ms: 100,
+          circuit_open_ms: 300000,
+        },
+        task: { ctx -> poll_connector(ctx.child_name) },
       },
-      task: { ctx -> poll_connector(ctx.child_name) },
-    },
-  ],
-})
+    ],
+  })
 
-const _state = supervisor_state(sup)
+  const _state = harness.runtime.supervisor_state(sup)
 
-const _events = supervisor_events(sup)
-supervisor_stop(sup, 2s)
+  const _events = harness.runtime.supervisor_events(sup)
+  harness.runtime.supervisor_stop(sup, 2s)
+}
 ```
 
 `strategy` supports `one_for_one`, `one_for_all`, `rest_for_one`, and
@@ -2154,16 +2203,21 @@ exponential backoff, deterministic jitter, and circuit-open delay before a
 suppressed child is eligible to restart again. Child status includes `running`,
 `waiting`, `circuit_open`, `stopped`, `failed`, and `suppressed`.
 
-- `supervisor_start(spec)` starts a supervisor and returns a supervisor handle.
-- `supervisor_state(handle_or_id)` returns children, status, restart count,
-  last error, current wait reason, active lease, next restart time, and metrics.
-- `supervisor_events(handle_or_id)` returns lifecycle events for child started,
-  stopped, failed, restarted, suppressed, escalated, and supervisor shutdown.
-- `supervisor_metrics(handle_or_id)` returns lifecycle counters.
-- `supervisor_wait(handle_or_id)` awaits the terminal lifecycle transition and
-  returns the final supervisor state.
-- `supervisor_stop(handle_or_id, timeout?)` requests cooperative child
-  cancellation, waits for drain, then force-aborts any remaining children.
+- `harness.runtime.supervisor_start(spec)` starts a supervisor and returns a
+  supervisor handle.
+- `harness.runtime.supervisor_state(handle_or_id)` returns children, status,
+  restart count, last error, current wait reason, active lease, next restart
+  time, and metrics.
+- `harness.runtime.supervisor_events(handle_or_id)` returns lifecycle events
+  for child started, stopped, failed, restarted, suppressed, escalated, and
+  supervisor shutdown.
+- `harness.runtime.supervisor_metrics(handle_or_id)` returns lifecycle
+  counters.
+- `harness.runtime.supervisor_wait(handle_or_id)` awaits the terminal
+  lifecycle transition and returns the final supervisor state.
+- `harness.runtime.supervisor_stop(handle_or_id, timeout?)` requests
+  cooperative child cancellation, waits for drain, then force-aborts any
+  remaining children.
 
 `runtime_context().debug.supervisors` exposes the same state for runtime
 introspection tooling. Supervisor lifecycle events are also appended to the
@@ -2174,9 +2228,12 @@ active EventLog topic `supervisor.lifecycle` when an EventLog is installed.
 Channels provide typed message-passing between concurrent tasks.
 
 ```harn
-const ch = channel("name", 10)   // buffered channel with capacity 10
-send(ch, "hello")               // send a value, returns true
-const msg = receive(ch)           // blocking receive
+fn main(harness: Harness) {
+  // buffered channel with capacity 10
+  const ch = harness.runtime.channel("name", 10)
+  harness.runtime.send(ch, "hello")     // send a value, returns true
+  const msg = harness.runtime.receive(ch)   // blocking receive
+}
 ```
 
 #### Channel iteration
@@ -2185,16 +2242,18 @@ A `for`-`in` loop over a channel asynchronously receives values until the
 channel is closed and drained:
 
 ```harn
-const ch = channel("stream", 10)
-spawn {
-  send(ch, "a")
-  send(ch, "b")
-  close_channel(ch)
+fn main(harness: Harness) {
+  const ch = harness.runtime.channel("stream", 10)
+  spawn {
+    harness.runtime.send(ch, "a")
+    harness.runtime.send(ch, "b")
+    harness.runtime.close_channel(ch)
+  }
+  for item in ch {
+    harness.obs.log(item)    // prints "a", then "b"
+  }
+  // loop exits after channel is closed and all items are consumed
 }
-for item in ch {
-  harness.obs.log(item)    // prints "a", then "b"
-}
-// loop exits after channel is closed and all items are consumed
 ```
 
 When the channel is closed, remaining buffered items are still delivered.
@@ -2233,12 +2292,15 @@ corresponding body. Only one case fires per select.
 #### timeout case
 
 ```harn
-fn handle(msg) { harness.obs.log(msg) }
-const ch1 = channel("events")
-select {
-  msg from ch1 { handle(msg) }
-  timeout 5s {
-    harness.obs.log("timed out")
+fn handle(harness: Harness, msg) { harness.obs.log(msg) }
+
+fn main(harness: Harness) {
+  const ch1 = harness.runtime.channel("events")
+  select {
+    msg from ch1 { handle(harness, msg) }
+    timeout 5s {
+      harness.obs.log("timed out")
+    }
   }
 }
 ```
@@ -2248,12 +2310,15 @@ If no channel produces a value within the duration, the timeout body runs.
 #### default case (non-blocking)
 
 ```harn
-fn handle(msg) { harness.obs.log(msg) }
-const ch1 = channel("events")
-select {
-  msg from ch1 { handle(msg) }
-  default {
-    harness.obs.log("nothing ready")
+fn handle(harness: Harness, msg) { harness.obs.log(msg) }
+
+fn main(harness: Harness) {
+  const ch1 = harness.runtime.channel("events")
+  select {
+    msg from ch1 { handle(harness, msg) }
+    default {
+      harness.obs.log("nothing ready")
+    }
   }
 }
 ```
@@ -2316,12 +2381,12 @@ the consumer at the pull site (`for`, `.next()`, or `.iter()`).
 ### Durable agent channels
 
 Durable agent channels (epic #1870) are distinct from the in-process
-`channel(...)` primitive above. Where in-process channels are typed
-mailboxes between concurrent tasks inside one VM, durable channels are
-a typed pub/sub primitive that writes to the active EventLog and fans
-each emit out to every matching `channel.emit` trigger binding. They
-survive process restarts, feed the replay oracle, and show up in the
-action graph alongside webhook and cron events.
+`harness.runtime.channel(...)` primitive above. Where in-process
+channels are typed mailboxes between concurrent tasks inside one VM,
+durable channels are a typed pub/sub primitive that writes to the
+active EventLog and fans each emit out to every matching `channel.emit`
+trigger binding. They survive process restarts, feed the replay oracle,
+and show up in the action graph alongside webhook and cron events.
 
 #### Emit
 
@@ -2706,7 +2771,7 @@ control flow.
 
 ### `Pipeline.on_finish` semantic
 
-`pipeline_on_finish(callback)` is a stdlib builtin that registers a
+`harness.agent.pipeline_on_finish(callback)` registers a
 `fn(harness, return_value)` closure into a thread-local one-shot slot
 (`PIPELINE_ON_FINISH`). The slot is last-write-wins inside one run.
 `Vm::execute` consumes the registered callback via
@@ -2915,8 +2980,8 @@ Every lifecycle decision is reproducible on a replay:
    harness clock. Tests control only their own harness through
    `harness.testing.clock_set(...)`, `clock_advance(...)`, and
    `clock_reset()`.
-4. **One-shot registration.** `pipeline_on_finish(callback)` is
-   last-write-wins; the slot is consumed exactly once per run via
+4. **One-shot registration.** `harness.agent.pipeline_on_finish(callback)`
+   is last-write-wins; the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. The error exit path clears the slot
    alongside the audit log, partial-handoff registry, disposition
    slot, and seq counter, so a failed run cannot leak in-progress
@@ -3205,19 +3270,22 @@ top-level `title` and `icons` metadata into the `tools/list` response.
 `tool_define` entry without annotations.
 
 ```harn
-registry = tool_define(registry, "repo.status", "Read repository status", {
-  parameters: {},
-  title: "Repository Status",
-  handler: { _args -> git.status() },
-  annotations: {
+registry = tool_define(
+  registry, "repo.status", "Read repository status", {
+    parameters: {},
     title: "Repository Status",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-  icons: [{src: "https://example.com/repo-status.png", mimeType: "image/png"}],
-})
+    handler: { _args -> git.status() },
+    annotations: {
+      title: "Repository Status",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    icons: [
+      {src: "https://example.com/repo-status.png", mimeType: "image/png"}
+    ],
+  })
 ```
 
 #### Tool surface validation
@@ -3420,7 +3488,7 @@ registry = tool_define(registry, "rare_admin_action", "...", {
 falling back to eager loading.
 
 Deferred tools are only materialised on the wire when the call opts
-into `tool_search` (see the `llm_call` option of the same name and
+into `tool_search` (see the `harness.llm.call` option of the same name and
 `docs/src/llm-and-agents.md`). Harn supports two native backends plus a
 provider-agnostic client fallback:
 
@@ -3458,7 +3526,9 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -3471,9 +3541,12 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   reasoning_effort_supported, reasoning_none_supported,
 //   message_wire_format, native_tool_wire_format,
 //   prefers_xml_scaffolding, prefers_markdown_scaffolding,
-//   structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none",
-//   supports_assistant_prefill, prefers_role_developer, prefers_xml_tools,
-//   thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline",
+//   structured_output_mode:
+//     "native_json" | "delimited" | "xml_tagged" | "none",
+//   supports_assistant_prefill, prefers_role_developer,
+//   prefers_xml_tools,
+//   thinking_block_style:
+//     "none" | "thinking_blocks" | "reasoning_summary" | "inline",
 // }
 ```
 
@@ -3560,7 +3633,9 @@ including closures.
 Functions can be promoted into skills via the `@acp_skill` attribute:
 
 ```harn,ignore
-@acp_skill(name: "deploy", when_to_use: "User says deploy", invocation: "explicit")
+@acp_skill(
+  name: "deploy", when_to_use: "User says deploy", invocation: "explicit",
+)
 pub fn deploy_run() { ... }
 ```
 
@@ -3791,7 +3866,8 @@ const result = try { json_parse(raw_input) }
 // Result.Err({error: "json_parse_error", kind, message, line, column})
 
 const checked = try { schema_check(data, schema) }
-// checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))
+// checked is schema_check's Result directly, not
+// Result.Ok(Result.Ok(...))
 ```
 
 The try-expression is the complement of the `?` operator: `try` enters
@@ -4039,7 +4115,8 @@ Type parameters on user-defined generics may be marked with `in` or
 `out`:
 
 ```harn,ignore
-type Reader<out T> = fn() -> T          // T appears only in output position
+// T appears only in output position
+type Reader<out T> = fn() -> T
 interface Sink<in T> { fn accept(v: T) -> int }
 fn map<in A, out B>(value: A) -> B { ... }
 ```
@@ -4268,7 +4345,10 @@ legacy helpers with `[lint].persona_step_allowlist`.
 #### `@command(name?, description?, hint?)`
 
 ```harn,ignore
-@command(name: "review", description: "Review the diff", hint: "(optional focus area)")
+@command(
+  name: "review", description: "Review the diff",
+  hint: "(optional focus area)",
+)
 pipeline review_branch(harness: Harness, task) { ... }
 ```
 
@@ -4413,9 +4493,12 @@ classifies nominal capability methods such as `harness.mcp.call(...)`,
 `host_call("capability.operation", ...)` wire is additionally classified when
 it appears in a trusted provenance-stamped host module; ordinary modules cannot
 invoke or re-export that wire.
-Calls like `with_execution_policy(...)`, `with_command_policy(...)`,
-`with_approval_policy(...)`, `with_autonomy_policy(...)`,
-`with_dynamic_permissions(...)`, `harness.net.egress_policy(...)`,
+Calls like `harness.runtime.with_execution_policy(...)`,
+`harness.runtime.with_command_policy(...)`,
+`harness.runtime.with_approval_policy(...)`,
+`harness.runtime.with_autonomy_policy(...)`,
+`harness.runtime.with_dynamic_permissions(...)`,
+`harness.net.egress_policy(...)`,
 `harness.interaction.request_approval(...)`, `harness.interaction.dual_control(...)`, and budget-bearing
 `harness.llm.call(..., {budget: ...})` satisfy the corresponding gates.
 
@@ -4461,10 +4544,19 @@ Expressions that infer to `never`:
 - `break` and `continue`
 - A block where every control path exits
 - An `if`/`else` where both branches infer to `never`
-- `while true { ... }` whose body contains no `break` binding to that loop
-  (a `break` inside a nested loop binds the inner loop and does not count),
-  so a function whose tail is such a loop needs no trailing `return`
+- A loop control never leaves: `while true { ... }` whose body contains no
+  `break` bound to that loop (see below)
 - Calls to `unreachable()`
+
+The `while` rule is about **divergence**, not about a return value.
+Control never reaches the statement after the loop, so a function whose
+tail is such a loop needs no trailing `return`. Two things defeat it:
+
+- A `break` bound to *that* loop. A `break` inside a nested loop binds the
+  inner loop, so it does not count.
+- A condition that is not the literal `true`. `while flag { ... }` may
+  exit, so it does not infer `never` even when `flag` is always true at
+  runtime.
 
 `never` is removed from union types: `never | string` simplifies to
 `string`. An empty union (all members removed by narrowing) becomes
@@ -4488,7 +4580,8 @@ fn passthrough(x: any) -> any {
   return x
 }
 
-const s: string = passthrough("hello")  // any → string, no narrowing required
+// any → string, no narrowing required
+const s: string = passthrough("hello")
 const n: int    = passthrough(42)
 ```
 
@@ -4523,9 +4616,21 @@ fn describe(v: unknown) -> string {
 
 Narrowing rules for `unknown`:
 
-- `type_of(x) == "T"` narrows `x` to `T` on the truthy branch (where
-  `T` is one of the type-of protocol names: `string`, `int`, `float`,
-  `bool`, `nil`, `list`, `dict`, `closure`, `bytes`).
+- `type_of(x) == "T"` narrows `x` to `T` on the truthy branch. `T` must
+  be one of the runtime type tags the checker can narrow to: `string`,
+  `bytes`, `int`, `float`, `decimal`, `bool`, `nil`, `list`, `dict`,
+  `closure`, `duration`, `task_handle`, `channel`, `atomic`, `rng`,
+  `sync_permit`, `resource`, `resource_guard`, `mcp_client`,
+  `verdict_receipt`, `set`, `generator`, `stream`, `range`, `iter`, and
+  `pair`. `type_of` returns three further tags — `struct`,
+  `enum`, and `builtin` — as well as harness-object names such as
+  `Harness` and `HarnessFs`. Comparing against those is legal but does
+  **not** narrow: knowing a value is "some struct" says nothing about
+  which declared struct it is. The canonical vocabulary is
+  `harn_builtin_meta::runtime_type_tags` — `ALL` for everything
+  `type_of` can return, `NARROWABLE` for the subset the checker acts
+  on — and the runtime, the checker, and this list are held in lockstep
+  by a test.
 - `schema_is(x, Shape)` narrows `x` to `Shape` on the truthy branch.
 - `guard type_of(x) == "T" else { ... }` narrows `x` to `T` in the
   surrounding scope after the guard.
@@ -4540,6 +4645,24 @@ Narrowing rules for `unknown`:
   only a bare `unknown` variable — including the ruled-out tracking for
   the exhaustiveness check.
 
+A **union** behaves differently from `unknown` in the falsy branch. A
+union is a closed set of alternatives, so `type_of(x) == "T"` subtracts
+`T` from it on the falsy branch instead of leaving it whole:
+
+```harn
+fn describe(v: string | int | bool) -> string {
+  if type_of(v) == "string" {
+    // v: string
+    return v.upper()
+  }
+  // v: int | bool — `string` has been subtracted
+  return "${v}"
+}
+```
+
+Only `unknown` keeps its full breadth in the falsy branch; that is the
+"open top" the bullet above describes.
+
 Interop between `any` and `unknown`:
 
 - `unknown` is assignable to `any` (upward to the full escape hatch).
@@ -4548,8 +4671,17 @@ Interop between `any` and `unknown`:
 
 **When to pick which:**
 
-- **No annotation** — "I haven't annotated this." Callers get no
-  checking. Use for internal, unstable code.
+- **No annotation** — "let inference decide." This does *not* turn
+  checking off for local bindings. An unannotated `let` / `const` is
+  inferred and then fully checked: `const x = make_int()` has type
+  `int`, and passing `x` where a `string` is expected is a
+  `HARN-TYP-006` error. An omitted **return type** is inferred from the
+  body the same way. What actually opens a hole is an unannotated
+  **parameter**: given `fn loose(v) { return v }`, any argument is
+  accepted, and because `v` carries no type the returned value carries
+  none either — so `needs_string(loose(5))` raises no error at all.
+  Annotate the parameters and return types of anything a caller reaches;
+  leaving an obvious local binding unannotated costs no safety.
 - **`unknown`** — "this value could be anything; narrow before use."
   Use at untrusted boundaries and in APIs that hand back open-ended
   data. This is the preferred annotation for LLM / JSON / dynamic
@@ -4610,7 +4742,8 @@ fn needs_id(x: {id: string, ...rest}) -> string {
 }
 
 needs_id({id: "u1", name: "Ann", age: 3})   // ok — extra fields allowed
-needs_id({name: "Ann"})                      // error — required `id` missing
+// error — required `id` missing
+needs_id({name: "Ann"})
 ```
 
 `rest` is a **row variable**: a generic type parameter in tail position. A
@@ -4799,7 +4932,8 @@ their arity and the type of each position:
 ```harn
 const row = tuple("retries", 3)          // tuple<string, int>
 const name: string = row[0]              // precise, not string?
-const count: int = row[-1]               // negative constant indexes are precise
+// negative constant indexes are precise
+const count: int = row[-1]
 
 fn consume(row: tuple<string, int>) -> int {
   return row[1]
@@ -4876,7 +5010,8 @@ include other fields.
 Nested shapes:
 
 ```harn
-const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+const data: {user: {name: string}, tags: list} =
+  {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -4901,16 +5036,19 @@ type GraderOut = {
 
 // Use the alias directly wherever a schema dict is expected.
 const s = schema_of(GraderOut)
-const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+const ok = schema_is(
+  {verdict: "pass", summary: "x", findings: []}, GraderOut,
+)
 
 const r = harness.llm.call(prompt, nil, {
   provider: "openai",
-  output: GraderOut,            // alias in value position — compiled to schema_of(T)
+  // alias in value position — compiled to schema_of(T)
+  output: GraderOut,
   schema_retries: 2,
 })
 ```
 
-`llm_call` can also express routing intent without pinning a single
+`harness.llm.call` can also express routing intent without pinning a single
 provider/model pair. The `route_policy` option accepts:
 
 - `"manual"` (default): use the normal `provider` / `model` / env resolution.
@@ -4935,7 +5073,7 @@ const r = harness.llm.call(prompt, nil, {
 System prompt fragments can be supplied without hand-concatenating the
 positional `system` string. The `system` option accepts either a string or an
 ordered list of `{content, title?, position?: "before"|"after", enabled?}`
-fragments for `llm_call` and `agent_loop`. In persistent
+fragments for `harness.llm.call` and `agent_loop`. In persistent
 `agent_loop` sessions, the composed session-level system prompt is recorded
 once in transcript metadata and as one leading internal `system_prompt`
 fingerprint event; it is not injected into the replayable message list. A later
@@ -4950,15 +5088,20 @@ import { system_before, with_system_fragments } from "std/llm/prompts"
 
 const opts = with_system_fragments(
   {provider: "anthropic", session_id: "review-42"},
-  [system_before("Follow the repository's validation gate before final output.")]
+  [system_before(
+    "Follow the repository's validation gate before final output."
+  )],
 )
-const r = agent_loop("Review this change", "You are a code review agent.", opts)
+const r = agent_loop(
+  "Review this change", "You are a code review agent.", opts,
+)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
 `cost_route` installs an inherited LLM routing context for the dynamic extent
-of its block. Nested `llm_call` invocations inherit the block's routing and
-budget options; an explicit option on the call wins for the same key.
+of its block. Nested `harness.llm.call` invocations inherit the block's
+routing and budget options; an explicit option on the call wins for the
+same key.
 
 ```harn
 const r = cost_route {
@@ -4973,8 +5116,8 @@ const r = cost_route {
 }
 ```
 
-The block config accepts the same canonical keys as `llm_call`; unknown or
-removed keys are errors. In `preference_list` mode, `targets` is the ordered
+The block config accepts the same canonical keys as `harness.llm.call`;
+unknown or removed keys are errors. In `preference_list` mode, `targets` is the ordered
 set of model aliases, model ids, or `provider:model` selectors and `strategy`
 selects `prefer_order`, `cheapest_first`, or `fastest_first`. Failures on the
 selected route advance through the remaining targets before provider-level
@@ -4982,8 +5125,8 @@ fallbacks are considered.
 
 For call sites that want Harn-managed response reuse, `std/llm/handlers`
 exports `with_cache(prompt, system?, options?)`. It returns the same envelope as
-`llm_call`, but first checks a persistent content-addressed cache. The key is
-`sha256:` plus canonical JSON over `{prompt, system, provider, model,
+`harness.llm.call`, but first checks a persistent content-addressed cache.
+The key is `sha256:` plus canonical JSON over `{prompt, system, provider, model,
 temperature, top_p, max_tokens}` after provider/model defaults resolve. Cache
 storage defaults to a sqlite store under Harn state with namespace
 `llm.with_cache`, a 10-minute TTL, and LRU eviction at 256 entries. Calls with
@@ -5018,7 +5161,7 @@ applies when the alias identifier appears as:
 - The argument of `schema_of(T)`.
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
   `schema_check`, `schema_report`, `is_type`, `json_validate`.
-- The value of an `output:` entry in an `llm_call` options dict.
+- The value of an `output:` entry in a `harness.llm.call` options dict.
 
 Public aliases keep the same reflection behavior when imported from a file or
 embedded standard-library module. Materialization resolves nested imported
@@ -5035,13 +5178,15 @@ builtin keeps existing schema dicts working.
 Schema-driven builtins are typed with proper generics so user-defined
 wrappers pick up the same narrowing.
 
-- `llm_call<T>(prompt, system, options: {output: Schema<T>, ...})
-  -> {data: T, text: string, ...}`
-- `llm_completion<T>` has the same signature.
-- `llm_call_structured<T>(prompt, schema: Schema<T>, options?) -> T`
-- `llm_call_structured_safe<T>(prompt, schema: Schema<T>, options?) ->
-  {ok: bool, data: T | nil, error: dict | nil}`
-- `llm_call_structured_result<T>(prompt, schema: Schema<T>, options?) ->
+- `harness.llm.call<T>(prompt, system,
+  options: {output: Schema<T>, ...}) -> {data: T, text: string, ...}`
+- `harness.llm.completion<T>` has the same signature.
+- `harness.llm.call_structured<T>(prompt, schema: Schema<T>, options?)
+  -> T`
+- `harness.llm.call_structured_safe<T>(prompt, schema: Schema<T>,
+  options?) -> {ok: bool, data: T | nil, error: dict | nil}`
+- `harness.llm.call_structured_result<T>(prompt, schema: Schema<T>,
+  options?) ->
   {ok: bool, data: T | nil, raw_text: string, error: string,
   error_category: string | nil, attempts: int, repaired: bool,
   repair_tier: string | nil,
@@ -5062,7 +5207,7 @@ wrappers pick up the same narrowing.
   `transient_network`, ...); JSON / schema failures surface as
   `missing_json`, `schema_validation`, or `repair_failed` when an
   optional repair pass was attempted and also failed. Options accept a
-  `repair: {enabled: bool, ...llm_call_overrides}` block. The ladder is
+  `repair: {enabled: bool, ...call_option_overrides}` block. The ladder is
   local mechanical salvage first (trailing commas, unquoted keys, prose
   preambles, truncated closers), then a single LLM reissue. `repaired`
   is true for either success; `repair_tier` is `"local"` or `"llm"`
@@ -5073,18 +5218,18 @@ wrappers pick up the same narrowing.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
-  ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
+  ...call_option_overrides}) -> {ok: bool, data: T | nil, raw_text:
   string, error: string, error_category: string | nil, attempts: int,
   stage: string, repaired: bool}`. Best-effort recovery of malformed
   LLM output against a target schema. Three deterministic stages
   followed by an optional one-shot LLM repair: `parsed` (direct
   `serde_json` parse) → `extracted` (lift JSON from prose / code
   fences) → `regex` (scrape top-level `key: value` lines for scalar
-  fields) → `llm_repair` (single-shot `llm_call` with `schema_retries:
+  fields) → `llm_repair` (single-shot `harness.llm.call` with `schema_retries:
   0`). `stage` reports which stage produced the result; `failed` means
   every stage exhausted. Set `{repair: false}` for a fully
   deterministic recovery pass with no LLM calls. The LLM repair stage
-  accepts the same overrides as `llm_call_structured_result`'s
+  accepts the same overrides as `harness.llm.call_structured_result`'s
   `repair`.
 
 `Schema<T>` denotes a runtime schema value whose static shape is `T`.
@@ -5114,29 +5259,42 @@ whose static type is `Schema<T>`.
 
 ### Human-in-the-loop primitives
 
-Human-in-the-loop is modeled as **first-class typed expression syntax**.
-`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
-reserved keywords with VM-enforced semantics: their names cannot be
-shadowed or rebound, the result envelopes are produced (and signed) by
-the runtime, and quorum approval requires distinct principals. Each
-primitive accepts either named arguments or the legacy positional form;
-both lower to the same runtime.
+Human-in-the-loop is modeled as typed methods on the `interaction`
+capability: `harness.interaction.ask_user`, `.request_approval`,
+`.dual_control`, and `.escalate_to`. Their semantics are VM-enforced —
+the result envelopes are produced (and signed) by the runtime, and
+quorum approval requires distinct principals.
+
+Arguments are **positional**. Harn has no keyword-argument call syntax,
+so the settings each primitive accepts are gathered into a trailing
+options record rather than passed by name.
 
 ```harn,ignore
 const answer = harness.interaction.ask_user(
-  prompt: "deploy now?", schema: schema_of(Choice),
+  "deploy now?",
+  {schema: schema_of(Choice)},
 )
-const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
-                              reviewers: ["alice", "bob", "carol"])
-const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
-                          approvers: ["alice", "bob", "carol"])
-const handle = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
+const record = harness.interaction.request_approval(
+  "merge_pr",
+  {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+)
+const merged = harness.interaction.dual_control(
+  2,
+  3,
+  destructive_step,
+  ["alice", "bob", "carol"],
+)
+const handle = harness.interaction.escalate_to(
+  "oncall",
+  "deploy failed",
+)
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
-- `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
+- `harness.interaction.ask_user<T>(prompt: string,
+  options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
 - `harness.interaction.request_approval(action: string, options?: ApprovalRequestOptions)`
   returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
   signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
@@ -5144,12 +5302,13 @@ records, and replay.
   reviewers?: list<string>, deadline?: duration, principal?: string,
   evidence_refs?: list<dict>, undo_metadata?: dict,
   capabilities_requested?: list<string>}`.
-- `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
+- `harness.interaction.dual_control<T>(n: int, m: int, action: fn() -> T,
+  approvers?: list<string>) -> T`
 - `harness.interaction.escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
   status: string, accepted_at: string | nil, reviewer: string | nil}`.
-- `hitl_pending(filters?: {since?: string, until?: string, kinds?: list<string>,
-  agent?: string, limit?: int})`
+- `harness.interaction.hitl_pending(filters?: {since?: string, until?: string,
+  kinds?: list<string>, agent?: string, limit?: int})`
   returns `list<{request_id: string, request_kind: string, agent: string,
   prompt: string, trace_id: string, timestamp: string, approvers: list<string>,
   metadata: dict}>`.
@@ -5303,7 +5462,7 @@ fn flags(entry: {arguments: list?}) -> list {
 Optional (`?.`) and plain (`.`) links address the same value, so they
 share a narrowing — `type_of(entry?.arguments) == "list"` narrows reads
 of both `entry?.arguments` and `entry.arguments`. A path whose type is
-the top type (`unknown`/`any`, common for `json_parse` / `llm_call`
+the top type (`unknown`/`any`, common for `json_parse` / `harness.llm.call`
 boundary fields) narrows to the tested kind, exactly as an
 `unknown`-typed variable does.
 
@@ -5322,7 +5481,8 @@ index or an absent key is `nil` at runtime, so typing the read as a bare
 
 ```harn,ignore
 const xs: list<int> = []
-const n: int = xs[0]   // error: expected int, found int? (xs[0] may be nil)
+// error: expected int, found int? (xs[0] may be nil)
+const n: int = xs[0]
 ```
 
 Recover the non-nil element in one of three ways:
@@ -5547,7 +5707,12 @@ fn handle(v: unknown) -> string {
 ```
 
 Covering all nine `type_of` variants (`int`, `string`, `float`, `bool`,
-`nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Suppression via
+`nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Nine, not
+the full narrowable set: `unknown` values come from boundary APIs such as
+`json_parse` and `harness.llm.call`, which can only produce these kinds,
+so requiring a `rng` or `sync_permit` arm would make the warning
+unusable. The canonical list is
+`harn_builtin_meta::runtime_type_tags::UNKNOWN_COVERAGE`. Suppression via
 an explicit fallthrough `return` is intentional: a plain `return`
 doesn't claim exhaustiveness, so partial narrowing followed by a normal
 return stays silent. Reaching `throw` or `unreachable()` with no prior
@@ -5605,8 +5770,9 @@ Type error: binding `doc` expects {name: string}, got dict
 ```
 
 This is what makes an annotation on a boundary value load-bearing: the declared
-type is the validation. `json_parse`, `toml_parse`, `yaml_parse`, `llm_call`, and
-every other producer of untrusted data are checked where their result is bound.
+type is the validation. `json_parse`, `toml_parse`, `yaml_parse`,
+`harness.llm.call`, and every other producer of untrusted data are checked
+where their result is bound.
 
 Struct field annotations are checked the same way. Constructing
 `struct User { name: string }` with a non-string `name` fails at construction
@@ -5875,7 +6041,7 @@ claims, and invalid PEM keys throw runtime errors.
 |---|---|
 | `cookie_parse(headers)` | Parses request `Cookie` header strings, lists, or header dicts into `{cookies, pairs, duplicates, invalid}` |
 | `cookie_serialize(name, value, options?)` | Serializes one `Set-Cookie` header value. Options support `HttpOnly`, `Secure`, `SameSite`, `Path`, `Domain`, `Max-Age`, and `Expires` through snake_case or header-style keys |
-| `cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
+| `harness.net.cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
 | `cookie_sign(value, secret)` / `cookie_verify(value, secret)` | Signs and verifies a string cookie value using the `cookie` crate's signed-jar format and at least 32 bytes of random key material |
 | `session_sign(payload, secret)` / `session_verify(token, secret)` | Signs and verifies a stateless JSON session payload. Verification returns `{ok, payload, error}` and does not throw on bad signatures |
 | `session_cookie(name, payload, secret, options?)` | Serializes a signed session cookie with secure defaults: `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |
@@ -5928,11 +6094,15 @@ and returns a list of dicts, one per match. Each dict contains:
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
-//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
-//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
+//   {match: "alice@example", groups: ["alice", "example"],
+//    start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"],
+//    start: 14, end: 22, line: 1}
 // ]
 
-const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures(
+  "(?P<user>\\w+):(?P<role>\\w+)", "alice:admin",
+)
 // named == [{match: "alice:admin", groups: ["alice", "admin"],
 //            user: "alice", role: "admin"}]
 
@@ -6500,7 +6670,7 @@ attached.
 `memory_summarize` is deterministic by default. `window` may be `nil`, an
 integer limit, or a dict with `limit`, `query`, and `tag` / `tags`. The summary
 text is an extractive bullet list capped to a bounded size; callers that need
-LLM prose can pass `summary.records` to `llm_call`.
+LLM prose can pass `summary.records` to `harness.llm.call`.
 
 `memory_forget` never rewrites or removes prior observations. It appends a
 tombstone event. Predicates may be a string (substring match against searchable
@@ -6510,7 +6680,9 @@ and `query`; all provided dict predicates must match.
 ### std/agent/fact module
 
 ```harn
-import { store_fact, recall_facts, invalidate_facts } from "std/agent/fact"
+import {
+  store_fact, recall_facts, invalidate_facts,
+} from "std/agent/fact"
 ```
 
 Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
@@ -6697,7 +6869,7 @@ TimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
 ```
 
 - `trigger` is validated by the same trigger-spec parser used by
-  `trigger_register(...)`. Any provider that works as a trigger source
+  `harness.runtime.trigger_register(...)`. Any provider that works as a trigger source
   (`github`, `slack`, `cron`, `channel`, `webhook`, etc.) works as a
   resume condition. Registration failures raise `HARN-SUS-007`.
 - `timeout.duration_minutes` must be a positive integer.
@@ -6820,8 +6992,8 @@ internally call `agent_await_resumption(...)` when no wake source
 paths) is queued. The persisted snapshot extends the standard suspend
 metadata with daemon-specific fields (`pending_event_count`,
 `queued_event_count`, `inflight_event`, `wake_interval_ms`,
-`watch_paths`, `event_queue_capacity`). `daemon_resume(path)` cold-
-restores the loop identically.
+`watch_paths`, `event_queue_capacity`).
+`harness.agent.daemon_resume(path)` cold-restores the loop identically.
 
 ### Cooperative cancellation contract
 
@@ -7204,7 +7376,13 @@ Harn source may also declare an eval pack directly:
 ```harn
 eval_pack regression "slack-connector" {
   baseline: "fixtures/baseline.run.json"
-  fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
+  fixtures: [
+    {
+      id: "candidate",
+      kind: "run-record",
+      path: "fixtures/candidate.run.json",
+    }
+  ]
   rubrics: [{
     id: "status",
     kind: "deterministic",
@@ -7266,8 +7444,8 @@ pipeline revision metadata, package data, and judge configuration. Paired eval
 statistics compare rows only when both the case and harness fingerprints are
 compatible.
 
-`eval_pack_run(manifest, options?)` appends one durable eval-ledger row per
-trial cell keyed by `(suite, model, split, commit, case,
+`harness.runtime.eval_pack_run(manifest, options?)` appends one durable
+eval-ledger row per trial cell keyed by `(suite, model, split, commit, case,
 case_fingerprint, harness_config_fingerprint, trial)` to the active event-log
 backend, defaulting to the sqlite event log under the manifest `base_dir` /
 `HARN_STATE_DIR`. Before running a cell, the runner reuses an exact matching
@@ -7303,8 +7481,8 @@ holdout = ["case-c"]
 
 `eval_pack_validate_split(manifest)` rejects duplicate case ids, duplicate
 partition entries, overlapping partitions, unknown case ids, and under-covered
-splits. `eval_pack_run(manifest)` performs the same validation before running
-cases.
+splits. `harness.runtime.eval_pack_run(manifest)` performs the same validation
+before running cases.
 
 An `eval_pack` block may include ordinary Harn statements and one
 `summarize { ... }` block. These statements run when the declaration is
@@ -7662,18 +7840,22 @@ fn admin_merge(ctx) {
 }
 
 pipeline default(harness: Harness) {
-  register_persona_hook("merge_*", "PreStep", { ctx -> nil })
-  register_step_hook("merge_captain", "admin_merge", "PostStep", { ctx ->
-    {output: ctx.output}
-  })
+  harness.agent.register_persona_hook(
+    "merge_*", "PreStep", { ctx -> nil },
+  )
+  harness.agent.register_step_hook(
+    "merge_captain", "admin_merge", "PostStep", { ctx ->
+      {output: ctx.output}
+    },
+  )
 }
 ```
 
-`register_persona_hook(persona_pattern, event, handler)` matches a
-glob-style persona name and fires for matching lifecycle events.
-`register_step_hook(persona_pattern, step_name, event, handler)` further
-narrows the hook to one statically declared `@step(name: ...)`. `harn
-check` rejects literal step-hook targets whose persona pattern matches a
+`harness.agent.register_persona_hook(persona_pattern, event, handler)`
+matches a glob-style persona name and fires for matching lifecycle events.
+`harness.agent.register_step_hook(persona_pattern, step_name, event, handler)`
+further narrows the hook to one statically declared `@step(name: ...)`.
+`harn check` rejects literal step-hook targets whose persona pattern matches a
 statically declared `@persona` but whose step name is not declared by
 that persona.
 
@@ -7722,7 +7904,7 @@ shaped for `agent_loop`'s tool registry. Recognized keys:
 
 - `stacks` (`list<string>`, default `[]`) — drives both
   `tool_hooks_filter` and registry auto-seed.
-- `registry` (`tool_hooks_registry()` value, default
+- `registry` (`harness.tools.hooks_registry()` value, default
   `tool_hooks_seed_registry(stacks)`) — explicit override.
 - `custom_rules` (`list<tool_rule>`, default `[]`) — matched before
   the registry regardless of stack scoping.
@@ -7759,9 +7941,9 @@ Three shipped modes return a uniform decision envelope:
   original command unchanged and records a `tool_rule_warning`
   lifecycle audit entry.
 
-Custom modes call the same `tool_hooks_emit_audit(kind, payload)` and
-`tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` primitives
-and return any envelope shape the caller wants — unknown `action`
+Custom modes call the same `harness.tools.hooks_emit_audit(kind, payload)`
+and `harness.tools.hooks_inject_reminder({tags, body, ttl_turns, ...})`
+primitives and return any envelope shape the caller wants — unknown `action`
 strings are treated as advisory extensions by replay tooling.
 
 The optional `llm_classifier` runs a small model against any command
@@ -8068,7 +8250,9 @@ fn fixture() -> dict {
   ],
   fixture: fixture,
 )
-pipeline test_query(harness: Harness, fx: dict, input: string, expected: string) {
+pipeline test_query(
+  harness: Harness, fx: dict, input: string, expected: string,
+) {
   fx.rows.push(input)
   assert_eq("${fx.prefix}:${input}", expected)
 }
@@ -8124,7 +8308,8 @@ output too. `--json-out` and `--junit` reports include it under
 During `harn test`, the `HARN_LLM_PROVIDER` environment variable is
 automatically set to `"mock"` unless explicitly overridden. The mock
 provider returns deterministic placeholder responses, allowing tests
-that call `llm`, `llm_stream`, or `llm_stream_call` to run without API keys.
+that call `harness.llm.call`, `harness.llm.stream`, or
+`harness.llm.stream_call` to run without API keys.
 
 ### CLI options
 

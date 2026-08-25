@@ -100,7 +100,7 @@ fn test_parses_models_lora_preflight_args() {
     assert_eq!(args.max_seq_length, Some(8192));
     assert_eq!(args.min_fit_ratio, Some(0.98));
     assert_eq!(args.hard_token_limit, 32_768);
-    assert_eq!(args.min_records, 190);
+    assert_eq!(args.min_records, Some(190));
     assert_eq!(args.source_tool_format, "json");
     assert_eq!(args.min_tool_call_share, 0.95);
     assert_eq!(args.done_marker.as_deref(), Some("##DONE##"));

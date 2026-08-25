@@ -25,6 +25,7 @@ pub use env::{
     closest_match, LazyPipelineCallable, LazyVmCallable, ModuleFunctionRegistry, ModuleState,
     VmCallable, VmClosure, VmEnv,
 };
+pub(crate) use error::error_category_for_http_status;
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,

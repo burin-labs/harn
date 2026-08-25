@@ -710,7 +710,7 @@ pub(crate) struct ModelsLoraPreflightArgs {
     /// Corpus JSONL file, or a directory containing a conventional corpus JSONL.
     #[arg(long, value_name = "PATH")]
     pub corpus: String,
-    /// Training config file to read max_seq_length/min_fit_ratio from.
+    /// Training config file to read sequence, fit, and record thresholds from.
     #[arg(long, value_name = "PATH")]
     pub config: Option<std::path::PathBuf>,
     /// Override the config's max_seq_length.
@@ -722,9 +722,9 @@ pub(crate) struct ModelsLoraPreflightArgs {
     /// Hard approximate token budget outlier ceiling.
     #[arg(long = "hard-token-limit", default_value_t = 32_768)]
     pub hard_token_limit: u64,
-    /// Minimum trainable record count.
-    #[arg(long = "min-records", default_value_t = 1)]
-    pub min_records: u64,
+    /// Override the config's minimum trainable record count.
+    #[arg(long = "min-records")]
+    pub min_records: Option<u64>,
     /// Expected source tool-call body format (`json`, `text`, or `auto`).
     #[arg(long = "source-tool-format", default_value = "json")]
     pub source_tool_format: String,
