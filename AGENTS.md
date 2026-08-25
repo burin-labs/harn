@@ -152,7 +152,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Run one exact Rust library test without unrelated nextest discovery with
   `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set
   `HARN_TEST_ONE_PACKAGE` only when the test is outside `harn-cli`; zero matches
-  fail loudly.
+  fail loudly. Set `HARN_TEST_ONE_BINARY` to select a named integration-test
+  binary instead of the package library.
 - Workspace tests: `make test` (requires cargo-nextest; `make setup` installs it).
 - Full gate: `make all`.
 - Before declaring a change clean, run `make check-drift` and inspect

@@ -407,6 +407,7 @@ jobs:
           set -euo pipefail
           HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versioned_fitness_corpus' \
             HARN_TEST_ONE_PACKAGE=harn-hostlib \
+            HARN_TEST_ONE_BINARY=harn_hostlib \
             make test-one
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh

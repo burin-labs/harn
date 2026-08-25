@@ -291,9 +291,15 @@ test-focused:
 # fully-qualified test name opaque to Make and the shell parser.
 test-one:
 	@ : "$${HARN_TEST_ONE_NAME:?set HARN_TEST_ONE_NAME to the fully-qualified test name}"
-	$(HARN_RUST_TEST_ENV) ./scripts/test_one.sh \
-		--package "$${HARN_TEST_ONE_PACKAGE:-harn-cli}" \
-		--lib "$${HARN_TEST_ONE_NAME}"
+	@if [ -n "$${HARN_TEST_ONE_BINARY:-}" ]; then \
+		$(HARN_RUST_TEST_ENV) ./scripts/test_one.sh \
+			--package "$${HARN_TEST_ONE_PACKAGE:-harn-cli}" \
+			--test "$${HARN_TEST_ONE_BINARY}" "$${HARN_TEST_ONE_NAME}"; \
+	else \
+		$(HARN_RUST_TEST_ENV) ./scripts/test_one.sh \
+			--package "$${HARN_TEST_ONE_PACKAGE:-harn-cli}" \
+			--lib "$${HARN_TEST_ONE_NAME}"; \
+	fi
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
 # (default origin/main), expanded by the reverse-dependency closure. Used on
