@@ -25,9 +25,10 @@ const record = harness.interaction.request_approval(
 
 Writing `harness.interaction.request_approval(action: "deploy
 production", quorum: 2)` is a parse error (`HARN-PAR-001: expected
-expression, found :`), not an alternative form. Note that a key the primitive does not recognise is
-ignored rather than rejected, so a misspelled option silently takes no
-effect — check the option names against the signatures below.
+expression, found :`), not an alternative form. Note also that a key
+the primitive does not recognise is ignored rather than rejected, so a
+misspelled option silently takes no effect — check the option names
+against the signatures below.
 
 ## VM-enforced invariants
 
