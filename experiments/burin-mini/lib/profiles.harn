@@ -84,11 +84,41 @@ pub fn rate_limit_profile() {
   }
 }
 
+/**
+ * Task profile for the slow-verifier case.
+ *
+ * Same deliverable as `rate_limit_profile`, but its verifier does not answer
+ * inline: `background_after_ms` gives the command a foreground budget it is
+ * built to outlive, so the run converts to a handle and the exit status arrives
+ * only on the wait that resolves it. That is the lifecycle a real test suite
+ * has, and the one a loop can spin on forever if it re-runs the verifier
+ * instead of awaiting the run already in flight.
+ */
+pub fn slow_verify_profile() {
+  return rate_limit_profile()
+    + {
+      id: "slow_verify_auth",
+      verify_command: "./scripts/verify-slow.sh",
+      background_after_ms: 250,
+      success_criteria: [
+        "Add a simple in-memory per-IP rate limiter.",
+        "Export it from the middleware index.",
+        "Wire it into the API route stack.",
+        "Await the slow verifier's result instead of restarting it.",
+      ],
+      completion_bar:
+        "Ready once the verifier has been run AND its terminal result collected. A handle is not a result: if the run reports it is still running, wait on that handle rather than starting another verifier.",
+    }
+}
+
 /** Map a task prompt onto one of the canonical experiment profiles. */
 pub fn profile_for_task(task: string?) {
   const lower = lowercase(task)
   if contains(lower, "comment what this file does") {
     return comment_profile()
+  }
+  if contains(lower, "slow verifier") {
+    return slow_verify_profile()
   }
   if contains(lower, "rate limiting middleware") {
     return rate_limit_profile()
