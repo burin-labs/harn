@@ -185,7 +185,7 @@ mod tests {
 
         let source =
             fs::read_to_string(destination.join("connectors/echo.harn")).expect("connector source");
-        assert!(source.contains("pub fn normalize_inbound(_harness: Harness, raw)"));
+        assert!(source.contains("pub fn normalize_inbound(_harness: Harness, raw: dict) -> dict"));
         let formatted = harn_fmt::format_source(&source).expect("format connector source");
         assert_eq!(source, formatted, "connector source is not canonical");
     }
