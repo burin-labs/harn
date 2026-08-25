@@ -98,11 +98,30 @@ pub const PROCESS_RESULT: Ty = Ty::Shape(&[
 // Agent option bags
 // ---------------------------------------------------------------------------
 
-const RESUME_TIMEOUT_ACTION: Ty = Ty::Union(&[
-    Ty::LitString("resume_with_summary"),
-    Ty::LitString("fail"),
-    Ty::LitString("resume_with_input"),
-]);
+/// Actions accepted when an agent suspension reaches its timeout.
+pub const RESUME_TIMEOUT_ACTIONS: [&str; 3] = ["resume_with_summary", "fail", "resume_with_input"];
+
+/// Default action when `on_timeout` is omitted.
+pub const DEFAULT_RESUME_TIMEOUT_ACTION: &str = RESUME_TIMEOUT_ACTIONS[0];
+
+/// Whether `value` names a supported resume-timeout action.
+pub fn is_resume_timeout_action(value: &str) -> bool {
+    RESUME_TIMEOUT_ACTIONS.contains(&value)
+}
+
+const fn literal_string_types<const N: usize>(values: [&'static str; N]) -> [Ty; N] {
+    let mut types = [Ty::Never; N];
+    let mut index = 0;
+    while index < N {
+        types[index] = Ty::LitString(values[index]);
+        index += 1;
+    }
+    types
+}
+
+const RESUME_TIMEOUT_ACTION_TYPES: [Ty; RESUME_TIMEOUT_ACTIONS.len()] =
+    literal_string_types(RESUME_TIMEOUT_ACTIONS);
+const RESUME_TIMEOUT_ACTION: Ty = Ty::Union(&RESUME_TIMEOUT_ACTION_TYPES);
 
 pub const RESUME_TIMEOUT_SPEC: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("duration_minutes", TY_INT),
