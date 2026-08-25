@@ -5,9 +5,10 @@
  *
  * Streams share `<root>/.harn/session-store.sqlite`. The canonical Rust store
  * owns event ids, hashes, signatures, replay, and lineage. Retired per-stream
- * JSONL files are imported once on first access; all later writes go to SQLite.
- * Import is atomic and rejects malformed or hash-chain-invalid sources rather
- * than silently dropping rows and laundering the remainder into a new chain.
+ * JSONL files are projected in memory on reads and imported once by the first
+ * write. Import is atomic and rejects malformed or hash-chain-invalid sources
+ * rather than silently dropping rows and laundering the remainder into a new
+ * chain.
  *
  * A `payload` is treated as a mutation: `{operation: "upsert", record}`,
  * `{operation: "delete", id}`, `{operation: "replace", records}`, or
@@ -24,6 +25,9 @@ pub type SessionStoreOptions = {
   tags?: list<string>,
   headers?: dict<string, string>,
 }
+
+/** A read result that keeps a missing store distinct from an empty value. */
+pub type SessionStoreRead<out T> = {state: "absent"} | {state: "present", value: T}
 
 pub type SessionStoreEventKind = {kind: string, type?: string}
 
@@ -209,23 +213,31 @@ pub fn session_store_append(
 
 /**
  * Return every event dict in `session_id`'s stream, in append order.
+ * `state` is `absent` when no store exists. An existing empty stream returns
+ * `{state: "present", value: []}`.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_events(
   agent: HarnessAgent,
   session_id: string,
   options: SessionStoreOptions? = nil,
-) -> list<SessionStoreEvent> {
-  return agent.session_store_events(session_id, options).map(
-    { event -> __session_store_event(event) },
-  )
-    .to_list()
+) -> SessionStoreRead<list<SessionStoreEvent>> {
+  const read = agent.session_store_events(session_id, options)
+  if read.state == "absent" {
+    return {state: "absent"}
+  }
+  return {
+    state: "present",
+    value: read.value.map({ event -> __session_store_event(event) }).to_list(),
+  }
 }
 
 /**
  * List canonical sessions using keyset pagination and typed lifecycle filters.
+ * `state` is `absent` when no store exists. An existing store with no matching
+ * sessions returns `{state: "present", value: []}`.
  *
  * @effects: [store.read, fs.read]
  * @errors: [runtime]
@@ -233,64 +245,81 @@ pub fn session_store_events(
 pub fn session_store_list(
   agent: HarnessAgent,
   options: SessionStoreListOptions? = nil,
-) -> list<SessionStoreSession> {
-  return agent.session_store_list(options).map(
-    { session ->
-      return {
-        id: session.id,
-        tenant_id: session.tenant_id,
-        persona: session.persona,
-        parent_session_id: session.parent_session_id,
-        title: session.title,
-        cwd: session.cwd,
-        model: session.model,
-        session_type: session.session_type,
-        project_scope: session.project_scope,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        status: session.status,
-        event_count: session.event_count,
-      }
-    },
-  )
-    .to_list()
+) -> SessionStoreRead<list<SessionStoreSession>> {
+  const read = agent.session_store_list(options)
+  if read.state == "absent" {
+    return {state: "absent"}
+  }
+  return {
+    state: "present",
+    value: read.value.map(
+      { session ->
+        return {
+          id: session.id,
+          tenant_id: session.tenant_id,
+          persona: session.persona,
+          parent_session_id: session.parent_session_id,
+          title: session.title,
+          cwd: session.cwd,
+          model: session.model,
+          session_type: session.session_type,
+          project_scope: session.project_scope,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+          status: session.status,
+          event_count: session.event_count,
+        }
+      },
+    )
+      .to_list(),
+  }
 }
 
 /**
  * Return the non-nil `payload` of every event in append order.
+ * A missing store returns `{state: "absent"}`.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_payloads(
   agent: HarnessAgent,
   session_id: string,
   options: SessionStoreOptions? = nil,
-) -> list<any> {
+) -> SessionStoreRead<list<any>> {
+  const events = session_store_events(agent, session_id, options)
+  if events.state == "absent" {
+    return {state: "absent"}
+  }
   let payloads = []
-  for event in session_store_events(agent, session_id, options) {
+  for event in events.value {
     if event.payload != nil {
       payloads = payloads.appending(event.payload)
     }
   }
-  return payloads
+  return {state: "present", value: payloads}
 }
 
 /**
  * Project the stream's mutation payloads to the latest surviving record per
  * id, in first-seen order (`upsert`/`delete`/`replace`/`clear`).
+ * A missing store returns `{state: "absent"}`.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_project(
   agent: HarnessAgent,
   session_id: string,
   options: SessionStoreOptions? = nil,
-) -> list<any> {
+) -> SessionStoreRead<list<any>> {
+  const payloads = session_store_payloads(agent, session_id, options)
+  if payloads.state == "absent" {
+    return {state: "absent"}
+  }
   let records = {}
   let order = []
-  for mutation in session_store_payloads(agent, session_id, options) {
+  for mutation in payloads.value {
     const operation = to_string(mutation?.operation ?? "")
     if operation == "upsert" {
       const record = mutation?.record
@@ -322,14 +351,18 @@ pub fn session_store_project(
       order = []
     }
   }
-  return order.map({ id -> records[id] }).filter({ record -> record != nil }).to_list()
+  return {
+    state: "present",
+    value: order.map({ id -> records[id] }).filter({ record -> record != nil }).to_list(),
+  }
 }
 
 /**
  * Project the stream's `replace`/`clear` mutations to a single value, falling
- * back to `default_value`.
+ * back to `default_value` when the store is present. A missing store returns
+ * `{state: "absent"}` without applying the default.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_project_value(
@@ -337,9 +370,13 @@ pub fn session_store_project_value(
   session_id: string,
   default_value: any = nil,
   options: SessionStoreOptions? = nil,
-) -> any {
+) -> SessionStoreRead<any> {
+  const payloads = session_store_payloads(agent, session_id, options)
+  if payloads.state == "absent" {
+    return {state: "absent"}
+  }
   let value = default_value
-  for mutation in session_store_payloads(agent, session_id, options) {
+  for mutation in payloads.value {
     const operation = to_string(mutation?.operation ?? "")
     if operation == "replace" && mutation?.value != nil {
       value = mutation.value
@@ -347,22 +384,27 @@ pub fn session_store_project_value(
       value = default_value
     }
   }
-  return value
+  return {state: "present", value: value}
 }
 
 /**
- * Verify the hash chain of `session_id`. Returns `{ok, session_id, count}`;
- * on the first break also `broken_at` (event index) and `reason`.
+ * Verify the hash chain of `session_id`. A present result contains
+ * `{ok, session_id, count}`; on the first break it also contains `broken_at`
+ * (event index) and `reason`. A missing store returns `{state: "absent"}`.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_verify(
   agent: HarnessAgent,
   session_id: string,
   options: SessionStoreOptions? = nil,
-) -> SessionStoreVerifyReport {
-  return __session_store_verify_report(agent.session_store_verify(session_id, options))
+) -> SessionStoreRead<SessionStoreVerifyReport> {
+  const read = agent.session_store_verify(session_id, options)
+  if read.state == "absent" {
+    return {state: "absent"}
+  }
+  return {state: "present", value: __session_store_verify_report(read.value)}
 }
 
 /**
@@ -372,17 +414,21 @@ pub fn session_store_verify(
  * `effective_mode` reports the ranking path that actually ran. With no
  * semantic embedding backend, semantic and hybrid requests return the
  * deterministic FTS-only fallback instead of failing or claiming semantic
- * recall.
+ * recall. A missing store returns `{state: "absent"}`.
  *
- * @effects: [store.read, store.write, fs.read, fs.write, env.read]
+ * @effects: [store.read, fs.read, env.read]
  * @errors: [runtime]
  */
 pub fn session_store_search(
   agent: HarnessAgent,
   query: string,
   options: SessionStoreSearchOptions? = nil,
-) -> SessionStoreSearchResponse {
-  return __session_store_search_response(agent.session_store_search(query, options))
+) -> SessionStoreRead<SessionStoreSearchResponse> {
+  const read = agent.session_store_search(query, options)
+  if read.state == "absent" {
+    return {state: "absent"}
+  }
+  return {state: "present", value: __session_store_search_response(read.value)}
 }
 
 /**

@@ -113,7 +113,7 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(ha
       const sessions = session_store_list(
         harness.agent,
         {root: root, limit: 10, sort_by: "updated_at", order: "descending"},
-      )
+      ).value
       assert(
         len(sessions) == 5,
         "canonical session listing must preserve a multi-run conversation as one session",
@@ -276,7 +276,7 @@ pipeline test_pattern_learning_stamps_terminal_provenance_from_a_live_agent_loop
             harness.agent,
             "pattern-learning-live-terminal",
             {root: root},
-          )
+          ).value
           const terminal = events.find(
             { event -> event?.payload?.transcript_event?.kind == "agent_run_terminal" },
           )

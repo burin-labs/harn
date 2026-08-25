@@ -1116,7 +1116,7 @@ pipeline test_a_sets_store_value(harness: Harness, task) {
   harness.runtime.checkpoint("test-only-key", "from-a")
   assert_eq(harness.runtime.checkpoint_get("test-only-key"), "from-a")
   harness.agent.session_store_append("test-only-session", {case: "from-a"})
-  assert_eq(len(harness.agent.session_store_events("test-only-session")), 1)
+  assert_eq(len(harness.agent.session_store_events("test-only-session").value), 1)
 }
 
 pipeline test_b_has_fresh_store(harness: Harness, task) {
@@ -1124,7 +1124,7 @@ pipeline test_b_has_fresh_store(harness: Harness, task) {
   assert_eq(harness.project.metadata_get({dir: ".", namespace: "test"}), nil)
   assert_eq(harness.runtime.checkpoint_get("test-only-key"), nil)
   harness.agent.session_store_append("test-only-session", {case: "from-b"})
-  assert_eq(len(harness.agent.session_store_events("test-only-session")), 1)
+  assert_eq(len(harness.agent.session_store_events("test-only-session").value), 1)
 }
 "#,
         );
