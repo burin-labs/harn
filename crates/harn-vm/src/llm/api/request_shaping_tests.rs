@@ -59,7 +59,7 @@ fn anthropic_prefill_appends_assistant_for_legacy_model() {
 }
 
 #[test]
-fn anthropic_prefill_skipped_for_deprecated_4_6_model() {
+fn anthropic_prefill_skipped_for_opus_4_6() {
     use crate::llm::providers::AnthropicProvider;
 
     let mut opts = base_opts("anthropic");
