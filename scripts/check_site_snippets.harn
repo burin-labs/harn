@@ -18,12 +18,13 @@
 //
 // Each snippet must pass `harn check` and a strict `harn lint`. `check` alone
 // accepts plenty the language is moving away from — an untyped, unused
-// parameter type-checks fine — so `lint --strict
-// --require-public-api-types` is what holds the showcase to the style the docs
-// teach. (One gap this does not close: HARN-LNT-016 never fires on a
-// *pipeline* parameter, because the linter pre-marks them as referenced in
-// `crates/harn-lint/src/linter/walk.rs`. An unused `pipeline` parameter is
-// still invisible to every tool here.)
+// parameter type-checks fine — so the strict lint is what holds the showcase
+// to the style the docs teach.
+//
+// One gap this does not close: HARN-LNT-016 never fires on a *pipeline*
+// parameter, because the linter inserts every pipeline parameter into its
+// reference set before linting the body (crates/harn-lint/src/linter/walk.rs).
+// An unused `pipeline` parameter is invisible to every command here.
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn
