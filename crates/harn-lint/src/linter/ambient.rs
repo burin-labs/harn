@@ -6,7 +6,7 @@ use harn_parser::diagnostic::{
     harness_net_replacement, harness_random_replacement, harness_stdio_replacement,
     renamed_stdlib_symbol,
 };
-use harn_parser::{DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{DiagnosticCode as Code, SNode, TypeExpr, TypedParam};
 
 use super::Linter;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -199,20 +199,14 @@ impl Linter<'_> {
     /// `_harness`, and a local named `harness` that is not the host handle
     /// must not be mistaken for one.
     pub(super) fn harness_capability_of<'a>(&self, object: &'a SNode) -> Option<&'a str> {
-        let harness_name = self.harness_binding_name()?;
-        match &object.node {
-            Node::PropertyAccess {
-                object: root,
-                property,
-            }
-            | Node::OptionalPropertyAccess {
-                object: root,
-                property,
-            } if matches!(&root.node, Node::Identifier(name) if name == harness_name) => {
-                Some(property.as_str())
-            }
-            _ => None,
-        }
+        let (root, properties) = harn_parser::lexical::resolved_receiver_path(
+            object,
+            &self.resolved_identifier_bindings,
+        )?;
+        self.harness_bindings
+            .contains(root)
+            .then(|| properties.first().copied())
+            .flatten()
     }
 
     fn has_local_or_imported_name(&self, name: &str) -> bool {
