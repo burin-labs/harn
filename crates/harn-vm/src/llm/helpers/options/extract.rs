@@ -178,6 +178,7 @@ pub(crate) fn extract_llm_options(
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
+    let call_stage = opt_str(&options, "_call_stage").filter(|value| !value.trim().is_empty());
     let rate_limit_consumer_id = opt_str(&options, "rate_limit_consumer_id")
         .filter(|value| !value.trim().is_empty())
         .or_else(|| session_id.clone());
@@ -815,6 +816,7 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         region: None,
         session_id,
+        call_stage,
         rate_limit_consumer_id,
         rate_limit_reroute_on_timeout: false,
         mock_scope,

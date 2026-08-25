@@ -1,8 +1,8 @@
 # `harn usage` — LLM spend and usage analytics
 
 `harn usage` turns the per-call cost and token data Harn **already records** in
-the event log into spend/usage rollups by provider, model, or a
-day/week/month time series — including prompt-cache efficiency.
+the event log into spend and usage rollups by provider, model, stage, or a
+day/week/month time series. It also reports prompt-cache efficiency.
 
 Every LLM call the runtime makes appends a `provider_call_response` event to the
 `agent.transcript.llm` topic in `<project>/.harn/events.sqlite`. That event
@@ -47,7 +47,7 @@ total: 4329 calls, $18.8753, 82566555 in / 1567871 out tok, $1.8826 cache saving
 | `--all` | Discover and aggregate across every `<project>/.harn/events.sqlite` found under the current directory and `~/projects`, skipping vendored `.cargo/registry` copies and any `node_modules` trees. |
 | `--since <date>` | Only include calls at or after this date (inclusive). Accepts `YYYY-MM-DD` or an RFC3339 timestamp. |
 | `--until <date>` | Only include calls strictly before this date. A bare `YYYY-MM-DD` is inclusive of the whole day. |
-| `--group-by provider\|model\|day\|week\|month` | Roll-up dimension. Defaults to `provider`. |
+| `--group-by provider\|model\|stage\|day\|week\|month` | Roll-up dimension. Defaults to `provider`. Agent loops label their own work, checks, repairs, wrap-up, and compaction calls. Calls without a meaningful stage appear under `unattributed`. |
 | `--provider <p>` | Only include rows for this provider. |
 | `--model <m>` | Only include rows for this model. |
 | `--json` | Emit the stable [`JsonEnvelope`](./cli-json-contract.md) instead of the text table. |

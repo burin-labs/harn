@@ -503,6 +503,7 @@ pub(super) fn dump_llm_request(
         "fallback_chain": opts.fallback_chain.clone(),
         "routing_decision": opts.routing_decision.clone(),
     });
+    project_call_stage(&mut request_event, opts.call_stage.as_deref());
     if verbose_llm_transcript_enabled() {
         request_event["request_snapshot"] = serde_json::json!({
             "system": payload.system,
@@ -561,6 +562,7 @@ pub(super) fn dump_llm_response(
     result: &super::api::LlmResult,
     response_ms: u64,
     structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
+    call_stage: Option<&str>,
 ) {
     let structural_experiment = structural_experiment
         .map(serde_json::to_value)
@@ -602,6 +604,7 @@ pub(super) fn dump_llm_response(
         "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
     });
+    project_call_stage(&mut event, call_stage);
     crate::llm::response_tool_calls::project_onto_response(
         &mut event,
         &result.tool_calls,
@@ -610,6 +613,13 @@ pub(super) fn dump_llm_response(
     usage.project_onto_event(&mut event);
     raw_tool_receipts::project_onto_event(&mut event, result);
     append_llm_transcript_entry(&event);
+}
+
+pub(super) fn project_call_stage(event: &mut serde_json::Value, call_stage: Option<&str>) {
+    let Some(stage) = call_stage.map(str::trim).filter(|stage| !stage.is_empty()) else {
+        return;
+    };
+    event["stage"] = serde_json::json!(stage);
 }
 
 pub(super) fn decode_loop_state(text: &str) -> Option<serde_json::Value> {

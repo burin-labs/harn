@@ -45,9 +45,9 @@ fn response_event_and_returned_usage_share_priced_cost() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-    dump_llm_response(0, "call-priced", &priced, 1, None);
-    dump_llm_response(1, "call-unpriced", &unpriced, 1, None);
-    dump_llm_response(2, "call-local", &local, 1, None);
+    dump_llm_response(0, "call-priced", &priced, 1, None, None);
+    dump_llm_response(1, "call-unpriced", &unpriced, 1, None, None);
+    dump_llm_response(2, "call-local", &local, 1, None, None);
     pop_llm_transcript_dir();
 
     let transcript =

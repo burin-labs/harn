@@ -768,6 +768,14 @@ pub(super) fn append_provider_call_error_observability(
     // callers may add a provider-side billed receipt later, but must never
     // reinterpret this missing ledger as zero.
     crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
+    if let Some(stage) = opts
+        .call_stage
+        .as_deref()
+        .map(str::trim)
+        .filter(|stage| !stage.is_empty())
+    {
+        fields.insert("stage".to_string(), serde_json::json!(stage));
+    }
     if failover_eligible {
         fields.insert(
             "failover_eligible".to_string(),
