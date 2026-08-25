@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use harn_lexer::Span;
+use harn_lexer::{FixEdit, Span};
 
 /// A variable declaration tracked during linting.
 pub(crate) struct Declaration {
@@ -52,6 +52,15 @@ impl ImportInfo {
 pub(crate) struct ParamDeclaration {
     pub(crate) name: String,
     pub(crate) span: Span,
+    pub(crate) removable_pipeline: Option<RemovablePipelineParam>,
+}
+
+/// A pipeline slot whose invocation contract permits deletion when unused.
+pub(crate) struct RemovablePipelineParam {
+    pub(crate) owner: String,
+    pub(crate) fix: Vec<FixEdit>,
+    pub(crate) previous_name: Option<String>,
+    pub(crate) fix_after_removed_previous: Option<Vec<FixEdit>>,
 }
 
 /// A function declaration tracked for unused-function detection.

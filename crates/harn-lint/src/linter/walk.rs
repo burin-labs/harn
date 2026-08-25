@@ -12,7 +12,7 @@ use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
     empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
-    unnecessary_cast_fix,
+    pipeline_parameter_removal_fix, unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
 use crate::naming::simplify_bool_comparison;
@@ -29,6 +29,7 @@ impl<'a> Linter<'a> {
                 body,
                 name,
                 is_pub,
+                extends,
                 ..
             } => {
                 self.known_functions.insert(name.clone());
@@ -54,11 +55,28 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                for p in params {
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(p.name.clone());
+                for (index, parameter) in params.iter().enumerate() {
+                    let removal = (!*is_pub
+                        && extends.is_none()
+                        && !self.pipeline_parameter_removal_blocked
+                        && !parameter.rest
+                        && parameter.default_value.is_none())
+                    .then(|| pipeline_parameter_removal_fix(self.source, params, index))
+                    .flatten();
+                    if let Some((fix, fix_after_removed_previous)) = removal {
+                        self.declare_removable_pipeline_parameter(
+                            &parameter.name,
+                            parameter.span,
+                            name,
+                            fix,
+                            index
+                                .checked_sub(1)
+                                .map(|previous| params[previous].name.clone()),
+                            fix_after_removed_previous,
+                        );
+                    } else {
+                        self.declare_parameter(&parameter.name, parameter.span);
                     }
-                    self.references.insert(p.name.clone());
                 }
                 self.references.insert(name.clone());
                 if Self::is_test_pipeline_name(name) {
@@ -1344,6 +1362,10 @@ impl<'a> Linter<'a> {
                         self.record_attribute_argument_references(&argument.value);
                     }
                 }
+                let previous_removal_block = self.pipeline_parameter_removal_blocked;
+                self.pipeline_parameter_removal_blocked |= attributes
+                    .iter()
+                    .any(|attribute| attribute.name != "test" || !attribute.args.is_empty());
                 if suppresses_complexity {
                     self.complexity_suppression_depth += 1;
                 }
@@ -1351,6 +1373,7 @@ impl<'a> Linter<'a> {
                 if suppresses_complexity {
                     self.complexity_suppression_depth -= 1;
                 }
+                self.pipeline_parameter_removal_blocked = previous_removal_block;
             }
 
             Node::OrPattern(alternatives) => {

@@ -13,7 +13,10 @@ use harn_parser::{
 };
 
 use crate::complexity::cyclomatic_complexity;
-use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
+use crate::decls::{
+    Declaration, FnDeclaration, ImportInfo, ParamDeclaration, RemovablePipelineParam,
+    TypeDeclaration,
+};
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 use crate::fixes::{
     append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix, simple_ident_discard_fix,
@@ -98,6 +101,9 @@ pub(crate) struct Linter<'a> {
     pub(crate) externally_imported_names: HashSet<String>,
     /// Track whether the current traversal is inside a test pipeline body.
     pub(super) test_pipeline_depth: usize,
+    /// An enclosing attribute binds the pipeline's positional slots to a
+    /// table, fixture, or another declaration-owned invocation contract.
+    pub(super) pipeline_parameter_removal_blocked: bool,
     /// Track type declarations for the `unused-type` lint rule.
     pub(super) type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
@@ -193,6 +199,7 @@ impl<'a> Linter<'a> {
             connector_runtime_module: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
+            pipeline_parameter_removal_blocked: false,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
@@ -1038,6 +1045,37 @@ impl<'a> Linter<'a> {
         self.param_declarations.push(ParamDeclaration {
             name: name.to_string(),
             span,
+            removable_pipeline: None,
+        });
+    }
+
+    /// Declare a pipeline parameter whose positional slot can be deleted when
+    /// no body or caller reference survives the full-program walk.
+    pub(super) fn declare_removable_pipeline_parameter(
+        &mut self,
+        name: &str,
+        span: Span,
+        owner: &str,
+        fix: Vec<FixEdit>,
+        previous_name: Option<String>,
+        fix_after_removed_previous: Option<Vec<FixEdit>>,
+    ) {
+        if name == "_" {
+            return;
+        }
+        self.warn_if_shadows_outer_scope(name, span);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string());
+        }
+        self.param_declarations.push(ParamDeclaration {
+            name: name.to_string(),
+            span,
+            removable_pipeline: Some(RemovablePipelineParam {
+                owner: owner.to_string(),
+                fix,
+                previous_name,
+                fix_after_removed_previous,
+            }),
         });
     }
 

@@ -378,7 +378,7 @@ const REPAIR_BINDINGS_MAKE_IMMUTABLE: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
-    summary: "Mark an unused binding without changing callable arity",
+    summary: "Remove an unused private pipeline input or mark a fixed-arity slot unused",
     safety: RepairSafety::BehaviorPreserving,
 };
 

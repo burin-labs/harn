@@ -12,7 +12,7 @@ fn parse_env_assignment(token: string) {
   return {name: token, value: ""}
 }
 
-pipeline test(harness: Harness, _task: unknown) {
+pipeline test(harness: Harness) {
   const tokens = ["abc"]
   let index = 0
   while index < len(tokens) {

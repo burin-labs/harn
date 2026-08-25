@@ -2,7 +2,7 @@
 import { EvidenceReceipt, search_evidence } from "std/fs"
 import { assert_eq } from "std/testing"
 
-pipeline test_search_evidence_returns_typed_one_pass_receipt(harness: Harness, _task: unknown) {
+pipeline test_search_evidence_returns_typed_one_pass_receipt(harness: Harness) {
   const roots = [{id: "repo", path: path_join(harness.fs.source_dir(), "../fixtures/fs_evidence")}]
   const patterns = [{id: "whole", text: "needle"}, {id: "prefix", text: "need"}]
   const receipt: EvidenceReceipt = search_evidence(

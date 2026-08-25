@@ -20,10 +20,9 @@
 // mandatory parameter annotations; strict lint holds the rest of the showcase
 // to the style the docs teach.
 //
-// One gap this does not close: HARN-LNT-016 never fires on a *pipeline*
-// parameter, because the linter inserts every pipeline parameter into its
-// reference set before linting the body (crates/harn-lint/src/linter/walk.rs).
-// An unused `pipeline` parameter is invisible to every command here.
+// HARN-LNT-016 checks pipeline inputs too. Private pipelines can delete an
+// unused input; caller-, fixture-, and table-bound pipelines keep their
+// positional contract.
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn

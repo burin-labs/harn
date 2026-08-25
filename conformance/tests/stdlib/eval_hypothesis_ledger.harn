@@ -332,7 +332,7 @@ fn verify_bounded_observation_scale() {
     "exact candidate-by-case-by-trial coverage admits max-trial exhaustion"
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   const compiled = compile_experiment_intent(
     hypothesis_fixture_intent(),
     hypothesis_fixture_context(),

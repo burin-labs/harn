@@ -362,7 +362,7 @@ fn test_identical_arms_do_not_manufacture_a_winner() {
   require decision.winner == nil, "A/A evidence never manufactures a winner"
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   test_manifest_contract()
   test_registration_and_assignment()
   test_decision_and_promotion()
