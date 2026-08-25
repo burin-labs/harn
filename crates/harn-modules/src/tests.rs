@@ -1065,6 +1065,42 @@ fn same_named_symbols_in_different_modules_do_not_collapse() {
 }
 
 #[test]
+fn lexical_shadow_does_not_resolve_to_same_named_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    let importer_source =
+        "import { run } from \"./exported\"\nfn helper() {\n  let run = 2\n  run\n}\n";
+    let importer = write_file(root, "importer.harn", importer_source);
+
+    let build = build_for_reference_index(&[exported.clone(), importer.clone()], None);
+    let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let local_use = importer_source.rfind("run").expect("local run use");
+
+    let local_def = index
+        .definition_at(&importer, "run", local_use + 1)
+        .expect("local shadow definition");
+    assert_eq!(
+        local_def.file, importer,
+        "the lexical binding must win over the imported function"
+    );
+
+    let exported_def = build
+        .graph
+        .definition_of(&exported, "run")
+        .expect("exported run");
+    assert!(
+        index
+            .references_to(&exported_def)
+            .iter()
+            .all(|site| site.file != importer),
+        "the local shadow must not create an importer -> exported.run edge"
+    );
+}
+
+#[test]
 fn omitting_the_importer_from_the_index_is_a_visible_gap_not_a_pass() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

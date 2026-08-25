@@ -58,8 +58,13 @@ pub(crate) fn workspace_refs(
     })
 }
 
-pub(crate) fn definition_at(workspace: &WorkspaceRefs, file: &Path, name: &str) -> Option<DefSite> {
-    workspace.graph.definition_of(file, name)
+pub(crate) fn definition_at(
+    workspace: &WorkspaceRefs,
+    file: &Path,
+    name: &str,
+    offset: usize,
+) -> Option<DefSite> {
+    workspace.index.definition_at(file, name, offset)
 }
 
 fn collect_harn_files(root: &Path) -> Vec<PathBuf> {
@@ -157,8 +162,11 @@ mod tests {
             "cross-file control: importer must have been walked"
         );
 
-        let exported_def = definition_at(&workspace, &exported, "run").expect("exported run");
-        let local_def = definition_at(&workspace, &local, "run").expect("local run");
+        let exported_offset = fs::read_to_string(&exported).unwrap().find("run").unwrap();
+        let local_offset = fs::read_to_string(&local).unwrap().find("run").unwrap();
+        let exported_def =
+            definition_at(&workspace, &exported, "run", exported_offset).expect("exported run");
+        let local_def = definition_at(&workspace, &local, "run", local_offset).expect("local run");
         assert_ne!(exported_def.file, local_def.file);
 
         let exported_files: HashSet<_> = workspace
@@ -190,6 +198,41 @@ mod tests {
         assert!(
             !local_files.contains("importer.harn") && !local_files.contains("exported.harn"),
             "imported run must not collapse into local run: {local_files:?}"
+        );
+    }
+
+    #[test]
+    fn lsp_refs_prefer_a_lexical_shadow_over_same_named_import() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exported = tmp.path().join("exported.harn");
+        let importer = tmp.path().join("importer.harn");
+        fs::write(&exported, "pub fn run() { 1 }\n").unwrap();
+        let importer_source =
+            "import { run } from \"./exported\"\nfn helper() {\n  let run = 2\n  run\n}\n";
+        fs::write(&importer, importer_source).unwrap();
+
+        let docs = open_docs(&[&exported, &importer]);
+        let workspace = workspace_refs(&docs, Some(tmp.path())).expect("workspace index");
+        let local_use = importer_source.rfind("run").expect("local run use");
+        let local_def = definition_at(&workspace, &importer, "run", local_use + 1)
+            .expect("local shadow definition");
+        assert_eq!(
+            local_def.file,
+            harn_modules::canonical_path(&importer),
+            "the cursor must resolve through lexical binding identity"
+        );
+
+        let exported_def = workspace
+            .graph
+            .definition_of(&exported, "run")
+            .expect("exported run");
+        assert!(
+            workspace
+                .index
+                .references_to(&exported_def)
+                .iter()
+                .all(|site| site.file != harn_modules::canonical_path(&importer)),
+            "the local shadow must not enter the imported definition's references"
         );
     }
 

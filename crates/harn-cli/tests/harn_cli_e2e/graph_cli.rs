@@ -358,6 +358,11 @@ fn graph_json_does_not_collapse_same_named_symbols() {
         "fn run() { 2 }\nfn helper() { run() }\n",
     )
     .unwrap();
+    fs::write(
+        temp.path().join("shadowed.harn"),
+        "import { run } from \"./exported\"\nfn helper() { let run = 2\nrun }\n",
+    )
+    .unwrap();
 
     let output = run_harn(&["graph", temp.path().to_str().unwrap(), "--json"]);
     assert!(
@@ -382,6 +387,20 @@ fn graph_json_does_not_collapse_same_named_symbols() {
     assert!(
         !imported_run.iter().any(|edge| edge["from"] == "local.harn"),
         "local.run must not collapse into exported.run: {references:?}"
+    );
+    assert!(
+        !imported_run
+            .iter()
+            .any(|edge| edge["from"] == "shadowed.harn"),
+        "a lexical shadow must not resolve to exported.run: {references:?}"
+    );
+    assert!(
+        references.iter().any(|edge| {
+            edge["from"] == "shadowed.harn"
+                && edge["to"] == "shadowed.harn"
+                && edge["name"] == "run"
+        }),
+        "the lexical shadow must retain its local owner: {references:?}"
     );
     assert!(
         parsed["data"]["indexed"]["files"]

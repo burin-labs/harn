@@ -277,7 +277,8 @@ impl HarnLsp {
         }
         drop(docs);
 
-        let Some(def) = definition_at(&workspace, &current_path, &word) else {
+        let Some(def) = definition_at(&workspace, &current_path, &word, source.offset(position))
+        else {
             return Ok(None);
         };
         let include_declaration = params.context.include_declaration;
@@ -359,7 +360,12 @@ impl HarnLsp {
         }
         drop(docs);
 
-        let Some(def) = definition_at(&workspace, &current_path, &old_name) else {
+        let Some(def) = definition_at(
+            &workspace,
+            &current_path,
+            &old_name,
+            source.offset(position),
+        ) else {
             return Ok(None);
         };
 
