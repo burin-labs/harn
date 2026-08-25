@@ -158,7 +158,14 @@ async function fetchOnce(url, options = {}, extraHeaders = {}) {
     redirect: "follow",
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status}`);
+    // The message stays the operator-facing text; the status is carried
+    // alongside it so a caller can tell "absent" (404) apart from
+    // "throttled or unreachable" without parsing prose.
+    error.status = response.status;
+    throw error;
+  }
   return Buffer.from(await response.arrayBuffer());
 }
 
@@ -328,6 +335,55 @@ function readDigestPin(metadataPath, assetName) {
 }
 
 /**
+ * What the release actually looked like once neither verification source
+ * appeared.
+ *
+ * The two transport errors cannot tell an unpublished release apart from one
+ * whose asset upload stalled: both are `HTTP 404` (#7221). A half-published
+ * release then reads as a flaky download, so nothing reports that the release
+ * is incomplete and every pinned consumer stays blocked with no signal.
+ *
+ * This asks the release API exactly once, on the terminal failure path only.
+ * It must never move into the retry loop: unauthenticated api.github.com is 60
+ * requests/hour per IP, shared across GitHub-hosted runners, so a per-attempt
+ * diagnostic would spend the same budget the digest fallback depends on.
+ *
+ * Returns undefined when the query itself fails for any reason other than a
+ * definite 404 -- a throttled or unreachable API degrades to the transport
+ * errors alone rather than replacing them with a worse guess.
+ */
+async function describeReleaseState(options) {
+  const { releaseApiUrl, assetName } = options;
+  const tag = releaseApiUrl.slice(releaseApiUrl.lastIndexOf("/") + 1);
+  let release;
+  try {
+    // Same headers the digest fallback sends; see the note there on tokens.
+    const body = await fetchOnce(releaseApiUrl, options, {
+      accept: "application/vnd.github+json",
+      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+    });
+    release = JSON.parse(body.toString("utf8"));
+  } catch (error) {
+    if (error?.status === 404) {
+      return `release ${tag} does not exist: the release API reports no release for that tag, so nothing has been published to verify against yet`;
+    }
+    return undefined;
+  }
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const names = assets
+    .map((asset) => asset?.name)
+    .filter((name) => typeof name === "string");
+  if (!names.includes(assetName)) {
+    return (
+      `release ${tag} exists but does not publish ${assetName}: it has ${names.length} asset(s) ` +
+      `[${names.length > 0 ? names.join(", ") : "none"}]. The release is incomplete -- an asset ` +
+      `upload has not finished or was skipped, and SHA256SUMS cannot appear until it does`
+    );
+  }
+  return `release ${tag} exists and publishes ${assetName}, but neither SHA256SUMS nor a usable asset digest was available: the release is mid-finalization`;
+}
+
+/**
  * The checksum to verify the archive against, from whichever canonical source
  * exists first.
  *
@@ -400,10 +456,15 @@ async function resolveExpectedChecksum(options) {
 
     if (attempt < attempts) await delay(delayMs);
   }
+  // Both sources are exhausted. The transport errors say what was tried; the
+  // observed release state says what the situation actually is. Reporting only
+  // the former turns a stalled asset upload into an unexplained HTTP 404.
+  const state = await describeReleaseState(options);
   throw new Error(
     `no verification source for ${assetName} after ${attempts} attempt(s): ` +
       `${checksumUrl}: ${checksumError?.message ?? checksumError}; ` +
-      `${releaseApiUrl}: ${digestError?.message ?? digestError}`,
+      `${releaseApiUrl}: ${digestError?.message ?? digestError}` +
+      (state ? `\n  observed release state: ${state}` : ""),
   );
 }
 

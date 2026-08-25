@@ -927,9 +927,10 @@ test("a malformed or absent digest exhausts the bounded budget and explains both
       /SHA256SUMS/.test(error.message) &&
       /well-formed sha256 digest/.test(error.message),
   );
-  // Bounded: two attempts, each consulting both sources. No unbounded wait.
+  // Bounded: two attempts, each consulting both sources, plus the single
+  // terminal release-state query (#7221). No unbounded wait.
   assert.equal(malformed.calls.metadata, 2);
-  assert.equal(malformed.calls.api, 2);
+  assert.equal(malformed.calls.api, 3);
 
   const missing = pendingRelease(archive, { omitAsset: true });
   await assert.rejects(
@@ -966,4 +967,106 @@ test("SHA256SUMS disagreeing with a verified digest fails an exact release", asy
   });
   assert.equal(finalized.checksum_source, "SHA256SUMS");
   assert.equal(finalized.cache_hit, true);
+});
+
+// --- terminal release-state diagnosis (#7221) -------------------------------
+//
+// A release that does not exist and a release whose asset upload stalled both
+// answer `HTTP 404` on every source, so the exhausted-budget failure could not
+// tell them apart. A half-published v0.10.115 therefore blocked every pinned
+// consumer for ~70 minutes while reading as a flaky download. Each state now
+// has to name itself, which is why these three assert distinct text rather
+// than that a failure occurred: an "it errors" assertion passed before the fix.
+
+test("an absent release is named as absent, not as a transport 404", async (t) => {
+  const root = temporaryRoot(t);
+  const absent = pendingRelease(makeArchive(root), { apiStatus: 404 });
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, absent.fetchImpl), attempts: 2 }),
+    (error) =>
+      /observed release state: release v1\.2\.3 does not exist:/.test(
+        error.message,
+      ) &&
+      // The transport errors are added to, never replaced.
+      /SHA256SUMS: HTTP 404/.test(error.message) &&
+      !/does not publish|mid-finalization/.test(error.message),
+  );
+  // Exactly one query beyond the two attempts: the diagnostic never enters the
+  // retry loop, where it would spend the shared 60/hour unauthenticated budget.
+  assert.equal(absent.calls.api, 3);
+});
+
+test("a published release missing this asset says so and lists what it has", async (t) => {
+  const root = temporaryRoot(t);
+  const partial = pendingRelease(makeArchive(root), { omitAsset: true });
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, partial.fetchImpl), attempts: 2 }),
+    (error) =>
+      new RegExp(
+        `observed release state: release v1\\.2\\.3 exists but does not publish ${TEST_ASSET.replace(/\./g, "\\.")}: ` +
+          `it has 1 asset\\(s\\) \\[harn-some-other-target\\.tar\\.gz\\]\\. The release is incomplete`,
+      ).test(error.message) &&
+      /SHA256SUMS: HTTP 404/.test(error.message) &&
+      !/does not exist|mid-finalization/.test(error.message),
+  );
+  assert.equal(partial.calls.api, 3);
+});
+
+test("a released asset without SHA256SUMS reads as mid-finalization", async (t) => {
+  const root = temporaryRoot(t);
+  // The asset is published, so only the finalization artifacts are missing.
+  const finalizing = pendingRelease(makeArchive(root), {
+    digest: "not-a-digest",
+  });
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, finalizing.fetchImpl), attempts: 2 }),
+    (error) =>
+      new RegExp(
+        `observed release state: release v1\\.2\\.3 exists and publishes ${TEST_ASSET.replace(/\./g, "\\.")}, ` +
+          `but neither SHA256SUMS nor a usable asset digest was available: the release is mid-finalization`,
+      ).test(error.message) &&
+      !/does not exist|does not publish/.test(error.message),
+  );
+});
+
+test("a throttled state query degrades to the transport errors alone", async (t) => {
+  const root = temporaryRoot(t);
+  // 403 is what a spent unauthenticated rate limit looks like. The state is
+  // then unknown, and an unknown state must not be reported as a known one.
+  const throttled = pendingRelease(makeArchive(root), { apiStatus: 403 });
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, throttled.fetchImpl), attempts: 2 }),
+    (error) =>
+      /no verification source for/.test(error.message) &&
+      /releases\/tags\/v1\.2\.3: HTTP 403/.test(error.message) &&
+      !/observed release state/.test(error.message),
+  );
+});
+
+test("a state query that answers nonsense does not invent a state", async (t) => {
+  const root = temporaryRoot(t);
+  const archive = makeArchive(root);
+  let apiCalls = 0;
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/SHA256SUMS"))
+      return new Response("nope", { status: 404 });
+    if (url.includes("/releases/tags/")) {
+      apiCalls += 1;
+      // Reachable, 200, and not JSON: neither absent nor describable.
+      return new Response("<html>proxy interstitial</html>");
+    }
+    return new Response(archive);
+  };
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, fetchImpl), attempts: 1 }),
+    (error) =>
+      /no verification source for/.test(error.message) &&
+      !/observed release state/.test(error.message),
+  );
+  assert.equal(apiCalls, 2);
 });
