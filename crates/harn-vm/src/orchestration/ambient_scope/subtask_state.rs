@@ -9,6 +9,60 @@ use crate::redact::NamedPattern;
 use crate::security::SecurityPolicy;
 use crate::vm::subtask::{swap_subtask_placement_context, SubtaskPlacement};
 
+/// Mechanically checked projection of `thread_local_audit.toml`'s
+/// `subtask_scope.captured` policy. Keep this beside the typed state that
+/// implements the policy; the whole-crate audit test rejects drift either way.
+#[cfg(test)]
+pub(super) const CAPTURED_THREAD_LOCAL_PROJECTION: &[&str] = &[
+    "EXECUTION_POLICY_STACK",
+    "EXECUTION_APPROVAL_POLICY_STACK",
+    "OPERATOR_APPROVAL_GRANT_STACK",
+    "COMMAND_POLICY_STACK",
+    "DYNAMIC_PERMISSION_STACK",
+    "RUNTIME_CONTEXT_OVERLAY_STACK",
+    "AUTONOMY_POLICY_STACK",
+    "PERSONA_STACK",
+    "STEP_STACK",
+    "ACTIVE_CONTEXT_SUSPENSION_STACK",
+    "LLM_RENDER_STACK",
+    "TRANSCRIPT_DIR_STACK",
+    "ACTIVE_HARN_CONNECTOR_CTX",
+    "TRUSTED_BRIDGE_CALL_DEPTH",
+    "COMMAND_POLICY_HOOK_DEPTH",
+    "TOOL_PRECHECK_STACK",
+    "TOOL_PRECHECK_DEPTH",
+    "VM_EXECUTION_CONTEXT",
+    "VM_SOURCE_DIR",
+    "CURRENT_MUTATION_SESSION",
+    "SESSION_ENVIRONMENT_CONTEXT",
+    "PROCESS_ADMISSION_CONTEXT",
+    "CURRENT_HOST_BRIDGE",
+    "CURRENT_LOOP_SINKS",
+    "CURRENT_SESSION_STACK",
+    "LLM_CONFIG_OVERRIDES_CONTEXT",
+    "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
+    "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+    "LLM_MOCK_CONTEXT",
+    "EGRESS_POLICY_CONTEXT",
+    "ACTIVE_EXECUTION_SCOPE_STACK",
+    "RUN_EVENT_SINK_CONTEXT",
+    "SUBTASK_PLACEMENT_CONTEXT",
+    "SECURITY_POLICY_STACK",
+    "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+    "REQUIRE_SSRF_GUARD_DEPTH",
+    "CUSTOM_PATTERNS",
+    "ACTIVE_EVENT_LOG",
+    "MCP_CALL_BUDGET",
+    "PG_QUERY_BUDGET",
+    "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+    "ACTIVE_WORKER_REGISTRY",
+    "ACTIVE_DAEMON_REGISTRY",
+    "ACTIVE_TRIGGER_REGISTRY",
+    "ACTIVE_SESSION_RUNTIME",
+    "ACTIVE_TRACING_RUNTIME",
+    "ACTIVE_AGENT_HOST_SESSION_RUNTIME",
+];
+
 /// One structural contract for state that must cross a subtask thread boundary.
 ///
 /// Absence is part of each slot's explicit contract: for example, `None`
@@ -176,5 +230,36 @@ impl SubtaskAmbientState {
             &mut self.agent_host_session_runtime,
             crate::llm::agent_session_host::swap_active_agent_host_session_runtime,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use serde::Deserialize;
+
+    use super::CAPTURED_THREAD_LOCAL_PROJECTION;
+
+    #[derive(Deserialize)]
+    struct Audit {
+        subtask_scope: SubtaskScope,
+    }
+
+    #[derive(Deserialize)]
+    struct SubtaskScope {
+        captured: Vec<String>,
+    }
+
+    #[test]
+    fn capture_projection_matches_manifest_policy() {
+        let audit: Audit = toml::from_str(include_str!("../../../thread_local_audit.toml"))
+            .expect("parse thread-local audit");
+        let policy: BTreeSet<_> = audit.subtask_scope.captured.into_iter().collect();
+        let projection: BTreeSet<_> = CAPTURED_THREAD_LOCAL_PROJECTION
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+        assert_eq!(projection, policy);
     }
 }
