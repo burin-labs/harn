@@ -22,6 +22,10 @@ fn checkout_boundary_errors(steps: list) -> list<string> {
   if runtime_checkout?.with?.get("persist-credentials") != false {
     errors = errors + ["runtime checkout credentials must not persist"]
   }
+  if runtime_checkout?.with?.ref != "$" + "{{ inputs.orchestration-sha }}" {
+    errors = errors
+      + ["runtime orchestration must use the caller-projected exact workflow SHA"]
+  }
   return errors
 }
 
@@ -58,6 +62,10 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   if inputs?.get("refresh-command")?.type != "string" {
     errors = errors + ["refresh-command must remain a typed reusable-workflow input"]
   }
+  if inputs?.get("orchestration-sha")?.type != "string"
+    || inputs?.get("orchestration-sha")?.required != true {
+    errors = errors + ["orchestration-sha must remain a required typed workflow input"]
+  }
   if inputs?.get("format-command")?.type != "string" {
     errors = errors + ["format-command must remain a typed reusable-workflow input"]
   }
@@ -69,6 +77,21 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   }
   const steps = workflow?.jobs?.bump?.steps ?? []
   errors = errors + checkout_boundary_errors(steps)
+  const orchestration_guard = steps.find(
+    { step -> step?.name == "Validate exact orchestration SHA" },
+  )
+  if orchestration_guard?.env?.HARN_BUMP_ORCHESTRATION_SHA
+    != "$" + "{{ inputs.orchestration-sha }}" {
+    errors = errors + ["orchestration SHA validation must consume only the typed input"]
+  }
+  const orchestration_guard_command = to_string(orchestration_guard?.run ?? "")
+  if !orchestration_guard_command.contains("^[0-9a-f]{40}$") {
+    errors = errors + ["orchestration SHA validation must require exact lowercase 40-hex"]
+  }
+  if text.index_of("- name: Validate exact orchestration SHA")
+    >= text.index_of("- name: Checkout Harn runtime orchestration") {
+    errors = errors + ["orchestration SHA must be validated before checkout"]
+  }
   const node = steps.find({ step -> step?.name == "Install caller Node.js toolchain" })
   if node == nil || node?.if != "inputs.node-version != ''" {
     errors = errors + ["optional Node setup must be gated by node-version"]
@@ -97,10 +120,15 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   }
   const driver_install = steps.find({ step -> step?.name == "Install bump driver dependencies" })
   if driver_install?.get("working-directory") != ".harn-runtime/scripts/bump-driver" {
-    errors = errors + ["provider dependencies must install from the target runtime's driver lock"]
+    errors = errors
+      + ["provider dependencies must install from the orchestration commit's driver lock"]
   }
   if trim(to_string(driver_install?.run ?? "")) != "harn install --locked" {
     errors = errors + ["provider dependencies must use the immutable driver lock"]
+  }
+  const target_install = steps.find({ step -> step?.name == "Install target Harn" })
+  if target_install?.with?.version != "$" + "{{ steps.resolve.outputs.version }}" {
+    errors = errors + ["installed Harn must remain the independently resolved target version"]
   }
   const run = steps.find({ step -> step?.name == "Run bump orchestration" })
   if run == nil {

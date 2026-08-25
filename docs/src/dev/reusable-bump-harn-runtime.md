@@ -11,8 +11,8 @@ declared refresh and validation commands.
   `std/bump/runtime` (pure state machine) → `std/bump/live` (local filesystem,
   git, command, and polling effects) → the locked `harn-github-connector`
   package (all remote GitHub behavior).
-- Workspace boundary: the caller is checked out at `package/`; the target Harn
-  orchestration checkout is its sibling. Refresh, validation, and local git
+- Workspace boundary: the caller is checked out at `package/`; the exact
+  workflow-owner orchestration checkout is its sibling. Refresh, validation, and local git
   effects run from `package/`. The source script's nested package manifest
   activates its locked connector without changing that working directory.
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
@@ -44,6 +44,9 @@ jobs:
   bump:
     uses: burin-labs/harn/.github/workflows/bump-harn.yml@<pinned-sha>
     with:
+      # The fleet registry generates both occurrences from one policy value.
+      # The reusable workflow rejects non-SHA refs before checkout.
+      orchestration-sha: <pinned-sha>
       version: ${{ inputs.version }}
       # Optional repository-owned materialization. The target tag is inherited
       # as HARN_BUMP_TARGET_TAG. The reusable workflow first applies the target
@@ -95,11 +98,13 @@ jobs:
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
 
-Pin `@<pinned-sha>` to a full commit SHA of `burin-labs/harn`. That immutable
-ref owns the reusable workflow contract. The workflow then checks Harn out at
-the resolved release tag, so its orchestration script, embedded `std/bump/*`
-modules, checksum-verifying `setup-harn` action, and installed CLI all come
-from the same published version.
+Pin `@<pinned-sha>` to a full commit SHA of `burin-labs/harn`, and project that
+same registry-owned value into `orchestration-sha`. The reusable workflow
+validates exact lowercase 40-hex before checking out its setup action and bump
+driver from that commit. The independently resolved release tag selects only
+the installed CLI and its embedded `std/bump/*` modules. This lets a current
+adapter carry compatibility for an older target without granting callers an
+arbitrary orchestration ref.
 
 ## Idempotency and concurrency
 
@@ -140,9 +145,9 @@ release, so this holds in practice.)
   signs it and an org `required_signatures` ruleset is satisfied. A local
   `git commit` + push would land unsigned and be rejected.
 - **Immutable supply chain.** Third-party actions are pinned by full commit SHA.
-  The workflow contract is pinned by full Harn commit SHA; first-party runtime
-  pieces (orchestration script, embedded modules, `setup-harn`) come from the
-  resolved immutable release tag. The nested driver installs with `--locked`,
+  The workflow contract, setup action, and driver use one registry-projected
+  Harn commit SHA. The installed target release owns embedded runtime modules
+  and capability migrations. The nested driver installs with `--locked`,
   so the connector source and content hash are fixed. `setup-harn` verifies the
   downloaded runtime archive against its published SHA-256 before installing.
 - **Caller package-manager pin.** When `node-version` is configured, the shared
