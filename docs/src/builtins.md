@@ -2011,8 +2011,9 @@ harness.llm.mock_enqueue({
 
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
-// `try { ... } catch`, `harness.llm.call_safe`, and `with_rate_limit` all see
-// it the same way they would a live provider failure.
+// `try { ... } catch`, `harness.llm.call_safe`, and
+// `with_rate_limit` all see it the same way they would a live
+// provider failure.
 harness.llm.mock_enqueue({
   error: {category: "rate_limit", message: "429 Too Many Requests"}
 })
