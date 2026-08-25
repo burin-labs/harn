@@ -3,15 +3,18 @@
 // Two globbed sets, never a hand-maintained list:
 //
 //   - website/src/examples/*.harn.txt — the homepage hero and friends;
-//   - crates/harn-cli/assets/demo/*/scenario.harn — the bundled demo
-//     scenarios, which website/src/examples/gallery.ts imports directly out
-//     of the CLI assets to render the "Examples" tabs.
+//   - crates/harn-cli/assets/demo/*/*.harn — every Harn file the bundled demo
+//     scenarios ship, which website/src/examples/gallery.ts imports directly
+//     out of the CLI assets to render the "Examples" tabs.
 //
 // The gallery used to be an enumerated list of three scenario paths while the
 // homepage rendered four tabs, so review-captain — the "Code review agent" tab
 // — was displayed and checked by nothing. Globbing the demo directory removes
 // that failure mode: adding a scenario adds it to this gate, and adding a
-// gallery tab cannot outrun it.
+// gallery tab cannot outrun it. The glob takes every `.harn` in a scenario
+// directory rather than just `scenario.harn`, because the gallery already
+// renders sibling files (review-captain's two `.harn.prompt` templates) and a
+// scenario's imported modules are showcase code too.
 //
 // Each snippet must pass `harn check` and a strict `harn lint`. `check` alone
 // accepts plenty the language is moving away from — an untyped, unused
@@ -26,7 +29,7 @@
 //   harn run scripts/check_site_snippets.harn
 const SITE_SNIPPET_GLOB = "website/src/examples/*.harn.txt"
 
-const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/scenario.harn"
+const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/*.harn"
 
 /**
  * The argv tail of every command a snippet must survive, in order; the
