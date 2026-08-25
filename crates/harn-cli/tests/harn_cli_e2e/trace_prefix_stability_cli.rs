@@ -1,6 +1,6 @@
+use crate::test_util::process::harn_e2e_command;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -8,7 +8,7 @@ fn fixture_dir() -> PathBuf {
 }
 
 fn run_check(path: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_harn"))
+    harn_e2e_command()
         .arg("trace")
         .arg("prefix-stability")
         .arg(path)
