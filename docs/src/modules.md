@@ -549,13 +549,16 @@ harness.stdio.log(sum([1, 2, 3, 4]))          // 10
 harness.stdio.log(sum([1, nil, 3]))            // 4
 harness.stdio.log(avg([10, 20, 30]))          // 20
 harness.stdio.log(percentile([1, 2, 3, 4], 75)) // 3.25
-harness.stdio.log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
-harness.stdio.log(softmax([1, 2, 3]))         // probabilities summing to 1
+// ["bbbb", "cc"]
+harness.stdio.log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) }))
+// probabilities summing to 1
+harness.stdio.log(softmax([1, 2, 3]))
 harness.stdio.log(cosine_similarity([1, 0], [1, 1])) // ~0.707
 harness.stdio.log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
 
 const grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
-harness.stdio.log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
+// [[0.0, 0.5], [10.0, 10.5]]
+harness.stdio.log(grouped.centroids)
 ```
 
 ### std/slug
@@ -581,7 +584,9 @@ Options include `segments` (default `2`, clamped to `1..8`), `separator`
 import "std/slug"
 
 const run_name = random_slug({segments: 3})
-const stable = slug_from({repo: "harn", pr: 42}, {segments: 4, salt: "ci"})
+const stable = slug_from(
+  {repo: "harn", pr: 42}, {segments: 4, salt: "ci"},
+)
 const id = slugify("Agent 007 / Fast Verify")
 ```
 
@@ -611,8 +616,10 @@ pipeline default(harness: Harness) {
   const report = actor_chain_report(chain)
   const current = report.current
   require current != nil, "chain should have a current subject"
-  harness.stdio.log(current.subject)                    // "agent:reviewer"
-  harness.stdio.log(actor_chain_format(chain))   // "agent:reviewer for user:owner"
+  // "agent:reviewer"
+  harness.stdio.log(current.subject)
+  // "agent:reviewer for user:owner"
+  harness.stdio.log(actor_chain_format(chain))
   // "agent:reviewer -> user:owner"
   harness.stdio.log(actor_chain_format(chain, {style: "arrow"}))
 }
@@ -860,7 +867,9 @@ harness.stdio.log(ext("main.harn"))          // "harn"
 harness.stdio.log(stem("/src/main.harn"))    // "main"
 harness.stdio.log(is_absolute("/usr/bin"))   // true
 // "packages/app/SKILL.md"
-harness.stdio.log(workspace_normalize("/packages/app/SKILL.md", harness.fs.cwd()))
+harness.stdio.log(
+  workspace_normalize("/packages/app/SKILL.md", harness.fs.cwd())
+)
 
 const files = list_files("src")
 const dirs = list_dirs(".")
@@ -901,18 +910,25 @@ JSON utility patterns:
 ```harn
 import "std/json"
 
-const parsed: Result<unknown, JsonParseFailure> = try { json_parse("{\"x\": 1}") }
+const parsed: Result<unknown, JsonParseFailure> = try {
+  json_parse("{\"x\": 1}")
+}
 const data = parsed?   // {x: 1}; malformed JSON propagates Err
-const schema = {type: "dict", required: ["x"], properties: {x: {type: "int"}}}
+const schema = {
+  type: "dict", required: ["x"], properties: {x: {type: "int"}},
+}
 const validator = stream_validator(schema)
 const status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
 const parsed = validator.value()             // {x: 1}
 
 // std/json/stream_validate — plain-dict verdicts for streaming agents:
 const handle = stream_validate_create(schema)
-const r1 = stream_validate_chunk(handle, "{\"x\":")    // {verdict: "pending"}
-const r2 = stream_validate_chunk(handle, "1}")          // {verdict: "valid"}
-const r3 = stream_validate_finalize(handle)             // {verdict: "valid"}
+// {verdict: "pending"}
+const r1 = stream_validate_chunk(handle, "{\"x\":")
+// {verdict: "valid"}
+const r2 = stream_validate_chunk(handle, "1}")
+// {verdict: "valid"}
+const r3 = stream_validate_finalize(handle)
 const merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
 const subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
 const rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
@@ -1007,7 +1023,9 @@ heuristics.
 ```harn
 import { unified_diff } from "std/diff"
 
-harness.stdio.log(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
+harness.stdio.log(
+  unified_diff("one\ntwo", "one\nthree", {path: "example.txt"})
+)
 ```
 
 ### std/cache
@@ -1366,7 +1384,9 @@ const contract = schema_contract(schema_of(Event), [])
 let cursor = {offset: 0, line: 1}
 while true {
   const page = unwrap(
-    read_jsonl_contract_page_result("events.jsonl", contract, {cursor: cursor}),
+    read_jsonl_contract_page_result(
+      "events.jsonl", contract, {cursor: cursor},
+    ),
   )
   for record in page.records {
     handle(record.value)
@@ -1571,9 +1591,13 @@ Readiness checks start with `{background: true}`, wait on
 group has one clear owner:
 
 ```harn,ignore
-import { command_cancel, command_run, command_wait_for_output } from "std/command"
+import {
+  command_cancel, command_run, command_wait_for_output,
+} from "std/command"
 
-const server = command_run(harness.tools, ["my-server"], {background: true})
+const server = command_run(
+  harness.tools, ["my-server"], {background: true},
+)
 defer { command_cancel(server, {wait_result_ms: 5000}) }
 const ready = command_wait_for_output(
   harness.tools, server, "ready", {timeout_ms: 10000},
@@ -1618,7 +1642,8 @@ const step = command_step(
   },
   recovery_hint: { step ->
     if step?.classification?.kind == "permission" {
-      return "Check credentials or filesystem permissions, then rerun the same step."
+      return "Check credentials or filesystem permissions, then rerun"
+        + " the same step."
     }
     return nil
   },
@@ -1656,7 +1681,10 @@ import { command_json, command_try } from "std/command"
 
 const repo = command_try(harness.agent, harness.tools, harness.clock,
   [
-    {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
+    {
+      source: "connector",
+      run: fn() { return repos_get("burin-labs", "harn") },
+    },
     {source: "cli", run: fn() {
       return command_json(
         harness.agent, harness.tools, harness.clock,
@@ -1664,7 +1692,11 @@ const repo = command_try(harness.agent, harness.tools, harness.clock,
       )
     }},
   ],
-  {normalize: { value, source -> return {source: source, name: value.name} }},
+  {
+    normalize: { value, source ->
+      return {source: source, name: value.name}
+    }
+  },
 )
 ```
 
@@ -2373,7 +2405,9 @@ same stable name regardless of which entry pipeline rendered it.
 Stdlib prompt assets use `std/...harn.prompt` paths:
 
 ```harn,ignore
-harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+harness.fs.render_prompt(
+  "std/agent/prompts/tool_contract_text.harn.prompt", {},
+)
 ```
 
 These assets are embedded alongside stdlib modules, cache by stable asset id

@@ -25,7 +25,8 @@ import { edit_rename_symbol } from "std/edit"
 
 pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   // Workspace must already be indexed; usually the host does this on
-  // startup. From a script you can run `harness.code_index.rebuild` first.
+  // startup. From a script you can run
+  // `harness.code_index.rebuild` first.
   harness.fs.set_mode({ session_id: session_id, mode: "staged" })
 
   const plan = edit_rename_symbol(harness.code_index,
@@ -50,7 +51,8 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   // exposes byte and (row, col) spans on both sides of the edit.
   for file in plan.touched_files {
     harness.stdio.println(
-      "would rewrite " + file.path + " (" + str(len(file.edits)) + " edits)",
+      "would rewrite " + file.path
+        + " (" + str(len(file.edits)) + " edits)",
     )
   }
 
@@ -94,7 +96,8 @@ pipeline rename_would_shadow(harness: Harness) {
   assert(result.result == "conflict")
   for site in result.conflicts {
     harness.stdio.println(
-      "shadow at " + site.path + ":" + str(site.row + 1) + ":" + str(site.col + 1),
+      "shadow at " + site.path
+        + ":" + str(site.row + 1) + ":" + str(site.col + 1),
     )
   }
   return result

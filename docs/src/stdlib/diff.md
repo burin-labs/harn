@@ -49,7 +49,12 @@ fn compare_bounded(ast: HarnessAst) {
     ast,
     "before.rs",
     "after.rs",
-    {language: "rust", max_bytes: 1048576, max_nodes: 20000, max_graph_edges: 20000000},
+    {
+      language: "rust",
+      max_bytes: 1048576,
+      max_nodes: 20000,
+      max_graph_edges: 20000000,
+    },
   )
 }
 ```

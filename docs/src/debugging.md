@@ -214,7 +214,9 @@ Track LLM costs during a run:
 
 ```harn
 const usage = harness.obs.llm_usage()
-harness.stdio.log("Tokens used: ${usage.input_tokens + usage.output_tokens}")
+harness.stdio.log(
+  "Tokens used: ${usage.input_tokens + usage.output_tokens}"
+)
 harness.stdio.log("LLM calls: ${usage.total_calls}")
 ```
 

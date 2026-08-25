@@ -90,7 +90,9 @@ session, spread in alongside it:
 
 ```harn,ignore
 agent_loop(
-  harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows),
+  harness, task, nil, lane_policy(
+    rows, task, opts,
+  ) + lane_scope_classifier(rows),
 )
 ```
 
@@ -106,7 +108,9 @@ alias with the old `rows`-first order.
 ```harn,ignore
 import { default_overlay_rows, with_overlay } from "std/agent/overlays"
 
-const opts = with_overlay({provider: "anthropic"}, default_overlay_rows(), "agent")
+const opts = with_overlay(
+  {provider: "anthropic"}, default_overlay_rows(), "agent",
+)
 const result = agent_loop(harness, task, nil, opts)
 ```
 

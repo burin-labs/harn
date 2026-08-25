@@ -99,8 +99,8 @@ a fragment gated on that tool's own presence:
 tool_define(registry, "todo", "Add, update, and complete plan items", {
   parameters: { /* … */ },
   handler: todo_handler,
-  guidance: "When working from a plan or task list, always update the TODO"
-    + " tracker after each item.",
+  guidance: "When working from a plan or task list, always update the"
+    + " TODO tracker after each item.",
 })
 ```
 
@@ -148,9 +148,10 @@ const explained = prompt_explain({
 })
 // explained.system     → the assembled string
 // explained.root       → "composed" (or "replacement")
-// explained.fragments  → [{ id, source, producer, bucket, included, reason,
-//                           bytes, digest }, …]
-// explained.whole_prompt_digest / system_prompt_bytes → whole-prompt receipt
+// explained.fragments → [{ id, source, producer, bucket,
+//                           included, reason, bytes, digest }, …]
+// explained.whole_prompt_digest /
+// system_prompt_bytes → whole-prompt receipt
 // explained.included / explained.excluded → counts
 ```
 

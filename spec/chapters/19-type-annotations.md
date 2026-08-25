@@ -56,7 +56,8 @@ fn passthrough(x: any) -> any {
   return x
 }
 
-const s: string = passthrough("hello")  // any → string, no narrowing required
+// any → string, no narrowing required
+const s: string = passthrough("hello")
 const n: int    = passthrough(42)
 ```
 
@@ -178,7 +179,8 @@ fn needs_id(x: {id: string, ...rest}) -> string {
 }
 
 needs_id({id: "u1", name: "Ann", age: 3})   // ok — extra fields allowed
-needs_id({name: "Ann"})                      // error — required `id` missing
+// error — required `id` missing
+needs_id({name: "Ann"})
 ```
 
 `rest` is a **row variable**: a generic type parameter in tail position. A
@@ -367,7 +369,8 @@ their arity and the type of each position:
 ```harn
 const row = tuple("retries", 3)          // tuple<string, int>
 const name: string = row[0]              // precise, not string?
-const count: int = row[-1]               // negative constant indexes are precise
+// negative constant indexes are precise
+const count: int = row[-1]
 
 fn consume(row: tuple<string, int>) -> int {
   return row[1]
@@ -444,7 +447,8 @@ include other fields.
 Nested shapes:
 
 ```harn
-const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+const data: {user: {name: string}, tags: list} =
+  {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -469,11 +473,14 @@ type GraderOut = {
 
 // Use the alias directly wherever a schema dict is expected.
 const s = schema_of(GraderOut)
-const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+const ok = schema_is(
+  {verdict: "pass", summary: "x", findings: []}, GraderOut,
+)
 
 const r = harness.llm.call(prompt, nil, {
   provider: "openai",
-  output: GraderOut,            // alias in value position — compiled to schema_of(T)
+  // alias in value position — compiled to schema_of(T)
+  output: GraderOut,
   schema_retries: 2,
 })
 ```
@@ -518,9 +525,13 @@ import { system_before, with_system_fragments } from "std/llm/prompts"
 
 const opts = with_system_fragments(
   {provider: "anthropic", session_id: "review-42"},
-  [system_before("Follow the repository's validation gate before final output.")]
+  [system_before(
+    "Follow the repository's validation gate before final output."
+  )],
 )
-const r = agent_loop("Review this change", "You are a code review agent.", opts)
+const r = agent_loop(
+  "Review this change", "You are a code review agent.", opts,
+)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
@@ -694,11 +705,17 @@ both lower to the same runtime.
 const answer = harness.interaction.ask_user(
   prompt: "deploy now?", schema: schema_of(Choice),
 )
-const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
-                              reviewers: ["alice", "bob", "carol"])
-const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
-                          approvers: ["alice", "bob", "carol"])
-const handle = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
+const record = harness.interaction.request_approval(
+  action: "merge_pr", quorum: 2,
+  reviewers: ["alice", "bob", "carol"],
+)
+const merged = harness.interaction.dual_control(
+  n: 2, m: 3, action: destructive_step,
+  approvers: ["alice", "bob", "carol"],
+)
+const handle = harness.interaction.escalate_to(
+  role: "oncall", reason: "deploy failed",
+)
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
@@ -890,7 +907,8 @@ index or an absent key is `nil` at runtime, so typing the read as a bare
 
 ```harn,ignore
 const xs: list<int> = []
-const n: int = xs[0]   // error: expected int, found int? (xs[0] may be nil)
+// error: expected int, found int? (xs[0] may be nil)
+const n: int = xs[0]
 ```
 
 Recover the non-nil element in one of three ways:

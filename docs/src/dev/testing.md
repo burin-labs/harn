@@ -325,7 +325,8 @@ harness.runtime.with_execution_policy(
   {
     sandbox_profile: "worktree",
     workspace_roots: [jail],
-    // Pin reads too: an empty list inherits the runner's broad read scope.
+    // Pin reads too: an empty list inherits
+    // the runner's broad read scope.
     read_only_roots: [jail],
   },
   { -> ... },

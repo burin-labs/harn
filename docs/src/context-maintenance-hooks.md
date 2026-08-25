@@ -18,7 +18,9 @@ The portable rule is simple:
 Use `std/context/maintenance` to build the shared receipt shape:
 
 ```harn
-import { context_maintenance_queue_receipt } from "std/context/maintenance"
+import {
+  context_maintenance_queue_receipt
+} from "std/context/maintenance"
 
 pub fn on_file_edited(harness: Harness, event: TriggerEvent) {
   return context_maintenance_queue_receipt(

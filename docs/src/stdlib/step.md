@@ -10,9 +10,10 @@ for a deterministic input.
 
 ```harn,ignore
 fn main(harness: Harness) {
-  const user = step.run("load-user", {user_id: harness.event.id}, { input ->
-    return load_user(input.user_id)
-  }, {namespace: "signup-workflow"})
+  const user = step.run(
+    "load-user", {user_id: harness.event.id}, { input ->
+      return load_user(input.user_id)
+    }, {namespace: "signup-workflow"})
 
   const enriched = step.run("enrich", {user_id: user.id}, { ->
     return call_enrichment(user)

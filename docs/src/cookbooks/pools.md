@@ -21,7 +21,9 @@ never the actively-running ones.
 
 ```harn,ignore
 import { SpawnToPool } from "std/triggers"
-import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
+import {
+  Backpressure, fair_round_robin, pool_create,
+} from "std/lifecycle/pool"
 
 pipeline webhook_intake_setup(harness: Harness) {
   const bp = Backpressure()
@@ -93,7 +95,8 @@ import {
 
 pipeline inference_pool_setup(harness: Harness) {
   const bp = Backpressure()
-  const gpu_count = 4   // discovered from the host worker tier in real deployments
+  // discovered from the host worker tier in real deployments
+  const gpu_count = 4
 
   pool_create(harness.agent, {
     name: "gpu-inference",
@@ -124,7 +127,9 @@ pipeline inference_pool_setup(harness: Harness) {
 }
 
 // Synchronous caller path that wraps the trigger flow for in-process use.
-pipeline inference_call(harness: Harness, tenant_id, model, prompt, params) {
+pipeline inference_call(
+  harness: Harness, tenant_id, model, prompt, params,
+) {
   const pool = pool_get(harness.agent, "gpu-inference")
   const handle = pool.submit({ ->
     return run_gpu_inference(model, prompt, params)
@@ -160,7 +165,9 @@ the queue" to "all active customers interleave one task at a time."
 
 ```harn,ignore
 import { SpawnToPool } from "std/triggers"
-import { Backpressure, fair_round_robin, pool_create } from "std/lifecycle/pool"
+import {
+  Backpressure, fair_round_robin, pool_create,
+} from "std/lifecycle/pool"
 
 pipeline tenant_work_setup(harness: Harness) {
   const bp = Backpressure()
@@ -185,7 +192,9 @@ pipeline tenant_work_setup(harness: Harness) {
       priority_from: "provider_payload.payload.priority",
       task_factory: { event ->
         const req = event.provider_payload.payload
-        return { -> run_agent_task(harness, req.tenant_id, req.task_kind, req.input) }
+        return { ->
+          run_agent_task(harness, req.tenant_id, req.task_kind, req.input)
+        }
       },
     }),
   })
@@ -221,7 +230,9 @@ large queue depth turns a "thundering herd" into a slow drain.
 
 ```harn,ignore
 import { SpawnToPool } from "std/triggers"
-import { Backpressure, fifo, pool_create, pool_wait } from "std/lifecycle/pool"
+import {
+  Backpressure, fifo, pool_create, pool_wait,
+} from "std/lifecycle/pool"
 
 pipeline nightly_report_setup(harness: Harness) {
   const bp = Backpressure()
@@ -257,7 +268,8 @@ pipeline nightly_report_setup(harness: Harness) {
 }
 
 fn generate_report(customer_id, run_date) {
-  const data = fetch_customer_data(customer_id, run_date)   // slow SaaS call
+  // slow SaaS call
+  const data = fetch_customer_data(customer_id, run_date)
   return upload_report(customer_id, run_date, data)
 }
 ```

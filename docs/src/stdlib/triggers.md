@@ -216,7 +216,9 @@ and cached classifier steps.
 import "std/triggers"
 
 pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
-  const forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
+  const forked = stream_fork(
+    [event.provider_payload.raw], ["risk", "ledger"],
+  )
   const windowed = window_by(
     [event.provider_payload.raw],
     {
@@ -229,7 +231,9 @@ pub fn on_quotes(harness: Harness, event: TriggerEvent) -> dict {
     },
   )
   const classified = llm_classify(
-    event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"},
+    event.provider_payload.raw, [
+      "ignore", "review",
+    ], {cache: "quotes:v1"},
   )
   return {forked: forked, windowed: windowed, classified: classified}
 }
@@ -315,8 +319,12 @@ const handle = trigger_register({
   package_name: nil,
 })
 
-const fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
-const dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
+const fired = trigger_fire(
+  handle, {provider: "github", kind: "issue.opened"},
+)
+const dlq = trigger_inspect_dlq().filter({ entry ->
+  entry.binding_id == handle.id
+})
 const replay = trigger_replay(fired.event_id)
 
 harness.stdio.log(fired.status)                  // "dlq"

@@ -169,7 +169,8 @@ const with_session = skill_render(
   [],
   {session_id: "sess-123"},
 )
-// with_session is "Session: sess-123" even when `HARN_SESSION_ID` is unset.
+// with_session is "Session: sess-123"
+// even when `HARN_SESSION_ID` is unset.
 ```
 
 `skill_render` takes an optional third argument: a session-id string or
@@ -229,7 +230,9 @@ block and trims the list to the requested character budget.
 Copy-pasteable example:
 
 ```harn
-const catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+const catalog = render_always_on_catalog(
+  skills_catalog_entries(skills), 2000,
+)
 
 const result = agent_loop(harness,
   "Help me ship this release",

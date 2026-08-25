@@ -338,7 +338,12 @@ post-parse validation, and early stream abort in one place:
 type Verdict = {pass: bool, reason: string}
 
 const result = harness.llm.call(prompt, nil, {
-  output: {schema: Verdict, strict: true, validation: "error", stream_abort: true},
+  output: {
+    schema: Verdict,
+    strict: true,
+    validation: "error",
+    stream_abort: true,
+  },
   schema_retries: 1,
 })
 ```
@@ -502,7 +507,9 @@ const opts: LlmCallOptions = {
   truncation: "auto",
   max_tool_calls: 4,
 }
-const result = harness.llm.call("Search and summarize current docs.", nil, opts)
+const result = harness.llm.call(
+  "Search and summarize current docs.", nil, opts,
+)
 ```
 
 Use normal Harn `tools` when Harn should execute, approve, and audit a tool or
@@ -523,7 +530,9 @@ const experiment_opts: LlmCallOptions = {
   provider: "mock",
   structural_experiment: "prompt_order_permutation(seed: 42)",
 }
-const result = harness.llm.call("Instruction\n\nContext block", nil, experiment_opts)
+const result = harness.llm.call(
+  "Instruction\n\nContext block", nil, experiment_opts,
+)
 ```
 
 For custom transforms, pass a closure (or a `std/experiments.custom(...)`
@@ -586,9 +595,13 @@ overrides them in `options`.
 the validated `.data` pre-unwrapped) instead of throwing:
 
 ```harn
-const r = harness.llm.call_structured_safe(prompt, schema, {provider: "openai"})
+const r = harness.llm.call_structured_safe(
+  prompt, schema, {provider: "openai"},
+)
 if !r.ok {
-  harness.stdio.log("structured call failed:", r.error.category, r.error.message)
+  harness.stdio.log(
+    "structured call failed:", r.error.category, r.error.message,
+  )
   return nil
 }
 const person = r.data
@@ -633,7 +646,9 @@ if r.ok {
   const person = r.data
   // ...
 } else {
-  harness.stdio.log("structured call failed:", r.error_category, "raw:", r.raw_text)
+  harness.stdio.log(
+    "structured call failed:", r.error_category, "raw:", r.raw_text,
+  )
 }
 ```
 
@@ -779,7 +794,9 @@ const completion_opts: LlmCallOptions = {
   provider: "ollama",
   model_tier: "small",
 }
-const result = harness.llm.completion("const total = ", ";", nil, completion_opts)
+const result = harness.llm.completion(
+  "const total = ", ";", nil, completion_opts,
+)
 harness.stdio.log(result.text)
 ```
 
@@ -859,7 +876,9 @@ Use `harness.llm.mock_enqueue()` to queue specific responses — text, tool call
 ```harn
 // Queue a text response (consumed in FIFO order)
 harness.llm.mock_enqueue({text: "The capital of France is Paris."})
-const r = harness.llm.call("What is the capital of France?", nil, {provider: "mock"})
+const r = harness.llm.call(
+  "What is the capital of France?", nil, {provider: "mock"},
+)
 assert_eq(r.text, "The capital of France is Paris.")
 
 // Queue a response with tool calls
@@ -873,10 +892,15 @@ harness.llm.mock_enqueue({
   text: "certain", logprobs: [{token: "certain", logprob: 0.0}],
 })
 
-// Pattern-matched mocks (reusable by default, matched in declaration order)
+// Pattern-matched mocks (reusable by
+// default, matched in declaration order)
 harness.llm.mock_enqueue({text: "I don't know.", match: "*unknown*"})
-harness.llm.mock_enqueue({text: "step 1", match: "*planner*", consume_match: true})
-harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({
+  text: "step 1", match: "*planner*", consume_match: true,
+})
+harness.llm.mock_enqueue({
+  text: "step 2", match: "*planner*", consume_match: true,
+})
 
 // Provider-style error envelopes exercise the same catch/safe-call paths
 // as live provider failures.
@@ -886,8 +910,10 @@ harness.llm.mock_enqueue({
 
 // Inspect what was sent to the mock provider
 const calls = harness.llm.mock_calls()
-// Each entry includes mock_scope, messages, system, tools, output/thinking
-// controls, and portable generation options such as temperature and max_tokens.
+// Each entry includes mock_scope,
+// messages, system, tools, output/thinking
+// controls, and portable generation options
+// such as temperature and max_tokens.
 
 // Clear all mocks and call log between tests
 harness.llm.mock_clear()

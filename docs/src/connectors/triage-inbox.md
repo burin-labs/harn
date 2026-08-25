@@ -55,7 +55,9 @@ Use `triage_dedupe_events(events)` before rendering or emitting a feed:
 ```harn
 import { triage_dedupe_events } from "std/triage"
 
-const _unique = triage_dedupe_events([github_delivery, github_delivery_retry])
+const _unique = triage_dedupe_events([
+  github_delivery, github_delivery_retry,
+])
 ```
 
 ## EventLog receipts

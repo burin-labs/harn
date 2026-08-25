@@ -43,7 +43,9 @@ for t in tools {
   harness.stdio.log("${t.name}: ${t.description}")
 }
 
-const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+const content = harness.tools.mcp_call(
+  client, "read_file", {path: "/tmp/data.txt"},
+)
 harness.stdio.log(content)
 ```
 
@@ -55,10 +57,14 @@ error, `mcp_call` throws.
 
 ```harn
 const resources = harness.tools.mcp_list_resources(client)
-const data = harness.tools.mcp_read_resource(client, "file:///tmp/config.json")
+const data = harness.tools.mcp_read_resource(
+  client, "file:///tmp/config.json",
+)
 
 const prompts = harness.tools.mcp_list_prompts(client)
-const prompt = harness.tools.mcp_get_prompt(client, "review", {code: "fn main() {}"})
+const prompt = harness.tools.mcp_get_prompt(
+  client, "review", {code: "fn main() {}"},
+)
 ```
 
 ### MCP client support matrix
@@ -157,7 +163,9 @@ Explicit control from user code:
 ```harn
 // Start the lazy server and hold it open.
 const client = mcp_ensure_active("github")
-const issues = harness.tools.mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
+const issues = harness.tools.mcp_call(
+  client, "list_issues", {repo: "burin-labs/harn"},
+)
 
 // Release when done — lets the registry shut it down.
 mcp_release("github")
@@ -165,7 +173,9 @@ mcp_release("github")
 // Inspect current state.
 const status = mcp_registry_status()
 for s in status {
-  harness.stdio.log("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
+  harness.stdio.log(
+    "${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}"
+  )
 }
 ```
 
@@ -406,12 +416,18 @@ const client = harness.tools.mcp_connect(
 )
 
 harness.tools.mcp_call(
-  client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"},
+  client, "write_file", {
+    path: "/tmp/hello.txt", content: "Hello from Harn!",
+  },
 )
-const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
+const content = harness.tools.mcp_call(
+  client, "read_file", {path: "/tmp/hello.txt"},
+)
 harness.stdio.log(content)
 
-const entries = harness.tools.mcp_call(client, "list_directory", {path: "/tmp"})
+const entries = harness.tools.mcp_call(
+  client, "list_directory", {path: "/tmp"},
+)
 harness.stdio.log(entries)
 
 harness.tools.mcp_disconnect(client)

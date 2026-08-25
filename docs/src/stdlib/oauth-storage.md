@@ -40,7 +40,11 @@ pipeline default(harness: Harness) {
   const store = memory()
   store.set(
     "github",
-    {access_token: "abc", refresh_token: "rfr", expires_at_unix: 17000000000},
+    {
+      access_token: "abc",
+      refresh_token: "rfr",
+      expires_at_unix: 17000000000,
+    },
     3600,
   )
   const token = store.get("github")              // -> TokenSet | nil
@@ -144,7 +148,9 @@ const store = custom({
     vault_put("oauth/" + key, token_set, {ttl: ttl_seconds})
   },
   delete: { key -> vault_delete("oauth/" + key) },
-  with_refresh_lock: { key, body -> vault_with_lock("oauth/" + key, body) },
+  with_refresh_lock: { key, body ->
+    vault_with_lock("oauth/" + key, body)
+  },
   id: "my-vault",          // optional, surfaces in diagnostics
 })
 

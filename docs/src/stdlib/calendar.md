@@ -18,7 +18,9 @@ Public calendar helpers use reusable shapes instead of anonymous records:
 ## Civil calendar helpers
 
 ```harn
-import { iso_week, next_weekday, quarter, start_of_day } from "std/calendar"
+import {
+  iso_week, next_weekday, quarter, start_of_day,
+} from "std/calendar"
 
 pipeline default(harness: Harness) {
   const now = date_parse("2026-05-11T17:00:00-04:00")
@@ -28,7 +30,9 @@ pipeline default(harness: Harness) {
   )
 
   harness.stdio.log(date_to_zone(next_monday, "America/New_York"))
-  harness.stdio.log(json_stringify(iso_week(next_monday, "America/New_York")))
+  harness.stdio.log(
+    json_stringify(iso_week(next_monday, "America/New_York"))
+  )
   harness.stdio.log(quarter(next_monday, "America/New_York"))
 }
 ```
@@ -105,7 +109,9 @@ pipeline default(harness: Harness) {
     business_days_between("2026-07-01", "2026-07-08", calendar, timezone),
   )
   harness.stdio.log(
-    is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window),
+    is_business_time(
+      date_parse("2026-07-06T14:00:00-04:00"), calendar, window,
+    ),
   )
 }
 ```

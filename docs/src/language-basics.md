@@ -85,7 +85,8 @@ let items = []
 items = items.appending("a")   // `items` is now ["a"]
 
 const base = []
-base.appending("a")            // error[HARN-LNT-066]: no effect — `base` is still []
+// error[HARN-LNT-066]: no effect — `base` is still []
+base.appending("a")
 ```
 
 See [Binding mutability](./spec/language/04-scope-rules.md#binding-mutability)
@@ -190,7 +191,8 @@ const count: int = row[-1]
 fn retry_count(row: tuple<string, int>) -> int {
   return row[1]
 }
-retry_count(["timeout", 5])       // bracket literal is contextually a tuple
+// bracket literal is contextually a tuple
+retry_count(["timeout", 5])
 ```
 
 Ordinary bracket literals still infer lists. A `tuple<...>` annotation or
@@ -812,9 +814,7 @@ function name.
 Binary operators, method chains, and pipes can span multiple lines:
 
 ```harn,ignore
-const message = "hello"
-  + " "
-  + "world"
+const message = "hello world"
 
 const result = items
   .filter({ x -> x > 0 })
@@ -1379,7 +1379,9 @@ The `format` builtin supports both positional `{}` placeholders and named
 harness.stdio.log(format("Hello, {}!", "world"))
 
 // Named
-harness.stdio.log(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
+harness.stdio.log(
+  format("Hello {name}, you are {age}.", {name: "Alice", age: 30})
+)
 ```
 
 For simple cases, string interpolation with `${}` is usually more

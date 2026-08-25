@@ -29,7 +29,9 @@ pipeline inspect_readme(harness: Harness, task) {
 
   const read_tool = host_tool_lookup("Read")
   assert(read_tool != nil, "Read tool metadata should be present")
-  assert(read_tool?.deprecated != true, "Read tool is deprecated on this host")
+  assert(
+    read_tool?.deprecated != true, "Read tool is deprecated on this host",
+  )
 
   const result = harness.tools.invoke("Read", {path: "README.md"})
   harness.stdio.log(result)

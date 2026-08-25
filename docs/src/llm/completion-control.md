@@ -123,11 +123,13 @@ For an explicit preflight verdict instead of loop composition, use
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/completion_gate"
 
-agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
-  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-  verify_command: fn() { return host_run_verify() },
-  judge: true,          // optional bounded LLM judge, capped at 5 by default
-}))
+agent_loop(harness, task, system, base_opts + agent_completion_gate(
+  harness.runtime, {
+    facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+    verify_command: fn() { return host_run_verify() },
+    // optional bounded LLM judge, capped at 5 by default
+    judge: true,
+  }))
 ```
 
 See [Completion gate (`std/agent/completion_gate`)](../stdlib/agent-judge.md)

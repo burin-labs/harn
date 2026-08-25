@@ -25,10 +25,12 @@ const pins = [
 ]
 
 // (1) Survive compaction by construction: inject each pin as a
-//     preserve_on_compact reminder, or hand the summarizer a preserve policy.
+// preserve_on_compact reminder, or hand
+// the summarizer a preserve policy.
 const policy = pin_compaction_policy(pins)
 
-// (2) Double as reachability-GC roots: any stale tool result that references a
+// (2) Double as reachability-GC roots: any stale tool result that
+// references a
 //     pinned path/identifier is kept, not reclaimed.
 const projected = transcript_project(
   t, with_pin_roots({policy: "reachability_gc"}, pins),
@@ -47,7 +49,9 @@ Hosts that emit a literal `[no-compact]` heading marker can convert it to a pin:
 ```harn,ignore
 import { recognize_no_compact } from "std/agent/pins"
 
-const maybe_pin = recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+const maybe_pin = recognize_no_compact(
+  "## Session goal [no-compact]\nObjective: X"
+)
 ```
 
 `recognize_no_compact` returns a `no_compact` pin with the marker stripped, or
@@ -69,7 +73,9 @@ Each success criterion may carry a host-fact `check` callback, which makes it
 machine-checkable (a deterministic floor) instead of LLM-judged.
 
 ```harn,ignore
-import { goal, with_goal, goal_judge, goal_check, goal_reloop } from "std/agent/goal"
+import {
+  goal, with_goal, goal_judge, goal_check, goal_reloop,
+} from "std/agent/goal"
 
 const g = goal({
   objective: "Fix the flaky login test",
@@ -85,14 +91,16 @@ const g = goal({
   budget: {max_cost_usd: 5.0},
 })
 
-// Render the goal into every outbound request (existing fragment channel):
+// Render the goal into every outbound
+// request (existing fragment channel):
 const goal_opts = with_goal(
   {provider: "anthropic", done_judge: goal_judge(g)}, g,
 )
 const result = agent_loop(harness, "Proceed.", nil, goal_opts)
 
 // The machine-checkable floor:
-const floor = goal_check(g, {ci_green: false})   // {done: false, unmet: ["green"], ...}
+// {done: false, unmet: ["green"], ...}
+const floor = goal_check(g, {ci_green: false})
 ```
 
 - `with_goal(opts, goal)` renders the objective, criteria, and constraints into

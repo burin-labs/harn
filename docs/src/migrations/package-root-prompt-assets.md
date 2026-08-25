@@ -15,7 +15,9 @@ breaking when callers move.
 
 ```harn,ignore
 // pipelines/lib/runtime/workflow/graph-stages.harn
-harness.fs.render_prompt("../../../partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt(
+  "../../../partials/tool-examples.harn.prompt", bindings,
+)
 ```
 
 A pure refactor that relocates `graph-stages.harn` silently breaks the
@@ -26,7 +28,9 @@ at a non-existent file.
 ## After — project-root form
 
 ```harn,ignore
-harness.fs.render_prompt("@/pipelines/partials/tool-examples.harn.prompt", bindings)
+harness.fs.render_prompt(
+  "@/pipelines/partials/tool-examples.harn.prompt", bindings,
+)
 ```
 
 Verbose but resilient: the path resolves the same regardless of where

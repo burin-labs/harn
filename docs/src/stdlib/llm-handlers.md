@@ -101,7 +101,8 @@ supports two interchangeable call shapes:
 
 ```harn,ignore
 with_retry(next, opts)   // direct: returns a caller
-with_retry(opts)         // curried: returns fn(next) -> caller, drops into compose
+// curried: returns fn(next) -> caller, drops into compose
+with_retry(opts)
 ```
 
 Compose with `compose([with_logging({...}), with_retry({...})])(base)`
@@ -158,7 +159,11 @@ import {compose, with_logging, with_retry} from "std/llm/handlers"
 
 const route = agent_model_options({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-5", reasoning_task: "agent"},
+  defaults: {
+    provider: "anthropic",
+    model: "claude-sonnet-5",
+    reasoning_task: "agent",
+  },
 })
 const middleware = [with_retry({max_attempts: 3}), with_logging({})]
 const caller = compose(middleware)(default_llm_caller())
@@ -217,7 +222,8 @@ const router = with_routing({
   routes: [
     {name: "frontier",
      when: { call ->
-       call?.opts?.reasoning_task == "judge" || (call?.opts?.escalate ?? false)
+       call?.opts?.reasoning_task == "judge"
+         || (call?.opts?.escalate ?? false)
      },
      caller: frontier},
   ],
@@ -262,13 +268,16 @@ const policy = routing_policy({
   latency: {race_after_ms: 5000},
   budget:  {per_call_usd: 0.5, on_exceed: "abort"},
   observe: {emit_event: "billing.routing_decision"},
-  escalate_on: [                                       // optional verifier chain
+  // optional verifier chain
+  escalate_on: [
     {kind: "typecheck"},
     {kind: "lint", forbidden_patterns: ["TODO"], on_fail: "refine"},
   ],
 })
 
-const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
+const result = harness.llm.call(
+  "Summarize this PR.", nil, {routing: policy},
+)
 ```
 
 `escalate_on` makes frontier escalation **conditional on a
@@ -429,7 +438,9 @@ refinements.
 ### Example
 
 ```harn,ignore
-import {recommend_max_output_tokens, fits_in_context} from "std/llm/budget"
+import {
+  recommend_max_output_tokens, fits_in_context,
+} from "std/llm/budget"
 
 const max_out = recommend_max_output_tokens({
   prompt: long_text,
@@ -509,13 +520,19 @@ agent_loop(harness, task, system, opts + {loop_until_done: true})
 ### Example
 
 ```harn,ignore
-import {safe_call, safe_field, with_case_insensitive_keys} from "std/llm/safe"
+import {
+  safe_call, safe_field, with_case_insensitive_keys,
+} from "std/llm/safe"
 
-const r = safe_call(prompt, system, {provider: "auto", model: "gpt-5.4-mini"})
+const r = safe_call(
+  prompt, system, {provider: "auto", model: "gpt-5.4-mini"},
+)
 if !r.ok { return r }
 
 const envelope = with_case_insensitive_keys(parse_json(r.value.text))
-const verdict = safe_field(envelope, ["verdict", "decision", "result"], "unknown")
+const verdict = safe_field(
+  envelope, ["verdict", "decision", "result"], "unknown",
+)
 ```
 
 ---
@@ -537,7 +554,9 @@ const sys = system_prelude({
   persona: "You are a release auditor.",
   tone: "terse",
   constraints: ["Cite evidence by file path", "No speculation"],
-  output_contract: {format: "json", required: ["risks", "recommendation"]},
+  output_contract: {
+    format: "json", required: ["risks", "recommendation"],
+  },
 })
 ```
 
@@ -573,7 +592,9 @@ if has_capability(model, "thinking") {
 
 const fam = family_of(model)       // e.g. "anthropic-claude"
 const routes = named_model_ladder("agent_frontier").steps
-const reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
+const reviewer = complementary_reviewer({
+  author_model: model, intent: "plan_review",
+})
 ```
 
 ---

@@ -10,7 +10,9 @@ harness.memory.store("workspace/acme", "alice-profile", {
   text: "Alice prefers Rust examples and concise plans",
 }, ["profile", "preference"])
 
-const related = harness.memory.recall("workspace/acme", "rust preference", 3)
+const related = harness.memory.recall(
+  "workspace/acme", "rust preference", 3,
+)
 const summary = harness.memory.summarize("workspace/acme", {limit: 10})
 ```
 
@@ -128,9 +130,12 @@ answer instead of re-guessing.
 ```harn
 import { probe_eval, probe_typecheck } from "std/agent/probe"
 
-const helper = probe_eval("git diff --quiet HEAD -- crates/harn-stdlib", {expected: 0})
+const helper = probe_eval(
+  "git diff --quiet HEAD -- crates/harn-stdlib", {expected: 0},
+)
 const tc = probe_typecheck(
-  "pipeline summary() { const x: int = len([1, 2, 3]) __io_println(x) }\n",
+  "pipeline summary() { const x: int = len([1, 2, 3])"
+    + " __io_println(x) }\n",
   {expected: 0},
 )
 ```
@@ -156,7 +161,9 @@ import {
 
 const options = {allow_manual_evidence: true}
 pattern_learning_observe(
-  "session-1", "Refactor the auth refresh tests", ["read", "edit"], options,
+  "session-1", "Refactor the auth refresh tests", [
+    "read", "edit",
+  ], options,
 )
 const proposals = pattern_learning_pending(options)
 ```

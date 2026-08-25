@@ -34,7 +34,9 @@ agent_subscribe(
   if ev?.type == "iteration_end" {
     const current = harness.agent.current_id()
     if current != nil {
-      agent_inject_feedback(current, "iteration_marker", "just finished an iteration")
+      agent_inject_feedback(
+        current, "iteration_marker", "just finished an iteration",
+      )
     }
   }
 },

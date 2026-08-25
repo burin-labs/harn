@@ -75,7 +75,8 @@ Postgres parameters rather than interpolated into SQL:
 ```harn
 const receipt = pg_query_one(
   db,
-  "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
+  "select id, payload from receipts where tenant_id = $1 and id"
+    + " = $2::uuid",
   [tenant_id, receipt_id],
 )
 ```
@@ -154,7 +155,8 @@ const q = sql(
     + " {tenant_id}::uuid AS again",
   {tenant_id: tenant_id},
 )
-// q.sql    == "SELECT '{}' AS empty_json, $1::uuid AS tenant_id, $1::uuid AS again"
+// q.sql ==
+//   "SELECT '{}' AS empty_json, $1::uuid AS tenant_id, $1::uuid AS again"
 // q.params == [tenant_id]
 ```
 
@@ -199,7 +201,8 @@ For one-off call sites, pass the template query record directly:
 
 ```harn,ignore
 const rows = many(db, sql(
-  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id ="
+    + " {tenant_id}::uuid",
   {tenant_id: tenant_id},
 ))
 ```
@@ -210,7 +213,8 @@ easy to inspect in tests while keeping execution explicit:
 ```harn,ignore
 const db = pg_mock_pool([
   {
-    sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
+    sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
+      + " = $1::uuid",
     params: ["tenant-a"],
     rows: [{id: "r1", payload: {ok: true}}],
   },
@@ -219,7 +223,8 @@ const db = pg_mock_pool([
 const rows = run(db, named(
   "list_receipts",
   "many",
-  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id = $1::uuid",
+  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
+    + " = $1::uuid",
   ["tenant-a"],
 ))
 assert_eq(rows[0].id, "r1")
@@ -260,11 +265,14 @@ list composes without `unsafe_sql(...)`:
 const q = sql(
   "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
   {
-    projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
+    projection: columns([
+      uuid_text("id"), timestamptz_json("created_at"), "payload",
+    ]),
     tenant_id: tenant_id,
   },
 )
-// q.sql == "SELECT id::text AS id, to_json(created_at)#>>'{}' AS created_at, payload
+// q.sql == "SELECT id::text AS id, to_json(created_at)#>>'{}' AS
+// created_at, payload
 //           FROM receipts WHERE tenant_id = $1::uuid"
 ```
 
@@ -285,10 +293,12 @@ pg_transaction(
       {receipt_id: receipt_id},
     ])
 
-    pg_execute(tx, "insert into audit_records(tenant_id, action) values ($1, $2)", [
-      tenant_id,
-      "receipt.created",
-    ])
+    pg_execute(
+      tx, "insert into audit_records(tenant_id, action) values ($1, $2)",
+      [
+        tenant_id,
+        "receipt.created",
+      ])
   },
   {settings: {"app.current_tenant_id": tenant_id}},
 )
@@ -307,9 +317,13 @@ the surviving writes while the rolled-back ones disappear:
 const drop_inner = true
 
 pg_transaction(db, { tx ->
-  pg_execute(tx, "insert into entries (id, label) values ($1, $2)", [1, "outer"])
+  pg_execute(
+    tx, "insert into entries (id, label) values ($1, $2)", [1, "outer"],
+  )
   pg_savepoint(tx, "before_inner")
-  pg_execute(tx, "insert into entries (id, label) values ($1, $2)", [2, "inner"])
+  pg_execute(
+    tx, "insert into entries (id, label) values ($1, $2)", [2, "inner"],
+  )
   if drop_inner {
     pg_rollback_to_savepoint(tx, "before_inner")
   }
@@ -331,7 +345,9 @@ ignored — keep down migrations alongside ups for tooling outside Harn but
 let Harn only apply the ups.
 
 ```harn
-const pool = harness.postgres.pool("env:DATABASE_URL", {max_connections: 1})
+const pool = harness.postgres.pool(
+  "env:DATABASE_URL", {max_connections: 1},
+)
 const result = pg_migrate(pool, {dir: "./migrations"})
 harness.stdio.log(
   "applied " + to_string(len(result.applied))
@@ -357,7 +373,9 @@ Pass `ledger: "sqlx"` to apply an existing SQLx migration history into
 SQLx's own `_sqlx_migrations` table, byte-for-byte compatibly:
 
 ```harn
-const pool = harness.postgres.pool("env:DATABASE_URL", {max_connections: 1})
+const pool = harness.postgres.pool(
+  "env:DATABASE_URL", {max_connections: 1},
+)
 const result = pg_migrate(pool, {dir: "./migrations", ledger: "sqlx"})
 ```
 
@@ -505,7 +523,9 @@ The `pg.jsonb.*` helpers execute Postgres' native JSONB functions/operators with
 bound operands, which keeps quick JSON manipulation out of string-built SQL:
 
 ```harn
-const ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
+const ids = pg.jsonb.path(
+  db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id",
+)
 const merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
 const has_b = pg.jsonb.contains(db, merged, {b: 2})
 ```
@@ -555,11 +575,15 @@ const db = harness.postgres.pool("env:DATABASE_URL", {
   read_routing_policy: "round_robin_replica",
 })
 // Per-query opt-in uses the pool's read_routing_policy.
-pg_query(db, "select * from receipts where id = $1", [id], {read_only: true})
+pg_query(
+  db, "select * from receipts where id = $1", [id], {read_only: true},
+)
 // Or override the route for one query.
 pg_query(db, "select count(*) from receipts", [], {route: "primary"})
 // Writes always go to the primary.
-pg_execute(db, "insert into receipts (id, payload) values ($1, $2)", [id, payload])
+pg_execute(
+  db, "insert into receipts (id, payload) values ($1, $2)", [id, payload],
+)
 ```
 
 `replicas` accepts URL strings, `env:…`/`secret:…` references, or
@@ -574,7 +598,8 @@ otherwise.
 ```harn
 pg_partition_attach(db, "events", "events_2026_05",
                     {from: "2026-05-01", to: "2026-06-01"})       // range
-pg_partition_attach(db, "events", "events_h0", {modulus: 4, remainder: 0})  // hash
+// hash
+pg_partition_attach(db, "events", "events_h0", {modulus: 4, remainder: 0})
 pg_partition_detach(db, "events", "events_2026_03", {concurrently: true})
 const pruned = pg_partition_prune(db, "events", "2026-01-01")
 // Returns the list of `<schema>.<partition>` names that were dropped.
@@ -645,7 +670,9 @@ const db = pg_mock_pool([
 ])
 
 const rows = pg_query(
-  db, "select id, payload from receipts where tenant_id = $1", ["tenant-123"],
+  db, "select id, payload from receipts where tenant_id = $1", [
+    "tenant-123"
+  ],
 )
 assert_eq(rows[0].payload.ok, true)
 

@@ -104,7 +104,9 @@ pool registry handle.
 
 ```harn,ignore
 const handle = pool.submit({ ->
-  return agent_loop(harness, "review this PR", "You are a careful reviewer.")
+  return agent_loop(
+    harness, "review this PR", "You are a careful reviewer.",
+  )
 }, {
   priority: 10,
   tenant_id: "acme",
@@ -156,7 +158,9 @@ all of them:
 ```harn,ignore
 import { pool_wait } from "std/lifecycle/pool"
 
-const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
+const handles = [
+  pool.submit(work_a), pool.submit(work_b), pool.submit(work_c),
+]
 const outcomes = pool_wait(harness.agent, handles)
 ```
 
@@ -282,8 +286,12 @@ idempotent. Two submits with the same `(pool_id, idempotency_key)`
 return the *same* task handle:
 
 ```harn,ignore
-const first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
-const second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
+const first = pool.submit(
+  { -> review(pr) }, {idempotency_key: "review-pr-1984"},
+)
+const second = pool.submit(
+  { -> review(pr) }, {idempotency_key: "review-pr-1984"},
+)
 harness.stdio.log(first.id == second.id)   // true
 ```
 
@@ -389,9 +397,21 @@ import { agent_fanout } from "std/agent/workers"
 
 const results = agent_fanout(
   [
-    {task: "Port src/a to the new API", options: child_opts_a, label: "a"},
-    {task: "Port src/b to the new API", options: child_opts_b, label: "b"},
-    {task: "Port src/c to the new API", options: child_opts_c, label: "c"},
+    {
+      task: "Port src/a to the new API",
+      options: child_opts_a,
+      label: "a",
+    },
+    {
+      task: "Port src/b to the new API",
+      options: child_opts_b,
+      label: "b",
+    },
+    {
+      task: "Port src/c to the new API",
+      options: child_opts_c,
+      label: "c",
+    },
   ],
   {max_parallel: 8},
 )

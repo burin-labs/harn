@@ -425,7 +425,9 @@ pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness,
 @test
 pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task) {
   // A line exactly at the limit is fine; one column past it is not. The
-  // off-by-one here is the whole contract, so pin both sides.
+  // off-by-one here is the whole contract, so pin both sides. 88 is an
+  // arbitrary limit argument, not the repo budget — the budget itself is
+  // pinned by test_overlong_lines_pins_the_repo_budget below.
   const at_limit = "x".repeat(88)
   const over = "x".repeat(89)
   assert_eq(overlong_lines(at_limit + "\n", 88), [])
@@ -434,6 +436,20 @@ pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task) {
   assert_eq(found[0].line, 1)
   assert_eq(found[0].width, 89)
   assert_eq(found[0].text, over)
+}
+
+@test
+pipeline test_overlong_lines_pins_the_repo_budget(harness: Harness, task) {
+  // The published budget is 74 columns, derived from the rendered article
+  // column (max-w-3xl minus padding and border = 654px of code text, at
+  // JetBrains Mono 13.6px whose advance is 8.734px). A 74-column line must
+  // pass and a 75-column line must fail; if the constant drifts without the
+  // derivation being redone, this fails.
+  assert_eq(MAX_SNIPPET_COLUMNS, 74)
+  assert_eq(overlong_lines("x".repeat(74) + "\n", MAX_SNIPPET_COLUMNS), [])
+  const over = overlong_lines("x".repeat(75) + "\n", MAX_SNIPPET_COLUMNS)
+  assert_eq(over.count, 1)
+  assert_eq(over[0].width, 75)
 }
 
 @test

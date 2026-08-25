@@ -14,10 +14,11 @@ import { agent_preset } from "std/agent/presets"
 import { timed } from "std/timing"
 
 pipeline default(harness: Harness) {
-  const outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
-    const opts = agent_preset("repair")
-    return agent_loop(harness, task, opts?.system, opts)
-  })
+  const outcome = timed(
+    "benchmark.agent_loop", {case_id: "python-add"}, { ->
+      const opts = agent_preset("repair")
+      return agent_loop(harness, task, opts?.system, opts)
+    })
   __io_println("duration_ms=${outcome.timing.duration_ms}")
   return outcome.result
 }

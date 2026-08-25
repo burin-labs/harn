@@ -34,7 +34,8 @@ pipeline default(harness: Harness, task) {
   })
   agent_loop(harness, task, {
     tools: {tools: [{name: "run_command", handler: run_command}]},
-    system: "You are a Rust contributor. Run cargo commands through run_command.",
+    system: "You are a Rust contributor. Run cargo commands through"
+      + " run_command.",
   })
 }
 ```
@@ -117,10 +118,11 @@ pipeline default(harness: Harness, task) {
     },
     applies_to: ["swift"],
     severity: "warning",
-    explanation: "Run `xcodebuild` with `-destination` so the simulator or"
-      + " device target is explicit.",
+    explanation: "Run `xcodebuild` with `-destination` so the simulator"
+      + " or device target is explicit.",
     references: [
-      "https://developer.apple.com/library/archive/technotes/tn2339/_index.html",
+      "https://developer.apple.com/library/archive/technotes/tn2339"
+        + "/_index.html",
     ],
   })
 
@@ -152,13 +154,15 @@ pipeline default(harness: Harness, task) {
     id: "harness.sql.unbounded_select_star",
     pattern: { command, _context ->
       const lc = lowercase(command)
-      if !regex_match("^\\s*select\\s+\\*\\s+from\\s+\\S+", lc) { return false }
+      if !regex_match(
+        "^\\s*select\\s+\\*\\s+from\\s+\\S+", lc,
+      ) { return false }
       return !(contains(lc, " where ") || contains(lc, " limit "))
     },
     applies_to: [],
     severity: "error",
-    explanation: "Unbounded `SELECT *` scans entire tables. Add a WHERE or"
-      + " LIMIT clause.",
+    explanation: "Unbounded `SELECT *` scans entire tables. Add a WHERE"
+      + " or LIMIT clause.",
   })
 
   const run_command = preset_run_command({
@@ -263,7 +267,9 @@ pipeline default(harness: Harness, task) {
     tools: {tools: [{name: "run_command", handler: run_command}]},
   })
   const audits = harness.obs.pipeline_lifecycle_audit_log_take()
-  const warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
+  const warnings = audits |> filter({ a ->
+    a.kind == "tool_rule_warning"
+  })
   harness.stdio.log("matched (audit-only): " + to_string(len(warnings)))
 }
 ```
@@ -287,7 +293,8 @@ pipeline default(harness: Harness) {
   harness.stdio.log(envelope.action)        // "rewrite"
   // "cargo build --release --target-dir target-shared"
   harness.stdio.log(envelope.command)
-  harness.stdio.log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
+  // "rust.cargo.target_dir_conflict"
+  harness.stdio.log(envelope.rule_id)
   harness.stdio.log(envelope.severity)      // "warning"
 }
 ```

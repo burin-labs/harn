@@ -90,5 +90,6 @@ const result: AgentResult = agent_loop(harness, task, system, spec)
 if result.terminal.kind == "natural" {
   return result.visible_text
 }
-throw "agent stopped: " + result.terminal.kind + ": " + result.terminal.reason
+throw "agent stopped: " + result.terminal.kind
+  + ": " + result.terminal.reason
 ```

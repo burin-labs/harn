@@ -67,33 +67,38 @@ fn deterministic_tools() {
       text: {type: "string"},
     },
     returns: {type: "array", items: {type: "string"}},
-    handler: { args -> return regex_match(args.pattern, args.text) ?? [] },
-  })
-
-  tools = tool_define(tools, "strings::count_char", "Count a single character", {
-    parameters: {
-      text: {type: "string"},
-      char: {type: "string", minLength: 1, maxLength: 1},
-    },
-    returns: {type: "integer"},
     handler: { args ->
-      require len(args.char) == 1, "char must be exactly one character"
-      return split(args.text, args.char).count() - 1
+      return regex_match(args.pattern, args.text) ?? []
     },
   })
 
-  tools = tool_define(tools, "crypto::sha256", "Hash text as lowercase hex", {
-    parameters: {
-      text: {type: "string"},
-    },
-    returns: {type: "string"},
-    handler: { args -> return sha256(args.text) },
-  })
+  tools = tool_define(
+    tools, "strings::count_char", "Count a single character", {
+      parameters: {
+        text: {type: "string"},
+        char: {type: "string", minLength: 1, maxLength: 1},
+      },
+      returns: {type: "integer"},
+      handler: { args ->
+        require len(args.char) == 1, "char must be exactly one character"
+        return split(args.text, args.char).count() - 1
+      },
+    })
+
+  tools = tool_define(
+    tools, "crypto::sha256", "Hash text as lowercase hex", {
+      parameters: {
+        text: {type: "string"},
+      },
+      returns: {type: "string"},
+      handler: { args -> return sha256(args.text) },
+    })
 
   tools = tool_define(tools, "vision::ocr", "Read text from an image", {
     parameters: {
       image: {
-        description: "Path string or image dict accepted by std/vision.ocr",
+        description: "Path string or image dict accepted by"
+          + " std/vision.ocr",
       },
       options: {
         type: "object",
@@ -155,7 +160,8 @@ Then hand the registry to `agent_loop(harness, ...)`:
 
 ```harn,ignore
 const result = agent_loop(harness,
-  "Read the screenshot, hash the extracted order id, and summarize the UI state.",
+  "Read the screenshot, hash the extracted order id, and summarize the"
+    + " UI state.",
   "Use deterministic tools first. Prefer pure stdlib tools over free-form"
     + " reasoning when possible.",
   {
@@ -195,7 +201,9 @@ the packaged hostlib wrappers instead of hand-rolling tool registries. Import
 `std/agent/host_tools` and choose the narrowest helper:
 
 ```harn
-import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
+import {
+  agent_command_tools, agent_host_tools,
+} from "std/agent/host_tools"
 
 const tools = agent_command_tools(nil, {
   cwd: repo_root,
@@ -610,20 +618,21 @@ deterministic tool receipts. Use OpenAI Responses `provider_tools` only when
 the provider should execute a hosted tool or remote MCP connector:
 
 ```harn
-const result = harness.llm.call("Find the current policy and summarize it.", nil, {
-  provider: "openai",
-  model: "gpt-5.4",
-  api_mode: "responses",
-  provider_tools: [
-    {type: "web_search"},
-    {
-      type: "mcp",
-      server_label: "docs",
-      server_url: "https://mcp.example.com",
-      require_approval: "always",
-    },
-  ],
-})
+const result = harness.llm.call(
+  "Find the current policy and summarize it.", nil, {
+    provider: "openai",
+    model: "gpt-5.4",
+    api_mode: "responses",
+    provider_tools: [
+      {type: "web_search"},
+      {
+        type: "mcp",
+        server_label: "docs",
+        server_url: "https://mcp.example.com",
+        require_approval: "always",
+      },
+    ],
+  })
 ```
 
 Provider-hosted calls are not dispatchable Harn tool calls. Harn records them
@@ -651,7 +660,11 @@ const result = agent_loop(harness,
     provider: "openai",
     model: "gpt-5.4",
     mcp_servers: [
-      {name: "github", transport: "http", url: "http://localhost:3030/mcp"},
+      {
+        name: "github",
+        transport: "http",
+        url: "http://localhost:3030/mcp",
+      },
       {
         name: "local_fs",
         transport: "stdio",

@@ -81,7 +81,9 @@ Plugin authors observe seams through one canonical builtin:
 harness.agent.register_checkpoint_hook(
   ["pre_tool_dispatch", "iteration_end"],
   { event ->
-    harness.stdio.log("seam fired:", event.kind, "delivered:", event.delivered)
+    harness.stdio.log(
+      "seam fired:", event.kind, "delivered:", event.delivered,
+    )
   },
 )
 ```

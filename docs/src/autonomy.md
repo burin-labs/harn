@@ -21,7 +21,9 @@ For non-trigger orchestration, scope policy with `with_autonomy_policy`:
 import { autonomy_policy } from "std/agent/options"
 
 with_autonomy_policy(
-  autonomy_policy("suggest", {agent: "release-captain", reviewers: ["maintainer"]}),
+  autonomy_policy(
+    "suggest", {agent: "release-captain", reviewers: ["maintainer"]},
+  ),
   fn() {
     harness.fs.write_text("release-notes.md", "candidate")
   },

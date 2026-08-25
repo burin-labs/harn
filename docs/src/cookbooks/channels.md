@@ -38,8 +38,12 @@ pipeline release_agent_setup(harness: Harness) {
     kind: "channel.emit",
     provider: "channel",
     match: {events: ["channel:pr.merged"]},
-    when: { _harness, event -> event.provider_payload.payload.target_branch == "main" },
-    batch: {count: 3, window: "2h", key: "repo", expire_action: "fire_partial"},
+    when: { _harness, event ->
+      event.provider_payload.payload.target_branch == "main"
+    },
+    batch: {
+      count: 3, window: "2h", key: "repo", expire_action: "fire_partial",
+    },
     handler: { harness, event ->
       const merged = event.batch
       const repo = merged[0].provider_payload.payload.repo
@@ -117,9 +121,9 @@ pipeline reflection_agent(harness: Harness, task) {
     batch: {count: 30, window: "1h", key: "session"},
     handler: ReminderInject({
       target: "current",
-      body: "You have used 30 tools without a checkpoint. Take this turn to"
-        + " summarize progress, re-read the spec, and adjust the plan if"
-        + " needed.",
+      body: "You have used 30 tools without a checkpoint. Take"
+        + " this turn to summarize progress, re-read the spec, and adjust"
+        + " the plan if needed.",
       tags: ["reflection_nudge"],
       ttl_turns: 1,
       dedupe_key: "reflection_nudge",
@@ -127,7 +131,10 @@ pipeline reflection_agent(harness: Harness, task) {
   })
 
   // 3. Run the loop. The reflection nudge arrives transparently.
-  agent_loop(harness, task, "You are a careful engineering agent. Reflect when nudged.")
+  agent_loop(
+    harness, task,
+    "You are a careful engineering agent. Reflect when nudged.",
+  )
 }
 ```
 
@@ -154,7 +161,9 @@ import { trigger_register, ReminderInject } from "std/triggers"
 // --- planner ---
 pipeline planner_loop(harness: Harness, task) {
   const session = harness.agent.open("planner")
-  const draft = harness.llm.call(task, "Write a one-page plan.", {session_id: session})
+  const draft = harness.llm.call(
+    task, "Write a one-page plan.", {session_id: session},
+  )
   harness.channels.append("plan.draft", {
     plan: draft,
     revision: 1,
@@ -172,7 +181,8 @@ pipeline planner_loop(harness: Harness, task) {
     },
     handler: ReminderInject({
       target: session,
-      body: "Reviewer feedback: {{ event.provider_payload.payload.critique }}",
+      body: "Reviewer feedback: {{"
+        + " event.provider_payload.payload.critique }}",
       tags: ["plan_feedback"],
       ttl_turns: 2,
     }),
@@ -181,8 +191,8 @@ pipeline planner_loop(harness: Harness, task) {
   agent_loop(
     harness,
     task,
-    "Revise the plan when reminders arrive. Re-emit plan.draft when revision"
-      + " is complete.",
+    "Revise the plan when reminders arrive. Re-emit plan.draft when"
+      + " revision is complete.",
     {session_id: session},
   )
 }
@@ -232,7 +242,8 @@ emit.
 import { trigger_register } from "std/triggers"
 import { register_step_hook } from "std/hooks"
 
-// --- producers: any pipeline registering this hook gets free instrumentation ---
+// --- producers: any pipeline registering this hook gets free
+// instrumentation ---
 pipeline producer_setup(harness: Harness) {
   register_step_hook({
     pattern: "*",

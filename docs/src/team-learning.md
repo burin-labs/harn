@@ -30,7 +30,8 @@ friction_record({
   run_id: "run_checkout_184",
   tool: "splunk",
   provider: "splunk",
-  redacted_summary: "Checkout incidents repeatedly need the same error search",
+  redacted_summary: "Checkout incidents repeatedly need the same"
+    + " error search",
   estimated_time_ms: 300000,
   estimated_cost_usd: 0.12,
   recurrence_hints: ["checkout incident queries"],

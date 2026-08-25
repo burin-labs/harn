@@ -94,7 +94,8 @@ pipeline main(harness: Harness) {
   ])
 
   return composition_execute(
-    "const file = harness.fs.read_text({path: \"README.md\"})\nreturn file.text",
+    "const file = harness.fs.read_text({path: \"README.md\"})\nreturn"
+      + " file.text",
     manifest,
     {run_id: "docs-code-mode", max_operations: 8, timeout_ms: 1000},
   )
@@ -202,7 +203,9 @@ fn dispatch_binding(fs: HarnessFs, binding_name: string, input: dict) {
 const dispatch = { binding_name, input ->
   dispatch_binding(harness.fs, binding_name, input)
 }
-const report = composition_execute(snippet, manifest, {dispatcher: dispatch})
+const report = composition_execute(
+  snippet, manifest, {dispatcher: dispatch},
+)
 ```
 
 The dispatcher receives `(binding_name: string, input: dict)` for each child
@@ -244,11 +247,16 @@ BM25/regex/hybrid scorer as `tool_search`, so large MCP servers can stay
 deferred until the agent asks for a slice:
 
 ```harn
-import { composition_mcp_api, composition_mcp_execute } from "std/composition"
+import {
+  composition_mcp_api, composition_mcp_execute,
+} from "std/composition"
 
-const api = composition_mcp_api(tool_registry, {query: "issues", limit: 5})
+const api = composition_mcp_api(
+  tool_registry, {query: "issues", limit: 5},
+)
 const output = composition_mcp_execute(
-  "const hits = github_search_issues({query: \"is:open label:bug\"})\nreturn hits",
+  "const hits = github_search_issues({query: \"is:open"
+    + " label:bug\"})\nreturn hits",
   tool_registry,
   {
     manifest: api.manifest,

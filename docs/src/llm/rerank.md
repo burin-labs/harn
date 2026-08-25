@@ -15,7 +15,8 @@ const candidates = [
 
 const result = pairwise_rerank(candidates, {
   task: "Choose the answer with the safest production behavior.",
-  criteria: "Prefer bounded retries, clear failure modes, and low operational risk.",
+  criteria: "Prefer bounded retries, clear failure modes, and low"
+    + " operational risk.",
   model_tier: "small",
 })
 
@@ -42,7 +43,9 @@ omitted, normal `llm_call` options on `opts` are used directly.
 ```harn
 import { pairwise_rerank } from "std/llm/rerank"
 
-const items = ["primary source", "unattributed summary", "official documentation"]
+const items = [
+  "primary source", "unattributed summary", "official documentation",
+]
 const ranked = pairwise_rerank(items, {
   task: "Pick the most relevant search result.",
   criteria: "Prefer direct answers from primary sources.",

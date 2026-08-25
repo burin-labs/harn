@@ -23,7 +23,7 @@ whole batch. The streamed form preserves the `max_concurrent` cap but
 emits each result as soon as that task completes:
 
 ```harn
-const results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
+const results = parallel each [30, 5, 10] with {max_concurrent: 2} { ms ->
   harness.clock.sleep_ms(ms)
   return ms
 } as stream

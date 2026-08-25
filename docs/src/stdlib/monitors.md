@@ -13,7 +13,9 @@ const result = wait_for({
     label: "deploy",
     poll: { ctx -> github_status(ctx.wait_id) },
     prefers_push: true,
-    push_filter: { event -> event.payload.event.kind == "deployment_status" },
+    push_filter: { event ->
+      event.payload.event.kind == "deployment_status"
+    },
   },
   condition: { state -> state.status == "success" },
 })

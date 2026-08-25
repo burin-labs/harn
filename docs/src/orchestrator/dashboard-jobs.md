@@ -7,7 +7,9 @@ produce ordered events, and hosts render queue/run/approval/DLQ/receipt state
 from normalized fields.
 
 ```harn
-import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
+import {
+  dashboard_job_event, dashboard_jobs_view,
+} from "std/dashboard/jobs"
 
 const event = dashboard_job_event(
   "run.started",
@@ -80,7 +82,9 @@ order-based: deterministic fixtures can drive a static Burin Home Jobs view
 without a live scheduler or database.
 
 ```harn
-import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
+import {
+  dashboard_job_event, dashboard_jobs_view,
+} from "std/dashboard/jobs"
 
 const events = [
   dashboard_job_event(
@@ -92,7 +96,9 @@ const events = [
     },
   ),
 ]
-const view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})
+const view = dashboard_jobs_view(
+  events, {emit: true, topic: "dashboard.jobs.events"},
+)
 for job in view.jobs {
   harness.stdio.log(job.job_id + ": " + job.status)
 }

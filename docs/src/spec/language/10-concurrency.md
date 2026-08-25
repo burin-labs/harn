@@ -122,7 +122,7 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 ```harn
 fn fetch_page(cursor) { cursor }
 const cursors = ["a", "b", "c"]
-const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const pages = parallel settle cursors with {max_concurrent: 4} { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -146,17 +146,23 @@ receipt still needs every lane's structured outcome. `std/abort` is that form,
 built on scoped shared state rather than on new syntax:
 
 ```harn
-import { abort_requested, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   while !lane_terminal(lane) {
     if abort_requested(token) {
-      return Err({code: "stopped_waiting", message: "a sibling lane failed"})
+      return Err(
+        {code: "stopped_waiting", message: "a sibling lane failed"}
+      )
     }
     harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
-    let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
+    let _ = request_abort(
+      token, {code: "doomed", message: "lane ${lane} failed"},
+    )
     return Err({code: "terminal", message: "lane ${lane} failed"})
   }
   return lane_proof(lane)
@@ -335,7 +341,9 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire(
+  "state:customer-42", 250ms,
+)
 const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
 const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
@@ -480,7 +488,9 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell(
+  {scope: "task_group", key: "tokens", initial: 0}
+)
 
 parallel 10 { i ->
   let updated = false
@@ -552,7 +562,9 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open(
+  {scope: "task_group", name: "reviewer", capacity: 32}
+)
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
 }

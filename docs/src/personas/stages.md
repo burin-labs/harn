@@ -34,8 +34,16 @@ or directly on the `@persona` attribute in a Harn workflow:
   name: "scoped_persona",
   tools: [github, ci],
   stages: [
-    {name: "research", allowed_tools: ["github"], side_effect_level: "read_only"},
-    {name: "act", allowed_tools: ["github", "ci"], side_effect_level: "process_exec"},
+    {
+      name: "research",
+      allowed_tools: ["github"],
+      side_effect_level: "read_only",
+    },
+    {
+      name: "act",
+      allowed_tools: ["github", "ci"],
+      side_effect_level: "process_exec",
+    },
   ],
 )
 fn scoped_persona(ctx) {

@@ -16,11 +16,13 @@ Spread the returned fragment into the loop's base options:
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/completion_gate"
 
-agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
-  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-  verify_command: fn() { return host_run_verify() },
-  judge: true,          // optional bounded LLM judge, capped at 5 by default
-}))
+agent_loop(harness, task, system, base_opts + agent_completion_gate(
+  harness.runtime, {
+    facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+    verify_command: fn() { return host_run_verify() },
+    // optional bounded LLM judge, capped at 5 by default
+    judge: true,
+  }))
 ```
 
 ### Options

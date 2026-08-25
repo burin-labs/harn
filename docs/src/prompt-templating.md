@@ -342,7 +342,8 @@ same template works in CI / doc-gen contexts as long as it guards with
 ```harn-prompt
 {{ if llm }}
   Targeting {{ llm.provider }}/{{ llm.model }} — using
-  {{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }} tools.
+  {{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}
+  tools.
 {{ else }}
   Generic prompt — no model selected.
 {{ end }}

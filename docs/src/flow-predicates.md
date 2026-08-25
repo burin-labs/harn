@@ -52,7 +52,9 @@ fn no_raw_tokens(slice, _ctx, _repo_at_base) {
   coverage_examples: ["crates/api/src/auth.rs"]
 )
 fn no_raw_tokens_semantic_review(slice, _ctx, _repo_at_base) {
-  return flow_invariant_warn("semantic review found risky token-like text")
+  return flow_invariant_warn(
+    "semantic review found risky token-like text"
+  )
 }
 ```
 

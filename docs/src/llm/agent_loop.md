@@ -163,9 +163,10 @@ import {
 } from "std/agent/user"
 
 const answerer = agentic_user(
-  "Provide a simple prompt to create ./index.test.ts with full edge coverage.",
-  "Research the codebase only if needed. Answer clarification questions with"
-    + " plausible user preferences. If the agent is done, stop.",
+  "Provide a simple prompt to create ./index.test.ts with full edge"
+    + " coverage.",
+  "Research the codebase only if needed. Answer clarification questions"
+    + " with plausible user preferences. If the agent is done, stop.",
   simulated_user_read_tools(),
   "ollama:devstral-small-2",
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
@@ -686,7 +687,9 @@ single number.
 ```harn
 import { AgentSpec, IterationBudget } from "std/agent/options"
 
-const budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+const budget: IterationBudget = {
+  mode: "adaptive", initial: 4, max: 16, extend_by: 2,
+}
 const budget_opts: AgentSpec = {iteration_budget: budget}
 const result = agent_loop(harness, prompt, system, budget_opts)
 ```
@@ -859,7 +862,11 @@ import {agent_preset, agent_preset_register} from "std/agent/presets"
 
 agent_preset_register("triage", {
   family: "captain",
-  pack: {provider: "openai", timeout_ms: 90000, budget: {total_budget_usd: 5.0}},
+  pack: {
+    provider: "openai",
+    timeout_ms: 90000,
+    budget: {total_budget_usd: 5.0},
+  },
 })
 const opts = agent_preset("triage", {tools: triage_tools})
 const run = agent_loop(harness, "Triage the queue.", opts?.system, opts)
@@ -876,7 +883,9 @@ const audit_opts = agent_preset("audit", {
   tools: release_tools,
   require_successful_tools: ["release_run"],
 })
-const audit = agent_loop(harness, "Audit the release", audit_opts?.system, audit_opts)
+const audit = agent_loop(
+  harness, "Audit the release", audit_opts?.system, audit_opts,
+)
 
 // Tool-using repair. Wider budget {initial: 4, max: 16}, max_nudges: 2.
 // Customize before passing to agent_loop:
@@ -886,14 +895,18 @@ const opts = agent_preset("repair", {
 })
 const result = agent_loop(harness, prompt, system, opts)
 
-// Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
+// Cheap one-shot summary. tool_choice="none",
+// iteration_budget fixed at 1.
 const summary_opts = agent_preset("summary", {
   provider: "openai", model: "gpt-5.4-mini",
 })
-const summary = agent_loop(harness, "Summarize the audit findings.", nil, summary_opts)
+const summary = agent_loop(
+  harness, "Summarize the audit findings.", nil, summary_opts,
+)
 
 // Local/configured route. The audit preset keeps its audit behavior,
-// budget, timeout, and retry defaults, but it does not mix in the built-in
+// budget, timeout, and retry defaults,
+// but it does not mix in the built-in
 // Anthropic provider or frontier ladder once the route is supplied.
 const local_opts = agent_preset("audit", {
   llm_options: {provider: "llamacpp", model: "gemma4-local"},
@@ -941,10 +954,13 @@ const sweep_opts = agent_preset("merge_captain", {
   consent: { call -> approval_bridge.prompt(call) },     // HITL bridge
   audit_sink: { record -> receipts.append(record) },     // captain ledger
 })
-const sweep = agent_loop(harness, "Sweep open PRs.", sweep_opts?.system, sweep_opts)
+const sweep = agent_loop(
+  harness, "Sweep open PRs.", sweep_opts?.system, sweep_opts,
+)
 
-// Oncall Captain: defaults `with_rate_limit(harness.runtime, {max_calls: 50})` so an
-// alert-storm loop can't fan out unbounded. Override via `rate_limit`.
+// Oncall Captain: defaults
+// `with_rate_limit(harness.runtime, {max_calls: 50})` so an alert-storm
+// loop can't fan out unbounded. Override via `rate_limit`.
 const triage_opts = agent_preset("oncall_captain", {
   provider: "openai",
   model: "gpt-5.4",
@@ -967,7 +983,9 @@ const ship_opts = agent_preset("release_captain", {
   escalate_predicate: { call -> call?.opts?.reasoning_task == "judge" },
   logging_sink: { record -> receipts.llm_call(record) },
 })
-const shipping = agent_loop(harness, "Cut v0.9.0.", ship_opts?.system, ship_opts)
+const shipping = agent_loop(
+  harness, "Cut v0.9.0.", ship_opts?.system, ship_opts,
+)
 ```
 
 Captain layers are opt-in: the preset only adds an `audit_sink` /
@@ -1122,7 +1140,9 @@ const callback_opts: AgentSpec = {
   loop_until_done: true,
   context_callback: hide_old_assistant_turns,
 }
-const result = agent_loop(harness, task, "You are a coding assistant.", callback_opts)
+const result = agent_loop(
+  harness, task, "You are a coding assistant.", callback_opts,
+)
 ```
 
 ### Post-turn callback
@@ -1158,7 +1178,13 @@ The callback receives:
 Each `tool_results` entry has:
 
 ```harn,ignore
-{tool_name: string, ok: bool, status: string, rendered_result: string, error: string?}
+{
+  tool_name: string,
+  ok: bool,
+  status: string,
+  rendered_result: string,
+  error: string?,
+}
 ```
 
 It may return:
@@ -1189,7 +1215,8 @@ answer with no more native tool calls:
 fn finalize_after_read(turn) {
   if turn?.session_successful_tools?.contains("read_file") {
     return {
-      message: "You have the required file evidence. Produce the final answer now.",
+      message: "You have the required file evidence. Produce the final"
+        + " answer now.",
       llm_options: {tool_choice: "none"},
     }
   }
@@ -1210,7 +1237,9 @@ const retry_opts: AgentSpec = {
   model: "claude-sonnet-5",
 }
 retry 3 {
-  const result = agent_loop(harness, task, "You are a coding assistant.", retry_opts)
+  const result = agent_loop(
+    harness, task, "You are a coding assistant.", retry_opts,
+  )
   harness.stdio.log(result.text)
 }
 ```

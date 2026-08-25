@@ -40,10 +40,11 @@ pipeline main(harness: Harness) {
   ]
 
   const results = parallel each cases { tc ->
-    const answer = harness.llm.call(tc.input, "Answer in one word or short phrase.", {
-      temperature: 0.0,
-      max_tokens: 64,
-    })
+    const answer = harness.llm.call(
+      tc.input, "Answer in one word or short phrase.", {
+        temperature: 0.0,
+        max_tokens: 64,
+      })
 
     {
       id: tc.id,
@@ -74,7 +75,9 @@ pipeline main(harness: Harness) {
 
   let passed = 0
   for tc in cases {
-    const answer = harness.llm.call(tc.input, "Answer in one word.", {temperature: 0.0})
+    const answer = harness.llm.call(
+      tc.input, "Answer in one word.", {temperature: 0.0},
+    )
     const correct = answer.text.contains(tc.expected)
     if correct {
       passed = passed + 1
