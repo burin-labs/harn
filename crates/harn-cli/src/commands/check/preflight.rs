@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
-use super::harness_receiver::harness_method_builtin;
+use super::harness_receiver::harness_method_receiver;
 use super::host_capabilities::{is_known_host_operation, HostCapabilities};
 use super::imports::{
     scan_import_collisions, scan_re_export_conflicts, scan_selective_import_visibility,
@@ -19,6 +19,7 @@ mod llm_composition;
 use host_param_discriminators::scan_host_param_discriminators;
 pub(super) use host_param_discriminators::{host_render_path_arg, parse_host_call_args};
 
+#[derive(Debug)]
 pub(crate) struct PreflightDiagnostic {
     pub(crate) code: Code,
     pub(crate) path: String,
@@ -1633,8 +1634,10 @@ fn scan_node_preflight(
             method,
             args,
         } if matches!(
-            harness_method_builtin(object, method),
-            Some((_, "exec_at" | "shell_at"))
+            harness_method_receiver(object),
+            Some(receiver)
+                if receiver.capability == harn_builtin_meta::CapabilityId::Process
+                    && matches!(method.as_str(), "exec_at" | "shell_at")
         ) =>
         {
             scan_execution_dir_preflight(args, file_path, source, diagnostics);

@@ -18,7 +18,7 @@
 //! * [`harness_handle_field`] keeps the permissive spelling, because that is
 //!   what `bundle.rs` already shipped for collecting bundle entries. Narrowing
 //!   it would silently drop entries that are being collected today.
-//! * [`harness_method_builtin`] accepts only the unambiguous `harness.<cap>`
+//! * [`harness_method_receiver`] accepts only the unambiguous `harness.<cap>`
 //!   receiver, because its callers raise errors. A destructured handle is
 //!   therefore missed; that under-flags, which is the right way to be wrong for
 //!   a diagnostic that tells an author their code is broken. Widening it needs
@@ -43,20 +43,20 @@ pub(super) fn harness_handle_field(node: &SNode) -> Option<&str> {
     }
 }
 
-/// The capability field and registry name behind an explicit
-/// `harness.<capability>.<method>(...)`, so `harness.llm.call(...)` yields
-/// `("llm", "llm_call")`. A method no capability declares yields `None`, and so
-/// does any receiver that is not a literal `harness.<capability>`.
+/// The typed capability behind an explicit `harness.<capability>` receiver.
 ///
-/// The registry owns this correspondence — `builtin_for_harness_path` exists so
-/// that diagnostics "classify a capability call by the same registry entry the
-/// removed ambient global resolved to". Resolving through it lets a rule keep
-/// one table keyed by builtin name instead of growing a second one keyed by
-/// `(capability, method)` that would drift away from the first.
-pub(super) fn harness_method_builtin<'a>(
-    object: &'a SNode,
-    method: &str,
-) -> Option<(&'a str, &'static str)> {
+/// This classifies only the receiver. Some portable Harness methods are
+/// registry-backed builtins, while native methods such as
+/// `harness.process.exec_at` are dispatched directly by the VM. Requiring a
+/// builtin entry here would silently exclude that second, equally public
+/// method family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HarnessMethodReceiver<'a> {
+    pub(super) field: &'a str,
+    pub(super) capability: harn_builtin_meta::CapabilityId,
+}
+
+pub(super) fn harness_method_receiver(object: &SNode) -> Option<HarnessMethodReceiver<'_>> {
     let Node::PropertyAccess {
         object: root,
         property,
@@ -68,8 +68,10 @@ pub(super) fn harness_method_builtin<'a>(
         return None;
     }
     let capability = harn_builtin_meta::CapabilityId::from_field_name(property)?;
-    let entry = harn_vm::stdlib::capability_method_manifest_entry(capability, method)?;
-    Some((property.as_str(), entry.name))
+    Some(HarnessMethodReceiver {
+        field: property,
+        capability,
+    })
 }
 
 #[cfg(test)]
@@ -94,22 +96,22 @@ mod tests {
         found.expect("a method call")
     }
 
-    fn builtin_of(source: &str) -> Option<&'static str> {
-        let (object, method) = first_method_call(source);
-        harness_method_builtin(&object, &method).map(|(_, name)| name)
+    fn receiver_of(source: &str) -> Option<harn_builtin_meta::CapabilityId> {
+        let (object, _) = first_method_call(source);
+        harness_method_receiver(&object).map(|receiver| receiver.capability)
     }
 
     #[test]
-    fn resolves_harness_methods_to_their_registry_names() {
+    fn resolves_explicit_harness_capability_receivers() {
         assert_eq!(
-            builtin_of("fn main(harness: Harness) {\n    harness.llm.call(\"u\", \"s\")\n}\n"),
-            Some("llm_call")
+            receiver_of("fn main(harness: Harness) {\n    harness.llm.call(\"u\", \"s\")\n}\n"),
+            Some(harn_builtin_meta::CapabilityId::Llm)
         );
         assert_eq!(
-            builtin_of(
+            receiver_of(
                 "fn main(harness: Harness) {\n    harness.process.exec_at(\"d\", \"ls\")\n}\n"
             ),
-            Some("exec_at")
+            Some(harn_builtin_meta::CapabilityId::Process)
         );
     }
 
@@ -118,11 +120,11 @@ mod tests {
     #[test]
     fn rejects_a_non_harness_receiver_with_a_colliding_method_name() {
         assert_eq!(
-            builtin_of("fn main(harness: Harness) {\n    client.exec_at(\"d\", \"ls\")\n}\n"),
+            receiver_of("fn main(harness: Harness) {\n    client.exec_at(\"d\", \"ls\")\n}\n"),
             None
         );
         assert_eq!(
-            builtin_of("fn main(harness: Harness) {\n    client.call(\"u\", \"s\")\n}\n"),
+            receiver_of("fn main(harness: Harness) {\n    client.call(\"u\", \"s\")\n}\n"),
             None
         );
     }
@@ -133,19 +135,11 @@ mod tests {
     #[test]
     fn declines_a_bare_capability_named_receiver_but_handle_field_accepts_it() {
         assert_eq!(
-            builtin_of("fn main(harness: Harness) {\n    process.exec_at(\"d\", \"ls\")\n}\n"),
+            receiver_of("fn main(harness: Harness) {\n    process.exec_at(\"d\", \"ls\")\n}\n"),
             None
         );
         let (object, _) =
             first_method_call("fn main(harness: Harness) {\n    process.exec_at(\"d\")\n}\n");
         assert_eq!(harness_handle_field(&object), Some("process"));
-    }
-
-    #[test]
-    fn rejects_a_method_no_capability_declares() {
-        assert_eq!(
-            builtin_of("fn main(harness: Harness) {\n    harness.process.not_a_method(\"d\")\n}\n"),
-            None
-        );
     }
 }
