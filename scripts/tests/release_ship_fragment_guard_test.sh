@@ -30,6 +30,13 @@ run_guard() {
   ( cd "$workdir" && eval "$guard_src"'; require_no_unfolded_fragments' )
 }
 
+run_guard_allowing() {
+  # Same, with the tagged-release recovery escape armed.
+  local workdir="$1"
+  ( cd "$workdir" \
+      && ALLOW_UNFOLDED_FRAGMENTS=1 eval "$guard_src"'; require_no_unfolded_fragments' )
+}
+
 # --- Case 1: no fragments (only non-fragment files) -> PASS (exit 0) ----------
 clean="$tmp_root/clean"
 mkdir -p "$clean/changelog.d"
@@ -77,6 +84,37 @@ nodir="$tmp_root/nodir"
 mkdir -p "$nodir"
 if ! run_guard "$nodir" >/dev/null 2>&1; then
   echo "FAIL: guardrail errored when changelog.d/ is absent" >&2
+  exit 1
+fi
+
+# --- Case 5: recovery escape lets a TAGGED release finalize -------------------
+# A release tagged before its fragments were folded publishes from the tag's own
+# tree, so the fragments the guard reads are immutable: no commit changes what
+# the tag selects, and moving the branch away fails the anchoring check instead.
+# Without the escape that release can never be completed.
+if err=$(run_guard_allowing "$multi" 2>&1); then
+  :
+else
+  echo "FAIL: recovery escape did not let the guardrail pass" >&2
+  echo "$err" >&2
+  exit 1
+fi
+
+# --- Case 6: the escape RECORDS the omission, it does not silence it ----------
+# This is the property that makes the escape acceptable: the operator and the
+# run log both still learn exactly what is missing from the notes.
+grep -q "3 unfolded changelog fragment" <<<"$err" \
+  || { echo "FAIL: escape did not report the fragment count: $err" >&2; exit 1; }
+grep -q "3872.added.md" <<<"$err" \
+  || { echo "FAIL: escape did not list the omitted fragments: $err" >&2; exit 1; }
+grep -q "NOT in this release" <<<"$err" \
+  || { echo "FAIL: escape did not state the notes are incomplete: $err" >&2; exit 1; }
+grep -q "next release" <<<"$err" \
+  || { echo "FAIL: escape did not say where the entries resurface: $err" >&2; exit 1; }
+
+# --- Case 7: the escape is inert when there is nothing to escape --------------
+if ! run_guard_allowing "$clean" >/dev/null 2>&1; then
+  echo "FAIL: escape broke the fragment-free path" >&2
   exit 1
 fi
 

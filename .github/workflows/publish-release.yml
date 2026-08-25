@@ -73,6 +73,16 @@ on:
           ran the same gates a few minutes ago.
         type: boolean
         default: false
+      allow_unfolded_fragments:
+        description: >-
+          Recovery for a release that was tagged before its changelog
+          fragments were folded. Finalization publishes from the tag's
+          own tree, so those fragments cannot be corrected by any commit
+          and the release is otherwise unfinishable. The omission is
+          recorded in the log, and the entries appear under the next
+          release, which folds them from the default branch.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -569,6 +579,9 @@ jobs:
           args=(--finalize --skip-github-release)
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
             args+=(--skip-dry-run)
+          fi
+          if [[ "${{ inputs.allow_unfolded_fragments }}" == "true" ]]; then
+            args+=(--allow-unfolded-fragments)
           fi
           HARN_RELEASE_ROOT="$PWD" \
             HARN_RELEASE_GATE_SCRIPT="$RUNNER_TEMP/release-tools/release_gate.sh" \
