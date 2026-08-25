@@ -58,6 +58,49 @@ pipeline default(task) {
 }
 
 #[test]
+fn test_nil_coalesce_noop_fix_drops_false_from_positive_assert() {
+    let source = r#"
+pipeline default(task) {
+  assert(
+    task?.ready
+      ?? false,
+    "task must be ready",
+  )
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "nil-coalesce-noop"), 1, "{diags:?}");
+
+    let result = apply_fixes(source, &diags);
+    assert!(
+        result.contains("task?.ready,"),
+        "expected assert to use native truthiness, got: {result}"
+    );
+    let mut lexer = Lexer::new(&result);
+    let tokens = lexer.tokenize().expect("relex after fix");
+    let mut parser = Parser::new(tokens);
+    parser.parse().expect("reparse after fix");
+}
+
+#[test]
+fn test_nil_coalesce_noop_preserves_false_outside_exact_positive_assert() {
+    let source = r"
+pipeline default(task) {
+  const stored = task?.ready ?? false
+  assert(!(task?.ready ?? false))
+  assert((task?.ready ?? false) == true)
+  assert(!(task?.ready ?? true))
+  log(stored)
+}
+";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "nil-coalesce-noop"),
+        "semantic fallbacks outside an exact positive assertion must remain: {diags:?}"
+    );
+}
+
+#[test]
 fn test_nil_coalesce_self_fallback_fix_drops_identity_fallback() {
     let source = r"
 pipeline default(task) {

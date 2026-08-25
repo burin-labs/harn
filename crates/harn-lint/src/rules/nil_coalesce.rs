@@ -3,8 +3,10 @@
 //! The nil-coalescing operator already returns nil when the left side is nil,
 //! so a nil fallback is mechanically redundant. Likewise, `x ?? x` is an
 //! identity fallback for a pure identifier and communicates uncertainty instead
-//! of a real recovery path. These are error-level lints with local fixes that
-//! remove the operator and fallback.
+//! of a real recovery path. A `false` fallback is also redundant as the exact
+//! positive condition of `assert`: both `nil` and `false` fail the assertion,
+//! while present values retain their native truthiness. These are error-level
+//! lints with local fixes that remove the operator and fallback.
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode};
@@ -20,6 +22,14 @@ pub(crate) fn check_nil_coalesce_noop(
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
     visit::walk_program(program, &mut |node| {
+        if let Node::FunctionCall { name, args, .. } = &node.node {
+            if name == "assert" {
+                if let Some((left, right)) = args.first().and_then(assert_false_fallback) {
+                    diagnostics.push(make_assert_false_diagnostic(left, right));
+                }
+            }
+            return;
+        }
         let Node::BinaryOp { op, left, right } = &node.node else {
             return;
         };
@@ -34,6 +44,14 @@ pub(crate) fn check_nil_coalesce_noop(
             diagnostics.push(make_self_diagnostic(left, right));
         }
     });
+}
+
+fn assert_false_fallback(argument: &SNode) -> Option<(&SNode, &SNode)> {
+    let Node::BinaryOp { op, left, right } = &argument.node else {
+        return None;
+    };
+    (op == "??" && matches!(right.node, Node::BoolLiteral(false)))
+        .then_some((left.as_ref(), right.as_ref()))
 }
 
 fn repeated_identifier(left: &SNode, right: &SNode) -> bool {
@@ -66,6 +84,23 @@ fn make_nil_diagnostic(left: &SNode, right: &SNode) -> LintDiagnostic {
         span: fix_span,
         severity: LintSeverity::Error,
         suggestion: Some("drop the `?? nil` fallback".to_string()),
+        fix: Some(vec![FixEdit {
+            span: fix_span,
+            replacement: String::new(),
+        }]),
+    }
+}
+
+fn make_assert_false_diagnostic(left: &SNode, right: &SNode) -> LintDiagnostic {
+    let fix_span = coalesce_fallback_span(left, right);
+    LintDiagnostic {
+        code: Code::LintNilCoalesceNoop,
+        rule: NIL_RULE_NAME.into(),
+        message: "`?? false` is redundant in a positive assertion; `assert` already rejects every falsy value"
+            .to_string(),
+        span: fix_span,
+        severity: LintSeverity::Error,
+        suggestion: Some("let `assert` apply native truthiness directly".to_string()),
         fix: Some(vec![FixEdit {
             span: fix_span,
             replacement: String::new(),

@@ -578,10 +578,27 @@ fn g() -> int {
 #[test]
 fn assert_condition_narrows_like_a_guard() {
     // `assert(cond, msg?)` throws when `cond` is falsy, so code after it may
-    // rely on the truthy refinement — `assert(x != nil)` then `x - 1` is fine.
-    let errs =
-        errors("fn g(x: float?) -> float {\n  assert(x != nil, \"nn\")\n  return x - 1.0\n}");
-    assert!(errs.is_empty(), "assert should narrow, got: {errs:?}");
+    // rely on the truthy refinement. A direct nilable value and that value
+    // coalesced with `false` have the same continuing-scope refinement.
+    for condition in ["x", "x ?? false", "x != nil"] {
+        let errs = errors(&format!(
+            "fn g(x: float?) -> float {{\n  assert({condition}, \"nn\")\n  return x - 1.0\n}}"
+        ));
+        assert!(
+            errs.is_empty(),
+            "assert({condition}) should narrow, got: {errs:?}"
+        );
+    }
+
+    for condition in ["x ?? true", "!(x ?? false)"] {
+        let errs = errors(&format!(
+            "fn g(x: float?) -> float {{\n  assert({condition})\n  return x - 1.0\n}}"
+        ));
+        assert!(
+            !errs.is_empty(),
+            "assert({condition}) must not prove x non-nil, got: {errs:?}"
+        );
+    }
 }
 
 #[test]

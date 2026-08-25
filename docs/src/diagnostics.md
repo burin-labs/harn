@@ -313,7 +313,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-058`](#harn-lnt-058) | if / while / guard condition is statically known to always succeed or always fail | — | — |
 | [`HARN-LNT-059`](#harn-lnt-059) | project rule-engine or native lint rule | — | — |
 | [`HARN-LNT-060`](#harn-lnt-060) | inline options dict bypasses the typed option constructors | `types/add-shape-annotation` | `surface-changing` |
-| [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback is nil | `expressions/simplify` | `behavior-preserving` |
+| [`HARN-LNT-061`](#harn-lnt-061) | nil coalesce fallback has no effect | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-062`](#harn-lnt-062) | nil coalesce fallback is unreachable | — | — |
 | [`HARN-LNT-063`](#harn-lnt-063) | non-null assertion `!` on an already-non-nil value | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
@@ -3479,7 +3479,7 @@ nudge toward the single documented path.
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
 
-nil coalesce fallback is nil
+nil coalesce fallback has no effect
 
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
@@ -3505,6 +3505,23 @@ const value = task?.flag
 ```
 
 Use a real default only when the surrounding code needs a non-nil value.
+
+The same rule applies to `false` used as the exact positive condition of an
+assertion:
+
+```harn,ignore
+assert(task?.ready ?? false)
+```
+
+`assert` accepts any value and applies Harn truthiness. Both `nil` and `false`
+fail, so the fallback cannot change the result. Assert the value directly:
+
+```harn
+assert(task?.ready)
+```
+
+Keep boolean fallbacks used outside this exact position. In particular, a
+negation or a `?? true` fallback can change how a missing value behaves.
 
 ### `HARN-LNT-062`
 

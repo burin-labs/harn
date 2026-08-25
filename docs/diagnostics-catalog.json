@@ -2343,7 +2343,7 @@
     {
       "code": "HARN-LNT-061",
       "category": "LNT",
-      "summary": "nil coalesce fallback is nil",
+      "summary": "nil coalesce fallback has no effect",
       "repairs": [
         {
           "id": "expressions/simplify",

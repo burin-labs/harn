@@ -1,4 +1,4 @@
-# HARN-LNT-061 - nil coalesce fallback is nil
+# HARN-LNT-061 - nil coalesce fallback has no effect
 
 ## What it means
 
@@ -21,3 +21,20 @@ const value = task?.flag
 ```
 
 Use a real default only when the surrounding code needs a non-nil value.
+
+The same rule applies to `false` used as the exact positive condition of an
+assertion:
+
+```harn,ignore
+assert(task?.ready ?? false)
+```
+
+`assert` accepts any value and applies Harn truthiness. Both `nil` and `false`
+fail, so the fallback cannot change the result. Assert the value directly:
+
+```harn
+assert(task?.ready)
+```
+
+Keep boolean fallbacks used outside this exact position. In particular, a
+negation or a `?? true` fallback can change how a missing value behaves.

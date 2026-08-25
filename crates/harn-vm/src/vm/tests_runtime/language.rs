@@ -341,6 +341,38 @@ harness.stdio.log(b) }"#,
 }
 
 #[test]
+fn positive_assert_false_fallback_matches_native_truthiness() {
+    let out = run_output(
+        r#"
+fn direct_accepts(x: bool?) -> bool {
+  return try {
+    assert(x)
+    true
+  } catch {
+    false
+  }
+}
+
+fn coalesced_accepts(x: bool?) -> bool {
+  return try {
+    assert(x ?? false)
+    true
+  } catch {
+    false
+  }
+}
+
+pipeline default(harness: Harness) {
+  for value in [true, false, nil] {
+    harness.stdio.log(direct_accepts(value) == coalesced_accepts(value))
+  }
+}
+"#,
+    );
+    assert_eq!(out, "[harn] true\n[harn] true\n[harn] true");
+}
+
+#[test]
 fn test_logical_operators() {
     let out = run_output("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(true && false)\nharness.stdio.log(true || false)\nharness.stdio.log(!true) }");
     assert_eq!(out, "[harn] false\n[harn] true\n[harn] false");
