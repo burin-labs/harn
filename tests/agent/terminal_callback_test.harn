@@ -4,6 +4,11 @@
 // mock LLM script and explicit callback verdicts, so it proves the loop
 // mechanics without sleeps, wall-clock polling, API calls, or broad eval
 // machinery.
+import {
+  agent_capture_events,
+  agent_event_value,
+  agent_feedback_injected_event_schema,
+} from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
@@ -48,8 +53,10 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
       llm_text("The rescue turn completed the task. ##DONE##"),
     ],
     { ->
+      const session = "terminal-callback-" + harness.random.uuid()
       const opts: AgentSpec = {
         provider: "mock",
+        session_id: session,
         tools: terminal_callback_tools(),
         loop_until_done: true,
         iteration_budget: {mode: "fixed", initial: 4, max: 4, extend_by: 0, expose_decisions: true},
@@ -68,7 +75,12 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
           }
         },
       }
-      const result = agent_loop(harness, "Continue once, then finish.", nil, opts)
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Continue once, then finish.", nil, opts) },
+      )
+      const result = captured.result
       assert_eq(result.status, "done")
       assert(result.llm.iterations >= 5, "terminal callback must allow the scripted rescue turn")
       const decisions = result?.adaptive_budget?.decisions ?? []
@@ -76,28 +88,44 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
         "adaptive budget decisions should record the terminal rescue extension",
       )
-      const reminders = transcript_events_by_kind(result.transcript, "system_reminder")
-      let saw_post_turn_feedback = false
-      let saw_terminal_feedback = false
-      for event in reminders {
-        if event?.reminder?.dedupe_key == "runtime_feedback/post_turn"
-          && event?.reminder?.authority
-            == "corrective" {
-          saw_post_turn_feedback = true
-        }
-        if event?.reminder?.dedupe_key == "runtime_feedback/terminal_callback"
-          && event?.reminder?.authority
-            == "corrective" {
-          saw_terminal_feedback = true
-        }
-      }
+      // Both callbacks declare `ttl_turns: 1`, and expiry REMOVES the reminder
+      // from the transcript rather than marking it spent, so neither directive
+      // is still there to count once the loop returns. The property this case
+      // exists to protect is not "a reminder survives to the end" — it is that
+      // callback feedback travels as a corrective DIRECTIVE and never as a
+      // synthetic user turn. Both halves of that are still observable after
+      // expiry, from opposite directions.
+      //
+      // Forward: the injection happened, once per callback, with its own kind.
+      const feedback_kinds = captured.events.filter({ event -> event.type == "feedback_injected" })
+        .map({ event -> agent_event_value(event, agent_feedback_injected_event_schema()).kind })
+        .to_list()
       assert(
-        saw_post_turn_feedback,
-        "post-turn callback feedback should use a corrective directive",
+        contains(feedback_kinds, "post_turn"),
+        "post-turn callback feedback should be injected as runtime feedback",
       )
       assert(
-        saw_terminal_feedback,
-        "terminal callback feedback should have its own corrective directive lifecycle",
+        contains(feedback_kinds, "terminal_callback"),
+        "terminal callback feedback should be injected under its own kind",
+      )
+      // Reverse: it went down the directive path, not the message path. Only
+      // `prefill_assistant` becomes a real transcript turn; everything else is
+      // a reminder. If either callback ever regressed to `inject_message`, the
+      // text would be a durable user turn and would still be sitting here.
+      const transcript_messages = json_stringify(result?.transcript?.messages ?? [])
+      // Control for the two absence checks below: an empty or wrongly-keyed
+      // haystack would satisfy them without proving anything.
+      assert(
+        contains(transcript_messages, "Continue once, then finish."),
+        "transcript messages must be readable here or the absence assertions are vacuous",
+      )
+      assert(
+        !contains(transcript_messages, "Keep going until the done sentinel is present."),
+        "post-turn callback feedback must be a directive, never a synthetic user turn",
+      )
+      assert(
+        !contains(transcript_messages, "Terminal callback granted a bounded rescue turn."),
+        "terminal callback feedback must be a directive, never a synthetic user turn",
       )
     },
   )

@@ -281,6 +281,7 @@ fn __maybe_inject_completion_confirmation(
     session.session_id,
     "completion_confirmation",
     "You ended your turn without calling a tool. If you intended to call a tool, call it now. If this was your final answer, restate it briefly on the next line — do not describe your process.",
+    1,
   )
   agent_emit_event(
     agent,
@@ -291,6 +292,8 @@ fn __maybe_inject_completion_confirmation(
   return true
 }
 
+// Describes the turn that just ended; the detector re-runs every post-turn
+// and re-fires while the shape persists.
 fn __required_tools_text_completion(opts: dict?, has_tool_calls: bool, text: string?) {
   if has_tool_calls || trim(text) == "" || opts?.require_successful_tools == nil {
     return false
@@ -659,6 +662,7 @@ fn __maybe_inject_action_nudge(
         + " fence — that is ignored. Emit the call as a "
         + paradigm.call_noun
         + " instead.",
+      1,
     )
     agent_emit_event(
       agent,
@@ -688,6 +692,7 @@ fn __maybe_inject_action_nudge(
         + "` but no call could be read from it. Emit the call as a "
         + paradigm.call_noun
         + " instead.",
+      1,
     )
     agent_emit_event(
       agent,
@@ -730,6 +735,7 @@ fn __maybe_inject_action_nudge(
         + to_string(tool_name)
         + "` but did not call it. "
         + instruction,
+      1,
     )
     agent_emit_event(
       agent,
@@ -749,6 +755,10 @@ fn __maybe_inject_action_nudge(
   return nil
 }
 
+// Names markup in the turn that just ended; re-detected each post-turn.
+// Names markup in the turn that just ended; re-detected each post-turn.
+// Names a call the turn that just ended failed to emit; the classifier
+// re-runs and re-fires while the intent is still unmet.
 /**
  * The post-turn result for a turn the content-specific corrective claimed.
  *
@@ -882,6 +892,7 @@ fn __post_turn_verdict_result(
       session.session_id,
       effective_feedback_kind,
       verdict.message,
+      1,
     )
     return {kind: "continue"}
   }
@@ -894,6 +905,7 @@ fn __post_turn_verdict_result(
       session.session_id,
       effective_feedback_kind,
       verdict.message,
+      1,
     )
   }
   if verdict.stop {
@@ -924,6 +936,11 @@ fn __post_turn_verdict_result(
   return nil
 }
 
+// A verdict about the turn that just ended. Left durable, one injection
+// was re-served on every later turn for the rest of the session, still
+// demanding an action the model had already taken. The callback runs
+// every post-turn, so a still-true verdict simply re-injects.
+// Same verdict, rich arm: spent by the turn that reads it.
 fn __post_turn_with_narrowing(outcome: any, narrowing: any) {
   if narrowing == nil {
     return outcome

@@ -241,5 +241,9 @@ pub fn agent_required_tools_inject_feedback(
     session_id,
     "required_tools",
     agent_required_tools_feedback(missing),
+    1,
   )
 }
+// The caller recomputes the missing set from the session on every post-turn
+// and re-injects while it is non-empty, so a durable copy would only name a
+// tool the model has since called.
