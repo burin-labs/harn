@@ -1154,8 +1154,31 @@ fn validate_composition_program(
     program: &[harn_parser::SNode],
     manifest: &BindingManifest,
 ) -> Result<(), String> {
+    use harn_parser::lexical::{resolved_identifier_bindings, BindingId};
     use harn_parser::visit::walk_program;
-    use harn_parser::Node;
+    use harn_parser::{Node, TypeExpr};
+
+    let (harness_binding, resolved_bindings) = program
+        .iter()
+        .find_map(|node| {
+            match &node.node {
+            Node::Pipeline {
+                name, params, body, ..
+            } if name == "main" => params
+                .iter()
+                .find(|param| {
+                    matches!(&param.type_expr, Some(TypeExpr::Named(name)) if name == "Harness")
+                })
+                .map(|param| {
+                    (
+                        BindingId::from_declaration(&param.name, param.span),
+                        resolved_identifier_bindings(params, body),
+                    )
+                }),
+            _ => None,
+        }
+        })
+        .ok_or_else(|| "composition program is missing its Harness entrypoint".to_string())?;
 
     let bindings = manifest
         .bindings
@@ -1225,7 +1248,14 @@ fn validate_composition_program(
             }
             Node::MethodCall { object, method, .. }
             | Node::OptionalMethodCall { object, method, .. } => {
-                if let Some(receiver) = harness_receiver_path(object) {
+                if let Some((root, properties)) =
+                    harn_parser::lexical::resolved_receiver_path(object, &resolved_bindings)
+                        .filter(|(root, _)| *root == &harness_binding)
+                {
+                    let receiver = std::iter::once(root.name.as_str())
+                        .chain(properties)
+                        .collect::<Vec<_>>()
+                        .join(".");
                     error = Some(format!(
                         "composition snippets cannot call `{receiver}.{method}`: they run \
                          without harness capabilities, and their only egress is a manifest \
@@ -1237,36 +1267,6 @@ fn validate_composition_program(
         }
     });
     error.map_or(Ok(()), Err)
-}
-
-/// Render the receiver of a method call when it is the composition pipeline's
-/// own `harness` parameter, so `harness.interaction.ask_user(...)` yields
-/// `"harness.interaction"` and `harness.stop(...)` yields `"harness"`.
-///
-/// `DENIED_COMPOSITION_CALLS` catches the bare spellings the ambient-to-harness
-/// migration removed. This catches the spelling that migration tells authors to
-/// use, so both produce a validation error rather than one of them reaching the
-/// null harness and failing later with a runtime denial.
-///
-/// The root is matched against the literal name `harness` because
-/// [`composition_source`] always emits `pipeline main(harness: Harness)`
-/// — a composition snippet has no other way to name the host handle.
-fn harness_receiver_path(object: &harn_parser::SNode) -> Option<String> {
-    use harn_parser::Node;
-
-    let is_harness = |node: &harn_parser::SNode| matches!(&node.node, Node::Identifier(name) if name == "harness");
-    match &object.node {
-        Node::PropertyAccess {
-            object: root,
-            property,
-        }
-        | Node::OptionalPropertyAccess {
-            object: root,
-            property,
-        } if is_harness(root) => Some(format!("harness.{property}")),
-        _ if is_harness(object) => Some("harness".to_string()),
-        _ => None,
-    }
 }
 
 const DENIED_COMPOSITION_CALLS: &[&str] = &[

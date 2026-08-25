@@ -1490,3 +1490,56 @@ async fn composition_denial_does_not_reach_a_non_harness_receiver() {
         report.summary
     );
 }
+
+/// Receiver authority follows the entrypoint parameter's declaration, not its
+/// spelling. Nested callables and locals may legally reuse `harness` without
+/// acquiring the composition entrypoint's denied host capabilities.
+#[tokio::test(flavor = "current_thread")]
+async fn composition_denial_respects_lexical_harness_shadowing() {
+    for (run_id, snippet) in [
+        (
+            "closure-harness-shadow",
+            "const helper = fn(harness) { return harness.tools.run_command({}) }\nreturn helper({})",
+        ),
+        (
+            "function-harness-shadow",
+            "fn helper(harness) { return harness.tools.run_command({}) }\nreturn helper({})",
+        ),
+        (
+            "local-harness-shadow",
+            "const harness = {tools: {}}\nreturn harness.tools.run_command({})",
+        ),
+    ] {
+        let report = execute_unbound_snippet(run_id, snippet).await;
+        assert!(
+            !report.summary.contains("without harness capabilities"),
+            "shadowed receiver inherited entrypoint authority: {}",
+            report.summary
+        );
+    }
+}
+
+/// Optional and recursively nested properties retain the root parameter's
+/// binding identity all the way to the invoked method.
+#[tokio::test(flavor = "current_thread")]
+async fn composition_denies_recursive_optional_harness_receivers() {
+    let report = execute_unbound_snippet(
+        "deny-recursive-optional-harness",
+        "return harness?.interaction.channel.ask_user({prompt: \"continue?\"})",
+    )
+    .await;
+
+    assert!(!report.ok);
+    assert_eq!(
+        report.run.failure_category,
+        Some(CompositionFailureCategory::PolicyDenied)
+    );
+    assert!(
+        report
+            .summary
+            .contains("harness.interaction.channel.ask_user"),
+        "{}",
+        report.summary
+    );
+    assert!(report.child_calls.is_empty());
+}
