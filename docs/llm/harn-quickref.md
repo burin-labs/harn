@@ -2416,7 +2416,7 @@ invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 error observations and appear under `tools.rejected`. The
 resilience surface is the `llm_caller:` seam (see "Composable LLM
 callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
-removed and the `deprecated_llm_options` lint hard-errors on them. Plus its
+removed and the `removed-llm-options` lint hard-errors on them. Plus its
 own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
 `native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that

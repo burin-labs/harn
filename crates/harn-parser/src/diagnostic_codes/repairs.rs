@@ -225,7 +225,6 @@ impl Code {
             }
 
             // --- LLM / PRM: model + prompt contract -----------------------
-            Code::DeprecatedLlmOption => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LlmSchemaMissing => Some(&REPAIR_LLM_ADD_SCHEMA),
             Code::LlmProviderIdentityBranch | Code::PromptProviderIdentityBranch => {
                 Some(&REPAIR_LLM_USE_CAPABILITY_FLAG)
@@ -299,7 +298,7 @@ impl Code {
             Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS),
             Code::LintAmbientHarnessMethod => Some(&REPAIR_BINDINGS_THREAD_HARNESS_METHOD),
             Code::LintBroadHarnessParameter => Some(&REPAIR_BINDINGS_ATTENUATE_HARNESS),
-            Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
+            Code::LintRemovedLlmOptions => Some(&REPAIR_LLM_MIGRATE_REMOVED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
             Code::LintShadowVariable => Some(&REPAIR_BINDINGS_RENAME_SHADOW),
@@ -575,9 +574,9 @@ const REPAIR_BINDINGS_ATTENUATE_HARNESS: RepairTemplate = RepairTemplate {
     safety: RepairSafety::SurfaceChanging,
 };
 
-const REPAIR_LLM_MIGRATE_DEPRECATED_OPTION: RepairTemplate = RepairTemplate {
-    id: "llm/migrate-deprecated-option",
-    summary: "Replace the deprecated option with its supported equivalent",
+const REPAIR_LLM_MIGRATE_REMOVED_OPTION: RepairTemplate = RepairTemplate {
+    id: "llm/migrate-removed-option",
+    summary: "Replace the removed option with its supported equivalent",
     safety: RepairSafety::ScopeLocal,
 };
 
@@ -712,7 +711,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_DEAD_CODE_REMOVE,
     &REPAIR_STDLIB_MIGRATE_RENAMED,
     &REPAIR_BINDINGS_ATTENUATE_HARNESS,
-    &REPAIR_LLM_MIGRATE_DEPRECATED_OPTION,
+    &REPAIR_LLM_MIGRATE_REMOVED_OPTION,
     &REPAIR_LLM_ADD_SCHEMA,
     &REPAIR_LLM_USE_CAPABILITY_FLAG,
     &REPAIR_PROMPTS_ESCAPE_INJECTION,

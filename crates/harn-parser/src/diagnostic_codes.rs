@@ -223,7 +223,6 @@ diagnostic_codes! {
     CapabilityBindingInvalid, "HARN-CAP-007", Cap, "tool host capability binding is invalid";
     CapabilityOperationUnserved, "HARN-CAP-008", Cap, "declared host capability operation is not served";
     EffectInheritanceViolation, "HARN-CAP-301", Cap, "child agent effect set exceeds the parent's declared effects";
-    DeprecatedLlmOption, "HARN-LLM-002", Llm, "LLM option key is deprecated";
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";
     LlmSchemaInvalid, "HARN-LLM-004", Llm, "LLM schema option is invalid";
     LlmProviderIdentityBranch, "HARN-LLM-005", Llm, "prompt branches on provider identity instead of capability flags";
@@ -329,7 +328,7 @@ diagnostic_codes! {
     LintImportOrder, "HARN-LNT-047", Lnt, "import order lint";
     LintPreferOptionalShorthand, "HARN-LNT-048", Lnt, "prefer optional shorthand lint";
     LintLegacyDocComment, "HARN-LNT-049", Lnt, "legacy doc comment lint";
-    LintDeprecatedLlmOptions, "HARN-LNT-050", Lnt, "deprecated LLM options lint";
+    LintRemovedLlmOptions, "HARN-LNT-050", Lnt, "removed LLM options lint";
     LintUnnecessarySafeNavigation, "HARN-LNT-051", Lnt, "unnecessary safe navigation lint";
     LintAmbientClockBuiltin, "HARN-LNT-052", Lnt, "ambient clock builtin replaced by `harness.clock.*`";
     LintAmbientStdioBuiltin, "HARN-LNT-053", Lnt, "ambient stdio builtin replaced by `harness.stdio.*`";
@@ -436,7 +435,6 @@ impl Code {
             // LLM call family — schema, options, provider branching.
             Code::LlmSchemaMissing => &[Code::LlmSchemaInvalid],
             Code::LlmSchemaInvalid => &[Code::LlmSchemaMissing],
-            Code::DeprecatedLlmOption => &[Code::LintDeprecatedLlmOptions],
             Code::LlmProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             // Prompt-template family.
             Code::PromptTemplateParse => &[Code::PromptTargetMissing],
@@ -520,9 +518,8 @@ impl Code {
             Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],
             // Lint pairs (drift between lint and runtime/typecheck codes).
-            Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption],
             Code::LintUnnormalizedOptions => {
-                &[Code::LintDeprecatedLlmOptions, Code::LintUntypedDictAccess]
+                &[Code::LintRemovedLlmOptions, Code::LintUntypedDictAccess]
             }
             Code::LintPromptInjectionRisk => &[Code::PromptInjectionRisk],
             Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],

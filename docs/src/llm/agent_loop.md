@@ -593,7 +593,7 @@ Caller contract: `fn(call) -> {ok, value | status, error?}` where
 `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
 The pre-0.10 `llm_retries` / `llm_backoff_ms` options were removed —
 the loop is fail-fast on transient provider errors unless a composed
-`llm_caller` retries them; the `deprecated_llm_options` lint hard-errors
+`llm_caller` retries them; the `removed-llm-options` lint hard-errors
 on usage (see [Migrating to 0.10](../migrations/v0.10.md)). See
 [Composable callers and middleware](../stdlib/llm-handlers.md) for the
 full middleware catalog.
