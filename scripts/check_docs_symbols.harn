@@ -68,20 +68,16 @@
 // here, and `probe_parse_error` fails loudly if a parse error slips
 // through anyway.
 //
-// GENERATED PAGES ARE NOT SCANNED — THEIR SOURCES ARE
-// ---------------------------------------------------
-// `docs/src/spec/language/`, `docs/src/diagnostics.md` and friends are
-// projections of another source; the excluded set is read out of
-// `scripts/generated_artifacts.toml` rather than restated here, so a new
-// generated page needs no edit to this file. Editing a projection is the
-// wrong fix anyway — the next regeneration overwrites it — so DOCS_GLOBS
-// names the sources instead: `spec/chapters/*.md` behind the language
-// spec, and `crates/harn-parser/src/diagnostic_codes/explanations/*.md`
-// behind `docs/src/diagnostics.md`. Those two are markdown, so they can
-// be scanned as pages. A projection whose source is Rust — the
-// `out.push_str` literals of `harn dump-trigger-quickref` behind
-// `docs/llm/harn-triggers-quickref.md` — has no page to scan and stays
-// uncovered.
+// GENERATED PAGES RESOLVE TO THEIR OWNER
+// --------------------------------------
+// Generated pages are scanned because a stale projection is still a
+// broken page. Ownership comes only from `scripts/generated_artifacts.toml`.
+// When the registered source and its projection contain the same stale
+// call, the source finding wins and the projection is folded into it. When
+// only the projection is stale, the failure names the registered generator
+// and its sources instead of asking a contributor to edit generated output.
+// DOCS_GLOBS still names markdown sources such as `spec/chapters/*.md` and
+// diagnostic explanations so a contributor gets the exact source line.
 //
 // THE ALLOWLIST IS A SHRINKING BASELINE
 // -------------------------------------
@@ -108,6 +104,7 @@ import {
   rel_path,
   resolve_harn_bin,
 } from "./check_docs_snippets.harn"
+import { path_under } from "./warn_generated_artifact_drift.harn"
 
 const DOCS_GLOBS = [
   "docs/src/**/*.md",
@@ -450,6 +447,109 @@ pub fn is_generated(path: string, generated: list<string>) -> bool {
   return false
 }
 
+/** Registered ownership records for generated outputs. */
+pub fn generated_owners(registry: dict) -> list {
+  let out: list = []
+  for art in registry?.artifact ?? [] {
+    const outputs = art?.outputs ?? []
+    if outputs.count() > 0 {
+      out = out
+        + [
+          {
+            id: art?.id ?? "",
+            gen: art?.gen ?? "",
+            check: art?.check ?? "",
+            outputs: outputs,
+            sources: art?.sources ?? [],
+          },
+        ]
+    }
+  }
+  return out
+}
+
+/** The registry owner of `path`, or `nil` when it is not an output. */
+pub fn generated_owner(path: string, owners: list) {
+  let best = nil
+  let best_len = -1
+  for owner in owners {
+    for output in owner.outputs {
+      if path_under(path, output) && output.len() > best_len {
+        best = owner
+        best_len = output.len()
+      }
+    }
+  }
+  return best
+}
+
+/** Whether a finding is in one of an artifact's registered sources. */
+pub fn finding_belongs_to_source(finding: dict, owner: dict) -> bool {
+  for source in owner.sources {
+    if path_under(finding.path, source) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Resolve raw documentation findings through generated-artifact ownership.
+ *
+ * Direct source findings stay unchanged. A generated duplicate disappears
+ * only when the same removed symbol is present in a registered source. A
+ * projection-only defect stays visible once per artifact and symbol, with
+ * its owner attached for the diagnostic. Missing ownership is an explicit
+ * error and never drops the finding. Pure.
+ */
+pub fn resolve_generated_findings(findings: list, generated: list<string>, owners: list) -> dict {
+  let out: list = []
+  let errors: list<string> = []
+  let projection_keys: dict = {}
+  for finding in findings {
+    if !is_generated(finding.path, generated) {
+      out = out + [finding]
+      continue
+    }
+    const owner = generated_owner(finding.path, owners)
+    if owner == nil {
+      errors = errors
+        + [
+          "${finding.path}:${finding.line}: generated output has no "
+            + "owner in ${REGISTRY}",
+        ]
+      out = out + [finding]
+      continue
+    }
+    let source_duplicate = false
+    for candidate in findings {
+      if candidate.symbol == finding.symbol
+        && !is_generated(candidate.path, generated)
+        && finding_belongs_to_source(candidate, owner) {
+        source_duplicate = true
+      }
+    }
+    if source_duplicate {
+      continue
+    }
+    const key = "${owner.id}\t${finding.symbol}"
+    if projection_keys[key] == nil {
+      projection_keys[key] = true
+      out = out
+        + [
+          finding
+            + {
+              generated_owner: owner.id,
+              generator: owner.gen,
+              owner_check: owner.check,
+              owner_sources: owner.sources,
+            },
+        ]
+    }
+  }
+  return {findings: out, errors: errors}
+}
+
 /**
  * Failures from scanning a fixture whose answer is already known, so a
  * run that reports nothing has to prove it looked.
@@ -513,6 +613,7 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   const generated = generated_paths(registry)
+  const owners = generated_owners(registry)
   const vocabulary = try {
     json_parse(harness.fs.read_text(VOCABULARY))
   } catch (err) {
@@ -536,7 +637,7 @@ pipeline main(harness: Harness, task: unknown) {
   for docs_glob in DOCS_GLOBS {
     for g in harness.fs.glob(docs_glob) {
       const rel = rel_path(g)
-      if !is_generated(rel, generated) && !md_files.contains(rel) {
+      if !md_files.contains(rel) {
         md_files = md_files + [rel]
       }
     }
@@ -634,6 +735,10 @@ pipeline main(harness: Harness, task: unknown) {
       }
     }
   }
+  const resolved = resolve_generated_findings(findings, generated, owners)
+  for problem in resolved.errors {
+    harness.stdio.println("FAIL: ${problem}")
+  }
   const allow = parse_allowlist(harness.fs.read_text(ALLOWLIST))
   for problem in allow.errors {
     harness.stdio.println("FAIL: ${problem}")
@@ -643,8 +748,9 @@ pipeline main(harness: Harness, task: unknown) {
     allowed_pairs["${pair.path}\t${pair.symbol}"] = true
   }
   let reported = 0
+  let generated_reported = 0
   let suppressed = 0
-  for finding in findings {
+  for finding in resolved.findings {
     if allow.pages.contains(finding.path) {
       continue
     }
@@ -654,10 +760,26 @@ pipeline main(harness: Harness, task: unknown) {
     reported = reported + 1
     if reported <= MAX_REPORTED {
       harness.stdio.println("")
-      harness.stdio.println(
-        "FAIL: ${finding.path}:${finding.line} references removed "
-          + "`${finding.symbol}` — use `${finding.replacement}`",
-      )
+      if finding?.generated_owner != nil {
+        generated_reported = generated_reported + 1
+        const target = if finding.generator != "" {
+          "make ${finding.generator}"
+        } else if finding.owner_check != "" {
+          "make ${finding.owner_check}"
+        } else {
+          finding.generated_owner
+        }
+        harness.stdio.println(
+          "FAIL: ${target} projects removed `${finding.symbol}` into "
+            + "${finding.path}:${finding.line} — use `${finding.replacement}`",
+        )
+        harness.stdio.println("      registered sources: ${finding.owner_sources.join(", ")}")
+      } else {
+        harness.stdio.println(
+          "FAIL: ${finding.path}:${finding.line} references removed "
+            + "`${finding.symbol}` — use `${finding.replacement}`",
+        )
+      }
       harness.stdio.println("      ${quote(finding.text)}")
     } else {
       suppressed = suppressed + 1
@@ -668,7 +790,7 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.println("")
     harness.stdio.println("FAIL: ${problem}")
   }
-  const failures = reported + stale.count() + allow.errors.count()
+  const failures = reported + stale.count() + allow.errors.count() + resolved.errors.count()
   if suppressed > 0 {
     harness.stdio.println("")
     harness.stdio.println("      ... and ${suppressed} more.")
@@ -684,8 +806,17 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.println(
       "hint: the replacement above comes from the compiler's own "
         + "migration table, not from a list in this repository's "
-        + "scripts. Update the prose or the ```harn,ignore body to the "
-        + "typed harness path.",
+        + "scripts.",
+    )
+    if generated_reported > 0 {
+      harness.stdio.println(
+        "      For a generated page, edit its registered source and run "
+          + "the named generator; do not edit the projection.",
+      )
+    }
+    harness.stdio.println(
+      "      For a hand-written page, update the prose or the "
+        + "```harn,ignore body to the typed harness path.",
     )
     harness.stdio.println(
       "      A page that legitimately names an old API — a migration "

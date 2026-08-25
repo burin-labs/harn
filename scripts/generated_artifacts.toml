@@ -471,7 +471,11 @@ description = "LLM trigger quickref doc generated from the live ProviderCatalog 
 gen = "gen-trigger-quickref"
 check = "check-trigger-quickref"
 outputs = ["docs/llm/harn-triggers-quickref.md"]
-sources = ["crates/harn-vm/src/llm/", "crates/harn-vm/src/provider_catalog.rs"]
+sources = [
+  "crates/harn-cli/src/commands/dump_trigger_quickref.rs",
+  "crates/harn-vm/src/llm/",
+  "crates/harn-vm/src/provider_catalog.rs",
+]
 ci = true
 make_all = true
 

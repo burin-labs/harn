@@ -351,3 +351,72 @@ pipeline test_generated_paths_tolerates_a_registry_without_outputs(
   assert_eq(generated_paths({}), [])
   assert_eq(generated_paths({artifact: [{}]}), [])
 }
+
+@test
+pipeline test_source_and_projection_collapse_to_the_source(harness: Harness, task: unknown) {
+  const registry = {
+    artifact: [
+      {
+        id: "language-spec",
+        gen: "sync-language-spec",
+        outputs: ["docs/src/spec/language"],
+        sources: ["spec/chapters/*.md"],
+      },
+    ],
+  }
+  const findings = [
+    {path: "spec/chapters/10-concurrency.md", line: 7, symbol: "send"},
+    {path: "docs/src/spec/language/10-concurrency.md", line: 9, symbol: "send"},
+  ]
+  const resolved = resolve_generated_findings(
+    findings,
+    generated_paths(registry),
+    generated_owners(registry),
+  )
+  assert_eq(resolved.errors, [])
+  assert_eq(resolved.findings.count, 1)
+  assert_eq(resolved.findings[0].path, "spec/chapters/10-concurrency.md")
+}
+
+@test
+pipeline test_projection_only_finding_names_registered_generator_once(
+  harness: Harness,
+  task: unknown,
+) {
+  const registry = {
+    artifact: [
+      {
+        id: "trigger-quickref",
+        gen: "gen-trigger-quickref",
+        check: "check-trigger-quickref",
+        outputs: ["docs/llm/harn-triggers-quickref.md"],
+        sources: ["crates/harn-cli/src/commands/dump_trigger_quickref.rs"],
+      },
+    ],
+  }
+  const findings = [
+    {path: "docs/llm/harn-triggers-quickref.md", line: 4, symbol: "send"},
+    {path: "docs/llm/harn-triggers-quickref.md", line: 8, symbol: "send"},
+  ]
+  const resolved = resolve_generated_findings(
+    findings,
+    generated_paths(registry),
+    generated_owners(registry),
+  )
+  assert_eq(resolved.errors, [])
+  assert_eq(resolved.findings.count, 1)
+  assert_eq(resolved.findings[0].generated_owner, "trigger-quickref")
+  assert_eq(resolved.findings[0].generator, "gen-trigger-quickref")
+}
+
+@test
+pipeline test_missing_generated_owner_fails_without_dropping_finding(
+  harness: Harness,
+  task: unknown,
+) {
+  const finding = {path: "docs/generated.md", line: 3, symbol: "send"}
+  const resolved = resolve_generated_findings([finding], ["docs/generated.md"], [])
+  assert_eq(resolved.errors.count, 1)
+  assert_eq(resolved.errors[0].contains("has no owner"), true)
+  assert_eq(resolved.findings, [finding])
+}
