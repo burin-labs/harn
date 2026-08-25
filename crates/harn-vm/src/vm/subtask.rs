@@ -18,10 +18,12 @@
 //!
 //! # Placement
 //!
-//! [`SubtaskPlacement`] selects between the runtime's worker threads and the
-//! creating thread. Worker placement is what gives CPU-bound fan-out real
-//! parallelism: a tight compute loop never yields, so pinned subtasks run one
-//! at a time no matter how many workers are idle.
+//! [`SubtaskPlacement`] selects between the creating thread and the runtime's
+//! worker threads. Current-thread placement is the safe default because some
+//! host capabilities still own thread-affine registries and `LocalSet` tasks.
+//! Explicit worker placement gives audited CPU-only fan-out real parallelism:
+//! a tight compute loop never yields, so pinned subtasks run one at a time no
+//! matter how many workers are idle.
 //!
 //! Both placements require the subtask future to be `Send + 'static`. That is
 //! deliberate. The bound is a property of the seam, not of the placement, so
@@ -74,14 +76,16 @@ impl<F: Future> PreparedSubtask<F> {
 /// Where a subtask runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SubtaskPlacement {
-    /// Run on the runtime's worker threads. CPU-bound branches of one fan-out
-    /// then run at the same time on different cores.
-    #[default]
-    Worker,
     /// Run on the thread that created the subtask. Branches interleave at
-    /// await points and never migrate, which supports thread-affine embedding
-    /// hosts and single-thread determinism requirements.
+    /// await points and never migrate, preserving thread-affine capability and
+    /// embedding-host contracts.
+    #[default]
     CurrentThread,
+    /// Run on the runtime's worker threads. CPU-bound branches of one fan-out
+    /// then run at the same time on different cores. Callers opt into this
+    /// only when every capability reachable from the child has a migrated
+    /// cross-thread owner.
+    Worker,
 }
 
 /// The environment variable that selects placement for a whole process.
@@ -273,11 +277,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn scoped_placement_reaches_the_spawn_seam() {
-        assert_eq!(placement(), SubtaskPlacement::Worker);
-        let observed =
-            scope_placement(SubtaskPlacement::CurrentThread, async { placement() }).await;
-        assert_eq!(observed, SubtaskPlacement::CurrentThread);
-        assert_eq!(placement(), SubtaskPlacement::Worker);
+        assert_eq!(placement(), SubtaskPlacement::CurrentThread);
+        let observed = scope_placement(SubtaskPlacement::Worker, async { placement() }).await;
+        assert_eq!(observed, SubtaskPlacement::Worker);
+        assert_eq!(placement(), SubtaskPlacement::CurrentThread);
     }
 
     #[test]
