@@ -602,6 +602,42 @@ fn assert_condition_narrows_like_a_guard() {
 }
 
 #[test]
+fn shadowed_assert_does_not_apply_builtin_refinement() {
+    let source_shadow = errors(
+        r"
+fn assert(value: float?) -> bool { return true }
+fn g(x: float?) -> float {
+  assert(x ?? false)
+  return x - 1.0
+}
+",
+    );
+    assert!(
+        source_shadow
+            .iter()
+            .any(|error| error.contains("may be nil")),
+        "source assert must not inherit builtin narrowing: {source_shadow:?}"
+    );
+
+    let import_shadow = check_source_with_imports(
+        r"
+fn g(x: float?) -> float {
+  assert(x ?? false)
+  return x - 1.0
+}
+",
+        &["assert"],
+    );
+    assert!(
+        import_shadow.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic.message.contains("may be nil")
+        }),
+        "imported assert must not inherit builtin narrowing: {import_shadow:?}"
+    );
+}
+
+#[test]
 fn require_condition_narrows_after_statement() {
     let errs = errors("fn g(x: int?) -> int { require x != nil\n  return x + 1 }");
     assert!(errs.is_empty(), "require should narrow, got: {errs:?}");

@@ -32,6 +32,12 @@ use super::super::union::simplify_union;
 use super::super::union::without_nil;
 use super::super::TypeChecker;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::typechecker) enum CallTarget {
+    Builtin,
+    Other,
+}
+
 #[derive(Clone, Copy)]
 enum CallKind {
     Builtin,
@@ -1247,7 +1253,21 @@ impl TypeChecker {
         args: &[SNode],
         scope: &mut TypeScope,
         span: Span,
-    ) {
+    ) -> CallTarget {
+        // Source and imported callables shadow builtins at runtime. Preserve
+        // that resolution for callers that attach builtin-only flow semantics
+        // after ordinary signature checking.
+        let source_defined = scope
+            .get_fn(name)
+            .is_some_and(|signature| signature.definition_span.is_some());
+        // `assert` is a VM intrinsic rather than a typed-signature builtin, so
+        // include it explicitly in the same resolution result.
+        let native_builtin = name == "assert" || self.lookup_builtin(name).is_some();
+        let call_target = if !source_defined && !self.name_is_imported(name) && native_builtin {
+            CallTarget::Builtin
+        } else {
+            CallTarget::Other
+        };
         self.check_cross_module_call_target_resolves(name, args, scope, span);
 
         // Deprecation: emit a warning at every call site of an `@deprecated`
@@ -1288,7 +1308,7 @@ impl TypeChecker {
             for arg in args {
                 self.check_node(arg, scope);
             }
-            return;
+            return call_target;
         }
 
         // Calls to user-defined functions with a `never` return type also
@@ -1333,6 +1353,7 @@ impl TypeChecker {
                 self.check_node(arg, scope);
             }
         }
+        call_target
     }
 
     /// Whether `name` was brought into scope by an `import` in the

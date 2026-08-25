@@ -21,9 +21,10 @@ pub(crate) fn check_nil_coalesce_noop(
     program: &[SNode],
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
+    let native_assert_is_visible = !shadows_native_assert(program);
     visit::walk_program(program, &mut |node| {
         if let Node::FunctionCall { name, args, .. } = &node.node {
-            if name == "assert" {
+            if native_assert_is_visible && name == "assert" {
                 if let Some((left, right)) = args.first().and_then(assert_false_fallback) {
                     diagnostics.push(make_assert_false_diagnostic(left, right));
                 }
@@ -44,6 +45,30 @@ pub(crate) fn check_nil_coalesce_noop(
             diagnostics.push(make_self_diagnostic(left, right));
         }
     });
+}
+
+/// Whether ordinary Harn resolution can bind bare `assert` to source code
+/// instead of the native builtin. Unresolved wildcard imports stay
+/// conservative: without their export graph, a behavior-preserving fixer must
+/// not assume which callable wins.
+fn shadows_native_assert(program: &[SNode]) -> bool {
+    let mut shadowed = false;
+    visit::walk_program(program, &mut |node| {
+        shadowed |= match &node.node {
+            Node::FnDecl { name, .. }
+            | Node::Pipeline { name, .. }
+            | Node::ToolDecl { name, .. }
+            | Node::SkillDecl { name, .. }
+            | Node::StructDecl { name, .. }
+            | Node::EnumDecl { name, .. } => name == "assert",
+            Node::EvalPackDecl { binding_name, .. } => binding_name == "assert",
+            Node::SelectiveImport { names, .. } => names.iter().any(|name| name == "assert"),
+            Node::NamespaceImport { alias, .. } => alias == "assert",
+            Node::ImportDecl { .. } => true,
+            _ => false,
+        };
+    });
+    shadowed
 }
 
 fn assert_false_fallback(argument: &SNode) -> Option<(&SNode, &SNode)> {

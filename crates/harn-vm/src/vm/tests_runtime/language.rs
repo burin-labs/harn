@@ -373,6 +373,21 @@ pipeline default(harness: Harness) {
 }
 
 #[test]
+fn source_assert_shadows_native_intrinsic() {
+    let out = run_output(
+        r#"
+fn assert(value: bool?) -> bool { return true }
+
+pipeline default(harness: Harness) {
+  assert(nil ?? false)
+  harness.stdio.log("continued")
+}
+"#,
+    );
+    assert_eq!(out, "[harn] continued");
+}
+
+#[test]
 fn test_logical_operators() {
     let out = run_output("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(true && false)\nharness.stdio.log(true || false)\nharness.stdio.log(!true) }");
     assert_eq!(out, "[harn] false\n[harn] true\n[harn] false");

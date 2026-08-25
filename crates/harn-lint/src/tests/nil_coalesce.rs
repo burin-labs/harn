@@ -101,6 +101,36 @@ pipeline default(task) {
 }
 
 #[test]
+fn test_nil_coalesce_noop_preserves_false_for_shadowed_assert() {
+    for source in [
+        r"
+fn assert(value: bool?) -> bool { return true }
+pipeline default(task) {
+  assert(task?.ready ?? false)
+}
+",
+        r#"
+import { assert } from "custom"
+pipeline default(task) {
+  assert(task?.ready ?? false)
+}
+"#,
+        r#"
+import "custom"
+pipeline default(task) {
+  assert(task?.ready ?? false)
+}
+"#,
+    ] {
+        let diags = lint_source(source);
+        assert!(
+            !has_rule(&diags, "nil-coalesce-noop"),
+            "a possibly shadowed assert must not receive a builtin-only fix: {diags:?}"
+        );
+    }
+}
+
+#[test]
 fn test_nil_coalesce_self_fallback_fix_drops_identity_fallback() {
     let source = r"
 pipeline default(task) {
