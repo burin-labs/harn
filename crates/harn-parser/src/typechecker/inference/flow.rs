@@ -356,6 +356,35 @@ impl TypeChecker {
         (resolved, used_alias)
     }
 
+    /// Resolve only aliases that preserve a `type_of` discriminant. A normal
+    /// const still owns its value: `const result = lookup(); result != nil`
+    /// must narrow `result`, not replace it with the call expression. In
+    /// contrast, `const kind = type_of(value); kind == "string"` carries a
+    /// stable fact about `value` and may expose that `type_of` call here.
+    fn resolve_typeof_alias_node(&self, node: &SNode, scope: &TypeScope) -> (SNode, bool) {
+        let original = node.clone();
+        let mut resolved = node.clone();
+        let mut visited = HashSet::new();
+        while let Node::Identifier(name) = &resolved.node {
+            let name = name.clone();
+            if !visited.insert(name.clone()) {
+                return (original, false);
+            }
+            let Some(expression) = scope.get_flow_alias(&name) else {
+                return (original, false);
+            };
+            resolved = expression.clone();
+        }
+        if matches!(
+            &resolved.node,
+            Node::FunctionCall { name, .. } if name == "type_of"
+        ) {
+            (resolved, true)
+        } else {
+            (original, false)
+        }
+    }
+
     /// Invalidate every narrowing (variable or reference path) whose subject is
     /// reassigned in a branch or loop body that can continue in the current
     /// callable.
@@ -577,14 +606,22 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> Refinements {
         if let Node::Identifier(name) = &condition.node {
-            if let Some(alias) = scope.get_flow_alias(name) {
-                return self.extract_refinements(alias, scope).retain_stable(scope);
+            let is_bool = scope
+                .get_var(name)
+                .and_then(Option::as_ref)
+                .is_some_and(|ty| {
+                    matches!(self.resolve_alias(ty, scope), TypeExpr::Named(kind) if kind == "bool")
+                });
+            if is_bool {
+                if let Some(alias) = scope.get_flow_alias(name) {
+                    return self.extract_refinements(alias, scope).retain_stable(scope);
+                }
             }
         }
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
-                let (left, left_aliased) = self.resolve_flow_alias_node(left, scope);
-                let (right, right_aliased) = self.resolve_flow_alias_node(right, scope);
+                let (left, left_aliased) = self.resolve_typeof_alias_node(left, scope);
+                let (right, right_aliased) = self.resolve_typeof_alias_node(right, scope);
                 let aliased = left_aliased || right_aliased;
                 let nil_ref = self.extract_nil_refinements(op, &left, &right, scope);
                 if !nil_ref.is_empty() {

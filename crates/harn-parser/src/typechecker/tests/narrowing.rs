@@ -129,6 +129,42 @@ fn const_typeof_result_alias_preserves_narrowing() {
 }
 
 #[test]
+fn const_value_guard_narrows_the_const_not_its_initializer() {
+    let errs = errors(
+        r#"fn maybe_text(value: string?) -> string? {
+  return value
+}
+
+fn check(value: string?) -> string {
+  const result = maybe_text(value)
+  if result == nil {
+    return "missing"
+  }
+  return result
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn truthy_const_guard_narrows_the_const_not_its_initializer() {
+    let errs = errors(
+        r"fn maybe_text(value: string?) -> string? {
+  return value
+}
+
+fn check(value: string?) -> int {
+  const result = maybe_text(value)
+  if result && len(result) > 0 {
+    return len(result)
+  }
+  return 0
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
 fn const_condition_aliases_compose_transitively() {
     let errs = errors(
         r#"fn check(x: string | int | nil) {
