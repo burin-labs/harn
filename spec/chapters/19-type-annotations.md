@@ -447,9 +447,8 @@ include other fields.
 Nested shapes:
 
 ```harn
-const data: {
-  user: {name: string}, tags: list,
-} = {user: {name: "X"}, tags: []}
+const data: {user: {name: string}, tags: list} =
+  {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -526,11 +525,9 @@ import { system_before, with_system_fragments } from "std/llm/prompts"
 
 const opts = with_system_fragments(
   {provider: "anthropic", session_id: "review-42"},
-  [
-    system_before(
-      "Follow the repository's validation gate before final output."
-    )
-  ]
+  [system_before(
+    "Follow the repository's validation gate before final output."
+  )],
 )
 const r = agent_loop(
   "Review this change", "You are a code review agent.", opts,
@@ -710,10 +707,12 @@ const answer = harness.interaction.ask_user(
 )
 const record = harness.interaction.request_approval(
   action: "merge_pr", quorum: 2,
-                                reviewers: ["alice", "bob", "carol"])
+  reviewers: ["alice", "bob", "carol"],
+)
 const merged = harness.interaction.dual_control(
   n: 2, m: 3, action: destructive_step,
-                            approvers: ["alice", "bob", "carol"])
+  approvers: ["alice", "bob", "carol"],
+)
 const handle = harness.interaction.escalate_to(
   role: "oncall", reason: "deploy failed",
 )
