@@ -382,6 +382,8 @@ pub struct Vm {
     /// Immutable hydrated module bytecode shared across fresh VM isolates.
     /// Runtime closures, registries, state, and init execution are not cached.
     pub(crate) prepared_module_cache: crate::PreparedModuleCache,
+    /// One graph-validity observation shared by this VM execution tree.
+    pub(crate) prepared_module_validation: crate::prepared_module::PreparedModuleValidation,
     /// Authority provenance used for the next root module graph. This can only
     /// move from ordinary user code to trusted host dispatch before loading.
     pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
@@ -565,6 +567,7 @@ impl VmBaseline {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             prepared_module_cache: self.prepared_module_cache.clone(),
+            prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: self.module_provenance,
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
@@ -826,6 +829,7 @@ impl Vm {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             prepared_module_cache: crate::PreparedModuleCache::default(),
+            prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: crate::module_artifact::ModuleProvenance::User,
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
@@ -900,6 +904,8 @@ impl Vm {
     /// Fresh runtime module state is still instantiated for every VM.
     pub fn set_prepared_module_cache(&mut self, cache: crate::PreparedModuleCache) {
         self.prepared_module_cache = cache;
+        self.prepared_module_validation =
+            crate::prepared_module::PreparedModuleValidation::default();
     }
 
     /// Hand this VM the link table for the import graph it is about to run.
@@ -1086,6 +1092,7 @@ impl Vm {
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
             prepared_module_cache: self.prepared_module_cache.clone(),
+            prepared_module_validation: self.prepared_module_validation.clone(),
             module_provenance: self.module_provenance,
             module_phase_recorder: self.module_phase_recorder.clone(),
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),

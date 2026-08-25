@@ -15,11 +15,11 @@ use quick_cache::sync::{Cache, GuardResult};
 use quick_cache::{DefaultHashBuilder, Lifecycle, UnitWeighter};
 
 use crate::chunk::{Chunk, CompiledFunction};
+use crate::context_manifest::{ContextManifest, ManifestCheck};
 use crate::module_artifact::{
     compile_module_artifact_from_source_with_context,
-    compile_trusted_host_dispatch_module_artifact_from_source_with_context,
-    module_compilation_context_for_source, ModuleArtifact, ModuleCompilationContext,
-    ModuleImportSpec, ModuleProvenance,
+    compile_trusted_host_dispatch_module_artifact_from_source_with_context, ModuleArtifact,
+    ModuleCompilationContext, ModuleImportSpec, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
@@ -201,7 +201,7 @@ pub struct PreparedModuleCache {
     /// [`PreparedModuleCache::prepare_import_graph`] clears it before seeding
     /// from a freshly walked graph, so a run that re-prepares its graph starts
     /// from current interfaces rather than a previous generation's.
-    interfaces: Arc<Mutex<HashMap<InterfaceMemoKey, ModuleCompilationContext>>>,
+    interfaces: Arc<Mutex<HashMap<InterfaceMemoKey, InterfaceMemoEntry>>>,
 }
 
 /// One module's bytes under one authority — everything a derived interface is
@@ -211,6 +211,110 @@ struct InterfaceMemoKey {
     canonical_path: PathBuf,
     source_hash: [u8; 32],
     provenance: ModuleProvenance,
+}
+
+#[derive(Clone)]
+struct InterfaceMemoEntry {
+    context: ModuleCompilationContext,
+    /// One graph capture is shared by every interface it produced. `None` is
+    /// reserved for `prepare_import_graph`, whose fresh whole-graph walk clears
+    /// and replaces the memo before publishing its contexts.
+    manifest: Option<Arc<PreparedModuleManifest>>,
+}
+
+/// One import graph's refreshable filesystem proof.
+///
+/// A racily clean manifest carries a newer capture stamp after its content
+/// check. Keep that stamp beside every interface from the graph so later runs
+/// settle onto stats-only validation instead of rereading the same files.
+struct PreparedModuleManifest {
+    manifest: Mutex<ContextManifest>,
+}
+
+impl PreparedModuleManifest {
+    fn new(manifest: ContextManifest) -> Self {
+        Self {
+            manifest: Mutex::new(manifest),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        let mut manifest = self
+            .manifest
+            .lock()
+            .expect("prepared-module manifest lock poisoned");
+        let entry = manifest.entry.clone();
+        match manifest.check(&entry) {
+            ManifestCheck::Stale => false,
+            ManifestCheck::Valid => true,
+            ManifestCheck::ValidAfterRecheck { refreshed } => {
+                *manifest = refreshed;
+                true
+            }
+        }
+    }
+}
+
+/// Filesystem validation shared by one VM execution tree.
+///
+/// A manifest can describe every module in a closure. Cache its result by Arc
+/// identity so loading N modules from that closure performs one graph recheck,
+/// while a fresh VM gets a fresh observation and notices edits made between
+/// runs that share the same prepared-module cache handle.
+#[derive(Clone, Default)]
+pub(crate) struct PreparedModuleValidation {
+    checked: Arc<Mutex<Vec<PreparedModuleCheck>>>,
+}
+
+struct PreparedModuleCheck {
+    manifest: Arc<PreparedModuleManifest>,
+    valid: bool,
+}
+
+impl PreparedModuleValidation {
+    fn is_valid(&self, manifest: &Arc<PreparedModuleManifest>) -> bool {
+        {
+            let checked = self
+                .checked
+                .lock()
+                .expect("prepared-module validation lock poisoned");
+            if let Some(check) = checked
+                .iter()
+                .find(|check| Arc::ptr_eq(&check.manifest, manifest))
+            {
+                return check.valid;
+            }
+        }
+        // The graph owns its lock while checking and refreshing. The validation
+        // registry lock is deliberately not held across filesystem work, so
+        // unrelated graphs can validate in parallel.
+        let valid = manifest.is_valid();
+        let mut checked = self
+            .checked
+            .lock()
+            .expect("prepared-module validation lock poisoned");
+        if let Some(check) = checked
+            .iter()
+            .find(|check| Arc::ptr_eq(&check.manifest, manifest))
+        {
+            return check.valid;
+        }
+        checked.push(PreparedModuleCheck {
+            manifest: Arc::clone(manifest),
+            valid,
+        });
+        valid
+    }
+
+    fn remember_fresh(&self, manifest: &Arc<PreparedModuleManifest>) {
+        self.checked
+            .lock()
+            .expect("prepared-module validation lock poisoned")
+            .push(PreparedModuleCheck {
+                manifest: Arc::clone(manifest),
+                valid: true,
+            });
+    }
 }
 
 impl Default for PreparedModuleCache {
@@ -241,15 +345,34 @@ impl PreparedModuleCache {
         }
     }
 
-    fn remembered_interface(&self, key: &InterfaceMemoKey) -> Option<ModuleCompilationContext> {
-        self.interfaces
+    fn remembered_interface(
+        &self,
+        key: &InterfaceMemoKey,
+        validation: &PreparedModuleValidation,
+    ) -> Option<ModuleCompilationContext> {
+        let entry = self
+            .interfaces
             .lock()
             .expect("interface memo lock poisoned")
             .get(key)
-            .cloned()
+            .cloned()?;
+        if entry
+            .manifest
+            .as_ref()
+            .is_none_or(|manifest| validation.is_valid(manifest))
+        {
+            Some(entry.context)
+        } else {
+            None
+        }
     }
 
-    fn remember_interface(&self, key: InterfaceMemoKey, context: &ModuleCompilationContext) {
+    fn remember_interface(
+        &self,
+        key: InterfaceMemoKey,
+        context: &ModuleCompilationContext,
+        manifest: Option<Arc<PreparedModuleManifest>>,
+    ) {
         let mut interfaces = self
             .interfaces
             .lock()
@@ -263,7 +386,38 @@ impl PreparedModuleCache {
         if interfaces.len() >= MAX_REMEMBERED_INTERFACES {
             interfaces.clear();
         }
-        interfaces.insert(key, context.clone());
+        interfaces.insert(
+            key,
+            InterfaceMemoEntry {
+                context: context.clone(),
+                manifest,
+            },
+        );
+    }
+
+    fn remember_interface_graph(
+        &self,
+        root_key: InterfaceMemoKey,
+        root_context: &ModuleCompilationContext,
+        manifest: ContextManifest,
+        provenance: ModuleProvenance,
+        validation: &PreparedModuleValidation,
+    ) {
+        let files = manifest.files.clone();
+        let manifest = Arc::new(PreparedModuleManifest::new(manifest));
+        validation.remember_fresh(&manifest);
+        self.remember_interface(root_key, root_context, Some(Arc::clone(&manifest)));
+        for file in files {
+            self.remember_interface(
+                InterfaceMemoKey {
+                    canonical_path: file.path,
+                    source_hash: file.content_hash,
+                    provenance,
+                },
+                &file.compilation_context,
+                Some(Arc::clone(&manifest)),
+            );
+        }
     }
 
     pub fn stats(&self) -> PreparedModuleCacheStats {
@@ -319,6 +473,7 @@ impl PreparedModuleCache {
             .map(|path| harn_modules::canonical_path(path))
             .collect::<std::collections::HashSet<_>>();
         let recorder = ModulePhaseRecorder::new();
+        let validation = PreparedModuleValidation::default();
 
         for path in graph.module_paths() {
             if root_paths.contains(&harn_modules::canonical_path(&path)) {
@@ -349,6 +504,7 @@ impl PreparedModuleCache {
                 Some(&compilation_context),
                 Some(&recorder),
                 provenance,
+                &validation,
             );
         }
 
@@ -473,6 +629,7 @@ impl PreparedModuleCache {
         compilation_context: Option<&ModuleCompilationContext>,
         recorder: Option<&ModulePhaseRecorder>,
         provenance: ModuleProvenance,
+        validation: &PreparedModuleValidation,
     ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
         let source_hash = {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
@@ -485,15 +642,22 @@ impl PreparedModuleCache {
         };
         let compilation_context = match compilation_context {
             Some(context) => {
-                self.remember_interface(memo_key, context);
+                self.remember_interface(memo_key, context, None);
                 context.clone()
             }
-            None => match self.remembered_interface(&memo_key) {
+            None => match self.remembered_interface(&memo_key, validation) {
                 Some(context) => context,
                 None => {
-                    let context =
-                        module_compilation_context_for_source(source_path, source.as_str())?;
-                    self.remember_interface(memo_key, &context);
+                    let (context, manifest) =
+                        crate::bytecode_cache::module_compilation_context_with_manifest(
+                            source_path,
+                            source.as_str(),
+                        )?;
+                    if let Some(manifest) = manifest {
+                        self.remember_interface_graph(
+                            memo_key, &context, manifest, provenance, validation,
+                        );
+                    }
                     context
                 }
             },
@@ -617,6 +781,7 @@ mod tests {
         let source = crate::module_source::read(&module).expect("read module");
         let canonical = harn_modules::canonical_path(&module);
         let cache = PreparedModuleCache::default();
+        let validation = PreparedModuleValidation::default();
 
         let resolutions = |prepare: &dyn Fn()| {
             let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
@@ -632,6 +797,7 @@ mod tests {
                     None,
                     None,
                     ModuleProvenance::User,
+                    &validation,
                 )
                 .expect("module prepares");
         };
@@ -648,6 +814,69 @@ mod tests {
             resolutions(&prepare),
             0,
             "the same bytes must not be re-parsed to re-derive the same interface"
+        );
+    }
+
+    #[test]
+    fn fresh_run_revalidates_a_remembered_interface_dependency() {
+        let dir = tempfile::tempdir().expect("temp module dir");
+        let dependency = dir.path().join("dep.harn");
+        std::fs::write(&dependency, "pub enum Color { Ready(string) }\n")
+            .expect("write enum dependency");
+        let module = dir.path().join("library.harn");
+        std::fs::write(
+            &module,
+            r#"import "./dep"
+pub fn exercise(value: any) -> string {
+  match value {
+    Color.Ready(message) -> { return message }
+    _ -> { return "fallback" }
+  }
+}
+"#,
+        )
+        .expect("write dependent module");
+
+        let source = crate::module_source::read(&module).expect("read dependent module");
+        let canonical = harn_modules::canonical_path(&module);
+        let cache = PreparedModuleCache::default();
+        let first = cache
+            .prepare(
+                &module,
+                &canonical,
+                &source,
+                None,
+                None,
+                ModuleProvenance::User,
+                &PreparedModuleValidation::default(),
+            )
+            .expect("prepare with imported enum");
+
+        std::fs::write(&dependency, "pub fn replacement() { return 1 }\n")
+            .expect("replace dependency interface");
+
+        let second = cache
+            .prepare(
+                &module,
+                &canonical,
+                &source,
+                None,
+                None,
+                ModuleProvenance::User,
+                &PreparedModuleValidation::default(),
+            )
+            .expect("prepare after dependency edit");
+
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "a fresh run must not reuse bytecode lowered against the old interface"
+        );
+        assert_ne!(
+            postcard::to_allocvec(&first.functions["exercise"].freeze_for_cache())
+                .expect("serialize first function"),
+            postcard::to_allocvec(&second.functions["exercise"].freeze_for_cache())
+                .expect("serialize second function"),
+            "the dependency edit must reach the context-sensitive bytecode"
         );
     }
 
@@ -787,6 +1016,7 @@ pub fn exercise(value: any) -> string {
         );
 
         let cache = PreparedModuleCache::default();
+        let validation = PreparedModuleValidation::default();
         let without_imported_enum = cache
             .prepare(
                 &source_path,
@@ -795,6 +1025,7 @@ pub fn exercise(value: any) -> string {
                 Some(&ModuleCompilationContext::default()),
                 None,
                 ModuleProvenance::User,
+                &validation,
             )
             .expect("prepare dynamically-resolved artifact");
         let with_imported_enum = cache
@@ -805,6 +1036,7 @@ pub fn exercise(value: any) -> string {
                 Some(&imported_enum_context),
                 None,
                 ModuleProvenance::User,
+                &validation,
             )
             .expect("prepare imported-enum-resolved artifact");
 
@@ -869,6 +1101,7 @@ pub fn exercise(value: any) -> string {
                 .collect::<String>(),
         ));
         let source_path = Arc::new(PathBuf::from("shared-runtime-module.harn"));
+        let validation = PreparedModuleValidation::default();
         let start = Arc::new(Barrier::new(WORKERS + 1));
         let mut handles = Vec::with_capacity(WORKERS);
 
@@ -876,6 +1109,7 @@ pub fn exercise(value: any) -> string {
             let cache = cache.clone();
             let source = Arc::clone(&source);
             let source_path = Arc::clone(&source_path);
+            let validation = validation.clone();
             let start = Arc::clone(&start);
             handles.push(std::thread::spawn(move || {
                 let recorder = ModulePhaseRecorder::new();
@@ -888,6 +1122,7 @@ pub fn exercise(value: any) -> string {
                         None,
                         Some(&recorder),
                         ModuleProvenance::TrustedHostDispatch,
+                        &validation,
                     )
                     .expect("compile shared immutable module");
                 (artifact, recorder.snapshot())
