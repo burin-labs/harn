@@ -7,6 +7,7 @@ mod config;
 pub(crate) mod connector_matrix;
 mod driver;
 mod fmt;
+mod harness_receiver;
 mod host_capabilities;
 mod imports;
 mod lint;

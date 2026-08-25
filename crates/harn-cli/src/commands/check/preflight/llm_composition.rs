@@ -2,6 +2,7 @@ use std::path::Path;
 
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
+use super::super::harness_receiver::harness_method_builtin;
 use super::{dict_literal_field, literal_string, PreflightDiagnostic};
 
 /// Reject literal provider/model/option compositions that the runtime
@@ -31,6 +32,37 @@ fn scan_node(
     if let Node::FunctionCall { name, args, .. } = &node.node {
         if let Some(options) = options_arg(name, args) {
             check_literal_composition(name, options, file_path, source, diagnostics);
+        }
+    }
+    // The `llm_*` entries in `options_arg` are removed ambient globals whose
+    // supported spelling is `harness.llm.<method>`. Resolving the receiver back
+    // to its registry name reuses that one table rather than growing a second
+    // one keyed by `(capability, method)`; the `agent_*` entries are `std/agent`
+    // module functions and keep matching as plain calls.
+    if let Node::MethodCall {
+        object,
+        method,
+        args,
+    }
+    | Node::OptionalMethodCall {
+        object,
+        method,
+        args,
+    } = &node.node
+    {
+        if let Some((field, builtin)) = harness_method_builtin(object, method) {
+            if let Some(options) = options_arg(builtin, args) {
+                // Name the capability path rather than the registry name: it is
+                // the spelling at the call site, and the registry name is the
+                // removed global the author was told to stop writing.
+                check_literal_composition(
+                    &format!("harness.{field}.{method}"),
+                    options,
+                    file_path,
+                    source,
+                    diagnostics,
+                );
+            }
         }
     }
     for child in harn_parser::visit::immediate_children(node) {

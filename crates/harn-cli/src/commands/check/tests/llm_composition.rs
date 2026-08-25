@@ -254,3 +254,77 @@ fn main(harness: Harness) {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The `llm_*` globals this pass keys on were replaced by `harness.llm.*`, so
+/// the check has to hold in three directions at once: it still fires on the
+/// removed spelling, it now fires on the one the compiler recommends, and it
+/// stays quiet on an unrelated receiver whose method name happens to collide.
+/// Only asserting that some spelling errors would have passed before the fix.
+#[test]
+fn preflight_checks_llm_composition_through_the_capability_method() {
+    const OPTIONS: &str = r#"{
+    provider: "moonshot",
+    model: "kimi-k3",
+    temperature: 0.2,
+  }"#;
+
+    let legacy =
+        format!("fn main(harness: Harness) {{\n  llm_call(\"hello\", nil, {OPTIONS})\n}}\n");
+    let legacy_found = diagnostics(&legacy);
+    assert_eq!(
+        legacy_found.len(),
+        1,
+        "the removed ambient spelling must keep reporting: {legacy_found:?}"
+    );
+    assert!(legacy_found[0].message.contains("`llm_call`"));
+
+    let capability = format!(
+        "fn main(harness: Harness) {{\n  harness.llm.call(\"hello\", nil, {OPTIONS})\n}}\n"
+    );
+    let capability_found = diagnostics(&capability);
+    assert_eq!(
+        capability_found.len(),
+        1,
+        "the supported capability spelling must report too: {capability_found:?}"
+    );
+    assert!(
+        capability_found[0].message.contains("`harness.llm.call`"),
+        "the diagnostic should name the spelling at the call site: {}",
+        capability_found[0].message
+    );
+    assert!(capability_found[0]
+        .message
+        .contains("option `temperature` is not supported"));
+
+    // `call` is a real `harness.llm` method, so this is the exact collision the
+    // receiver check exists to reject.
+    let unrelated =
+        format!("fn main(harness: Harness) {{\n  client.call(\"hello\", nil, {OPTIONS})\n}}\n");
+    assert!(
+        diagnostics(&unrelated).is_empty(),
+        "a non-harness receiver must not be treated as a capability call"
+    );
+}
+
+/// `completion` takes its options one slot later than `call`. Resolving the
+/// receiver back to its registry name is what keeps that index correct without
+/// a second table keyed by `(capability, method)`.
+#[test]
+fn preflight_uses_the_registry_name_to_find_the_options_slot() {
+    let source = r#"
+fn main(harness: Harness) {
+  harness.llm.completion("prefix", nil, nil, {
+    provider: "moonshot",
+    model: "kimi-k3",
+    temperature: 0.2,
+  })
+}
+"#;
+    let found = diagnostics(source);
+    assert_eq!(
+        found.len(),
+        1,
+        "completion options live at index 3: {found:?}"
+    );
+    assert!(found[0].message.contains("`harness.llm.completion`"));
+}

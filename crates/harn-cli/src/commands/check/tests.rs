@@ -1455,5 +1455,84 @@ pipeline main(harness: Harness) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `exec_at` / `shell_at` were replaced by `harness.process.*`, so the
+/// execution-directory check has to hold in three directions: the removed
+/// spelling still reports, the supported spelling now reports, and an
+/// unrelated receiver with a colliding method name does not. `bundle.rs`
+/// already recognized both spellings for this same pair; preflight did not.
+#[test]
+fn preflight_reports_a_missing_execution_dir_through_the_capability_method() {
+    let dir = unique_temp_dir("harn-check-exec-at");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+
+    let reported = |source: &str| -> Vec<PreflightDiagnostic> {
+        let program = parse_program(source);
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default())
+            .into_iter()
+            .filter(|d| d.code.as_str() == "HARN-ORC-010")
+            .collect()
+    };
+
+    let legacy = reported("fn main(harness: Harness) {\n  exec_at(\"no-such-dir\", \"ls\")\n}\n");
+    assert_eq!(
+        legacy.len(),
+        1,
+        "the removed ambient spelling must keep reporting: {legacy:?}"
+    );
+
+    let capability = reported(
+        "fn main(harness: Harness) {\n  harness.process.exec_at(\"no-such-dir\", \"ls\")\n}\n",
+    );
+    assert_eq!(
+        capability.len(),
+        1,
+        "the supported capability spelling must report too: {capability:?}"
+    );
+    assert!(capability[0].message.contains("no-such-dir"));
+
+    let shell = reported(
+        "fn main(harness: Harness) {\n  harness.process.shell_at(\"no-such-dir\", \"ls\")\n}\n",
+    );
+    assert_eq!(shell.len(), 1, "shell_at too: {shell:?}");
+
+    // `exec_at` is a real `harness.process` method, so this is the exact
+    // collision the receiver check exists to reject.
+    let unrelated =
+        reported("fn main(harness: Harness) {\n  client.exec_at(\"no-such-dir\", \"ls\")\n}\n");
+    assert!(
+        unrelated.is_empty(),
+        "a non-harness receiver must not be treated as a capability call: {unrelated:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Recognizing the capability spelling must not stop the walk: a diagnostic
+/// nested in the call's arguments still has to surface.
+#[test]
+fn preflight_keeps_scanning_inside_a_recognized_capability_call() {
+    let dir = unique_temp_dir("harn-check-exec-at-nested");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = "fn main(harness: Harness) {\n  harness.process.exec_at(\"no-such-dir\", harness.fs.render_prompt(\"missing.txt\"))\n}\n";
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code.as_str() == "HARN-ORC-010"),
+        "outer call still reports: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("render_prompt target")),
+        "nested argument is still scanned: {diagnostics:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 mod effect_inheritance;
 mod llm_composition;

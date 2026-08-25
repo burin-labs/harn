@@ -7,6 +7,7 @@ use harn_parser::{Node, SNode};
 use crate::package::CheckConfig;
 use crate::parse_source_file;
 
+use super::harness_receiver::harness_handle_field;
 use super::preflight::{
     dict_literal_field, host_render_path_arg, literal_string, parse_host_call_args,
     resolve_preflight_target, resolve_source_relative,
@@ -372,20 +373,6 @@ fn scan_node_bundle(
             let children = node_children_bundle(node);
             scan_children_bundle(&children, file_path, config, visited, manifest);
         }
-    }
-}
-
-fn harness_handle_field(node: &SNode) -> Option<&str> {
-    match &node.node {
-        Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(root) if root == "harness") => {
-            Some(property)
-        }
-        Node::Identifier(name)
-            if harn_builtin_meta::CapabilityId::from_field_name(name).is_some() =>
-        {
-            Some(name)
-        }
-        _ => None,
     }
 }
 
