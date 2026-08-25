@@ -1,5 +1,5 @@
 use harn_lexer::Span;
-use harn_parser::{DiagnosticCode as Code, Node, SNode};
+use harn_parser::{DiagnosticCode as Code, SNode};
 
 use super::Linter;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -17,24 +17,7 @@ impl Linter<'_> {
                 .last()
                 .cloned()
                 .and_then(|export| {
-                    let harness_name = self.harness_binding_name()?;
-                    let capability = match &object.node {
-                        Node::PropertyAccess {
-                            object: root,
-                            property,
-                        }
-                        | Node::OptionalPropertyAccess {
-                            object: root,
-                            property,
-                        } if matches!(
-                            &root.node,
-                            Node::Identifier(name) if name == harness_name
-                        ) =>
-                        {
-                            property.clone()
-                        }
-                        _ => return None,
-                    };
+                    let capability = self.harness_capability_of(object)?.to_string();
                     harn_vm::connector_export_denied_harness_method_reason(
                         &export,
                         &capability,
