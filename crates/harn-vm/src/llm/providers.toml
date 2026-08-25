@@ -761,7 +761,8 @@ path = "/v1/models"
 # llama.cpp — separate from `local` so capability rules can isolate Qwen
 # chat-template thinking quirks from other local OpenAI-compatible hosts.
 [providers.llamacpp]
-cache_usage_accounting = false
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "http://127.0.0.1:8001"
 base_url_env = "LLAMACPP_BASE_URL"
 auth_style = "none"
