@@ -22,7 +22,9 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
     echo "mock retention API authorization failure" >&2
     exit 1
   fi
-  if [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
+  if [[ "${MOCK_LOCAL_SCCACHE:-0}" == "1" ]]; then
+    printf '%s\n' '[{"actions_caches":[{"id":40,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":41,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-2222222222222222222222222222222222222222","created_at":"2026-01-02T00:00:00Z"},{"id":42,"ref":"refs/pull/9/merge","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-3333333333333333333333333333333333333333","created_at":"2026-01-03T00:00:00Z"},{"id":43,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-aarch64-apple-darwin-macOS-ARM64-1111111111111111111111111111111111111111","created_at":"2026-01-01T00:00:00Z"},{"id":44,"ref":"refs/heads/main","key":"burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-manual","created_at":"2026-01-04T00:00:00Z"}]}]'
+  elif [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
     printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"}]}]\n'
   else
     printf '%s\n' '[{"actions_caches":[{"id":10,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":20,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":30,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"}]},{"actions_caches":[{"id":11,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":12,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-33333333-cccccccc","created_at":"2026-01-02T00:00:00Z"},{"id":21,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":13,"ref":"refs/pull/9/merge","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-44444444-dddddddd","created_at":"2026-01-03T00:00:00Z"},{"id":14,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-manual-backup","created_at":"2026-01-04T00:00:00Z"}]}]'
@@ -76,6 +78,30 @@ cache delete 11 --repo burin-labs/harn
 cache delete 10 --repo burin-labs/harn
 EXPECTED
 diff -u "$tmp/expected-family-prune-gh.log" "$tmp/family-prune-gh.log"
+
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/local-sccache-prune-gh.log" \
+  MOCK_LOCAL_SCCACHE=1 GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --local-sccache-family-prefix \
+  burin-labs/harn-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64-
+cat >"$tmp/expected-local-sccache-prune-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 40 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-local-sccache-prune-gh.log" "$tmp/local-sccache-prune-gh.log"
+
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/invalid-local-sccache-prune-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --local-sccache-family-prefix \
+  burin-labs/other-sccache-local-release-x86_64-pc-windows-msvc-Windows-X64- \
+  >"$tmp/invalid-local-sccache-prune.out" \
+  2>"$tmp/invalid-local-sccache-prune.err"; then
+  echo "expected a cache family from another repository to fail" >&2
+  exit 1
+fi
+grep -q -- '--local-sccache-family-prefix' "$tmp/invalid-local-sccache-prune.err"
+test ! -s "$tmp/invalid-local-sccache-prune-gh.log"
 
 PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/clear-linux-family-gh.log" \
   GITHUB_REPOSITORY=burin-labs/harn \
