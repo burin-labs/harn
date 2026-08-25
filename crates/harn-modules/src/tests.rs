@@ -1021,6 +1021,9 @@ fn same_named_symbols_in_different_modules_do_not_collapse() {
     let build =
         build_for_reference_index(&[exported.clone(), importer.clone(), local.clone()], None);
     let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let local = canonical_path(&local);
     assert_eq!(
         index.files.len(),
         3,
