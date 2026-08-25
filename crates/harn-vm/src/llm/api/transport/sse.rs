@@ -1133,10 +1133,14 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 // it erased by the frame carrying the counters. Re-capture
                 // below still lets this frame's own value win.
                 let carried_fingerprint = telemetry.serving_fingerprint.take();
-                telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
-                telemetry.serving_fingerprint = carried_fingerprint;
+                telemetry = ProviderTelemetry::from_openai_response(&json, request_id);
+                if telemetry.serving_fingerprint.is_none() {
+                    telemetry.serving_fingerprint = carried_fingerprint;
+                }
             }
-            telemetry.capture_provider_metadata(&json);
+            if json.get("usage").is_none() {
+                telemetry.capture_provider_metadata(&json);
+            }
         }
         // A finish_reason ends content, not necessarily accounting. Providers
         // with a declared stream-usage contract and managed gateways append
@@ -1347,7 +1351,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     }
     telemetry.capture_request_id(provider_request_id);
     // Written after the loop, never inside it: the usage frame replaces
-    // `telemetry` wholesale via `from_openai_usage` / `from_anthropic_usage`,
+    // `telemetry` wholesale via `from_openai_response` / `from_anthropic_usage`,
     // so a value assigned mid-stream would be discarded by the rebuild.
     telemetry.client_first_frame_ms = liveness.first_frame_ms();
     Ok(LlmResult {

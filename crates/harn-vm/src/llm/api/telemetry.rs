@@ -31,7 +31,7 @@ pub mod source {
     /// details). No server-side timings unless the runtime extends the
     /// schema.
     pub const OPENAI_USAGE: &str = "openai_usage";
-    /// llama.cpp `usage.timings` extension (`prompt_ms`, `predicted_ms`,
+    /// llama.cpp `timings` extension (`prompt_ms`, `predicted_ms`,
     /// `predicted_n`, `prompt_n`, ...). Preserved verbatim from the
     /// non-OpenAI subset.
     pub const LLAMACPP_TIMINGS: &str = "llamacpp_timings";
@@ -114,12 +114,19 @@ pub struct ProviderTelemetry {
     /// Generation/decode time (Ollama `eval_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_generation_ms: Option<u64>,
-    /// Tokens the server reports it prefilled (Ollama `prompt_eval_count`).
-    /// Distinct from `LlmResult::input_tokens` because hosted providers
-    /// frequently bill different token boundaries than the on-device
-    /// tokenizer reports.
+    /// Total prompt tokens reported by the provider's usage counter. Distinct
+    /// from `LlmResult::input_tokens` because hosted providers frequently bill
+    /// different token boundaries than the on-device tokenizer reports.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_prompt_tokens: Option<i64>,
+    /// Prompt tokens the server actually evaluated rather than reading from a
+    /// cache. llama.cpp reports this as `timings.prompt_n`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_uncached_prompt_tokens: Option<i64>,
+    /// Prompt tokens the server read from its prompt cache. llama.cpp reports
+    /// this as `timings.cache_n`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_cached_prompt_tokens: Option<i64>,
     /// Tokens the server reports it generated (Ollama `eval_count`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_output_tokens: Option<i64>,
@@ -224,6 +231,8 @@ impl ProviderTelemetry {
             server_prompt_eval_ms,
             server_generation_ms,
             server_prompt_tokens,
+            server_uncached_prompt_tokens,
+            server_cached_prompt_tokens,
             server_output_tokens,
             client_wall_ms,
             client_first_frame_ms,
@@ -246,6 +255,8 @@ impl ProviderTelemetry {
             && server_prompt_eval_ms.is_none()
             && server_generation_ms.is_none()
             && server_prompt_tokens.is_none()
+            && server_uncached_prompt_tokens.is_none()
+            && server_cached_prompt_tokens.is_none()
             && server_output_tokens.is_none()
             && client_wall_ms.is_none()
             && client_first_frame_ms.is_none()
@@ -290,10 +301,11 @@ impl ProviderTelemetry {
         telemetry
     }
 
-    /// Extract OpenAI-shape `usage` telemetry. Most OpenAI-compatible local
-    /// runtimes only report counts; llama.cpp's `usage.timings` extension is
-    /// folded in here as well so a single envelope captures both shapes.
-    pub fn from_openai_usage(usage: &serde_json::Value, request_id: Option<&str>) -> Self {
+    /// Extract telemetry from a complete OpenAI-shaped response or stream
+    /// frame. llama.cpp puts `timings` beside `usage`; older adapters may put
+    /// it inside `usage`, which remains a fallback.
+    pub fn from_openai_response(response: &serde_json::Value, request_id: Option<&str>) -> Self {
+        let usage = response.get("usage").unwrap_or(&serde_json::Value::Null);
         let mut telemetry = Self::new(source::OPENAI_USAGE);
         telemetry.server_prompt_tokens = usage
             .get("prompt_tokens")
@@ -303,17 +315,18 @@ impl ProviderTelemetry {
             .get("completion_tokens")
             .or_else(|| usage.get("output_tokens"))
             .and_then(serde_json::Value::as_i64);
-        if let Some(timings) = usage.get("timings").filter(|value| value.is_object()) {
+        if let Some(timings) = response
+            .get("timings")
+            .filter(|value| value.is_object())
+            .or_else(|| usage.get("timings").filter(|value| value.is_object()))
+        {
             telemetry.source = source::LLAMACPP_TIMINGS.to_string();
             telemetry.server_prompt_eval_ms = ms_or_round(timings.get("prompt_ms"));
             telemetry.server_generation_ms = ms_or_round(timings.get("predicted_ms"));
-            // llama.cpp also reports `prompt_n` / `predicted_n` here when
-            // its usage breakdown is enabled; prefer them over the
-            // legacy top-level counts so prefill cache hits surface
-            // correctly.
-            if let Some(prefill) = timings.get("prompt_n").and_then(serde_json::Value::as_i64) {
-                telemetry.server_prompt_tokens = Some(prefill);
-            }
+            telemetry.server_uncached_prompt_tokens =
+                timings.get("prompt_n").and_then(serde_json::Value::as_i64);
+            telemetry.server_cached_prompt_tokens =
+                timings.get("cache_n").and_then(serde_json::Value::as_i64);
             if let Some(predicted) = timings
                 .get("predicted_n")
                 .and_then(serde_json::Value::as_i64)
@@ -336,6 +349,7 @@ impl ProviderTelemetry {
             .or_else(|| usage.get("total_cost"))
             .and_then(serde_json::Value::as_f64)
             .filter(|cost| cost.is_finite() && *cost >= 0.0);
+        telemetry.capture_provider_metadata(response);
         telemetry
     }
 
@@ -490,6 +504,16 @@ impl ProviderTelemetry {
         );
         insert_opt_u64(&mut dict, "server_generation_ms", self.server_generation_ms);
         insert_opt_i64(&mut dict, "server_prompt_tokens", self.server_prompt_tokens);
+        insert_opt_i64(
+            &mut dict,
+            "server_uncached_prompt_tokens",
+            self.server_uncached_prompt_tokens,
+        );
+        insert_opt_i64(
+            &mut dict,
+            "server_cached_prompt_tokens",
+            self.server_cached_prompt_tokens,
+        );
         insert_opt_i64(&mut dict, "server_output_tokens", self.server_output_tokens);
         insert_opt_u64(&mut dict, "client_wall_ms", self.client_wall_ms);
         insert_opt_u64(
@@ -670,13 +694,15 @@ mod tests {
 
     #[test]
     fn openai_usage_extracts_counts_and_provider_cost() {
-        let usage = serde_json::json!({
-            "prompt_tokens": 200,
-            "completion_tokens": 50,
-            "cost": 0.00125
+        let response = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 200,
+                "completion_tokens": 50,
+                "cost": 0.00125
+            }
         });
 
-        let telemetry = ProviderTelemetry::from_openai_usage(&usage, Some("req-abc"));
+        let telemetry = ProviderTelemetry::from_openai_response(&response, Some("req-abc"));
 
         assert_eq!(telemetry.source, source::OPENAI_USAGE);
         assert_eq!(telemetry.server_prompt_tokens, Some(200));
@@ -687,25 +713,30 @@ mod tests {
     }
 
     #[test]
-    fn llamacpp_timings_promotes_source_and_fills_durations() {
-        let usage = serde_json::json!({
-            "prompt_tokens": 220,
-            "completion_tokens": 17,
-            "timings": {
-                "prompt_n": 200,
-                "prompt_ms": 145.4,
-                "predicted_n": 17,
-                "predicted_ms": 89.1,
+    fn nested_llamacpp_timings_remain_a_fallback() {
+        let response = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 220,
+                "completion_tokens": 17,
+                "timings": {
+                    "prompt_n": 200,
+                    "cache_n": 20,
+                    "prompt_ms": 145.4,
+                    "predicted_n": 17,
+                    "predicted_ms": 89.1
+                }
             }
         });
 
-        let telemetry = ProviderTelemetry::from_openai_usage(&usage, None);
+        let telemetry = ProviderTelemetry::from_openai_response(&response, None);
 
         assert_eq!(telemetry.source, source::LLAMACPP_TIMINGS);
         assert_eq!(telemetry.server_prompt_eval_ms, Some(145));
         assert_eq!(telemetry.server_generation_ms, Some(89));
         assert_eq!(telemetry.server_total_ms, Some(234));
-        assert_eq!(telemetry.server_prompt_tokens, Some(200));
+        assert_eq!(telemetry.server_prompt_tokens, Some(220));
+        assert_eq!(telemetry.server_uncached_prompt_tokens, Some(200));
+        assert_eq!(telemetry.server_cached_prompt_tokens, Some(20));
         assert_eq!(telemetry.server_output_tokens, Some(17));
         assert!(!telemetry.is_empty());
     }
@@ -834,6 +865,8 @@ mod tests {
             server_prompt_eval_ms: Some(2),
             server_generation_ms: Some(3),
             server_prompt_tokens: Some(4),
+            server_uncached_prompt_tokens: Some(2),
+            server_cached_prompt_tokens: Some(2),
             server_output_tokens: Some(5),
             client_wall_ms: Some(2_000),
             client_first_frame_ms: Some(1_500),
@@ -879,7 +912,7 @@ mod tests {
         // silently excused from the check above.
         assert_eq!(
             encoded.len(),
-            21,
+            23,
             "every ProviderTelemetry field must be populated for the census to \
              cover it; update this count when the struct gains a field"
         );

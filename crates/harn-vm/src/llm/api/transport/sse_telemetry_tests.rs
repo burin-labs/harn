@@ -52,6 +52,29 @@ fn usage_chunk(fingerprint: Option<&str>) -> serde_json::Value {
     frame
 }
 
+/// The trailing frame shape captured from llama-server b10603-c060ca974.
+fn llamacpp_usage_chunk() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [],
+        "id": "chatcmpl-stream",
+        "model": "served-model",
+        "object": "chat.completion.chunk",
+        "system_fingerprint": "b10603-c060ca974",
+        "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 6036,
+            "total_tokens": 6042
+        },
+        "timings": {
+            "prompt_n": 4,
+            "cache_n": 6032,
+            "prompt_ms": 12.4,
+            "predicted_n": 6,
+            "predicted_ms": 30.6
+        }
+    })
+}
+
 fn sse_body(frames: &[serde_json::Value]) -> String {
     let mut body = String::new();
     for frame in frames {
@@ -92,6 +115,23 @@ async fn streamed_system_fingerprint_reaches_telemetry() {
         result.telemetry.serving_fingerprint.as_deref(),
         Some(OBSERVED_BUILD)
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn streamed_llamacpp_root_timings_reach_telemetry() {
+    let body = sse_body(&[content_chunk(None), llamacpp_usage_chunk()]);
+    let result = drive_openai(&body).await;
+
+    assert_eq!(
+        result.telemetry.source,
+        crate::llm::api::telemetry_source::LLAMACPP_TIMINGS
+    );
+    assert_eq!(result.telemetry.server_prompt_eval_ms, Some(12));
+    assert_eq!(result.telemetry.server_generation_ms, Some(31));
+    assert_eq!(result.telemetry.server_total_ms, Some(43));
+    assert_eq!(result.telemetry.server_prompt_tokens, Some(6036));
+    assert_eq!(result.telemetry.server_uncached_prompt_tokens, Some(4));
+    assert_eq!(result.telemetry.server_cached_prompt_tokens, Some(6032));
 }
 
 #[tokio::test(flavor = "current_thread")]

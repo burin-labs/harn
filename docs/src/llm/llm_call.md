@@ -176,6 +176,18 @@ or derive cache behavior independently.
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
 | `provider_attempts` | dict | How many provider requests this one logical call took, and why the extra ones happened (see below) |
 
+For llama.cpp calls, `usage.provider_telemetry` also separates prompt size from
+prompt work:
+
+| Field | Meaning |
+|---|---|
+| `server_prompt_tokens` | Full prompt size from `usage.prompt_tokens` |
+| `server_uncached_prompt_tokens` | Prompt tokens llama.cpp evaluated instead of reading from cache |
+| `server_cached_prompt_tokens` | Prompt tokens llama.cpp read from cache |
+| `server_prompt_eval_ms` | Time llama.cpp spent evaluating the uncached prompt |
+| `server_generation_ms` | Time llama.cpp spent generating the answer |
+| `server_total_ms` | Prompt evaluation time plus generation time |
+
 Flat `provider_call_response` and LLM-trace records use the same canonical
 names (`input_tokens`, `output_tokens`, `cache_read_tokens`, and
 `cache_write_tokens`). The former trace-only `cache_tokens` mirror is not a

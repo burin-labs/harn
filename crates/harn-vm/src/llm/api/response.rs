@@ -620,8 +620,7 @@ pub(crate) fn parse_openai_responses_response(
         })
         .map(str::to_string);
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-    let mut telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
-    telemetry.capture_provider_metadata(json);
+    let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
 
     Ok(LlmResult {
         attempts: Default::default(),
@@ -1111,8 +1110,7 @@ pub(crate) fn parse_llm_response(
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = finish_reason.map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-        let mut telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
-        telemetry.capture_provider_metadata(json);
+        let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
         let billed_length_truncation =
             is_length_stop_reason(stop_reason.as_deref()) && output_tokens > 0;
 
@@ -2257,24 +2255,21 @@ mod tests {
 
     #[test]
     fn openai_parser_lifts_llamacpp_timings_into_telemetry() {
-        // llama.cpp's OpenAI-compatible server extends `usage` with a
-        // `timings` block. Preserve the millisecond fields verbatim and
-        // promote the source to `llamacpp_timings` so eval scripts can
-        // route on them.
+        // Captured from llama-server b10603-c060ca974. Its timing breakdown is
+        // a response-root sibling of `usage`, and a warm prompt cache makes
+        // the full prompt count differ sharply from the work the server did.
         let response = serde_json::json!({
             "choices": [{
                 "message": {"content": "answer"},
                 "finish_reason": "stop"
             }],
-            "usage": {
-                "prompt_tokens": 200,
-                "completion_tokens": 17,
-                "timings": {
-                    "prompt_n": 200,
-                    "prompt_ms": 145.4,
-                    "predicted_n": 17,
-                    "predicted_ms": 89.1
-                }
+            "usage": {"prompt_tokens": 6036, "completion_tokens": 17},
+            "timings": {
+                "prompt_n": 4,
+                "cache_n": 6032,
+                "prompt_ms": 145.4,
+                "predicted_n": 17,
+                "predicted_ms": 89.1
             }
         });
 
@@ -2288,6 +2283,9 @@ mod tests {
         assert_eq!(result.telemetry.server_prompt_eval_ms, Some(145));
         assert_eq!(result.telemetry.server_generation_ms, Some(89));
         assert_eq!(result.telemetry.server_total_ms, Some(234));
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(6036));
+        assert_eq!(result.telemetry.server_uncached_prompt_tokens, Some(4));
+        assert_eq!(result.telemetry.server_cached_prompt_tokens, Some(6032));
     }
 
     #[test]

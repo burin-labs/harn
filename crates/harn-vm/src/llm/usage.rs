@@ -880,8 +880,8 @@ mod tests {
         result.model = "accounts/fireworks/models/minimax-m3".to_string();
         result.input_tokens = 0;
         result.output_tokens = 0;
-        result.telemetry = ProviderTelemetry::from_openai_usage(
-            &serde_json::json!({}),
+        result.telemetry = ProviderTelemetry::from_openai_response(
+            &serde_json::json!({"usage": {}}),
             Some("chatcmpl-without-usage"),
         );
 
