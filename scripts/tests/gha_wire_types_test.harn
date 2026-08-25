@@ -1,0 +1,18 @@
+import {
+  gha_env_block,
+  gha_write_env,
+  gha_write_output,
+} from "../../crates/harn-stdlib/src/stdlib/stdlib_gha.harn"
+
+@test
+pipeline test_gha_wire_boundary_accepts_typed_values(harness: Harness, task: unknown) {
+  const root = harness.fs.mkdtemp_in_workspace("gha-wire-types-")
+  const output = path_join(root, "output.txt")
+  assert_eq(gha_env_block(harness.random, "ready", true, "EOF"), "ready<<EOF\ntrue\nEOF\n")
+  assert_eq(gha_write_output(harness, "ready", false, output), true)
+  assert_eq(gha_write_env(harness, "PR_NUMBER", 7272, output), true)
+  const written = harness.fs.read_text(output)
+  assert_eq(contains(written, "\nfalse\n"), true)
+  assert_eq(contains(written, "\n7272\n"), true)
+  harness.fs.delete(root)
+}

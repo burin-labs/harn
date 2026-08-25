@@ -1,5 +1,5 @@
 /** std/gha - GitHub Actions output, summary, and annotation helpers. */
-type GhaAnnotationOptions = {
+pub type GhaAnnotationOptions = {
   file?: string,
   line?: int,
   endLine?: int,
@@ -17,17 +17,17 @@ fn __gha_escape_property(value: unknown) -> string {
   return replace(replace(__gha_escape_data(value), ":", "%3A"), ",", "%2C")
 }
 
-fn __gha_kv(key: string, value: any) {
+fn __gha_kv(key: string, value: unknown) -> string? {
   if value == nil {
     return nil
   }
   return key + "=" + __gha_escape_property(value)
 }
 
-fn __gha_file_path(path: string?, fallback: any) {
-  const explicit = path ?? fallback
-  if explicit != nil && explicit != "" {
-    return explicit
+fn __gha_file_path(path: string?, fallback: unknown) -> string? {
+  const resolved = to_string(path ?? fallback ?? "")
+  if resolved != "" {
+    return resolved
   }
   return nil
 }
@@ -88,7 +88,7 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_notice(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+pub fn gha_notice(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) -> nil {
   stdio.println(gha_annotation("notice", message, options))
 }
 
@@ -98,7 +98,11 @@ pub fn gha_notice(stdio: HarnessStdio, message: string, options: GhaAnnotationOp
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_warning(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+pub fn gha_warning(
+  stdio: HarnessStdio,
+  message: string,
+  options: GhaAnnotationOptions = {},
+) -> nil {
   stdio.println(gha_annotation("warning", message, options))
 }
 
@@ -108,7 +112,7 @@ pub fn gha_warning(stdio: HarnessStdio, message: string, options: GhaAnnotationO
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) -> nil {
   stdio.println(gha_annotation("error", message, options))
 }
 
@@ -121,7 +125,7 @@ pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOpt
 pub fn gha_env_block(
   random: HarnessRandom,
   name: string,
-  value: string?,
+  value: unknown,
   delimiter: string? = nil,
 ) -> string {
   const delim = delimiter ?? ("harn_" + random.uuid_v7())
@@ -137,7 +141,7 @@ pub fn gha_env_block(
 pub fn gha_write_output(
   harness: Harness,
   name: string,
-  value: string?,
+  value: unknown,
   path: string? = nil,
 ) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
@@ -154,7 +158,7 @@ pub fn gha_write_output(
  * @effects: []
  * @errors: []
  */
-pub fn gha_write_env(harness: Harness, name: string, value: string?, path: string? = nil) -> bool {
+pub fn gha_write_env(harness: Harness, name: string, value: unknown, path: string? = nil) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
   if target == nil {
     return false
