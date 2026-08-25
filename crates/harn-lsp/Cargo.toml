@@ -15,6 +15,8 @@ path = "src/main.rs"
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "=0.10.116" }
 harn-parser = { path = "../harn-parser", version = "=0.10.116" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.116" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.116" }
 harn-ir = { path = "../harn-ir", version = "=0.10.116" }
 harn-lint = { path = "../harn-lint", version = "=0.10.116" }
 harn-modules = { path = "../harn-modules", version = "=0.10.116" }

@@ -376,21 +376,47 @@ pub(crate) fn infer_dot_receiver_type(
         return Some(TypeExpr::Named("dict".to_string()));
     }
 
-    let name = dot_receiver_identifier(source, position)?;
+    let mut path_start = dot_start;
+    while path_start > 0 {
+        let previous = previous_char_boundary(line, path_start);
+        let ch = line[previous..path_start].chars().next()?;
+        if !(ch.is_alphanumeric() || ch == '_' || ch == '.') {
+            break;
+        }
+        path_start = previous;
+    }
+    let path: Vec<&str> = line[path_start..dot_start]
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let name = *path.first()?;
+    let mut receiver_type = None;
     for sym in symbols.iter().rev() {
         if sym.name == name {
             if let Some(ref ty) = sym.type_info {
-                return Some(ty.clone());
+                receiver_type = Some(ty.clone());
+                break;
             }
             if matches!(
                 sym.kind,
                 crate::symbols::HarnSymbolKind::Struct | crate::symbols::HarnSymbolKind::Enum
             ) {
-                return Some(TypeExpr::Named(sym.name.clone()));
+                receiver_type = Some(TypeExpr::Named(sym.name.clone()));
+                break;
             }
         }
     }
-    None
+    let mut receiver_type = receiver_type?;
+    for property in path.iter().skip(1) {
+        receiver_type = match receiver_type {
+            TypeExpr::Named(ref name) if name == "Harness" => {
+                let capability = harn_builtin_meta::CapabilityId::from_field_name(property)?;
+                TypeExpr::Named(capability.type_name().to_string())
+            }
+            _ => return None,
+        };
+    }
+    Some(receiver_type)
 }
 
 pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {

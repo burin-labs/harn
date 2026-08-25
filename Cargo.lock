@@ -3733,6 +3733,8 @@ dependencies = [
 name = "harn-lsp"
 version = "0.10.116"
 dependencies = [
+ "harn-builtin-meta",
+ "harn-capability-contracts",
  "harn-fmt",
  "harn-hostlib",
  "harn-ir",

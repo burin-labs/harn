@@ -1,12 +1,14 @@
 //! Hover, signature help, and inlay hints.
 
-use harn_parser::format_type;
+use harn_parser::{format_type, TypeExpr};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
+use crate::constants::{
+    builtin_doc, builtin_signature, capability_method_details, capability_method_doc, keyword_doc,
+};
 use crate::document_kind::DocumentKind;
-use crate::helpers::{is_member_access, word_span_at_position};
+use crate::helpers::{infer_dot_receiver_type, is_member_access, word_span_at_position};
 use crate::source_text::SourceText;
 use crate::symbols::{
     format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
@@ -40,6 +42,19 @@ pub(crate) fn resolve_hover_target(
     // member that resolves to a global describes something the receiver does not
     // have, which makes a call the runtime rejects look implemented.
     let member_access = is_member_access(source, word_start);
+
+    if member_access {
+        let receiver_position = source.position(word_start);
+        if let Some(TypeExpr::Named(type_name)) =
+            infer_dot_receiver_type(source, receiver_position, symbols)
+        {
+            if let Some(capability) = harn_builtin_meta::CapabilityId::from_type_name(&type_name) {
+                if let Some(doc) = capability_method_doc(capability.field_name(), &word) {
+                    return Some(HoverTarget::Builtin(doc));
+                }
+            }
+        }
+    }
 
     if !member_access {
         if let Some(doc) = builtin_doc(&word) {
@@ -245,10 +260,10 @@ impl HarnLsp {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let source = {
+        let (source, symbols) = {
             let docs = self.documents.lock().unwrap();
             match docs.get(uri) {
-                Some(s) if s.kind.is_harn() => s.source.clone(),
+                Some(s) if s.kind.is_harn() => (s.source.clone(), s.symbols.clone()),
                 _ => return Ok(None),
             }
         };
@@ -298,10 +313,32 @@ impl HarnLsp {
             return Ok(None);
         }
 
-        let sig_str = match builtin_signature(&name) {
-            Some(sig) => sig,
-            None => return Ok(None),
+        let name_start = before.len().saturating_sub(name.len());
+        let word_offset = source
+            .offset(position)
+            .saturating_sub(prefix.len())
+            .saturating_add(name_start);
+        let capability = infer_dot_receiver_type(&source, source.position(word_offset), &symbols)
+            .and_then(|receiver| match receiver {
+                TypeExpr::Named(type_name) => {
+                    harn_builtin_meta::CapabilityId::from_type_name(&type_name)
+                }
+                _ => None,
+            });
+        let capability_detail = capability.and_then(|capability| {
+            capability_method_details(capability.field_name())
+                .iter()
+                .find(|detail| detail.name == name)
+                .map(|detail| (capability, detail))
+        });
+        let sig_str = builtin_signature(&name)
+            .or_else(|| capability_detail.map(|(_, detail)| detail.signature.as_str()));
+        let Some(sig_str) = sig_str else {
+            return Ok(None);
         };
+        let documentation = capability_detail
+            .and_then(|(capability, _)| capability_method_doc(capability.field_name(), &name))
+            .or_else(|| builtin_doc(&name));
 
         // Extract parameter fragment from `name(p1, p2, ...) -> ret`.
         let params_str = sig_str
@@ -325,7 +362,7 @@ impl HarnLsp {
         Ok(Some(SignatureHelp {
             signatures: vec![SignatureInformation {
                 label: sig_str.to_string(),
-                documentation: builtin_doc(&name).map(|d| {
+                documentation: documentation.map(|d| {
                     Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
                         value: d,

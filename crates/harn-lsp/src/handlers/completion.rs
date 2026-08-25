@@ -6,7 +6,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{
-    builtin_details, builtin_doc, keyword_doc, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS,
+    builtin_details, builtin_doc, capability_method_details, keyword_doc, DICT_METHODS, KEYWORDS,
+    LIST_METHODS, STRING_METHODS,
 };
 use crate::document_kind::DocumentKind;
 use crate::helpers::{
@@ -241,6 +242,16 @@ pub(super) fn dot_completion_items(
             TypeExpr::Shape(fields) => {
                 push_field_items(&mut items, fields);
             }
+            TypeExpr::Named(name) if name == "Harness" => {
+                push_harness_capability_items(&mut items);
+            }
+            TypeExpr::Named(name)
+                if harn_builtin_meta::CapabilityId::from_type_name(name).is_some() =>
+            {
+                let capability = harn_builtin_meta::CapabilityId::from_type_name(name)
+                    .expect("guarded by the match condition");
+                push_harness_method_items(&mut items, capability.field_name());
+            }
             TypeExpr::Named(name) if name == "string" => {
                 push_method_items(&mut items, STRING_METHODS);
             }
@@ -286,6 +297,28 @@ pub(super) fn dot_completion_items(
     items.sort_by(|a, b| a.label.cmp(&b.label));
     items.dedup_by(|a, b| a.label == b.label && a.kind == b.kind);
     items
+}
+
+fn push_harness_capability_items(items: &mut Vec<CompletionItem>) {
+    for capability in harn_builtin_meta::CapabilityId::ALL {
+        items.push(CompletionItem {
+            label: capability.field_name().to_string(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(capability.type_name().to_string()),
+            ..Default::default()
+        });
+    }
+}
+
+fn push_harness_method_items(items: &mut Vec<CompletionItem>, field: &str) {
+    for detail in capability_method_details(field) {
+        items.push(CompletionItem {
+            label: detail.name.clone(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some(detail.signature.clone()),
+            ..Default::default()
+        });
+    }
 }
 
 fn push_method_items(items: &mut Vec<CompletionItem>, methods: &[&str]) {
@@ -640,6 +673,35 @@ mod tests {
                         .is_some_and(|detail| detail.contains("fn greet"))
             }),
             "items: {items:?}"
+        );
+    }
+
+    #[test]
+    fn dot_completion_includes_harness_capability_methods() {
+        let items = completion_items_at(
+            r#"fn main(harness: Harness) {
+  harness.llm.call("hello")
+}"#,
+            "harness.llm.",
+        );
+        assert!(
+            items.iter().any(|(label, detail)| {
+                label == "call"
+                    && detail
+                        .as_deref()
+                        .is_some_and(|detail| detail.contains("call(prompt: string"))
+            }),
+            "items: {items:?}"
+        );
+    }
+
+    #[test]
+    fn global_completion_excludes_removed_ambient_builtins() {
+        let details = crate::constants::builtin_details();
+        assert!(details.iter().any(|detail| detail.name == "type_of"));
+        assert!(
+            !details.iter().any(|detail| detail.name == "read_file"),
+            "removed ambient read_file must not be offered"
         );
     }
 
