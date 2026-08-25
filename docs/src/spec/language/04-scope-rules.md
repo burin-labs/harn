@@ -65,10 +65,12 @@ value, changing part of it changes the binding's whole value:
 
 ```harn
 const base = [1]
-const appended = base.appending(2)   // fine: base is untouched, base == [1]
+// fine: base is untouched, base == [1]
+const appended = base.appending(2)
 
 let built = []
-built = built.appending(1)           // this is how a collection is built up
+// this is how a collection is built up
+built = built.appending(1)
 ```
 
 Because the methods are pure, discarding a result silently does nothing;

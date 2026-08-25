@@ -51,7 +51,8 @@ fn greet(u: {name: string, age: int}) {
 }
 
 greet({name: "Alice", age: 30})   // OK
-greet({name: "Alice"})            // Error: parameter 'u': missing field 'age' (int)
+// Error: parameter 'u': missing field 'age' (int)
+greet({name: "Alice"})
 ```
 
 See [Error handling -- Runtime shape validation errors](error-handling.md#runtime-shape-validation-errors)
@@ -231,7 +232,9 @@ import { parse_json_typed } from "std/schema"
 
 type User = {name: string}
 
-const user = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
+const user = parse_json_typed(
+  "{\"name\":\"Ada\"}", User, {name: "fallback"},
+)
 harness.stdio.log(user?.name)
 ```
 
@@ -257,10 +260,17 @@ type Receipt = {id: string, version: int}
 const receipt = schema_contract(
   schema_of(Receipt),
   [
-    validation_rule("id_version", fn(value: Receipt) -> list<ValidationIssue> {
-      if starts_with(value.id, "v" + to_string(value.version) + "-") { return [] }
-      return [validation_issue("receipt.id_version", "id must encode version", "id")]
-    }),
+    validation_rule(
+      "id_version", fn(value: Receipt) -> list<ValidationIssue> {
+        if starts_with(
+          value.id, "v" + to_string(value.version) + "-",
+        ) { return [] }
+        return [
+          validation_issue(
+            "receipt.id_version", "id must encode version", "id",
+          )
+        ]
+      }),
   ],
 )
 const checked: Result<Receipt, SchemaContractFailure> =
@@ -312,8 +322,12 @@ recursive descent. It always returns the emitted stream as a list;
 ```harn
 const api = json_parse(response.body)
 const email = json_pointer(api, "/users/0/email")
-const active_emails = jq(api, ".users[] | select(.active == true) | .email")
-const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+const active_emails = jq(
+  api, ".users[] | select(.active == true) | .email",
+)
+const summary = jq_first(
+  api, "{ count: .users | length, next: .meta.next }",
+)
 ```
 
 ## Multipart forms
@@ -750,16 +764,21 @@ Returns a list of dicts, one per match. Each dict contains:
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // [
-//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
-//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
+//   {match: "alice@example", groups: ["alice", "example"],
+//    start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"],
+//    start: 14, end: 22, line: 1}
 // ]
 ```
 
 Named capture groups are added as top-level keys on each result dict:
 
 ```harn
-const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
-// [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+const named = regex_captures(
+  "(?P<user>\\w+):(?P<role>\\w+)", "alice:admin",
+)
+// [{match: "alice:admin", groups: ["alice", "admin"],
+//   user: "alice", role: "admin"}]
 ```
 
 Returns an empty list if there are no matches. Throws on invalid regex.
@@ -934,7 +953,11 @@ keys throw runtime errors.
 ```harn
 const token = jwt_sign(
   "ES256",
-  {iss: app_id, iat: harness.clock.timestamp(), exp: harness.clock.timestamp() + 600},
+  {
+    iss: app_id,
+    iat: harness.clock.timestamp(),
+    exp: harness.clock.timestamp() + 600,
+  },
   harness.fs.read_text("github-app-private-key.pem"),
 )
 ```
@@ -988,7 +1011,9 @@ an opaque session ID in the cookie and store mutable server-side state with
 ```harn
 const set_cookie = session_cookie("harn_session", {user: "alice"}, secret)
 const next_request = cookie_round_trip(set_cookie)
-const session = session_from_cookies(next_request.cookie_header, "harn_session", secret)
+const session = session_from_cookies(
+  next_request.cookie_header, "harn_session", secret,
+)
 if !session.ok {
   throw "invalid session"
 }
@@ -1220,7 +1245,9 @@ import { host } from "std/net_policy"
 
 pipeline main(harness: Harness) {
   const restricted = harness.with_net_policy({
-    allow: [host("api.example.com", [443]), "*.trusted.example", "10.0.0.0/8"],
+    allow: [
+      host("api.example.com", [443]), "*.trusted.example", "10.0.0.0/8",
+    ],
     deny: ["blocked.trusted.example"],
     default: "deny",
   })
@@ -1330,7 +1357,9 @@ const docs = web_search("fastapi dependency injection", {
   ],
 })
 const imports = verify_imports("app.py", {
-  registry: [{ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}],
+  registry: [
+    {ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}
+  ],
 })
 ```
 
@@ -1413,11 +1442,15 @@ Minimal webhook example:
 
 ```harn
 pipeline default(harness: Harness) {
-  const server = harness.net.server({max_body_bytes: 1048576, retain_raw_body: true})
+  const server = harness.net.server({
+    max_body_bytes: 1048576, retain_raw_body: true,
+  })
 
   harness.net.server_before(server, { req ->
     if http_header(req, "origin") != nil {
-      return http_response_text("browser origins are rejected", {status: 403})
+      return http_response_text(
+        "browser origins are rejected", {status: 403},
+      )
     }
     req
   })
@@ -1430,24 +1463,29 @@ pipeline default(harness: Harness) {
     }
   })
 
-  harness.net.server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
-    const signature = http_header(req, "x-hub-signature-256")
-    const expected = "sha256="
-      + hmac_sha256(harness.secrets.read("github/webhook-secret"), req.body)
-    if signature != expected {
-      return http_response_text("invalid signature", {status: 401})
-    }
+  harness.net.server_route(
+    server, "POST", "/hooks/{tenant}/{trigger}", { req ->
+      const signature = http_header(req, "x-hub-signature-256")
+      const expected = "sha256="
+        + hmac_sha256(
+          harness.secrets.read("github/webhook-secret"), req.body,
+        )
+      if signature != expected {
+        return http_response_text("invalid signature", {status: 401})
+      }
 
-    const payload = json_parse(req.body)
-    trigger_fire("github-webhook", {
-      tenant: req.path_params.tenant,
-      trigger: req.path_params.trigger,
-      payload: payload,
-      raw_body: req.raw_body,
-      client_ip: req.client_ip,
+      const payload = json_parse(req.body)
+      trigger_fire("github-webhook", {
+        tenant: req.path_params.tenant,
+        trigger: req.path_params.trigger,
+        payload: payload,
+        raw_body: req.raw_body,
+        client_ip: req.client_ip,
+      })
+      http_response_json(
+        {accepted: true}, {status: 202, headers: {["retry-after"]: "0"}},
+      )
     })
-    http_response_json({accepted: true}, {status: 202, headers: {["retry-after"]: "0"}})
-  })
 
   const probe = harness.net.server_test(server, {
     method: "POST",
@@ -1478,9 +1516,13 @@ and `harness.net.sse_server_cancelled()` to observe shutdown state.
 ```harn
 pipeline progress_stream(harness: Harness, task) {
   const stream = harness.net.sse_server_response({max_event_bytes: 4096})
-  harness.net.sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
+  harness.net.sse_server_send(
+    stream, {event: "progress", id: "1", data: "queued"},
+  )
   harness.net.sse_server_heartbeat(stream, "still working")
-  harness.net.sse_server_send(stream, {event: "progress", id: "2", data: "done"})
+  harness.net.sse_server_send(
+    stream, {event: "progress", id: "2", data: "done"},
+  )
   harness.net.sse_server_flush(stream)
   return stream
 }
@@ -1527,11 +1569,12 @@ assert_eq(call.headers.authorization, "Bearer test-token")
 ```
 
 ```harn
-const stream = harness.net.stream_open("https://example.com/archive.tar.gz", {
-  decompress: false,
-  connect_timeout_ms: 5000,
-  read_timeout_ms: 30000,
-})
+const stream = harness.net.stream_open(
+  "https://example.com/archive.tar.gz", {
+    decompress: false,
+    connect_timeout_ms: 5000,
+    read_timeout_ms: 30000,
+  })
 const meta = harness.net.stream_info(stream)
 const chunk = harness.net.stream_read(stream, 65536)
 harness.net.stream_close(stream)
@@ -1571,7 +1614,8 @@ Use `params` for every dynamic value:
 ```harn
 const rows = pg_query(
   db,
-  "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
+  "select id, payload from receipts where tenant_id = $1 and id"
+    + " = $2::uuid",
   [tenant_id, receipt_id],
 )
 ```
@@ -1584,10 +1628,11 @@ RLS policies:
 
 ```harn
 pg_transaction(db, { tx ->
-  pg_execute(tx, "insert into event_log(tenant_id, kind) values ($1, $2)", [
-    tenant_id,
-    "receipt.created",
-  ])
+  pg_execute(
+    tx, "insert into event_log(tenant_id, kind) values ($1, $2)", [
+      tenant_id,
+      "receipt.created",
+    ])
 }, {settings: {"app.current_tenant_id": tenant_id}})
 ```
 
@@ -1957,21 +2002,28 @@ assert_eq(r.text, "The answer is 42.")
 
 // Pattern-matched mocks (reusable, not consumed)
 harness.llm.mock_enqueue({text: "Hello!", match: "*greeting*"})
-harness.llm.mock_enqueue({text: "step 1", match: "*planner*", consume_match: true})
-harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: true})
+harness.llm.mock_enqueue({
+  text: "step 1", match: "*planner*", consume_match: true,
+})
+harness.llm.mock_enqueue({
+  text: "step 2", match: "*planner*", consume_match: true,
+})
 
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
 // `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
 // it the same way they would a live provider failure.
-harness.llm.mock_enqueue(
-  {error: {category: "rate_limit", message: "429 Too Many Requests"}},
-)
-harness.llm.mock_enqueue(
-  {error: {status: 503, kind: "transient", reason: "upstream_unavailable"}},
-)
+harness.llm.mock_enqueue({
+  error: {category: "rate_limit", message: "429 Too Many Requests"}
+})
+harness.llm.mock_enqueue({
+  error: {
+    status: 503, kind: "transient", reason: "upstream_unavailable",
+  }
+})
 
-// Scope larger fixtures with std/testing::with_llm_script so installation and
+// Scope larger fixtures with
+// std/testing::with_llm_script so installation and
 // cleanup stay attached to this HarnessLlm instead of process state.
 const snapshot = harness.llm.mock_snapshot()
 
@@ -2151,7 +2203,9 @@ after the loop completes.
 Example:
 
 ```harn,ignore
-const result = agent_loop(harness, "summarize this file", nil, {tools: [read_file]})
+const result = agent_loop(
+  harness, "summarize this file", nil, {tools: [read_file]},
+)
 const summary = agent_trace_summary()
 harness.stdio.log("LLM calls: " + str(summary.llm_calls))
 harness.stdio.log("Tools used: " + str(summary.tools_used))
@@ -2420,7 +2474,9 @@ const client = harness.tools.mcp_connect(
 const tools = harness.tools.mcp_list_tools(client)
 harness.stdio.log(tools)
 
-const result = harness.tools.mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
+const result = harness.tools.mcp_call(
+  client, "read_file", {"path": "/tmp/hello.txt"},
+)
 harness.stdio.log(result)
 
 harness.tools.mcp_disconnect(client)
@@ -2500,7 +2556,9 @@ pipeline default(harness: Harness) {
   const tools = harness.tools.mcp_list_tools(mcp.filesystem)
   harness.stdio.log(tools)
 
-  const result = harness.tools.mcp_call(mcp.github, "list_issues", {repo: "harn"})
+  const result = harness.tools.mcp_call(
+    mcp.github, "list_issues", {repo: "harn"},
+  )
   harness.stdio.log(result)
 }
 ```
@@ -2722,8 +2780,14 @@ Example profiles:
 const local_dev_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
-    {ask: {tool_kind: ["edit", "move"], path: "src/**"}, reason: "workspace mutation"},
-    {deny: {command: ["*curl*", "*wget*"]}, reason: "downloaded shell is not allowed"}
+    {
+      ask: {tool_kind: ["edit", "move"], path: "src/**"},
+      reason: "workspace mutation",
+    },
+    {
+      deny: {command: ["*curl*", "*wget*"]},
+      reason: "downloaded shell is not allowed",
+    }
   ],
   repeat_limit: 3
 }
@@ -2731,7 +2795,11 @@ const local_dev_policy = {
 const ci_headless_policy = {
   rules: [
     {allow: {tool_kind: ["read", "search"]}},
-    {allow: {tool: "run_command", command_identity: ["cargo", "npm", "make"]}},
+    {
+      allow: {
+        tool: "run_command", command_identity: ["cargo", "npm", "make"],
+      }
+    },
     {deny: "*"}
   ],
   allow_sensitive_paths: false,

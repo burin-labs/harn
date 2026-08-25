@@ -222,7 +222,9 @@ and `query`; all provided dict predicates must match.
 ### std/agent/fact module
 
 ```harn
-import { store_fact, recall_facts, invalidate_facts } from "std/agent/fact"
+import {
+  store_fact, recall_facts, invalidate_facts,
+} from "std/agent/fact"
 ```
 
 Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains

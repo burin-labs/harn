@@ -27,7 +27,9 @@ deadline expires, and `command_cancel` tears down the owned process group. The
 output wait subscribes to capture publication; it does not poll artifact files.
 
 ```harn,ignore
-import { command_cancel, command_run, command_wait_for_output } from "std/command"
+import {
+  command_cancel, command_run, command_wait_for_output,
+} from "std/command"
 
 fn run_service(tools: HarnessTools) {
   const service = command_run(tools, ["my-service"], {background: true})
@@ -36,7 +38,9 @@ fn run_service(tools: HarnessTools) {
     source: "stderr",
     timeout_ms: 10000,
   })
-  if !ready.matched { throw "service did not become ready: " + ready.status }
+  if !ready.matched {
+    throw "service did not become ready: " + ready.status
+  }
 }
 ```
 
@@ -104,9 +108,10 @@ pipeline main(harness: Harness) {
     harness.tools.invoke("cancel_handle", {handle_id: handle.handle_id})
   }
 
-  agent_loop(harness, "Summarize the repository while the file walk runs.", nil, {
-    tools: ["read_file"],
-  })
+  agent_loop(
+    harness, "Summarize the repository while the file walk runs.", nil, {
+      tools: ["read_file"],
+    })
 }
 ```
 

@@ -214,7 +214,8 @@ register_reminder_provider({
     }
     return {
       reminder: {
-        body: "Workspace may have changed while idle; re-check touched files.",
+        body: "Workspace may have changed while idle; re-check"
+          + " touched files.",
         tags: ["workspace"],
         dedupe_key: "workspace:idled",
         ttl_turns: 1,
@@ -429,7 +430,9 @@ const compacted = transcript_compact(snapshot, {
       messages: [
         {
           role: "system",
-          content: "Summary plus " + str(len(reminders)) + " active reminders.",
+          content: "Summary plus " + str(
+            len(reminders)
+          ) + " active reminders.",
         },
       ],
     })
@@ -533,7 +536,8 @@ filters per loop when the defaults are too broad.
 ```harn,ignore
 store_fact({
   kind: "Decision",
-  claim: "Build cancels in-flight tool calls on SIGINT before clearing state.",
+  claim: "Build cancels in-flight tool calls on SIGINT before"
+    + " clearing state.",
   confidence: 0.92,
   evidence: [{kind: "FileRange", ref: "crates/harn-vm/src/cancel.rs:1"}],
 })
@@ -558,18 +562,20 @@ one pending nudge.
 
 ```harn,ignore
 pipeline main(harness: Harness) {
-  harness.agent.register_session_hook("file_edited", { _hook_harness, event ->
-    const path = to_string(event?.path ?? "")
-    return {
-      reminder: {
-        body: "File changed externally: " + path + ". Re-read it before editing.",
-        tags: ["workspace", "file_changed"],
-        dedupe_key: "file_changed:" + path,
-        ttl_turns: 2,
-        propagate: "session",
-      },
-    }
-  })
+  harness.agent.register_session_hook(
+    "file_edited", { _hook_harness, event ->
+      const path = to_string(event?.path ?? "")
+      return {
+        reminder: {
+          body: "File changed externally: " + path + ". Re-read it"
+            + " before editing.",
+          tags: ["workspace", "file_changed"],
+          dedupe_key: "file_changed:" + path,
+          ttl_turns: 2,
+          propagate: "session",
+        },
+      }
+    })
 }
 ```
 
@@ -578,7 +584,8 @@ pipeline main(harness: Harness) {
 Use `propagate: "all"` only when downstream agents need the same caution.
 
 ```harn,ignore
-const memory_warning = "Customer prefers patch-sized PRs and explicit verification."
+const memory_warning = "Customer prefers patch-sized PRs and explicit"
+  + " verification."
 const injected = transcript.inject_reminder(transcript(), {
   body: memory_warning,
   tags: ["memory"],

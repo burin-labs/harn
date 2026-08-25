@@ -112,19 +112,21 @@ top-level loops):
 ```harn,ignore
 import { agent_await_resumption } from "std/agent/workers"
 
-const result = agent_loop(harness, "Wait for the maintainer's review.", nil, {
-  provider: "openai",
-  model: "gpt-5",
-  tool_format: "native",
-  // agent_await_resumption is registered automatically.
-})
+const result = agent_loop(
+  harness, "Wait for the maintainer's review.", nil, {
+    provider: "openai",
+    model: "gpt-5",
+    tool_format: "native",
+    // agent_await_resumption is registered automatically.
+  })
 
 // The model decided to park; `result.status == "suspended"`.
 if result.status == "suspended" {
   harness.stdio.log(result.reason)                      // model-supplied
   harness.stdio.log(result.initiator)                   // "self"
   harness.stdio.log(result.conditions?.timeout?.duration_minutes)
-  harness.stdio.log(result.handle.snapshot_path)        // persisted snapshot
+  // persisted snapshot
+  harness.stdio.log(result.handle.snapshot_path)
 }
 ```
 
@@ -153,7 +155,9 @@ model-callable tools:
 ```harn,ignore
 import { agent_lifecycle_tools } from "std/agent/workers"
 
-const parent_registry = agent_lifecycle_tools(tool_registry(), {subagents: true})
+const parent_registry = agent_lifecycle_tools(
+  tool_registry(), {subagents: true},
+)
 
 agent_loop(harness, "Coordinate the review.", nil, {
   tools: parent_registry,
@@ -184,7 +188,8 @@ const snapshot = suspend_agent(handle, "operator pulled context")
 const resumed = resume_agent(handle, "Pick up where you left off.")
 const final = wait_agent(handle)
 harness.stdio.log(final.status)         // "done"
-harness.stdio.log(final.has_transcript) // true — transcript continuity preserved
+// true — transcript continuity preserved
+harness.stdio.log(final.has_transcript)
 ```
 
 `subagent_pause` and `subagent_resume` emit `tool_call_audit` telemetry
@@ -314,7 +319,9 @@ so they compose with `first_available(...)`, `compose(...)`, and the rest of
 import { ResumeBy, first_handled } from "std/agent/resume_by"
 
 const RB = ResumeBy()
-const chain = first_handled([RB.cloud_harness, RB.local_runtime, RB.parent_llm])
+const chain = first_handled([
+  RB.cloud_harness, RB.local_runtime, RB.parent_llm,
+])
 
 const request = agent_await_resumption(
   "wait for upstream merge",

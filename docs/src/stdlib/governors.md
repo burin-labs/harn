@@ -88,7 +88,9 @@ into a live `post_turn_callback` that reads the per-turn payload and steers.
 import { governor_post_turn } from "std/agent/governors"
 
 agent_loop(harness, task, ctx, {
-  post_turn_callback: governor_post_turn({budget: 40.0, signal: "iterations"}),
+  post_turn_callback: governor_post_turn({
+    budget: 40.0, signal: "iterations",
+  }),
 })
 ```
 

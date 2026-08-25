@@ -285,7 +285,9 @@ import {
   on_finish_drain,
   on_finish_handoff_to,
 } from "std/lifecycle"
-import { compose, if_unsettled, with_telemetry } from "std/lifecycle/combinators"
+import {
+  compose, if_unsettled, with_telemetry,
+} from "std/lifecycle/combinators"
 
 pipeline default(harness: Harness) {
   pipeline_on_finish(

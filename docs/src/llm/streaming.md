@@ -6,7 +6,9 @@
 arrive. Iterate over it with a `for` loop:
 
 ```harn
-const stream = harness.llm.stream("Tell me a story", "You are a storyteller")
+const stream = harness.llm.stream(
+  "Tell me a story", "You are a storyteller",
+)
 for chunk in stream {
   harness.stdio.log(chunk)
 }
@@ -24,7 +26,9 @@ It returns a first-class `Stream` of chunk dicts instead of a channel of
 raw strings:
 
 ```harn
-const chunks = harness.llm.stream_call("Tell me a story", nil, {provider: "openai"})
+const chunks = harness.llm.stream_call(
+  "Tell me a story", nil, {provider: "openai"},
+)
 for chunk in chunks {
   harness.stdio.log(chunk.visible_delta)
   if chunk.partial.contains("REFUSAL") {
@@ -213,7 +217,11 @@ const graph = workflow_graph({
   entry: "act",
   nodes: {
     act: {kind: "stage", mode: "agent", tools: review_tools()},
-    verify: {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
+    verify: {
+      kind: "verify",
+      mode: "agent",
+      tools: tool_select(review_tools(), ["run"]),
+    }
   },
   edges: [{from: "act", to: "verify"}]
 })

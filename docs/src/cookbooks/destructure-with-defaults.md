@@ -16,7 +16,9 @@ Every line repeats the source and the `?.` / `??` dance. Harn supports
 block collapses to one bind:
 
 ```harn,ignore
-const { namespace = nil, opts = {}, path = "", retries = 0 } = pipeline_input() ?? {}
+const {
+  namespace = nil, opts = {}, path = "", retries = 0,
+} = pipeline_input() ?? {}
 ```
 
 The two forms are equivalent — including the types each binding receives.

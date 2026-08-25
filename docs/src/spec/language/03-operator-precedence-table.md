@@ -66,9 +66,12 @@ automatically wrapped in a closure where `_` is replaced with the piped
 value:
 
 ```harn
-"hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
-[3, 1, 2] |> _.sorted()             // desugars to: |> { __pipe -> __pipe.sorted() }
-items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
+// desugars to: |> { __pipe -> split(__pipe, " ") }
+"hello world" |> split(_, " ")
+// desugars to: |> { __pipe -> __pipe.sorted() }
+[3, 1, 2] |> _.sorted()
+// desugars to: |> { __pipe -> len(__pipe) }
+items |> len(_)
 ```
 
 Without `_`, the pipe passes the value as the sole argument to the callable on

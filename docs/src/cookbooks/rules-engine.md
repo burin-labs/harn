@@ -183,7 +183,8 @@ rule without recompiling:
 ```harn,ignore
 import { rules_search, rules_apply } from "std/rules"
 
-const rule = "id = \"calls\"\nlanguage = \"typescript\"\n[rule]\npattern = \"$FN()\"\n"
+const rule = "id = \"calls\"\nlanguage = \"typescript\"\n[rule]\npattern"
+  + " = \"$FN()\"\n"
 
 fn inspect_rules(rules: HarnessRules, stdio: HarnessStdio) {
   const found = rules_search(
@@ -192,7 +193,8 @@ fn inspect_rules(rules: HarnessRules, stdio: HarnessStdio) {
   )
   stdio.println(found.match_count)            // 2
 
-  // Applying a codemod is explicit authority; dry-run remains the default.
+  // Applying a codemod is explicit
+  // authority; dry-run remains the default.
   const result = rules_apply(
     rules,
     {rule: codemod_rule, paths: ["src/a.ts"], dry_run: false},
@@ -215,7 +217,14 @@ a finding, a list of findings, or a `rules_diagnostics(...)` result:
 // rules/no-todo.lint.harn
 pub fn lint(source) -> list {
   if source.contains("TODO") {
-    return [{column: 1, line: 1, message: "TODO markers are banned", severity: "error"}]
+    return [
+      {
+        column: 1,
+        line: 1,
+        message: "TODO markers are banned",
+        severity: "error",
+      }
+    ]
   }
   return []
 }
@@ -238,8 +247,8 @@ A script rule can also delegate to the structural engine and return the
 import { rules_diagnostics } from "std/rules"
 
 pub fn lint(source) {
-  const rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no foo\"\n"
-    + "[rule]\npattern = \"foo()\"\n"
+  const rule = "id = \"no-foo\"\nlanguage = \"harn\"\nmessage = \"no"
+    + " foo\"\n[rule]\npattern = \"foo()\"\n"
   return rules_diagnostics({language: "harn", rule: rule, source: source})
 }
 ```

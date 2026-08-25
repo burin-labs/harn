@@ -159,7 +159,10 @@ legacy helpers with `[lint].persona_step_allowlist`.
 #### `@command(name?, description?, hint?)`
 
 ```harn,ignore
-@command(name: "review", description: "Review the diff", hint: "(optional focus area)")
+@command(
+  name: "review", description: "Review the diff",
+  hint: "(optional focus area)",
+)
 pipeline review_branch(harness: Harness, task) { ... }
 ```
 

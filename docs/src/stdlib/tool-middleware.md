@@ -134,7 +134,9 @@ the model omits the synthetic `reason` field, while still recording
 ```harn,ignore
 const mw = with_required_reason({schema_required: false})
 const registry = tools_use_middleware(my_registry, mw.schema_transform)
-agent_loop(harness, task, system, {tools: registry, tool_caller: mw.caller})
+agent_loop(
+  harness, task, system, {tools: registry, tool_caller: mw.caller},
+)
 ```
 
 `schema_required: false` keeps runtime validation aligned with the
@@ -350,8 +352,10 @@ import {
 const reason_mw = with_required_reason({schema_required: false})
 
 const captain_tool_caller = compose_tool_callers([
-  with_audit_log({sink: "both", redact: ["token", "content"]}), // typed tool receipts
-  with_telemetry({sink: "langfuse", project: "harn-dev"}), // tool-call spans
+  // typed tool receipts
+  with_audit_log({sink: "both", redact: ["token", "content"]}),
+  // tool-call spans
+  with_telemetry({sink: "langfuse", project: "harn-dev"}),
   with_summary({ call, _r -> describe(call) }), // user-facing one-liner
   with_consent(persona.autonomy_policy),       // act_with_approval gate
   reason_mw.caller,                            // require `reason` arg
@@ -359,10 +363,13 @@ const captain_tool_caller = compose_tool_callers([
   with_handoff_artifact({sink: handoff_emitter}), // typed handoff records
   with_idempotency(per_tool_idempotency_keyer),
   with_rate_limit(harness.runtime, {max_calls: persona.tool_budget}),
-  with_dry_run({only: persona.shadow_tools}),  // crystallization shadow runs
+  // crystallization shadow runs
+  with_dry_run({only: persona.shadow_tools}),
 ])
 
-const registry = tools_use_middleware(my_registry, reason_mw.schema_transform)
+const registry = tools_use_middleware(
+  my_registry, reason_mw.schema_transform,
+)
 
 agent_loop(harness, task, system, {
   tools: registry,

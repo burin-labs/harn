@@ -46,7 +46,10 @@ pipeline main(harness: Harness) {
   // Or branch from a scrubber-rebuilt prefix.
   const replay_branch = harness.agent.fork_at(s, 1)
   const ancestry = harness.agent.ancestry(replay_branch)
-  assert(ancestry["root_id"] == s, "fork ancestry resolves back to the root session")
+  assert(
+    ancestry["root_id"] == s,
+    "fork ancestry resolves back to the root session",
+  )
 
   // Release a session immediately.
   harness.agent.close(branch)
@@ -115,7 +118,9 @@ fn manage_clients(agent: HarnessAgent) {
 
   // A second controller must make takeover explicit.
   agent.takeover(s, "mobile", {metadata: {reason: "operator handoff"}})
-  agent.client_inject_prompt(s, "mobile", "continue from the failing test")
+  agent.client_inject_prompt(
+    s, "mobile", "continue from the failing test",
+  )
   agent.detach(s, "mobile", {reason: "client_exit"})
 }
 ```

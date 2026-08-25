@@ -63,7 +63,9 @@ workspace:
 ```harn
 import "std/project"
 
-const profile = harness.project.context_profile(".", {include_env_credentials: false})
+const profile = harness.project.context_profile(
+  ".", {include_env_credentials: false},
+)
 ```
 
 The resolver composes existing signals instead of indexing code itself. It uses
@@ -101,16 +103,14 @@ instead of forcing another project scan:
 ```harn
 import { agent_loop_options } from "std/agent/options"
 
-const _opts = agent_loop_options(
-  {
-    root: ".",
-    code_librarian_signals: {
-      source: "code_librarian",
-      fingerprint: {primary_language: "rust", languages: ["rust"]},
-      remote: "https://github.com/burin-labs/harn.git",
-    },
+const _opts = agent_loop_options({
+  root: ".",
+  code_librarian_signals: {
+    source: "code_librarian",
+    fingerprint: {primary_language: "rust", languages: ["rust"]},
+    remote: "https://github.com/burin-labs/harn.git",
   },
-)
+})
 ```
 
 The same profile can be handed to `prompt_explain(...)`; the resulting
@@ -165,7 +165,9 @@ sub-project evidence:
 ```harn
 import "std/project"
 
-const tree = harness.project.scan_tree(".", {tiers: ["ambient"], depth: 3})
+const tree = harness.project.scan_tree(
+  ".", {tiers: ["ambient"], depth: 3},
+)
 // {".": {...}, "frontend": {...}, "backend": {...}}
 ```
 
@@ -200,7 +202,8 @@ const base = harness.project.scan(".", {tiers: ["ambient", "config"]})
 const enriched = harness.project.enrich(".", {
   base_evidence: base,
   prompt: "Project: {{package_name}}\n"
-    + "{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\n"
+    + "{{ for file in files }}FILE"
+      + " {{file.path}}\n{{file.content}}\n{{ end }}\n"
     + "Return JSON.",
   schema: {
     type: "object",

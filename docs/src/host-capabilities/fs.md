@@ -143,7 +143,8 @@ The walker prunes an ignored directory before any pattern is tested, so *where*
 you name that directory decides whether you can reach it:
 
 ```harn
-// Returns nothing: `target` is pruned as a descendant, and the pattern never
+// Returns nothing: `target` is pruned
+// as a descendant, and the pattern never
 // gets a chance to run against anything inside it.
 harness.fs.glob("target/**/*.rs")
 

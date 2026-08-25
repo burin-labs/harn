@@ -157,23 +157,35 @@ import {
 const receipt = coord_post(
   "session",
   "release",
-  {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
+  {
+    kind: "claim",
+    subject: "release ownership",
+    body: "Codex-2 owns v0.8.167",
+  },
   {id: "release-claim", session_id: "agent-session-1"},
 )
 
-const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const messages = coord_read(
+  "session", "release", {session_id: "agent-session-1"},
+)
 const newer = coord_read("session", "release", {
   session_id: "agent-session-1",
   since_seq: receipt.message.seq,
 })
-const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
-const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+const stream = coord_subscribe(
+  "session", "release", {session_id: "agent-session-1"},
+)
+const memory_receipt = coord_remember(
+  receipt, {namespace: "coordination/release"},
+)
 const request = coord_send("workspace", "release", "build-agent", {
   kind: "request",
   subject: "verify release",
   body: "Please audit the new patch release.",
 })
-const inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+const inbox = coord_inbox(
+  "workspace", "release", {consumer_id: "build-agent"},
+)
 coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
@@ -214,7 +226,9 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   handler: { harness, event ->
-    harness.stdio.log("PR merged: " + to_string(event.provider_payload.payload.number))
+    harness.stdio.log(
+      "PR merged: " + to_string(event.provider_payload.payload.number)
+    )
   },
   match: {events: ["channel:pr.merged"]},
 })
@@ -247,7 +261,9 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
-  when: { _harness, event -> event.provider_payload.payload.target_branch == "main" },
+  when: { _harness, event ->
+    event.provider_payload.payload.target_branch == "main"
+  },
   handler: { harness, event -> kick_release(event) },
 })
 ```
@@ -268,10 +284,14 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
-  batch: {count: 3, window: "1h", key: "repo", expire_action: "fire_partial"},
+  batch: {
+    count: 3, window: "1h", key: "repo", expire_action: "fire_partial",
+  },
   handler: { harness, event ->
     const merged = event.batch
-    harness.stdio.log("Cutting release with " + to_string(len(merged)) + " merged PRs")
+    harness.stdio.log(
+      "Cutting release with " + to_string(len(merged)) + " merged PRs"
+    )
   },
 })
 ```
@@ -330,8 +350,8 @@ trigger_register({
   batch: {count: 30, window: "1h"},
   handler: ReminderInject({
     target: "current",
-    body: "You've used 30 tools without a checkpoint. Take a turn to reflect"
-      + " on progress and adjust the plan.",
+    body: "You've used 30 tools without a checkpoint. Take a turn to"
+      + " reflect on progress and adjust the plan.",
     tags: ["reflection_nudge"],
     ttl_turns: 1,
     dedupe_key: "reflection_nudge",
@@ -370,12 +390,15 @@ Worst verdict wins; a `block` short-circuits remaining guardrails.
 Register guardrails with `channel_guardrail_register(config)`:
 
 ```harn,ignore
-import { prompt_injection_scanner, register_guardrail } from "std/channel_guardrails"
+import {
+  prompt_injection_scanner, register_guardrail,
+} from "std/channel_guardrails"
 
 // Built-in: heuristic prompt-injection signature scan.
 const pi_id = prompt_injection_scanner({})
 
-// Custom: any closure returning nil / "allow" | "warn" | "block" / {verdict, reason?}.
+// Custom: any closure returning nil / "allow" | "warn" | "block" /
+// {verdict, reason?}.
 const custom_id = register_guardrail({
   id: "block-secrets-in-payload",
   applies_to: ["channel:learnings.*"],

@@ -19,13 +19,16 @@ All three accept the same options: `namespace`, `ttl` (e.g. `"10m"`) or
 ## Primitives
 
 ```harn
-import { cache_clear, cache_get, cache_put, cache_stats, mem_cache } from "std/cache"
+import {
+  cache_clear, cache_get, cache_put, cache_stats, mem_cache,
+} from "std/cache"
 
 pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "evals", ttl: "5m"})
   cache_put("k", {answer: 42}, {store: store})
   const hit = cache_get("k", {store: store})
-  // -> {hit: true, value: {answer: 42}, backend: "mem", namespace: "evals"}
+  // -> {hit: true, value: {answer: 42},
+  //     backend: "mem", namespace: "evals"}
   harness.stdio.log(to_string(hit.hit))
   cache_clear({store: store})
   harness.stdio.log(json_stringify(cache_stats({store: store})))
@@ -112,7 +115,11 @@ import { compose, with_cache, with_retry } from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 2}),
-  with_cache({store: sqlite_cache(state_path("personas/triage.sqlite"), {ttl: "24h"})}),
+  with_cache({
+    store: sqlite_cache(
+      state_path("personas/triage.sqlite"), {ttl: "24h"},
+    )
+  }),
 ])(default_llm_caller())
 ```
 
@@ -142,8 +149,14 @@ import { fs_cache, with_cache } from "std/cache"
 
 const fixtures = fs_cache(repo_path("conformance/fixtures/triage"))
 const fixture = with_cache("trace:" + trace_id, fn() {
-  return read_jsonl(repo_path("conformance/fixtures/triage/" + trace_id + ".jsonl"))
-}, {store: fixtures, session_id: session_id, estimate: {model_calls_avoided: 1}})
+  return read_jsonl(
+    repo_path("conformance/fixtures/triage/" + trace_id + ".jsonl")
+  )
+}, {
+  store: fixtures,
+  session_id: session_id,
+  estimate: {model_calls_avoided: 1},
+})
 ```
 
 Because the session_id is set, the shadow run's tape captures the

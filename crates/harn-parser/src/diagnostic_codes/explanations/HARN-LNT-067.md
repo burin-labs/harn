@@ -8,11 +8,13 @@ boundary, so their contract must be visible without inspecting the body or a
 particular caller.
 
 ```harn
-pub fn load(path) {                  // warning: parameter and return are untyped
+// warning: parameter and return are untyped
+pub fn load(path) {
   return {path: path}
 }
 
-pub pipeline deploy(config) {        // warning: parameter and return are untyped
+// warning: parameter and return are untyped
+pub pipeline deploy(config) {
   return true
 }
 ```

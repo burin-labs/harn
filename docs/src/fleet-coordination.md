@@ -171,7 +171,9 @@ When deterministic discovery finishes after acquisition, replace the active
 lease metadata without introducing a sidecar authority or releasing ownership:
 
 ```harn
-import { host_lease_update_metadata, with_host_lease } from "std/host_lease"
+import {
+  host_lease_update_metadata, with_host_lease,
+} from "std/host_lease"
 
 with_host_lease(
   {

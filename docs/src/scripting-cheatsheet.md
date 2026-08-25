@@ -33,7 +33,9 @@ when the template should live inline in the module:
 
 ```harn
 const template = """
-pub fn {{ name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }}) {
+pub fn {{ name }}(
+  {{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }},
+) {
   return "{{ name }}"
 }
 """
@@ -98,7 +100,9 @@ const body = if len(content) > 2400 {
 `stream.collect`, `stream.fold`, or `stream.first` pulls from them.
 
 ```harn
-const first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+const first_three = stream.collect(
+  stream.take(results_channel, 3), {max: 3},
+)
 
 const tool_events = stream.collect(
   stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
@@ -182,7 +186,9 @@ if unwrap_err(r) != "" {
 // `try/catch` also works as an expression — the whole form evaluates to
 // the try body's tail value on success or the catch handler's tail value
 // on a caught throw, so simple fallbacks don't need Result gymnastics.
-const answer = try { harness.llm.call(prompt, nil, opts).text } catch (e) { "fallback" }
+const answer = try {
+  harness.llm.call(prompt, nil, opts).text
+} catch (e) { "fallback" }
 ```
 
 ## Concurrency
@@ -283,7 +289,8 @@ const r = harness.llm.call(prompt, system, {
 output: {schema: schema, validation: "error", stream_abort: true},
 schema_retries: 2,       // retry with corrective nudge on schema mismatch
 })
-harness.stdio.log(r.text)            // the public answer (preferred for "the answer")
+// the public answer (preferred for "the answer")
+harness.stdio.log(r.text)
 harness.stdio.log(r.data.verdict)    // parsed structured output
 ```
 

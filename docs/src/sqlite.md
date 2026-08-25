@@ -16,7 +16,8 @@ pipeline default(harness: Harness) {
 
   const rows = sqlite_query(
     db,
-    "select topic, id, payload from events where topic = ? order by id desc limit ?",
+    "select topic, id, payload from events where topic = ? order by id"
+      + " desc limit ?",
     ["agent_events", 50],
   )
 
@@ -87,9 +88,13 @@ is required.
 
 ```harn
 sqlite_transaction(db, { tx ->
-  sqlite_execute(tx, "insert into notes(id, body) values (?, ?)", [1, "outer"])
+  sqlite_execute(
+    tx, "insert into notes(id, body) values (?, ?)", [1, "outer"],
+  )
   sqlite_savepoint(tx, "before_optional")
-  sqlite_execute(tx, "insert into notes(id, body) values (?, ?)", [2, "optional"])
+  sqlite_execute(
+    tx, "insert into notes(id, body) values (?, ?)", [2, "optional"],
+  )
   sqlite_rollback_to_savepoint(tx, "before_optional")
   sqlite_release_savepoint(tx, "before_optional")
 })
@@ -130,7 +135,9 @@ const db = sqlite_mock_db([
   },
 ])
 
-const rows = sqlite_query(db, "select id from events where topic = ?", ["agent_events"])
+const rows = sqlite_query(
+  db, "select id from events where topic = ?", ["agent_events"],
+)
 const calls = sqlite_mock_calls(db)
 ```
 

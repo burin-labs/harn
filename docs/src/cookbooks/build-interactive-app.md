@@ -69,12 +69,13 @@ Give the tool an object return schema. Harn then sends the `UiUpdate` as MCP
 `structuredContent`, which avoids parsing presentation text.
 
 ```harn
-tools = tool_define(tools, "decision.handle_event", "Apply one UI event", {
-  parameters: {event: {type: "object", required: true}},
-  returns: {type: "object"},
-  handler: handle_event,
-  meta: ui.tool_metadata(resource, {visibility: ["app"]}),
-})
+tools = tool_define(
+  tools, "decision.handle_event", "Apply one UI event", {
+    parameters: {event: {type: "object", required: true}},
+    returns: {type: "object"},
+    handler: handle_event,
+    meta: ui.tool_metadata(resource, {visibility: ["app"]}),
+  })
 harness.tools.mcp_tools(tools)
 harness.tools.mcp_resource(ui.mcp_resource(resource))
 ```

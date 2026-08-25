@@ -283,7 +283,13 @@ const spec = parser({
   name: "render",
   args: [
     {name: "template", kind: "positional"},
-    {name: "jobs", kind: "flag", long: "--jobs", parse: "int", default: 1},
+    {
+      name: "jobs",
+      kind: "flag",
+      long: "--jobs",
+      parse: "int",
+      default: 1,
+    },
     {name: "json", kind: "switch", long: "--json"},
   ],
 })
@@ -395,7 +401,9 @@ CLI scripts that need app-specific directories should use
 [`std/cli/paths`](./cli-paths-reference.md):
 
 ```harn
-import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
+import {
+  xdg_cache_home, xdg_config_home, xdg_data_home,
+} from "std/cli/paths"
 
 const config_dir = xdg_config_home("harn")
 const data_dir = xdg_data_home("harn")

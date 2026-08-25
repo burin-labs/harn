@@ -9,7 +9,9 @@ Generic ActorChain validation, traversal, and compact formatting live in
 surface-specific rendering policy.
 
 ```harn
-import { append_git_trailers, render, slack_message_disclosure } from "std/disclosure"
+import {
+  append_git_trailers, render, slack_message_disclosure,
+} from "std/disclosure"
 
 pipeline default(harness: Harness) {
   const chain = {

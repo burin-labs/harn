@@ -165,7 +165,9 @@ import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
 const retrying = with_retry({max_attempts: 4, backoff: "exponential"})
 const caller = compose([retrying])(default_llm_caller())
-agent_loop(harness, task, system, {loop_until_done: true, llm_caller: caller})
+agent_loop(
+  harness, task, system, {loop_until_done: true, llm_caller: caller},
+)
 ```
 
 See [the LLM handlers catalog](docs/src/stdlib/llm-handlers.md) for the full module set (handlers, ensemble,
@@ -249,7 +251,9 @@ const graph = workflow_graph({
     plan: {
       kind: "stage", mode: "llm", task_label: "Planning task",
       model_policy: {model_tier: "small"},
-      context_policy: {include_kinds: ["summary", "resource"], max_tokens: 1200}
+      context_policy: {
+        include_kinds: ["summary", "resource"], max_tokens: 1200,
+      }
     },
     implement: {
       kind: "stage", mode: "agent", tools: coding_tools(),

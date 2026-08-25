@@ -511,7 +511,9 @@ keyed by the secret name with `-` replaced by `_`. A manifest declaring
 `args.secrets.api_key`, so `call` should read that first:
 
 ```harn
-const api_key = args?.api_key ?? args?.secrets?.api_key ?? env.get("EXAMPLE_API_KEY")
+const api_key = args?.api_key ?? args?.secrets?.api_key ?? env.get(
+  "EXAMPLE_API_KEY"
+)
 ```
 
 A credential the caller passed explicitly wins over the stored one, and a
@@ -744,8 +746,13 @@ fn api_json(clock: HarnessClock, net: HarnessNet, request) {
     {
       provider: "example",
       operation: "api_json",
-      headers: {Authorization: "Bearer " + request.token, Accept: "application/json"},
-      body: if request.body == nil { nil } else { json_stringify(request.body) },
+      headers: {
+        Authorization: "Bearer " + request.token,
+        Accept: "application/json",
+      },
+      body: if request.body == nil { nil } else {
+        json_stringify(request.body)
+      },
       idempotency_key: request.idempotency_key,
       retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
     },

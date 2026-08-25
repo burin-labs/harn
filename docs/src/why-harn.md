@@ -38,7 +38,9 @@ client initialization, no response parsing. Set an environment variable
 and call a model:
 
 ```harn
-const answer = harness.llm.call("Summarize this code", "You are a code reviewer.")
+const answer = harness.llm.call(
+  "Summarize this code", "You are a code reviewer.",
+)
 ```
 
 Harn ships with built-in configs for 44 providers, including Anthropic,
@@ -63,7 +65,10 @@ pipeline analyze(harness: Harness, task) {
   const steps = json_parse(plan.text)
 
   const results = parallel each steps { step ->
-    agent_loop(harness, step, "You are a coding assistant.", {loop_until_done: true})
+    agent_loop(
+      harness, step, "You are a coding assistant.",
+      {loop_until_done: true},
+    )
   }
 
   harness.fs.write_text("results.json", json_stringify(results))
@@ -89,7 +94,9 @@ const client = harness.tools.mcp_connect(
   ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
 )
 const tools = harness.tools.mcp_list_tools(client)
-const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/data.txt"})
+const content = harness.tools.mcp_call(
+  client, "read_file", {path: "/tmp/data.txt"},
+)
 harness.tools.mcp_disconnect(client)
 ```
 
@@ -101,7 +108,9 @@ without asking you to write an event loop.
 
 ```harn
 const results = parallel each files { file ->
-  harness.llm.call(harness.fs.read_text(file), "Review this file for security issues")
+  harness.llm.call(
+    harness.fs.read_text(file), "Review this file for security issues",
+  )
 }
 ```
 

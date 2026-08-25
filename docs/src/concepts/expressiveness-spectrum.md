@@ -126,7 +126,8 @@ opts = with_governance(opts, {
   detectors: {no_progress: {messages: 3}, stuck: {same_diagnostic: 3}},
 })
 
-// An independent "are we actually done?" gate, not the model's own say-so.
+// An independent "are we actually done?"
+// gate, not the model's own say-so.
 opts = {...opts, ...agent_completion_gate(harness.runtime, {
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
@@ -171,7 +172,8 @@ retry. You own what happens inside a try:
   kind: "stage",
   retry_policy: {max_attempts: 3, feedback: true},
   executor: { ctx ->
-    // ctx = {task, attempt, prior_findings, prior_verification, prior_text, artifacts}
+    // ctx = {task, attempt, prior_findings, prior_verification,
+    // prior_text, artifacts}
     const patched = my_patch_step(ctx.task, ctx.prior_findings)
     return {text: patched.summary, artifacts: patched.artifacts}
   },
@@ -184,7 +186,8 @@ runner actually moved. So the host feeds that fact in through a callback. The
 loop supplies the payload; you return the one number that matters:
 
 ```harn,ignore
-// "Writes are not progress." Return the turn's best verify-state — say, the
+// "Writes are not progress." Return the
+// turn's best verify-state — say, the
 // count of passing tests. nil means "no verification evidence this turn."
 const opts = {...base, stall_diagnostics: {
   progress_signal: { payload -> host_passing_test_count() },

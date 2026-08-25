@@ -54,9 +54,12 @@ Hosts can attach a managed provider to `Harness::real()` with
 // Canonical connector/runtime secret ids are first-class.
 const google = harness.secrets.read("google_workspace/access-token")
 
-// Application secrets may be scoped when they belong to a tenant/workspace.
+// Application secrets may be scoped when
+// they belong to a tenant/workspace.
 const scope = {kind: "workspace", id: "workspace-123"}
-const receipt = harness.secrets.write("github.token", "token-v1", scope, 3600000)
+const receipt = harness.secrets.write(
+  "github.token", "token-v1", scope, 3600000,
+)
 const token = harness.secrets.read("github.token", scope)
 const rotated = harness.secrets.rotate(
   "github.token",

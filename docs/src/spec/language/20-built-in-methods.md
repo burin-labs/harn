@@ -243,11 +243,15 @@ and returns a list of dicts, one per match. Each dict contains:
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
-//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
-//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
+//   {match: "alice@example", groups: ["alice", "example"],
+//    start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"],
+//    start: 14, end: 22, line: 1}
 // ]
 
-const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures(
+  "(?P<user>\\w+):(?P<role>\\w+)", "alice:admin",
+)
 // named == [{match: "alice:admin", groups: ["alice", "admin"],
 //            user: "alice", role: "admin"}]
 

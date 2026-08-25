@@ -245,8 +245,8 @@ import "std/edit"
 pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
-    query: "(function_item name: (identifier) @name (#eq? @name \"greet\") "
-      + "body: (block) @target)",
+    query: "(function_item name: (identifier) @name (#eq? @name"
+      + " \"greet\") body: (block) @target)",
     replacement: "{ format!(\"hi {name}!\") }",
   })
 
@@ -254,7 +254,9 @@ pipeline default(harness: Harness) {
     harness.stdio.log("edit failed: ${result.result} — ${result.details}")
     return
   }
-  harness.stdio.log("rewrote ${len(result.edits)} match(es) in ${result.path}")
+  harness.stdio.log(
+    "rewrote ${len(result.edits)} match(es) in ${result.path}"
+  )
 }
 ```
 
@@ -313,7 +315,8 @@ pipeline default(harness: Harness) {
     select: "first",
     dry_run: true,
   })
-  harness.stdio.log(preview.preview)  // rewritten source; file on disk is untouched
+  // rewritten source; file on disk is untouched
+  harness.stdio.log(preview.preview)
 }
 ```
 
@@ -423,12 +426,15 @@ pipeline default(harness: Harness) {
 
   if result.result == "stale_base" {
     // Another writer landed first. Re-read and retry — never blind-write.
-    harness.stdio.log("retrying — current hash is now ${result.current_hash}")
+    harness.stdio.log(
+      "retrying — current hash is now ${result.current_hash}"
+    )
     return
   }
   if result.result == "hunk_conflict" {
     harness.stdio.log(
-      "hunk ${result.failed_hunk_index} rejected: ${result.failed_hunk_error_code}",
+      "hunk ${result.failed_hunk_index} rejected:"
+        + " ${result.failed_hunk_error_code}",
     )
     return
   }
@@ -487,7 +493,8 @@ pipeline default(harness: Harness) {
     // re-run the same ops without dry_run to commit them.
     for file in bundle.per_file_unified_diff {
       harness.stdio.log(
-        "---- ${file.path} (+${file.lines_added} / -${file.lines_removed})",
+        "---- ${file.path} (+${file.lines_added} /"
+          + " -${file.lines_removed})",
       )
       harness.stdio.log(file.diff)
     }
@@ -497,7 +504,9 @@ pipeline default(harness: Harness) {
     // invalid_query, syntax_error, …).
     for op in bundle.ops {
       if !op.applied {
-        harness.stdio.log("REJECTED ${op.op}: ${op.reason} — ${op.details}")
+        harness.stdio.log(
+          "REJECTED ${op.op}: ${op.reason} — ${op.details}"
+        )
       }
     }
   }
@@ -531,7 +540,9 @@ pipeline default(harness: Harness) {
   })
 
   if result.result != "applied" {
-    harness.stdio.log("rename refused: ${result.result} — ${result.details ?? \"\"}")
+    harness.stdio.log(
+      "rename refused: ${result.result} — ${result.details ?? \"\"}"
+    )
     return
   }
   for file in result.touched_files {
@@ -621,7 +632,8 @@ Choose the simplest safe edit mechanism for each change.
 - Use edit_apply_node or edit_insert_at_anchor when structural addressing
   and parse validation materially reduce risk.
 - Use edit_rename_symbol when semantic neighbors must change together.
-- Use edit_safe_text_patch for exact localized text changes, whether or not
+- Use edit_safe_text_patch for exact localized text changes,
+whether or not
   the language has a Tree-Sitter grammar.
 - Use edit_dry_run to preview risky or multi-operation plans.
 """
@@ -670,12 +682,18 @@ pipeline default(harness: Harness) {
   }
 
   harness.tools.mcp_call(
-    client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"},
+    client, "write_file", {
+      path: "/tmp/hello.txt", content: "Hello from Harn!",
+    },
   )
-  const content = harness.tools.mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
+  const content = harness.tools.mcp_call(
+    client, "read_file", {path: "/tmp/hello.txt"},
+  )
   harness.stdio.log("File content: ${content}")
 
-  const entries = harness.tools.mcp_call(client, "list_directory", {path: "/tmp"})
+  const entries = harness.tools.mcp_call(
+    client, "list_directory", {path: "/tmp"},
+  )
   harness.stdio.log(entries)
 
   harness.tools.mcp_disconnect(client)
@@ -711,7 +729,9 @@ pipeline default(harness: Harness) {
     tools = tool_define(tools, t.name, t.description, {
       parameters: t.inputSchema?.properties ?? {},
       returns: {type: "string"},
-      handler: { args -> return harness.tools.mcp_call(client, t.name, args) }
+      handler: { args ->
+        return harness.tools.mcp_call(client, t.name, args)
+      }
     })
   }
 
@@ -819,7 +839,9 @@ not overflow even across thousands of iterations.
 
 ```harn
 pipeline default(harness: Harness) {
-  const items = ["Refactor auth module", "Add input validation", "Write unit tests"]
+  const items = [
+    "Refactor auth module", "Add input validation", "Write unit tests",
+  ]
 
   fn process(remaining, results) {
     if remaining.count == 0 {
@@ -907,7 +929,9 @@ pipeline default(harness: Harness) {
         "ParseFailure" -> {
           harness.stdio.log("Could not parse LLM output: ${e.fields[0]}")
         }
-        "Timeout" -> { harness.stdio.log("Timed out after ${e.fields[0]}s") }
+        "Timeout" -> {
+          harness.stdio.log("Timed out after ${e.fields[0]}s")
+        }
       }
     } else {
       harness.stdio.log("Unexpected error: ${e}")
@@ -943,8 +967,10 @@ pipeline default(harness: Harness) {
     {path: path, content: read_or_empty(path)}
   }
 
-  // Accumulate into an explicitly-typed `dict<string, string>`. An untyped
-  // `{}` is the opaque top object type, so annotating the dict keeps `.merge`
+  // Accumulate into an explicitly-typed
+  // `dict<string, string>`. An untyped
+  // `{}` is the opaque top object type,
+  // so annotating the dict keeps `.merge`
   // and the key/value iteration below well-typed.
   let files: dict<string, string> = {}
   for item in contents {
@@ -992,7 +1018,8 @@ import "lib/context"
 pipeline review(harness: Harness) {
   const task = "Review this project."
   const ctx = gather_context(task)
-  const prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
+  const prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask:"
+    + " ${ctx.task}"
   const result = harness.llm.call(prompt, "You are a code reviewer.")
   harness.stdio.log(result)
 }
@@ -1027,7 +1054,9 @@ pipeline default(harness: Harness) {
 
   harness.stdio.log("Relevant files: ${relevant}")
 
-  const config = {host: "localhost", port: 8080, debug: true, secret: "abc"}
+  const config = {
+    host: "localhost", port: 8080, debug: true, secret: "abc",
+  }
   const sensitive = ["secret", "password"]
 
   for entry in config {
@@ -1054,7 +1083,9 @@ pipeline default(harness: Harness) {
   ]
 
   const unique_urls = to_list(set(urls))
-  harness.stdio.log("${len(unique_urls)} unique URLs out of ${len(urls)} total")
+  harness.stdio.log(
+    "${len(unique_urls)} unique URLs out of ${len(urls)} total"
+  )
 
   let visited = set()
   for url in unique_urls {
@@ -1070,7 +1101,9 @@ pipeline default(harness: Harness) {
   const already_done = set_intersect(batch_a, batch_b)
   const new_work = set_difference(batch_b, batch_a)
 
-  harness.stdio.log("Overlap: ${len(already_done)}, New: ${len(new_work)}")
+  harness.stdio.log(
+    "Overlap: ${len(already_done)}, New: ${len(new_work)}"
+  )
 }
 ```
 
@@ -1091,7 +1124,9 @@ pipeline default(harness: Harness) {
     return "${join(truncated, " ")}..."
   }
 
-  harness.stdio.log(summarize("The quick brown fox jumps over the lazy dog", 5))
+  harness.stdio.log(
+    summarize("The quick brown fox jumps over the lazy dog", 5)
+  )
 
   try {
     summarize(42, "not a number")

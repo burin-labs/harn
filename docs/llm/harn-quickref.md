@@ -343,7 +343,8 @@ when you only need one synchronous subprocess capture record:
 
 ```harn,ignore
 import {
-  command_cancel, command_json, command_json_step, command_run, command_try,
+  command_cancel, command_json, command_json_step, command_run,
+  command_try,
   command_wait_for_output,
 } from "std/command"
 
@@ -372,7 +373,10 @@ const step = command_json_step(
 
 const fallback = command_try(harness.agent, harness.tools, harness.clock,
   [
-    {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
+    {
+      source: "connector",
+      run: fn() { return repos_get("burin-labs", "harn") },
+    },
     {source: "cli", run: fn() {
       return command_json(
         harness.agent, harness.tools, harness.clock,
@@ -380,7 +384,11 @@ const fallback = command_try(harness.agent, harness.tools, harness.clock,
       )
     }},
   ],
-  {normalize: { value, source -> return {source: source, name: value.name} }},
+  {
+    normalize: { value, source ->
+      return {source: source, name: value.name}
+    }
+  },
 )
 ```
 
@@ -506,7 +514,9 @@ const body = if len(content) > 2400 {
   content
 }
 
-const grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
+const grade = if score >= 90 {
+  "A"
+} else if score >= 80 { "B" } else { "C" }
 ```
 
 ## Iteration
@@ -530,7 +540,8 @@ for [a, b] in xs.zip(ys) { /* work */ }
 for {key, value} in my_dict.entries() { /* work */ }
 
 // Ranges:
-const first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
+// [0, 1, 2, 3, 4] — half-open, Python-style
+const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
 const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
 const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
@@ -578,7 +589,9 @@ const chunks = stream.collect(
 )
 
 // Parallel or channel results -> take the first three.
-const first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+const first_three = stream.collect(
+  stream.take(results_channel, 3), {max: 3},
+)
 
 // Agent events -> filter by topic.
 const tool_events = stream.collect(
@@ -713,8 +726,10 @@ Narrow `unknown` with `type_of(x) == "T"` or `schema_is(x, Shape)`:
 
 ```harn
 fn handle(v: unknown) -> string {
-  if type_of(v) == "string" { return "str:${v.upper()}" }  // v: string here
-  if schema_is(v, MyShape) { return "shape:${v.name}" }    // v: MyShape here
+  // v: string here
+  if type_of(v) == "string" { return "str:${v.upper()}" }
+  // v: MyShape here
+  if schema_is(v, MyShape) { return "shape:${v.name}" }
   return "other"
 }
 ```
@@ -958,7 +973,9 @@ object construction, and recursive descent `..`.
 const api = json_parse(response.body)
 const first_email = json_pointer(api, "/users/0/email")
 const active = jq(api, ".users[] | select(.active == true) | .email")
-const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+const summary = jq_first(
+  api, "{ count: .users | length, next: .meta.next }",
+)
 ```
 
 For JSONL files that may be large, import `std/jsonl` and use
@@ -1032,19 +1049,27 @@ import {
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   if abort_requested(token) {           // your own safe checkpoint
-    return Err({code: "stopped_waiting", message: "sibling already failed"})
+    return Err({
+      code: "stopped_waiting", message: "sibling already failed",
+    })
   }
   if doomed(lane) {
-    let _ = request_abort(token, {code: "lane_failed", message: "${lane} red"})
+    let _ = request_abort(
+      token, {code: "lane_failed", message: "${lane} red"},
+    )
     return Err({code: "terminal", message: "${lane} red"})
   }
   return proof(lane)
 }, {max_concurrent: 3})
 
-// outcome.results is one Result per item in source order (std/settled applies).
-// A branch fails when it throws OR returns Result.Err — plain `parallel settle`
+// outcome.results is one Result per item
+// in source order (std/settled applies).
+// A branch fails when it throws OR returns
+// Result.Err — plain `parallel settle`
 // would record a returned Err as Ok(Err(..)) and count it a success.
-harness.stdio.log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
+harness.stdio.log(
+  outcome.aborted, outcome.abandoned, outcome.reason?.code,
+)
 // first non-abandoned failure: the real cause
 harness.stdio.log(decisive_error(outcome))
 ```
@@ -1168,7 +1193,8 @@ because only 5 elements flow through the pipeline.
 ## Regex
 
 ```harn
-const matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
+// ["42", "7"] or nil
+const matches  = regex_match("[0-9]+", "abc 42 def 7")
 const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> "world hello"
 const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
@@ -1267,7 +1293,9 @@ LIMIT {limit}
 
 const rows = run(db, list_receipts_query(tenant_id, 50))
 const direct = many(
-  db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}),
+  db, sql(
+    "SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10},
+  ),
 )
 ```
 
@@ -1292,10 +1320,14 @@ for source-controlled fragments no typed helper covers.
 
 ```harn
 const response = harness.llm.call(prompt, system, options)
-harness.stdio.log(response.text)           // public answer, post-projection
-harness.stdio.log(response.raw_text)       // pre-projection source, tags intact
-harness.stdio.log(response.visible_text)   // sanitized human-visible output
-harness.stdio.log(response.canonical_text) // canonical replay form of a tagged response
+// public answer, post-projection
+harness.stdio.log(response.text)
+// pre-projection source, tags intact
+harness.stdio.log(response.raw_text)
+// sanitized human-visible output
+harness.stdio.log(response.visible_text)
+// canonical replay form of a tagged response
+harness.stdio.log(response.canonical_text)
 harness.stdio.log(response.usage.input_tokens)
 harness.stdio.log(response.usage.output_tokens)
 // outcome.kind is "complete" | "tool_use" | "truncated" | "refused"
@@ -1303,7 +1335,8 @@ harness.stdio.log(response.usage.output_tokens)
 harness.stdio.log(response.outcome.kind)
 // canonical blocks; may contain private signed reasoning
 harness.stdio.log(response.blocks)
-harness.stdio.log(response.logprobs)       // present when requested and returned
+// present when requested and returned
+harness.stdio.log(response.logprobs)
 ```
 
 All call accounting lives under `usage` and the typed `outcome`
@@ -1340,8 +1373,16 @@ The `output` forms are:
 ```harn
 {output: "text"}                                      // default
 {output: "json"}                                      // parse JSON
-{output: Verdict}                                     // validate Schema<Verdict>
-{output: {schema: Verdict, strict: true, validation: "error", stream_abort: true}}
+// validate Schema<Verdict>
+{output: Verdict}
+{
+  output: {
+    schema: Verdict,
+    strict: true,
+    validation: "error",
+    stream_abort: true,
+  }
+}
 ```
 
 `system` is a string, an ordered fragment list, or an exclusive replacement
@@ -1477,13 +1518,19 @@ silently-repositioned directive.
 ```harn
 let convo = add_user(transcript_from_messages([]), "My name is Ada.")
 convo = add_assistant(convo, "Nice to meet you, Ada.")
-convo = add_system(convo, "For the rest of this conversation, reply only in French.")
+convo = add_system(
+  convo, "For the rest of this conversation, reply only in French.",
+)
 convo = add_user(convo, "What is my name?")
 
 // Same script on every route:
 const base = {messages: transcript_messages(convo)}
-harness.llm.call("", nil, base + {provider: "anthropic", model: "claude-opus-4-8"})
-harness.llm.call("", nil, base + {provider: "anthropic", model: "claude-haiku-4-5"})
+harness.llm.call(
+  "", nil, base + {provider: "anthropic", model: "claude-opus-4-8"},
+)
+harness.llm.call(
+  "", nil, base + {provider: "anthropic", model: "claude-haiku-4-5"},
+)
 harness.llm.call("", nil, base + {provider: "openai", model: "gpt-5.4"})
 ```
 
@@ -1695,7 +1742,9 @@ thinking_modes = ["effort"]
 Query the effective matrix at runtime:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   provider: "anthropic", model: "claude-opus-4-7",
 //   native_tools: true, text_tool_wire_format_supported: true,
@@ -1719,17 +1768,25 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 
 // `caps.tools` matches Harn's own tool gate: true when the route can call
 // tools via either the native API wire shape or Harn's text wire format.
-// Inspect `native_tools` or `text_tool_wire_format_supported` directly when
+// Inspect `native_tools` or
+// `text_tool_wire_format_supported` directly when
 // you need to distinguish. Presets use `preferred_tool_format` when it is
 // present, so known native/text divergences stay data-driven.
-// `agent_loop` also uses this field for `tool_format: "auto"`; if a concrete
-// provider/model pair has no recommendation, it falls back to text tools and
+// `agent_loop` also uses this field for
+// `tool_format: "auto"`; if a concrete
+// provider/model pair has no recommendation,
+// it falls back to text tools and
 // emits a `capability_gap` warning event.
-// An explicit `tool_format` that disagrees with `preferred_tool_format` or
-// chooses the catalog-marked unreliable side emits a `tool_format_override`
-// transcript event. A non-empty `tool_format_override_reason` deliberately
-// forces the requested channel past both prompt and runtime capability gates;
-// provider-call records expose the effective format and native tool count.
+// An explicit `tool_format` that disagrees
+// with `preferred_tool_format` or
+// chooses the catalog-marked unreliable
+// side emits a `tool_format_override`
+// transcript event. A non-empty
+// `tool_format_override_reason` deliberately
+// forces the requested channel past both
+// prompt and runtime capability gates;
+// provider-call records expose the
+// effective format and native tool count.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure
@@ -1865,9 +1922,13 @@ options?)` returns `{ok, data, error}` (same envelope as
 `llm_call_safe`, but with the validated `.data` pre-unwrapped):
 
 ```harn
-const r = harness.llm.call_structured_safe(prompt, schema, {provider: "auto"})
+const r = harness.llm.call_structured_safe(
+  prompt, schema, {provider: "auto"},
+)
 if !r.ok {
-  harness.stdio.log("structured call failed:", r.error.category, r.error.message)
+  harness.stdio.log(
+    "structured call failed:", r.error.category, r.error.message,
+  )
   return nil
 }
 harness.stdio.log(r.data.verdict)
@@ -1934,7 +1995,9 @@ const r = harness.llm.recover_schema(raw, schema)
 if r.ok {
   process(r.data)                  // narrowed-shape dict
 } else {
-  harness.stdio.log("recovery failed:", r.stage, r.error_category, r.error)
+  harness.stdio.log(
+    "recovery failed:", r.stage, r.error_category, r.error,
+  )
 }
 ```
 
@@ -2041,10 +2104,12 @@ const packed = assemble_context({
   budget_tokens: 8000,
   dedup: "chunked",                 // none | chunked | semantic
   strategy: "relevance",            // recency | relevance | round_robin
-  query: user_prompt,               // scored by default keyword-overlap ranker
+  // scored by default keyword-overlap ranker
+  query: user_prompt,
   microcompact_threshold: 2000,     // artifacts over this get chunked
 })
-// packed = {chunks, included, dropped, reasons, total_tokens, budget_tokens, …}
+// packed = {chunks, included, dropped, reasons, total_tokens,
+// budget_tokens, …}
 ```
 
 Chunk ids are content-addressed (`{artifact_id}#{sha256(text)[..16]}`)
@@ -2067,8 +2132,10 @@ Compaction entrypoints accept a typed host/user instruction lane through
 ```harn
 import {compact_preserving_test_failures} from "std/agent/autocompact"
 
-// Returns { messages, archived, summary }. Use `archived` (the engine's true
-// archived-message count) to tell whether compaction happened -- never infer
+// Returns { messages, archived, summary
+// }. Use `archived` (the engine's true
+// archived-message count) to tell whether
+// compaction happened -- never infer
 // it from a length delta, since archiving one message and inserting one
 // summary leaves the length unchanged.
 const result = transcript_auto_compact(messages, {
@@ -2162,7 +2229,8 @@ const stance_opts: AgentSpec = {
   read_only_stance: {
     enabled: true,
     armed: intent.should_use_read_only_agent,  // host classifier decides
-    // classifier: fn(message) -> {read_only, confidence},  // or infer here
+    // or infer here:
+    // classifier: fn(message) -> {read_only, confidence},
     // consent_check: fn(justification, session_id) -> {verdict, reason},
     hard_keep: ["ask_user"],
   },
@@ -2423,7 +2491,11 @@ to `true`.
 agent_progress({
   message: "Finished API inventory; checking auth paths next.",
   entries: [
-    {content: "Inventory public API routes", status: "completed", priority: "high"},
+    {
+      content: "Inventory public API routes",
+      status: "completed",
+      priority: "high",
+    },
     {content: "Trace auth middleware", status: "in_progress"},
   ],
 })
@@ -2496,7 +2568,8 @@ const cadence_opts: AgentSpec = {
   done_judge: {
     cadence: {
       every: 5,                         // judge turns 5, 10, 15, ...
-      when: "always",                   // or "stalled" / { state -> bool }
+      // or "stalled" / { state -> bool }
+      when: "always",
       max_invocations: 3,
       min_iterations_before_first: 2,
     },
@@ -2529,7 +2602,10 @@ import { path_scope } from "std/tools"
 
 const scoped_opts: AgentSpec = {
   permissions: {
-    allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
+    allow: {
+      read_note: path_scope(),
+      write_note: path_scope({mount_modes: ["extend"]}),
+    },
     deny: ["dangerous_*"],
     on_escalation: { request -> {grant: "once", approver: "operator"} },
   },
@@ -2584,15 +2660,17 @@ needed by cross-compute resume.
 // Self-park mid-loop until a review approval lands or 30 minutes pass.
 import { agent_await_resumption } from "std/agent/workers"
 
-const result = agent_loop(harness, "Wait for the maintainer's review.", nil, {
-  provider: "openai",
-  model: "gpt-5",
-  tool_format: "native",
-})
+const result = agent_loop(
+  harness, "Wait for the maintainer's review.", nil, {
+    provider: "openai",
+    model: "gpt-5",
+    tool_format: "native",
+  })
 
 if result.status == "suspended" {
   harness.stdio.log(result.reason)               // model-supplied
-  harness.stdio.log(result.handle.snapshot_path) // resumable snapshot on disk
+  // resumable snapshot on disk
+  harness.stdio.log(result.handle.snapshot_path)
 }
 ```
 
@@ -2686,10 +2764,11 @@ resolver also returns `HARN-CHN-001` for `pipeline:` outside a pipeline,
 context.
 
 ```harn
-const receipt = harness.channels.append("session:worker.ready", {worker: "lint"}, {
-  id: "worker-ready-lint",
-  ttl: 10m,
-})
+const receipt = harness.channels.append(
+  "session:worker.ready", {worker: "lint"}, {
+    id: "worker-ready-lint",
+    ttl: 10m,
+  })
 harness.stdio.log(receipt.event_id)
 harness.stdio.log(receipt.emitted_at.signature.starts_with("sha256:"))
 ```
@@ -2731,22 +2810,34 @@ import {
 const receipt = coord_post(
   "session",
   "release",
-  {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
+  {
+    kind: "claim",
+    subject: "release ownership",
+    body: "Codex-2 owns v0.8.167",
+  },
   {id: "release-claim", session_id: "agent-session-1"},
 )
-const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const messages = coord_read(
+  "session", "release", {session_id: "agent-session-1"},
+)
 const newer = coord_read("session", "release", {
   session_id: "agent-session-1",
   since_seq: receipt.message.seq,
 })
-const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
-const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+const stream = coord_subscribe(
+  "session", "release", {session_id: "agent-session-1"},
+)
+const memory_receipt = coord_remember(
+  receipt, {namespace: "coordination/release"},
+)
 const request = coord_send("workspace", "release", "build-agent", {
   kind: "request",
   subject: "verify release",
   body: "Please audit the new patch release.",
 })
-const inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+const inbox = coord_inbox(
+  "workspace", "release", {consumer_id: "build-agent"},
+)
 coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
@@ -2778,7 +2869,9 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   match: {events: ["channel:pr.merged"]},
-  handler: { harness, event -> kick_release(event.provider_payload.payload) },
+  handler: { harness, event ->
+    kick_release(event.provider_payload.payload)
+  },
 })
 ```
 
@@ -2918,7 +3011,8 @@ const judge = { info ->
   if info.iteration % 3 != 0 { return nil }       // skip 2/3 turns
   const snapshot = harness.agent.snapshot(info.session_id)
   const verdict = harness.llm.call("...grade this transcript...", {
-    provider: "openai", model: "gpt-5-mini",      // cheaper reflection model
+    // cheaper reflection model
+    provider: "openai", model: "gpt-5-mini",
     messages: [{role: "user", content: json_encode(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
   })
@@ -2929,7 +3023,9 @@ const judge = { info ->
   nil
 }
 
-agent_loop(harness, task, system, {tools: registry, post_turn_callback: judge})
+agent_loop(
+  harness, task, system, {tools: registry, post_turn_callback: judge},
+)
 ```
 
 Hooks can also shape the next model turn. For example, once the required tool
@@ -2939,7 +3035,8 @@ evidence exists, ask the provider to stop calling tools and synthesize:
 const finalize_after_evidence = { info ->
   if info?.session_successful_tools?.contains("read_file") {
     return {
-      message: "Use the gathered evidence and produce the final answer now.",
+      message: "Use the gathered evidence and produce the final"
+        + " answer now.",
       llm_options: {tool_choice: "none"},
     }
   }
@@ -2984,21 +3081,24 @@ mechanics required:
 
   ```harn
   const s = harness.agent.open()
-  const main = agent_loop(harness, task, sys, {session_id: s, tools: registry,
-    post_turn_callback: { info ->
-      if judge_says_redo_from(info) {
-        const branch = harness.agent.fork_at(info.session_id, judged_k)
-        harness.agent.inject(branch, {role: "system",
-          content: "Redo from turn ${judged_k} with: ${redirection}"})
-        // Stash the branch id so the caller can pick it up.
-        save_branch_id(branch)
-        return {stop: true}
-      }
-      nil
-    },
-  })
+  const main = agent_loop(harness, task, sys, {
+    session_id: s, tools: registry,
+      post_turn_callback: { info ->
+        if judge_says_redo_from(info) {
+          const branch = harness.agent.fork_at(info.session_id, judged_k)
+          harness.agent.inject(branch, {role: "system",
+            content: "Redo from turn ${judged_k} with: ${redirection}"})
+          // Stash the branch id so the caller can pick it up.
+          save_branch_id(branch)
+          return {stop: true}
+        }
+        nil
+      },
+    })
   if main.status == "stopped" {
-    agent_loop(harness, task, sys, {session_id: load_branch_id(), tools: registry})
+    agent_loop(
+      harness, task, sys, {session_id: load_branch_id(), tools: registry},
+    )
   }
   ```
 
@@ -3009,14 +3109,17 @@ mechanics required:
   ```harn
   const base = harness.agent.open()
   const branch = harness.agent.fork(base)
-  harness.agent.inject(branch, {role: "system",
-    content: "Try the brute-force approach."})
+  harness.agent.inject(branch, {
+    role: "system", content: "Try the brute-force approach.",
+  })
 
-  const outcomes = parallel settle [base, branch] with { max_concurrent: 2 } { sess ->
+  const sessions = [base, branch]
+  const outcomes = parallel settle sessions with {max_concurrent: 2} {
+    sess ->
       agent_loop(harness, task, sys, {
         session_id: sess, tools: registry, max_iterations: 10,
       })
-    }
+  }
   const winner = pick_first_done(outcomes.results)
   ```
 
@@ -3088,10 +3191,15 @@ and never touch the store — the one-shot call shape is preserved.
 ```harn
 const s = harness.agent.open()                       // mint UUIDv7
 harness.agent.inject(s, {role: "user", content: "hi"})
-const a = agent_loop(harness, "continue", nil, {session_id: s, provider: "mock"})
-const b = agent_loop(harness, "remember me?", nil, {session_id: s, provider: "mock"})
+const a = agent_loop(
+  harness, "continue", nil, {session_id: s, provider: "mock"},
+)
+const b = agent_loop(
+  harness, "remember me?", nil, {session_id: s, provider: "mock"},
+)
 const branch = harness.agent.fork(s)                 // counterfactual
-const replay = harness.agent.fork_at(s, 1)           // branch from a rebuilt prefix
+// branch from a rebuilt prefix
+const replay = harness.agent.fork_at(s, 1)
 harness.agent.close(branch)
 harness.agent.close(replay)
 ```
@@ -3368,14 +3476,18 @@ Import `std/connectors/http` for provider API calls:
 ```harn
 import { connector_http_json } from "std/connectors/http"
 
-const response = connector_http_json(harness.clock, harness.net, "POST", url, {
-  headers: {Authorization: "Bearer " + token, Accept: "application/json"},
-  body: json_stringify(payload),
-  idempotency_key: "create:" + payload.id,
-  retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
-  provider: "example",
-  operation: "create_item",
-})
+const response = connector_http_json(
+  harness.clock, harness.net, "POST", url, {
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/json",
+    },
+    body: json_stringify(payload),
+    idempotency_key: "create:" + payload.id,
+    retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
+    provider: "example",
+    operation: "create_item",
+  })
 ```
 
 `connector_http_request` returns a non-throwing envelope. Success:
@@ -3411,7 +3523,9 @@ const signed = aws_sigv4_headers({
   headers: {"Content-Type": "application/x-amz-json-1.0"},
   timestamp: "20260429T120000Z",
 })
-const response = harness.net.request("POST", url, {body: body, headers: signed.headers})
+const response = harness.net.request(
+  "POST", url, {body: body, headers: signed.headers},
+)
 ```
 
 ### Human-in-the-loop primitives
@@ -3433,9 +3547,12 @@ const record  = harness.interaction.request_approval(
   action: "merge_pr", args: {pr: 123}, quorum: 2,
   reviewers: ["alice", "bob", "carol"],
 )
-const result  = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
-                           approvers: ["alice", "bob", "carol"])
-const handle  = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
+const result  = harness.interaction.dual_control(
+  n: 2, m: 3, action: destructive_step,
+                             approvers: ["alice", "bob", "carol"])
+const handle  = harness.interaction.escalate_to(
+  role: "oncall", reason: "deploy failed",
+)
 ```
 
 - `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
@@ -3620,7 +3737,10 @@ const resource = ui_resource(
   "ui://harn-dashboard/kpis@v1",
   "Weekly KPIs",
   weekly_kpi_html,
-  {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
+  {
+    permissions: ["tools/call"],
+    capabilities: ["tools/call", "context/read"],
+  },
 )
 const result = ui_tool_result(resource, {
   structured_fallback: ui_structured_fallback({signups: 42, churn: 3}),
@@ -3671,22 +3791,21 @@ trail is replayable:
 
 ```harn
 import {
-  bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt,
+  bulletin_propose, bulletin_emit, bulletin_accept,
+  bulletin_render_for_prompt,
 } from "std/personas/bulletins"
 
-const bulletin = bulletin_propose(
-  {
-    scope: "user",
-    scope_key: "kenneth@example.com",
-    subject: "kenneth",
-    persona: "burin_home",
-    assertion: "prefers concise responses without trailing summaries",
-    confidence: 0.92,
-    source: {agent: "burin_home_curator"},
-    evidence: [{kind: "user_msg", ref: "msg-42"}],
-    privacy: {sync: "local_only"},
-  },
-)
+const bulletin = bulletin_propose({
+  scope: "user",
+  scope_key: "kenneth@example.com",
+  subject: "kenneth",
+  persona: "burin_home",
+  assertion: "prefers concise responses without trailing summaries",
+  confidence: 0.92,
+  source: {agent: "burin_home_curator"},
+  evidence: [{kind: "user_msg", ref: "msg-42"}],
+  privacy: {sync: "local_only"},
+})
 const _proposal = bulletin_emit(bulletin)
 const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
 ```
@@ -3717,7 +3836,8 @@ const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
 
 ```harn
 import {
-  memory_open, memory_store, memory_recall, memory_summarize, memory_forget,
+  memory_open, memory_store, memory_recall, memory_summarize,
+  memory_forget,
 } from "std/memory"
 
 // Optional: configure the namespace once. Defaults to deterministic BM25.
@@ -3728,7 +3848,9 @@ harness.memory.open("workspace/acme", {
 harness.memory.store(
   "workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"],
 )
-const hits = harness.memory.recall("workspace/acme", "rust", 5, {mode: "semantic"})
+const hits = harness.memory.recall(
+  "workspace/acme", "rust", 5, {mode: "semantic"},
+)
 const summary = harness.memory.summarize("workspace/acme", {limit: 10})
 harness.memory.forget("workspace/acme", {tag: "stale"})
 ```
@@ -4002,7 +4124,9 @@ import {
 } from "std/lifecycle/combinators"
 
 pipeline_on_finish(
-  if_unsettled(with_telemetry(with_timeout(on_finish_drain, 30000), "drain")),
+  if_unsettled(
+    with_telemetry(with_timeout(on_finish_drain, 30000), "drain")
+  ),
 )
 ```
 
@@ -4061,7 +4185,9 @@ pipeline_on_finish(on_finish_drain)
 import { on_finish_block_until_settled } from "std/lifecycle"
 pipeline_on_finish(
   on_finish_block_until_settled(60s, { harness, rv ->
-    harness.emit_audit("aborted_with_unsettled", {state: harness.unsettled_state()})
+    harness.emit_audit(
+      "aborted_with_unsettled", {state: harness.unsettled_state()},
+    )
     throw {category: "unsettled_at_finish", reason: "timeout"}
   }),
 )
@@ -4278,7 +4404,8 @@ without string-sniffing:
 try {
   const r = harness.llm.call(user_prompt, nil, opts)
 } catch (e) {
-  // e is {kind, reason, category, message, status?, retry_after_ms?, provider, model}
+  // e is {kind, reason, category, message, status?, retry_after_ms?,
+  // provider, model}
   if e.kind == "transient" && e.reason == "rate_limit" {
     harness.clock.sleep_ms(e.retry_after_ms ?? 1000)
     continue
@@ -4304,10 +4431,17 @@ const data = r.response.data
 // pre-unwrapped and the schema-validated-JSON options are forced
 // by default (no repeated `output: {schema, validation: "error"}`
 // or `schema_retries` boilerplate at each callsite).
-const verdict = harness.llm.call_structured(user_prompt, schema, {provider: "auto"})
+const verdict = harness.llm.call_structured(
+  user_prompt, schema, {provider: "auto"},
+)
 // ...or non-throwing:
-const r = harness.llm.call_structured_safe(user_prompt, schema, {provider: "auto"})
-if !r.ok { harness.stdio.log("structured call failed:", r.error.category); return nil }
+const r = harness.llm.call_structured_safe(
+  user_prompt, schema, {provider: "auto"},
+)
+if !r.ok {
+  harness.stdio.log("structured call failed:", r.error.category);
+  return nil
+}
 const data = r.data
 
 // Scoped permit acquisition + backoff for flaky providers. Retries on
@@ -4356,7 +4490,9 @@ try {
   assert(e.retry_after_ms == 2500)
 }
 
-harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429"}})
+harness.llm.mock_enqueue({
+  error: {category: "rate_limit", message: "429"}
+})
 const r = harness.llm.call_safe("hi", nil, {provider: "mock"})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
@@ -4388,7 +4524,9 @@ const caller = compose([
   with_fallback,    // pseudo: with_fallback expects a list of callers
 ])(default_llm_caller())
 
-const resilient_opts: AgentSpec = {loop_until_done: true, llm_caller: caller}
+const resilient_opts: AgentSpec = {
+  loop_until_done: true, llm_caller: caller,
+}
 agent_loop(harness, task, system, resilient_opts)
 ```
 
@@ -4408,7 +4546,9 @@ import {agent_model_options} from "std/agent/options"
 
 const route = agent_model_options({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
+  defaults: {
+    provider: "anthropic", model: "claude-sonnet-5", task: "agent",
+  },
 })
 const caller = with_retry(default_llm_caller(), {max_attempts: 3})
 agent_loop(
@@ -4433,7 +4573,8 @@ const router = with_routing({
   default: cheap,                                // fast inexpensive model
   routes: [{name: "frontier",
             when: { call -> call?.opts?.escalate ?? false },
-            caller: strong}],                    // longer retries + fallback
+            // longer retries + fallback
+            caller: strong}],
 })
 const persona_caller = compose([
   with_logging({sink: receipts_sink}),
@@ -4466,26 +4607,43 @@ const policy = routing_policy({
   },
   latency: {
     target_p95_ms: 8000,
-    race_after_ms: 5000,                              // race backup after 5s
+    // race backup after 5s
+    race_after_ms: 5000,
   },
   budget: {
-    per_call_usd: 0.50,                               // hard ceiling per call
+    // hard ceiling per call
+    per_call_usd: 0.50,
     session_usd: 5.00,                                // session-wide cap
-    on_exceed: "abort",                               // or "skip" | "warn"
+    // or "skip" | "warn"
+    on_exceed: "abort",
   },
-  observe: {emit_event: "billing.routing_decision"},  // optional dispatch label
-  escalate_on: [                                      // optional verifier chain
-    {kind: "typecheck"},                              // parse the candidate as Harn
-    {kind: "lint", forbidden_patterns: ["TODO", "unwrap\\("], on_fail: "refine"},
-    {kind: "test_run", command: ["cargo", "test", "--quiet"], timeout_secs: 60},
+  // optional dispatch label
+  observe: {emit_event: "billing.routing_decision"},
+  // optional verifier chain
+  escalate_on: [
+    // parse the candidate as Harn
+    {kind: "typecheck"},
+    {
+      kind: "lint",
+      forbidden_patterns: ["TODO", "unwrap\\("],
+      on_fail: "refine",
+    },
+    {
+      kind: "test_run",
+      command: ["cargo", "test", "--quiet"],
+      timeout_secs: 60,
+    },
   ],
-  max_refines_per_link: 1,                            // optional, default 1
+  // optional, default 1
+  max_refines_per_link: 1,
 })
 
-const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
-// result.routing = {policy, selected, session_cost_usd, attempts: [{provider,
-//   model, status, duration_ms, cost_usd, error?, verifier_outcome?,
-//   verifier_signals?}]}
+const result = harness.llm.call(
+  "Summarize this PR.", nil, {routing: policy},
+)
+// result.routing = {policy, selected, session_cost_usd,
+//   attempts: [{provider, model, status, duration_ms, cost_usd,
+//               error?, verifier_outcome?, verifier_signals?}]}
 ```
 
 Semantics:
@@ -4554,15 +4712,19 @@ the schema-retry composition described above.
 // Inline ladder: ordered steps, cheapest first.
 const result = harness.llm.call("Summarize this PR.", nil, {
   models: [
-    "haiku",                              // string sugar for {model: "haiku"}
+    // string sugar for {model: "haiku"}
+    "haiku",
     {model: "sonnet", label: "mid"},
     {model: "opus", provider: "anthropic", label: "frontier",
-     options: {max_tokens: 4096}},                    // per-step generation overrides
+     // per-step generation overrides
+     options: {max_tokens: 4096}},
   ],
 })
 
 // Named ladder resolved from the catalog ([model_ladders.<name>]).
-const result = harness.llm.call("Summarize this PR.", nil, {ladder: "frugal"})
+const result = harness.llm.call(
+  "Summarize this PR.", nil, {ladder: "frugal"},
+)
 
 // Inspect a named ladder without starting a call.
 const routes = harness.llm.model_ladder("frugal").steps
@@ -4696,7 +4858,9 @@ filter through. `preset_run_command(...)` (TH-02) is the shipped
 wrapper that turns a registry into a tool handler.
 
 ```harn
-import { preset_run_command, tool_hooks_mode_rewrite_with_audit } from "std/tool_hooks"
+import {
+  preset_run_command, tool_hooks_mode_rewrite_with_audit,
+} from "std/tool_hooks"
 
 const rust_cat = catalogue({
   id: "harn-canon/rust",
@@ -4708,7 +4872,9 @@ const rust_cat = catalogue({
       applies_to: ["rust"],
       severity: "warning",
       explanation: "use --target-dir to avoid lockfile thrash",
-      rewrite: { command, _context -> command + " --target-dir target-shared" },
+      rewrite: { command, _context ->
+        command + " --target-dir target-shared"
+      },
     }),
   ],
 })
@@ -4717,9 +4883,11 @@ const registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
 const run_command = preset_run_command({
   stacks: ["rust"],
   registry: registry,
-  custom_rules: [],                                 // matched before the registry
+  // matched before the registry
+  custom_rules: [],
   mode: tool_hooks_mode_rewrite_with_audit,         // default
-  inner: { args -> harness.process.shell(args.command) }, // underlying executor
+  // underlying executor
+  inner: { args -> harness.process.shell(args.command) },
 })
 agent_loop(harness, message, nil, {
   tools: {tools: [{name: "run_command", handler: run_command}]},
@@ -4868,7 +5036,9 @@ unrestricted, so policies are scoped by where you rebind, not by
 mutating shared state. Tracked through harn#1913 / epic #1765.
 
 ```harn,ignore
-import { create, domain, domain_wildcard, cidr, host } from "std/net_policy"
+import {
+  create, domain, domain_wildcard, cidr, host,
+} from "std/net_policy"
 
 const policy = create({
   allow: [
@@ -4884,8 +5054,10 @@ const policy = create({
 })
 const restricted = harness.with_net_policy(policy)
 restricted.net.get("https://github.com/foo")          // allowed
-restricted.net.get("https://example.test/blocked")    // throws NetPolicyViolation
-restricted.is_quarantined()                           // sticky after a quarantine deny
+// throws NetPolicyViolation
+restricted.net.get("https://example.test/blocked")
+// sticky after a quarantine deny
+restricted.is_quarantined()
 ```
 
 - Rule precedence: `deny` rules fire first, then `allow`, then the
@@ -4920,8 +5092,10 @@ import { memory } from "std/oauth/storage"
 // RFC 6749 + 7636 + 8693 + 9700
 import { client, request, token, token_exchange } from "std/oauth/client"
 import { delegated_claims, token_type } from "std/oauth/token_exchange"
-import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / headless)
-import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
+// RFC 8628 (CI / headless)
+import { device_flow } from "std/oauth/device_flow"
+// HARN-OAU-001 catalog
+import { register_pattern } from "std/oauth/redaction"
 ```
 
 Full reference + per-provider cookbook: [`docs/src/oauth.md`](https://harnlang.com/oauth.html).
@@ -4937,7 +5111,8 @@ backend it's holding.
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import {
-  client, exchange_code, request, start_authorization, token, token_exchange,
+  client, exchange_code, request, start_authorization, token,
+  token_exchange,
 } from "std/oauth/client"
 
 const cli = client(
@@ -4957,7 +5132,8 @@ const pkce = start_authorization(cli)
 const token_set = exchange_code(cli, pkce, code, state)
 
 // Subsequent calls auto-refresh past 75% TTL:
-const access = token(cli)                        // -> string, valid access token
+// -> string, valid access token
+const access = token(cli)
 
 // Or let the client own HTTP, with 1x retry on 401:
 const response = request(cli, "GET", "https://api.github.com/user")
@@ -5013,7 +5189,10 @@ const delegated = token_exchange(cli, {
 
 const claims = delegated_claims(
   {sub: "user@example.com"},
-  [{sub: "https://service16.example.com"}, {sub: "https://service77.example.com"}],
+  [
+    {sub: "https://service16.example.com"},
+    {sub: "https://service77.example.com"},
+  ],
 )
 ```
 
@@ -5036,13 +5215,15 @@ import {
 } from "std/oauth/storage"
 
 const mem = memory()                                       // ephemeral
-const disk = file("/var/lib/harn/oauth.bin", harness.env.get("KEY"))   // AES-256-GCM
+// AES-256-GCM
+const disk = file("/var/lib/harn/oauth.bin", harness.env.get("KEY"))
 const cloud = harn_cloud_session()                          // per-session
 const shared = harn_cloud_org()                             // org-scoped
 const vault = custom({get: my_get, set: my_set, delete: my_delete})
 
 mem.set("github", {access_token: "abc"}, 3600)
-const token = mem.get("github")                            // -> TokenSet | nil
+// -> TokenSet | nil
+const token = mem.get("github")
 mem.delete("github")
 ```
 
@@ -5076,9 +5257,13 @@ import { file } from "std/oauth/storage"
 const token_set = device_flow(providers().github, {
   client_id: harness.env.get("GH_CLIENT_ID"),
   scopes: ["read:user", "repo"],
-  storage: file("/var/lib/harn/ci.bin", harness.env.get("HARN_OAUTH_KEY")),
+  storage: file(
+    "/var/lib/harn/ci.bin", harness.env.get("HARN_OAUTH_KEY"),
+  ),
   on_user_code: { user_code, verification_uri ->
-    harness.stdio.log("Open " + verification_uri + " and enter " + user_code)
+    harness.stdio.log(
+      "Open " + verification_uri + " and enter " + user_code
+    )
   },
 })
 ```
@@ -5106,8 +5291,10 @@ itself.
 ```harn,ignore
 import { providers } from "std/oauth/providers"
 import {
-  authorization_server_metadata, client_metadata, dynamic_registration_store,
-  register_client, validate_metadata, well_known_paths, well_known_response,
+  authorization_server_metadata, client_metadata,
+  dynamic_registration_store,
+  register_client, validate_metadata, well_known_paths,
+  well_known_response,
 } from "std/oauth/dynamic_registration"
 
 // {client_metadata, authorization_server_metadata, registration}
@@ -5115,11 +5302,15 @@ const paths = well_known_paths()
 const oas = authorization_server_metadata(
   providers().github, {registration_endpoint: paths.registration},
 )
-const envelope = well_known_response(oas)  // {status, content_type, headers, body}
+// {status, content_type, headers, body}
+const envelope = well_known_response(oas)
 
 const store = dynamic_registration_store()
-const result = register_client(store, {redirect_uris: ["https://app.example/cb"]})
-// result.client_id, result.client_secret (returned ONCE), result.client_id_issued_at
+const result = register_client(
+  store, {redirect_uris: ["https://app.example/cb"]},
+)
+// result.client_id, result.client_secret
+// (returned ONCE), result.client_id_issued_at
 ```
 
 - **Strict validation.** `redirect_uris` must be absolute `https://` or

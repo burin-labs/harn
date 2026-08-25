@@ -11,7 +11,9 @@ scheduled with `tokio::spawn`, while the pool registry is scoped through the
 VM so nested pool operations see the same named budgets.
 
 ```harn,ignore
-import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+import {
+  fair_round_robin, pool_create, pool_wait,
+} from "std/lifecycle/pool"
 
 const pool = pool_create(harness.agent, {
   name: "pr-review",
@@ -124,8 +126,11 @@ handles are recognised transparently so `wait_agent` is the one place
 callers need to learn.
 
 ```harn,ignore
-const handles = [pool.submit(work_a), pool.submit(work_b), pool.submit(work_c)]
-const outcomes = pool_wait(harness.agent, handles)  // or: wait_agent(handles)
+const handles = [
+  pool.submit(work_a), pool.submit(work_b), pool.submit(work_c),
+]
+// or: wait_agent(handles)
+const outcomes = pool_wait(harness.agent, handles)
 ```
 
 ## Inspection

@@ -34,9 +34,12 @@ Expected: {{expected_output}}
 ```harn,ignore
 const block = ""
 for sample in samples {
-  block = "${block}### ${sample.path}\n\`\`\`\n${sample.content}\n\`\`\`\n\n"
+  block = "${block}###"
+    + " ${sample.path}\n\`\`\`\n${sample.content}\n\`\`\`\n\n"
 }
-const prompt = harness.fs.render_prompt("enrichment.prompt", {block: block, ...})
+const prompt = harness.fs.render_prompt(
+  "enrichment.prompt", {block: block, ...},
+)
 ```
 
 ```harn-prompt
@@ -48,7 +51,9 @@ const prompt = harness.fs.render_prompt("enrichment.prompt", {block: block, ...}
 **After** — iterate in the template:
 
 ```harn,ignore
-const prompt = harness.fs.render_prompt("enrichment.prompt", {samples: samples, ...})
+const prompt = harness.fs.render_prompt(
+  "enrichment.prompt", {samples: samples, ...},
+)
 ```
 
 ````harn-prompt

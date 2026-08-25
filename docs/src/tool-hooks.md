@@ -143,22 +143,34 @@ observability, then return an envelope shaped the same as the shipped
 modes:
 
 ```harn,ignore
-import { tool_hooks_emit_audit, tool_hooks_inject_reminder } from "std/tool_hooks"
+import {
+  tool_hooks_emit_audit, tool_hooks_inject_reminder,
+} from "std/tool_hooks"
 
 const warn_then_run = { rule, args, inner ->
-  const cmd = type_of(args) == "string" ? args : to_string(args?.command ?? "")
-  tool_hooks_emit_audit("custom.tool_warn", {rule_id: rule.rule_id, command: cmd})
+  const cmd = type_of(args) == "string" ? args : to_string(
+    args?.command ?? ""
+  )
+  tool_hooks_emit_audit(
+    "custom.tool_warn", {rule_id: rule.rule_id, command: cmd},
+  )
   tool_hooks_inject_reminder({
     tags: ["custom_warning"],
     body: "rule " + rule.rule_id + " advisory: " + rule.explanation,
     ttl_turns: 2,
   })
-  if inner == nil { return {action: "warn", rule_id: rule.rule_id, command: cmd} }
+  if inner == nil {
+    return {action: "warn", rule_id: rule.rule_id, command: cmd}
+  }
   const result = inner(args)
-  return {action: "warn", rule_id: rule.rule_id, command: cmd, result: result}
+  return {
+    action: "warn", rule_id: rule.rule_id, command: cmd, result: result,
+  }
 }
 
-const wrapper = preset_run_command({stacks: ["rust"], mode: warn_then_run})
+const wrapper = preset_run_command({
+  stacks: ["rust"], mode: warn_then_run,
+})
 ```
 
 ## Decision envelope
@@ -204,10 +216,11 @@ const no_curl_pipe_sh = tool_rule({
   pattern: "curl[^|]+\\|\\s*(?:sudo\\s+)?(?:ba)?sh\\b",
   applies_to: [],
   severity: "error",
-  explanation: "Pipe-to-shell installs run unreviewed remote code. Download,"
-    + " inspect, then run.",
+  explanation: "Pipe-to-shell installs run unreviewed remote code."
+    + " Download, inspect, then run.",
   references: [
-    "https://www.idontplaydarts.com/2016/04/detecting-curl-pipe-bash-server-side/",
+    "https://www.idontplaydarts.com/2016/04"
+      + "/detecting-curl-pipe-bash-server-side/",
   ],
 })
 
@@ -234,7 +247,9 @@ const vendor_rust = catalogue({
   rules: [/* ... vendor-pinned rules ... */],
 })
 const registry = tool_hooks_register(
-  tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal()),
+  tool_hooks_register(
+    tool_hooks_registry(), tool_hooks_catalogue_universal(),
+  ),
   vendor_rust,
 )
 const wrapper = preset_run_command({stacks: ["rust"], registry: registry})
@@ -398,7 +413,9 @@ import { preset_run_command } from "std/tool_hooks"
 
 pipeline default(harness: Harness, task) {
   harness.tools.register_hook({pattern: "*", max_output: 4000})
-  harness.tools.register_hook({pattern: "exec_*", deny: "exec_* is gated"})
+  harness.tools.register_hook({
+    pattern: "exec_*", deny: "exec_* is gated",
+  })
 
   const run_command = preset_run_command({
     stacks: ["rust"],

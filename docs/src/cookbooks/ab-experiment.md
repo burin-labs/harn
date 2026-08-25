@@ -32,7 +32,8 @@ to tuning versus the frozen gate, and the ceilings.
 const MANIFEST = {
   schema: "harn.experiment.v1",
   experiment_id: "prompt-cache-policy",
-  hypothesis: "Caching the system prompt improves success without raising cost.",
+  hypothesis: "Caching the system prompt improves success without"
+    + " raising cost.",
   owner: "eval-team",
   baseline: {id: "baseline", config: {cache: "off"}, complexity: 0},
   candidates: [{id: "cached", config: {cache: "on"}, complexity: 1}],

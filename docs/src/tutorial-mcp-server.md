@@ -95,8 +95,8 @@ pipeline main(harness: Harness) {
     ],
     handler: { args ->
       const lang = args.language ?? "unknown"
-      "Please review this " + lang + " code for correctness, bugs, and tests:"
-        + "\n\n" + args.code
+      "Please review this " + lang + " code for correctness, bugs, and"
+        + " tests:\n\n" + args.code
     }
   })
 }

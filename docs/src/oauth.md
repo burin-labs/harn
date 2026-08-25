@@ -28,7 +28,8 @@ scripting API for code that runs *inside* a Harn pipeline.
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 import {
-  client, exchange_code, request, start_authorization, token, token_exchange,
+  client, exchange_code, request, start_authorization, token,
+  token_exchange,
 } from "std/oauth/client"
 
 const cli = client(
@@ -60,11 +61,17 @@ namespace) are validated against vendor docs, and you can override any
 field per-call:
 
 ```harn,ignore
-import { atlassian, github, github_enterprise, providers } from "std/oauth/providers"
+import {
+  atlassian, github, github_enterprise, providers,
+} from "std/oauth/providers"
 
-const gh = github()                                              // public github.com
-const ghe = github_enterprise("https://ghe.example.com")         // enterprise server
-const conf = atlassian({default_scopes: ["read:jira-work", "offline_access"]})
+// public github.com
+const gh = github()
+// enterprise server
+const ghe = github_enterprise("https://ghe.example.com")
+const conf = atlassian({
+  default_scopes: ["read:jira-work", "offline_access"]
+})
 
 // {github, slack, ..., custom, github_enterprise}
 const all = providers()
@@ -119,13 +126,20 @@ Pick a backend; the OAuth client never knows the difference.
 import { custom, file, harn_cloud_org, memory } from "std/oauth/storage"
 
 const dev   = memory()
-const disk  = file("/var/lib/harn/oauth.bin", harness.env.get("HARN_OAUTH_KEY"))
-const cloud = harn_cloud_org()                                   // org-shared bot
+const disk  = file(
+  "/var/lib/harn/oauth.bin", harness.env.get("HARN_OAUTH_KEY"),
+)
+// org-shared bot
+const cloud = harn_cloud_org()
 const vault = custom({
   get:    { key -> vault_get("oauth/" + key) },
-  set:    { key, token_set, ttl_seconds = nil -> vault_put("oauth/" + key, token_set) },
+  set:    { key, token_set, ttl_seconds = nil ->
+    vault_put("oauth/" + key, token_set)
+  },
   delete: { key -> vault_delete("oauth/" + key) },
-  with_refresh_lock: { key, body -> vault_with_lock("oauth/" + key, body) },
+  with_refresh_lock: { key, body ->
+    vault_with_lock("oauth/" + key, body)
+  },
 })
 ```
 
@@ -153,13 +167,20 @@ import {
 const cli = client(provider, {
   client_id:          string,
   storage:            <storage handle>,
-  client_secret?:     string,                       // confidential clients only
-  scopes?:            list<string>,                 // default: provider.default_scopes
-  redirect_uri?:      string,                       // required for start_authorization
-  storage_key?:       string,                       // defaults to provider.id
-  token_auth_method?: "none" | "client_secret_post" | "client_secret_basic",
-  audience?:          string,                       // appended to /authorize, /device
-  extra_auth_params?: dict,                         // raw passthrough on /authorize
+  // confidential clients only
+  client_secret?:     string,
+  // default: provider.default_scopes
+  scopes?:            list<string>,
+  // required for start_authorization
+  redirect_uri?:      string,
+  // defaults to provider.id
+  storage_key?:       string,
+  token_auth_method?:
+    "none" | "client_secret_post" | "client_secret_basic",
+  // appended to /authorize, /device
+  audience?:          string,
+  // raw passthrough on /authorize
+  extra_auth_params?: dict,
 })
 ```
 
@@ -254,7 +275,9 @@ const provider = custom({
   },
 })
 
-const cli = client(provider, {client_id: "agent-client", storage: memory()})
+const cli = client(
+  provider, {client_id: "agent-client", storage: memory()},
+)
 const delegated = token_exchange(cli, {
   subject_token: user_access_token,
   subject_token_type: token_type("access_token"),
@@ -311,7 +334,9 @@ const token_set = device_flow(
     scopes: ["read:user"],
     storage: memory(),
     on_user_code: { user_code, verification_uri ->
-      harness.stdio.log("Open " + verification_uri + " and enter " + user_code)
+      harness.stdio.log(
+        "Open " + verification_uri + " and enter " + user_code
+      )
     },
   },
 )
@@ -363,7 +388,8 @@ const body = register_client(store, {
   redirect_uris: ["https://app.example/cb"],
   client_name: "Acme Agent",
 })
-// body.client_id, body.client_secret (returned ONCE), body.client_id_issued_at, ...
+// body.client_id, body.client_secret (returned ONCE),
+// body.client_id_issued_at, ...
 ```
 
 `validate_metadata(metadata)` returns `{ok, errors}` against RFC 7591
@@ -421,7 +447,9 @@ the vendor docs.
 ### GitHub
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
@@ -456,7 +484,9 @@ codes.
 ### Slack
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -467,7 +497,9 @@ const cli = client(
     client_secret: harness.env.get("SLACK_CLIENT_SECRET"),
     scopes: ["app_mentions:read", "chat:write"],
     redirect_uri: "https://app.example/oauth/slack/callback",
-    storage: file("/var/lib/harn/slack.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/slack.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
   },
 )
 ```
@@ -486,7 +518,9 @@ consent.
 ### Linear
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
@@ -498,7 +532,8 @@ const cli = client(
     scopes: ["read", "write", "issues:create"],
     redirect_uri: "https://app.example/oauth/linear/callback",
     storage: harn_cloud_org(),
-    storage_key: "linear:" + team_id,                       // per-team isolation
+    // per-team isolation
+    storage_key: "linear:" + team_id,
   },
 )
 ```
@@ -519,7 +554,9 @@ isolated under the same provider record.
 ### Notion
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { harn_cloud_session } from "std/oauth/storage"
 
@@ -530,7 +567,8 @@ const cli = client(
     client_secret: harness.env.get("NOTION_CLIENT_SECRET"),
     redirect_uri: "https://app.example/oauth/notion/callback",
     storage: harn_cloud_session(),
-    extra_auth_params: {owner: "user"},        // user-owned public connection
+    // user-owned public connection
+    extra_auth_params: {owner: "user"},
   },
 )
 const pages = request(
@@ -570,7 +608,9 @@ const cli = client(
       "https://www.googleapis.com/auth/drive.readonly",
     ],
     redirect_uri: "http://127.0.0.1:8765/callback",
-    storage: file("/var/lib/harn/google.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/google.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
     extra_auth_params: {access_type: "offline", prompt: "consent"},
   },
 )
@@ -600,15 +640,20 @@ import { microsoft } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
 const tenant = harness.env.get("MS_TENANT_ID")
+const host = "https://login.microsoftonline.com/"
+const base = host + tenant + "/oauth2/v2.0"
 const cli = client(
   microsoft({
-    auth_url:  "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/authorize",
-    token_url: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/token",
+    auth_url:  base + "/authorize",
+    token_url: base + "/token",
   }),
   {
     client_id: harness.env.get("MS_CLIENT_ID"),
     client_secret: harness.env.get("MS_CLIENT_SECRET"),
-    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Mail.Read"],
+    scopes: [
+      "openid", "profile", "email", "offline_access", "User.Read",
+      "Mail.Read",
+    ],
     redirect_uri: "https://app.example/oauth/microsoft/callback",
     storage: harn_cloud_org(),
   },
@@ -637,7 +682,9 @@ only resolves the user's home tenant at consent time.
 ### Atlassian (Jira + Confluence)
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { harn_cloud_org } from "std/oauth/storage"
 
@@ -646,19 +693,25 @@ const cli = client(
   {
     client_id: harness.env.get("ATLASSIAN_CLIENT_ID"),
     client_secret: harness.env.get("ATLASSIAN_CLIENT_SECRET"),
-    scopes: ["read:jira-work", "read:confluence-content.summary", "offline_access"],
+    scopes: [
+      "read:jira-work", "read:confluence-content.summary",
+      "offline_access",
+    ],
     redirect_uri: "https://app.example/oauth/atlassian/callback",
     storage: harn_cloud_org(),
     audience: "api.atlassian.com",
   },
 )
-// 1) Resolve accessible cloud sites (one token covers Jira AND Confluence on each).
+// 1) Resolve accessible cloud sites (one token covers Jira AND Confluence
+// on each).
 const sites = request(
-  cli, "GET", "https://api.atlassian.com/oauth/token/accessible-resources",
+  cli, "GET",
+  "https://api.atlassian.com/oauth/token/accessible-resources",
 )
 // 2) Use the returned cloudid for product calls:
 //    https://api.atlassian.com/ex/jira/<cloudid>/rest/api/3/myself
-//    https://api.atlassian.com/ex/confluence/<cloudid>/wiki/rest/api/user/current
+//    https://api.atlassian.com/ex/confluence/<cloudid>
+//      /wiki/rest/api/user/current
 ```
 
 Atlassian's 3LO flow is one OAuth client for both products — Jira and
@@ -675,7 +728,9 @@ your own code.
 ### Discord
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -684,9 +739,12 @@ const cli = client(
   {
     client_id: harness.env.get("DISCORD_CLIENT_ID"),
     client_secret: harness.env.get("DISCORD_CLIENT_SECRET"),
-    scopes: ["identify", "email"],                            // user scope
+    // user scope
+    scopes: ["identify", "email"],
     redirect_uri: "https://app.example/oauth/discord/callback",
-    storage: file("/var/lib/harn/discord.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/discord.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
   },
 )
 ```
@@ -705,7 +763,9 @@ keep the token tracks separate.
 ### GitLab (cloud + self-hosted)
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { custom, providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -717,7 +777,9 @@ const cloud_cli = client(
     client_secret: harness.env.get("GITLAB_CLIENT_SECRET"),
     scopes: ["read_api", "read_user", "openid", "profile", "email"],
     redirect_uri: "https://app.example/oauth/gitlab/callback",
-    storage: file("/var/lib/harn/gitlab.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/gitlab.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
   },
 )
 
@@ -752,7 +814,9 @@ enough.
 ### Bitbucket (workspace-scoped)
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -763,10 +827,14 @@ const cli = client(
     client_secret: harness.env.get("BITBUCKET_CLIENT_SECRET"),
     scopes: ["account", "repository", "issue"],
     redirect_uri: "https://app.example/oauth/bitbucket/callback",
-    storage: file("/var/lib/harn/bitbucket.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/bitbucket.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
   },
 )
-const workspaces = request(cli, "GET", "https://api.bitbucket.org/2.0/workspaces")
+const workspaces = request(
+  cli, "GET", "https://api.bitbucket.org/2.0/workspaces",
+)
 ```
 
 Bitbucket Cloud OAuth supports **authorization-code and
@@ -790,7 +858,9 @@ import { device_flow } from "std/oauth/device_flow"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
-const store = file("/var/lib/harn/ci-token.bin", harness.env.get("HARN_OAUTH_KEY"))
+const store = file(
+  "/var/lib/harn/ci-token.bin", harness.env.get("HARN_OAUTH_KEY"),
+)
 const token_set = device_flow(
   providers().github,
   {
@@ -798,19 +868,22 @@ const token_set = device_flow(
     scopes: ["read:user", "repo"],
     storage: store,
     on_user_code: { user_code, verification_uri ->
-      // Surface to the CI log + a chat webhook so an operator can complete the dance.
+      // Surface to the CI log + a chat webhook so an operator can
+      // complete the dance.
       const _ = harness.stdio.log(
         "Visit " + verification_uri + " and enter " + user_code,
       )
-      const _ = harness.net.post(harness.env.get("SLACK_WEBHOOK_URL"), json_stringify({
-        text: "CI auth pending: open " + verification_uri
-          + " and enter `" + user_code + "`",
-      }), {headers: {"Content-Type": "application/json"}})
+      const _ = harness.net.post(
+        harness.env.get("SLACK_WEBHOOK_URL"), json_stringify({
+          text: "CI auth pending: open " + verification_uri
+            + " and enter `" + user_code + "`",
+        }), {headers: {"Content-Type": "application/json"}})
       nil
     },
   },
 )
-// On subsequent CI runs the file backend already has the token; skip device_flow.
+// On subsequent CI runs the file backend
+// already has the token; skip device_flow.
 ```
 
 The same pattern works for Google, Microsoft, and GitLab. Slack,
@@ -836,7 +909,9 @@ const cli = client(
     storage_key: "github:org-bot",
   },
 )
-const issues = request(cli, "GET", "https://api.github.com/orgs/burin-labs/issues")
+const issues = request(
+  cli, "GET", "https://api.github.com/orgs/burin-labs/issues",
+)
 ```
 
 `harn_cloud_org()` routes through the `oauth_storage.cloud_*` host
@@ -850,7 +925,9 @@ per-user: one entry covers every consumer of the bot.
 ### Custom enterprise OIDC provider
 
 ```harn,ignore
-import { client, exchange_code, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization,
+} from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -869,9 +946,13 @@ const cli = client(
   {
     client_id: harness.env.get("ACME_OIDC_CLIENT_ID"),
     client_secret: harness.env.get("ACME_OIDC_CLIENT_SECRET"),
-    scopes: ["openid", "profile", "email", "offline_access", "acme.api.read"],
+    scopes: [
+      "openid", "profile", "email", "offline_access", "acme.api.read",
+    ],
     redirect_uri: "https://app.acme.internal/oauth/callback",
-    storage: file("/var/lib/harn/acme.bin", harness.env.get("HARN_OAUTH_KEY")),
+    storage: file(
+      "/var/lib/harn/acme.bin", harness.env.get("HARN_OAUTH_KEY"),
+    ),
     audience: "https://api.acme.example",
     extra_auth_params: {prompt: "select_account"},
   },

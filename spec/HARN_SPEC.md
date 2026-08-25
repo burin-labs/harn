@@ -785,9 +785,12 @@ automatically wrapped in a closure where `_` is replaced with the piped
 value:
 
 ```harn
-"hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
-[3, 1, 2] |> _.sorted()             // desugars to: |> { __pipe -> __pipe.sorted() }
-items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
+// desugars to: |> { __pipe -> split(__pipe, " ") }
+"hello world" |> split(_, " ")
+// desugars to: |> { __pipe -> __pipe.sorted() }
+[3, 1, 2] |> _.sorted()
+// desugars to: |> { __pipe -> len(__pipe) }
+items |> len(_)
 ```
 
 Without `_`, the pipe passes the value as the sole argument to the callable on
@@ -859,10 +862,12 @@ value, changing part of it changes the binding's whole value:
 
 ```harn
 const base = [1]
-const appended = base.appending(2)   // fine: base is untouched, base == [1]
+// fine: base is untouched, base == [1]
+const appended = base.appending(2)
 
 let built = []
-built = built.appending(1)           // this is how a collection is built up
+// this is how a collection is built up
+built = built.appending(1)
 ```
 
 Because the methods are pure, discarding a result silently does nothing;
@@ -1514,7 +1519,8 @@ matches the tail without binding it):
 match coords {
   [x, y] -> { "2d: ${x},${y}" }          // matches ONLY length 2
   [x, y, z] -> { "3d" }                   // matches ONLY length 3
-  [first, ...rest] -> { "${first}+${rest}" } // length >= 1; rest is a list
+  // length >= 1; rest is a list
+  [first, ...rest] -> { "${first}+${rest}" }
   [] -> { "empty" }
   _ -> { "other" }
 }
@@ -1659,7 +1665,7 @@ All parallel forms accept `with { max_concurrent: N }` before the body:
 ```harn
 fn fetch_page(cursor) { cursor }
 const cursors = ["a", "b", "c"]
-const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+const pages = parallel settle cursors with {max_concurrent: 4} { cursor ->
   fetch_page(cursor)
 }
 ```
@@ -1683,17 +1689,23 @@ receipt still needs every lane's structured outcome. `std/abort` is that form,
 built on scoped shared state rather than on new syntax:
 
 ```harn
-import { abort_requested, request_abort, settle_with_abort } from "std/abort"
+import {
+  abort_requested, request_abort, settle_with_abort,
+} from "std/abort"
 
 const outcome = settle_with_abort(lanes, { lane, token ->
   while !lane_terminal(lane) {
     if abort_requested(token) {
-      return Err({code: "stopped_waiting", message: "a sibling lane failed"})
+      return Err(
+        {code: "stopped_waiting", message: "a sibling lane failed"}
+      )
     }
     harness.clock.sleep_ms(poll_interval_ms)
   }
   if lane_failed(lane) {
-    let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
+    let _ = request_abort(
+      token, {code: "doomed", message: "lane ${lane} failed"},
+    )
     return Err({code: "terminal", message: "lane ${lane} failed"})
   }
   return lane_proof(lane)
@@ -1872,7 +1884,9 @@ is released when the block's scope exits, including `throw`, `return`, `break`,
 Named primitives return a permit value or `nil` on timeout:
 
 ```harn
-const lock = harness.runtime.sync_mutex_acquire("state:customer-42", 250ms)
+const lock = harness.runtime.sync_mutex_acquire(
+  "state:customer-42", 250ms,
+)
 const slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
 const gate = sync_gate_acquire("workflow-runner", 8, 5s)
 ```
@@ -2017,7 +2031,9 @@ host approval payloads and permission transcript events carry that receipt for
 audit and replay.
 
 ```harn
-const budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+const budget = shared_cell(
+  {scope: "task_group", key: "tokens", initial: 0}
+)
 
 parallel 10 { i ->
   let updated = false
@@ -2089,7 +2105,9 @@ tasks and long-lived workers. They provide targeted messages without using
 transcript mutation as the transport.
 
 ```harn
-const inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+const inbox = mailbox_open(
+  {scope: "task_group", name: "reviewer", capacity: 32}
+)
 spawn {
   mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
 }
@@ -3205,19 +3223,22 @@ top-level `title` and `icons` metadata into the `tools/list` response.
 `tool_define` entry without annotations.
 
 ```harn
-registry = tool_define(registry, "repo.status", "Read repository status", {
-  parameters: {},
-  title: "Repository Status",
-  handler: { _args -> git.status() },
-  annotations: {
+registry = tool_define(
+  registry, "repo.status", "Read repository status", {
+    parameters: {},
     title: "Repository Status",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-  icons: [{src: "https://example.com/repo-status.png", mimeType: "image/png"}],
-})
+    handler: { _args -> git.status() },
+    annotations: {
+      title: "Repository Status",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    icons: [
+      {src: "https://example.com/repo-status.png", mimeType: "image/png"}
+    ],
+  })
 ```
 
 #### Tool surface validation
@@ -3458,7 +3479,9 @@ is a shipped TOML matrix overridable per-project via
 effective matrix at runtime with:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
@@ -3471,9 +3494,12 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   reasoning_effort_supported, reasoning_none_supported,
 //   message_wire_format, native_tool_wire_format,
 //   prefers_xml_scaffolding, prefers_markdown_scaffolding,
-//   structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none",
-//   supports_assistant_prefill, prefers_role_developer, prefers_xml_tools,
-//   thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline",
+//   structured_output_mode:
+//     "native_json" | "delimited" | "xml_tagged" | "none",
+//   supports_assistant_prefill, prefers_role_developer,
+//   prefers_xml_tools,
+//   thinking_block_style:
+//     "none" | "thinking_blocks" | "reasoning_summary" | "inline",
 // }
 ```
 
@@ -3560,7 +3586,9 @@ including closures.
 Functions can be promoted into skills via the `@acp_skill` attribute:
 
 ```harn,ignore
-@acp_skill(name: "deploy", when_to_use: "User says deploy", invocation: "explicit")
+@acp_skill(
+  name: "deploy", when_to_use: "User says deploy", invocation: "explicit",
+)
 pub fn deploy_run() { ... }
 ```
 
@@ -3791,7 +3819,8 @@ const result = try { json_parse(raw_input) }
 // Result.Err({error: "json_parse_error", kind, message, line, column})
 
 const checked = try { schema_check(data, schema) }
-// checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))
+// checked is schema_check's Result directly, not
+// Result.Ok(Result.Ok(...))
 ```
 
 The try-expression is the complement of the `?` operator: `try` enters
@@ -4039,7 +4068,8 @@ Type parameters on user-defined generics may be marked with `in` or
 `out`:
 
 ```harn,ignore
-type Reader<out T> = fn() -> T          // T appears only in output position
+// T appears only in output position
+type Reader<out T> = fn() -> T
 interface Sink<in T> { fn accept(v: T) -> int }
 fn map<in A, out B>(value: A) -> B { ... }
 ```
@@ -4268,7 +4298,10 @@ legacy helpers with `[lint].persona_step_allowlist`.
 #### `@command(name?, description?, hint?)`
 
 ```harn,ignore
-@command(name: "review", description: "Review the diff", hint: "(optional focus area)")
+@command(
+  name: "review", description: "Review the diff",
+  hint: "(optional focus area)",
+)
 pipeline review_branch(harness: Harness, task) { ... }
 ```
 
@@ -4488,7 +4521,8 @@ fn passthrough(x: any) -> any {
   return x
 }
 
-const s: string = passthrough("hello")  // any → string, no narrowing required
+// any → string, no narrowing required
+const s: string = passthrough("hello")
 const n: int    = passthrough(42)
 ```
 
@@ -4610,7 +4644,8 @@ fn needs_id(x: {id: string, ...rest}) -> string {
 }
 
 needs_id({id: "u1", name: "Ann", age: 3})   // ok — extra fields allowed
-needs_id({name: "Ann"})                      // error — required `id` missing
+// error — required `id` missing
+needs_id({name: "Ann"})
 ```
 
 `rest` is a **row variable**: a generic type parameter in tail position. A
@@ -4799,7 +4834,8 @@ their arity and the type of each position:
 ```harn
 const row = tuple("retries", 3)          // tuple<string, int>
 const name: string = row[0]              // precise, not string?
-const count: int = row[-1]               // negative constant indexes are precise
+// negative constant indexes are precise
+const count: int = row[-1]
 
 fn consume(row: tuple<string, int>) -> int {
   return row[1]
@@ -4876,7 +4912,9 @@ include other fields.
 Nested shapes:
 
 ```harn
-const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+const data: {
+  user: {name: string}, tags: list,
+} = {user: {name: "X"}, tags: []}
 ```
 
 Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
@@ -4901,11 +4939,14 @@ type GraderOut = {
 
 // Use the alias directly wherever a schema dict is expected.
 const s = schema_of(GraderOut)
-const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+const ok = schema_is(
+  {verdict: "pass", summary: "x", findings: []}, GraderOut,
+)
 
 const r = harness.llm.call(prompt, nil, {
   provider: "openai",
-  output: GraderOut,            // alias in value position — compiled to schema_of(T)
+  // alias in value position — compiled to schema_of(T)
+  output: GraderOut,
   schema_retries: 2,
 })
 ```
@@ -4950,9 +4991,15 @@ import { system_before, with_system_fragments } from "std/llm/prompts"
 
 const opts = with_system_fragments(
   {provider: "anthropic", session_id: "review-42"},
-  [system_before("Follow the repository's validation gate before final output.")]
+  [
+    system_before(
+      "Follow the repository's validation gate before final output."
+    )
+  ]
 )
-const r = agent_loop("Review this change", "You are a code review agent.", opts)
+const r = agent_loop(
+  "Review this change", "You are a code review agent.", opts,
+)
 ```
 
 For call sites that want routing policy to be visibly scoped around the work,
@@ -5126,11 +5173,15 @@ both lower to the same runtime.
 const answer = harness.interaction.ask_user(
   prompt: "deploy now?", schema: schema_of(Choice),
 )
-const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
-                              reviewers: ["alice", "bob", "carol"])
-const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
-                          approvers: ["alice", "bob", "carol"])
-const handle = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
+const record = harness.interaction.request_approval(
+  action: "merge_pr", quorum: 2,
+                                reviewers: ["alice", "bob", "carol"])
+const merged = harness.interaction.dual_control(
+  n: 2, m: 3, action: destructive_step,
+                            approvers: ["alice", "bob", "carol"])
+const handle = harness.interaction.escalate_to(
+  role: "oncall", reason: "deploy failed",
+)
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
@@ -5322,7 +5373,8 @@ index or an absent key is `nil` at runtime, so typing the read as a bare
 
 ```harn,ignore
 const xs: list<int> = []
-const n: int = xs[0]   // error: expected int, found int? (xs[0] may be nil)
+// error: expected int, found int? (xs[0] may be nil)
+const n: int = xs[0]
 ```
 
 Recover the non-nil element in one of three ways:
@@ -5928,11 +5980,15 @@ and returns a list of dicts, one per match. Each dict contains:
 ```harn
 const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
-//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
-//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
+//   {match: "alice@example", groups: ["alice", "example"],
+//    start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"],
+//    start: 14, end: 22, line: 1}
 // ]
 
-const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+const named = regex_captures(
+  "(?P<user>\\w+):(?P<role>\\w+)", "alice:admin",
+)
 // named == [{match: "alice:admin", groups: ["alice", "admin"],
 //            user: "alice", role: "admin"}]
 
@@ -6510,7 +6566,9 @@ and `query`; all provided dict predicates must match.
 ### std/agent/fact module
 
 ```harn
-import { store_fact, recall_facts, invalidate_facts } from "std/agent/fact"
+import {
+  store_fact, recall_facts, invalidate_facts,
+} from "std/agent/fact"
 ```
 
 Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
@@ -7204,7 +7262,13 @@ Harn source may also declare an eval pack directly:
 ```harn
 eval_pack regression "slack-connector" {
   baseline: "fixtures/baseline.run.json"
-  fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
+  fixtures: [
+    {
+      id: "candidate",
+      kind: "run-record",
+      path: "fixtures/candidate.run.json",
+    }
+  ]
   rubrics: [{
     id: "status",
     kind: "deterministic",
@@ -8068,7 +8132,9 @@ fn fixture() -> dict {
   ],
   fixture: fixture,
 )
-pipeline test_query(harness: Harness, fx: dict, input: string, expected: string) {
+pipeline test_query(
+  harness: Harness, fx: dict, input: string, expected: string,
+) {
   fx.rows.push(input)
   assert_eq("${fx.prefix}:${input}", expected)
 }

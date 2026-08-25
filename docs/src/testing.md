@@ -212,9 +212,13 @@ payloads until `step_assertions_end(harness.agent)`.
 ```harn
 pipeline test_project_metadata(harness: Harness, task) {
   harness.testing.clear()
-  harness.testing.respond("project", "metadata_get", {value: "file contents"})
+  harness.testing.respond(
+    "project", "metadata_get", {value: "file contents"},
+  )
 
-  const content = harness.project.metadata_get({dir: ".", namespace: "test"})
+  const content = harness.project.metadata_get({
+    dir: ".", namespace: "test",
+  })
   assert_eq(content.value, "file contents")
 
   const calls = harness.testing.calls()
@@ -249,7 +253,11 @@ pipeline test_runtime_input(harness: Harness, task) {
   with_capability_fixtures(
     harness.testing,
     [
-      {capability: "runtime", method: "pipeline_input", result: {task: "ship"}},
+      {
+        capability: "runtime",
+        method: "pipeline_input",
+        result: {task: "ship"},
+      },
     ],
     { ->
       assert_eq(harness.runtime.pipeline_input().task, "ship")
@@ -282,12 +290,10 @@ exact-consumption assertion:
 ```harn
 import { argv_step, scripted_argv } from "std/testing"
 
-const commands = scripted_argv<dict>(
-  [
-    argv_step(["tool", "status"], {success: true, stdout: "ready"}),
-    argv_step(["tool", "apply"], {success: true, stdout: "updated"}),
-  ],
-)
+const commands = scripted_argv<dict>([
+  argv_step(["tool", "status"], {success: true, stdout: "ready"}),
+  argv_step(["tool", "apply"], {success: true, stdout: "updated"}),
+])
 
 assert_eq(commands.run(["tool", "status"]).stdout, "ready")
 assert_eq(commands.run(["tool", "apply"]).stdout, "updated")

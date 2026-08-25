@@ -431,7 +431,9 @@ onto Interactions — so check the route before switching it. The
 honors project overrides:
 
 ```harn
-const caps = harness.llm.provider_capabilities("gemini", "gemini-3.5-flash")
+const caps = harness.llm.provider_capabilities(
+  "gemini", "gemini-3.5-flash",
+)
 // gemini_interactions
 harness.stdio.println(to_string(caps.live_endpoint_family ?? "nil"))
 ```
@@ -472,7 +474,9 @@ The provider support table is generated from
 capability surface without carrying vendor-specific knowledge:
 
 ```harn
-const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+const caps = harness.llm.provider_capabilities(
+  "anthropic", "claude-opus-4-7",
+)
 // {
 //   native_tools: true, text_tool_wire_format_supported: true,
 //   preferred_tool_format: "native", tool_mode_parity: "unknown",
@@ -494,13 +498,19 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   thinking_block_style: "thinking_blocks",
 // }
 
-// Gate on `tools` for "can this route call tools at all" — true for either
+// Gate on `tools` for "can this route
+// call tools at all" — true for either
 // native or text-format tool wire. Inspect `native_tools` or
-// `text_tool_wire_format_supported` directly when you need to distinguish.
-// Presets use `preferred_tool_format` when it is present, which keeps known
-// native/text divergences in capability data instead of provider-name branches.
-// `agent_loop` uses the same field when `tool_format` is unset or `"auto"`;
-// missing recommendations fall back to text tools and emit `capability_gap`.
+// `text_tool_wire_format_supported`
+// directly when you need to distinguish.
+// Presets use `preferred_tool_format`
+// when it is present, which keeps known
+// native/text divergences in capability
+// data instead of provider-name branches.
+// `agent_loop` uses the same field when
+// `tool_format` is unset or `"auto"`;
+// missing recommendations fall back to
+// text tools and emit `capability_gap`.
 if caps.tools && "bm25" in caps.tool_search {
   harness.llm.call(prompt, sys, {
     tools: registry,
