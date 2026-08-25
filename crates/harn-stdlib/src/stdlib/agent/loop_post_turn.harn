@@ -310,8 +310,7 @@ pub fn agent_loop_post_turn_transition(
     context.turn_llm_opts,
     { render_harness, _effective ->
       agent_compute_post_turn(
-        render_harness.agent,
-        render_harness.llm,
+        render_harness,
         session,
         context.normalized
           + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},

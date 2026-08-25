@@ -1,0 +1,144 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn edit_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> return "edited " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+fn always_claims_edit() {
+  return {
+    classifier: { _payload ->
+      return {
+        action: "tool_call_intended",
+        tool_name: "edit",
+        confidence: 0.99,
+        evidence: "fixture always claims another edit",
+        language: "fixture",
+      }
+    },
+  }
+}
+
+fn event_count(events: list, kind: string) {
+  return len(events.filter({ event -> event.type == kind }))
+}
+
+pipeline default(harness: Harness) {
+  // Once a native loop has used its tool channel, prose is the terminal
+  // contract. A second classifier must not reopen that turn.
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("edit", {path: "main.py"}), llm_text("The edit is complete.")],
+    { ->
+      const session = "terminal-native-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit main.py.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            session_id: session,
+            tools: edit_tools(),
+            missing_tool_call_recovery: always_claims_edit(),
+          },
+        ) },
+      )
+      harness.stdio.println("native.status=" + captured.result.status)
+      harness.stdio.println("native.calls=" + to_string(len(harness.llm.mock_calls())))
+      harness.stdio.println(
+        "native.classifier_events="
+          + to_string(event_count(captured.events, "missing_tool_call_verdict")),
+      )
+    },
+  )
+  // A completion judge is the sole model-based owner of terminal intent. The
+  // missing-call classifier must not consume a call before it.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The requested review is complete."),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The review result is explicit.\"}"),
+    ],
+    { ->
+      const session = "terminal-judge-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Review main.py.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            session_id: session,
+            tools: edit_tools(),
+            done_judge: true,
+            missing_tool_call_recovery: always_claims_edit(),
+          },
+        ) },
+      )
+      harness.stdio.println("judge.status=" + captured.result.status)
+      harness.stdio.println("judge.calls=" + to_string(len(harness.llm.mock_calls())))
+      harness.stdio.println(
+        "judge.classifier_events="
+          + to_string(event_count(captured.events, "missing_tool_call_verdict")),
+      )
+      harness.stdio.println(
+        "judge.decisions=" + to_string(event_count(captured.events, "judge_decision")),
+      )
+    },
+  )
+  // Remaining classifier calls put every stable byte before assistant text.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"action\":\"tool_call_intended\",\"tool_name\":\"edit\",\"confidence\":0.9,\"evidence\":\"explicit intent\",\"language\":\"en\"}",
+      ),
+    ],
+    { ->
+      const classify = missing_tool_call_classifier(harness, {provider: "mock"})
+      const verdict = classify(
+        {
+          session_id: "prefix-order",
+          iteration: 0,
+          text: "VARIABLE_ASSISTANT_TAIL",
+          visible_text: "VARIABLE_ASSISTANT_TAIL",
+          tools: [{name: "edit", description: "Edit a file."}],
+          tool_names: ["edit"],
+          tool_format: "native",
+        },
+      )
+      const prompt = harness.llm.mock_calls()[0].messages[0].content
+      const rules_at = prompt.index_of("Rules:")
+      const tools_at = prompt.index_of("Candidate tools JSON:")
+      const text_at = prompt.index_of("VARIABLE_ASSISTANT_TAIL")
+      require rules_at >= 0 && tools_at > rules_at && text_at > tools_at,
+        "stable rules and candidate tools must precede assistant text"
+      harness.stdio.println("prefix.action=" + verdict.action)
+      harness.stdio.println("prefix.stable_first=true")
+    },
+  )
+}
