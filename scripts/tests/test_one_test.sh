@@ -114,4 +114,18 @@ HARN_TEST_ONE_NAME=package::module::case \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
   make -s -C "$repo_root" test-one > "$tmp_root/make.out"
 
+HARN_TEST_ONE_NAME=package::module::case \
+  HARN_TEST_ONE_PACKAGE=harn-hostlib \
+  HARN_TEST_ONE_BINARY=harn_hostlib \
+  TEST_ONE_ARGS_LOG="$args_log" \
+  HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
+  make -s -C "$repo_root" test-one > "$tmp_root/make-binary.out"
+printf '%s\0' \
+  test --package harn-hostlib --test harn_hostlib package::module::case \
+  -- --exact --format terse > "$tmp_root/expected-make-binary-args.log"
+if ! cmp -s "$tmp_root/expected-make-binary-args.log" "$args_log"; then
+  echo "Make test-one did not preserve the named integration-test selector" >&2
+  exit 1
+fi
+
 echo "test_one contract tests passed"
