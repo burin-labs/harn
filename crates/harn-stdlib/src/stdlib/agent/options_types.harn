@@ -1,11 +1,9 @@
-// Canonical internal declarations for the typed agent-loop option surface.
-// `std/agent/options` repeats these aliases only because consumer annotations
-// do not yet resolve re-exported types; Rust parity tests mechanically reject
-// drift between that public projection and this module. Rust twins for the
-// workflow-facing policies live in
+// Canonical declarations for the typed agent-loop option surface.
+// `std/agent/options` is the public facade and re-exports these aliases.
+// Rust twins for the workflow-facing policies live in
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
-// parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
+// parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
 /** Failure streak that can terminate or pause an adaptive iteration budget. */
 pub type ConsecutiveFailureBudget = {max: int, kinds?: list<string>, paused_for_ms?: int}
 
