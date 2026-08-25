@@ -193,7 +193,8 @@ UX (e.g. an IDE host's approval modal) for destructive tools.
 ### `with_scoped_executor(opts) -> caller`
 
 Narrows the active `CapabilityPolicy` for the duration of one tool
-dispatch. Wraps the downstream chain in `with_execution_policy(...)`
+dispatch. Wraps the downstream chain in
+`harness.runtime.with_execution_policy(...)`
 so the runtime's existing `enforce_current_policy_for_tool` machinery
 (capability ceilings, side-effect ceiling, tool-arg constraints) sees
 the scoped policy as the top of the stack — the scoped policy is
@@ -388,8 +389,8 @@ audit log sees what the runtime actually attempted.
 1. **A captured binding is not concurrency-safe.** Closures capture by
    reference, so a captured dict does persist across calls of a stateful
    middleware — but under `parallel`/`spawn` every branch shares the one
-   cell, so a read-modify-write races (see HARN-LNT-064). Use `atomic(0)`
-   for integer counters or `std/cache` for richer state. See the existing
+   cell, so a read-modify-write races (see HARN-LNT-064). Use
+   `harness.runtime.atomic(0)` for integer counters or `std/cache` for richer state. See the existing
    `std/llm/handlers::with_budget` for the standard pattern.
 2. **Short-circuiting must produce a complete result dict.** The
    downstream `agent_session_record_tool_results` expects the standard

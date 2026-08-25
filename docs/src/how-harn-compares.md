@@ -152,8 +152,8 @@ See [Process sandboxing](./sandboxing.md) and [Host boundary](./host-boundary.md
 
 A Harn package is a versioned unit with a lockfile, stable exports, and a
 `harn package verify` contract. Filesystem-backed skills can go further: a
-project can require an Ed25519 signature chain before `load_skill(...)` promotes
-a skill's body into an agent session, so a model doesn't silently load prompt
+project can require an Ed25519 signature chain before
+`harness.agent.load_skill(...)` promotes a skill's body into an agent session, so a model doesn't silently load prompt
 instructions off disk.
 
 Read the other columns here carefully, because `Partial` is doing real work. A

@@ -101,7 +101,7 @@ TimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
 ```
 
 - `trigger` is validated by the same trigger-spec parser used by
-  `trigger_register(...)`. Any provider that works as a trigger source
+  `harness.runtime.trigger_register(...)`. Any provider that works as a trigger source
   (`github`, `slack`, `cron`, `channel`, `webhook`, etc.) works as a
   resume condition. Registration failures raise `HARN-SUS-007`.
 - `timeout.duration_minutes` must be a positive integer.
@@ -224,8 +224,8 @@ internally call `agent_await_resumption(...)` when no wake source
 paths) is queued. The persisted snapshot extends the standard suspend
 metadata with daemon-specific fields (`pending_event_count`,
 `queued_event_count`, `inflight_event`, `wake_interval_ms`,
-`watch_paths`, `event_queue_capacity`). `daemon_resume(path)` cold-
-restores the loop identically.
+`watch_paths`, `event_queue_capacity`).
+`harness.agent.daemon_resume(path)` cold-restores the loop identically.
 
 ### Cooperative cancellation contract
 
