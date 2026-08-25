@@ -4,7 +4,7 @@
     {
       "id": "TYP",
       "title": "Type checker",
-      "count": 28
+      "count": 29
     },
     {
       "id": "PAR",
@@ -473,6 +473,15 @@
           "summary": "Annotate the parameter with the inferred type, or `unknown` and narrow it at the dynamic boundary"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-029",
+      "category": "TYP",
+      "summary": "type predicate contract is invalid",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
