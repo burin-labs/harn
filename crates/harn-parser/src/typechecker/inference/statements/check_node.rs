@@ -197,13 +197,15 @@ impl TypeChecker {
                     span,
                 );
                 self.check_fn_body(
-                    type_params,
-                    params,
-                    return_type,
-                    type_predicate.as_ref(),
+                    CallableBodyContract {
+                        type_params,
+                        params,
+                        return_type,
+                        type_predicate: type_predicate.as_ref(),
+                        where_clauses,
+                        is_stream: *is_stream,
+                    },
                     body,
-                    where_clauses,
-                    *is_stream,
                     CallableDeclarationContext { span, scope },
                 );
                 if let Some(declared) = throws {

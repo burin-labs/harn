@@ -23,6 +23,16 @@ pub(in crate::typechecker) struct CallableDeclarationContext<'a> {
     pub scope: &'a TypeScope,
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::typechecker) struct CallableBodyContract<'a> {
+    pub type_params: &'a [TypeParam],
+    pub params: &'a [TypedParam],
+    pub return_type: &'a Option<TypeExpr>,
+    pub type_predicate: Option<&'a TypePredicate>,
+    pub where_clauses: &'a [WhereClause],
+    pub is_stream: bool,
+}
+
 impl TypeChecker {
     /// Check a parameter default before introducing the parameter itself.
     /// Earlier parameters are already in `scope`; the current parameter and
@@ -471,37 +481,23 @@ impl TypeChecker {
 
     pub(in crate::typechecker) fn check_fn_body(
         &mut self,
-        type_params: &[TypeParam],
-        params: &[TypedParam],
-        return_type: &Option<TypeExpr>,
-        type_predicate: Option<&TypePredicate>,
+        contract: CallableBodyContract<'_>,
         body: &[SNode],
-        where_clauses: &[WhereClause],
-        is_stream: bool,
         declaration: CallableDeclarationContext<'_>,
     ) {
         self.fn_depth += 1;
         let saved_stream_depth = self.stream_fn_depth;
         let saved_stream_emit_types = self.stream_emit_types.clone();
-        if is_stream {
+        if contract.is_stream {
             self.stream_fn_depth += 1;
             self.stream_emit_types
-                .push(Self::stream_emit_type(return_type));
+                .push(Self::stream_emit_type(contract.return_type));
         } else {
             self.stream_fn_depth = 0;
             self.stream_emit_types.clear();
         }
-        self.check_fn_body_inner(
-            type_params,
-            params,
-            return_type,
-            type_predicate,
-            body,
-            where_clauses,
-            is_stream,
-            declaration,
-        );
-        if is_stream {
+        self.check_fn_body_inner(contract, body, declaration);
+        if contract.is_stream {
             self.stream_emit_types.pop();
         }
         self.stream_fn_depth = saved_stream_depth;
@@ -582,26 +578,21 @@ impl TypeChecker {
 
     fn check_fn_body_inner(
         &mut self,
-        type_params: &[TypeParam],
-        params: &[TypedParam],
-        return_type: &Option<TypeExpr>,
-        type_predicate: Option<&TypePredicate>,
+        contract: CallableBodyContract<'_>,
         body: &[SNode],
-        where_clauses: &[WhereClause],
-        is_stream: bool,
         declaration: CallableDeclarationContext<'_>,
     ) {
         let mut fn_scope = declaration.scope.child();
         // Register generic type parameters so they are treated as compatible
         // with any concrete type during type checking.
-        for tp in type_params {
+        for tp in contract.type_params {
             fn_scope.generic_type_params.insert(tp.name.clone());
         }
         // Store where-clause constraints for definition-site checking. A type
         // parameter can appear in more than one clause (`where T: A, T: B`) or
         // carry additive bounds (`where T: A + B`); accumulate them all rather
         // than letting a later clause clobber an earlier one.
-        for wc in where_clauses {
+        for wc in contract.where_clauses {
             let bounds = fn_scope
                 .where_constraints
                 .entry(wc.type_name.clone())
@@ -610,7 +601,7 @@ impl TypeChecker {
                 bounds.push(wc.bound.clone());
             }
         }
-        for param in params {
+        for param in contract.params {
             let param_type = if param.rest {
                 param
                     .type_expr
@@ -627,26 +618,27 @@ impl TypeChecker {
             );
         }
         Self::mark_closure_mutated_captures(&mut fn_scope, body);
-        self.expected_return_types.push(return_type.clone());
-        self.check_block_with_expected_tail(body, return_type.as_ref(), &mut fn_scope);
+        self.expected_return_types
+            .push(contract.return_type.clone());
+        self.check_block_with_expected_tail(body, contract.return_type.as_ref(), &mut fn_scope);
         self.expected_return_types.pop();
 
-        if let Some(predicate) = type_predicate {
+        if let Some(predicate) = contract.type_predicate {
             if self.validate_type_predicate(
                 predicate,
-                type_params,
-                params,
+                contract.type_params,
+                contract.params,
                 body,
                 &fn_scope,
-                is_stream,
+                contract.is_stream,
             ) {
                 self.validated_type_predicates
                     .insert((declaration.span.start, declaration.span.end));
             }
         }
 
-        if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
-            if let Some(actual) = return_type {
+        if contract.is_stream && !matches!(contract.return_type, None | Some(TypeExpr::Stream(_))) {
+            if let Some(actual) = contract.return_type {
                 self.error_at(
                     Code::ReturnTypeMismatch,
                     format!(
@@ -663,13 +655,13 @@ impl TypeChecker {
         // outstanding narrowings rolled back so a parameter typed (e.g.) `T?`
         // is still seen as `T?` here even when the body narrowed it inside a
         // conditional that fell through.
-        if let Some(ret_type) = return_type {
+        if let Some(ret_type) = contract.return_type {
             let mut ret_scope = fn_scope.clone();
             ret_scope.restore_narrowed_vars();
             for stmt in body {
                 self.check_return_type(stmt, ret_type, declaration.span, &mut ret_scope);
             }
-            if !is_stream
+            if !contract.is_stream
                 && !Self::body_contains_yield(body)
                 && !self.body_cannot_fall_through(body, &ret_scope)
                 && !self.return_type_allows_implicit_nil(ret_type, &ret_scope)

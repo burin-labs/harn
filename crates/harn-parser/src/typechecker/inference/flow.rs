@@ -342,14 +342,12 @@ impl TypeChecker {
         let mut resolved = node.clone();
         let mut used_alias = false;
         let mut visited = HashSet::new();
-        loop {
-            let Node::Identifier(name) = &resolved.node else {
-                break;
-            };
+        while let Node::Identifier(name) = &resolved.node {
+            let name = name.clone();
             if !visited.insert(name.clone()) {
                 break;
             }
-            let Some(expression) = scope.get_flow_alias(name) else {
+            let Some(expression) = scope.get_flow_alias(&name) else {
                 break;
             };
             resolved = expression.clone();

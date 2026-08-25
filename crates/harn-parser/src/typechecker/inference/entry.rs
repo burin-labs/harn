@@ -16,7 +16,7 @@ use super::super::scope::{
     TypeScope,
 };
 use super::super::{TypeCheckFacts, TypeChecker};
-use super::decls::CallableDeclarationContext;
+use super::decls::{CallableBodyContract, CallableDeclarationContext};
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
@@ -181,13 +181,15 @@ impl TypeChecker {
                         self.check_main_signature(params, snode.span);
                     }
                     self.check_fn_body(
-                        type_params,
-                        params,
-                        &declared,
-                        type_predicate.as_ref(),
+                        CallableBodyContract {
+                            type_params,
+                            params,
+                            return_type: &declared,
+                            type_predicate: type_predicate.as_ref(),
+                            where_clauses,
+                            is_stream: *is_stream,
+                        },
                         body,
-                        where_clauses,
-                        *is_stream,
                         CallableDeclarationContext {
                             span: snode.span,
                             scope: body_scope.as_ref(),
