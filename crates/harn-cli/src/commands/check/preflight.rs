@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
-use super::harness_receiver::harness_method_receiver;
 use super::host_capabilities::{is_known_host_operation, HostCapabilities};
 use super::imports::{
     scan_import_collisions, scan_re_export_conflicts, scan_selective_import_visibility,
@@ -13,9 +12,11 @@ use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
+mod execution_target;
 mod host_param_discriminators;
 mod llm_composition;
 
+use execution_target::{is_process_execution_method, scan_execution_dir_preflight};
 use host_param_discriminators::scan_host_param_discriminators;
 pub(super) use host_param_discriminators::{host_render_path_arg, parse_host_call_args};
 
@@ -909,39 +910,6 @@ fn scan_program_preflight(
     }
 }
 
-/// Report a literal execution directory that does not exist, for either
-/// spelling of the directory-scoped process calls.
-fn scan_execution_dir_preflight(
-    args: &[SNode],
-    file_path: &Path,
-    source: &str,
-    diagnostics: &mut Vec<PreflightDiagnostic>,
-) {
-    let Some(dir) = args.first().and_then(literal_string) else {
-        return;
-    };
-    let resolved = resolve_source_relative(file_path, &dir);
-    if super::result_cache::probe_is_dir(&resolved) {
-        return;
-    }
-    diagnostics.push(PreflightDiagnostic {
-        code: Code::ExecutionTargetMissing,
-        path: file_path.display().to_string(),
-        source: source.to_string(),
-        span: args[0].span,
-        message: format!(
-            "preflight: execution directory '{}' does not exist at {}",
-            dir,
-            resolved.display()
-        ),
-        help: Some(
-            "use a source-relative directory that exists at preflight time, or create it before execution"
-                .to_string(),
-        ),
-        tags: None,
-    });
-}
-
 fn scan_node_preflight(
     node: &SNode,
     file_path: &Path,
@@ -1618,12 +1586,6 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        // `harness.process.exec_at(...)` is what the migration diagnostic for
-        // the removed `exec_at` global tells authors to write, so the
-        // execution-directory check has to follow it there. `bundle.rs` already
-        // collects the same pair from both spellings; this pass was the half
-        // that stayed on the old one. Recursion mirrors the generic method-call
-        // arm below so recognizing the call does not stop the walk.
         Node::MethodCall {
             object,
             method,
@@ -1633,34 +1595,10 @@ fn scan_node_preflight(
             object,
             method,
             args,
-        } if matches!(
-            harness_method_receiver(object),
-            Some(receiver)
-                if receiver.capability == harn_builtin_meta::CapabilityId::Process
-                    && matches!(method.as_str(), "exec_at" | "shell_at")
-        ) =>
-        {
-            scan_execution_dir_preflight(args, file_path, source, diagnostics);
-            scan_node_preflight(
-                object,
-                file_path,
-                source,
-                config,
-                host_capabilities,
-                visited,
-                diagnostics,
-            );
-            scan_children(
-                args,
-                file_path,
-                source,
-                config,
-                host_capabilities,
-                visited,
-                diagnostics,
-            );
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+        } => {
+            if is_process_execution_method(object, method) {
+                scan_execution_dir_preflight(args, file_path, source, diagnostics);
+            }
             scan_node_preflight(
                 object,
                 file_path,
