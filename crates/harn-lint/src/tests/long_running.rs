@@ -51,3 +51,160 @@ pipeline main() {
         "expected host tool cleanup warning, got: {diags:?}"
     );
 }
+
+#[test]
+fn harness_background_flag_without_cleanup_warns() {
+    let diags = lint_source(
+        r#"
+fn main(harness: Harness) {
+  harness.tools.run_command({argv: ["sleep", "10"], background: true})
+}
+"#,
+    );
+
+    assert!(
+        has_rule(&diags, "long-running-without-cleanup"),
+        "expected canonical harness call to require cleanup, got: {diags:?}"
+    );
+}
+
+#[test]
+fn colliding_non_harness_background_method_is_not_flagged() {
+    let diags = lint_source(
+        r"
+fn main(harness: Harness) {
+  const client = {}
+  client.run_command({background: true})
+}
+",
+    );
+
+    assert!(
+        !has_rule(&diags, "long-running-without-cleanup"),
+        "unrelated method must not be treated as a harness capability: {diags:?}"
+    );
+}
+
+#[test]
+fn shadowed_harness_receivers_do_not_inherit_host_authority() {
+    for source in [
+        r"
+fn main(harness: Harness) {
+  const helper = fn(harness) {
+    harness.tools.run_command({background: true})
+  }
+}
+",
+        r"
+fn main(harness: Harness) {
+  fn helper(harness) {
+    harness.tools.run_command({background: true})
+  }
+}
+",
+        r"
+fn main(harness: Harness) {
+  const harness = {}
+  harness.tools.run_command({background: true})
+}
+",
+    ] {
+        let diags = lint_source(source);
+        assert!(
+            !has_rule(&diags, "long-running-without-cleanup"),
+            "shadowed receiver must not inherit Harness policy: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn recursive_optional_harness_receiver_keeps_root_ownership() {
+    let diags = lint_source(
+        r"
+fn main(harness: Harness) {
+  harness?.tools.runner.run_command({background: true})
+}
+",
+    );
+    assert!(
+        has_rule(&diags, "long-running-without-cleanup"),
+        "nested optional/property receiver must retain Harness ownership: {diags:?}"
+    );
+}
+
+#[test]
+fn migrated_cleanup_covers_legacy_background_call() {
+    let diags = lint_source(
+        r#"
+fn main(harness: Harness) {
+  const handle = run_command("sleep 10", {background: true})
+  defer {
+    harness.tools.cancel_handle(handle)
+  }
+}
+"#,
+    );
+
+    assert!(
+        !has_rule(&diags, "long-running-without-cleanup"),
+        "canonical cleanup must cover a legacy trigger, got: {diags:?}"
+    );
+}
+
+#[test]
+fn legacy_cleanup_covers_migrated_background_call() {
+    let diags = lint_source(
+        r#"
+fn main(harness: Harness) {
+  const handle = harness.tools.run_command({argv: ["sleep", "10"], background: true})
+  defer {
+    cancel_handle(handle)
+  }
+}
+"#,
+    );
+
+    assert!(
+        !has_rule(&diags, "long-running-without-cleanup"),
+        "legacy cleanup must cover a canonical trigger, got: {diags:?}"
+    );
+}
+
+#[test]
+fn migrated_cleanup_covers_migrated_background_call() {
+    let diags = lint_source(
+        r#"
+fn main(harness: Harness) {
+  const handle = harness.tools.run_command({argv: ["sleep", "10"], background: true})
+  defer {
+    harness.tools.cancel_handle(handle)
+  }
+}
+"#,
+    );
+
+    assert!(
+        !has_rule(&diags, "long-running-without-cleanup"),
+        "fully canonical trigger and cleanup must pair, got: {diags:?}"
+    );
+}
+
+#[test]
+fn colliding_non_harness_cancel_method_does_not_count_as_cleanup() {
+    let diags = lint_source(
+        r#"
+fn main(harness: Harness) {
+  const client = {}
+  const handle = run_command("sleep 10", {background: true})
+  defer {
+    client.cancel_handle(handle)
+  }
+}
+"#,
+    );
+
+    assert!(
+        has_rule(&diags, "long-running-without-cleanup"),
+        "unrelated cancel method must not satisfy cleanup, got: {diags:?}"
+    );
+}

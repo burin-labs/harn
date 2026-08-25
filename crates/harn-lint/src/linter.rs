@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::find_closest_match;
-use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{
+    lexical::BindingId, BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam,
+};
 
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
@@ -109,6 +111,11 @@ pub(crate) struct Linter<'a> {
     /// A local binding named `harness` is not enough to safely rewrite
     /// capability calls to `harness.*`.
     pub(super) harness_param_stack: Vec<Option<String>>,
+    /// Exact identifier-use resolution for Harness receiver policy. The
+    /// declaration identity prevents nested parameters and locals with the
+    /// same spelling from inheriting host authority.
+    pub(super) resolved_identifier_bindings: HashMap<(usize, usize), BindingId>,
+    pub(super) harness_bindings: HashSet<BindingId>,
     /// Tracks how many enclosing `@complexity(allow)` attributes are
     /// active. When > 0, the cyclomatic-complexity rule is suppressed
     /// for the contained function.
@@ -190,6 +197,8 @@ impl<'a> Linter<'a> {
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
             harness_param_stack: Vec::new(),
+            resolved_identifier_bindings: HashMap::new(),
+            harness_bindings: HashSet::new(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
             impl_method_names: HashSet::new(),
@@ -696,21 +705,6 @@ impl<'a> Linter<'a> {
         });
     }
 
-    fn warn_missing_secret_scan(&mut self, span: Span) {
-        self.diagnostics.push(LintDiagnostic {
-            code: Code::LintPrOpenWithoutSecretScan,
-            rule: "pr-open-without-secret-scan".into(),
-            message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
-            span,
-            severity: LintSeverity::Warning,
-            suggestion: Some(
-                "run `secret_scan(content)` first and gate the PR-open call on an empty findings list"
-                    .to_string(),
-            ),
-            fix: None,
-        });
-    }
-
     fn analyze_secret_scan_expr(&mut self, node: &SNode, scanned: bool) -> bool {
         match &node.node {
             Node::FunctionCall { name, args, .. } => {
@@ -733,11 +727,24 @@ impl<'a> Linter<'a> {
                 }
                 state
             }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
                 let mut state = self.analyze_secret_scan_expr(object, scanned);
                 for arg in args {
                     state = self.analyze_secret_scan_expr(arg, state);
+                }
+                if let Some(state) =
+                    self.harness_mcp_secret_scan_state(object, method, args, state, node.span)
+                {
+                    return state;
                 }
                 state
             }
