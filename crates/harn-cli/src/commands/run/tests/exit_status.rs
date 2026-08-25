@@ -177,6 +177,42 @@ pipeline main(harness: Harness) {
 }
 
 #[tokio::test]
+async fn project_trigger_opt_in_initializes_and_fires_used_handler() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_manifest_trigger_project(
+        project.path(),
+        r#"
+import "std/triggers"
+
+pipeline main(harness: Harness) {
+  const binding = harness.runtime.trigger_list().filter({ item -> item.id == "cron-handler" })[0]
+  const fired = harness.runtime.trigger_fire(
+    binding,
+    {id: "evt-opt-in", provider: "cron", kind: "cron.tick"},
+  )
+  harness.stdio.println(fired.status)
+  harness.stdio.println(fired.result.handled)
+}
+"#,
+    );
+    std::fs::write(
+        project.path().join("trigger_handlers.harn"),
+        r#"
+pub fn on_tick(_event) -> dict {
+  return {handled: true}
+}
+"#,
+    )
+    .expect("write working trigger handler");
+
+    let outcome = execute_run_with_project_triggers(&script.to_string_lossy()).await;
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "dispatched\ntrue");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
 async fn standalone_run_ignores_broken_project_handlers() {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
