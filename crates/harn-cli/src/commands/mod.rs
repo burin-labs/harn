@@ -184,6 +184,29 @@ impl SourceTargets {
     }
 }
 
+/// Whether the repository declares that this file is *supposed* to be
+/// unparseable.
+///
+/// Conformance suites keep fixtures whose whole purpose is to be rejected, and
+/// they already say so: the expected diagnostic lives in a sibling `.error`
+/// file next to the `.harn`. Both this repo (`conformance/tests/modules/*.error`)
+/// and consuming packages (`conformance/errors/*.error`) use that convention.
+///
+/// This lives next to [`collect_source_targets`] because it is a property of
+/// the shared source tree, not of any one subcommand. `harn fix` learned it
+/// first (harn#6264); `harn fmt` walks the same trees and did not, so the
+/// reusable bump workflow's repo-wide `harn fmt .` re-broke the same consumers
+/// the moment that step was added. A predicate that only one caller knows is a
+/// class waiting to recur at the next caller.
+///
+/// A file with no such declaration still fails its command. That distinction is
+/// the point: an undeclared parse error is a corrupt file, and staying loud
+/// about it is why this reads a declaration rather than suppressing the
+/// category.
+pub(crate) fn declares_expected_invalid(file: &Path) -> bool {
+    file.with_extension("error").is_file()
+}
+
 pub(crate) fn collect_source_targets(
     targets: &[&str],
     include_harn: bool,
