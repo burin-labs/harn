@@ -56,41 +56,6 @@ docs/src/stdlib/tool-middleware.md                 with_rate_limit
 # concurrently, and a gate that waits for a 312-site burn-down protects
 # nothing in the meantime. Delete lines as pages are corrected.
 
-docs/llm/harn-quickref.md                          atomic
-docs/llm/harn-quickref.md                          cancel_in_flight_tool_call
-docs/llm/harn-quickref.md                          channel_guardrail_register
-docs/llm/harn-quickref.md                          channel_select
-docs/llm/harn-quickref.md                          clear_path_scope_guard
-docs/llm/harn-quickref.md                          clear_reminder_providers
-docs/llm/harn-quickref.md                          daemon_resume
-docs/llm/harn-quickref.md                          daemon_snapshot
-docs/llm/harn-quickref.md                          daemon_spawn
-docs/llm/harn-quickref.md                          daemon_stop
-docs/llm/harn-quickref.md                          daemon_trigger
-docs/llm/harn-quickref.md                          durable_rate_limit_acquire
-docs/llm/harn-quickref.md                          ed25519_keypair
-docs/llm/harn-quickref.md                          notify_file_edited
-docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_snapshot
-docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_take
-docs/llm/harn-quickref.md                          pipeline_on_finish
-docs/llm/harn-quickref.md                          register_path_scope_guard
-docs/llm/harn-quickref.md                          register_persona_hook
-docs/llm/harn-quickref.md                          register_reminder_provider
-docs/llm/harn-quickref.md                          register_session_hook
-docs/llm/harn-quickref.md                          register_tool_hook
-docs/llm/harn-quickref.md                          routing_policy
-docs/llm/harn-quickref.md                          trace_spans
-docs/llm/harn-quickref.md                          trigger_fire
-docs/llm/harn-quickref.md                          trigger_inspect_dlq
-docs/llm/harn-quickref.md                          trigger_inspect_lifecycle
-docs/llm/harn-quickref.md                          trigger_list
-docs/llm/harn-quickref.md                          trigger_register
-docs/llm/harn-quickref.md                          trigger_replay
-docs/llm/harn-quickref.md                          trust_query
-docs/llm/harn-quickref.md                          trust_record
-docs/llm/harn-quickref.md                          x25519_keypair
-docs/llm/harn-quickref.md                          yield_now
-
 docs/src/builtins.md                               agent_trace
 docs/src/builtins.md                               agent_trace_summary
 docs/src/builtins.md                               artifact_emit
@@ -236,7 +201,6 @@ docs/src/workflow-runtime.md                       load_run_tree
 
 spec/chapters/13-functions-and-closures.md         command_policy_pop
 spec/chapters/13-functions-and-closures.md         command_policy_push
-
 
 spec/chapters/26-checkpoint-resume.md              checkpoint
 spec/chapters/26-checkpoint-resume.md              checkpoint_clear
