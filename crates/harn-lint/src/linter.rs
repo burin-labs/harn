@@ -99,11 +99,8 @@ pub(crate) struct Linter<'a> {
     pub(crate) externally_imported_names: HashSet<String>,
     /// Track whether the current traversal is inside a test pipeline body.
     pub(super) test_pipeline_depth: usize,
-    /// An enclosing attribute binds the pipeline's positional slots to a
-    /// table, fixture, or another declaration-owned invocation contract.
-    /// True only while walking a pipeline structurally owned by a bare
-    /// `@test` declaration. The test runner derives its argument vector from
-    /// that declaration; names such as `test_*` are not reachability.
+    /// Whether a bare `@test` declaration owns this pipeline's inputs.
+    /// Owned inputs may be removed when no caller survives the full walk.
     pub(super) test_pipeline_input_owned: bool,
     /// Track type declarations for the `unused-type` lint rule.
     pub(super) type_declarations: Vec<TypeDeclaration>,
