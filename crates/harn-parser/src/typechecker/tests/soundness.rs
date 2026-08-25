@@ -635,6 +635,22 @@ fn g(x: float?) -> float {
         }),
         "imported assert must not inherit builtin narrowing: {import_shadow:?}"
     );
+
+    let binding_shadow = errors(
+        r"
+fn g(x: float?) -> float {
+  const assert = { value -> true }
+  assert(x ?? false)
+  return x - 1.0
+}
+",
+    );
+    assert!(
+        binding_shadow
+            .iter()
+            .any(|error| error.contains("may be nil")),
+        "closure-bound assert must not inherit builtin narrowing: {binding_shadow:?}"
+    );
 }
 
 #[test]

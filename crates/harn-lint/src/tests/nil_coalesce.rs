@@ -121,6 +121,12 @@ pipeline default(task) {
   assert(task?.ready ?? false)
 }
 "#,
+        r"
+pipeline default(task) {
+  const assert = { value -> true }
+  assert(task?.ready ?? false)
+}
+",
     ] {
         let diags = lint_source(source);
         assert!(

@@ -9,7 +9,7 @@
 //! lints with local fixes that remove the operator and fallback.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::{visit, DiagnosticCode as Code, Node, SNode};
+use harn_parser::{visit, BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -55,20 +55,45 @@ fn shadows_native_assert(program: &[SNode]) -> bool {
     let mut shadowed = false;
     visit::walk_program(program, &mut |node| {
         shadowed |= match &node.node {
-            Node::FnDecl { name, .. }
-            | Node::Pipeline { name, .. }
-            | Node::ToolDecl { name, .. }
-            | Node::SkillDecl { name, .. }
+            Node::FnDecl { name, params, .. }
+            | Node::Pipeline { name, params, .. }
+            | Node::ToolDecl { name, params, .. } => {
+                name == "assert" || params.iter().any(|param| param.name == "assert")
+            }
+            Node::Closure { params, .. } => params.iter().any(|param| param.name == "assert"),
+            Node::LetBinding { pattern, .. }
+            | Node::ConstBinding { pattern, .. }
+            | Node::ForIn { pattern, .. } => binding_pattern_binds_assert(pattern),
+            Node::OverrideDecl { name, params, .. } => {
+                name == "assert" || params.iter().any(|param| param == "assert")
+            }
+            Node::TryCatch { error_var, .. } => error_var.as_deref() == Some("assert"),
+            Node::SkillDecl { name, .. }
             | Node::StructDecl { name, .. }
             | Node::EnumDecl { name, .. } => name == "assert",
             Node::EvalPackDecl { binding_name, .. } => binding_name == "assert",
             Node::SelectiveImport { names, .. } => names.iter().any(|name| name == "assert"),
             Node::NamespaceImport { alias, .. } => alias == "assert",
             Node::ImportDecl { .. } => true,
+            // Match-arm destructuring uses expression-shaped identifiers as
+            // bindings. Treat any bare reference conservatively as well: a
+            // syntax-only fixer cannot prove that it resolves to the builtin.
+            Node::Identifier(name) => name == "assert",
             _ => false,
         };
     });
     shadowed
+}
+
+fn binding_pattern_binds_assert(pattern: &BindingPattern) -> bool {
+    match pattern {
+        BindingPattern::Identifier(name) => name == "assert",
+        BindingPattern::Dict(fields) => fields
+            .iter()
+            .any(|field| field.alias.as_deref().unwrap_or(&field.key) == "assert"),
+        BindingPattern::List(elements) => elements.iter().any(|element| element.name == "assert"),
+        BindingPattern::Pair(left, right) => left == "assert" || right == "assert",
+    }
 }
 
 fn assert_false_fallback(argument: &SNode) -> Option<(&SNode, &SNode)> {

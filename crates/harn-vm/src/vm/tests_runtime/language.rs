@@ -388,6 +388,19 @@ pipeline default(harness: Harness) {
 }
 
 #[test]
+fn closure_binding_assert_shadows_native_intrinsic() {
+    let out = run_output(
+        r#"
+pipeline default(harness: Harness) {
+  const assert = { value -> if value == nil { "nil" } else { "false" } }
+  harness.stdio.log(assert(nil ?? false))
+}
+"#,
+    );
+    assert_eq!(out, "[harn] false");
+}
+
+#[test]
 fn test_logical_operators() {
     let out = run_output("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(true && false)\nharness.stdio.log(true || false)\nharness.stdio.log(!true) }");
     assert_eq!(out, "[harn] false\n[harn] true\n[harn] false");

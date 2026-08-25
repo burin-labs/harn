@@ -1263,7 +1263,16 @@ impl TypeChecker {
         // `assert` is a VM intrinsic rather than a typed-signature builtin, so
         // include it explicitly in the same resolution result.
         let native_builtin = name == "assert" || self.lookup_builtin(name).is_some();
-        let call_target = if !source_defined && !self.name_is_imported(name) && native_builtin {
+        // Values are callable too: a closure bound with `const assert = ...`
+        // wins over the intrinsic at runtime just like a source function does.
+        // Even a non-callable binding must remain `Other`, because its eventual
+        // call error cannot establish builtin-only flow facts.
+        let value_defined = scope.get_var(name).is_some();
+        let call_target = if !source_defined
+            && !value_defined
+            && !self.name_is_imported(name)
+            && native_builtin
+        {
             CallTarget::Builtin
         } else {
             CallTarget::Other
