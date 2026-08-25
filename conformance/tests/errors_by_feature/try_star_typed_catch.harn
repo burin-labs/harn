@@ -3,7 +3,7 @@
  * a typed-catch filter on the outer `try { ... } catch (e: T) { ... }`
  * applies to the rethrown value normally.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   enum AppError {
     NotFound(msg)
   }

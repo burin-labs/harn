@@ -1,0 +1,19 @@
+fn optional_text(value: string?) -> string {
+  return value ?? "nil"
+}
+
+fn explicit_text_union(value: string?) -> string {
+  return value ?? "nil"
+}
+
+fn configuration(value: dict | bool | nil) -> string {
+  return type_of(value)
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(optional_text(nil))
+  harness.stdio.println(explicit_text_union(nil))
+  harness.stdio.println(configuration(nil))
+  harness.stdio.println(configuration(false))
+  harness.stdio.println(configuration({enabled: true}))
+}

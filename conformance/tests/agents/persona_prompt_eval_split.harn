@@ -4,7 +4,7 @@ import {
 } from "../../../evals/persona_prompt_compiler/run.harn"
 
 @test
-pipeline test_persona_prompt_eval_split(harness: Harness, _task) {
+pipeline test_persona_prompt_eval_split(harness: Harness, _task: unknown) {
   const manifest = {split: {"meter-tune": ["tune-case"], "meter-holdout": ["holdout-case"]}}
   assert_eq(
     persona_prompt_eval_selected_split(manifest, "meter-tune"),

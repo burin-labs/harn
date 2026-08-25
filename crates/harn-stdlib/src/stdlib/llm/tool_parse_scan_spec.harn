@@ -35,7 +35,7 @@ fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
  * @errors: []
  * @api_stability: internal
  */
-pub fn tool_parse_scan_spec(tools) -> dict {
+pub fn tool_parse_scan_spec(tools: any) -> dict {
   let block_tags: list<string> = []
   for canonical in ["assistant_prose", "user_response", "done"] {
     for spelling in __tool_parse_tag_spellings(canonical) {

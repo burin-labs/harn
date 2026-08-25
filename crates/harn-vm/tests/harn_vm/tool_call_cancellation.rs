@@ -59,7 +59,7 @@ fn out_lines(raw: &str) -> Vec<String> {
 #[test]
 fn cancel_in_flight_tool_call_overrides_dispatch_with_cancelled_result() {
     let source = r#"
-pipeline main(harness: Harness, _) {
+pipeline main(harness: Harness, _: unknown) {
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
@@ -154,7 +154,7 @@ pipeline main(harness: Harness, _) {
 #[test]
 fn cancel_in_flight_tool_call_returns_not_found_for_unknown_call_id() {
     let source = r#"
-pipeline main(harness: Harness, _) {
+pipeline main(harness: Harness, _: unknown) {
   const outcome = harness.agent.cancel_in_flight_tool_call(
     "no-such-session",
     "no-such-call",
@@ -180,7 +180,7 @@ pipeline main(harness: Harness, _) {
 #[test]
 fn cancel_in_flight_tool_call_returns_already_cancelled_on_repeat() {
     let source = r#"
-pipeline main(harness: Harness, _) {
+pipeline main(harness: Harness, _: unknown) {
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(
@@ -267,7 +267,7 @@ fn cancel_in_flight_tool_call_pushes_reminder_when_requested() {
     let source = r#"
 import { agent_loop } from "std/agent/loop"
 
-pipeline main(harness: Harness, _) {
+pipeline main(harness: Harness, _: unknown) {
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(

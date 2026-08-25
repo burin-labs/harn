@@ -10,15 +10,21 @@ import { workflow_join_readiness, workflow_next_edges } from "std/workflow/sched
 // crossings take the warm path instead of re-instantiating the module.
 import "std/workflow/stage"
 
-fn __workflow_execute_list(value) {
-  if type_of(value) == "list" {
-    return value
+fn __workflow_execute_node_ids(value: unknown) -> list<string> {
+  let node_ids: list<string> = []
+  if type_of(value) != "list" {
+    return node_ids
   }
-  return []
+  for node_id in value {
+    if type_of(node_id) == "string" {
+      node_ids = node_ids.appending(node_id)
+    }
+  }
+  return node_ids
 }
 
-fn __workflow_execute_enqueue_unique(queue, node_id) {
-  for queued in __workflow_execute_list(queue) {
+fn __workflow_execute_enqueue_unique(queue: list<string>, node_id: string) -> list<string> {
+  for queued in queue {
     if queued == node_id {
       return queue
     }
@@ -26,16 +32,19 @@ fn __workflow_execute_enqueue_unique(queue, node_id) {
   return queue.appending(node_id)
 }
 
-fn __workflow_execute_pop_front(queue) {
+fn __workflow_execute_pop_front(queue: list<string>) -> list<string> {
   if len(queue) <= 1 {
     return []
   }
   return queue.slice(1, len(queue))
 }
 
-fn __workflow_execute_enqueue_edges(queue, edges) {
+fn __workflow_execute_enqueue_edges(queue: list<string>, edges: unknown) -> list<string> {
   let next = queue
-  for edge in __workflow_execute_list(edges) {
+  if type_of(edges) != "list" {
+    return next
+  }
+  for edge in edges {
     if type_of(edge?.to) == "string" {
       next = __workflow_execute_enqueue_unique(next, edge.to)
     }
@@ -50,16 +59,22 @@ fn __workflow_execute_enqueue_edges(queue, edges) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_execute(harness: Harness, task, graph, artifacts = nil, options = nil) {
+pub fn workflow_execute(
+  harness: Harness,
+  task: string,
+  graph: dict,
+  artifacts: list<unknown>? = nil,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   let state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)
   const state_id = state.state_id
   const workflow_graph = state.graph
-  let ready = __workflow_execute_list(state?.ready_nodes)
+  let ready = __workflow_execute_node_ids(state?.ready_nodes)
   let steps = 0
   while steps < state.max_steps && len(ready) > 0 {
     steps = steps + 1
-    const current = ready[0]
+    const current = ready[0] ?? ""
     ready = __workflow_execute_pop_front(ready)
     const node = workflow_graph.nodes[current]
     if node?.kind == "join" {
@@ -109,9 +124,9 @@ pub fn workflow_execute(harness: Harness, task, graph, artifacts = nil, options 
     const edges = workflow_next_edges(
       {graph: workflow_graph, current: current, branch: executed.branch},
     )
-    ready = __workflow_execute_enqueue_edges(__workflow_execute_list(state?.ready_nodes), edges)
+    ready = __workflow_execute_enqueue_edges(__workflow_execute_node_ids(state?.ready_nodes), edges)
     state = __host_workflow_record_transitions(state_id, ready, executed.stage, edges)
-    ready = __workflow_execute_list(state?.ready_nodes)
+    ready = __workflow_execute_node_ids(state?.ready_nodes)
   }
   return __host_workflow_finalize_run(state_id, ready)
 }

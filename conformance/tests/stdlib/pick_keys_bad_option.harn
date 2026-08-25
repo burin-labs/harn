@@ -3,6 +3,6 @@
 // a generic VM failure several frames down.
 import "std/collections"
 
-pipeline default(harness: Harness, _) {
+pipeline default(harness: Harness, _: unknown) {
   pick_keys("not a dict", ["a"])
 }

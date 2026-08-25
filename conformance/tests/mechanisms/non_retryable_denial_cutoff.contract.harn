@@ -41,18 +41,18 @@ fn toolset() {
   return tools
 }
 
-fn edit_call(id) {
+fn edit_call(id: string) {
   return {
     text: "",
     tool_calls: [{id: id, name: "edit", arguments: {path: "src/app.rs", text: "fixed"}}],
   }
 }
 
-fn look_call(id) {
+fn look_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "src/app.rs"}}]}
 }
 
-fn base_opts(session, extra = {}) {
+fn base_opts(session: any, extra: dict = {}) {
   return {
     provider: "mock",
     tools: toolset(),
@@ -68,11 +68,11 @@ fn base_opts(session, extra = {}) {
     + extra
 }
 
-fn failed_denials(events) {
+fn failed_denials(events: any) {
   return events.filter({ event -> event.type == "tool_call_update" && event.status == "failed" })
 }
 
-fn cutoff_count(events) {
+fn cutoff_count(events: any) {
   return len(
     events.filter(
       { event ->

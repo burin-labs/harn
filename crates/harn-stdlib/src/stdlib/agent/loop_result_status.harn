@@ -15,7 +15,7 @@ pub fn __dispatch_results_list(dispatch: AgentToolDispatch) -> list {
   return dispatch ?? []
 }
 
-fn __error_category_is_dispatch_rejection(category) -> bool {
+fn __error_category_is_dispatch_rejection(category: any) -> bool {
   return category == "schema_validation" || category == "permission_denied"
 }
 
@@ -28,7 +28,7 @@ fn __error_category_is_dispatch_rejection(category) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn __tool_result_dispatch_rejection(result) -> bool {
+pub fn __tool_result_dispatch_rejection(result: dict) -> bool {
   if type_of(result) != "dict" {
     return false
   }
@@ -46,7 +46,7 @@ pub fn __tool_result_dispatch_rejection(result) -> bool {
   return false
 }
 
-pub fn __tool_result_product_error(result) -> bool {
+pub fn __tool_result_product_error(result: dict) -> bool {
   if type_of(result) != "dict" {
     return false
   }
@@ -57,7 +57,7 @@ pub fn __tool_result_product_error(result) -> bool {
   return __tool_result_dispatch_rejection(result)
 }
 
-pub fn __tool_result_ok(result) -> bool {
+pub fn __tool_result_ok(result: dict) -> bool {
   const outcome = agent_tool_result_outcome(result)
   const structured = agent_tool_result_is_ok(outcome)
   if structured == false {
@@ -79,7 +79,7 @@ pub fn __tool_result_ok(result) -> bool {
   return status == "ok" || status == "success"
 }
 
-pub fn __tool_result_name(result) {
+pub fn __tool_result_name(result: dict) {
   return result?.tool_name ?? result?.name ?? ""
 }
 

@@ -14,7 +14,7 @@ import {
 } from "std/oauth/dynamic_registration"
 import { custom } from "std/oauth/providers"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const metadata = client_metadata(
     {
       redirect_uris: ["https://app.example/callback"],

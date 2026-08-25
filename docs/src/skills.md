@@ -38,7 +38,8 @@ When `harn run` / `harn test` / `harn check` starts, every discovered
 skill is merged into a single registry and exposed as the pre-populated
 VM global `skills`. That startup registry is intentionally compact: it
 keeps the frontmatter card and activation metadata, but leaves the full
-Markdown body behind the lazy `load_skill(...)` path. The layers — in
+Markdown body behind the lazy `harness.agent.load_skill(...)` path. The layers
+— in
 order of highest to lowest priority — are:
 
 | # | Layer | Source | When |
@@ -65,7 +66,8 @@ below. Unknown fields are **not** hard errors — `harn doctor` reports
 them as warnings so newer spec fields roll out cleanly.
 
 See [Skill provenance](./skill-provenance.md) for detached signatures,
-trusted signers, and `load_skill(..., require_signature: true)`.
+trusted signers, and
+`harness.agent.load_skill(..., require_signature: true)`.
 
 ```markdown
 ---
@@ -111,7 +113,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `hooks` | map or list | Shell commands for lifecycle events. Filesystem skills only surface hooks when their detached provenance verifies as trusted. |
 | `model` | string | Preferred model alias. |
 | `effort` | string | `low` / `medium` / `high`. |
-| `require-signature` | bool | Require a valid detached signature before the skill is admitted to the startup registry or promoted by `load_skill(...)`. |
+| `require-signature` | bool | Require a valid detached signature before the skill is admitted to the startup registry or promoted by `harness.agent.load_skill(...)`. |
 | `trusted-signers` | list of string | Optional signer fingerprint allowlist layered on top of the trusted registry. |
 | `shell` | string | Shell to run the body under when `context` is shell-ish. |
 | `argument-hint` | string | UI hint for `$ARGUMENTS`. |
@@ -185,33 +187,38 @@ argument when a host-supplied registry entry is rendered after lazy
 Lazy skill loading surfaces in two places, both resolving the skill id
 against the active registry and applying the same substitution rules:
 
-- `load_skill("deploy")` is a stdlib builtin for Harn code. It hydrates
-  the full `SKILL.md`, applies substitution, and returns the rendered
-  body as a string.
+- `harness.agent.load_skill("deploy")` is the Harn-code entry point. It
+  hydrates the full `SKILL.md`, applies substitution, and returns the
+  rendered body as a string.
 - When an agent loop receives a skill registry through `skills:`, Harn
-  also exposes a runtime-owned `load_skill({ name })` tool for the
-  model. That tool calls the same lazy loader and returns the rendered
-  body in the next turn.
+  also exposes a runtime-owned `load_skill` tool (arguments
+  `{ name }`) for the model. That tool calls the same lazy loader and
+  returns the rendered body in the next turn.
 
 Builtin example:
 
 ```harn
-const runbook = load_skill("deploy")
-assert(contains(runbook, "Deploy runbook"), "full body is fetched lazily")
+fn main(harness: Harness) {
+  const runbook = harness.agent.load_skill("deploy")
+  assert(
+    contains(runbook, "Deploy runbook"),
+    "full body is fetched lazily",
+  )
+}
 ```
 
 If the target skill has `disable-model-invocation: true`, the runtime
 tool returns a typed error instead of leaking the body. Direct Harn-code
-`load_skill("name")` calls are explicit and are not blocked by that
-flag.
+`harness.agent.load_skill("name")` calls are explicit and are not blocked by
+that flag.
 
 ### Always-on catalog helper
 
 The recommended harness convention is:
 
 1. Keep a compact catalog of available skills in the system prompt.
-2. Let the model call the runtime `load_skill({ name })` tool only when
-   one of those entries looks relevant.
+2. Let the model call the runtime `load_skill` tool (arguments
+   `{ name }`) only when one of those entries looks relevant.
 
 Harn ships two pure helpers for that pattern:
 

@@ -57,7 +57,7 @@ fn __agent_recurring_entries(current: dict) -> list {
   return [current]
 }
 
-fn __agent_recurring_message(value) -> string {
+fn __agent_recurring_message(value: any) -> string {
   if type_of(value) != "dict" {
     return trim(to_string(value ?? ""))
   }
@@ -78,7 +78,7 @@ fn __agent_recurring_message(value) -> string {
   )
 }
 
-fn __agent_recurring_location(value) -> string? {
+fn __agent_recurring_location(value: unknown) -> string? {
   if type_of(value) != "dict" {
     return nil
   }
@@ -86,7 +86,7 @@ fn __agent_recurring_location(value) -> string? {
   return path == "" ? nil : path
 }
 
-fn __agent_recurring_category_value(value) -> RecurringDiagnosticCategory {
+fn __agent_recurring_category_value(value: string?) -> RecurringDiagnosticCategory {
   const category = lowercase(trim(to_string(value ?? "")))
   if ["syntax", "resolution", "type", "semantic"].contains(category) {
     return category
@@ -95,7 +95,7 @@ fn __agent_recurring_category_value(value) -> RecurringDiagnosticCategory {
 }
 
 fn __agent_recurring_category(
-  value,
+  value: unknown,
   categories: DiagnosticCategories,
 ) -> RecurringDiagnosticCategory {
   const codes = categories.codes ?? {}

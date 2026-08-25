@@ -2,7 +2,7 @@
 // capability resolver lowers `off` to the supported canonical `none` level.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = pack_for(
     harness.agent,
     harness.llm,

@@ -7,7 +7,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * blocked and that safe rewordings (e.g. `--force-with-lease` without
  * `=false`, deletes targeting non-root paths) stay allowed.
  */
-fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg: any, cmd: string) {
   /* Empty stacks so we exercise the "filter pass-through for stackless
    * catalogues" branch. */
   const m = tools.hooks_match(reg, cmd, {stacks: []})

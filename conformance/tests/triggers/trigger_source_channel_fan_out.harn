@@ -4,15 +4,15 @@ import "std/triggers"
  * CH-02 (#1872): two triggers subscribed to the same channel both fire
  * independently on a single emit.
  */
-fn handle_a(harness: Harness, event) {
+fn handle_a(harness: Harness, event: dict) {
   harness.channels.append("ch.fanout.fired", {who: "a", repo: event.provider_payload.payload.repo})
 }
 
-fn handle_b(harness: Harness, event) {
+fn handle_b(harness: Harness, event: dict) {
   harness.channels.append("ch.fanout.fired", {who: "b", repo: event.provider_payload.payload.repo})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(

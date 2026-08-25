@@ -12,9 +12,9 @@ import { AgentResult } from "std/agent/contracts"
  */
 pub fn agent_session_init(
   agent: HarnessAgent,
-  message,
-  system_prompt,
-  opts,
+  message: any,
+  system_prompt: any,
+  opts: any,
 ) -> {
   session_id: string,
   run_id: string,
@@ -35,8 +35,24 @@ pub fn agent_session_init(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_finalize(agent: HarnessAgent, session_id, status) -> AgentResult {
-  return agent.session_finalize(session_id, status)
+pub type AgentSessionFinalization = {
+  final_status: string,
+  stop_reason?: string,
+  iterations?: int,
+  error?: unknown,
+}
+
+pub fn agent_session_finalize(
+  agent: HarnessAgent,
+  session_id: any,
+  status: string | AgentSessionFinalization,
+) -> AgentResult {
+  const finalization = if type_of(status) == "string" {
+    {final_status: status}
+  } else {
+    status
+  }
+  return agent.session_finalize(session_id, finalization)
 }
 
 /**
@@ -46,7 +62,7 @@ pub fn agent_session_finalize(agent: HarnessAgent, session_id, status) -> AgentR
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_session_flush(agent: HarnessAgent, session_id) -> nil {
+pub fn agent_session_flush(agent: HarnessAgent, session_id: any) -> nil {
   return agent.session_flush(session_id)
 }
 
@@ -57,7 +73,7 @@ pub fn agent_session_flush(agent: HarnessAgent, session_id) -> nil {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_messages(agent: HarnessAgent, session_id) {
+pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
   return agent.session_messages(session_id)
 }
 
@@ -72,9 +88,9 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id) {
  */
 pub fn agent_session_visible_messages(
   agent: HarnessAgent,
-  session_id,
-  messages = nil,
-  append_only = false,
+  session_id: any,
+  messages: any = nil,
+  append_only: bool = false,
 ) -> list {
   return agent.session_visible_messages(session_id, messages, append_only)
 }
@@ -90,7 +106,7 @@ pub fn agent_session_visible_messages(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_commit_directives(agent: HarnessAgent, session_id) -> int {
+pub fn agent_session_commit_directives(agent: HarnessAgent, session_id: any) -> int {
   return agent.session_commit_directives(session_id)
 }
 
@@ -101,7 +117,7 @@ pub fn agent_session_commit_directives(agent: HarnessAgent, session_id) -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_record_assistant(agent: HarnessAgent, session_id, llm_result) {
+pub fn agent_session_record_assistant(agent: HarnessAgent, session_id: any, llm_result: any) {
   return agent.session_record_assistant(session_id, llm_result)
 }
 
@@ -112,7 +128,7 @@ pub fn agent_session_record_assistant(agent: HarnessAgent, session_id, llm_resul
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id, dispatch: list) {
+pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id: any, dispatch: list) {
   return agent.session_record_tool_results(session_id, dispatch)
 }
 
@@ -131,7 +147,7 @@ pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id, dispat
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_pair_orphaned_tool_use(agent: HarnessAgent, session_id, feedback) {
+pub fn agent_session_pair_orphaned_tool_use(agent: HarnessAgent, session_id: any, feedback: any) {
   return agent.session_pair_orphaned_tool_use(session_id, feedback)
 }
 
@@ -149,10 +165,10 @@ pub fn agent_session_pair_orphaned_tool_use(agent: HarnessAgent, session_id, fee
  */
 pub fn agent_session_record_undispatched_tool_results(
   agent: HarnessAgent,
-  session_id,
-  tool_calls,
-  status,
-  reason,
+  session_id: any,
+  tool_calls: list?,
+  status: string,
+  reason: string,
 ) {
   if len(tool_calls ?? []) == 0 {
     return nil
@@ -161,7 +177,7 @@ pub fn agent_session_record_undispatched_tool_results(
   return agent.session_record_tool_results(session_id, results)
 }
 
-fn __agent_usage_int(value) {
+fn __agent_usage_int(value: any) {
   if type_of(value) == "int" {
     return value
   }
@@ -181,10 +197,10 @@ fn __agent_usage_int(value) {
  */
 pub fn agent_reminder_providers_fire(
   agent: HarnessAgent,
-  session_id,
-  event,
-  payload = nil,
-  opts = nil,
+  session_id: any,
+  event: string,
+  payload: dict? = nil,
+  opts: dict? = nil,
 ) {
   return agent.reminder_providers_fire(session_id, event, payload ?? {}, opts ?? {})
 }
@@ -198,10 +214,10 @@ pub fn agent_reminder_providers_fire(
  */
 pub fn agent_session_record_usage(
   agent: HarnessAgent,
-  session_id,
-  llm_result,
-  opts = nil,
-  iteration = 0,
+  session_id: any,
+  llm_result: dict,
+  opts: dict? = nil,
+  iteration: int = 0,
 ) {
   const totals = agent.session_record_usage(session_id, llm_result)
   const llm = llm_result?.llm ?? {}
@@ -233,7 +249,7 @@ pub fn agent_session_record_usage(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_drain_feedback(agent: HarnessAgent, session_id) {
+pub fn agent_session_drain_feedback(agent: HarnessAgent, session_id: any) {
   return agent.session_drain_feedback(session_id)
 }
 
@@ -252,7 +268,7 @@ pub fn agent_session_drain_feedback(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_await_inbox(agent: HarnessAgent, session_id, timeout_ms) -> bool {
+pub fn agent_session_await_inbox(agent: HarnessAgent, session_id: string, timeout_ms: any) -> bool {
   return agent.session_await_inbox(session_id, timeout_ms)
 }
 
@@ -271,7 +287,7 @@ pub fn agent_session_await_inbox(agent: HarnessAgent, session_id, timeout_ms) ->
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_drain_command_updates(agent: HarnessAgent, session_id) -> list {
+pub fn agent_session_drain_command_updates(agent: HarnessAgent, session_id: string) -> list {
   return agent.session_drain_command_updates(session_id)
 }
 
@@ -283,7 +299,12 @@ pub fn agent_session_drain_command_updates(agent: HarnessAgent, session_id) -> l
  * @api_stability: experimental
  * @example: agent_session_drain_host_injections(harness.agent, session_id, "turn_boundary", "iteration_start")
  */
-pub fn agent_session_drain_host_injections(agent: HarnessAgent, session_id, delivery, seam) {
+pub fn agent_session_drain_host_injections(
+  agent: HarnessAgent,
+  session_id: any,
+  delivery: any,
+  seam: any,
+) {
   return agent.session_drain_host_injections(session_id, delivery, seam)
 }
 
@@ -295,7 +316,11 @@ pub fn agent_session_drain_host_injections(agent: HarnessAgent, session_id, deli
  * @api_stability: experimental
  * @example: agent_session_drain_bridge_injections(harness.agent, session_id, "finish_step")
  */
-pub fn agent_session_drain_bridge_injections(agent: HarnessAgent, session_id, checkpoint) {
+pub fn agent_session_drain_bridge_injections(
+  agent: HarnessAgent,
+  session_id: any,
+  checkpoint: any,
+) {
   return agent.session_drain_bridge_injections(session_id, checkpoint)
 }
 
@@ -327,7 +352,7 @@ pub fn agent_session_drain_bridge_injections(agent: HarnessAgent, session_id, ch
  * @api_stability: experimental
  * @example: agent_session_push_bridge_injection(harness.agent, session_id, {body: "stop", mode: "interrupt_immediate"})
  */
-pub fn agent_session_push_bridge_injection(agent: HarnessAgent, session_id, options) {
+pub fn agent_session_push_bridge_injection(agent: HarnessAgent, session_id: any, options: any) {
   return agent.session_push_bridge_injection(session_id, options)
 }
 
@@ -360,7 +385,7 @@ pub fn agent_session_push_bridge_injection(agent: HarnessAgent, session_id, opti
  * @api_stability: experimental
  * @example: agent_session_push_user_message(harness.agent, session_id, {content: "use auth_v2.go", mode: "steer"})
  */
-pub fn agent_session_push_user_message(agent: HarnessAgent, session_id, options) {
+pub fn agent_session_push_user_message(agent: HarnessAgent, session_id: any, options: any) {
   return agent.session_push_user_message(session_id, options)
 }
 
@@ -376,7 +401,7 @@ pub fn agent_session_push_user_message(agent: HarnessAgent, session_id, options)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_pending_injections(agent: HarnessAgent, session_id) {
+pub fn agent_session_pending_injections(agent: HarnessAgent, session_id: any) {
   return agent.session_pending_injections(session_id)
 }
 
@@ -396,7 +421,7 @@ pub fn agent_session_pending_injections(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_revoke_reminder(agent: HarnessAgent, session_id, reminder_id) {
+pub fn agent_session_revoke_reminder(agent: HarnessAgent, session_id: any, reminder_id: any) {
   return agent.session_revoke_reminder(session_id, reminder_id)
 }
 
@@ -407,7 +432,7 @@ pub fn agent_session_revoke_reminder(agent: HarnessAgent, session_id, reminder_i
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_totals(agent: HarnessAgent, session_id) {
+pub fn agent_session_totals(agent: HarnessAgent, session_id: string) {
   return agent.session_totals(session_id)
 }
 
@@ -420,7 +445,12 @@ pub fn agent_session_totals(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_inject_feedback(agent: HarnessAgent, session_id, kind, content) {
+pub fn agent_session_inject_feedback(
+  agent: HarnessAgent,
+  session_id: any,
+  kind: any,
+  content: any,
+) {
   return agent.session_inject_feedback(session_id, kind, content)
 }
 
@@ -438,7 +468,7 @@ pub fn agent_session_inject_feedback(agent: HarnessAgent, session_id, kind, cont
  * @api_stability: experimental
  * @example: agent_session_inject_reminder(harness.agent, session_id, {body: "re-read auth.go", ttl_turns: 1})
  */
-pub fn agent_session_inject_reminder(agent: HarnessAgent, session_id, options) {
+pub fn agent_session_inject_reminder(agent: HarnessAgent, session_id: any, options: any) {
   return agent.session_inject_reminder(session_id, options)
 }
 
@@ -455,7 +485,7 @@ pub fn agent_session_inject_reminder(agent: HarnessAgent, session_id, options) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_session_pop_last_assistant(agent: HarnessAgent, session_id) {
+pub fn agent_session_pop_last_assistant(agent: HarnessAgent, session_id: any) {
   return agent.session_pop_last_assistant(session_id)
 }
 
@@ -469,7 +499,13 @@ pub fn agent_session_pop_last_assistant(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_post_event(agent: HarnessAgent, session_id, kind, content, source = nil) {
+pub fn agent_session_post_event(
+  agent: HarnessAgent,
+  session_id: any,
+  kind: any,
+  content: any,
+  source: any = nil,
+) {
   return agent.session_post_event(session_id, kind, content, source)
 }
 
@@ -480,7 +516,7 @@ pub fn agent_session_post_event(agent: HarnessAgent, session_id, kind, content, 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_apply_reminder_post_turn(agent: HarnessAgent, session_id, turn = 0) {
+pub fn agent_session_apply_reminder_post_turn(agent: HarnessAgent, session_id: any, turn: any = 0) {
   return agent.session_apply_reminder_post_turn(session_id, turn)
 }
 
@@ -491,7 +527,7 @@ pub fn agent_session_apply_reminder_post_turn(agent: HarnessAgent, session_id, t
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_set_active_skills(agent: HarnessAgent, session_id, skills) {
+pub fn agent_session_set_active_skills(agent: HarnessAgent, session_id: any, skills: any) {
   return agent.session_set_active_skills(session_id, skills)
 }
 
@@ -502,7 +538,7 @@ pub fn agent_session_set_active_skills(agent: HarnessAgent, session_id, skills) 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_active_skills(agent: HarnessAgent, session_id) {
+pub fn agent_session_active_skills(agent: HarnessAgent, session_id: any) {
   return agent.session_active_skills(session_id)
 }
 
@@ -513,7 +549,12 @@ pub fn agent_session_active_skills(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_record_skill_event(agent: HarnessAgent, session_id, kind, metadata) {
+pub fn agent_session_record_skill_event(
+  agent: HarnessAgent,
+  session_id: any,
+  kind: string,
+  metadata: dict,
+) {
   return agent.session_record_skill_event(session_id, kind, metadata)
 }
 
@@ -524,7 +565,11 @@ pub fn agent_session_record_skill_event(agent: HarnessAgent, session_id, kind, m
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_claim_tool_format_internal(agent: HarnessAgent, session_id, tool_format) {
+pub fn agent_session_claim_tool_format_internal(
+  agent: HarnessAgent,
+  session_id: any,
+  tool_format: any,
+) {
   return agent.session_claim_tool_format(session_id, tool_format)
 }
 
@@ -535,7 +580,7 @@ pub fn agent_session_claim_tool_format_internal(agent: HarnessAgent, session_id,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_emit_event(agent: HarnessAgent, session_id, event_type, payload) {
+pub fn agent_emit_event(agent: HarnessAgent, session_id: any, event_type: any, payload: any) {
   return agent.emit_event(session_id, event_type, payload)
 }
 
@@ -546,7 +591,7 @@ pub fn agent_emit_event(agent: HarnessAgent, session_id, event_type, payload) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_record_native_tool_fallback(agent: HarnessAgent, session_id, payload) {
+pub fn agent_record_native_tool_fallback(agent: HarnessAgent, session_id: any, payload: any) {
   return agent.record_native_tool_fallback(session_id, payload)
 }
 
@@ -557,7 +602,7 @@ pub fn agent_record_native_tool_fallback(agent: HarnessAgent, session_id, payloa
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_record_compaction(agent: HarnessAgent, session_id, payload) {
+pub fn agent_record_compaction(agent: HarnessAgent, session_id: any, payload: any) {
   return agent.record_compaction(session_id, payload)
 }
 
@@ -577,6 +622,6 @@ pub fn agent_record_compaction(agent: HarnessAgent, session_id, payload) {
  * @api_stability: experimental
  * @example: agent_session_project_turn(harness.agent, session_id, {policy: "clean_tool_repair"})
  */
-pub fn agent_session_project_turn(agent: HarnessAgent, session_id, options = nil) {
+pub fn agent_session_project_turn(agent: HarnessAgent, session_id: any, options: dict? = nil) {
   return agent.session_project_turn(session_id, options ?? {})
 }

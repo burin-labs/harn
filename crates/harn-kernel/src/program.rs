@@ -100,7 +100,12 @@ pub struct CompiledFunction {
 
 impl CompiledFunction {
     pub(crate) fn has_runtime_type_checks_for_params(params: &[ParamSlot]) -> bool {
-        params.iter().any(|param| param.type_expr.is_some())
+        params.iter().any(|param| {
+            param
+                .type_expr
+                .as_ref()
+                .is_some_and(crate::type_contract::requires_runtime_type_check)
+        })
     }
 
     pub fn param_names(&self) -> impl Iterator<Item = &str> {

@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * invokes the closure. With a high RPM limit, successive calls return
  * immediately.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.llm.rate_limit("mock", {rpm: 1000})
   with_llm_script(
     harness.llm,

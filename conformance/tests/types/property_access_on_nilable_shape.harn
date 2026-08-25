@@ -3,7 +3,7 @@
 // have to remember the exact syntax.
 type User = {name: string, email: string}
 
-pipeline default(harness: Harness, _) {
+pipeline default(harness: Harness, _: unknown) {
   const maybe: User? = nil
   harness.stdio.println(maybe.name)
 }

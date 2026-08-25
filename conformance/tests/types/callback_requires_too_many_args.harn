@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn call_one(f: fn(int) -> int) -> int {
     return f(1)
   }

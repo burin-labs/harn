@@ -19,7 +19,7 @@
  */
 import { edit_add_parameter, edit_change_return_type, edit_extract_function } from "std/edit"
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   // The AST edit primitives read and (would) write host files, so they
   // share the deterministic-tools gate.
   const assets = harness.fs.runtime_paths().asset_root

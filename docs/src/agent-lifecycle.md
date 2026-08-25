@@ -98,8 +98,8 @@ wake it. `parse_resume_conditions(nil)` returns `nil`; bad input raises
 
 `timeout.on_timeout` defaults to `"resume_with_summary"` and accepts
 `"fail"` or `"resume_with_input"`. `trigger` is validated by the same
-trigger-spec parser used by `trigger_register(...)`, so any provider that
-works as a trigger source works as a resume condition.
+trigger-spec parser used by `harness.runtime.trigger_register(...)`, so any
+provider that works as a trigger source works as a resume condition.
 
 ## Self-park mid-loop
 
@@ -418,8 +418,8 @@ parks the loop. Daemon-specific snapshot fields
 `wake_interval_ms`, `watch_paths`) are persisted alongside the standard
 suspend metadata.
 
-That means daemons can be cold-restored with `daemon_resume(path)` the
-same way a parked agent can be cold-restored with `harn run --resume`.
+That means daemons can be cold-restored with
+`harness.agent.daemon_resume(path)` the same way a parked agent can be cold-restored with `harn run --resume`.
 
 See [Agent loops — Daemon stdlib wrappers](./llm/agent_loop.md#daemon-stdlib-wrappers)
 for the daemon-specific surface.

@@ -19,28 +19,28 @@
  *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
  *     handler level), else the human conformance summary.
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __safe_list(value) -> list {
+fn __safe_list(value: list) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_bool(value, fallback: bool) -> bool {
+fn __safe_bool(value: bool, fallback: bool) -> bool {
   if type_of(value) == "bool" {
     return value
   }

@@ -55,7 +55,11 @@ pub enum Verdict {
  * @api_stability: experimental
  * @example: verdict_from_run(harness.verdict, run_result)
  */
-pub fn verdict_from_run(verdict: HarnessVerdict, run_result, subject = "") -> Verdict {
+pub fn verdict_from_run(
+  verdict: HarnessVerdict,
+  run_result: dict,
+  subject: string = "",
+) -> Verdict {
   const handle = to_string(run_result?.result_handle ?? "")
   if handle == "" {
     return verdict_indeterminate(
@@ -86,10 +90,10 @@ pub fn verdict_from_run(verdict: HarnessVerdict, run_result, subject = "") -> Ve
  */
 pub fn verdict_from_checkpoint(
   verdict: HarnessVerdict,
-  checkpoint,
+  checkpoint: dict,
   decided_pass: bool,
-  run_result,
-  subject = "",
+  run_result: dict,
+  subject: string = "",
 ) -> Verdict {
   if !(checkpoint?.ok ?? false) {
     return verdict_indeterminate("judge_unavailable", to_string(checkpoint?.error ?? ""))
@@ -107,7 +111,7 @@ pub fn verdict_from_checkpoint(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verdict_fail(reason: string, detail = "") -> Verdict {
+pub fn verdict_fail(reason: string, detail: string = "") -> Verdict {
   return Verdict.Fail(to_string(reason), to_string(detail))
 }
 
@@ -119,7 +123,7 @@ pub fn verdict_fail(reason: string, detail = "") -> Verdict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verdict_indeterminate(cause: string, detail = "") -> Verdict {
+pub fn verdict_indeterminate(cause: string, detail: string = "") -> Verdict {
   return Verdict.Indeterminate(to_string(cause), to_string(detail))
 }
 

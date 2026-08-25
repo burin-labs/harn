@@ -46,7 +46,7 @@ plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/call_budget.rs"
-statics = ["MCP_CALL_BUDGET", "MCP_CALL_COUNT", "PG_QUERY_BUDGET", "PG_QUERY_COUNT"]
+statics = ["MCP_CALL_BUDGET", "PG_QUERY_BUDGET"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -715,9 +715,9 @@ plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/tool_call_cancellations.rs"
-statics = ["REGISTRY"]
-category = "logical_task"
-plan = "task_local_or_explicit"
+statics = ["ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/tracing.rs"
@@ -772,6 +772,12 @@ path = "src/triggers/webhook_intake.rs"
 statics = ["CACHED_INBOX"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/vm/subtask.rs"
+statics = ["SUBTASK_PLACEMENT_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/vm/execution.rs"

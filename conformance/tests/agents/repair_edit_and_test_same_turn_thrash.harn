@@ -10,7 +10,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * boundary from being mistaken for the legacy same-dispatch edit+retest shape:
  * deferred synthetic results must not create a duplicate repair-stall warning.
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
@@ -47,7 +47,7 @@ fn repair_tools() {
  * Propose an edit followed by a dependent test. The dispatcher runs the edit
  * and defers the test until the next inference.
  */
-fn fix_and_test(edit_id, test_id) {
+fn fix_and_test(edit_id: string, test_id: string) {
   return {
     text: "",
     tool_calls: [
@@ -57,7 +57,7 @@ fn fix_and_test(edit_id, test_id) {
   }
 }
 
-fn test_again(test_id) {
+fn test_again(test_id: string) {
   return {text: "", tool_calls: [{id: test_id, name: "run_test", arguments: {}}]}
 }
 

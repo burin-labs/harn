@@ -3,7 +3,7 @@
  * Validates that the testbench clock drives the cron connector
  * deterministically and that all 30 ticks are ordered correctly.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = harness.runtime.trigger_test_harness("cron_30_days")
   harness.stdio.println(result.ok)
   harness.stdio.println(len(result.emitted) == 30)

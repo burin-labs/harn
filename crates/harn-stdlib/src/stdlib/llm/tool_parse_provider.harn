@@ -14,7 +14,7 @@ import {
 import { json_call } from "std/llm/tool_parse_json_support"
 import { protocol_violation, provider_result, registry_names } from "std/llm/tool_parse_result"
 
-fn __tool_parse_mistral(text: string, tools) -> dict {
+fn __tool_parse_mistral(text: string, tools: dict) -> dict {
   const marker_at = text.index_of(MISTRAL_CALL_MARKER)
   const prose = marker_at >= 0 ? text.slice(0, marker_at) : text
   const payload = marker_at >= 0 ? trim(
@@ -84,7 +84,7 @@ fn __tool_parse_mistral(text: string, tools) -> dict {
   return provider_result(calls, errors, prose, violations)
 }
 
-fn __tool_parse_dsml(text: string, tools) -> dict {
+fn __tool_parse_dsml(text: string, tools: dict) -> dict {
   const invoke_pattern = "(?s)<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>(.*?)</｜DSML｜invoke>"
   const parameter_pattern =
     "(?s)<｜DSML｜parameter\\s+name=\"([^\"]+)\"(?:\\s+string=\"(true|false)\")?\\s*>(.*?)</｜DSML｜parameter>"
@@ -144,7 +144,7 @@ fn __tool_parse_dsml(text: string, tools) -> dict {
  * @errors: []
  * @api_stability: internal
  */
-pub fn parse_provider_dialect(text: string, tools) -> dict? {
+pub fn parse_provider_dialect(text: string, tools: any) -> dict? {
   if contains(text, MISTRAL_CALL_MARKER) {
     return __tool_parse_mistral(text, tools)
   }

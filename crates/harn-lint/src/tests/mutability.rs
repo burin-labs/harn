@@ -6,7 +6,7 @@ use super::*;
 fn test_mutable_never_reassigned() {
     let diags = lint_source(
         r"
-pipeline default(task) {
+pipeline default(task: unknown) {
 let x = 1
 log(x)
 }
@@ -22,7 +22,7 @@ log(x)
 fn test_mutable_reassigned_ok() {
     let diags = lint_source(
         r"
-pipeline default(task) {
+pipeline default(task: unknown) {
 let x = 1
 x = 2
 log(x)
@@ -58,7 +58,7 @@ fn test_fix_shadowed_loop_local_preserves_execution() {
     // `pin` is unrelated to the later closure parameter named `pin`. The
     // autofix must preserve the same strict parse/typecheck/execute result.
     let source = r#"
-pipeline default(task) {
+pipeline default(task: unknown) {
   let pins = []
   for line in ["alpha", "beta"] {
     let pin = {name: line}

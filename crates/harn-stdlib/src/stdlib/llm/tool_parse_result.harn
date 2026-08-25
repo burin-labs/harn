@@ -94,7 +94,7 @@ pub fn protocol_violation_messages(violations: list<ProtocolViolation>) -> list<
  * @errors: []
  * @api_stability: internal
  */
-pub fn registry_names(tools) -> list<string> {
+pub fn registry_names(tools: any) -> list<string> {
   let names: list<string> = []
   if type_of(tools) == "dict" {
     for entry in tools?.tools ?? [] {
@@ -139,7 +139,7 @@ pub fn empty_parse() -> dict {
  * @errors: []
  * @api_stability: internal
  */
-pub fn call_block(call) -> string {
+pub fn call_block(call: dict) -> string {
   return "<tool_call>\n"
     + __host_tool_render_call(to_string(call?.name ?? ""), call?.arguments ?? {})
     + "\n</tool_call>"
@@ -181,7 +181,7 @@ pub fn canonical(parts: list<string>) -> string {
  * @errors: []
  * @api_stability: internal
  */
-pub fn provider_result(calls, errors, prose: string, violations) -> dict {
+pub fn provider_result(calls: any, errors: any, prose: string, violations: list) -> dict {
   let parts: list<string> = []
   if trim(prose) != "" {
     parts = parts.appending(prose_block(prose))

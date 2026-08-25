@@ -5,7 +5,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * fire on real-world invocations and stay quiet on already-corrected
  * variants.
  */
-fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg: any, cmd: string) {
   const m = tools.hooks_match(reg, cmd, {stacks: ["python"]})
   if len(m) > 0 {
     stdio.println(m[0].rule_id + " " + m[0].severity)

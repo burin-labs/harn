@@ -423,7 +423,7 @@ pub fn holidays(year: int, calendar: string = "US-FEDERAL") -> list<CalendarHoli
 pub fn is_holiday(
   timestamp: CalendarInstant,
   calendar: CalendarBusinessCalendar = "US-FEDERAL",
-  timezone = nil,
+  timezone: any = nil,
 ) -> bool {
   return __calendar_is_holiday(timestamp, calendar, timezone)
 }
@@ -448,7 +448,7 @@ pub fn is_weekend(timestamp: CalendarInstant, timezone: string = "UTC") -> bool 
 pub fn is_business_day(
   timestamp: CalendarInstant,
   calendar: CalendarBusinessCalendar = "US-FEDERAL",
-  timezone = nil,
+  timezone: any = nil,
 ) -> bool {
   return __calendar_is_business_day(timestamp, calendar, timezone)
 }
@@ -462,7 +462,7 @@ pub fn is_business_day(
 pub fn next_business_day(
   timestamp: CalendarInstant,
   calendar: CalendarBusinessCalendar = "US-FEDERAL",
-  timezone = nil,
+  timezone: any = nil,
   include_today: bool = false,
 ) -> CalendarTimestamp {
   return __calendar_next_business_day(timestamp, calendar, timezone, include_today)
@@ -478,7 +478,7 @@ pub fn add_business_days(
   timestamp: CalendarInstant,
   days: int,
   calendar: CalendarBusinessCalendar = "US-FEDERAL",
-  timezone = nil,
+  timezone: any = nil,
 ) -> CalendarTimestamp {
   return __calendar_add_business_days(timestamp, days, calendar, timezone)
 }
@@ -493,7 +493,7 @@ pub fn business_days_between(
   start: CalendarInstant,
   end: CalendarInstant,
   calendar: CalendarBusinessCalendar = "US-FEDERAL",
-  timezone = nil,
+  timezone: any = nil,
 ) -> int {
   return __calendar_business_days_between(start, end, calendar, timezone)
 }

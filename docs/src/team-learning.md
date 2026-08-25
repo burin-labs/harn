@@ -17,8 +17,8 @@ workflow crystallization loop in [Workflow crystallization](./workflow-crystalli
 
 ## Friction events
 
-Use `friction_record(payload, options?)` to record repeated pain from Harn workflows
-or host integrations. With no configured recorder, the event is stored in the
+Use `harness.obs.friction_record(payload, options?)` to record repeated pain
+from Harn workflows or host integrations. With no configured recorder, the event is stored in the
 process-local friction buffer and the workflow keeps running. Set `enabled: false`
 for a deliberate no-op, or pass `log_path` / `HARN_FRICTION_LOG` to append JSONL.
 

@@ -8,16 +8,16 @@ fn __empty_library() {
   return {_type: "prompt_library", fragments: []}
 }
 
-fn __require_library(library, name = "prompt_library") {
+fn __require_library(library: dict, name: string = "prompt_library") {
   require library != nil && library._type == "prompt_library", name + ": expected a prompt library"
   return library.fragments ?? []
 }
 
-fn __estimate_tokens_text(text) {
+fn __estimate_tokens_text(text: string | bytes | list | dict | set | range | nil) {
   return to_int(ceil(len(text) * 1.0 / 4.0))
 }
 
-fn __fragment_id_from_path(path) {
+fn __fragment_id_from_path(path: string?) {
   const base = basename(path)
   if ends_with(base, ".harn.prompt") {
     return substring(base, 0, len(base) - len(".harn.prompt"))
@@ -29,12 +29,12 @@ fn __fragment_id_from_path(path) {
   return base
 }
 
-fn __normalize_words(text) {
+fn __normalize_words(text: any) {
   const normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(text))
   return split(trim(normalized), " ").filter({ word -> word != "" })
 }
 
-fn __token_prefix(text, max_tokens) {
+fn __token_prefix(text: any, max_tokens: int) {
   const words = __normalize_words(text)
   if max_tokens == nil || max_tokens <= 0 || len(words) <= max_tokens {
     return join(words, " ")
@@ -42,7 +42,7 @@ fn __token_prefix(text, max_tokens) {
   return join(words[:max_tokens], " ")
 }
 
-fn __fragment_from_config(fs: HarnessFs, config, base_dir = nil) {
+fn __fragment_from_config(fs: HarnessFs, config: dict, base_dir: any = nil) {
   let body = config?.body ?? config?.prompt ?? config?.text
   let path = config?.path
   if body == nil && path != nil {
@@ -64,7 +64,7 @@ fn __fragment_from_config(fs: HarnessFs, config, base_dir = nil) {
   return prompt_fragment(id, body, config + {path: path})
 }
 
-fn __front_matter_fragment(fs: HarnessFs, path, text) {
+fn __front_matter_fragment(fs: HarnessFs, path: string?, text: string?) {
   if !starts_with(text, "---\n") {
     return prompt_fragment(__fragment_id_from_path(path), text, {path: path, source_path: path})
   }
@@ -83,7 +83,7 @@ fn __front_matter_fragment(fs: HarnessFs, path, text) {
   )
 }
 
-fn __load_one(fs: HarnessFs, path) {
+fn __load_one(fs: HarnessFs, path: any) {
   const text = fs.read_text(path)
   const parsed = try {
     toml_parse(text)
@@ -105,7 +105,7 @@ fn __load_one(fs: HarnessFs, path) {
   return prompt_library([__front_matter_fragment(fs, path, text)])
 }
 
-fn __render_fragment(fs: HarnessFs, fragment, bindings = nil) {
+fn __render_fragment(fs: HarnessFs, fragment: dict, bindings: dict? = nil) {
   const body = fragment?.body ?? fragment?.prompt ?? fragment?.text
   require body != nil, "prompt_library_inject: fragment has no body"
   const source_path = fragment?.source_path ?? fragment?.path
@@ -115,7 +115,7 @@ fn __render_fragment(fs: HarnessFs, fragment, bindings = nil) {
   return fs.render_template(body, bindings ?? {})
 }
 
-fn __matches_filters(fragment, filters) {
+fn __matches_filters(fragment: dict, filters: dict) {
   if filters == nil {
     return true
   }
@@ -144,7 +144,7 @@ fn __matches_filters(fragment, filters) {
   return true
 }
 
-fn __score_fragment(fragment, ctx) {
+fn __score_fragment(fragment: dict, ctx: dict) {
   let score = 0
   const tags = fragment?.tags ?? []
   for tag in ctx?.tags ?? [] {
@@ -167,7 +167,7 @@ fn __score_fragment(fragment, ctx) {
   return score
 }
 
-fn __top_scored(scored, limit) {
+fn __top_scored(scored: list, limit: int) {
   let remaining = scored
   let out = []
   while len(remaining) > 0 && (limit == nil || len(out) < limit) {
@@ -187,7 +187,7 @@ fn __top_scored(scored, limit) {
   return out
 }
 
-fn __conversation_text(conversation) {
+fn __conversation_text(conversation: dict) {
   if type_of(conversation) == "string" {
     return conversation
   }
@@ -199,14 +199,14 @@ fn __conversation_text(conversation) {
     ?? json_stringify(conversation)
 }
 
-fn __conversation_id(conversation, index) {
+fn __conversation_id(conversation: dict, index: int) {
   if type_of(conversation) == "dict" && conversation?.id != nil {
     return conversation.id
   }
   return "conversation-" + to_string(index)
 }
 
-fn __conversation_embedding(conversation, text) {
+fn __conversation_embedding(conversation: dict, text: any) {
   if type_of(conversation) == "dict" && conversation?.embedding != nil {
     return conversation.embedding
   }
@@ -243,7 +243,7 @@ fn __conversation_embedding(conversation, text) {
   return vector
 }
 
-fn __avg_distance(point, points) {
+fn __avg_distance(point: any, points: any) {
   if len(points) == 0 {
     return 0.0
   }
@@ -254,7 +254,7 @@ fn __avg_distance(point, points) {
   return total / (len(points) * 1.0)
 }
 
-fn __silhouette(points, assignments, k) {
+fn __silhouette(points: any, assignments: any, k: int) {
   if k <= 1 || len(points) <= 1 {
     return 0.0
   }
@@ -306,7 +306,7 @@ fn __silhouette(points, assignments, k) {
   return total / (len(points) * 1.0)
 }
 
-fn __choose_kmeans(points, options) {
+fn __choose_kmeans(points: any, options: dict) {
   const n = len(points)
   const requested = options?.k
   if requested != nil {
@@ -339,7 +339,7 @@ fn __choose_kmeans(points, options) {
   return best
 }
 
-fn __prefix_count(snippets, prefix) {
+fn __prefix_count(snippets: string | bytes | list | dict | set | range | nil, prefix: any) {
   let count = 0
   for snippet in snippets {
     if starts_with(snippet, prefix) {
@@ -349,7 +349,7 @@ fn __prefix_count(snippets, prefix) {
   return count
 }
 
-fn __shared_prefix(snippets, min_fraction, min_tokens) {
+fn __shared_prefix(snippets: any, min_fraction: any, min_tokens: int) {
   let best = {text: "", tokens: 0, support: 0}
   for snippet in snippets {
     const words = split(snippet, " ").filter({ word -> word != "" })
@@ -373,7 +373,7 @@ fn __shared_prefix(snippets, min_fraction, min_tokens) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library(fragments = nil) {
+pub fn prompt_library(fragments: list? = nil) {
   let library = __empty_library()
   for fragment in fragments ?? [] {
     library = prompt_library_define(library, fragment)
@@ -387,14 +387,16 @@ pub fn prompt_library(fragments = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_fragment(id, body, config = nil) {
+pub fn prompt_fragment(id: string, body: any, config: dict? = nil) {
   require id != nil && id != "", "prompt_fragment: id must be a non-empty string"
   require body != nil, "prompt_fragment: body must not be nil"
-  const {provenance = "manual", status = if provenance == "kmeans" {
-  "pending_review"
-} else {
-  "accepted"
-}} = config ?? {}
+  const provenance = config?.provenance ?? "manual"
+  const status = config?.status
+    ?? if provenance == "kmeans" {
+      "pending_review"
+    } else {
+      "accepted"
+    }
   return filter_nil(
     {
       id: id,
@@ -424,7 +426,7 @@ pub fn prompt_fragment(id, body, config = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_define(library, fragment) {
+pub fn prompt_library_define(library: dict, fragment: dict) {
   const fragments = __require_library(library, "prompt_library_define")
   require fragment?.id != nil && fragment.id != "", "prompt_library_define: fragment requires id"
   let out = []
@@ -449,7 +451,7 @@ pub fn prompt_library_define(library, fragment) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_load(harness: Harness, path_or_paths) {
+pub fn prompt_library_load(harness: Harness, path_or_paths: string | list<string> | nil) {
   if type_of(path_or_paths) == "list" {
     let library = __empty_library()
     for path in path_or_paths {
@@ -469,7 +471,7 @@ pub fn prompt_library_load(harness: Harness, path_or_paths) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_list(library, filters = nil) {
+pub fn prompt_library_list(library: dict, filters: any = nil) {
   const fragments = __require_library(library, "prompt_library_list")
   return fragments.filter({ fragment -> __matches_filters(fragment, filters) })
 }
@@ -480,7 +482,7 @@ pub fn prompt_library_list(library, filters = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_find(library, id) {
+pub fn prompt_library_find(library: dict, id: any) {
   for fragment in __require_library(library, "prompt_library_find") {
     if fragment.id == id {
       return fragment
@@ -495,7 +497,7 @@ pub fn prompt_library_find(library, id) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_inject(fs: HarnessFs, library, id, bindings = nil) {
+pub fn prompt_library_inject(fs: HarnessFs, library: dict, id: string, bindings: dict? = nil) {
   const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_inject: unknown fragment '" + id + "'"
   return __render_fragment(fs, fragment, bindings)
@@ -507,7 +509,7 @@ pub fn prompt_library_inject(fs: HarnessFs, library, id, bindings = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_payload(fs: HarnessFs, library, id, bindings = nil) {
+pub fn prompt_library_payload(fs: HarnessFs, library: dict, id: string, bindings: dict? = nil) {
   const fragment = prompt_library_find(library, id)
   require fragment != nil, "prompt_library_payload: unknown fragment '" + id + "'"
   return {
@@ -526,7 +528,12 @@ pub fn prompt_library_payload(fs: HarnessFs, library, id, bindings = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_inject_cluster(fs: HarnessFs, library, filters = nil, bindings = nil) {
+pub fn prompt_library_inject_cluster(
+  fs: HarnessFs,
+  library: dict,
+  filters: any = nil,
+  bindings: dict? = nil,
+) {
   const max_tokens = filters?.max_tokens
   let used = 0
   let blocks = []
@@ -547,7 +554,7 @@ pub fn prompt_library_inject_cluster(fs: HarnessFs, library, filters = nil, bind
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_suggest(library, ctx = nil) {
+pub fn prompt_library_suggest(library: dict, ctx: dict? = nil) {
   let scored = []
   for fragment in __require_library(library, "prompt_library_suggest") {
     const score = __score_fragment(fragment, ctx ?? {})
@@ -564,7 +571,7 @@ pub fn prompt_library_suggest(library, ctx = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_api(fs: HarnessFs, library) {
+pub fn prompt_library_api(fs: HarnessFs, library: dict) {
   return {
     inject: fn(id, bindings = nil) { return prompt_library_inject(fs, library, id, bindings) },
     inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(
@@ -586,7 +593,7 @@ pub fn prompt_library_api(fs: HarnessFs, library) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_hotspots(conversations, options = nil) {
+pub fn prompt_library_hotspots(conversations: list, options: dict? = nil) {
   const tenant = options?.tenant_id
   const {max_prefix_tokens = 1200, min_fraction = 0.8, min_shared_tokens = 8} = options ?? {}
   const daily_invocations = options?.daily_invocation_count ?? 1
@@ -679,7 +686,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_library_review_queue(library, filters = nil) {
+pub fn prompt_library_review_queue(library: dict, filters: dict? = nil) {
   let queue = []
   const base_filters = filters ?? {}
   const review_status = filters?.status ?? "pending_review"

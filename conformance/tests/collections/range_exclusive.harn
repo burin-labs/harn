@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `to ... exclusive` is the half-open form. `.to_list()` is the
   // explicit path to materialize a range into a list for printing.
   const xs = 0 to 4 exclusive

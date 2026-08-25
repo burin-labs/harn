@@ -5,7 +5,7 @@ import "std/triggers"
  * matching event starts a fresh window. Counter increments cleanly from
  * 0 again.
  */
-fn handle_batch(harness: Harness, event) {
+fn handle_batch(harness: Harness, event: dict) {
   const batch_len = if event.batch == nil {
     0
   } else {
@@ -14,7 +14,7 @@ fn handle_batch(harness: Harness, event) {
   harness.channels.append("batch.btb.fired", {batch_size: batch_len})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(

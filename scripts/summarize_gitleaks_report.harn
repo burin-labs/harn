@@ -65,7 +65,7 @@ pub fn render_table(findings_count: int, by_file: dict) -> string {
   return lines.join("\n")
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const report_path = flag_value(argv, "--report")
   if report_path == nil {
     harness.stdio.eprintln("usage: summarize_gitleaks_report.harn --report PATH")

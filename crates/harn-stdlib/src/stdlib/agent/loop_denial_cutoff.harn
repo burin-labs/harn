@@ -31,7 +31,7 @@ pub type AgentPostDispatchResult = {
   terminal: AgentPostDispatchTerminal?,
 }
 
-fn __tool_result_denial(result) {
+fn __tool_result_denial(result: dict) {
   if type_of(result?.denial) == "dict" {
     return result.denial
   }
@@ -54,7 +54,7 @@ fn __tool_result_denial(result) {
  * @effects: []
  * @errors: []
  */
-fn __non_retryable_denial_signature(dispatch) {
+fn __non_retryable_denial_signature(dispatch: AgentToolDispatch) {
   const results = __dispatch_results_list(dispatch)
   if len(results) == 0 {
     return nil
@@ -84,11 +84,11 @@ fn __non_retryable_denial_signature(dispatch) {
 
 fn __emit_non_retryable_denial_cutoff(
   agent: HarnessAgent,
-  session_id,
-  iteration,
-  current_max,
-  dispatch,
-  denial_signature,
+  session_id: string,
+  iteration: any,
+  current_max: any,
+  dispatch: AgentToolDispatch,
+  denial_signature: any,
 ) {
   agent_emit_event(
     agent,
@@ -128,16 +128,16 @@ fn __emit_non_retryable_denial_cutoff(
  */
 pub fn __agent_loop_post_dispatch(
   harness: Harness,
-  session_id,
-  llm_result,
-  turn_llm_opts,
-  iteration_index,
-  tool_calls,
-  visible_text,
-  loop_start_ms,
-  current_max,
-  dispatch,
-  prior_dispatch,
+  session_id: string,
+  llm_result: dict,
+  turn_llm_opts: dict?,
+  iteration_index: int,
+  tool_calls: string | bytes | list | dict | set | range | nil,
+  visible_text: string,
+  loop_start_ms: any,
+  current_max: any,
+  dispatch: AgentToolDispatch,
+  prior_dispatch: AgentToolDispatch,
 ) -> AgentPostDispatchResult {
   const iteration = iteration_index + 1
   const totals = agent_session_record_usage(

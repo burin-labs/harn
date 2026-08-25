@@ -1,3 +1,6 @@
+use harn_builtin_meta::shapes::{
+    is_resume_timeout_action, DEFAULT_RESUME_TIMEOUT_ACTION, RESUME_TIMEOUT_ACTIONS,
+};
 use harn_parser::diagnostic_codes::Code;
 
 use super::diagnostic_error;
@@ -60,20 +63,14 @@ pub(super) fn parse_resume_timeout_condition(
         ));
     }
     let on_timeout = match map.get("on_timeout") {
-        Some(VmValue::Nil) | None => "resume_with_summary".to_string(),
-        Some(VmValue::String(action))
-            if matches!(
-                action.as_ref(),
-                "resume_with_summary" | "fail" | "resume_with_input"
-            ) =>
-        {
-            action.to_string()
-        }
+        Some(VmValue::Nil) | None => DEFAULT_RESUME_TIMEOUT_ACTION.to_string(),
+        Some(VmValue::String(action)) if is_resume_timeout_action(action) => action.to_string(),
         Some(VmValue::String(action)) => {
             return Err(resume_conditions_error(
                 "timeout.on_timeout",
                 format!(
-                    "unsupported action `{action}`, expected resume_with_summary|fail|resume_with_input"
+                    "unsupported action `{action}`; expected one of: {}",
+                    RESUME_TIMEOUT_ACTIONS.join(", ")
                 ),
             ))
         }

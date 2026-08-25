@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const recv_ch = harness.runtime.channel("deadline-receive", 1)
   const recv_result = try {
     deadline 25ms {

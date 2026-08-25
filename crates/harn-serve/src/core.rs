@@ -435,11 +435,11 @@ impl DispatchCore {
             }
         }
 
-        // Per-dispatch resource budget caps live on `function.budget`
-        // and are installed inside `invoke_function` / `invoke_pipeline`
-        // — the thread-local backing (`BudgetSpec::install`)
-        // must be set on the same OS thread the VM runs on, which the
-        // tokio `LocalSet` inside each invoker pins.
+        // Per-dispatch resource budget caps live on `function.budget` and are
+        // installed inside `invoke_function` / `invoke_pipeline`. Their ceiling
+        // and `Arc` count travel together in one `CallBudget`, and
+        // `AmbientExecutionScope` carries it into every subtask. Fan-out spends
+        // one allowance regardless of which OS thread each branch uses.
 
         // tenant_id is a low-cardinality routing key (one entry per
         // tenant), not PII — safe to record as a span attribute so
@@ -1220,7 +1220,7 @@ pub fn run_help(harness: Harness, binary: string) -> int {
         std::fs::write(
             &script,
             r"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(json_stringify({task: task}))
 }
 ",

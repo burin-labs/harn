@@ -5,7 +5,7 @@ import {
   github_slug_from_remote,
 } from "std/connectors/github"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(
     github_slug_from_remote("git@github.com:octo-org/octo-repo.git"),
     "octo-org/octo-repo",

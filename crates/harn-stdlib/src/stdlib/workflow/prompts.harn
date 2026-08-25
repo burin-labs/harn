@@ -5,7 +5,7 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn render_workflow_prompt_asset(fs: HarnessFs, path, bindings = nil) {
+pub fn render_workflow_prompt_asset(fs: HarnessFs, path: string, bindings: dict? = nil) {
   return fs.render_prompt("std/workflow/prompts/" + path, bindings ?? {})
 }
 
@@ -16,7 +16,7 @@ pub fn render_workflow_prompt_asset(fs: HarnessFs, path, bindings = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_stage_prompt(fs: HarnessFs, bindings) {
+pub fn workflow_stage_prompt(fs: HarnessFs, bindings: dict?) {
   return render_workflow_prompt_asset(fs, "stage.harn.prompt", bindings)
 }
 
@@ -31,11 +31,11 @@ pub fn workflow_verification_context_intro(fs: HarnessFs) {
   return render_workflow_prompt_asset(fs, "verification_context_intro.harn.prompt", {})
 }
 
-fn __workflow_escape_prompt_text(text) {
+fn __workflow_escape_prompt_text(text: string?) {
   return to_string(text ?? "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 
-fn __workflow_artifact_title(artifact) {
+fn __workflow_artifact_title(artifact: any) {
   const title = artifact?.title
   if title != nil {
     return title
@@ -43,7 +43,7 @@ fn __workflow_artifact_title(artifact) {
   return to_string(artifact?.kind ?? "") + " " + to_string(artifact?.id ?? "")
 }
 
-fn __workflow_artifact_body(artifact) {
+fn __workflow_artifact_body(artifact: any) {
   const text = artifact?.text
   if text != nil {
     return text
@@ -55,7 +55,7 @@ fn __workflow_artifact_body(artifact) {
   return ""
 }
 
-fn __workflow_render_artifact_xml(artifact) {
+fn __workflow_render_artifact_xml(artifact: dict) {
   const title = __workflow_artifact_title(artifact)
   const {source = "unknown", freshness = "normal"} = artifact ?? {}
   return "<artifact>\n"
@@ -80,7 +80,7 @@ fn __workflow_render_artifact_xml(artifact) {
     + "</artifact>"
 }
 
-fn __workflow_render_artifact_json(artifact) {
+fn __workflow_render_artifact_json(artifact: dict) {
   return json_stringify(
     {
       id: artifact?.id,
@@ -101,7 +101,7 @@ fn __workflow_render_artifact_json(artifact) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_render_artifacts_context(artifacts = nil, policy = nil) {
+pub fn workflow_render_artifacts_context(artifacts: list? = nil, policy: any = nil) {
   const render = policy?.render
   let parts = []
   for artifact in artifacts ?? [] {
@@ -114,21 +114,21 @@ pub fn workflow_render_artifacts_context(artifacts = nil, policy = nil) {
   return join(parts, "\n\n")
 }
 
-fn __workflow_push_optional_field(out, name, value) {
+fn __workflow_push_optional_field(out: string, name: string, value: string?) {
   if value == nil {
     return out
   }
   return out + "<" + name + ">" + __workflow_escape_prompt_text(value) + "</" + name + ">\n"
 }
 
-fn __workflow_push_int_field(out, name, value) {
+fn __workflow_push_int_field(out: string, name: string, value: any) {
   if value == nil {
     return out
   }
   return out + "<" + name + ">" + to_string(value) + "</" + name + ">\n"
 }
 
-fn __workflow_push_string_list(out, name, values) {
+fn __workflow_push_string_list(out: string, name: string, values: list?) {
   if len(values ?? []) == 0 {
     return out
   }
@@ -139,7 +139,7 @@ fn __workflow_push_string_list(out, name, values) {
   return result + "</" + name + ">\n"
 }
 
-fn __workflow_push_checks(out, checks) {
+fn __workflow_push_checks(out: string, checks: list?) {
   if len(checks ?? []) == 0 {
     return out
   }
@@ -156,7 +156,7 @@ fn __workflow_push_checks(out, checks) {
   return result + "</checks>\n"
 }
 
-fn __workflow_render_contract(contract) {
+fn __workflow_render_contract(contract: dict) {
   let out = "\n<contract>\n"
   out = __workflow_push_optional_field(out, "source_node", contract?.source_node)
   out = __workflow_push_optional_field(out, "summary", contract?.summary)
@@ -183,7 +183,7 @@ fn __workflow_render_contract(contract) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_render_verification_context(fs: HarnessFs, contracts = nil) {
+pub fn workflow_render_verification_context(fs: HarnessFs, contracts: list? = nil) {
   if len(contracts ?? []) == 0 {
     return ""
   }
@@ -194,7 +194,7 @@ pub fn workflow_render_verification_context(fs: HarnessFs, contracts = nil) {
   return out
 }
 
-fn __workflow_stage_label(label) {
+fn __workflow_stage_label(label: string?) {
   const trimmed = trim(label ?? "")
   if trimmed == "" {
     return "Task"
@@ -209,7 +209,7 @@ fn __workflow_stage_label(label) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_prepare_stage_prompt(fs: HarnessFs, config = nil) {
+pub fn workflow_prepare_stage_prompt(fs: HarnessFs, config: dict? = nil) {
   const opts = config ?? {}
   const rendered_context = opts?.rendered_context
     ?? workflow_render_artifacts_context(opts?.artifacts ?? [], opts?.context_policy ?? {})

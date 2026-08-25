@@ -112,7 +112,7 @@ fn dependabot_schema() {
  * list, and rejects an entry carrying both. Normalizing at this boundary means
  * nothing downstream has to know there are two spellings.
  */
-fn entry_directories(update, ecosystem: string) -> list<string> {
+fn entry_directories(update: dict, ecosystem: string) -> list<string> {
   const single = update.get("directory")
   const many = update.get("directories")
   if single != nil && many != nil {
@@ -352,7 +352,7 @@ pub fn group_error_message(error: GroupError) -> string {
   return "${scope}: ${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const entries = groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
   const errors = group_errors(entries)
   if errors.count > 0 {

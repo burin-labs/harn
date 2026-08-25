@@ -346,7 +346,7 @@ fn path_key(path: list<string>) -> string {
  * `{state, text}` — Harn dicts are value-typed, so the caches thread
  * through explicitly.
  */
-pub fn help_text_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+pub fn help_text_cached(state: dict, path: list<string>, fetch: fn(list<string>) -> string) {
   const key = path_key(path)
   const cached = state.help[key]
   if cached != nil {
@@ -359,7 +359,7 @@ pub fn help_text_cached(state, path: list<string>, fetch: fn(list<string>) -> st
 }
 
 /** Memoized `parse_help_flags` over the cached help text. */
-pub fn help_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+pub fn help_flags_cached(state: dict, path: list<string>, fetch: fn(list<string>) -> string) {
   const key = path_key(path)
   const cached = state.flagsets[key]
   if cached != nil {
@@ -373,7 +373,7 @@ pub fn help_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> s
 }
 
 /** Flags accepted at `path`: the union over every prefix of the path. */
-pub fn accepted_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+pub fn accepted_flags_cached(state: any, path: list<string>, fetch: fn(list<string>) -> string) {
   let st = state
   let accepted: list<string> = []
   let depth = 0
@@ -395,7 +395,7 @@ pub fn accepted_flags_cached(state, path: list<string>, fetch: fn(list<string>) 
  * collecting long flags the corresponding `--help` does not advertise.
  * Returns `{state, path, missing}`.
  */
-pub fn analyze_harn_args(state, args: list<string>, fetch: fn(list<string>) -> string) {
+pub fn analyze_harn_args(state: any, args: list<string>, fetch: fn(list<string>) -> string) {
   let st = state
   let path: list<string> = []
   let missing: list<string> = []
@@ -504,7 +504,7 @@ fn fetch_help(process: HarnessProcess, harn_bin: string, path: list<string>) -> 
   return ""
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const harn_bin = resolve_harn_bin(harness)
   const fetch = { path: list<string> -> fetch_help(harness.process, harn_bin, path) }
   let md_files: list<string> = []

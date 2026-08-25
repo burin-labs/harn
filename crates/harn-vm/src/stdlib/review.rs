@@ -787,7 +787,7 @@ mod tests {
 import "std/review"
 import "std/triggers"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.llm.mock_enqueue({
     text: "{\"summary\":\"Parser change needs a regression test.\",\"findings\":[{\"severity\":\"blocking\",\"category\":\"test_coverage\",\"title\":\"Missing regression test\",\"detail\":\"The parser behavior changed without a focused regression test.\",\"suggestion\":\"Add a conformance case.\",\"file\":\"conformance/tests/parser_case.harn\",\"line_start\":1,\"line_end\":1}]}"
   })
@@ -812,7 +812,7 @@ pipeline test(harness: Harness, task) {
                 r#"
 import "std/review"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.llm.mock_enqueue({text: "{\"summary\":\"No extra issues.\",\"findings\":[]}"})
   const result: ReviewResult = harness.agent.self_review("diff --git a/.env b/.env\n+OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx123456", "default", 1)
   harness.stdio.println(result.has_blocking_findings)
@@ -832,7 +832,7 @@ pipeline test(harness: Harness, task) {
                 r#"
 import "std/review"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.llm.mock_enqueue({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"detail\":\"The changed path can crash on startup.\"}]}"
   })
@@ -854,7 +854,7 @@ pipeline test(harness: Harness, task) {
                 r#"
 import "std/review"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.llm.mock_enqueue({
     text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"title\":\"Startup crash\",\"description\":\"The changed path can crash on startup.\",\"path\":\"src/main.rs\",\"line\":1}]}"
   })
@@ -876,7 +876,7 @@ pipeline test(harness: Harness, task) {
                 r#"
 import "std/review"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.llm.mock_enqueue({
     text: "{\"summary\":\"Maybe add a test.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"test_coverage\",\"title\":\"Consider a test\",\"detail\":\"A narrow regression test would help.\"}]}"
   })

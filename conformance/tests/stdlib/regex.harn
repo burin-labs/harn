@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // regex_match returns list of matches
   const matches = regex_match("[0-9]+", "abc 123 def 456")
   harness.stdio.log(matches)

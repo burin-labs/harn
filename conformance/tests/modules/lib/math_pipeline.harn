@@ -1,4 +1,4 @@
-pipeline square(harness: Harness, task) {
+pipeline square(harness: Harness, task: unknown) {
   const x = 7
   harness.stdio.log(x * x)
 }

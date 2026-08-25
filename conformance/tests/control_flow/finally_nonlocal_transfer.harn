@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `return` inside a finally overrides the body's outcome (Java/JS semantics)
   // rather than crashing the compiler with unbounded recursion.
   fn ret_in_finally() {

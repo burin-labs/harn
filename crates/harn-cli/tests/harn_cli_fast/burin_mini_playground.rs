@@ -69,6 +69,13 @@ fn generated_report_path(experiment_root: &Path, stdout: &str, fallback_name: &s
         .unwrap_or_else(|| experiment_root.join("evals/generated").join(fallback_name))
 }
 
+fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
+    assert_eq!(
+        report["verdict"], "pass",
+        "playground report did not pass\nstdout:\n{stdout}\nreport:\n{report}"
+    );
+}
+
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
 /// `LocalSet` inside `execute_playground` binds to a thread we control,
 /// matching what `harn playground` does in production. The returned
@@ -152,11 +159,11 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     let report = generated_report_path(&experiment_root, &stdout, "explain_repo-latest.json");
     let report_json = read_json(&report);
     assert!(stdout.contains("task_id=explain_repo"), "stdout={stdout}");
+    assert_report_passes(&report_json, &stdout);
     assert!(
         stdout.contains("small TypeScript auth API demo"),
-        "stdout={stdout}"
+        "stdout={stdout}\nreport={report_json}"
     );
-    assert_eq!(report_json["verdict"], "pass");
 }
 
 #[test]
@@ -172,7 +179,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
-    assert_eq!(report_json["verdict"], "pass");
+    assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
@@ -228,7 +235,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_eq!(report_json["verdict"], "pass");
+    assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -340,7 +347,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_eq!(report_json["verdict"], "pass");
+    assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -381,7 +388,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_eq!(report_json["verdict"], "pass");
+    assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     let actions = report_json["action_graph"]["actions"]
         .as_array()
@@ -441,7 +448,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_eq!(report_json["verdict"], "pass");
+    assert_report_passes(&report_json, &stdout);
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),

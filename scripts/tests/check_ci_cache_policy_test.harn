@@ -23,12 +23,12 @@ import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
 @test
-pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task) {
+pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task: unknown) {
   assert_eq(ci_workflow_concurrency_errors({concurrency: ci_concurrency()}), [])
 }
 
 @test
-pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task) {
+pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task: unknown) {
   const invalid = {
     concurrency: {
       group: gha_expression("github.workflow")
@@ -45,26 +45,32 @@ pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task) {
 @test
 pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
 }
 
 @test
-pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task) {
+pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task: unknown) {
   const job = {concurrency: {group: "per-commit", "cancel-in-progress": true}}
   assert_eq(len(rust_cache_refresh_concurrency_errors(job)), 2)
 }
 
 @test
-pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss(harness: Harness, task) {
+pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss(
+  harness: Harness,
+  task: unknown,
+) {
   const job = cache_refresh_generation_steps("steps.rust-cache.outputs.cache-hit != 'true'")
   assert_eq(rust_cache_refresh_miss_only_errors(job), [])
 }
 
 @test
-pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(harness: Harness, task) {
+pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(
+  harness: Harness,
+  task: unknown,
+) {
   // An exact-key restore is immutable: the post step writes nothing, so an
   // unguarded warm compiles for minutes and discards the result.
   const job = {
@@ -82,7 +88,7 @@ pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(harness:
 
 pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_wiring(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const policy = release_warm_cache_path_policy()
   assert_eq(release_warm_cache_path_policy_parse(policy), policy)
@@ -93,7 +99,10 @@ pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_
   assert_eq(release_warm_cache_prune_errors(workflow), [])
 }
 
-pipeline test_release_warm_cache_policy_accepts_a_rotated_full_commit_pin(harness: Harness, task) {
+pipeline test_release_warm_cache_policy_accepts_a_rotated_full_commit_pin(
+  harness: Harness,
+  task: unknown,
+) {
   const rotated = release_binary_workflow_with_filter_uses(
     RELEASE_PATH_FILTER_ACTION + "@fedcba9876543210fedcba9876543210fedcba98",
   )
@@ -102,7 +111,7 @@ pipeline test_release_warm_cache_policy_accepts_a_rotated_full_commit_pin(harnes
 
 pipeline test_release_warm_cache_policy_rejects_mutable_or_malformed_action_refs(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const invalid_uses = [
     RELEASE_PATH_FILTER_ACTION + "@v4",
@@ -119,7 +128,10 @@ pipeline test_release_warm_cache_policy_rejects_mutable_or_malformed_action_refs
   }
 }
 
-pipeline test_release_warm_cache_policy_classifies_representative_paths(harness: Harness, task) {
+pipeline test_release_warm_cache_policy_classifies_representative_paths(
+  harness: Harness,
+  task: unknown,
+) {
   const policy = release_warm_cache_path_policy()
   const cases = [
     {path: "Cargo.lock", expected: true},
@@ -144,7 +156,10 @@ pipeline test_release_warm_cache_policy_classifies_representative_paths(harness:
   }
 }
 
-pipeline test_release_warm_cache_policy_rejects_invalid_or_duplicate_paths(harness: Harness, task) {
+pipeline test_release_warm_cache_policy_rejects_invalid_or_duplicate_paths(
+  harness: Harness,
+  task: unknown,
+) {
   const policy = release_warm_cache_path_policy()
   assert_eq(release_warm_cache_path_policy_parse({...policy, unexpected: true}), nil)
   assert_eq(
@@ -169,7 +184,7 @@ pipeline test_release_warm_cache_policy_rejects_invalid_or_duplicate_paths(harne
 
 pipeline test_release_warm_cache_policy_rejects_post_build_gates_and_missing_compile_inputs(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const policy = release_warm_cache_path_policy()
   const invalid: ReleaseWarmCachePathPolicy = {
@@ -188,7 +203,7 @@ pipeline test_release_warm_cache_policy_rejects_post_build_gates_and_missing_com
 
 pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_policy(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const workflow = release_binary_workflow()
   const filter_step = setup_step_by_id(workflow, "release-build-inputs")
@@ -212,7 +227,7 @@ pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_polic
 
 pipeline test_release_warm_cache_policy_requires_an_unshallowed_setup_checkout(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const workflow = release_binary_workflow()
   const policy = release_warm_cache_path_policy()
@@ -244,7 +259,7 @@ pipeline test_release_warm_cache_policy_requires_an_unshallowed_setup_checkout(
 
 pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_output(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const workflow = release_binary_workflow()
   const filter_step = setup_step_by_id(workflow, "release-build-inputs")
@@ -269,7 +284,10 @@ pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_out
   )
 }
 
-pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harness: Harness, task) {
+pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(
+  harness: Harness,
+  task: unknown,
+) {
   const workflow = release_binary_workflow()
   const invalid = {
     ...workflow,
@@ -300,7 +318,10 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
   )
 }
 
-pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(harness: Harness, task) {
+pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(
+  harness: Harness,
+  task: unknown,
+) {
   const workflow = release_binary_workflow()
   const resolve = setup_step_by_id(workflow, "resolve")
   const invalid = {
@@ -329,7 +350,7 @@ pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(harness
   )
 }
 
-pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task) {
+pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task: unknown) {
   const workflow = release_binary_workflow()
   const invalid = {
     ...workflow,
@@ -351,7 +372,10 @@ pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harnes
   )
 }
 
-pipeline test_release_warm_cache_prune_skips_only_superseded_warms(harness: Harness, task) {
+pipeline test_release_warm_cache_prune_skips_only_superseded_warms(
+  harness: Harness,
+  task: unknown,
+) {
   const workflow = release_binary_workflow()
   const invalid = {
     ...workflow,
@@ -371,7 +395,10 @@ pipeline test_release_warm_cache_prune_skips_only_superseded_warms(harness: Harn
   )
 }
 
-pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Harness, task) {
+pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(
+  harness: Harness,
+  task: unknown,
+) {
   assert(ci_cache_policy_parse(policy()) != nil)
   const declared = workflows()
   assert_eq(
@@ -391,7 +418,7 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
 
 pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
@@ -408,7 +435,10 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
-pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(harness: Harness, task) {
+pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(
+  harness: Harness,
+  task: unknown,
+) {
   const declared = workflows()
   const windows = declared["ci.yml"].jobs.windows
   const hosted_only = {
@@ -478,7 +508,7 @@ pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(harne
 
 pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_and_silent_tail(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const declared = workflows()
   const windows = declared["ci.yml"].jobs.windows
@@ -688,7 +718,7 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
 
 pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const declared = workflows()
   const windows = declared["ci.yml"].jobs.windows
@@ -782,7 +812,10 @@ pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
   )
 }
 
-pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(harness: Harness, task) {
+pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
+  harness: Harness,
+  task: unknown,
+) {
   const declared = workflows()
   const nightly = declared["windows-nightly.yml"]
   const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
@@ -825,7 +858,7 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(harness:
   )
 }
 
-pipeline test_native_cache_inputs_exclude_test_runtime_stack(harness: Harness, task) {
+pipeline test_native_cache_inputs_exclude_test_runtime_stack(harness: Harness, task: unknown) {
   assert_eq(
     NATIVE_CACHE_INPUTS,
     ["CARGO_INCREMENTAL", "CARGO_TERM_COLOR", "RUSTC_WRAPPER", "RUSTFLAGS"],
@@ -833,7 +866,10 @@ pipeline test_native_cache_inputs_exclude_test_runtime_stack(harness: Harness, t
   assert(!NATIVE_CACHE_INPUTS.contains("RUST_MIN_STACK"))
 }
 
-pipeline test_windows_shared_cache_requires_release_certification_bypass(harness: Harness, task) {
+pipeline test_windows_shared_cache_requires_release_certification_bypass(
+  harness: Harness,
+  task: unknown,
+) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"].jobs.nextest
   const cache = producer.steps[3]
@@ -854,7 +890,7 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(harness
 
 pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_drive(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"]
@@ -923,7 +959,7 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   )
 }
 
-pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task) {
+pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task: unknown) {
   const declared = workflows()
   const declared_policy = policy()
   assert_eq(nextest_version_errors(declared_policy, declared), [])
@@ -954,7 +990,10 @@ pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task) {
   )
 }
 
-pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Harness, task) {
+pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(actions_cache_capacity_errors(policy()), [])
   const base = policy()
   const oversized_warm: CiCachePolicy = {
@@ -996,7 +1035,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Har
 
 pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"].jobs.nextest
@@ -1036,7 +1075,7 @@ pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_targe
 
 pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const invalid = {
     ...workflows(),

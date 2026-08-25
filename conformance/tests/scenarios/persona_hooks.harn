@@ -12,13 +12,13 @@ fn audit_tools() {
 }
 
 @persona(name: "merge_captain")
-fn merge_captain(harness: Harness, ctx) -> string {
+fn merge_captain(harness: Harness, ctx: string) -> string {
   const merged = admin_merge(harness, ctx)
   return "persona:" + merged
 }
 
 @step(name: "admin_merge")
-fn admin_merge(harness: Harness, ctx) -> string {
+fn admin_merge(harness: Harness, ctx: string) -> string {
   return with_llm_script(
     harness.llm,
     [

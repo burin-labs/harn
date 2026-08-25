@@ -39,7 +39,7 @@ type ResumeByCallback = fn(Harness, dict) -> ResumeByDispatchResult | dict | nil
  * @api_stability: experimental
  * @example: first_handled([ResumeBy().cloud_harness, ResumeBy().local_runtime])
  */
-pub fn first_handled(callbacks) -> ResumeByCallback {
+pub fn first_handled(callbacks: any) -> ResumeByCallback {
   return { harness, suspension ->
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return nil
@@ -56,7 +56,7 @@ pub fn first_handled(callbacks) -> ResumeByCallback {
   }
 }
 
-fn __resume_by_payload(suspension, mechanism, extra) {
+fn __resume_by_payload(suspension: dict, mechanism: string, extra: dict?) {
   const base = {mechanism: mechanism, handle: suspension?.handle, reason: suspension?.reason}
   if extra == nil {
     return base
@@ -64,14 +64,19 @@ fn __resume_by_payload(suspension, mechanism, extra) {
   return base + extra
 }
 
-fn __resume_by_emit(harness: Harness?, suspension, mechanism, extra = nil) {
+fn __resume_by_emit(harness: Harness?, suspension: dict, mechanism: string, extra: any = nil) {
   if harness == nil {
     return
   }
   harness.emit_audit("resume_by_dispatched", __resume_by_payload(suspension, mechanism, extra))
 }
 
-fn __resume_by_emit_declined(harness: Harness?, suspension, mechanism, reason) {
+fn __resume_by_emit_declined(
+  harness: Harness?,
+  suspension: dict,
+  mechanism: string,
+  reason: string,
+) {
   if harness == nil {
     return
   }
@@ -81,7 +86,7 @@ fn __resume_by_emit_declined(harness: Harness?, suspension, mechanism, reason) {
   )
 }
 
-fn __resume_by_has_conditions(suspension) {
+fn __resume_by_has_conditions(suspension: dict) {
   const conditions = suspension?.conditions
   if conditions == nil {
     return false
@@ -119,7 +124,7 @@ fn __resume_by_cloud_session(harness: Harness?) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn resume_by_parent_llm(harness: Harness, suspension) -> ResumeByDispatchResult {
+pub fn resume_by_parent_llm(harness: Harness, suspension: dict) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.parent_llm")
   return {handled: true, mechanism: "ResumeBy.parent_llm"}
 }
@@ -134,7 +139,7 @@ pub fn resume_by_parent_llm(harness: Harness, suspension) -> ResumeByDispatchRes
  * @errors: []
  * @api_stability: experimental
  */
-pub fn resume_by_local_runtime(harness: Harness, suspension) -> ResumeByDispatchResult {
+pub fn resume_by_local_runtime(harness: Harness, suspension: dict) -> ResumeByDispatchResult {
   if !__resume_by_has_conditions(suspension) {
     __resume_by_emit_declined(harness, suspension, "ResumeBy.local_runtime", "no_conditions")
     return {handled: false, mechanism: "ResumeBy.local_runtime", reason: "no_conditions"}
@@ -158,7 +163,7 @@ pub fn resume_by_local_runtime(harness: Harness, suspension) -> ResumeByDispatch
  * @errors: []
  * @api_stability: experimental
  */
-pub fn resume_by_cloud_harness(harness: Harness, suspension) -> ResumeByDispatchResult {
+pub fn resume_by_cloud_harness(harness: Harness, suspension: dict) -> ResumeByDispatchResult {
   const session = __resume_by_cloud_session(harness)
   if session == nil {
     __resume_by_emit_declined(harness, suspension, "ResumeBy.cloud_harness", "no_cloud_session")
@@ -183,7 +188,7 @@ pub fn resume_by_cloud_harness(harness: Harness, suspension) -> ResumeByDispatch
  * @errors: []
  * @api_stability: experimental
  */
-pub fn resume_by_pipeline_drain(harness: Harness, suspension) -> ResumeByDispatchResult {
+pub fn resume_by_pipeline_drain(harness: Harness, suspension: dict) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.pipeline_drain")
   return {handled: true, mechanism: "ResumeBy.pipeline_drain"}
 }
@@ -231,7 +236,7 @@ pub fn ResumeBy() {
  * @api_stability: experimental
  * @example: default_resume_by(harness, cond)
  */
-pub fn default_resume_by(harness: Harness, conditions = nil) -> ResumeByCallback {
+pub fn default_resume_by(harness: Harness, conditions: any = nil) -> ResumeByCallback {
   const has_conditions = if conditions == nil {
     false
   } else if type_of(conditions) == "dict" {
@@ -260,7 +265,11 @@ pub fn default_resume_by(harness: Harness, conditions = nil) -> ResumeByCallback
  * @errors: []
  * @api_stability: experimental
  */
-pub fn invoke_resume_by(callback, harness: Harness, suspension) -> ResumeByDispatchResult | dict {
+pub fn invoke_resume_by(
+  callback: any,
+  harness: Harness,
+  suspension: dict,
+) -> ResumeByDispatchResult | dict {
   const cb = if callback == nil {
     resume_by_parent_llm
   } else {

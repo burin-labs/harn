@@ -7,7 +7,7 @@
  * the mock and `harness.runtime.yield_now()` lets sibling tasks make progress without
  * actually sleeping.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1700000000000)
   const order = harness.runtime.atomic(0)
   const results = parallel each [10, 20, 30, 40] with { max_concurrent: 2 } { n ->

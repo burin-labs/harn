@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // r[k] is O(1) and computes start + k with a bounds check.
   const r = 1 to 10
   harness.stdio.log(r[0])

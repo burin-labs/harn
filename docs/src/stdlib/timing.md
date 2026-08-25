@@ -75,7 +75,8 @@ that pin wall time align with timing output.
 `timing_event(handle, name, attrs?)` records a sub-phase annotation on the open
 span without allocating a child span for every marker. Events ride along with
 the parent span — they show up in `timing.events` after `end_timing`, in
-`trace_spans()` output, and in OTel exports as native span events. Returns
+`harness.obs.trace_spans()` output, and in OTel exports as native span events.
+Returns
 `true` when the event was attached, `false` when the handle is already closed.
 
 ## Duplicate close is idempotent

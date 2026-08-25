@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // list
   for x in iter([1, 2, 3]) {
     harness.stdio.log("list:${x}")

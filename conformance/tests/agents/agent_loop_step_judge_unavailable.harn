@@ -19,11 +19,11 @@ import { llm_text, with_llm_script } from "std/testing"
  * completes on the done sentinel. We assert the emitted decision carries the
  * distinct marker, and a CONTROL run with a real `pass` verdict does NOT.
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn judge_decisions(captured) {
+fn judge_decisions(captured: dict) {
   return events_of(captured.events, "step_judge_decision")
 }
 

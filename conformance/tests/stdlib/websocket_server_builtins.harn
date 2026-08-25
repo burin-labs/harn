@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.transport_mock_clear()
   const server = harness.net.websocket_server("127.0.0.1:0", {})
   // 10s instead of 2s gives the WebSocket handshake enough headroom when the

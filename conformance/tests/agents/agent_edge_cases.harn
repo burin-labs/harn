@@ -13,7 +13,7 @@ fn read_only_tools() {
   return tools
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Test agent() edge cases
   // Agent with no config
   const a1 = agent("minimal", {})

@@ -17,14 +17,14 @@
  */
 import { verification_file_hash_snapshot } from "std/verification"
 
-fn seed_workspace(fs: HarnessFs, root: string) {
+fn seed_workspace(fs: HarnessFs, root: string) -> nil {
   fs.mkdir(root)
   fs.mkdir(path_join(root, "src"))
   fs.write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 42 }\n")
   fs.write_text(path_join(root, "README.md"), "# verification demo\n")
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   const root = path_join(harness.fs.runtime_paths().asset_root, "verification-workspace")
   seed_workspace(harness.fs, root)
   const _ = harness.code_index.rebuild({root: root})

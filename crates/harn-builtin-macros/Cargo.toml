@@ -15,11 +15,11 @@ proc-macro = true
 syn = { version = "3", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.115" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.116" }
 
 [dev-dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.115" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.115" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.116" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.116" }
 
 [lints]
 workspace = true

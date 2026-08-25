@@ -33,7 +33,8 @@ for result in results {
 }
 ```
 
-Use `parallel_race(items, callable, options?)` when only the first
+Use `harness.runtime.parallel_race(items, callable, options?)` when only the
+first
 successful result matters. It returns the first plain value or
 `Result.Ok` payload, cancels remaining work, and throws an aggregate
 error when every task throws or returns `Result.Err`.

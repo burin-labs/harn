@@ -20,7 +20,7 @@ fn __step_judge_schema() {
   }
 }
 
-fn __serialize_response(llm_result) {
+fn __serialize_response(llm_result: dict?) {
   const {text = "", tool_calls = []} = llm_result ?? {}
   let parts = []
   if text != "" {
@@ -35,7 +35,7 @@ fn __serialize_response(llm_result) {
   return join(parts, "\n")
 }
 
-fn __payload(agent: HarnessAgent, session, llm_result, iteration) {
+fn __payload(agent: HarnessAgent, session: dict, llm_result: dict?, iteration: int) {
   const messages = agent_session_messages(agent, session.session_id)
   return {
     session_id: session.session_id,
@@ -46,7 +46,13 @@ fn __payload(agent: HarnessAgent, session, llm_result, iteration) {
   }
 }
 
-fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations) {
+fn __should_skip(
+  judge_cfg: dict,
+  llm_result: dict,
+  attempts: int,
+  stall_warning: any,
+  remaining_iterations: any,
+) {
   const max_attempts = judge_cfg?.max_attempts ?? 3
   if attempts >= max_attempts {
     return {skip: true, reason: "max_attempts_reached"}
@@ -68,7 +74,7 @@ fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_itera
   return {skip: false}
 }
 
-fn __invoke(harness: Harness, judge_cfg, opts, payload) {
+fn __invoke(harness: Harness, judge_cfg: dict, opts: dict, payload: any) {
   const system = step_judge_system_prompt(harness.fs, {rubric: judge_cfg?.rubric ?? "default"})
   const user = step_judge_user_prompt(harness.fs, payload)
   const schema = __step_judge_schema()
@@ -140,7 +146,13 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
     }
 }
 
-fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict) {
+fn __emit_decision(
+  agent: HarnessAgent,
+  session_id: any,
+  iteration: int,
+  on_veto: any,
+  verdict: dict,
+) {
   const {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
   const cost_est = if provider != "" && model != "" {
     estimate_call_cost(
@@ -215,13 +227,13 @@ fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict)
  */
 pub fn agent_step_judge(
   harness: Harness,
-  session,
-  llm_result,
-  opts,
-  iteration = 0,
-  stall_warning = nil,
-  attempts = 0,
-  remaining_iterations = nil,
+  session: dict,
+  llm_result: any,
+  opts: dict,
+  iteration: int = 0,
+  stall_warning: any = nil,
+  attempts: int = 0,
+  remaining_iterations: any = nil,
 ) {
   const judge_cfg = opts?.step_judge
   if judge_cfg == nil {

@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
   assert(result.converged)
   assert_eq(result.iterations, 2)

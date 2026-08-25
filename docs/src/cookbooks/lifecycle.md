@@ -28,9 +28,11 @@ import { on_finish_handoff_to } from "std/lifecycle"
 pipeline ingest(harness: Harness, events) {
   // Any deferred items become partial-handoff envelopes via
   // harness.handoff_to so they show up in unsettled_state().
-  pipeline_on_finish(on_finish_handoff_to("nightly-settle", {
-    note: "live ingest deferred bucket",
-  }))
+  harness.agent.pipeline_on_finish(
+    on_finish_handoff_to("nightly-settle", {
+      note: "live ingest deferred bucket",
+    }),
+  )
 
   for event in events {
     const outcome = try_process_now(event)
@@ -103,7 +105,7 @@ pipeline triage(harness: Harness, input) {
 
   // 2. Drain on finish, wrapped in an OTel span so dashboards can
   //    pin on the duration distribution.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "triage_drain"),
   )
 
@@ -242,16 +244,15 @@ same handoff envelopes — across two runs of the same pipeline.
 ```harn,ignore
 import { mock_time, advance_time } from "std/clock"
 import { flush_trigger_aggregations } from "std/triggers/testing"
-import { pipeline_lifecycle_audit_log_take } from "std/lifecycle"
 import { on_finish_drain } from "std/lifecycle"
 import { compose, with_telemetry } from "std/lifecycle/combinators"
 
 pipeline multi_suspend_fixture(harness: Harness) {
   // 1. Pin wall-clock so queued_at_ms / age_ms are reproducible.
-  harness.testing.clock_set(1_700_000_000_000)
+  harness.testing.clock_set(1700000000000)
 
   // 2. Capture audits via the per-run log instead of wall-clock spans.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "fixture_drain"),
   )
 
@@ -259,12 +260,12 @@ pipeline multi_suspend_fixture(harness: Harness) {
   //    a typed audit entry.
   const worker = spawn_research_worker()
   emit_external_event("operator.resume", {})
-  harness.testing.clock_advance(60_000)
+  harness.testing.clock_advance(60000)
   harness.channels.flush_aggregations()
 
   const worker2 = spawn_followup_worker(worker)
   emit_external_event("operator.resume", {})
-  harness.testing.clock_advance(120_000)
+  harness.testing.clock_advance(120000)
   harness.channels.flush_aggregations()
 
   return wait_agent(worker2)
@@ -273,7 +274,7 @@ pipeline multi_suspend_fixture(harness: Harness) {
 pipeline assert_replay_determinism(harness: Harness) {
   // 4. Drain the audit log; the conformance harness compares this
   //    byte-for-byte against the recorded fixture.
-  const entries = pipeline_lifecycle_audit_log_take()
+  const entries = harness.obs.pipeline_lifecycle_audit_log_take()
   return {audits: entries, count: len(entries)}
 }
 ```

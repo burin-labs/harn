@@ -5,15 +5,15 @@
 // parser/typechecker contract — the attribute compiles without warnings
 // and the surrounding program runs.
 @command(name: "review", description: "Review the diff", hint: "focus area")
-pipeline review_branch(harness: Harness, task) {
+pipeline review_branch(harness: Harness, task: unknown) {
   return "reviewed"
 }
 
 @command(description: "Plan the work")
-pipeline plan(harness: Harness, task) {
+pipeline plan(harness: Harness, task: unknown) {
   return "planned"
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.log("attributes_command ok")
 }

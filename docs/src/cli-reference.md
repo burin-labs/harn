@@ -1128,7 +1128,6 @@ while trusted native dynamic libraries use `nativeRuleDirs`.
 harn lint main.harn
 harn lint src/ tests/
 harn lint prompts/system.harn.prompt
-harn lint --require-public-api-types src/
 ```
 
 To ratchet strict linting onto newly added Harn source lines without making
@@ -1193,12 +1192,6 @@ reach a wire, not that a runtime internal became source-visible, so a
 `runtime_internal` builtin and a capability method called as a bare global both
 keep reporting.
 
-`--require-public-api-types` reports every untyped public function or pipeline
-parameter and return as `HARN-LNT-067`. Set
-`[lint] require_public_api_types = true` in `harn.toml` to apply the same policy
-to CLI and LSP linting across the project. The rule has no autofix because
-choosing a public contract is an API-design decision.
-
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import
 removal, string interpolation conversion, `let`-then-`return` simplification,
@@ -1235,6 +1228,7 @@ harn fix --plan --json --safety behavior-preserving src/
 harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
+harn fix --apply --safety surface-changing --code HARN-TYP-028 src/
 harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
 
@@ -1243,6 +1237,14 @@ omitting it keeps every code. Use it when a migration should touch one class of
 finding rather than everything at its safety ceiling. Narrowing happens in the
 plan, so `--plan --code <CODE>` shows exactly what `--apply --code <CODE>`
 writes.
+
+`HARN-TYP-028` marks declared parameters that have no type annotation. Its
+surface-changing repair infers parameter types from body usage and call sites,
+then rechecks each edited file. The JSON plan reports `parameterAnnotations`
+with inferred and unresolved counts plus cause clusters. Unresolved parameters
+receive explicit `unknown`, preserving type checks at every use site until a
+human supplies a narrower contract. Review that residue before applying a large
+migration.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient
@@ -2445,22 +2447,24 @@ harn models lora preflight --base google/gemma-4-e4b-it \
 ```
 
 The preflight is CPU-only. It resolves the target model route, reads
-`max_seq_length` and `min_fit_ratio` from a lightweight config file when
-provided, then checks record count, approximate sequence-budget fit, hard token
-outliers, source tool-call body format, malformed tool-call blocks, undeclared
-tool names, typed behavior-strata coverage, and an optional caller-supplied
-done marker. Behavior-strata policy defaults to
+`max_seq_length`, `min_fit_ratio`, and `min_records` from a lightweight config
+file when provided, then checks record count, approximate sequence-budget fit,
+hard token outliers, source tool-call body format, malformed tool-call blocks,
+undeclared tool names, typed behavior-strata coverage, and an optional
+caller-supplied done marker. Behavior-strata policy defaults to
 `--behavior-strata-policy strict`. The explicit
 `legacy-unclassified` policy lets an old corpus with no declared behavior
 metadata pass preflight for migration review, but its typed report remains
 `status: "legacy_unclassified"`, retains all five missing classes, lists the
-stable record ids that need review, and prints a warning. If even one trainable
-record declares a behavior class, missing coverage is `incomplete` and remains
-an error under both policies. Export has no migration policy and always
-requires real emitted coverage. Use `--check` to make readiness failures exit
-non-zero. The command intentionally owns reusable LoRA corpus readiness in
-Harn; product-specific markers or thresholds should be passed as flags rather
-than hard-coded into hosts.
+stable record ids that need review, and prints a warning. A command-line
+threshold overrides the matching config value. `--check` requires a record
+floor from `--min-records` or `min_records` in the config, so an unset gate
+cannot report success. If even one trainable record declares a behavior class,
+missing coverage is `incomplete` and remains an error under both policies.
+Export has no migration policy and always requires real emitted coverage. Use
+`--check` to make readiness failures exit non-zero. The command intentionally
+owns reusable LoRA corpus readiness in Harn; product-specific markers or
+thresholds should be passed as flags rather than hard-coded into hosts.
 
 ## harn models lora inspect
 

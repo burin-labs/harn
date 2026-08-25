@@ -2,7 +2,7 @@
 // outer-first: compose([a, b, c])(base) == a(b(c(base))).
 import { compose } from "std/llm/handlers"
 
-fn make_tagger(tag) {
+fn make_tagger(tag: string) {
   return { next ->
     return { call ->
       const env = next(call)

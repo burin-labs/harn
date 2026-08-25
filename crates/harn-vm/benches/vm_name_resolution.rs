@@ -39,7 +39,7 @@ fn rt() -> tokio::runtime::Runtime {
 
 /// `work` reads a *function-local* `a` ten times per iteration: the compiler
 /// resolves `a` to a `GetLocalSlot`, the O(1) fast path.
-const LOCAL_READ: &str = r"pipeline t(task) {
+const LOCAL_READ: &str = r"pipeline t(task: unknown) {
   fn work() {
     const a = 1
     let total = 0
@@ -56,7 +56,7 @@ const LOCAL_READ: &str = r"pipeline t(task) {
 /// `work` reads a *module-level* `a` ten times per iteration: the compiler
 /// emits `GetVar`, so each read runs the dead local-slot scan + env walk +
 /// `module_state` mutex before hitting the binding.
-const GLOBAL_READ: &str = r"pipeline t(task) {
+const GLOBAL_READ: &str = r"pipeline t(task: unknown) {
   const a = 1
   fn work() {
     let total = 0
@@ -72,7 +72,7 @@ const GLOBAL_READ: &str = r"pipeline t(task) {
 
 /// Same global read, but `work` carries many local slots so the linear
 /// `active_local_slot_index` scan each `GetVar` pays is wide.
-const GLOBAL_READ_MANY_LOCALS: &str = r"pipeline t(task) {
+const GLOBAL_READ_MANY_LOCALS: &str = r"pipeline t(task: unknown) {
   const a = 1
   fn work() {
     const l0 = 0
@@ -116,7 +116,7 @@ fn bench(c: &mut Criterion, name: &str, src: &str) {
 /// The sync call path runs `resolve_named_closure` — local-slot scan, env
 /// walk, and the `module_functions` + `module_state` mutexes (both missing) —
 /// before the builtin finally dispatches by id.
-const BUILTIN_CALL: &str = r"pipeline t(task) {
+const BUILTIN_CALL: &str = r"pipeline t(task: unknown) {
   fn work() {
     let total = 0
     let i = 0
@@ -132,7 +132,7 @@ const BUILTIN_CALL: &str = r"pipeline t(task) {
 /// Hot loop calling a sibling module-level function ten times per iteration:
 /// `resolve_named_closure` re-resolves through the module-function/module-state
 /// mutexes every call even though the DirectCall cache is "warm".
-const USER_FN_CALL: &str = r"pipeline t(task) {
+const USER_FN_CALL: &str = r"pipeline t(task: unknown) {
   fn dbl(x) { return x + x }
   fn work() {
     let total = 0

@@ -95,7 +95,7 @@ import {{
   command_ledger_hold,
 }} from "std/agent/command_ledger"
 
-fn _lease_of(ledger) {{
+fn _lease_of(ledger: list<dict>) {{
   for row in ledger {{
     return to_string(row?.lease ?? "")
   }}

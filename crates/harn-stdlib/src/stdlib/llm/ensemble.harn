@@ -14,7 +14,7 @@ import { decisive_error, settle_with_abort } from "std/abort"
 import { agent_emit_event } from "std/agent/state"
 import { safe_call, with_case_insensitive_keys } from "std/llm/safe"
 
-fn __clamp_int(n, lo, hi) {
+fn __clamp_int(n: any, lo: int, hi: int) {
   const v = to_int(n)
   if v < lo {
     return lo
@@ -25,7 +25,7 @@ fn __clamp_int(n, lo, hi) {
   return v
 }
 
-fn __sampler_opts_for(opts) {
+fn __sampler_opts_for(opts: dict) {
   const so = opts?.sampler_opts
   if type_of(so) == "dict" {
     return so
@@ -33,7 +33,7 @@ fn __sampler_opts_for(opts) {
   return {temperature: 1.0}
 }
 
-fn __merge_call_opts(base, sampler_opts) {
+fn __merge_call_opts(base: any, sampler_opts: any) {
   const merged = if type_of(base) == "dict" {
     base
   } else {
@@ -46,7 +46,7 @@ fn __merge_call_opts(base, sampler_opts) {
 // best_of_n
 // -------------------------------------------------------------------------------------------------
 
-fn __sample_one(llm: HarnessLlm, prompt, system, call_opts, index) {
+fn __sample_one(llm: HarnessLlm, prompt: any, system: any, call_opts: any, index: any) {
   const envelope = safe_call(llm, prompt, system, call_opts)
   if !(envelope?.ok ?? false) {
     return {ok: false, index: index, status: envelope?.status, error: envelope?.error, text: ""}
@@ -55,7 +55,15 @@ fn __sample_one(llm: HarnessLlm, prompt, system, call_opts, index) {
   return {ok: true, index: index, text: text, value: envelope.value}
 }
 
-fn __collect_samples(llm: HarnessLlm, prompt, system, base_opts, sampler_opts, n, run_parallel) {
+fn __collect_samples(
+  llm: HarnessLlm,
+  prompt: any,
+  system: any,
+  base_opts: any,
+  sampler_opts: any,
+  n: int,
+  run_parallel: any,
+) {
   const call_opts = __merge_call_opts(base_opts, sampler_opts)
   let indices = []
   let i = 0
@@ -75,7 +83,7 @@ fn __collect_samples(llm: HarnessLlm, prompt, system, base_opts, sampler_opts, n
   return out
 }
 
-fn __reward_filter(samples, reward) {
+fn __reward_filter(samples: list, reward: any) {
   if reward == nil {
     return samples
   }
@@ -95,7 +103,7 @@ fn __reward_filter(samples, reward) {
   return scored
 }
 
-fn __structured_judge(llm: HarnessLlm, samples, opts) {
+fn __structured_judge(llm: HarnessLlm, samples: any, opts: dict) {
   let labelled = []
   const total = len(samples)
   let i = 0
@@ -174,7 +182,7 @@ fn __structured_judge(llm: HarnessLlm, samples, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn best_of_n(llm: HarnessLlm, prompt, system, opts = nil) {
+pub fn best_of_n(llm: HarnessLlm, prompt: any, system: any, opts: any = nil) {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -248,7 +256,7 @@ pub fn best_of_n(llm: HarnessLlm, prompt, system, opts = nil) {
 // self_consistency
 // -------------------------------------------------------------------------------------------------
 
-fn __log2(x) {
+fn __log2(x: int | float) {
   // log2(x) = ln(x) / ln(2). Harn provides `ln`/`log` via std/math; fall
   // back on a manual approximation if not.
   const lnx = ln(x)
@@ -256,7 +264,7 @@ fn __log2(x) {
   return lnx / ln2
 }
 
-fn __shannon_entropy(counts, total) {
+fn __shannon_entropy(counts: list, total: int) {
   if total <= 0 {
     return 0.0
   }
@@ -271,7 +279,7 @@ fn __shannon_entropy(counts, total) {
   return h
 }
 
-fn __answer_key(value) {
+fn __answer_key(value: any) {
   const kind = type_of(value)
   if kind == "string" {
     return value
@@ -282,7 +290,7 @@ fn __answer_key(value) {
   return to_string(value)
 }
 
-fn __extract_answer(sample, extract, normalize) {
+fn __extract_answer(sample: dict, extract: unknown, normalize: any) {
   if !(sample?.ok ?? false) {
     return nil
   }
@@ -304,7 +312,7 @@ fn __extract_answer(sample, extract, normalize) {
   return ans
 }
 
-fn __weight_for(sample, vote_mode, confidence_fn) {
+fn __weight_for(sample: any, vote_mode: string, confidence_fn: unknown) {
   if vote_mode != "weighted" {
     return 0.0
   }
@@ -317,7 +325,13 @@ fn __weight_for(sample, vote_mode, confidence_fn) {
   return to_float(unwrap(cv))
 }
 
-fn __tally_samples(samples, extract, normalize, vote_mode, confidence_fn) {
+fn __tally_samples(
+  samples: list,
+  extract: any,
+  normalize: any,
+  vote_mode: string,
+  confidence_fn: any,
+) {
   let keys_in_order = []
   let counts = {}
   let first_seen = {}
@@ -354,14 +368,14 @@ fn __tally_samples(samples, extract, normalize, vote_mode, confidence_fn) {
   }
 }
 
-fn __score_for(key, counts, weights, vote_mode) {
+fn __score_for(key: any, counts: any, weights: any, vote_mode: string) {
   if vote_mode == "weighted" {
     return weights[key]
   }
   return to_float(counts[key])
 }
 
-fn __pick_winner(tally, vote_mode) {
+fn __pick_winner(tally: dict, vote_mode: string) {
   const keys = tally.keys_in_order
   let best_key = keys[0]
   let best_score = __score_for(best_key, tally.counts, tally.weights, vote_mode)
@@ -389,7 +403,7 @@ fn __pick_winner(tally, vote_mode) {
   return {key: best_key, tie: tie}
 }
 
-fn __canonical_answer(extracted, key) {
+fn __canonical_answer(extracted: list, key: any) {
   for e in extracted {
     if e != nil && __answer_key(e) == key {
       return e
@@ -398,7 +412,7 @@ fn __canonical_answer(extracted, key) {
   return nil
 }
 
-fn __build_distribution(keys_in_order, counts) {
+fn __build_distribution(keys_in_order: list, counts: any) {
   let distribution = []
   let total = 0
   for k in keys_in_order {
@@ -432,7 +446,13 @@ fn __build_distribution(keys_in_order, counts) {
  * @effects: []
  * @errors: []
  */
-pub fn self_consistency(agent: HarnessAgent, llm: HarnessLlm, prompt, system, opts = nil) {
+pub fn self_consistency(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  prompt: any,
+  system: any,
+  opts: any = nil,
+) {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -498,7 +518,13 @@ pub fn self_consistency(agent: HarnessAgent, llm: HarnessLlm, prompt, system, op
 
 // One judged item. Returns `Ok(record)` / `Err(record)` so `settle_with_abort`
 // can see the failure: the record itself is the payload either way.
-fn __parallel_judge_step(clock: HarnessClock, entry, judge_fn, total, on_progress) {
+fn __parallel_judge_step(
+  clock: HarnessClock,
+  entry: dict,
+  judge_fn: unknown,
+  total: int,
+  on_progress: any,
+) {
   const started = clock.now_ms()
   const r = try {
     judge_fn(entry.item)
@@ -554,7 +580,12 @@ fn __parallel_judge_step(clock: HarnessClock, entry, judge_fn, total, on_progres
  * @effects: []
  * @errors: []
  */
-pub fn parallel_judge(harness: Harness, items, judge_fn, opts = nil) {
+pub fn parallel_judge(
+  harness: Harness,
+  items: string | bytes | list | dict | set | range | nil,
+  judge_fn: any,
+  opts: any = nil,
+) {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {
@@ -642,7 +673,7 @@ type DebateResult = {
   short_circuit_event_id: int?,
 }
 
-fn __debate_prompt_value(opts) {
+fn __debate_prompt_value(opts: dict) {
   const prompt = opts?.prompt ?? opts?.question ?? opts?.task
   if type_of(prompt) != "string" || trim(prompt) == "" {
     throw "debate: opts.prompt must be a non-empty string"
@@ -650,7 +681,7 @@ fn __debate_prompt_value(opts) {
   return prompt
 }
 
-fn __debate_int(value, fallback, label) {
+fn __debate_int(value: int?, fallback: int, label: string) {
   const parsed = to_int(value ?? fallback)
   if parsed == nil || parsed < 1 {
     throw "debate: " + label + " must be a positive integer"
@@ -658,7 +689,7 @@ fn __debate_int(value, fallback, label) {
   return parsed
 }
 
-fn __debate_float(value, fallback, label) {
+fn __debate_float(value: float?, fallback: float, label: string) {
   const parsed = to_float(value ?? fallback)
   if parsed == nil {
     throw "debate: " + label + " must be numeric"
@@ -666,7 +697,7 @@ fn __debate_float(value, fallback, label) {
   return parsed
 }
 
-fn __debate_debaters(opts) {
+fn __debate_debaters(opts: dict) {
   const debaters = opts?.debaters ?? opts?.agents ?? ["debater_1", "debater_2"]
   if type_of(debaters) != "list" || len(debaters) == 0 {
     throw "debate: opts.debaters must be a non-empty list"
@@ -674,7 +705,7 @@ fn __debate_debaters(opts) {
   return debaters
 }
 
-fn __debater_name(debater, index) {
+fn __debater_name(debater: unknown, index: int) {
   if type_of(debater) == "string" {
     const name = trim(debater)
     if name != "" {
@@ -691,14 +722,14 @@ fn __debater_name(debater, index) {
   throw "debate: each debater must be a string or dict"
 }
 
-fn __debater_instruction(debater) {
+fn __debater_instruction(debater: unknown) {
   if type_of(debater) == "dict" && type_of(debater?.instruction) == "string" {
     return trim(debater.instruction)
   }
   return ""
 }
 
-fn __debater_names(debaters) {
+fn __debater_names(debaters: any) {
   let names = []
   let index = 0
   while index < len(debaters) {
@@ -708,7 +739,7 @@ fn __debater_names(debaters) {
   return names
 }
 
-fn __debate_options(raw) {
+fn __debate_options(raw: dict) {
   if type_of(raw) != "dict" {
     throw "debate: opts must be a dict"
   }
@@ -734,7 +765,7 @@ fn __debate_options(raw) {
     }
 }
 
-fn __copy_top_level_llm_options(opts, base) {
+fn __copy_top_level_llm_options(opts: dict, base: dict) {
   let out = {} + base
   for key in [
     "provider",
@@ -754,7 +785,7 @@ fn __copy_top_level_llm_options(opts, base) {
   return out
 }
 
-fn __debate_llm_options(opts, debater) {
+fn __debate_llm_options(opts: dict, debater: unknown) {
   let out = opts?.llm_options ?? {}
   if type_of(out) != "dict" {
     throw "debate: opts.llm_options must be a dict when provided"
@@ -770,7 +801,7 @@ fn __debate_llm_options(opts, debater) {
   return out
 }
 
-fn __debate_system(opts, debater) {
+fn __debate_system(opts: dict, debater: unknown) {
   let parts = []
   if type_of(opts?.system) == "string" && trim(opts.system) != "" {
     parts = parts.appending(trim(opts.system))
@@ -785,7 +816,7 @@ fn __debate_system(opts, debater) {
   return join(parts, "\n\n")
 }
 
-fn __debate_history(rounds) {
+fn __debate_history(rounds: list) {
   let lines = []
   for round in rounds {
     lines = lines.appending("Round " + to_string(round.round) + ":")
@@ -796,7 +827,13 @@ fn __debate_history(rounds) {
   return join(lines, "\n")
 }
 
-fn __debate_call_prompt(opts, debater, debater_name, round_number, previous_rounds) {
+fn __debate_call_prompt(
+  opts: dict,
+  debater: string | dict,
+  debater_name: string,
+  round_number: int,
+  previous_rounds: list,
+) {
   let parts = [
     "Question:\n" + opts.prompt,
     "Debater: " + debater_name,
@@ -814,7 +851,7 @@ fn __debate_call_prompt(opts, debater, debater_name, round_number, previous_roun
   return join(parts, "\n\n")
 }
 
-fn __debate_response_text(result) {
+fn __debate_response_text(result: dict) {
   if type_of(result) == "dict" {
     if result?.text != nil {
       return to_string(result.text)
@@ -826,7 +863,7 @@ fn __debate_response_text(result) {
   return to_string(result)
 }
 
-fn __debate_response(debater_name, result) {
+fn __debate_response(debater_name: any, result: dict) {
   let response = {debater: debater_name, text: __debate_response_text(result)}
   if type_of(result) == "dict" {
     for key in ["provider", "model", "input_tokens", "output_tokens"] {
@@ -838,7 +875,7 @@ fn __debate_response(debater_name, result) {
   return response
 }
 
-fn __debate_run_round(llm: HarnessLlm, opts, round_number, previous_rounds) {
+fn __debate_run_round(llm: HarnessLlm, opts: dict, round_number: int, previous_rounds: list) {
   let responses = []
   let index = 0
   while index < len(opts.debaters) {
@@ -855,7 +892,7 @@ fn __debate_run_round(llm: HarnessLlm, opts, round_number, previous_rounds) {
   return responses
 }
 
-fn __debate_tokens(text) {
+fn __debate_tokens(text: any) {
   const cleaned = trim(regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text))))
   if cleaned == "" {
     return []
@@ -863,7 +900,7 @@ fn __debate_tokens(text) {
   return split(cleaned, " ").filter({ token -> return token != "" })
 }
 
-fn __ngram_counts(tokens, width) {
+fn __ngram_counts(tokens: string | bytes | list | dict | set | range | nil, width: int) {
   let counts = {}
   if len(tokens) < width {
     return counts
@@ -878,7 +915,11 @@ fn __ngram_counts(tokens, width) {
   return counts
 }
 
-fn __ngram_precision(reference_tokens, candidate_tokens, width) {
+fn __ngram_precision(
+  reference_tokens: string | bytes | list | dict | set | range | nil,
+  candidate_tokens: string | bytes | list | dict | set | range | nil,
+  width: int,
+) {
   const candidate_counts = __ngram_counts(candidate_tokens, width)
   const reference_counts = __ngram_counts(reference_tokens, width)
   let overlap = 0
@@ -893,7 +934,7 @@ fn __ngram_precision(reference_tokens, candidate_tokens, width) {
   return overlap * 1.0 / total
 }
 
-fn __bleu_lite(reference_text, candidate_text) {
+fn __bleu_lite(reference_text: any, candidate_text: any) {
   const reference_tokens = __debate_tokens(reference_text)
   const candidate_tokens = __debate_tokens(candidate_text)
   if len(reference_tokens) == 0 && len(candidate_tokens) == 0 {
@@ -917,7 +958,7 @@ fn __bleu_lite(reference_text, candidate_text) {
   return brevity * precision_sum / precision_count
 }
 
-fn __text_drift(previous_text, current_text) {
+fn __text_drift(previous_text: any, current_text: any) {
   const similarity = __bleu_lite(previous_text, current_text)
   if similarity < 0.0 {
     return 1.0
@@ -928,7 +969,7 @@ fn __text_drift(previous_text, current_text) {
   return 1.0 - similarity
 }
 
-fn __round_stability(previous_round, current_round, threshold) {
+fn __round_stability(previous_round: dict, current_round: dict, threshold: float) {
   let drifts = []
   let max_drift = 0.0
   let index = 0
@@ -949,7 +990,7 @@ fn __round_stability(previous_round, current_round, threshold) {
   }
 }
 
-fn __emit_stability_short_circuit(obs: HarnessObs, opts, stability) {
+fn __emit_stability_short_circuit(obs: HarnessObs, opts: dict, stability: dict) {
   return obs.event_log_emit(
     "llm.ensemble.debate",
     "debate_stability_short_circuit",
@@ -973,7 +1014,7 @@ fn __emit_stability_short_circuit(obs: HarnessObs, opts, stability) {
  * @effects: []
  * @errors: []
  */
-pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts) -> DebateResult {
+pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts: dict) -> DebateResult {
   const config = __debate_options(opts)
   let rounds = []
   let stability = []
@@ -1027,49 +1068,49 @@ pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts) -> DebateResult {
   }
 }
 
-fn __tot_is_callable(value) {
+fn __tot_is_callable(value: any) {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __tot_is_number(value) {
+fn __tot_is_number(value: any) {
   const kind = type_of(value)
   return kind == "int" || kind == "float"
 }
 
-fn __tot_require_callable(opts, name) {
+fn __tot_require_callable(opts: dict, name: string) {
   const value = opts[name]
   require __tot_is_callable(value), "tree_of_thoughts: opts." + name + " must be callable"
   return value
 }
 
-fn __tot_require_positive_int(value, label) {
+fn __tot_require_positive_int(value: int | float, label: string) {
   require __tot_is_number(value), "tree_of_thoughts: " + label + " must be numeric"
   require floor(value) == value, "tree_of_thoughts: " + label + " must be an integer"
   require value >= 1, "tree_of_thoughts: " + label + " must be at least 1"
   return to_int(value)
 }
 
-fn __tot_require_non_negative_int(value, label) {
+fn __tot_require_non_negative_int(value: int | float, label: string) {
   require __tot_is_number(value), "tree_of_thoughts: " + label + " must be numeric"
   require floor(value) == value, "tree_of_thoughts: " + label + " must be an integer"
   require value >= 0, "tree_of_thoughts: " + label + " must be non-negative"
   return to_int(value)
 }
 
-fn __tot_score(evaluate, state) {
+fn __tot_score(evaluate: unknown, state: any) {
   const score = evaluate(state)
   require __tot_is_number(score), "tree_of_thoughts: evaluate(state) must return a number"
   return score
 }
 
-fn __tot_terminal(is_terminal, state) {
+fn __tot_terminal(is_terminal: unknown, state: any) {
   const terminal = is_terminal(state)
   require type_of(terminal) == "bool", "tree_of_thoughts: is_terminal(state) must return a bool"
   return terminal
 }
 
-fn __tot_stop(stop, node) {
+fn __tot_stop(stop: any, node: any) {
   if stop == nil {
     return false
   }
@@ -1078,7 +1119,15 @@ fn __tot_stop(stop, node) {
   return should_stop
 }
 
-fn __tot_node(id, parent_id, state, path, depth, score, terminal) {
+fn __tot_node(
+  id: any,
+  parent_id: any,
+  state: any,
+  path: any,
+  depth: any,
+  score: any,
+  terminal: any,
+) {
   return {
     id: id,
     parent_id: parent_id,
@@ -1090,15 +1139,15 @@ fn __tot_node(id, parent_id, state, path, depth, score, terminal) {
   }
 }
 
-fn __tot_better_terminal(best_terminal, candidate) {
+fn __tot_better_terminal(best_terminal: dict?, candidate: dict) {
   return candidate.terminal && (best_terminal == nil || candidate.score > best_terminal.score)
 }
 
-fn __tot_better_seen(best_seen, candidate) {
+fn __tot_better_seen(best_seen: dict?, candidate: dict) {
   return best_seen == nil || candidate.score > best_seen.score
 }
 
-fn __tot_update_best(best, node) {
+fn __tot_update_best(best: dict, node: dict) {
   let best_terminal = best.terminal
   let best_seen = best.seen
   if __tot_better_terminal(best_terminal, node) {
@@ -1110,11 +1159,18 @@ fn __tot_update_best(best, node) {
   return {terminal: best_terminal, seen: best_seen}
 }
 
-fn __tot_top(nodes, limit) {
+fn __tot_top(nodes: list, limit: any) {
   return nodes.sorted_by({ node -> 0 - node.score }).take(limit)
 }
 
-fn __tot_children(parent, expand, evaluate, is_terminal, k, next_id) {
+fn __tot_children(
+  parent: any,
+  expand: unknown,
+  evaluate: any,
+  is_terminal: any,
+  k: int,
+  next_id: int,
+) {
   const expanded = expand(parent.state, k)
   require type_of(expanded) == "list", "tree_of_thoughts: expand(state, k) must return a list"
   let children = []
@@ -1141,7 +1197,15 @@ fn __tot_children(parent, expand, evaluate, is_terminal, k, next_id) {
   return children
 }
 
-fn __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason) {
+fn __tot_finalize(
+  search: string,
+  k: int,
+  max_depth: any,
+  beam_width: any,
+  nodes: list,
+  best: dict,
+  stop_reason: any,
+) {
   const best_node = best.terminal ?? best.seen
   const reason = if stop_reason != nil {
     stop_reason
@@ -1169,15 +1233,15 @@ fn __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason) {
 }
 
 fn __tot_search_frontier(
-  search,
-  root,
-  expand,
-  evaluate,
-  is_terminal,
-  stop,
-  k,
-  max_depth,
-  beam_width,
+  search: string,
+  root: dict,
+  expand: any,
+  evaluate: any,
+  is_terminal: any,
+  stop: any,
+  k: int,
+  max_depth: any,
+  beam_width: any,
 ) {
   let nodes = [root]
   let frontier = [root]
@@ -1217,7 +1281,16 @@ fn __tot_search_frontier(
   return __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason)
 }
 
-fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width) {
+fn __tot_search_beam(
+  root: dict,
+  expand: any,
+  evaluate: any,
+  is_terminal: any,
+  stop: any,
+  k: int,
+  max_depth: int,
+  beam_width: any,
+) {
   let nodes = [root]
   let beam = [root]
   let next_id = 1
@@ -1253,7 +1326,7 @@ fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, be
  * @effects: []
  * @errors: []
  */
-pub fn tree_of_thoughts(opts) {
+pub fn tree_of_thoughts(opts: dict) {
   require type_of(opts) == "dict", "tree_of_thoughts: opts must be a dict"
   require opts.has("initial_state"), "tree_of_thoughts: opts.initial_state is required"
   const expand = __tot_require_callable(opts, "expand")

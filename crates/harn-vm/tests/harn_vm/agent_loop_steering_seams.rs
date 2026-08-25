@@ -135,7 +135,7 @@ fn race_window_pipeline(session_id: &str, injection: RaceWindowInjection) -> Str
         r#"
 import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const handler_calls = harness.runtime.shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
@@ -378,7 +378,7 @@ fn audit_only_pipeline(session_id: &str, queue_audit_only: bool) -> String {
         r#"
 import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.tools.clear_hooks()
 {push_block}
   const call_counter = harness.runtime.shared_cell(
@@ -524,7 +524,7 @@ fn steer_pipeline(session_id: &str, push_steer_mid_turn: bool) -> String {
         r#"
 import {{ agent_session_push_user_message }} from "std/agent/state"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(

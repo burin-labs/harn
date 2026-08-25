@@ -1,5 +1,5 @@
 /** env_or returns the env var when set, or the default otherwise. */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Unlikely-to-be-set var → default path.
   const model = harness.env.get_or("HARN_TEST_UNSET_VAR_28_XYZ", "ollama:qwen3:30b-a3b")
   harness.stdio.println(model)

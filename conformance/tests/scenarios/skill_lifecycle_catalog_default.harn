@@ -6,7 +6,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * catalog and `load_skill`, then activate/scoped-load a skill only after
  * the model explicitly asks for it.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill alpha {
     description "Alpha workflow"
     when_to_use "Use alpha for alpha-shaped work"

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Deterministic hashes from the empty string
   harness.stdio.log(sha3_256(""))
   harness.stdio.log(sha3_512(""))

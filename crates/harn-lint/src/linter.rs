@@ -24,7 +24,7 @@ mod connector_effects;
 mod discarded_result;
 mod execution_safety;
 mod program;
-mod public_api_types;
+mod spans;
 mod type_facts;
 mod unused_parameters;
 mod walk;
@@ -137,13 +137,6 @@ pub(crate) struct Linter<'a> {
     /// warn (`missing-harndoc`). Opt-in via `[lint] require_docstrings`;
     /// implied by `require_stdlib_metadata`.
     pub(crate) require_docstrings: bool,
-    /// Whether public function and pipeline signatures must be completely
-    /// annotated. Opt-in for ordinary packages.
-    pub(crate) require_public_api_types: bool,
-    /// Lazily-lexed source tokens shared by declaration-level rules. Without
-    /// this cache, enabling a public-API policy re-tokenizes the entire file
-    /// once per declaration.
-    pub(super) cached_source_tokens: Option<Vec<harn_lexer::Token>>,
     /// Lazily-lexed comment tokens, cached so the `missing-harndoc`
     /// suppression gate (which runs per public item) does not re-tokenize
     /// the whole source each time.
@@ -205,8 +198,6 @@ impl<'a> Linter<'a> {
             mcp_registry_missing_annotation_spans: HashMap::new(),
             require_stdlib_metadata: false,
             require_docstrings: false,
-            require_public_api_types: false,
-            cached_source_tokens: None,
             cached_comment_toks: None,
             rules,
             rules_visit_nodes,

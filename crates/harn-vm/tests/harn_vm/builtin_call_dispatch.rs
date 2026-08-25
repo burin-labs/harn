@@ -36,7 +36,7 @@ fn eval(source: &str) -> Result<VmValue, String> {
 fn sync_builtin_call_dispatches_inline() {
     // `abs` is a synchronous builtin: the fast path must return its result.
     assert!(matches!(
-        eval("pipeline t(task) { return abs(-5) }"),
+        eval("pipeline t(task: unknown) { return abs(-5) }"),
         Ok(VmValue::Int(5))
     ));
 }
@@ -47,8 +47,8 @@ fn user_fn_shadowing_a_builtin_name_still_wins() {
     // confirms the name is not a user closure. A module-level `fn` named like a
     // builtin must therefore still take precedence over the builtin.
     let result = eval(
-        r"pipeline t(task) {
-            fn abs(x) { return 999 }
+        r"pipeline t(task: unknown) {
+            fn abs(_x: int) -> int { return 999 }
             return abs(-5)
         }",
     );
@@ -61,7 +61,7 @@ fn user_fn_shadowing_a_builtin_name_still_wins() {
 #[test]
 fn builtin_calls_work_inside_a_loop() {
     let result = eval(
-        r"pipeline t(task) {
+        r"pipeline t(task: unknown) {
             let s = 0
             for x in [-1, -2, 3] {
                 s = s + abs(x)
@@ -79,7 +79,7 @@ fn builtin_calls_work_inside_a_loop() {
 fn builtin_argument_validation_still_fires_on_fast_path() {
     // Calling a numeric builtin with a wrong-typed argument must still error
     // (validation runs inside the sync dispatch, not only on the async path).
-    let result = eval(r#"pipeline t(task) { return abs("not a number") }"#);
+    let result = eval(r#"pipeline t(task: unknown) { return abs("not a number") }"#);
     assert!(
         result.is_err(),
         "expected a validation error for abs(string), got {result:?}"
@@ -93,22 +93,22 @@ fn string_slice_aliases_substring_with_list_semantics() {
     // char-based, negative-index aware, clamped — mirroring `list.slice`,
     // so "string has no method `slice`" can never crash an agent loop again.
     assert!(matches!(
-        eval(r#"pipeline t(task) { return "hello world".slice(0, 5) }"#),
+        eval(r#"pipeline t(task: unknown) { return "hello world".slice(0, 5) }"#),
         Ok(VmValue::String(ref s)) if s == "hello"
     ));
     // Negative indices count from the end (like list.slice).
     assert!(matches!(
-        eval(r#"pipeline t(task) { return "hello".slice(-3) }"#),
+        eval(r#"pipeline t(task: unknown) { return "hello".slice(-3) }"#),
         Ok(VmValue::String(ref s)) if s == "llo"
     ));
     // Out-of-range end clamps instead of panicking.
     assert!(matches!(
-        eval(r#"pipeline t(task) { return "hi".slice(0, 999) }"#),
+        eval(r#"pipeline t(task: unknown) { return "hi".slice(0, 999) }"#),
         Ok(VmValue::String(ref s)) if s == "hi"
     ));
     // start > end yields empty, never a slice-index panic.
     assert!(matches!(
-        eval(r#"pipeline t(task) { return "hello".slice(4, 1) }"#),
+        eval(r#"pipeline t(task: unknown) { return "hello".slice(4, 1) }"#),
         Ok(VmValue::String(ref s)) if s.is_empty()
     ));
 }

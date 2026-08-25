@@ -1,5 +1,5 @@
 @persona(name: "oncall_captain")
-pub fn oncall_captain_persona(ctx) {
+pub fn oncall_captain_persona(ctx: dict) {
   return build_verification_plan_step(ctx)
 }
 
@@ -14,7 +14,7 @@ fn sample_incident() {
 }
 
 @step(name: "build_verification_plan", approval: required, receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
-fn build_verification_plan_step(incident) {
+fn build_verification_plan_step(incident: dict) {
   return {
     persona: "oncall_captain",
     execution_mode: "dry_run",
@@ -38,7 +38,7 @@ fn build_verification_plan_step(incident) {
   }
 }
 
-pub pipeline run(harness: Harness, task) -> dict {
+pub pipeline run(harness: Harness, task: unknown) -> dict {
   const result = build_verification_plan_step(sample_incident())
   harness.stdio.println(json_stringify(result))
   return result

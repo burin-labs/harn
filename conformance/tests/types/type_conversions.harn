@@ -1,5 +1,5 @@
 /** Test to_int and to_float builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // to_int from int (passthrough)
   harness.stdio.println(42)
   // to_int from float (truncates)

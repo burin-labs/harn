@@ -613,7 +613,7 @@ fn smoke_test_source(smoke: Option<&SmokeOperation>, default_base_url: &str) -> 
         return format!(
             r#"import {{ new_client, {fn_name} }} from "../src/lib"
 
-pipeline test_generated_sdk_smoke(harness: Harness, task) {{
+pipeline test_generated_sdk_smoke(harness: Harness, task: any) {{
   harness.testing.http_mock_clear()
   harness.testing.http_mock({method}, {url}, {{
     status: 200,
@@ -638,7 +638,7 @@ pipeline test_generated_sdk_smoke(harness: Harness, task) {{
     }
     r#"import { new_client, pagination_plans } from "../src/lib"
 
-pipeline test_generated_sdk_smoke(task) {
+pipeline test_generated_sdk_smoke(task: any) {
   const client = new_client()
   assert_eq(type_of(client), "dict")
   assert_eq(type_of(pagination_plans()), "list")

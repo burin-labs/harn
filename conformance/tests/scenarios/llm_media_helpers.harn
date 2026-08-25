@@ -6,7 +6,7 @@ import {
   video_message,
 } from "std/llm/media"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const png_path = path_join(harness.fs.workspace_temp_dir(), "media_helper_fixture.png")
   harness.fs.write_bytes(
     png_path,

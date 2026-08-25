@@ -5,7 +5,7 @@
  * compound forms, an aliasing right-hand side, dict merge, and the scalar
  * path the optimization must leave untouched.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Plain `x = x + [item]` accumulator.
   let xs = []
   for i in [1, 2, 3, 4] {

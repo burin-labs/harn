@@ -123,6 +123,7 @@ fn exposure_json(exposure: BuiltinExposure) -> serde_json::Value {
             "source_name": format!("harness.{}.{}", capability.field_name(), method),
         }),
         BuiltinExposure::PrivilegedWire => json!({"kind": "privileged_wire"}),
+        BuiltinExposure::StdlibInternal => json!({"kind": "stdlib_internal"}),
         BuiltinExposure::RuntimeInternal => json!({"kind": "runtime_internal"}),
     }
 }

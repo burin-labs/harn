@@ -35,7 +35,7 @@ fn runs_schema() {
   )
 }
 
-pub fn release_smoke_run_covers(run, tag: string) -> bool {
+pub fn release_smoke_run_covers(run: dict, tag: string) -> bool {
   if to_string(run?.conclusion ?? "") != "success" {
     return false
   }
@@ -65,7 +65,7 @@ pub fn release_smoke_log_covers(log: string, tag: string) -> bool {
   return false
 }
 
-pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
+pub fn select_release_smoke_run(runs: list, tag: string, log_loader: unknown) {
   let matches = runs.filter({ run -> release_smoke_run_covers(run, tag) })
   if matches.count == 0 {
     const candidates = runs.filter(

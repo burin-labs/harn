@@ -11,7 +11,7 @@ skill deploy {
   prompt "Follow the runbook."
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const x = 1
   const y = 2
   const meta = skill_find(deploy, "deploy")

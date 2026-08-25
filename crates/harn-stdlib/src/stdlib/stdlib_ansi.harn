@@ -20,7 +20,7 @@ type AnsiStyle = {
   strikethrough?: bool,
 }
 
-fn __ansi_options(options) {
+fn __ansi_options(options: any) {
   if type_of(options) == "dict" {
     return options ?? {}
   }
@@ -30,7 +30,7 @@ fn __ansi_options(options) {
   return {}
 }
 
-fn __ansi_color_index(name) {
+fn __ansi_color_index(name: string?) {
   const n = lowercase(replace(name ?? "", "-", "_"))
   if n == "black" {
     return 0
@@ -83,7 +83,7 @@ fn __ansi_color_index(name) {
   return nil
 }
 
-fn __ansi_color_code(name, background) {
+fn __ansi_color_code(name: string?, background: bool) {
   const index = __ansi_color_index(name)
   if index == nil {
     return nil
@@ -104,7 +104,7 @@ fn __ansi_color_code(name, background) {
   return to_string(base + index)
 }
 
-fn __ansi_codes(style) {
+fn __ansi_codes(style: any) {
   const s = style ?? {}
   let codes = []
   if s?.bold ?? false {

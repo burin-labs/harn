@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const yaml = yaml_parse("name: Ada\nage: 37\n")
   const toml_data = toml_parse("name = \"Ada\"\nage = 37\n")
   harness.stdio.log(yaml.name)

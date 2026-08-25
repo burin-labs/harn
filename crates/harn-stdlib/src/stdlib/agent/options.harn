@@ -28,6 +28,77 @@ import { ToolRegistry } from "std/tools"
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
+/** Failure streak that can terminate or pause an adaptive iteration budget. */
+pub type ConsecutiveFailureBudget = {max: int, kinds?: list<string>, paused_for_ms?: int}
+
+/** Post-turn evidence supplied to a custom missing-tool-call classifier. */
+pub type MissingToolCallRecoveryRequest = {
+  session_id: unknown,
+  iteration: int,
+  text: string?,
+  visible_text: string?,
+  tools: ToolRegistry | list,
+  tool_names: list<string>,
+  tool_format?: string,
+  candidate_tools?: list,
+  confidence_threshold?: float,
+}
+
+/** Custom recovery seam; nil means that no missing call was identified. */
+pub type MissingToolCallCustomClassifier = fn(MissingToolCallRecoveryRequest) -> dict?
+
+/** Typed configuration for text-mode missing-tool-call recovery. */
+pub type MissingToolCallRecoveryOptions = {
+  enabled?: bool,
+  provider?: string,
+  model?: string,
+  confidence_threshold?: float,
+  max_tokens?: int,
+  temperature?: float,
+  classifier?: MissingToolCallCustomClassifier,
+  top_p?: float,
+  seed?: int,
+  effort?: string,
+  timeout_ms?: int,
+}
+
+/** Tool-window policy applied after a stable run of turns. */
+pub type ToolSurfaceNarrowingOptions = {
+  enabled?: bool,
+  window_turns?: int,
+  narrow_window_turns?: int,
+  mode?: "safe" | "aggressive",
+  hard_keep?: list<string>,
+  prune_classes?: list<string>,
+  keep_classes?: list<string>,
+  unknown_tool_policy?: "keep" | "prune",
+}
+
+/** Verdict returned by an intent classifier for read-only stance. */
+pub type ReadOnlyStanceClassification = {read_only: bool, confidence?: float}
+
+/** Consent evidence returned when the agent requests write access. */
+pub type ReadOnlyStanceConsent = {
+  verdict: "grant" | "deny",
+  consent?: "express" | "implied" | "none",
+  reason?: string,
+}
+
+pub type ReadOnlyStanceClassifier = fn(string) -> ReadOnlyStanceClassification
+
+pub type ReadOnlyStanceConsentCheck = fn(string, unknown) -> ReadOnlyStanceConsent
+
+/** Least-privilege tool window and its typed elevation callbacks. */
+pub type ReadOnlyStanceOptions = {
+  enabled?: bool,
+  armed?: bool,
+  escape_tool?: string,
+  consent_check?: ReadOnlyStanceConsentCheck,
+  classifier?: ReadOnlyStanceClassifier,
+  min_confidence?: float,
+  hard_keep?: list<string>,
+}
+
 /**
  * Iteration budget accepted by `agent_loop`'s `iteration_budget:` option.
  * Normalized by `__normalize_iteration_budget` below.
@@ -45,7 +116,7 @@ pub type IterationBudget = {
   expose_decisions?: bool,
   wall_clock_ms?: int,
   total_cost_usd?: float | int,
-  consecutive_failures?: dict,
+  consecutive_failures?: ConsecutiveFailureBudget,
 }
 
 /**
@@ -293,14 +364,14 @@ pub type AgentExecutionSpec = {
   max_concurrent_tools?: int,
   intra_turn_resource_fail_fast?: bool,
   prefetch_next_turn?: bool,
-  tool_surface_narrowing?: bool | dict,
+  tool_surface_narrowing?: bool | ToolSurfaceNarrowingOptions,
   tool_format_override_reason?: string,
 }
 
 /** Policy and capability extensions applied at the agent boundary. */
 pub type AgentCapabilitySpec = {
-  missing_tool_call_recovery?: bool | dict,
-  read_only_stance?: bool | dict,
+  missing_tool_call_recovery?: bool | MissingToolCallRecoveryOptions,
+  read_only_stance?: bool | ReadOnlyStanceOptions,
   progress_tool?: bool | dict,
   policy?: dict,
   permissions?: dict,

@@ -396,7 +396,7 @@ mod browser_tests {
     #[wasm_bindgen_test]
     fn browser_worker_matches_native_suspend_resume_and_denial() {
         const SOURCE: &str = r#"
-            fn greet(harness: Harness, input) {
+            fn greet(harness: Harness, input: string) {
                 return harness.interaction.ask(input)
             }
         "#;

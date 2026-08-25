@@ -1,6 +1,6 @@
 import { OnBudget, replan } from "std/lifecycle/on_budget"
 
-fn reminder_has_no_command_terms(body) {
+fn reminder_has_no_command_terms(body: string?) {
   const lowered = lowercase(body)
   return !contains(lowered, "cargo")
     && !contains(lowered, "swift")

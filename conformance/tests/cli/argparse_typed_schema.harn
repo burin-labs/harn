@@ -7,6 +7,7 @@ import {
   schema_int,
   schema_list,
   schema_object,
+  schema_refine,
   schema_string,
 } from "std/schema"
 import { assert_eq, assert_throws } from "std/testing"
@@ -22,18 +23,25 @@ type Options = {
   mode: string,
 }
 
+type InputOnly = {input: string}
+
+type InputWithExtra = {input: string, extra: bool}
+
 fn options_schema() -> Schema<Options> {
-  return schema_closed_object(
-    {
-      input: schema_string(),
-      count: schema_int(),
-      ratio: schema_float(),
-      enabled: schema_bool(),
-      tag: schema_list(schema_string()),
-      label: schema_list(schema_string()),
-      json: schema_bool(),
-      mode: schema_default(schema_string(), "safe"),
-    },
+  return schema_refine(
+    schema_of(Options),
+    schema_closed_object(
+      {
+        input: schema_string(),
+        count: schema_int(),
+        ratio: schema_float(),
+        enabled: schema_bool(),
+        tag: schema_list(schema_string()),
+        label: schema_list(schema_string()),
+        json: schema_bool(),
+        mode: schema_default(schema_string(), "safe"),
+      },
+    ),
   )
 }
 
@@ -49,7 +57,7 @@ fn argv_failure(code: string, arg: string, message: string) {
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(help_requested(["--help"]), true)
   assert_eq(help_requested(["-h"]), true)
   assert_eq(help_requested(["--", "--help"]), false)
@@ -128,10 +136,10 @@ pipeline test(harness: Harness, task) {
     },
   )
   assert_eq(
-    parse_typed(
+    parse_typed<InputOnly>(
       extra_spec,
       ["input.harn", "--extra"],
-      schema_closed_object({input: schema_string()}),
+      schema_refine(schema_of(InputOnly), schema_closed_object({input: schema_string()})),
     ),
     Err(
       {
@@ -151,7 +159,11 @@ pipeline test(harness: Harness, task) {
     ),
   )
   assert_eq(
-    parse_typed(extra_spec, ["input.harn", "--extra"], schema_object({input: schema_string()})),
+    parse_typed<InputWithExtra>(
+      extra_spec,
+      ["input.harn", "--extra"],
+      schema_refine(schema_of(InputWithExtra), schema_object({input: schema_string()})),
+    ),
     Ok({options: {input: "input.harn", extra: true}, rest: []}),
   )
   assert_eq(

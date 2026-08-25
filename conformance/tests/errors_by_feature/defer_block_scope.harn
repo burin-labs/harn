@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Defer is block-scoped: runs at end of its enclosing { ... } block,
   // not at end of the surrounding function.
   fn block_scoped() {

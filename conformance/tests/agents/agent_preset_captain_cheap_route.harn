@@ -18,7 +18,7 @@ import { agent_loop } from "std/agent/loop"
  */
 import { agent_preset } from "std/agent/presets"
 
-fn preset_agent(harness: Harness, kind, prompt, options = nil) {
+fn preset_agent(harness: Harness, kind: any, prompt: string, options: any = nil) {
   const opts = agent_preset(harness, kind, options)
   return agent_loop(harness, prompt, opts?.system, opts)
 }

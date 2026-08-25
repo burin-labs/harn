@@ -104,12 +104,12 @@ fn _effect_rules() -> list {
 }
 
 /** Whitespace set matching Python str.strip(): space, tab, CR, FF, VT, NL. */
-fn _is_ws(c) -> bool {
+fn _is_ws(c: string) -> bool {
   return c == " " || c == "\t" || c == "\r" || c == "\n"
 }
 
 /** Strip leading whitespace (Python str.lstrip). */
-pub fn lstrip_ws(s) -> string {
+pub fn lstrip_ws(s: string) -> string {
   const n = s.len()
   let i = 0
   while i < n {
@@ -123,7 +123,7 @@ pub fn lstrip_ws(s) -> string {
 }
 
 /** Strip trailing whitespace (Python str.rstrip). */
-pub fn rstrip_ws(s) -> string {
+pub fn rstrip_ws(s: string) -> string {
   let n = s.len()
   while n > 0 {
     if _is_ws(s.char_at(n - 1)) {
@@ -136,12 +136,12 @@ pub fn rstrip_ws(s) -> string {
 }
 
 /** Strip leading and trailing whitespace (Python str.strip). */
-pub fn strip_ws(s) -> string {
+pub fn strip_ws(s: string) -> string {
   return rstrip_ws(lstrip_ws(s))
 }
 
 /** Strip leading occurrences of a single char `ch` (Python lstrip("*")). */
-pub fn lstrip_char(s, ch) -> string {
+pub fn lstrip_char(s: string, ch: string) -> string {
   const n = s.len()
   let i = 0
   while i < n {
@@ -155,7 +155,7 @@ pub fn lstrip_char(s, ch) -> string {
 }
 
 /** Leading-whitespace prefix of a line (its indentation). */
-pub fn leading_indent(s) -> string {
+pub fn leading_indent(s: string) -> string {
   return s.substring(0, s.len() - lstrip_ws(s).len())
 }
 
@@ -163,7 +163,7 @@ pub fn leading_indent(s) -> string {
  * Match `^pub fn NAME` where NAME is followed (after optional ws) by < or (.
  * Returns the function name, or "" when the line is not a pub fn header.
  */
-pub fn match_pub_fn(line) -> string {
+pub fn match_pub_fn(line: string) -> string {
   const prefix = "pub fn "
   if !line.starts_with(prefix) {
     return ""
@@ -206,19 +206,19 @@ pub fn match_pub_fn(line) -> string {
   return ""
 }
 
-fn _is_ident_start(c) -> bool {
+fn _is_ident_start(c: string) -> bool {
   return _is_alpha(c) || c == "_"
 }
 
-fn _is_ident_part(c) -> bool {
+fn _is_ident_part(c: string) -> bool {
   return _is_alpha(c) || _is_digit(c) || c == "_"
 }
 
-fn _is_alpha(c) -> bool {
+fn _is_alpha(c: string) -> bool {
   return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
 }
 
-fn _is_digit(c) -> bool {
+fn _is_digit(c: string) -> bool {
   return c >= "0" && c <= "9"
 }
 
@@ -226,7 +226,7 @@ fn _is_digit(c) -> bool {
  * Walk backward over `out` to find the start index of a canonical doc block
  * immediately above the next line. Returns -1 when none is adjacent.
  */
-pub fn find_doc_block_start(out) -> int {
+pub fn find_doc_block_start(out: any) -> int {
   const total = len(out)
   if total == 0 {
     return -1
@@ -262,7 +262,7 @@ pub fn find_doc_block_start(out) -> int {
  * Parse `@key: value` metadata pairs out of a doc-block slice. Returns a
  * dict of recognized keys -> value (stripped).
  */
-pub fn parse_existing_metadata(block_lines) -> dict {
+pub fn parse_existing_metadata(block_lines: list) -> dict {
   let out = {}
   for raw in block_lines {
     let s = strip_ws(raw)
@@ -294,7 +294,7 @@ pub fn parse_existing_metadata(block_lines) -> dict {
  * Insert `@key: value` lines for new_fields inside an existing doc block,
  * immediately before the closing terminator. Returns the rebuilt lines.
  */
-pub fn inject_metadata(block_lines, new_fields) -> list {
+pub fn inject_metadata(block_lines: any, new_fields: dict) -> list {
   if len(block_lines) == 0 {
     return block_lines
   }
@@ -340,7 +340,7 @@ pub fn inject_metadata(block_lines, new_fields) -> list {
  * Collect the function body (brace-balanced) starting at line `start`.
  * Returns the joined body text.
  */
-pub fn collect_body(lines, start) -> string {
+pub fn collect_body(lines: any, start: int) -> string {
   let depth = 0
   let seen_open = false
   let body_lines = []
@@ -372,7 +372,7 @@ pub fn collect_body(lines, start) -> string {
 }
 
 /** Infer effects list label set, in rule order, from the body text. */
-pub fn infer_effects(body) -> string {
+pub fn infer_effects(body: any) -> string {
   let effects = []
   for rule in _effect_rules() {
     const pattern = rule[0]
@@ -385,7 +385,7 @@ pub fn infer_effects(body) -> string {
 }
 
 /** Build the inferred metadata dict for the missing keys. */
-pub fn build_inferred(keys, body) -> dict {
+pub fn build_inferred(keys: list, body: any) -> dict {
   let out = {}
   if keys.contains("effects") {
     out = out + {effects: infer_effects(body)}
@@ -397,7 +397,7 @@ pub fn build_inferred(keys, body) -> dict {
 }
 
 /** Pure transform: text + path -> {text, stats}. */
-pub fn process_file(text, path) -> dict {
+pub fn process_file(text: string, path: unknown) -> dict {
   let total = 0
   let backfilled = 0
   let skipped_no_block = 0
@@ -463,7 +463,7 @@ pub fn process_file(text, path) -> dict {
 }
 
 /** Format a ratio as a one-decimal percent, matching Python f"{n/max(d,1):.1%}". */
-pub fn pct(num, den) -> string {
+pub fn pct(num: any, den: int) -> string {
   const d = if den < 1 {
     1
   } else {
@@ -477,7 +477,7 @@ pub fn pct(num, den) -> string {
   return "${whole}.${tenth}%"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const stdlib = "crates/harn-stdlib/src/stdlib"
   let total = 0
   let backfilled = 0

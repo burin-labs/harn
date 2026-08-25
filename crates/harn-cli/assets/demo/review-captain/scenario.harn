@@ -13,7 +13,12 @@
  * `assets/demo/review-captain/`. The same script runs against a real provider
  * via `harn demo review-captain --live`.
  */
-fn diff_summary() {
+type DiffFile = {path: string, loc_added: int, loc_removed: int, risk: string}
+
+/** The PR-level diff review_captain reasons over, one entry per changed file. */
+type DiffSummary = {repo: string, pr_number: int, files: list<DiffFile>}
+
+fn diff_summary() -> DiffSummary {
   return {
     repo: "burin-labs/widgets",
     pr_number: 502,
@@ -27,7 +32,7 @@ fn diff_summary() {
   }
 }
 
-fn total_added(files) {
+fn total_added(files: list<DiffFile>) -> int {
   let total = 0
   for f in files {
     total = total + f.loc_added
@@ -35,7 +40,7 @@ fn total_added(files) {
   return total
 }
 
-fn render_review_prompt(fs: HarnessFs, diff) {
+fn render_review_prompt(fs: HarnessFs, diff: DiffSummary) -> string {
   return fs.render_prompt(
     "review.harn.prompt",
     {
@@ -47,11 +52,11 @@ fn render_review_prompt(fs: HarnessFs, diff) {
   )
 }
 
-fn render_clarification_prompt(fs: HarnessFs, pr, answer) {
+fn render_clarification_prompt(fs: HarnessFs, pr: int, answer: string) -> string {
   return fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   const diff = diff_summary()
   const system = "You are review_captain, a thorough code reviewer."
   const review_prompt = render_review_prompt(harness.fs, diff)

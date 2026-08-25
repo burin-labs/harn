@@ -1,7 +1,7 @@
 // Test std/json module functions
 import { JsonParseFailure, merge, omit, pick } from "std/json"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Bare try over json_parse gives the canonical Result contract.
   const parsed_data: Result<unknown, JsonParseFailure> = try {
     json_parse("{\"name\":\"test\",\"value\":42}")

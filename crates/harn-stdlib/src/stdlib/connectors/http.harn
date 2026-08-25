@@ -56,7 +56,7 @@ pub type ConnectorHttpFailure = {
 
 pub type ConnectorHttpResponse = ConnectorHttpSuccess | ConnectorHttpFailure
 
-fn __connector_http_retry_options(options) {
+fn __connector_http_retry_options(options: dict?) {
   const opts = options ?? {}
   const policy = opts.retry_policy ?? opts.retry ?? {}
   let max_attempts = to_int(policy?.max_attempts ?? opts?.max_attempts)
@@ -90,7 +90,7 @@ fn __connector_http_retry_options(options) {
   }
 }
 
-fn __connector_http_retry_delay_ms(policy, attempt) {
+fn __connector_http_retry_delay_ms(policy: dict, attempt: int) {
   let delay = policy.base_ms
   let i = 0
   while i < attempt {
@@ -103,7 +103,7 @@ fn __connector_http_retry_delay_ms(policy, attempt) {
   return delay
 }
 
-fn __connector_http_retryable_status(status, retry_on) {
+fn __connector_http_retryable_status(status: int, retry_on: list?) {
   for candidate in retry_on ?? [] {
     if to_int(candidate) == status {
       return true
@@ -112,7 +112,7 @@ fn __connector_http_retryable_status(status, retry_on) {
   return false
 }
 
-fn __connector_http_category(status) {
+fn __connector_http_category(status: int) {
   if status == 408 {
     return "timeout"
   }
@@ -140,17 +140,17 @@ fn __connector_http_category(status) {
   return "provider_error"
 }
 
-fn __connector_http_safe_method(method) {
+fn __connector_http_safe_method(method: string?) {
   const normalized = uppercase(trim(to_string(method ?? "")))
   return contains(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"], normalized)
 }
 
-fn __connector_http_has_idempotency_key(headers) {
+fn __connector_http_has_idempotency_key(headers: dict?) {
   const value = connector_http_header(headers ?? {}, "Idempotency-Key")
   return value != nil && trim(to_string(value)) != ""
 }
 
-fn __connector_http_retry_allowed(method, headers, options) {
+fn __connector_http_retry_allowed(method: string?, headers: dict?, options: dict) {
   if __connector_http_safe_method(method) {
     return true
   }
@@ -162,7 +162,7 @@ fn __connector_http_retry_allowed(method, headers, options) {
   return retry_unsafe
 }
 
-fn __connector_http_headers(options) {
+fn __connector_http_headers(options: dict?) {
   const opts = options ?? {}
   let headers = {}
   for entry in (opts.headers ?? {}).entries() {
@@ -176,7 +176,7 @@ fn __connector_http_headers(options) {
   return headers
 }
 
-fn __connector_http_request_options(options, headers) {
+fn __connector_http_request_options(options: dict?, headers: any) {
   const opts = options ?? {}
   let out = {}
   const internal = set(
@@ -204,7 +204,7 @@ fn __connector_http_request_options(options, headers) {
   return out
 }
 
-fn __connector_http_safe_error_body(body, options) {
+fn __connector_http_safe_error_body(body: any, options: dict) {
   if options?.redact_error_body ?? false {
     return nil
   }
@@ -218,19 +218,24 @@ fn __connector_http_safe_error_body(body, options) {
     + " chars]"
 }
 
-fn __connector_http_safe_error_headers(headers) {
+fn __connector_http_safe_error_headers(headers: dict?) {
   return __token_redaction_redact_headers(headers ?? {})
 }
 
-fn __connector_http_error_body(response, options) {
+fn __connector_http_error_body(response: dict, options: dict) {
   return __connector_http_safe_error_body(response?.body, options)
 }
 
-fn __connector_http_has_fields(value) {
+fn __connector_http_has_fields(value: dict?) {
   return type_of(value) == "dict" && len((value ?? {}).keys()) > 0
 }
 
-fn __connector_http_error_from_response(clock: HarnessClock, response, options, retryable) {
+fn __connector_http_error_from_response(
+  clock: HarnessClock,
+  response: any,
+  options: dict,
+  retryable: any,
+) {
   const status = to_int(response?.status) ?? 0
   const rate_limit = connector_http_rate_limit(clock, response)
   let error = {category: __connector_http_category(status), status: status, retryable: retryable}
@@ -253,7 +258,7 @@ fn __connector_http_error_from_response(clock: HarnessClock, response, options, 
   return error
 }
 
-fn __connector_http_error_from_exception(error, options) {
+fn __connector_http_error_from_exception(error: any, options: dict) {
   const message = to_string(error)
   const lowered = lowercase(message)
   let category = "transient_network"
@@ -285,7 +290,7 @@ fn __connector_http_error_from_exception(error, options) {
   )
 }
 
-fn __connector_http_error_envelope(response, error) {
+fn __connector_http_error_envelope(response: any, error: dict) {
   let envelope = {ok: false, error: error}
   const status = response?.status ?? error?.status
   if status != nil {
@@ -318,7 +323,7 @@ fn __connector_http_error_envelope(response, error) {
   return envelope
 }
 
-fn __connector_http_success_envelope(clock: HarnessClock, response) {
+fn __connector_http_success_envelope(clock: HarnessClock, response: dict?) {
   const rate_limit = connector_http_rate_limit(clock, response)
   let envelope = {
     ok: true,
@@ -338,7 +343,7 @@ fn __connector_http_success_envelope(clock: HarnessClock, response) {
   return envelope
 }
 
-fn __connector_http_should_retry_response(response, retry_policy, retry_allowed) {
+fn __connector_http_should_retry_response(response: dict, retry_policy: dict, retry_allowed: any) {
   if !retry_allowed {
     return false
   }
@@ -349,7 +354,12 @@ fn __connector_http_should_retry_response(response, retry_policy, retry_allowed)
   return __connector_http_retryable_status(status, retry_policy.retry_on)
 }
 
-fn __connector_http_sleep_before_retry(clock: HarnessClock, retry_policy, attempt, retry_after_ms) {
+fn __connector_http_sleep_before_retry(
+  clock: HarnessClock,
+  retry_policy: dict,
+  attempt: int,
+  retry_after_ms: any,
+) {
   let delay = __connector_http_retry_delay_ms(retry_policy, attempt)
   if retry_policy.respect_retry_after && retry_after_ms != nil {
     if retry_after_ms > retry_policy.cap_ms {
@@ -373,7 +383,7 @@ fn __connector_http_sleep_before_retry(clock: HarnessClock, retry_policy, attemp
  * @errors: []
  * @example: connector_http_header(response, "Retry-After")
  */
-pub fn connector_http_header(headers_or_response, name) -> string? {
+pub fn connector_http_header(headers_or_response: dict?, name: string) -> string? {
   return http_header(headers_or_response ?? {}, name)
 }
 
@@ -385,7 +395,7 @@ pub fn connector_http_header(headers_or_response, name) -> string? {
  */
 pub fn connector_http_rate_limit(
   clock: HarnessClock,
-  headers_or_response,
+  headers_or_response: dict?,
 ) -> ConnectorHttpRateLimit {
   const retry_after = connector_http_header(headers_or_response, "Retry-After")
   const limit = connector_http_header(headers_or_response, "RateLimit-Limit")
@@ -421,9 +431,9 @@ pub fn connector_http_rate_limit(
 pub fn connector_http_request(
   clock: HarnessClock,
   net: HarnessNet,
-  method,
-  url,
-  options = nil,
+  method: string?,
+  url: any,
+  options: dict? = nil,
 ) -> ConnectorHttpResponse {
   const opts = options ?? {}
   const resolved_method = uppercase(trim(to_string(method ?? "GET")))
@@ -490,9 +500,9 @@ pub fn connector_http_request(
 pub fn connector_http_json(
   clock: HarnessClock,
   net: HarnessNet,
-  method,
-  url,
-  options = nil,
+  method: string?,
+  url: any,
+  options: dict? = nil,
 ) -> ConnectorHttpResponse {
   const response = connector_http_request(clock, net, method, url, options)
   if !(response.ok ?? false) {

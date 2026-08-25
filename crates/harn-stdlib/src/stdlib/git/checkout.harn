@@ -35,7 +35,7 @@ pub type GitCheckoutReceipt = {
   recovery: string,
 }
 
-fn __checkout_arg(value, label) -> string {
+fn __checkout_arg(value: any, label: string) -> string {
   if type_of(value) != "string" || value == "" {
     throw "std/git: " + label + " must be a non-empty string"
   }
@@ -45,7 +45,7 @@ fn __checkout_arg(value, label) -> string {
   return value
 }
 
-fn __checkout_config(options) {
+fn __checkout_config(options: GitCheckoutOptions) {
   const remote = __checkout_arg(options.remote ?? "origin", "remote")
   const base = __checkout_arg(options.base_branch, "base_branch")
   const refspec = options.exact_refspec
@@ -145,7 +145,7 @@ pub fn git_checkout_plan(options: GitCheckoutOptions) -> list<GitCheckoutStep> {
   ]
 }
 
-fn __checkout_find(plan, kind) {
+fn __checkout_find(plan: list, kind: string) {
   for step in plan {
     if step.kind == kind {
       return step
@@ -154,7 +154,7 @@ fn __checkout_find(plan, kind) {
   throw "std/git: checkout plan missing step " + kind
 }
 
-fn __checkout_record(step, result) -> GitCheckoutStepReceipt {
+fn __checkout_record(step: any, result: dict) -> GitCheckoutStepReceipt {
   return step
     + {
       success: result?.success ?? result?.ok ?? false,
@@ -165,7 +165,7 @@ fn __checkout_record(step, result) -> GitCheckoutStepReceipt {
     }
 }
 
-fn __checkout_recovery(cfg, stashed, failure_kind) -> string {
+fn __checkout_recovery(cfg: dict, stashed: bool, failure_kind: string?) -> string {
   if stashed {
     return "changes remain in git stash list under '" + cfg.stash_name
       + "'; inspect and apply them manually"
@@ -176,7 +176,7 @@ fn __checkout_recovery(cfg, stashed, failure_kind) -> string {
   return "inspect the failed step receipt and leave the checkout unchanged until its state is understood"
 }
 
-fn __checkout_receipt(cfg, state) -> GitCheckoutReceipt {
+fn __checkout_receipt(cfg: dict, state: dict) -> GitCheckoutReceipt {
   return {
     schema: "harn-stdlib-git-checkout-v1",
     success: state.success,
@@ -201,11 +201,11 @@ fn __checkout_receipt(cfg, state) -> GitCheckoutReceipt {
   }
 }
 
-fn __checkout_fail(cfg, state, kind) {
+fn __checkout_fail(cfg: dict, state: dict, kind: string) {
   return __checkout_receipt(cfg, state + {success: false, status: "failed", failure_kind: kind})
 }
 
-fn __checkout_run_step(runner, plan, kind, steps) {
+fn __checkout_run_step(runner: unknown, plan: list, kind: string, steps: list) {
   const step = __checkout_find(plan, kind)
   const result = __checkout_record(step, runner(step))
   return {result: result, steps: steps + [result]}

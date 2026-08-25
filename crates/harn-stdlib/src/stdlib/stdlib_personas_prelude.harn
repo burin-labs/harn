@@ -6,19 +6,54 @@
  */
 import { settle_with_abort } from "std/abort"
 
-fn __prelude_is_callable(value) -> bool {
+/** A direct model selector or structured route accepted by persona classifiers. */
+pub type PersonaModelRoute = {
+  provider?: string,
+  model?: string,
+  prompt?: string,
+  system?: string,
+  ...rest,
+}
+
+/** A callable classification strategy, preserving the classifier input type. */
+pub type PersonaClassifierFn<in TInput> = fn(TInput) -> dict
+
+/** One classification strategy, preserving the classifier input type. */
+pub type PersonaClassifier<TInput> = PersonaClassifierFn<TInput> | PersonaModelRoute | string
+
+/** Closed outcome of the cheap-classify/escalate decision. */
+pub type PersonaClassificationResult = {
+  ok: bool,
+  status: "cheap" | "escalated",
+  escalated: bool,
+  result: dict,
+  cheap: dict?,
+  error: nil,
+  receipt: dict,
+} \
+  | {
+  ok: bool,
+  status: "failure",
+  escalated: bool,
+  result: nil,
+  cheap: dict?,
+  error: dict,
+  receipt: dict,
+}
+
+fn __prelude_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __prelude_digest(value) {
+fn __prelude_digest(value: any) {
   if value == nil {
     return nil
   }
   return "sha256:" + sha256(json_stringify(value))
 }
 
-fn __prelude_error_object(error) {
+fn __prelude_error_object(error: any) -> dict? {
   if error == nil {
     return nil
   }
@@ -28,7 +63,11 @@ fn __prelude_error_object(error) {
   return {message: to_string(error)}
 }
 
-fn __prelude_error_message(error) -> string {
+fn __prelude_required_error_object(error: any) -> dict {
+  return __prelude_error_object(error) ?? {message: "unknown error"}
+}
+
+fn __prelude_error_message(error: dict?) -> string {
   if error == nil {
     return ""
   }
@@ -38,7 +77,7 @@ fn __prelude_error_message(error) -> string {
   return to_string(error)
 }
 
-fn __prelude_as_result(value) {
+fn __prelude_as_result(value: unknown) {
   const ok_probe = try {
     is_ok(value)
   }
@@ -89,7 +128,7 @@ fn __prelude_as_result(value) {
   }
 }
 
-fn __prelude_receipt_id(opts, status, calls) -> string {
+fn __prelude_receipt_id(opts: dict, status: any, calls: list?) -> string {
   if opts?.id != nil {
     return opts.id
   }
@@ -105,10 +144,17 @@ fn __prelude_receipt_id(opts, status, calls) -> string {
   return "receipt-" + substring(sha256(json_stringify(seed)), 0, 16)
 }
 
-fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
+fn __prelude_receipt(
+  opts: dict?,
+  status: any,
+  result: any,
+  error: any,
+  calls: list?,
+  approvals: list?,
+  side_effects: list?,
+) {
   const options = opts ?? {}
-  const {started_at = harness.clock.date_iso(), completed_at = started_at, persona = "persona_prelude"} =
-    options
+  const {started_at = "", completed_at = started_at, persona = "persona_prelude"} = options
     ?? {}
   const input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
   const output_digest = options?.outputs_digest ?? __prelude_digest(result)
@@ -137,7 +183,7 @@ fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects
   }
 }
 
-fn __prelude_call_record(name, status, value, error) {
+fn __prelude_call_record(name: any, status: any, value: any, error: any) {
   return {
     name: name,
     status: status,
@@ -153,10 +199,14 @@ fn __prelude_call_record(name, status, value, error) {
  * @effects: []
  * @errors: []
  */
-pub fn verify_then_act(verifier, actor, options = nil) {
+pub fn verify_then_act(
+  clock: HarnessClock,
+  verifier: unknown,
+  actor: unknown,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
-  const {started_at = harness.clock.date_iso(), verifier_name = "verifier", actor_name = "actor"} =
-    opts
+  const {started_at = clock.date_iso(), verifier_name = "verifier", actor_name = "actor"} = opts
     ?? {}
   const verified_raw = try {
     verifier()
@@ -266,7 +316,7 @@ pub fn verify_then_act(verifier, actor, options = nil) {
  * @effects: [time]
  * @errors: []
  */
-pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
+pub fn bounded_loop(clock: HarnessClock, state_init: any, step_fn: unknown, options: dict? = nil) {
   const opts = options ?? {}
   const started_at = opts?.started_at ?? clock.date_iso()
   const started_ms = clock.timestamp() * 1000
@@ -288,7 +338,7 @@ pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
         iterations: 0,
         stopped_reason: "state_init_error",
         history: [],
-        error: __prelude_error_object(error),
+        error: __prelude_required_error_object(error),
         receipt: __prelude_receipt(
           opts + {started_at: started_at},
           "failure",
@@ -327,7 +377,7 @@ pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
         iterations: iterations,
         stopped_reason: "error",
         history: history,
-        error: __prelude_error_object(error),
+        error: __prelude_required_error_object(error),
         receipt: __prelude_receipt(
           opts + {started_at: started_at},
           "failure",
@@ -400,7 +450,12 @@ pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
   }
 }
 
-fn __prelude_invoke_model(llm: HarnessLlm, input, model_spec, options) {
+fn __prelude_invoke_model<TInput>(
+  llm: HarnessLlm,
+  input: TInput,
+  model_spec: PersonaClassifier<TInput>,
+  options: dict?,
+) -> dict {
   const opts = options ?? {}
   if __prelude_is_callable(model_spec) {
     return model_spec(input)
@@ -413,7 +468,7 @@ fn __prelude_invoke_model(llm: HarnessLlm, input, model_spec, options) {
   return llm.call(to_string(input), opts?.system, opts + {model: model_spec})
 }
 
-fn __prelude_confidence(value) {
+fn __prelude_confidence(value: dict) {
   if type_of(value) == "dict" && value?.confidence != nil {
     return value.confidence
   }
@@ -427,15 +482,15 @@ fn __prelude_confidence(value) {
  * @effects: []
  * @errors: []
  */
-pub fn cheap_classify_then_escalate(
+pub fn cheap_classify_then_escalate<TInput>(
   clock: HarnessClock,
   llm: HarnessLlm,
-  input,
-  cheap_model,
-  escalate_model,
-  escalation_predicate,
-  options = nil,
-) {
+  input: TInput,
+  cheap_model: PersonaClassifier<TInput>,
+  escalate_model: PersonaClassifier<TInput>,
+  escalation_predicate: fn(dict) -> bool,
+  options: dict? = nil,
+) -> PersonaClassificationResult {
   const opts = options ?? {}
   const {started_at = clock.date_iso(), min_confidence = 0.7} = opts ?? {}
   const cheap_result = try {
@@ -457,7 +512,7 @@ pub fn cheap_classify_then_escalate(
         escalated: true,
         result: nil,
         cheap: nil,
-        error: __prelude_error_object(error),
+        error: __prelude_required_error_object(error),
         receipt: __prelude_receipt(
           opts + {started_at: started_at},
           "failure",
@@ -536,7 +591,7 @@ pub fn cheap_classify_then_escalate(
       escalated: true,
       result: nil,
       cheap: cheap,
-      error: __prelude_error_object(error),
+      error: __prelude_required_error_object(error),
       receipt: __prelude_receipt(
         opts + {started_at: started_at},
         "failure",
@@ -576,7 +631,12 @@ pub fn cheap_classify_then_escalate(
  * @effects: []
  * @errors: []
  */
-pub fn parallel_sweep_with_circuit_breaker(harness: Harness, items, step_fn, options = nil) {
+pub fn parallel_sweep_with_circuit_breaker(
+  harness: Harness,
+  items: any,
+  step_fn: unknown,
+  options: dict? = nil,
+) {
   const opts = options ?? {}
   const started_at = opts?.started_at ?? harness.clock.date_iso()
   let max_concurrent = opts?.max_concurrent ?? 4
@@ -670,7 +730,7 @@ pub fn parallel_sweep_with_circuit_breaker(harness: Harness, items, step_fn, opt
  * @effects: []
  * @errors: []
  */
-pub fn with_audit_receipt(clock: HarnessClock, step_fn, options = nil) {
+pub fn with_audit_receipt(clock: HarnessClock, step_fn: unknown, options: dict? = nil) {
   const opts = options ?? {}
   return fn() {
     const started_at = opts?.started_at ?? clock.date_iso()
@@ -727,9 +787,9 @@ pub fn with_audit_receipt(clock: HarnessClock, step_fn, options = nil) {
 pub fn with_approval_gate(
   clock: HarnessClock,
   interaction: HarnessInteraction,
-  approval_kind,
-  step_fn,
-  options = nil,
+  approval_kind: any,
+  step_fn: unknown,
+  options: dict? = nil,
 ) {
   const opts = options ?? {}
   return fn() {
@@ -864,21 +924,21 @@ pub fn with_approval_gate(
   }
 }
 
-fn __prelude_persona_repair_record(entry) {
+fn __prelude_persona_repair_record(entry: dict) {
   return entry?.repair_run ?? entry
 }
 
-fn __prelude_persona_repair_status(record) -> string {
+fn __prelude_persona_repair_status(record: dict) -> string {
   return lowercase(to_string(record?.status ?? ""))
 }
 
-fn __prelude_persona_repair_succeeded(record) -> bool {
+fn __prelude_persona_repair_succeeded(record: dict) -> bool {
   const status = __prelude_persona_repair_status(record)
   const validation_errors = record?.validation_errors ?? []
   return (status == "completed" || status == "success") && len(validation_errors) == 0
 }
 
-fn __prelude_persona_repair_persona(record, opts) -> string {
+fn __prelude_persona_repair_persona(record: dict, opts: dict) -> string {
   return to_string(
     record?.persona
       ?? record?.parent_receipt_ref?.persona
@@ -888,7 +948,7 @@ fn __prelude_persona_repair_persona(record, opts) -> string {
   )
 }
 
-fn __prelude_persona_downstream_action(record) -> string {
+fn __prelude_persona_downstream_action(record: dict) -> string {
   return to_string(
     record?.downstream_action
       ?? record?.next_action
@@ -899,7 +959,7 @@ fn __prelude_persona_downstream_action(record) -> string {
   )
 }
 
-fn __prelude_persona_input_shape(record) {
+fn __prelude_persona_input_shape(record: dict) {
   const bundle = record?.bundle ?? {}
   return {
     kind: bundle?.kind ?? record?.kind ?? "repair",
@@ -913,7 +973,7 @@ fn __prelude_persona_input_shape(record) {
   }
 }
 
-fn __prelude_persona_output_shape(record) {
+fn __prelude_persona_output_shape(record: dict) {
   const output = record?.output ?? {}
   const push = output?.push_result
   return {
@@ -937,7 +997,7 @@ fn __prelude_persona_output_shape(record) {
   }
 }
 
-fn __prelude_persona_pattern_key(record, opts) -> string {
+fn __prelude_persona_pattern_key(record: dict, opts: dict) -> string {
   const seed = {
     persona: __prelude_persona_repair_persona(record, opts),
     worker: record?.worker ?? record?.agent ?? "repair_worker",
@@ -948,7 +1008,7 @@ fn __prelude_persona_pattern_key(record, opts) -> string {
   return "persona-pattern-" + substring(sha256(json_stringify(seed)), 0, 16)
 }
 
-fn __prelude_persona_pattern_example(record, index, opts) {
+fn __prelude_persona_pattern_example(record: dict, index: int, opts: dict) {
   const trace_id = record?.trace_id
     ?? record?.parent_receipt_ref?.sweep_id
     ?? record?.bundle?.parent?.sweep_id
@@ -965,7 +1025,7 @@ fn __prelude_persona_pattern_example(record, index, opts) {
   }
 }
 
-fn __prelude_persona_identifier(value) -> string {
+fn __prelude_persona_identifier(value: string?) -> string {
   let clean = regex_replace("[^A-Za-z0-9_]+", "_", lowercase(trim(to_string(value ?? "repair"))))
   clean = regex_replace("^_+|_+$", "", clean)
   if clean == "" {
@@ -977,7 +1037,7 @@ fn __prelude_persona_identifier(value) -> string {
   return clean
 }
 
-fn __prelude_persona_patch_for_group(group, opts) -> string {
+fn __prelude_persona_patch_for_group(group: dict, opts: dict?) -> string {
   const persona = __prelude_persona_identifier(group.persona)
   const kind = __prelude_persona_identifier(group.repair_kind)
   const downstream = __prelude_persona_identifier(group.downstream_action)
@@ -992,7 +1052,7 @@ fn __prelude_persona_patch_for_group(group, opts) -> string {
   return "// Insert after persona step: ${anchor_step}\n@step(name: \"${step_name}\", receipt: audit, error_boundary: fail)\nfn ${function_name}(ctx) {\n  return {\n    _type: \"harn.persona.crystallized_repair.v1\",\n    pattern_key: \"${key}\",\n    status: \"matched\",\n    input_digest: \"${input_digest}\",\n    output_digest: \"${output_digest}\",\n    downstream_action: \"${action}\",\n    context: ctx,\n  }\n}"
 }
 
-fn __prelude_persona_candidate(group, opts) {
+fn __prelude_persona_candidate(group: dict, opts: dict) {
   const step_name = opts?.step_name
     ?? "crystallized_${__prelude_persona_identifier(group.persona)}_${__prelude_persona_identifier(group.repair_kind)}_${__prelude_persona_identifier(group.downstream_action)}"
   const package_name = opts?.package_name
@@ -1059,7 +1119,7 @@ fn __prelude_persona_candidate(group, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn persona_crystallization_candidates(history, options = nil) {
+pub fn persona_crystallization_candidates(history: list?, options: dict? = nil) {
   const opts = options ?? {}
   const min_examples = opts?.min_examples ?? 3
   const hosted_history_days = opts?.hosted_history_days ?? 0
@@ -1166,7 +1226,7 @@ pub fn persona_crystallization_candidates(history, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn persona_crystallization_bundle(history, options = nil) {
+pub fn persona_crystallization_bundle(history: list?, options: dict? = nil) {
   const opts = options ?? {}
   const report = persona_crystallization_candidates(history, opts)
   if !report.ok {
@@ -1229,6 +1289,6 @@ pub fn persona_crystallization_bundle(history, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn persona_output_style(function = nil) {
+pub fn persona_output_style(function: any = nil) {
   return __persona_output_style(function)
 }

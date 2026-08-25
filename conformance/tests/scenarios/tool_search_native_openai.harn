@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      "does not expose native" diagnostic as other non-supporting
  *      providers.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let registry = tool_registry()
   registry = tool_define(
     registry,

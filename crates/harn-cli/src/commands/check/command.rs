@@ -5,9 +5,9 @@ use crate::cli::{CheckArgs, CheckOutputFormat};
 use crate::{command_error, json_envelope, package, print_check_error};
 
 use super::{
-    build_module_graph_with_parsed_sources, check_files, check_files_independently,
-    collect_cross_file_imports, collect_harn_targets, connector_matrix, provider_matrix,
-    CheckCliOverrides, CheckReport, CHECK_SCHEMA_VERSION,
+    build_module_graph, check_files, check_files_independently, collect_cross_file_imports,
+    collect_harn_targets, connector_matrix, provider_matrix, CheckCliOverrides, CheckReport,
+    CHECK_SCHEMA_VERSION,
 };
 
 pub(crate) fn run_check_command(args: CheckArgs) {
@@ -64,12 +64,11 @@ pub(crate) fn run_check_command(args: CheckArgs) {
     let checked = if args.independent {
         check_files_independently(&files, &overrides, !args.json)
     } else {
-        let (module_graph, parsed_sources) = build_module_graph_with_parsed_sources(&files);
+        let module_graph = build_module_graph(&files);
         let cross_file_imports = collect_cross_file_imports(&module_graph);
         check_files(
             &files,
             &module_graph,
-            parsed_sources,
             &cross_file_imports,
             &overrides,
             !args.json,

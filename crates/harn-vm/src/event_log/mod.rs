@@ -514,6 +514,16 @@ pub fn active_event_log() -> Option<Arc<AnyEventLog>> {
     }
 }
 
+/// Swap the active event log handle. Paired with `AmbientExecutionScope`'s
+/// per-poll swap.
+///
+/// The captured value is an `Arc`, so a subtask and its parent append to ONE
+/// log. Capturing the log by value would give each worker thread its own
+/// in-memory log that nothing ever reads.
+pub(crate) fn swap_active_event_log(next: Option<Arc<AnyEventLog>>) -> Option<Arc<AnyEventLog>> {
+    ACTIVE_EVENT_LOG.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
 pub fn reset_active_event_log() {
     ACTIVE_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = None;

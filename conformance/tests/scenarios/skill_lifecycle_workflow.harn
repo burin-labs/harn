@@ -8,7 +8,7 @@ import { workflow_execute } from "std/workflow/execute"
  * the same assertions against a 2-node workflow graph so the
  * workflow-level skill wiring is no longer silently dropped.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let tools = tool_registry()
   tools = tool_define(
     tools,

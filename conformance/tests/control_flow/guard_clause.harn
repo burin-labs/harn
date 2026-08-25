@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn process(x) {
+pipeline test(harness: Harness, task: unknown) {
+  fn process(x: int) {
     guard x > 0 else {
       return "invalid"
     }

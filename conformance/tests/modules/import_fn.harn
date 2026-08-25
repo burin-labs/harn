@@ -1,6 +1,6 @@
 import "lib/helpers.harn"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(double(5))
   harness.stdio.log(greet("world"))
 }

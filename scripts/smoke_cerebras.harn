@@ -12,7 +12,7 @@
  *   set -a && source ~/projects/burin-code/.env && set +a
  *   cargo run --quiet --bin harn -- run scripts/smoke_cerebras.harn
  */
-pipeline default(harness: Harness, args) {
+pipeline default(harness: Harness, args: unknown) {
   const model = "cerebras/gpt-oss-120b"
   const iterations = 20
   // First call eats DNS/TLS/connection setup; drop it from the

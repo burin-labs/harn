@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Iter snapshots the source: reassigning the source binding to a new
   // list does not affect what the already-constructed iter yields.
   let xs = [1, 2, 3]

@@ -3,7 +3,7 @@
  * unchanged so provider-specific code can honour it (Anthropic native,
  * harn#70 client fallback, harn#71 OpenAI Responses API).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let registry = tool_registry()
   // Eager tool (no defer_loading → not present on entry).
   registry = tool_define(

@@ -63,6 +63,9 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
     if matches!(args.max_seq_length, Some(0)) {
         return Err("--max-seq-length must be greater than zero".to_string());
     }
+    if matches!(args.min_records, Some(0)) {
+        return Err("--min-records must be greater than zero".to_string());
+    }
 
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
@@ -99,6 +102,10 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         .or(config.min_fit_ratio)
         .unwrap_or(DEFAULT_MIN_FIT_RATIO);
     validate_ratio("effective min_fit_ratio", min_fit_ratio)?;
+    let min_records = args.min_records.or(config.min_records);
+    if matches!(min_records, Some(0)) {
+        return Err("effective min_records must be greater than zero".to_string());
+    }
 
     let corpus_path = resolve_corpus_path(&args.corpus)?;
     let regexes = ExportRegexes::new();
@@ -172,18 +179,25 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         max_seq_length,
         min_fit_ratio,
         hard_token_limit: args.hard_token_limit,
-        min_records: args.min_records,
+        min_records,
         expected_source_tool_format: expected_source_format.clone(),
         required_export_source_tool_format: required_source_format.to_string(),
         min_tool_call_share: args.min_tool_call_share,
         done_marker: args.done_marker.clone(),
     };
     let mut errors = load_errors;
-    if stats.trainable_records < args.min_records {
-        errors.push(format!(
-            "records {} below required floor {}",
-            stats.trainable_records, args.min_records
-        ));
+    if let Some(min_records) = min_records {
+        if stats.trainable_records < min_records {
+            errors.push(format!(
+                "records {} below required floor {min_records}",
+                stats.trainable_records
+            ));
+        }
+    } else if args.check {
+        errors.push(
+            "minimum record floor is required under --check; set --min-records or min_records in --config"
+                .to_string(),
+        );
     }
     if stats.fit_ratio < min_fit_ratio {
         errors.push(format!(
@@ -250,6 +264,12 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             "no --config or --max-seq-length supplied; using --hard-token-limit {max_seq_length} as the sequence budget"
         ));
     }
+    if min_records.is_none() && !args.check {
+        warnings.push(
+            "no minimum record floor supplied; set --min-records or min_records in --config before using --check"
+                .to_string(),
+        );
+    }
     if !skipped_records.is_empty() {
         warnings.push(format!(
             "skipped {} record(s) with no messages",
@@ -303,6 +323,7 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             path: args.config.as_ref().map(|path| path.display().to_string()),
             max_seq_length: config.max_seq_length,
             min_fit_ratio: config.min_fit_ratio,
+            min_records: config.min_records,
         },
         thresholds,
         stats,
@@ -330,6 +351,12 @@ fn read_training_config(path: &Path) -> Result<TrainingConfig, String> {
             config.min_fit_ratio = Some(value.parse::<f64>().map_err(|error| {
                 format!("invalid min_fit_ratio in {}: {error}", path.display())
             })?);
+        }
+        if let Some(value) = scalar_value(line, "min_records") {
+            config.min_records =
+                Some(value.parse::<u64>().map_err(|error| {
+                    format!("invalid min_records in {}: {error}", path.display())
+                })?);
         }
     }
     Ok(config)
@@ -665,6 +692,7 @@ fn validate_ratio(name: &str, value: f64) -> Result<(), String> {
 struct TrainingConfig {
     max_seq_length: Option<u64>,
     min_fit_ratio: Option<f64>,
+    min_records: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -720,6 +748,7 @@ struct TrainingConfigReport {
     path: Option<String>,
     max_seq_length: Option<u64>,
     min_fit_ratio: Option<f64>,
+    min_records: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -727,7 +756,7 @@ struct PreflightThresholds {
     max_seq_length: u64,
     min_fit_ratio: f64,
     hard_token_limit: u64,
-    min_records: u64,
+    min_records: Option<u64>,
     expected_source_tool_format: String,
     required_export_source_tool_format: String,
     min_tool_call_share: f64,

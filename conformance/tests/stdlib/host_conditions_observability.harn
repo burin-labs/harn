@@ -9,7 +9,7 @@ fn sample_with_injected_host_facts(system: HarnessSystem, testing: HarnessTestin
   return snapshot
 }
 
-pipeline test_host_conditions_observability(harness: Harness, task) {
+pipeline test_host_conditions_observability(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond(
     "system",

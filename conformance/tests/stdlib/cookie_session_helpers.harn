@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const parsed = cookie_parse("sid=abc; theme=light; sid=old; badsegment")
   assert_eq(parsed.cookies.sid, "abc")
   assert_eq(parsed.cookies.theme, "light")

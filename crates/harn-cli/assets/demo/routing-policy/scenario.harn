@@ -23,7 +23,10 @@
  * signals, per-attempt token counts) consumes from `llm_call`. The
  * demo gate (#2437) flagged it as previously uncovered.
  */
-fn tasks() {
+/** One routed task: the prompt to send and the failover story it exercises. */
+type RoutedTask = {id: string, prompt: string, story: string}
+
+fn tasks() -> list<RoutedTask> {
   return [
     {
       id: "smoke",
@@ -43,7 +46,7 @@ fn tasks() {
   ]
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   // Single routing policy reused across all three tasks. The chain
   // covers both failure-mode dimensions the v0.8.40 primitive handles:
   // status-based failover plus verifier-signal escalation.

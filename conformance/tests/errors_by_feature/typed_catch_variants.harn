@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Typed catch with multiple enum variants
   enum ApiError {
     NotFound(path)

@@ -20,7 +20,7 @@ const PROGRESS_SIGNAL = { p ->
   }
 }
 
-fn observe(agent: HarnessAgent, config, state, score, wrote) {
+fn observe(agent: HarnessAgent, config: dict, state: any, score: int?, wrote: bool) {
   const payload = if score == nil {
     {}
   } else {
@@ -47,7 +47,7 @@ fn observe(agent: HarnessAgent, config, state, score, wrote) {
  * Drive one gate-bearing verification FAILURE (for the total-recurrence axis):
  * a substantive "run" call whose prior dispatch failed with `error_text`.
  */
-fn observe_fail(agent: HarnessAgent, config, state, error_text) {
+fn observe_fail(agent: HarnessAgent, config: dict, state: any, error_text: string) {
   return agent_stall_observe_tool_calls(
     agent,
     "verify-state-churn",

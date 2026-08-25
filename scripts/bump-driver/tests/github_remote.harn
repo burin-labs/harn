@@ -3,7 +3,7 @@ import { github_bump_remote } from "../github_remote"
 
 const API = "https://api.github.com"
 
-fn remote(harness: Harness, repo_dir = ".") {
+fn remote(harness: Harness, repo_dir: string = ".") {
   return github_bump_remote(
     harness,
     {
@@ -85,7 +85,7 @@ fn pull(head_oid: string) {
   }
 }
 
-pipeline test_release_projection_is_closed_and_exact(harness: Harness, task) {
+pipeline test_release_projection_is_closed_and_exact(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   const tag = "v0.10.53"
   harness.testing.http_mock(
@@ -145,7 +145,7 @@ pipeline test_release_projection_is_closed_and_exact(harness: Harness, task) {
   harness.testing.http_mock_clear()
 }
 
-pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, task) {
+pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   const url = API
     + "/repos/octo-org/octo-repo/pulls?state=open&head=octo-org%3Aautomation%2Fbump-harn-runtime&base=main"
@@ -175,7 +175,10 @@ pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, 
   harness.testing.http_mock_clear()
 }
 
-pipeline test_pull_upsert_waits_for_published_head_before_mutation(harness: Harness, task) {
+pipeline test_pull_upsert_waits_for_published_head_before_mutation(
+  harness: Harness,
+  task: unknown,
+) {
   harness.testing.http_mock_clear()
   const previous_head_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   const expected_head_oid = "cccccccccccccccccccccccccccccccccccccccc"
@@ -228,7 +231,10 @@ pipeline test_pull_upsert_waits_for_published_head_before_mutation(harness: Harn
   harness.testing.http_mock_clear()
 }
 
-pipeline test_signed_worktree_publication_retries_one_github_502_in_place(harness: Harness, task) {
+pipeline test_signed_worktree_publication_retries_one_github_502_in_place(
+  harness: Harness,
+  task: unknown,
+) {
   harness.testing.http_mock_clear()
   const fixture = publication_repo({fs: harness.fs, process: harness.process})
   const ref_url = API

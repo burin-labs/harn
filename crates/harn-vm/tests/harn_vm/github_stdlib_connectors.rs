@@ -112,7 +112,7 @@ import {
   workflow_runs,
 } from "std/connectors/github"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const dispatch = workflow_dispatch(harness.net, "git@github.com:octo-org/octo-repo.git", "release.yml", "main", {version: "v0.8.4"})
   assert_eq(dispatch.run_id, 123, "dispatch result")
   assert_eq(workflow_runs(harness.net, "octo-org/octo-repo", {event: "workflow_dispatch"}).runs[0].id, 123, "runs result")

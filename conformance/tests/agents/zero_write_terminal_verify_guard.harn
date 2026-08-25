@@ -50,13 +50,13 @@ fn build_tools() {
  * wire event and tags the mechanism with `payload.reserveKind` (no new wire
  * kind), so forensics can distinguish the verification path.
  */
-fn is_zero_write_event(event) -> bool {
+fn is_zero_write_event(event: dict) -> bool {
   return event.type == "reserved_terminal_verify"
     && (event?.payload?.reserveKind ?? "")
       == "zero_write_terminal_verify"
 }
 
-fn count_zero_write_events(events) {
+fn count_zero_write_events(events: list) {
   let n = 0
   for event in events {
     if is_zero_write_event(event) {
@@ -66,7 +66,7 @@ fn count_zero_write_events(events) {
   return n
 }
 
-fn has_phase(events, phase) {
+fn has_phase(events: list, phase: string) {
   for event in events {
     if is_zero_write_event(event) && (event?.payload?.phase ?? "") == phase {
       return true
@@ -75,7 +75,7 @@ fn has_phase(events, phase) {
   return false
 }
 
-fn terminal_verify_ran(events) -> bool {
+fn terminal_verify_ran(events: list) -> bool {
   return has_phase(events, "verify_passed") || has_phase(events, "verify_failed")
 }
 
@@ -85,7 +85,12 @@ fn terminal_verify_ran(events) -> bool {
  * nil (pass) releases a legitimately-complete no-write task as `done`; a string
  * (veto) stands in for the `no_source_write` rung surfacing the missing write.
  */
-fn run_scenario(harness: Harness, zero_write_on, reserve_iterations, release_verify) {
+fn run_scenario(
+  harness: Harness,
+  zero_write_on: bool,
+  reserve_iterations: int,
+  release_verify: bool,
+) {
   return with_llm_script(
     harness.llm,
     [

@@ -12,12 +12,15 @@ use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
+mod execution_target;
 mod host_param_discriminators;
 mod llm_composition;
 
+use execution_target::{is_process_execution_method, scan_execution_dir_preflight};
 use host_param_discriminators::scan_host_param_discriminators;
 pub(super) use host_param_discriminators::{host_render_path_arg, parse_host_call_args};
 
+#[derive(Debug)]
 pub(crate) struct PreflightDiagnostic {
     pub(crate) code: Code,
     pub(crate) path: String,
@@ -1032,27 +1035,7 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
-            if let Some(dir) = args.first().and_then(literal_string) {
-                let resolved = resolve_source_relative(file_path, &dir);
-                if !super::result_cache::probe_is_dir(&resolved) {
-                    diagnostics.push(PreflightDiagnostic {
-                        code: Code::ExecutionTargetMissing,
-                        path: file_path.display().to_string(),
-                        source: source.to_string(),
-                        span: args[0].span,
-                        message: format!(
-                            "preflight: execution directory '{}' does not exist at {}",
-                            dir,
-                            resolved.display()
-                        ),
-                        help: Some(
-                            "use a source-relative directory that exists at preflight time, or create it before execution"
-                                .to_string(),
-                        ),
-                        tags: None,
-                    });
-                }
-            }
+            scan_execution_dir_preflight(args, file_path, source, diagnostics);
         }
         Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
             if let Some(agent_config) = args.last() {
@@ -1603,7 +1586,19 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        }
+        | Node::OptionalMethodCall {
+            object,
+            method,
+            args,
+        } => {
+            if is_process_execution_method(object, method) {
+                scan_execution_dir_preflight(args, file_path, source, diagnostics);
+            }
             scan_node_preflight(
                 object,
                 file_path,

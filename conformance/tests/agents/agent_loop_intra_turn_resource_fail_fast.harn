@@ -18,10 +18,10 @@ fn edit_dependency_range_params() {
 }
 
 fn edit_tools(
-  metadata_key = "annotations",
-  dependency_key_params = [],
-  dependency_range_params = [],
-  arg_aliases = {},
+  metadata_key: string = "annotations",
+  dependency_key_params: list = [],
+  dependency_range_params: list = [],
+  arg_aliases: dict = {},
 ) {
   let tools = tool_registry()
   const arg_schema = {
@@ -435,7 +435,7 @@ fn same_file_same_range_alias_applied_failure_batch() {
   ]
 }
 
-fn run_scripted(harness: Harness, calls, opts = {}) {
+fn run_scripted(harness: Harness, calls: any, opts: dict = {}) {
   return with_llm_script(
     harness.llm,
     [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
@@ -488,7 +488,7 @@ fn run_scripted(harness: Harness, calls, opts = {}) {
   )
 }
 
-fn has_tool_update(events, status: string, category: string, text: string) -> bool {
+fn has_tool_update(events: list, status: string, category: string, text: string) -> bool {
   return events.find(
     { event ->
       return event.type == "tool_call_update"
@@ -501,7 +501,7 @@ fn has_tool_update(events, status: string, category: string, text: string) -> bo
     != nil
 }
 
-fn partial_apply_receipt_at_index(events, skipped_call_index: number) {
+fn partial_apply_receipt_at_index(events: list, skipped_call_index: number) {
   for event in events {
     const receipt = event?.raw_output?.partial_apply
     if receipt?.skipped_call_index == skipped_call_index {

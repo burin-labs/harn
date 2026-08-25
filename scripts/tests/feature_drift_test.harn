@@ -3,7 +3,7 @@ import { feature_drift, parse_feature_snapshot, render_feature_drift } from "../
 @test
 pipeline test_feature_drift_unions_duplicate_rows_and_ignores_version_changes(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const baseline = parse_feature_snapshot(
     "alpha v1.0.0 a,b\nalpha v1.0.0 c\nbeta v1.0.0 old\ngamma v1.0.0 x\n",
@@ -16,7 +16,7 @@ pipeline test_feature_drift_unions_duplicate_rows_and_ignores_version_changes(
 }
 
 @test
-pipeline test_feature_drift_rendering_preserves_advisory_contract(harness: Harness, task) {
+pipeline test_feature_drift_rendering_preserves_advisory_contract(harness: Harness, task: unknown) {
   const drift = [{name: "alpha", version: "1.0.0", added: ["new"], removed: ["old"]}]
   const text = render_feature_drift(drift, "origin/main")
   assert(text.contains("Feature drift against origin/main"))

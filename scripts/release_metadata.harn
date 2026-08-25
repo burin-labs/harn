@@ -25,13 +25,16 @@ type AgentManifestProjection = {
 }
 
 fn package_manifest_projection_schema() -> Schema<PackageManifestProjection> {
-  return schema_object(
-    {
-      package: schema_field(
-        schema_object({name: schema_field(schema_string())}, {additional_properties: true}),
-      ),
-    },
-    {additional_properties: true},
+  return schema_refine(
+    schema_of(PackageManifestProjection),
+    schema_object(
+      {
+        package: schema_field(
+          schema_object({name: schema_field(schema_string())}, {additional_properties: true}),
+        ),
+      },
+      {additional_properties: true},
+    ),
   )
 }
 
@@ -40,14 +43,20 @@ fn agent_manifest_projection_schema() -> Schema<AgentManifestProjection> {
     {archive: schema_field(schema_string())},
     {additional_properties: true},
   )
-  return schema_object(
-    {
-      version: schema_field(schema_string()),
-      distribution: schema_field(
-        schema_object({binary: schema_field(schema_dict(archive))}, {additional_properties: true}),
-      ),
-    },
-    {additional_properties: true},
+  return schema_refine(
+    schema_of(AgentManifestProjection),
+    schema_object(
+      {
+        version: schema_field(schema_string()),
+        distribution: schema_field(
+          schema_object(
+            {binary: schema_field(schema_dict(archive))},
+            {additional_properties: true},
+          ),
+        ),
+      },
+      {additional_properties: true},
+    ),
   )
 }
 
@@ -74,7 +83,7 @@ fn distribution_version(fs: HarnessFs, root: string, version: string) -> string 
   return release_distribution_version(load_release_withdrawals(fs, path), version)
 }
 
-pub fn workspace_version_from_doc(doc) -> string {
+pub fn workspace_version_from_doc(doc: dict) -> string {
   const value = doc?.workspace?.package?.version ?? doc?.workspace?.version
   if type_of(value) != "string" || to_string(value) == "" {
     throw "missing workspace version"
@@ -122,7 +131,7 @@ pub fn stable_version_from_development(version: string) -> string {
     + to_string(parsed.patch)
 }
 
-fn workspace_entries(doc, key: string) -> list<string> {
+fn workspace_entries(doc: dict, key: string) -> list<string> {
   const raw = doc?.workspace?.get(key)
   if raw == nil && key == "exclude" {
     return []

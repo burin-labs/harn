@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   let result = ""
   for i in [1, 2, 3, 4, 5] {
     if i == 3 {

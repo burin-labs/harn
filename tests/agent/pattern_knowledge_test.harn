@@ -64,7 +64,7 @@ fn append_session_evidence(
 
 pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(
   harness: Harness,
-  _task,
+  _task: unknown,
 ) {
   with_temp_dir(
     harness.fs,
@@ -185,7 +185,10 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(
   )
 }
 
-pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(harness: Harness, _task) {
+pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(
+  harness: Harness,
+  _task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -216,7 +219,10 @@ pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(harness: 
   )
 }
 
-pipeline test_pattern_learning_read_surfaces_do_not_create_memory_state(harness: Harness, _task) {
+pipeline test_pattern_learning_read_surfaces_do_not_create_memory_state(
+  harness: Harness,
+  _task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -253,7 +259,7 @@ pipeline test_pattern_learning_read_surfaces_do_not_create_memory_state(harness:
 
 pipeline test_pattern_learning_stamps_terminal_provenance_from_a_live_agent_loop(
   harness: Harness,
-  _task,
+  _task: unknown,
 ) {
   with_temp_dir(
     harness.fs,

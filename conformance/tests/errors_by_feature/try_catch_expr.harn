@@ -6,7 +6,7 @@
  * Explicit type annotations on the `let` are exercised alongside the
  * untyped form to pin down type-checker behavior, not just the runtime.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   enum AppError {
     NotFound(msg)
     Forbidden(msg)

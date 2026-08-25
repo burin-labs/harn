@@ -14,13 +14,13 @@ fn timeout_command(system: HarnessSystem) {
   return ["sh", "-c", "printf before; sleep 30 & wait"]
 }
 
-fn expect_eq(actual, expected, label: string) {
+fn expect_eq(actual: any, expected: any, label: string) {
   if actual != expected {
     throw label + ": expected " + to_string(expected) + ", got " + to_string(actual)
   }
 }
 
-fn expect_true(actual, label: string) {
+fn expect_true(actual: any, label: string) {
   if !actual {
     throw label + ": expected true"
   }

@@ -9,7 +9,7 @@ import "./fixtures.harn"
 @test
 pub pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   assert_eq(setup_harn_cache_action_errors(setup_harn_action()), [])
 }
@@ -17,7 +17,7 @@ pub pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_r
 @test
 pub pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const invalid = {
     runs: {
@@ -60,7 +60,7 @@ pub pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(
 
 pub pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const invalid_action = {
     runs: {
@@ -84,7 +84,7 @@ pub pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(
 
 pub pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const valid_action = action()
   const invalid_action = {
@@ -112,7 +112,10 @@ pub pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(
+  harness: Harness,
+  task: unknown,
+) {
   const valid_action = action()
   const cache = valid_action.runs.steps[2]
   const invalid_action = {
@@ -147,13 +150,16 @@ pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(harness:
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
 }
 
-pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task: unknown) {
   const invalid = {
     ...workflows(),
     "windows-nightly.yml": {
@@ -184,7 +190,7 @@ pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, tas
 
 pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const invalid = {
     ...workflows(),
@@ -243,7 +249,10 @@ pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
+  harness: Harness,
+  task: unknown,
+) {
   const invalid = {
     ...workflows(),
     "build-release-binaries.yml": {
@@ -262,7 +271,10 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(harness: Harn
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(
+  harness: Harness,
+  task: unknown,
+) {
   const bounded = workflows()["build-release-binaries.yml"].jobs.build
   const release_cache = bounded.steps[0]
   const invalid = {
@@ -294,7 +306,7 @@ pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harn
 
 pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const bounded = workflows()["build-release-binaries.yml"].jobs.build
   const release_cache = bounded.steps[0]
@@ -318,7 +330,10 @@ pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(
+  harness: Harness,
+  task: unknown,
+) {
   const bounded = workflows()["build-release-binaries.yml"].jobs.build
   const release_cache = bounded.steps[0]
   const invalid = {
@@ -356,7 +371,7 @@ pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(harness: Ha
   )
 }
 
-pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness, task) {
+pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness, task: unknown) {
   const invalid = {
     ...workflows(),
     "cli-cold-start-budget.yml": {

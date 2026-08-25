@@ -1,5 +1,5 @@
 /** Test guard statement narrowing applies to outer scope */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn require_string(x: string?) -> string {
     guard x != nil else {
       return "missing"

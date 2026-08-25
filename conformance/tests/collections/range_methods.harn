@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // .first() and .last() on an inclusive range
   const inc = 1 to 5
   harness.stdio.log(inc.first())

@@ -8,7 +8,7 @@
  * transcript is under threshold, a `compact_now` decision when it crosses,
  * and a `compaction.run` that funnels through the existing #2323 lifecycle.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session = harness.agent.open("compaction-policy-primitive")
   // Register a session-specific policy.
   const snapshot = harness.agent.compaction_policy(

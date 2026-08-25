@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use harn_builtin_meta::shapes::{
+    is_resume_timeout_action, DEFAULT_RESUME_TIMEOUT_ACTION, RESUME_TIMEOUT_ACTIONS,
+};
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -185,29 +188,24 @@ fn auto_resume_timeout_spec(
             )
         })? as u64;
     let on_timeout = match timeout.get("on_timeout") {
-        Some(VmValue::String(value))
-            if matches!(
-                value.as_str(),
-                "resume_with_summary" | "resume_with_input" | "fail"
-            ) =>
-        {
-            value.to_string()
-        }
-        Some(VmValue::Nil) | None => "resume_with_summary".to_string(),
+        Some(VmValue::String(value)) if is_resume_timeout_action(value) => value.to_string(),
+        Some(VmValue::Nil) | None => DEFAULT_RESUME_TIMEOUT_ACTION.to_string(),
         Some(VmValue::String(value)) => {
             return Err(suspend_diagnostic_error(
                 Code::ResumeTimeoutUnsupported,
                 format!(
-                    "auto_resume: unsupported conditions.timeout.on_timeout `{}`; expected resume_with_summary, resume_with_input, or fail",
-                    value.as_str()
-                ),
+                "auto_resume: unsupported conditions.timeout.on_timeout `{}`; expected one of: {}",
+                value.as_str(),
+                RESUME_TIMEOUT_ACTIONS.join(", ")
+            ),
             ))
         }
         Some(other) => {
             return Err(suspend_diagnostic_error(
                 Code::ResumeTimeoutUnsupported,
                 format!(
-                    "auto_resume: conditions.timeout.on_timeout must be resume_with_summary, resume_with_input, or fail; got {}",
+                    "auto_resume: conditions.timeout.on_timeout must be one of: {}; got {}",
+                    RESUME_TIMEOUT_ACTIONS.join(", "),
                     other.type_name()
                 ),
             ))

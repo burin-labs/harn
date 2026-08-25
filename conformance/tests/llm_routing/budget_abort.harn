@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * 100k output tokens at catalog pricing well above the $0.0001 cap,
  * so the chain aborts before any provider call.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [{text: "should never reach the provider", model: "gpt-4o-mini", provider: "openai"}],

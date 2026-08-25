@@ -4,37 +4,37 @@ import "../drift_preflight_members.harn"
 import "../generated_artifacts_schema.harn"
 
 @test
-pipeline test_members_source_tier_sorted(harness: Harness, task) {
+pipeline test_members_source_tier_sorted(harness: Harness, task: unknown) {
   const dispatch = {"check-b": "source", "check-a": "source", "check-c": "binary"}
   assert_eq(members_for_tier(dispatch, "source"), ["check-a", "check-b"])
 }
 
 @test
-pipeline test_members_binary_tier(harness: Harness, task) {
+pipeline test_members_binary_tier(harness: Harness, task: unknown) {
   const dispatch = {"check-a": "source", "check-c": "binary", "check-d": "binary"}
   assert_eq(members_for_tier(dispatch, "binary"), ["check-c", "check-d"])
 }
 
 @test
-pipeline test_members_excluded_never_selected(harness: Harness, task) {
+pipeline test_members_excluded_never_selected(harness: Harness, task: unknown) {
   const dispatch = {"check-a": "excluded", "check-b": "source"}
   assert_eq(members_for_tier(dispatch, "source"), ["check-b"])
   assert_eq(members_for_tier(dispatch, "binary"), [])
 }
 
 @test
-pipeline test_members_empty_dispatch(harness: Harness, task) {
+pipeline test_members_empty_dispatch(harness: Harness, task: unknown) {
   assert_eq(members_for_tier({}, "source"), [])
 }
 
 @test
-pipeline test_members_unknown_tier(harness: Harness, task) {
+pipeline test_members_unknown_tier(harness: Harness, task: unknown) {
   const dispatch = {"check-a": "source"}
   assert_eq(members_for_tier(dispatch, "nope"), [])
 }
 
 @test
-pipeline test_real_registry_pins_binary_semantics_boundaries(harness: Harness, task) {
+pipeline test_real_registry_pins_binary_semantics_boundaries(harness: Harness, task: unknown) {
   const registry = schema_expect(
     toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
     generated_artifacts_schema(),

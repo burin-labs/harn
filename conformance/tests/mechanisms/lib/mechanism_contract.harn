@@ -55,7 +55,7 @@
  * @errors: []
  * @example: first_contract_event(captured.events, "budget_circuit_breaker")
  */
-pub fn first_contract_event(events, event_type: string) {
+pub fn first_contract_event(events: list, event_type: string) {
   for event in events {
     if to_string(event?.type ?? "") == event_type {
       return event
@@ -72,7 +72,7 @@ pub fn first_contract_event(events, event_type: string) {
  * @errors: []
  * @example: count_contract_events(captured.events, "loop_stuck")
  */
-pub fn count_contract_events(events, event_type: string) -> int {
+pub fn count_contract_events(events: list, event_type: string) -> int {
   let n = 0
   for event in events {
     if to_string(event?.type ?? "") == event_type {

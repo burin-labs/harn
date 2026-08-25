@@ -54,19 +54,19 @@ import "std/schema"
 // shared helpers
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_dict(value) -> dict {
+fn __binder_dict(value: unknown) -> dict {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __binder_is_callable(value) -> bool {
+fn __binder_is_callable(value: any) -> bool {
   let kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __binder_drop_key(args, field) {
+fn __binder_drop_key(args: dict, field: any) {
   let source = __binder_dict(args)
   let cleaned = {}
   for key in source.keys() {
@@ -77,7 +77,7 @@ fn __binder_drop_key(args, field) {
   return cleaned
 }
 
-fn __binder_short_circuit(envelope, reason) {
+fn __binder_short_circuit(envelope: dict, reason: string) {
   return {
     ok: false,
     status: "error",
@@ -93,7 +93,7 @@ fn __binder_short_circuit(envelope, reason) {
   }
 }
 
-fn __binder_attach_audit(result, audit) {
+fn __binder_attach_audit(result: dict, audit: any) {
   let existing = if type_of(result?.audit) == "dict" {
     result.audit
   } else {
@@ -106,7 +106,14 @@ fn __binder_default_system() -> string {
   return "You bind tool arguments to the supplied JSON Schema. Return one JSON object only. No prose or markdown."
 }
 
-fn __binder_audit(provider, model, status, latency_ms, reason, attempts) {
+fn __binder_audit(
+  provider: any,
+  model: any,
+  status: string,
+  latency_ms: any,
+  reason: any,
+  attempts: int,
+) {
   let base = {
     provider: provider,
     model: model,
@@ -139,7 +146,7 @@ fn __binder_options_schema() {
   )
 }
 
-fn __binder_typed_opts(cfg) {
+fn __binder_typed_opts(cfg: any) {
   let report = get_typed_report(cfg, __binder_options_schema(), true)
   if !report.ok {
     throw "with_natural_language_executor: " + report.message
@@ -151,7 +158,7 @@ fn __binder_typed_opts(cfg) {
 // Prompt rendering
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_prompt(fs: HarnessFs, envelope, intent, partial_args) -> string {
+fn __binder_prompt(fs: HarnessFs, envelope: dict, intent: any, partial_args: dict) -> string {
   let schema_for_prompt = if envelope.schema != nil {
     envelope.schema
   } else {
@@ -180,7 +187,7 @@ fn __binder_prompt(fs: HarnessFs, envelope, intent, partial_args) -> string {
 // Binder dispatch
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_extract_json(response) {
+fn __binder_extract_json(response: dict) {
   if type_of(response) == "dict" {
     let data = response?.data
     if type_of(data) == "dict" {
@@ -204,7 +211,7 @@ fn __binder_extract_json(response) {
   return {ok: false, reason: "binder returned an unexpected envelope shape"}
 }
 
-fn __binder_invoke(binder_fn, prompt, system, cfg) {
+fn __binder_invoke(binder_fn: unknown, prompt: any, system: any, cfg: dict) {
   let opts = {
     provider: cfg.provider,
     model: cfg.model,
@@ -227,7 +234,13 @@ fn __binder_invoke(binder_fn, prompt, system, cfg) {
  * stays a flat sequence of error checks instead of nesting `if reject /
  * raise / passthrough` blocks per failure mode.
  */
-fn __binder_handle_failure(envelope, next, ctx, status, reason) {
+fn __binder_handle_failure(
+  envelope: dict,
+  next: unknown,
+  ctx: dict,
+  status: string,
+  reason: string,
+) {
   if ctx.on_failure == "raise" {
     throw "with_natural_language_executor: " + reason
   }
@@ -243,7 +256,7 @@ fn __binder_handle_failure(envelope, next, ctx, status, reason) {
 // Middleware
 // -------------------------------------------------------------------------------------------------
 
-fn __binder_validate_opts(llm: HarnessLlm, cfg) {
+fn __binder_validate_opts(llm: HarnessLlm, cfg: any) {
   let typed = __binder_typed_opts(cfg)
   if typed.max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0; retries defeat the latency win; got "
@@ -295,7 +308,7 @@ fn __binder_validate_opts(llm: HarnessLlm, cfg) {
  * @errors: []
  * @example: natural_language_executor_schema_transform({intent_field: "_nl_intent"})
  */
-pub fn natural_language_executor_schema_transform(opts = nil) {
+pub fn natural_language_executor_schema_transform(opts: any = nil) {
   let cfg = __binder_dict(opts)
   let field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
   if field == "" {
@@ -321,14 +334,14 @@ pub fn natural_language_executor_schema_transform(opts = nil) {
  * @errors: []
  * @example: natural_language_executor_middleware(harness, {provider: "cerebras", model: "gpt-oss-120b"})
  */
-pub fn natural_language_executor_middleware(harness: Harness, opts) {
+pub fn natural_language_executor_middleware(harness: Harness, opts: dict) {
   return {
     schema_transform: natural_language_executor_schema_transform(opts),
     caller: with_natural_language_executor(harness, opts),
   }
 }
 
-fn __binder_skip_reason(intent, schema_provided, already_valid) {
+fn __binder_skip_reason(intent: string, schema_provided: any, already_valid: any) {
   // Order matters: "args_already_valid" is the cheapest skip (no binder
   // hop, no missing-intent error to surface) so we check it first.
   if already_valid {
@@ -343,7 +356,15 @@ fn __binder_skip_reason(intent, schema_provided, already_valid) {
   return nil
 }
 
-fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ctx, skip_reason) {
+fn __binder_passthrough(
+  envelope: dict,
+  next: unknown,
+  original_args: any,
+  stripped_args: any,
+  intent: string,
+  ctx: dict,
+  skip_reason: any,
+) {
   let next_args = if intent == "" {
     original_args
   } else {
@@ -380,7 +401,7 @@ fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ct
  * @effects: []
  * @errors: []
  */
-pub fn with_natural_language_executor(harness: Harness, opts) {
+pub fn with_natural_language_executor(harness: Harness, opts: dict) {
   let ctx = __binder_validate_opts(harness.llm, __binder_dict(opts))
   return { envelope, next ->
     let tool_args = __binder_dict(envelope.tool_args)

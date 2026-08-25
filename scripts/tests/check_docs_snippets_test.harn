@@ -4,7 +4,7 @@ import "../check_docs_snippets.harn"
 
 // --- extract_blocks ---------------------------------------------------------
 @test
-pipeline test_extract_basic_block(harness: Harness, task) {
+pipeline test_extract_basic_block(harness: Harness, task: unknown) {
   const md = "intro\n```harn\nlet x = 1\nlog(x)\n```\noutro\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -15,7 +15,7 @@ pipeline test_extract_basic_block(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_ignore_block_skipped(harness: Harness, task) {
+pipeline test_extract_ignore_block_skipped(harness: Harness, task: unknown) {
   const md = "```harn,ignore\npartial fragment\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -24,7 +24,7 @@ pipeline test_extract_ignore_block_skipped(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_idx_counts_all_harn_fences(harness: Harness, task) {
+pipeline test_extract_idx_counts_all_harn_fences(harness: Harness, task: unknown) {
   // The block index counts harn fences (checked AND ignored), matching the
   // awk `idx++` on both fence kinds.
   const md = "```harn,ignore\na\n```\n\n```harn\nb\n```\n"
@@ -37,7 +37,7 @@ pipeline test_extract_idx_counts_all_harn_fences(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_check_block_opts_into_full_check(harness: Harness, task) {
+pipeline test_extract_check_block_opts_into_full_check(harness: Harness, task: unknown) {
   const md = "```harn,check\npipeline default() { return 1 }\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -48,7 +48,7 @@ pipeline test_extract_check_block_opts_into_full_check(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_other_fences_ignored(harness: Harness, task) {
+pipeline test_extract_other_fences_ignored(harness: Harness, task: unknown) {
   const md = "```bash\necho hi\n```\n```harn\nx\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -57,14 +57,14 @@ pipeline test_extract_other_fences_ignored(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_info_string_must_be_exact(harness: Harness, task) {
+pipeline test_extract_info_string_must_be_exact(harness: Harness, task: unknown) {
   // ```harn extra or trailing spaces do not open a checked block.
   assert_eq(extract_blocks("```harn foo\nx\n```\n"), [])
   assert_eq(extract_blocks("```harn \nx\n```\n"), [])
 }
 
 @test
-pipeline test_extract_unclosed_at_eof(harness: Harness, task) {
+pipeline test_extract_unclosed_at_eof(harness: Harness, task: unknown) {
   const events = extract_blocks("pre\n```harn\nbody\n")
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "unclosed")
@@ -72,7 +72,7 @@ pipeline test_extract_unclosed_at_eof(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_reopened_fence_reports_previous(harness: Harness, task) {
+pipeline test_extract_reopened_fence_reports_previous(harness: Harness, task: unknown) {
   // A new ```harn fence while one is open reports the earlier open line
   // and starts a fresh block.
   const events = extract_blocks("```harn\na\n```harn\nb\n```\n")
@@ -86,12 +86,12 @@ pipeline test_extract_reopened_fence_reports_previous(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_empty_input(harness: Harness, task) {
+pipeline test_extract_empty_input(harness: Harness, task: unknown) {
   assert_eq(extract_blocks(""), [])
 }
 
 @test
-pipeline test_extract_indented_block_is_checked(harness: Harness, task) {
+pipeline test_extract_indented_block_is_checked(harness: Harness, task: unknown) {
   // A fence nested under a list item is a real example and gets checked.
   // Before this was handled, such blocks were silently invisible to the
   // gate — a `harn parse` failure shipped in docs/src/diagnostics.md
@@ -106,7 +106,7 @@ pipeline test_extract_indented_block_is_checked(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_indented_block_keeps_relative_indent(harness: Harness, task) {
+pipeline test_extract_indented_block_keeps_relative_indent(harness: Harness, task: unknown) {
   // Only the fence's own indent is removed; nesting inside the snippet
   // survives, so the extracted source is byte-identical to the example.
   const md = "  ```harn\n  fn f() -> int {\n    return 1\n  }\n  ```\n"
@@ -116,13 +116,13 @@ pipeline test_extract_indented_block_keeps_relative_indent(harness: Harness, tas
 }
 
 @test
-pipeline test_extract_indented_ignore_and_check_tags(harness: Harness, task) {
+pipeline test_extract_indented_ignore_and_check_tags(harness: Harness, task: unknown) {
   assert_eq(extract_blocks("  ```harn,ignore\n  frag\n  ```\n")[0].kind, "skip")
   assert_eq(extract_blocks("  ```harn,check\n  x\n  ```\n")[0].mode, "check")
 }
 
 @test
-pipeline test_extract_indented_blank_line_in_body(harness: Harness, task) {
+pipeline test_extract_indented_blank_line_in_body(harness: Harness, task: unknown) {
   // A blank line carries no indent to strip and must not underflow.
   const events = extract_blocks("  ```harn\n  const a = 1\n\n  const b = 2\n  ```\n")
   assert_eq(events[0].content, "const a = 1\n\nconst b = 2\n")
@@ -130,7 +130,7 @@ pipeline test_extract_indented_blank_line_in_body(harness: Harness, task) {
 
 // --- harn-prompt fences -----------------------------------------------------
 @test
-pipeline test_extract_prompt_block(harness: Harness, task) {
+pipeline test_extract_prompt_block(harness: Harness, task: unknown) {
   const md = "```harn-prompt\n{{ if x }}a{{ end }}\n```\n"
   const events = extract_blocks(md)
   assert_eq(events.count, 1)
@@ -140,14 +140,14 @@ pipeline test_extract_prompt_block(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_prompt_ignore_block_skipped(harness: Harness, task) {
+pipeline test_extract_prompt_ignore_block_skipped(harness: Harness, task: unknown) {
   const events = extract_blocks("```harn-prompt,ignore\n{{ fragment\n```\n")
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "skip")
 }
 
 @test
-pipeline test_extract_prompt_and_harn_share_one_index(harness: Harness, task) {
+pipeline test_extract_prompt_and_harn_share_one_index(harness: Harness, task: unknown) {
   // Temp-file names are keyed on idx, so both languages advance the same
   // counter and cannot collide within a file.
   const events = extract_blocks("```harn\nx\n```\n\n```harn-prompt\n{{ y }}\n```\n")
@@ -159,14 +159,14 @@ pipeline test_extract_prompt_and_harn_share_one_index(harness: Harness, task) {
 }
 
 @test
-pipeline test_extract_prompt_info_string_must_be_exact(harness: Harness, task) {
+pipeline test_extract_prompt_info_string_must_be_exact(harness: Harness, task: unknown) {
   assert_eq(extract_blocks("```harn-prompt extra\nx\n```\n"), [])
   assert_eq(extract_blocks("```text\n{{ x }}\n```\n"), [])
 }
 
 // --- longer fences ----------------------------------------------------------
 @test
-pipeline test_extract_longer_fence_keeps_inner_backticks(harness: Harness, task) {
+pipeline test_extract_longer_fence_keeps_inner_backticks(harness: Harness, task: unknown) {
   // A template that shows fenced output is itself fenced with four
   // backticks; the inner ``` lines are body, not the close.
   const md = "````harn-prompt\n{{ for s in xs }}\n```\n{{ s }}\n```\n{{ end }}\n````\n"
@@ -178,7 +178,10 @@ pipeline test_extract_longer_fence_keeps_inner_backticks(harness: Harness, task)
 }
 
 @test
-pipeline test_extract_three_tick_block_still_closes_on_longer_fence(harness: Harness, task) {
+pipeline test_extract_three_tick_block_still_closes_on_longer_fence(
+  harness: Harness,
+  task: unknown,
+) {
   // A ``` block closes on any fence at least as long, preserving the
   // behaviour that predates variable-length fences.
   const events = extract_blocks("```harn\nx\n````\n")
@@ -189,7 +192,7 @@ pipeline test_extract_three_tick_block_still_closes_on_longer_fence(harness: Har
 
 // --- fence + mode tables ----------------------------------------------------
 @test
-pipeline test_backtick_run_len(harness: Harness, task) {
+pipeline test_backtick_run_len(harness: Harness, task: unknown) {
   assert_eq(backtick_run_len("```harn"), 3)
   assert_eq(backtick_run_len("````"), 4)
   assert_eq(backtick_run_len("no ticks"), 0)
@@ -197,7 +200,7 @@ pipeline test_backtick_run_len(harness: Harness, task) {
 }
 
 @test
-pipeline test_fence_mode_and_ownership(harness: Harness, task) {
+pipeline test_fence_mode_and_ownership(harness: Harness, task: unknown) {
   assert_eq(fence_mode("harn"), "parse")
   assert_eq(fence_mode("harn,check"), "check")
   assert_eq(fence_mode("harn,diagnostic-check"), "diagnostic-check")
@@ -216,7 +219,7 @@ pipeline test_fence_mode_and_ownership(harness: Harness, task) {
 // inside this gate: before fence_strip_title, the longer info string missed the
 // exact matches and the block was checked by nobody.
 @test
-pipeline test_fence_title_does_not_escape_the_gate(harness: Harness, task) {
+pipeline test_fence_title_does_not_escape_the_gate(harness: Harness, task: unknown) {
   assert_eq(fence_mode("harn title=\"example.harn\""), "parse")
   assert_eq(fence_mode("harn,check title=\"example.harn\""), "check")
   assert_eq(fence_mode("harn-prompt title=\"review.harn.prompt\""), "prompt")
@@ -236,7 +239,7 @@ pipeline test_fence_title_does_not_escape_the_gate(harness: Harness, task) {
 }
 
 @test
-pipeline test_mode_extension_and_argv(harness: Harness, task) {
+pipeline test_mode_extension_and_argv(harness: Harness, task: unknown) {
   // A prompt block must reach `harn lint` as a .harn.prompt file: the
   // extension is what routes it to the template parser rather than the
   // Harn parser.
@@ -256,7 +259,10 @@ pipeline test_mode_extension_and_argv(harness: Harness, task) {
 
 // --- generated diagnostic projection --------------------------------------
 @test
-pipeline test_decode_example_diagnostic_requires_one_bounded_finding(harness: Harness, task) {
+pipeline test_decode_example_diagnostic_requires_one_bounded_finding(
+  harness: Harness,
+  task: unknown,
+) {
   const source = "const value: string = 42\n"
   const envelope = json_stringify(
     {
@@ -328,7 +334,7 @@ pipeline test_decode_example_diagnostic_requires_one_bounded_finding(harness: Ha
 }
 
 @test
-pipeline test_decode_example_repairs_projects_registry_contract(harness: Harness, task) {
+pipeline test_decode_example_repairs_projects_registry_contract(harness: Harness, task: unknown) {
   const explanation = json_stringify(
     {
       repairs: [
@@ -348,7 +354,7 @@ pipeline test_decode_example_repairs_projects_registry_contract(harness: Harness
 
 // --- leading_ws_len / strip_indent ------------------------------------------
 @test
-pipeline test_leading_ws_len(harness: Harness, task) {
+pipeline test_leading_ws_len(harness: Harness, task: unknown) {
   assert_eq(leading_ws_len("no indent"), 0)
   assert_eq(leading_ws_len("  two"), 2)
   assert_eq(leading_ws_len("\ttab"), 1)
@@ -357,7 +363,7 @@ pipeline test_leading_ws_len(harness: Harness, task) {
 }
 
 @test
-pipeline test_strip_indent(harness: Harness, task) {
+pipeline test_strip_indent(harness: Harness, task: unknown) {
   assert_eq(strip_indent("  body", 2), "body")
   assert_eq(strip_indent("    nested", 2), "  nested")
   // Never strips past the whitespace a line actually has.
@@ -367,7 +373,7 @@ pipeline test_strip_indent(harness: Harness, task) {
 
 // --- md_base_name -----------------------------------------------------------
 @test
-pipeline test_md_base_name(harness: Harness, task) {
+pipeline test_md_base_name(harness: Harness, task: unknown) {
   assert_eq(md_base_name("docs/src/dev/testing.md"), "testing")
   assert_eq(md_base_name("plain.md"), "plain")
   assert_eq(md_base_name("docs/src/noext"), "noext")
@@ -375,20 +381,20 @@ pipeline test_md_base_name(harness: Harness, task) {
 
 // --- indent_output ----------------------------------------------------------
 @test
-pipeline test_indent_output(harness: Harness, task) {
+pipeline test_indent_output(harness: Harness, task: unknown) {
   assert_eq(indent_output("a\nb\n"), ["      | a", "      | b"])
   assert_eq(indent_output(""), [])
 }
 
 // --- rel_path ---------------------------------------------------------------
 @test
-pipeline test_rel_path(harness: Harness, task) {
+pipeline test_rel_path(harness: Harness, task: unknown) {
   assert_eq(rel_path("/r/./docs/src/a.md"), "docs/src/a.md")
 }
 
 // --- duplicate_leading_args -------------------------------------------------
 @test
-pipeline test_duplicate_leading_args_flags_repeated_receiver(harness: Harness, task) {
+pipeline test_duplicate_leading_args_flags_repeated_receiver(harness: Harness, task: unknown) {
   const snippet = "pipeline main(harness: Harness) {\n"
     + "  const r = agent_loop(harness,\n"
     + "    harness,\n"
@@ -403,14 +409,14 @@ pipeline test_duplicate_leading_args_flags_repeated_receiver(harness: Harness, t
 }
 
 @test
-pipeline test_duplicate_leading_args_flags_same_line_form(harness: Harness, task) {
+pipeline test_duplicate_leading_args_flags_same_line_form(harness: Harness, task: unknown) {
   const found = duplicate_leading_args("agent_loop(harness, harness, \"go\", nil)\n")
   assert_eq(found.count, 1)
   assert_eq(found[0].callee, "agent_loop")
 }
 
 @test
-pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness, task) {
+pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness, task: unknown) {
   const snippet = "pipeline main(harness: Harness) {\n"
     + "  const r = agent_loop(harness,\n"
     + "    \"Triage ticket #42.\",\n"
@@ -423,11 +429,9 @@ pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness,
 
 // --- overlong_lines ---------------------------------------------------------
 @test
-pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task) {
+pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task: unknown) {
   // A line exactly at the limit is fine; one column past it is not. The
-  // off-by-one here is the whole contract, so pin both sides. 88 is an
-  // arbitrary limit argument, not the repo budget — the budget itself is
-  // pinned by test_overlong_lines_pins_the_repo_budget below.
+  // off-by-one here is the whole contract, so pin both sides.
   const at_limit = "x".repeat(88)
   const over = "x".repeat(89)
   assert_eq(overlong_lines(at_limit + "\n", 88), [])
@@ -439,7 +443,7 @@ pipeline test_overlong_lines_boundary_is_exclusive(harness: Harness, task) {
 }
 
 @test
-pipeline test_overlong_lines_pins_the_repo_budget(harness: Harness, task) {
+pipeline test_overlong_lines_pins_the_repo_budget(harness: Harness, task: unknown) {
   // The published budget is 74 columns, derived from the rendered article
   // column (max-w-3xl minus padding and border = 654px of code text, at
   // JetBrains Mono 13.6px whose advance is 8.734px). A 74-column line must
@@ -453,13 +457,13 @@ pipeline test_overlong_lines_pins_the_repo_budget(harness: Harness, task) {
 }
 
 @test
-pipeline test_overlong_lines_ignores_trailing_whitespace(harness: Harness, task) {
+pipeline test_overlong_lines_ignores_trailing_whitespace(harness: Harness, task: unknown) {
   // Trailing blanks cost the reader nothing, so they must not trip the budget.
   assert_eq(overlong_lines("x".repeat(88) + "    \n", 88), [])
 }
 
 @test
-pipeline test_overlong_lines_reports_every_offender(harness: Harness, task) {
+pipeline test_overlong_lines_reports_every_offender(harness: Harness, task: unknown) {
   const md = "ok\n" + "y".repeat(90) + "\nfine\n" + "z".repeat(95) + "\n"
   const found = overlong_lines(md, 88)
   assert_eq(found.count, 2)
@@ -468,7 +472,7 @@ pipeline test_overlong_lines_reports_every_offender(harness: Harness, task) {
 }
 
 @test
-pipeline test_ignored_block_still_carries_content(harness: Harness, task) {
+pipeline test_ignored_block_still_carries_content(harness: Harness, task: unknown) {
   // An ```harn,ignore block is exempt from type checking, never from the
   // reading budget: it still renders, so extract_blocks must hand back its
   // body for the width pass.

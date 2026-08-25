@@ -18,7 +18,7 @@ import { estimate_text_tokens } from "std/llm/budget"
 import { with_prompt_rewrite } from "std/llm/handlers"
 import { safe_call } from "std/llm/safe"
 
-fn __copy_llm_option(current, opts, key) {
+fn __copy_llm_option(current: dict, opts: dict, key: any) {
   let out = current
   if contains(opts.keys(), key) {
     out[key] = opts[key]
@@ -26,7 +26,7 @@ fn __copy_llm_option(current, opts, key) {
   return out
 }
 
-fn __llm_options(options) {
+fn __llm_options(options: dict?) {
   const opts = options ?? {}
   if type_of(opts) != "dict" {
     throw "std/llm/refine: options must be a dict"
@@ -47,7 +47,7 @@ fn __llm_options(options) {
   return out
 }
 
-fn __string_values(value) {
+fn __string_values(value: string | list | nil) {
   if value == nil {
     return []
   }
@@ -67,23 +67,23 @@ fn __string_values(value) {
   return out
 }
 
-fn __configured_proposals(options) {
+fn __configured_proposals(options: dict?) {
   return __string_values((options ?? {})?.instruction_proposals)
 }
 
-fn __proposal_prompt(base_prompt, count) {
+fn __proposal_prompt(base_prompt: any, count: int) {
   return "Given this base prompt, propose "
     + to_string(count)
     + " concise improved instruction variants as JSON {\"instructions\": [string, ...]}.\n\nBase prompt:\n"
     + base_prompt
 }
 
-fn __legacy_refine_meta_prompt(base_prompt) {
+fn __legacy_refine_meta_prompt(base_prompt: string) {
   return "Rewrite the following prompt to be clearer, more specific, and easier for an LLM to follow. Return JSON {\"prompt\": string, \"notes\": string}.\n\nPrompt:\n"
     + base_prompt
 }
 
-fn __auto_target_size(est_tokens) {
+fn __auto_target_size(est_tokens: int) {
   if est_tokens <= 60 {
     return "small"
   }
@@ -93,7 +93,7 @@ fn __auto_target_size(est_tokens) {
   return "large"
 }
 
-fn __target_size_clause(target_size) {
+fn __target_size_clause(target_size: string) {
   if target_size == "small" {
     return "<= 80 tokens (under ~320 characters)"
   }
@@ -106,7 +106,7 @@ fn __target_size_clause(target_size) {
   return "a similar size to the original"
 }
 
-fn __style_clause(style) {
+fn __style_clause(style: string) {
   if style == "imperative" {
     return "imperative"
   }
@@ -119,7 +119,7 @@ fn __style_clause(style) {
   return "concise"
 }
 
-fn __bullet_list(prefix, items) {
+fn __bullet_list(prefix: string, items: string | bytes | list | dict | set | range | nil) {
   if type_of(items) != "list" || len(items) == 0 {
     return ""
   }
@@ -130,7 +130,13 @@ fn __bullet_list(prefix, items) {
   return prefix + "\n" + join(lines, "\n")
 }
 
-fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
+fn __build_meta_prompt(
+  user_prompt: string,
+  style: string,
+  target_size: string,
+  keep: string | bytes | list | dict | set | range | nil,
+  strip: string | bytes | list | dict | set | range | nil,
+) {
   const style_clause = __style_clause(style)
   const size_clause = __target_size_clause(target_size)
   const keep_block = __bullet_list("- Keep verbatim:", keep)
@@ -168,7 +174,7 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
   return join(lines, "\n")
 }
 
-fn __split_refined_and_diff(text) {
+fn __split_refined_and_diff(text: string) {
   const s = to_string(text)
   const marker = "DIFF: "
   if !contains(s, marker) {
@@ -190,7 +196,7 @@ fn __split_refined_and_diff(text) {
   return {refined: refined_part, diff_summary: diff_part}
 }
 
-fn __cache_key(user_prompt, style, target_size) {
+fn __cache_key(user_prompt: string, style: any, target_size: any) {
   return sha256(to_string(user_prompt) + "::" + style + "::" + target_size)
 }
 
@@ -220,7 +226,7 @@ fn __cache_key(user_prompt, style, target_size) {
  * session dict through subsequent calls; Harn does not currently support
  * out-of-closure mutation of session state.
  */
-fn __refine_prompt_dict(llm: HarnessLlm, opts) {
+fn __refine_prompt_dict(llm: HarnessLlm, opts: dict?) {
   if type_of(opts) != "dict" {
     throw "refine_prompt: opts must be a dict"
   }
@@ -307,7 +313,7 @@ fn __refine_prompt_dict(llm: HarnessLlm, opts) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn refine_prompt(llm: HarnessLlm, input, options = nil) {
+pub fn refine_prompt(llm: HarnessLlm, input: any, options: dict? = nil) {
   if type_of(input) == "dict" {
     return __refine_prompt_dict(llm, input)
   }
@@ -341,7 +347,7 @@ pub fn refine_prompt(llm: HarnessLlm, input, options = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn propose_instructions(llm: HarnessLlm, base_prompt, options = nil) {
+pub fn propose_instructions(llm: HarnessLlm, base_prompt: any, options: dict? = nil) {
   if type_of(base_prompt) != "string" {
     throw "propose_instructions: base_prompt must be a string"
   }
@@ -395,7 +401,7 @@ pub fn propose_instructions(llm: HarnessLlm, base_prompt, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn refine_caller(llm: HarnessLlm, next, refine_opts = nil) {
+pub fn refine_caller(llm: HarnessLlm, next: any, refine_opts: any = nil) {
   const base_opts = if type_of(refine_opts) == "dict" {
     refine_opts
   } else {

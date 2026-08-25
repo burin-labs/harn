@@ -5,12 +5,12 @@ import "std/triggers"
  * on a matching harness.channels.append(...). The handler echoes the payload to a
  * separate channel so the test can observe the dispatch synchronously.
  */
-fn handle_channel(harness: Harness, event) {
+fn handle_channel(harness: Harness, event: dict) {
   const payload = event.provider_payload
   harness.channels.append("ch.basic.fired", {name: payload.name, repo: payload.payload?.repo})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const handle: TriggerHandle = harness.runtime.trigger_register(

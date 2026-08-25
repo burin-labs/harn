@@ -3,7 +3,7 @@
  * but taking only 2 materializes 2 elements. Single-pass semantics are
  * preserved — a second drain of the same iter yields only what remains.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   harness.stdio.log(iter(xs).map({ x -> x * 10 }).take(2).to_list())
   harness.stdio.log(iter(xs).map({ x -> x * 10 }).filter({ x -> x > 30 }).take(3).to_list())

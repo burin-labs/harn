@@ -5,6 +5,7 @@ use harn_fmt::{format_source_opts, line_width_violations, FmtOptions};
 use harn_parser::DiagnosticCode as Code;
 use serde::Serialize;
 
+use crate::commands::declares_expected_invalid;
 use crate::json_envelope::{JsonEnvelope, JsonError};
 
 pub(crate) const FMT_SCHEMA_VERSION: u32 = 1;
@@ -28,7 +29,6 @@ pub(crate) struct FmtFileReport {
 pub(crate) enum FmtFileStatus {
     Formatted,
     AlreadyFormatted,
-    #[allow(dead_code)]
     Skipped,
     Error,
 }
@@ -158,6 +158,18 @@ fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport
 
     let formatted = match format_source_opts(&source, opts) {
         Ok(formatted) => formatted,
+        // A fixture that declares its own unparseability is not drift, and the
+        // formatter has nothing to say about it. Only the parse failure is
+        // excused: a declared-invalid fixture that parses is formatted like any
+        // other file, which is why this fork lives here and not in the walk.
+        Err(_) if declares_expected_invalid(Path::new(path)) => {
+            return FmtFileReport {
+                path: path.to_string(),
+                status: FmtFileStatus::Skipped,
+                diff_lines_changed: 0,
+                diagnostics: Vec::new(),
+            };
+        }
         Err(error) => return fmt_error(path, "format", format!("{path}: {error}")),
     };
 
@@ -253,6 +265,22 @@ fn print_text_report(report: &FmtReport) {
             FmtFileStatus::AlreadyFormatted | FmtFileStatus::Skipped => {}
         }
     }
+    // Say what was left alone, in the same words `harn fix` uses. A silent skip
+    // is indistinguishable from a fixture the walk never reached.
+    let declared_invalid: Vec<&FmtFileReport> = report
+        .files
+        .iter()
+        .filter(|file| matches!(file.status, FmtFileStatus::Skipped))
+        .collect();
+    if !declared_invalid.is_empty() {
+        eprintln!(
+            "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
+            declared_invalid.len()
+        );
+        for file in declared_invalid {
+            eprintln!("  {}", file.path);
+        }
+    }
     // `--check` drift is always auto-fixable by running the formatter in
     // write mode; point the user at it. In write mode these files get status
     // `Formatted` (not `Error`/`FormatterWouldReformat`), so the hint stays
@@ -339,5 +367,88 @@ mod tests {
         assert_eq!(file.diagnostics[0].code, "line_width");
         assert!(file.diagnostics[0].message.contains("maximum 20"));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    }
+
+    /// The unparseable source both fixture tests share, so the only difference
+    /// between them is whether a sibling `.error` file declares it.
+    const UNPARSEABLE: &str = "fn t() { return\n";
+
+    #[test]
+    fn a_declared_invalid_fixture_is_skipped_rather_than_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing_close_brace.harn");
+        std::fs::write(&path, UNPARSEABLE).unwrap();
+        std::fs::write(
+            dir.path().join("missing_close_brace.error"),
+            "HARN-FMT-001\n",
+        )
+        .unwrap();
+
+        let report = fmt_targets_report(
+            &[dir.path().to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions::default(),
+        );
+
+        assert_eq!(report.summary.errors, 0, "declared fixture must not fail");
+        assert_eq!(report.summary.skipped, 1);
+        let file = report.files.first().expect("file report");
+        assert!(matches!(file.status, FmtFileStatus::Skipped));
+        assert!(file.diagnostics.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            UNPARSEABLE,
+            "a skipped fixture must be left byte-identical"
+        );
+    }
+
+    /// The negative control for the test above. Without this, that test would
+    /// also pass if the fix had suppressed every parse failure, which is the
+    /// one outcome the declaration must not buy.
+    #[test]
+    fn an_undeclared_parse_failure_still_fails_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("corrupt.harn");
+        std::fs::write(&path, UNPARSEABLE).unwrap();
+
+        let report = fmt_targets_report(
+            &[dir.path().to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions::default(),
+        );
+
+        assert_eq!(report.summary.errors, 1);
+        assert_eq!(report.summary.skipped, 0);
+        let file = report.files.first().expect("file report");
+        assert!(matches!(file.status, FmtFileStatus::Error));
+        assert_eq!(file.diagnostics[0].code, "format");
+    }
+
+    /// The declaration excuses a parse failure, not the file. A fixture that
+    /// parses is still the formatter's business — `conformance/errors` carries
+    /// runtime-error fixtures that are perfectly well-formed source.
+    #[test]
+    fn a_declared_invalid_fixture_that_parses_is_still_formatted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("uncaught_throw.harn");
+        std::fs::write(&path, "fn t(){return 1}\n").unwrap();
+        std::fs::write(dir.path().join("uncaught_throw.error"), "HARN-RT-001\n").unwrap();
+
+        let report = fmt_targets_report(
+            &[dir.path().to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions::default(),
+        );
+
+        assert_eq!(
+            report.summary.skipped, 0,
+            "parseable fixture is not skipped"
+        );
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(report.summary.formatted, 1);
+        assert_ne!(
+            std::fs::read_to_string(&path).unwrap(),
+            "fn t(){return 1}\n"
+        );
     }
 }

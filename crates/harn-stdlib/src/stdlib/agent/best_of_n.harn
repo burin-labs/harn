@@ -15,7 +15,7 @@
  * select_callback falls through to a deterministic candidate. Best-of-N is thus
  * a safe overlay that degrades to plain single-attempt behavior.
  */
-fn __bon_clamp_int(value, lo, hi) {
+fn __bon_clamp_int(value: any, lo: int, hi: any) {
   const n = if type_of(value) == "int" {
     value
   } else {
@@ -51,7 +51,7 @@ fn __bon_clamp_int(value, lo, hi) {
  * @effects: []
  * @errors: []
  */
-pub fn best_of_n_candidates(opts) {
+pub fn best_of_n_candidates(opts: any) {
   const o = if type_of(opts) == "dict" {
     opts
   } else {

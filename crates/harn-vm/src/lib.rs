@@ -74,6 +74,18 @@ pub mod harness_net;
 pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
+
+/// Placement policy for child-interpreter subtasks.
+///
+/// Current-thread placement is the safe default. Embedders may scope an
+/// audited execution tree to worker placement when every reachable capability
+/// supports crossing a runtime thread boundary.
+pub mod subtask {
+    pub use crate::vm::subtask::{
+        placement, scope_placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV,
+        PLACEMENT_VALUES,
+    };
+}
 mod http;
 pub mod jsonrpc;
 pub(crate) mod limits;

@@ -5,17 +5,17 @@
 @trigger(github.check_failed)
 @handoff(target: review_captain, reason: "risky diff")
 @budget(daily_usd: 20, max_tokens: 100000)
-pub fn merge_captain(ctx) -> string {
+pub fn merge_captain(ctx: dict) -> string {
   return "persona:${ctx.autonomy}:${ctx.triggers[0]}"
 }
 
 @deprecated(since: "0.9", use: "merge_captain")
-pub fn legacy_merge_captain(ctx) -> string {
+pub fn legacy_merge_captain(ctx: dict) -> string {
   return "legacy:${ctx.autonomy}"
 }
 
 @test
-pipeline test_durable_persona_attributes(harness: Harness, task) {
+pipeline test_durable_persona_attributes(harness: Harness, task: unknown) {
   const legacy = {
     triggers: ["github.pr_opened", "github.check_failed"],
     tools: ["github", "ci", "linear"],

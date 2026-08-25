@@ -213,6 +213,178 @@ pub(super) fn synthesize_missing_capability_argument_repair(
     ))
 }
 
+pub(super) fn synthesize_unknown_type_validation(
+    span: Span,
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    source: &str,
+    program: &[harn_parser::SNode],
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    if !matches!(actual, TypeExpr::Named(name) if name == "unknown") {
+        return None;
+    }
+    let validation_span = nil_coalesce_left_span(program, span).unwrap_or(span);
+    let expression = source.get(validation_span.start..validation_span.end)?;
+    let schema = runtime_schema_for_type(expected)?;
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned("types/validate-unknown-value".to_string()),
+            summary: "Validate the unknown boundary value against the required static type"
+                .to_string(),
+            safety: RepairSafety::ScopeLocal,
+        },
+        vec![FixEdit {
+            span,
+            replacement: format!("schema_expect({expression}, {schema})"),
+        }],
+        RepairImpactWire::runtime_validation(validation_span != span),
+    ))
+}
+
+pub(super) fn synthesize_schema_witness_refinement(
+    span: Span,
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+    source: &str,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let TypeExpr::Applied { name, args } = expected else {
+        return None;
+    };
+    if name != "Schema"
+        || args.len() != 1
+        || !matches!(actual, TypeExpr::Named(name) if name == "dict")
+    {
+        return None;
+    }
+    let expression = source.get(span.start..span.end)?;
+    let witness = harn_parser::typechecker::format_type(&args[0]);
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned("types/refine-schema-witness".to_string()),
+            summary: "Refine a nominal schema witness with the dictionary constraint".to_string(),
+            safety: RepairSafety::ScopeLocal,
+        },
+        vec![FixEdit {
+            span,
+            replacement: format!("schema_refine(schema_of({witness}), {expression})"),
+        }],
+        RepairImpactWire::schema_refinement(),
+    ))
+}
+
+fn nil_coalesce_left_span(program: &[harn_parser::SNode], span: Span) -> Option<Span> {
+    let mut left_span = None;
+    harn_parser::visit::walk_program(program, &mut |node| {
+        if node.span == span {
+            if let harn_parser::Node::BinaryOp { op, left, .. } = &node.node {
+                if op == "??" {
+                    left_span = Some(left.span);
+                }
+            }
+        }
+    });
+    left_span
+}
+
+fn runtime_schema_for_type(expected: &TypeExpr) -> Option<String> {
+    match expected {
+        TypeExpr::Named(name) => match name.as_str() {
+            "string" | "int" | "float" | "bool" | "nil" | "dict" | "list" => {
+                Some(format!("{{type: \"{name}\"}}"))
+            }
+            "number" => Some("{union: [{type: \"int\"}, {type: \"float\"}]}".to_string()),
+            "any" | "unknown" | "never" | "closure" | "Harness" => None,
+            name if harn_builtin_meta::CapabilityId::from_type_name(name).is_some() => None,
+            name => Some(format!("schema_of({name})")),
+        },
+        TypeExpr::Union(members) => Some(format!(
+            "{{union: [{}]}}",
+            members
+                .iter()
+                .map(runtime_schema_for_type)
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        TypeExpr::Intersection(members) => Some(format!(
+            "{{all_of: [{}]}}",
+            members
+                .iter()
+                .map(runtime_schema_for_type)
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        TypeExpr::Shape(fields) => runtime_schema_for_shape(fields, None),
+        TypeExpr::OpenShape { fields, rests } => {
+            let [rest] = rests.as_slice() else {
+                return None;
+            };
+            runtime_schema_for_shape(fields, Some(rest))
+        }
+        TypeExpr::List(item) => Some(format!(
+            "{{type: \"list\", items: {}}}",
+            runtime_schema_for_type(item)?
+        )),
+        TypeExpr::DictType(key, value) if matches!(key.as_ref(), TypeExpr::Named(name) if name == "string") => {
+            Some(format!(
+                "{{type: \"dict\", additional_properties: {}}}",
+                runtime_schema_for_type(value)?
+            ))
+        }
+        TypeExpr::Applied { name, args } if name == "Option" && args.len() == 1 => Some(format!(
+            "{{union: [{}, {{type: \"nil\"}}]}}",
+            runtime_schema_for_type(&args[0])?
+        )),
+        TypeExpr::LitString(value) => Some(format!(
+            "{{type: \"string\", const: {}}}",
+            serde_json::to_string(value).ok()?
+        )),
+        TypeExpr::LitInt(value) => Some(format!("{{type: \"int\", const: {value}}}")),
+        TypeExpr::Tuple(_)
+        | TypeExpr::DictType(_, _)
+        | TypeExpr::Iter(_)
+        | TypeExpr::Generator(_)
+        | TypeExpr::Stream(_)
+        | TypeExpr::Owned(_)
+        | TypeExpr::Applied { .. }
+        | TypeExpr::FnType { .. }
+        | TypeExpr::Never => None,
+    }
+}
+
+fn runtime_schema_for_shape(
+    fields: &[harn_parser::ShapeField],
+    rest: Option<&TypeExpr>,
+) -> Option<String> {
+    let properties = fields
+        .iter()
+        .map(|field| {
+            Some(format!(
+                "{}: {}",
+                serde_json::to_string(&field.name).ok()?,
+                runtime_schema_for_type(&field.type_expr)?
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let required = fields
+        .iter()
+        .filter(|field| !field.optional)
+        .map(|field| serde_json::to_string(&field.name).ok())
+        .collect::<Option<Vec<_>>>()?;
+    let additional = match rest {
+        None => "false".to_string(),
+        Some(TypeExpr::Named(name)) if name == "dict" => "true".to_string(),
+        Some(TypeExpr::DictType(key, value)) if matches!(key.as_ref(), TypeExpr::Named(name) if name == "string") => {
+            runtime_schema_for_type(value)?
+        }
+        Some(_) => return None,
+    };
+    Some(format!(
+        "{{type: \"dict\", properties: {{{}}}, required: [{}], additional_properties: {additional}}}",
+        properties.join(", "),
+        required.join(", ")
+    ))
+}
+
 pub(super) fn synthesize_missing_zero_arg_capability_repair(
     call_span: Span,
     expected: &TypeExpr,

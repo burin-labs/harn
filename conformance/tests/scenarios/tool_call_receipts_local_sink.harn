@@ -22,7 +22,7 @@ fn receipt_tools() {
   )
 }
 
-fn run_receipt_agent(harness: Harness, session, audit_options) {
+fn run_receipt_agent(harness: Harness, session: any, audit_options: dict) {
   return with_llm_script(
     harness.llm,
     [

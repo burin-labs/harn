@@ -1,6 +1,6 @@
 use harn_vm::value::VmError;
 
-fn run_on_multithread(source: &str) -> Result<Vec<String>, String> {
+fn run_with_worker_placement(source: &str) -> Result<Vec<String>, String> {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source)?;
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -8,14 +8,17 @@ fn run_on_multithread(source: &str) -> Result<Vec<String>, String> {
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    let output = rt.block_on(async {
-        let mut vm = harn_vm::Vm::new();
-        harn_vm::register_vm_stdlib(&mut vm);
-        vm.execute(&chunk)
-            .await
-            .map_err(|error: VmError| format!("{error:?}"))?;
-        Ok::<_, String>(vm.output().to_string())
-    })?;
+    let output = rt.block_on(harn_vm::subtask::scope_placement(
+        harn_vm::subtask::SubtaskPlacement::Worker,
+        async {
+            let mut vm = harn_vm::Vm::new();
+            harn_vm::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk)
+                .await
+                .map_err(|error: VmError| format!("{error:?}"))?;
+            Ok::<_, String>(vm.output().to_string())
+        },
+    ))?;
     Ok(output
         .lines()
         .filter_map(|line| line.strip_prefix("[harn] "))
@@ -25,11 +28,11 @@ fn run_on_multithread(source: &str) -> Result<Vec<String>, String> {
 
 #[test]
 fn pool_workers_run_on_multithread_runtime_without_localset() {
-    let lines = run_on_multithread(
+    let lines = run_with_worker_placement(
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "multithread-no-localset", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
@@ -54,11 +57,11 @@ pipeline main(harness: Harness, task) {
 
 #[test]
 fn pool_worker_inherits_registry_for_nested_waits() {
-    let lines = run_on_multithread(
+    let lines = run_with_worker_placement(
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "worker-nested-wait", max_concurrent: 2})
   const inner = pool.submit({ -> "inner-ok" })
   const outer = pool.submit({ ->
@@ -80,11 +83,11 @@ pipeline main(harness: Harness, task) {
 
 #[test]
 fn host_managed_pool_scope_diagnostic_is_public() {
-    let err = run_on_multithread(
+    let err = run_with_worker_placement(
         r#"
 import { pool_create } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   pool_create(harness.agent, {name: "tenant-backed", scope: "tenant"})
 }
 "#,

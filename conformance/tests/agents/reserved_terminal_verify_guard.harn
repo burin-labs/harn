@@ -45,7 +45,7 @@ fn build_tools() {
   return tools
 }
 
-fn count_events(events, kind) {
+fn count_events(events: list, kind: string) {
   let n = 0
   for event in events {
     if event.type == kind {
@@ -55,7 +55,7 @@ fn count_events(events, kind) {
   return n
 }
 
-fn has_phase(events, phase) {
+fn has_phase(events: list, phase: string) {
   for event in events {
     if event.type == "reserved_terminal_verify" && (event?.payload?.phase ?? "") == phase {
       return true
@@ -71,7 +71,12 @@ fn has_phase(events, phase) {
 // survives the nested agent_loop execution, unlike a closure-captured counter):
 // with a low value the repair lands within the reserve (case 1), with a value
 // the reserve can never reach the repair never lands (case 2).
-fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iteration) {
+fn run_scenario(
+  harness: Harness,
+  reserved_on: bool,
+  reserve_iterations: int,
+  green_at_iteration: int,
+) {
   return with_llm_script(
     harness.llm,
     [
@@ -128,7 +133,7 @@ fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iter
 
 // A terminal verify provably RAN when the guard emitted either a verify outcome
 // phase (the closure was invoked and its verdict surfaced).
-fn terminal_verify_ran(events) -> bool {
+fn terminal_verify_ran(events: list) -> bool {
   return has_phase(events, "verify_passed") || has_phase(events, "verify_failed")
 }
 

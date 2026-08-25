@@ -5,7 +5,7 @@ import { llm_call_options } from "std/llm/options"
 import { structured_output_preface } from "std/llm/prompts"
 import { __wrap_llm_result } from "std/llm/safe"
 
-fn __dispatch_reject_removed_options(options) {
+fn __dispatch_reject_removed_options(options: dict?) {
   const removed = __llm_call_option_registry().removed
   for key in keys(options ?? {}) {
     if removed[key] != nil {
@@ -14,7 +14,7 @@ fn __dispatch_reject_removed_options(options) {
   }
 }
 
-fn __dispatch_messages_include_tool_result(messages) {
+fn __dispatch_messages_include_tool_result(messages: list) {
   if type_of(messages) != "list" {
     return false
   }
@@ -27,7 +27,7 @@ fn __dispatch_messages_include_tool_result(messages) {
   return false
 }
 
-fn __dispatch_error_field(err, key, fallback) {
+fn __dispatch_error_field(err: any, key: string, fallback: string) {
   if type_of(err) == "dict" {
     const value = err[key]
     if value != nil {
@@ -37,7 +37,7 @@ fn __dispatch_error_field(err, key, fallback) {
   return fallback
 }
 
-fn __dispatch_provider_error(err, llm_opts) {
+fn __dispatch_provider_error(err: any, llm_opts: dict) {
   const typed = if type_of(err) == "dict" {
     err
   } else {
@@ -66,7 +66,7 @@ fn __dispatch_provider_error(err, llm_opts) {
     }
 }
 
-fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts) {
+fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts: dict) {
   const session_id = to_string(llm_opts?.session_id ?? "")
   if session_id == "" {
     return nil
@@ -87,7 +87,7 @@ fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts) {
   return nil
 }
 
-fn __dispatch_structured_output_schema(llm_opts) {
+fn __dispatch_structured_output_schema(llm_opts: dict) -> dict? {
   const output = llm_opts?.output
   if output == nil || output == "text" {
     return nil
@@ -104,7 +104,12 @@ fn __dispatch_structured_output_schema(llm_opts) {
   return nil
 }
 
-fn __dispatch_prompt_mode_request(harness: Harness, message, llm_opts, schema) -> dict {
+fn __dispatch_prompt_mode_request(
+  harness: Harness,
+  message: any,
+  llm_opts: dict,
+  schema: dict,
+) -> dict {
   const prompt = structured_output_preface(
     harness.fs,
     schema,
@@ -120,7 +125,7 @@ fn __dispatch_prompt_mode_request(harness: Harness, message, llm_opts, schema) -
   }
 }
 
-fn __dispatch_validate_caller_result(result) {
+fn __dispatch_validate_caller_result<T>(result: T) {
   if type_of(result) != "dict" {
     throw "agent_loop: llm_caller must return a dict; got " + type_of(result)
   }
@@ -143,7 +148,7 @@ fn __dispatch_validate_caller_result(result) {
  * @effects: []
  * @errors: []
  */
-pub fn __dispatch_default_result(result, llm_opts) -> dict {
+pub fn __dispatch_default_result(result: any, llm_opts: dict) -> dict {
   const projected = __wrap_llm_result(result)
   if projected.ok {
     return projected
@@ -152,7 +157,7 @@ pub fn __dispatch_default_result(result, llm_opts) -> dict {
   return projected + {stop_reason: projected.status, error: normalized}
 }
 
-fn __dispatch_default(llm: HarnessLlm, message, turn_system, llm_opts) {
+fn __dispatch_default(llm: HarnessLlm, message: any, turn_system: any, llm_opts: any) {
   // Streaming and non-streaming paths intentionally return the same normalized
   // result so downstream tool dispatch does not depend on rendering mode.
   const on_delta = llm_opts?._on_delta
@@ -174,7 +179,12 @@ fn __dispatch_default(llm: HarnessLlm, message, turn_system, llm_opts) {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-fn __dispatch_invoke_once(harness: Harness, message, turn_system, llm_opts) -> dict {
+fn __dispatch_invoke_once(
+  harness: Harness,
+  message: any,
+  turn_system: any,
+  llm_opts: dict,
+) -> dict {
   const call_opts = llm_call_options(llm_opts)
   const caller = llm_opts?._llm_caller
   if caller == nil {
@@ -234,7 +244,7 @@ fn __dispatch_invoke_once(harness: Harness, message, turn_system, llm_opts) -> d
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dict {
+pub fn agent_invoke_llm(harness: Harness, message: any, turn_system: any, llm_opts: dict) -> dict {
   __dispatch_reject_removed_options(llm_opts)
   __dispatch_emit_call_start(harness.agent, llm_opts)
   const first = __dispatch_invoke_once(harness, message, turn_system, llm_opts)

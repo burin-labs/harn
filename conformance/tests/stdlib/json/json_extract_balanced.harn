@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Should extract first balanced JSON object, not span to last }
   const mixed = "The result was {\"a\": 1}. Later text {\"b\": 2}"
   const extracted = json_extract(mixed)

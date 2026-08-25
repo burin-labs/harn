@@ -131,7 +131,7 @@ fn path_artifact_digest(fs: HarnessFs, package_name: string) -> string {
   return "sha256:" + sha256(joined)
 }
 
-fn artifact_digest(fs: HarnessFs, package) -> string {
+fn artifact_digest(fs: HarnessFs, package: dict) -> string {
   const checksum = package?.checksum ?? ""
   if checksum != "" {
     return "sha256:" + checksum
@@ -159,7 +159,7 @@ fn corpus_digest(fs: HarnessFs, corpus_text: string, rows: list) -> string {
 pub type GrammarDrift = {language: string, from: string, to: string}
 
 /** What a drift report compares: the resolved version and the exact artifact. */
-fn grammar_identity(row) -> string {
+fn grammar_identity(row: dict) -> string {
   const package = row?.package
   return "${package?.version ?? "?"} (${package?.artifact_digest ?? "?"})"
 }

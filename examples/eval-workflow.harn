@@ -7,7 +7,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/eval-workflow.harn
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log("=== Eval Workflow ===")
   // Check baseline usage before any LLM calls
   const usage_before = harness.obs.llm_usage()

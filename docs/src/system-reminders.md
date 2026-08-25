@@ -172,23 +172,25 @@ events that support transcript mutation. A hook may return
 effect list.
 
 ```harn,ignore
-register_tool_hook({
-  pattern: "read_file",
-  post: { ctx ->
-    if ctx.result.truncated {
-      return {
-        reminder: {
-          body: "The file read was truncated; inspect the specific range"
-            + " before editing.",
-          tags: ["truncation"],
-          dedupe_key: "read_file:truncated",
-          ttl_turns: 1,
-          propagate: "none",
-        },
+fn install_truncation_hook(harness: Harness) {
+  harness.tools.register_hook({
+    pattern: "read_file",
+    post: { ctx ->
+      if ctx.result.truncated {
+        return {
+          reminder: {
+            body: "The file read was truncated; inspect the"
+              + " specific range before editing.",
+            tags: ["truncation"],
+            dedupe_key: "read_file:truncated",
+            ttl_turns: 1,
+            propagate: "none",
+          },
+        }
       }
-    }
-  },
-})
+    },
+  })
+}
 ```
 
 Worker lifecycle events are observational and reject reminder effects with
@@ -198,43 +200,46 @@ persona hook.
 ### From a provider
 
 `agent_loop(harness, ...)` evaluates canonical reminder providers by default.
-Register a custom provider with `register_reminder_provider({id,
-subscribes_to, evaluate})`. The `evaluate` closure receives
+Register a custom provider with
+`harness.agent.register_reminder_provider({id, subscribes_to, evaluate})`. The `evaluate` closure receives
 `{event, session, session_id, payload, options, config}` and may return
 `nil`, a bare reminder spec, a `{reminder: {...}}` effect, or a list of
 effects.
 
 ```harn,ignore
-register_reminder_provider({
-  id: "workspace_guard",
-  subscribes_to: ["session_idle"],
-  evaluate: { ctx ->
-    if ctx.config?.enabled == false {
-      return nil
-    }
-    return {
-      reminder: {
-        body: "Workspace may have changed while idle; re-check"
-          + " touched files.",
-        tags: ["workspace"],
-        dedupe_key: "workspace:idled",
-        ttl_turns: 1,
-        propagate: "session",
-      },
-    }
-  },
-})
-
-agent_loop(harness, task, system, {
-  reminders: {
-    config: {
-      workspace_guard: {enabled: true},
+fn install_reminder_provider(harness: Harness) {
+  harness.agent.register_reminder_provider({
+    id: "workspace_guard",
+    subscribes_to: ["session_idle"],
+    evaluate: { ctx ->
+      if ctx.config?.enabled == false {
+        return nil
+      }
+      return {
+        reminder: {
+          body: "Workspace may have changed while idle; re-check"
+            + " touched files.",
+          tags: ["workspace"],
+          dedupe_key: "workspace:idled",
+          ttl_turns: 1,
+          propagate: "session",
+        },
+      }
     },
-  },
-})
+  })
+
+  agent_loop(harness, task, system, {
+    reminders: {
+      config: {
+        workspace_guard: {enabled: true},
+      },
+    },
+  })
+}
 ```
 
-`clear_reminder_providers()` removes user-defined providers, mainly for
+`harness.agent.clear_reminder_providers()` removes user-defined providers,
+mainly for
 tests. Canonical stdlib providers remain available through `agent_loop`
 unless disabled with reminder options.
 

@@ -13,7 +13,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * and assert the feedback surfaces on the next turn's user messages.
  * That proves the subscriber fired live (not on post-turn replay).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let registry = tool_registry()
   registry = tool_define(
     registry,

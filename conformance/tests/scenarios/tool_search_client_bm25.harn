@@ -16,7 +16,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *      land with the Anthropic-compatible shape (tagged `mode:
  *      "client"` so replayers can distinguish path-1 from path-2).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let registry = tool_registry()
   registry = tool_define(
     registry,

@@ -8,7 +8,7 @@ use super::harness::*;
 #[test]
 fn test_if_else_has_lexical_block_scope() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 const x = "outer"
 if true {
   const x = "inner"
@@ -26,7 +26,7 @@ harness.stdio.log(x)
 #[test]
 fn test_loop_and_catch_bindings_are_block_scoped() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 const label = "outer"
 for item in [1, 2] {
   const label = "loop ${item}"

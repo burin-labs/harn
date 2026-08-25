@@ -144,7 +144,10 @@ pub fn external_action_error(
   return {kind: kind, code: code, message: message, retryable: retryable}
 }
 
-fn __external_action_non_empty(value, field: string) -> Result<string, ExternalActionError> {
+fn __external_action_non_empty(
+  value: string?,
+  field: string,
+) -> Result<string, ExternalActionError> {
   const text = trim(to_string(value ?? ""))
   if text == "" {
     return Err(external_action_error("invalid_intent", "missing_" + field, field + " is required"))
@@ -170,7 +173,7 @@ fn __external_action_actor_result(
 }
 
 fn __external_action_environment_result(
-  raw,
+  raw: string?,
 ) -> Result<ExternalActionEnvironment, ExternalActionError> {
   const environment = lowercase(trim(to_string(raw ?? "")))
   if environment == "mock" || environment == "test" || environment == "live" {

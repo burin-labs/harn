@@ -3,7 +3,7 @@
  * covariant (return) position, which is consistent with the
  * declared variance.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   type Reader<out T> = fn() -> T
   harness.stdio.println("ok")
 }

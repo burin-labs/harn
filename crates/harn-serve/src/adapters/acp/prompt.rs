@@ -23,7 +23,7 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        let (cancellation, current_mode_id, inject_state, session_budget) =
+        let (cancellation, current_mode_id, inject_state, tool_call_cancellations, session_budget) =
             match self.sessions.get_mut(&session_id) {
                 Some(s) => {
                     s.cancellation.begin_prompt();
@@ -32,6 +32,7 @@ impl AcpServer {
                         s.cancellation.clone(),
                         s.current_mode_id.clone(),
                         s.inject_state.clone(),
+                        s.concurrent_control.tool_call_cancellations.clone(),
                         s.budget.clone(),
                     )
                 }
@@ -180,16 +181,19 @@ impl AcpServer {
         });
         let bridge_output = output.clone();
         let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
                 bridge.pending.clone(),
-                cancellation.cancelled.clone(),
-                cancellation.notify.clone(),
                 Arc::new(move |line| {
                     bridge_output.write_line(line);
                     Ok(())
                 }),
                 bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-                Some(inject_state),
+                harn_vm::bridge::HostBridgeControlState::new(
+                    cancellation.cancelled.clone(),
+                    cancellation.notify.clone(),
+                    inject_state,
+                    tool_call_cancellations,
+                ),
             ),
         );
         host_bridge.set_session_id(&bridge.session_id);

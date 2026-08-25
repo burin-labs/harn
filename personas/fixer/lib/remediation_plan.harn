@@ -26,7 +26,7 @@
  * list of plan ops and `fallbacks` lists atoms that could not be mapped
  * to a structural op (and the reason why).
  */
-pub fn plan_for_atoms(atoms) {
+pub fn plan_for_atoms(atoms: list?) {
   const input = atoms ?? []
   let plan = []
   let fallbacks = []
@@ -41,7 +41,7 @@ pub fn plan_for_atoms(atoms) {
   return {plan: plan, fallbacks: fallbacks}
 }
 
-fn _op_for_atom(atom) {
+fn _op_for_atom(atom: dict) {
   const kind = atom?.kind ?? ""
   const supports_ast = atom?.language_supports_ast ?? true
   if kind == "rewrite_node" && supports_ast {

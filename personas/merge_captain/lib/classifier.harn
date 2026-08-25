@@ -14,12 +14,12 @@ import {
 import { allowed_next, is_valid_transition, unknown_state } from "states"
 
 /** Result of classifying a single observation. */
-fn _result(state, action, reason, evidence) {
+fn _result(state: any, action: any, reason: string, evidence: dict) {
   return {state: state, action: action, reason: reason, evidence: evidence}
 }
 
 /** Classify an observation under a repo policy. */
-pub fn classify(observation, policy, prior_state) {
+pub fn classify(observation: any, policy: dict, prior_state: unknown) {
   const obs = observation
   // Terminal observations override anything we previously thought.
   if is_merged(obs) {
@@ -126,7 +126,7 @@ pub fn initial_prior() {
 }
 
 /** Sanity-check a classification against the legal-edge table. */
-pub fn verify(prior_state, classification) {
+pub fn verify(prior_state: any, classification: dict) {
   if !is_valid_transition(prior_state, classification.state) {
     return {
       ok: false,

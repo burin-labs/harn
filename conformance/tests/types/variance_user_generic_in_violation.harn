@@ -1,7 +1,7 @@
 // `in T` declares T contravariant, but the interface method uses T
 // as a return type (a covariant position) — must be rejected at the
 // declaration site.
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   interface Producer<in T> {
     fn next() -> T
   }

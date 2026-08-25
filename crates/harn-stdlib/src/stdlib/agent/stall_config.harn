@@ -171,7 +171,7 @@ pub const SOFT_PROGRESS_TOOLS = ["agent_progress"]
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
+pub fn __agent_stall_bool(value: any, fallback: bool, field: string) -> bool {
   if value == nil {
     return fallback
   }
@@ -181,7 +181,7 @@ pub fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
   throw "agent_loop: stall_diagnostics." + field + " must be a bool; got " + type_of(value)
 }
 
-pub fn __agent_stall_list(value, field: string) -> list {
+pub fn __agent_stall_list(value: list?, field: string) -> list {
   if value == nil {
     return []
   }
@@ -191,14 +191,14 @@ pub fn __agent_stall_list(value, field: string) -> list {
   throw "agent_loop: stall_diagnostics." + field + " must be a list; got " + type_of(value)
 }
 
-pub fn __agent_stall_int(value, fallback: int, minimum: int) -> int {
+pub fn __agent_stall_int(value: any, fallback: int, minimum: int) -> int {
   if type_of(value) == "int" && value >= minimum {
     return value
   }
   return fallback
 }
 
-pub fn __agent_stall_repair_value(flat, nested, key: string) {
+pub fn __agent_stall_repair_value(flat: any, nested: any, key: string) -> any? {
   if flat[key] != nil {
     return flat[key]
   }
@@ -218,7 +218,7 @@ pub fn __agent_stall_repair_value(flat, nested, key: string) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_closure(value, field: string) {
+pub fn __agent_stall_closure(value: any, field: string) -> any? {
   if value == nil {
     return nil
   }
@@ -242,7 +242,7 @@ pub fn __agent_stall_closure(value, field: string) {
  */
 pub const __NO_NET_PROGRESS_PREDICATE_KEYS = ["hard_recurrence", "long_stall", "write_axis"]
 
-pub fn __agent_stall_predicates(value, field: string) -> dict {
+pub fn __agent_stall_predicates(value: any, field: string) -> dict {
   const defaults = {hard_recurrence: true, long_stall: true, write_axis: true}
   if value == nil {
     return defaults
@@ -270,7 +270,7 @@ pub fn __agent_stall_predicates(value, field: string) -> dict {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_opt_int(value, field: string) {
+pub fn __agent_stall_opt_int(value: any, field: string) -> int? {
   if value == nil {
     return nil
   }
@@ -319,7 +319,7 @@ pub fn __agent_stall_default_config() -> AgentStallConfig {
   }
 }
 
-pub fn __agent_stall_config(value) -> AgentStallConfig {
+pub fn __agent_stall_config(value: dict | bool | nil) -> AgentStallConfig {
   const defaults = __agent_stall_default_config()
   if value == nil {
     return defaults
@@ -335,17 +335,14 @@ pub fn __agent_stall_config(value) -> AgentStallConfig {
     throw "agent_loop: stall_diagnostics.repair_diagnostics must be a dict or nil; got "
       + type_of(repair_diagnostics)
   }
-  const {threshold = 3, max_feedback = 1} = value ?? {}
+  const threshold = value?.threshold
+  const max_feedback = value?.max_feedback
   const exempt_tools = if value?.exempt_tools != nil {
     __agent_stall_list(value.exempt_tools, "exempt_tools")
   } else {
     __agent_stall_list(value?.allow_repeated_tools, "allow_repeated_tools")
   }
-  const resolved_threshold = if type_of(threshold) == "int" && threshold >= 2 {
-    threshold
-  } else {
-    3
-  }
+  const resolved_threshold = __agent_stall_int(threshold, 3, 2)
   // The legacy `threshold` knob (N repeated identical calls) IS the same intent
   // as the same-observation condition, so when a caller sets it explicitly it
   // also drives `repeat_same_observation` for back-compat. Absent an explicit
@@ -359,11 +356,7 @@ pub fn __agent_stall_config(value) -> AgentStallConfig {
     enabled: __agent_stall_bool(value?.enabled, true, "enabled"),
     threshold: resolved_threshold,
     inject_feedback: __agent_stall_bool(value?.inject_feedback, true, "inject_feedback"),
-    max_feedback: if type_of(max_feedback) == "int" && max_feedback >= 0 {
-      max_feedback
-    } else {
-      1
-    },
+    max_feedback: __agent_stall_int(max_feedback, 1, 0),
     exempt_tools: exempt_tools,
     include_arguments: __agent_stall_bool(value?.include_arguments, false, "include_arguments"),
     repeat_same_observation: __agent_stall_int(

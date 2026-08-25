@@ -1950,7 +1950,7 @@ mod tests {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "question", {answer: "9"})
   const answer: int = harness.interaction.ask_user("Pick a number", {default: 0})
   harness.stdio.println(answer)
@@ -1988,7 +1988,7 @@ pipeline test(harness: Harness, task) {
                 reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "approval", [
     {approved: true, reviewer: "alice", reason: "ok"},
     {approved: true, reviewer: "bob", reason: "ship it"},
@@ -2028,7 +2028,7 @@ pipeline test(harness: Harness, task) {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let log = install_memory_for_current_thread(super::HITL_EVENT_LOG_QUEUE_DEPTH);
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "approval", {approved: true, reviewer: "alice", reason: "ok"})
   harness.interaction.request_approval("deploy production", {
     args: {environment: "prod"},
@@ -2073,7 +2073,7 @@ pipeline test(harness: Harness, task) {
                 reset_thread_local_state();
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "approval", {approved: false, reviewer: "alice", reason: "unsafe"})
   const denied = try {
     harness.interaction.request_approval("drop table", {reviewers: ["alice"]})
@@ -2105,7 +2105,7 @@ pipeline test(harness: Harness, task) {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "dual_control", [
     {approved: true, reviewer: "alice"},
     {approved: true, reviewer: "bob"},
@@ -2144,7 +2144,7 @@ pipeline test(harness: Harness, task) {
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "escalation", {accepted: true, reviewer: "lead", reason: "taking over"})
   const handle = harness.interaction.escalate_to("admin", "need override")
   harness.stdio.println(handle.status)
@@ -2208,7 +2208,7 @@ pipeline test(harness: Harness, task) {
                 let _guard = crate::agent_sessions::enter_current_session(session_id.clone());
 
                 let source = r#"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   host_mock("hitl", "question", {answer: "ok"})
   const answer: string = harness.interaction.ask_user("Are you sure?", {default: "no"})
   harness.stdio.println(answer)

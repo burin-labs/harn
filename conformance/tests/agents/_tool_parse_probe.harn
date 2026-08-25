@@ -138,7 +138,7 @@ pub fn native_registry() -> dict {
 }
 
 /** Print the observable outcome of one parse under `label`. */
-pub fn report(stdio: HarnessStdio, label: string, parsed) -> nil {
+pub fn report(stdio: HarnessStdio, label: string, parsed: dict) -> nil {
   stdio.println("# ${label}")
   stdio.println(
     "  calls=${len(parsed.tool_calls)} errors=${len(parsed.tool_parse_errors)} violations=${len(parsed.protocol_violations)} stray=${parsed.recovered_from_stray_count}",
@@ -159,7 +159,13 @@ pub fn report(stdio: HarnessStdio, label: string, parsed) -> nil {
 }
 
 /** Parse `text` through the canonical tagged/heredoc text grammar and report it. */
-pub fn probe(agent: HarnessAgent, stdio: HarnessStdio, label: string, text: string, tools) -> nil {
+pub fn probe(
+  agent: HarnessAgent,
+  stdio: HarnessStdio,
+  label: string,
+  text: string,
+  tools: any,
+) -> nil {
   return report(stdio, label, agent_parse_tool_calls(agent, text, tools, "text"))
 }
 
@@ -180,7 +186,7 @@ pub fn probe_canonical(
   stdio: HarnessStdio,
   label: string,
   text: string,
-  tools,
+  tools: any,
 ) -> nil {
   const parsed = agent_parse_tool_calls(agent, text, tools, "text")
   stdio.println("# ${label}")
@@ -197,7 +203,7 @@ pub fn probe_drops(
   stdio: HarnessStdio,
   label: string,
   text: string,
-  tools,
+  tools: any,
 ) -> nil {
   const parsed = agent_parse_tool_calls(agent, text, tools, "text")
   stdio.println("# ${label}")

@@ -16,7 +16,7 @@ fn every_ambient_shape_thread_local_is_cataloged() {
             || name.ends_with("_CTX")
     }
 
-    fn collect(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+    fn collect(dir: &std::path::Path, shaped: &mut BTreeSet<String>, all: &mut BTreeSet<String>) {
         for entry in std::fs::read_dir(dir).expect("read_dir src") {
             let path = entry.expect("dir entry").path();
             // Test-support thread-locals do not affect production task scope.
@@ -32,7 +32,7 @@ fn every_ambient_shape_thread_local_is_cataloged() {
                 continue;
             }
             if path.is_dir() {
-                collect(&path, out);
+                collect(&path, shaped, all);
             } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
                 let content = std::fs::read_to_string(&path).expect("read src file");
                 let mut pending_static: Option<String> = None;
@@ -43,8 +43,9 @@ fn every_ambient_shape_thread_local_is_cataloged() {
                         if line.contains("RefCell") {
                             if let Some(name) = pending_static.take() {
                                 if is_ambient_shape(&name) {
-                                    out.insert(name);
+                                    shaped.insert(name.clone());
                                 }
+                                all.insert(name);
                             }
                         }
                         continue;
@@ -65,8 +66,9 @@ fn every_ambient_shape_thread_local_is_cataloged() {
                     }
                     if line.contains("RefCell") {
                         if is_ambient_shape(&name) {
-                            out.insert(name);
+                            shaped.insert(name.clone());
                         }
+                        all.insert(name);
                     } else {
                         pending_static = Some(name);
                     }
@@ -76,14 +78,19 @@ fn every_ambient_shape_thread_local_is_cataloged() {
     }
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut discovered = BTreeSet::new();
-    collect(&src, &mut discovered);
+    // `shaped` drives the forcing function: a new ambient-shape thread-local
+    // must be classified. `all` drives the staleness check, so a catalog entry
+    // for a thread-local whose NAME is off-shape (a captured registry handle,
+    // say) is still caught when it is renamed or deleted.
+    let mut shaped = BTreeSet::new();
+    let mut all = BTreeSet::new();
+    collect(&src, &mut shaped, &mut all);
 
     let cataloged: BTreeSet<String> = AMBIENT_THREAD_LOCAL_CATALOG
         .iter()
         .map(|(name, _)| (*name).to_string())
         .collect();
-    let missing: Vec<_> = discovered.difference(&cataloged).cloned().collect();
+    let missing: Vec<_> = shaped.difference(&cataloged).cloned().collect();
     assert!(
         missing.is_empty(),
         "new ambient-shape thread-local(s) not classified in \
@@ -91,7 +98,7 @@ fn every_ambient_shape_thread_local_is_cataloged() {
          whether each must be Captured into AmbientExecutionScope or is safely Uncaptured."
     );
 
-    let stale: Vec<_> = cataloged.difference(&discovered).cloned().collect();
+    let stale: Vec<_> = cataloged.difference(&all).cloned().collect();
     assert!(
         stale.is_empty(),
         "AMBIENT_THREAD_LOCAL_CATALOG names thread-local(s) no longer in src: {stale:?}"
@@ -138,6 +145,15 @@ fn captured_catalog_matches_scope_fields() {
         "ACTIVE_EXECUTION_SCOPE_STACK",
         "RUN_EVENT_SINK_CONTEXT",
         "TRANSCRIPT_DIR_STACK",
+        "SUBTASK_PLACEMENT_CONTEXT",
+        "SECURITY_POLICY_STACK",
+        "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+        "REQUIRE_SSRF_GUARD_DEPTH",
+        "CUSTOM_PATTERNS",
+        "ACTIVE_EVENT_LOG",
+        "MCP_CALL_BUDGET",
+        "PG_QUERY_BUDGET",
+        "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
     ]);
     assert_eq!(
         captured, expected,

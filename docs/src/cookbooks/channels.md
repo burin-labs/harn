@@ -19,8 +19,6 @@ dependent repos subscribe to the release's
 `harn-release.shipped` event so they can rebase their queues.
 
 ```harn,ignore
-import { trigger_register } from "std/triggers"
-
 // --- harn-pr-agent ---
 pipeline pr_agent_on_merge(harness: Harness, pr) {
   harness.channels.append("pr.merged", {
@@ -33,7 +31,7 @@ pipeline pr_agent_on_merge(harness: Harness, pr) {
 
 // --- release agent ---
 pipeline release_agent_setup(harness: Harness) {
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "release-after-3-merges",
     kind: "channel.emit",
     provider: "channel",
@@ -61,7 +59,7 @@ pipeline release_agent_setup(harness: Harness) {
 
 // --- merge captains in dependent repos ---
 pipeline merge_captain_setup(harness: Harness) {
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "rebase-on-harn-release",
     kind: "channel.emit",
     provider: "channel",
@@ -95,12 +93,12 @@ tool hook); a batched trigger drops a reminder onto the same session
 when the counter hits 30.
 
 ```harn,ignore
-import { trigger_register, ReminderInject } from "std/triggers"
+import { ReminderInject } from "std/triggers"
 
 pipeline reflection_agent(harness: Harness, task) {
   // 1. Emit a channel event from a tool hook so we don't have to
   //    instrument every tool definition by hand.
-  register_tool_hook({
+  harness.tools.register_hook({
     pattern: "*",
     post: { ctx ->
       harness.channels.append("tool_call.completed", {
@@ -113,7 +111,7 @@ pipeline reflection_agent(harness: Harness, task) {
 
   // 2. Subscribe to the channel with a batched ReminderInject. The
   //    reminder lands on the *same* session at the next turn boundary.
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "reflect-every-30-tools",
     kind: "channel.emit",
     provider: "channel",
@@ -156,7 +154,7 @@ planner subscribes to the critiques and revises. Channels make this a
 declarative cycle rather than a hand-rolled coordination dance.
 
 ```harn,ignore
-import { trigger_register, ReminderInject } from "std/triggers"
+import { ReminderInject } from "std/triggers"
 
 // --- planner ---
 pipeline planner_loop(harness: Harness, task) {
@@ -171,7 +169,7 @@ pipeline planner_loop(harness: Harness, task) {
   })
 
   // Watch for reviewer feedback addressed at our session.
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "planner-on-feedback-" + session,
     kind: "channel.emit",
     provider: "channel",
@@ -199,7 +197,7 @@ pipeline planner_loop(harness: Harness, task) {
 
 // --- reviewers ---
 pipeline reviewer_setup(harness: Harness) {
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "reviewer-on-draft",
     kind: "channel.emit",
     provider: "channel",
@@ -239,13 +237,10 @@ dashboard. The producers don't know the monitor exists — they just
 emit.
 
 ```harn,ignore
-import { trigger_register } from "std/triggers"
-import { register_step_hook } from "std/hooks"
-
 // --- producers: any pipeline registering this hook gets free
 // instrumentation ---
 pipeline producer_setup(harness: Harness) {
-  register_step_hook({
+  harness.agent.register_step_hook({
     pattern: "*",
     post: { ctx ->
       harness.channels.append("pipeline.step.completed", {
@@ -261,7 +256,7 @@ pipeline producer_setup(harness: Harness) {
 
 // --- dashboard: one subscriber, scoped to the whole tenant ---
 pipeline dashboard_setup(harness: Harness) {
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "dashboard-on-step",
     kind: "channel.emit",
     provider: "channel",
@@ -299,9 +294,6 @@ deferred items by emitting a channel event. A nightly settlement
 pipeline (B) subscribes and picks up the deferred work.
 
 ```harn,ignore
-import { trigger_register } from "std/triggers"
-import { pipeline_on_finish } from "std/lifecycle"
-
 // --- pipeline A: live ingest ---
 pipeline ingest_pipeline(harness: Harness, events) {
   const deferred = []
@@ -313,7 +305,7 @@ pipeline ingest_pipeline(harness: Harness, events) {
   }
 
   // On clean drain, hand the deferred bucket off to pipeline B.
-  pipeline_on_finish({ ctx ->
+  harness.agent.pipeline_on_finish({ ctx ->
     if ctx.status == "completed" && len(deferred) > 0 {
       harness.channels.append("pipeline.drained", {
         source_pipeline: "ingest",
@@ -327,7 +319,7 @@ pipeline ingest_pipeline(harness: Harness, events) {
 
 // --- pipeline B: nightly settlement ---
 pipeline settlement_setup(harness: Harness) {
-  trigger_register({
+  harness.runtime.trigger_register({
     id: "settlement-on-drain",
     kind: "channel.emit",
     provider: "channel",
@@ -360,7 +352,8 @@ first.
 
 For any of these recipes, the wrong tool is also worth knowing:
 
-- **Don't use `channel(...) + send/receive`** (the in-process
+- **Don't use `harness.runtime.channel(...)` with
+  `harness.runtime.send`/`harness.runtime.receive`** (the in-process
   concurrency channel) for cross-pipeline or cross-process pub/sub —
   it lives only inside one VM. Reach for `emit_channel` whenever the
   publisher and subscriber could be different runs.

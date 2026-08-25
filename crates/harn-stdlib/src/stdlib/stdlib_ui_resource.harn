@@ -196,14 +196,14 @@ const UI_DEFAULT_CSP = {
   sandbox: ["allow-scripts", "allow-same-origin"],
 }
 
-fn __ui_text(value) {
+fn __ui_text(value: any) {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __ui_first(values) {
+fn __ui_first(values: list) {
   for value in values {
     const text = __ui_text(value)
     if text != "" {
@@ -213,7 +213,7 @@ fn __ui_first(values) {
   return nil
 }
 
-fn __ui_str_list(values) {
+fn __ui_str_list(values: list?) {
   let out = []
   for value in values ?? [] {
     const text = __ui_text(value)
@@ -224,7 +224,7 @@ fn __ui_str_list(values) {
   return out
 }
 
-fn __ui_validate_uri(uri) {
+fn __ui_validate_uri(uri: string) {
   const text = __ui_text(uri)
   if text == "" {
     throw "std/ui_resource: uri is required"
@@ -235,7 +235,7 @@ fn __ui_validate_uri(uri) {
   return text
 }
 
-fn __ui_validation_summary(validation) {
+fn __ui_validation_summary(validation: dict) {
   return {
     ok: validation?.ok ?? false,
     error_codes: validation?.error_codes ?? [],
@@ -243,7 +243,7 @@ fn __ui_validation_summary(validation) {
   }
 }
 
-fn __ui_csp(options) {
+fn __ui_csp(options: UiResourceOptions) {
   const base = options?.csp ?? UI_DEFAULT_CSP
   return {
     default_src: __ui_str_list(base.default_src ?? UI_DEFAULT_CSP.default_src),
@@ -639,7 +639,7 @@ pub fn ui_tool_call_envelope(
  */
 pub fn ui_context_update_envelope(
   key: string,
-  value,
+  value: any,
   options: UiContextUpdateOptions = nil,
 ) -> UiContextUpdateEnvelope {
   const context_key = __ui_text(key)

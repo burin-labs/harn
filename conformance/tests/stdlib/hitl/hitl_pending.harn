@@ -1,6 +1,6 @@
 import "std/hitl"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const prompt = "Need a human " + harness.random.uuid()
   const handle = spawn {
     harness.interaction.ask_user(prompt, {timeout: 5m})

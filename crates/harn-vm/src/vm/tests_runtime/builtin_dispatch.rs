@@ -16,7 +16,7 @@ use crate::vm::*;
 #[test]
 fn test_direct_builtin_call_uses_registered_sync_id() {
     let (out, _) = run_harn_with_setup(
-        r#"pipeline t(harness: Harness, task) { test_sync("ok") }"#,
+        r#"pipeline t(harness: Harness, task: unknown) { test_sync("ok") }"#,
         |vm| {
             vm.register_builtin("test_sync", |args, out| {
                 out.push_str("sync:");
@@ -32,7 +32,7 @@ fn test_direct_builtin_call_uses_registered_sync_id() {
 #[test]
 fn test_direct_builtin_call_uses_registered_async_id() {
     let (out, _) = run_harn_with_setup(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 const value = test_async("ok")
 harness.stdio.log(value)
 }"#,
@@ -52,7 +52,7 @@ harness.stdio.log(value)
 #[test]
 fn test_direct_builtin_callback_uses_builtin_ref_id() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 const converted = ["first_name"].map(snake_to_camel)
 harness.stdio.log(converted[0])
 }"#,
@@ -63,7 +63,7 @@ harness.stdio.log(converted[0])
 #[test]
 fn test_direct_builtin_call_preserves_function_shadowing() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 fn push(xs, x) {
   harness.stdio.log("shadow")
 }
@@ -76,7 +76,7 @@ push([1], 2)
 #[test]
 fn test_direct_builtin_call_preserves_local_closure_shadowing() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 const push = { xs, x -> harness.stdio.log("local") }
 push([1], 2)
 }"#,
@@ -108,7 +108,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
                     .await
                     .unwrap();
 
-                let source = r#"pipeline t(harness: Harness, task) { harness.stdio.log(bridge_echo("ok")) }"#;
+                let source = r#"pipeline t(harness: Harness, task: unknown) { harness.stdio.log(bridge_echo("ok")) }"#;
                 let mut lexer = Lexer::new(source);
                 let tokens = lexer.tokenize().unwrap();
                 let mut parser = Parser::new(tokens);

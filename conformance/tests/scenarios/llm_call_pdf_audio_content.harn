@@ -1,7 +1,7 @@
 import { upload } from "std/files"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const pdf_path = path_join(harness.fs.workspace_temp_dir(), "sample.pdf")
   harness.fs.write_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
   const file_id = upload(harness.llm, pdf_path, "mock")

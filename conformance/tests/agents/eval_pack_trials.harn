@@ -45,7 +45,7 @@ fn pack(expected_status: string) -> dict {
   }
 }
 
-pipeline test(harness: Harness, _task) {
+pipeline test(harness: Harness, _task: unknown) {
   const manifest = eval_pack_manifest(pack("completed"))
   assert_eq(manifest.trials, 3)
   assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")

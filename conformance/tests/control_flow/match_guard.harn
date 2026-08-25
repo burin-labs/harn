@@ -1,6 +1,6 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Basic guard on literal pattern
-  fn classify(n) {
+  fn classify(n: any) {
     return match n {
       0 -> { "zero" }
       x if x > 0 -> { "positive" }
@@ -12,7 +12,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.log(classify(5))
   harness.stdio.log(classify(-3))
   // Guard with string pattern
-  fn greet(name) {
+  fn greet(name: string) {
     return match name {
       "admin" -> { "Welcome back, admin!" }
       n if len(n) > 10 -> { "Hello, ${n} (long name)!" }

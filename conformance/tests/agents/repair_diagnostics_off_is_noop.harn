@@ -9,7 +9,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * invariant. A caller that wants the old fully-inert behavior must opt out of
  * post-edit verification directly with `post_edit_reverify:false`.
  */
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 

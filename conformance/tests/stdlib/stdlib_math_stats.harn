@@ -1,6 +1,6 @@
 import "std/math"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(mean([2, 4, 6]), 4)
   assert_eq(median([7, 1, 5]), 5)
   assert_eq(median([1, 2, 10, 20]), 6)

@@ -5,7 +5,7 @@
  */
 type Task = {title: string, priority: "low" | "med" | "high", points: 1 | 2 | 3 | 5 | 8}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const s = schema_of(Task)
   const json_schema = schema_to_json_schema(s)
   // JSON Schema canonical keys for the enum members.

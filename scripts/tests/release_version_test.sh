@@ -91,6 +91,40 @@ if (cd "$tmp_repo" && release_head_is_release_commit_for_version 1.2.4); then
   echo "release_version_test: title-only release commit accepted" >&2
   exit 1
 fi
+git -C "$tmp_repo" tag v1.2.4 HEAD~1
+(
+  cd "$tmp_repo"
+  release_development_bump_plan 1.2.4 v1.2.4
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == true ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_VERSION" == 1.2.5-dev ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == published_stable_needs_development_identity ]]
+) || {
+  echo "release_version_test: later main commit disabled the published development bump" >&2
+  exit 1
+}
+(
+  cd "$tmp_repo"
+  release_development_bump_plan 1.2.5-dev v1.2.4
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == false ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == workspace_does_not_match_latest_stable ]]
+) || {
+  echo "release_version_test: development workspace produced another bump" >&2
+  exit 1
+}
+git -C "$tmp_repo" switch --orphan orphan --quiet
+rm -f "$tmp_repo/Cargo.toml" "$tmp_repo/README.md"
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$tmp_repo/Cargo.toml"
+git -C "$tmp_repo" add Cargo.toml
+git -C "$tmp_repo" commit --quiet -m orphan
+(
+  cd "$tmp_repo"
+  release_development_bump_plan 1.2.4 v1.2.4
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == false ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == latest_stable_tag_is_not_in_head_ancestry ]]
+) || {
+  echo "release_version_test: unrelated tag ancestry was accepted" >&2
+  exit 1
+}
 release_tag_is_canonical v1.2.3-rc.0
 if release_tag_is_canonical 1.2.3-rc.0; then
   echo "release_version_test: bare version reported as canonical tag" >&2

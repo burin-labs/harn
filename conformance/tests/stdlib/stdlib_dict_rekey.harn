@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const snake_dict = {first_name: "Ada", last_name: "Lovelace", birth_year: 1815}
   // Named builtin passed by reference (no lambda wrapper needed)
   const camel_dict = snake_dict.rekeyed(snake_to_camel)

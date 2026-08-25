@@ -1,6 +1,6 @@
 import "std/hitl"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond(
     "interaction",

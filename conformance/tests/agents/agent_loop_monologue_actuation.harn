@@ -3,7 +3,7 @@ import { agent_loop } from "std/agent/loop"
 import { default_llm_caller } from "std/llm/caller"
 import { assert_eq, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
-fn lookup_tools(fail_reads = false, include_writers = true) {
+fn lookup_tools(fail_reads: bool = false, include_writers: bool = true) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -49,7 +49,7 @@ fn lookup_tools(fail_reads = false, include_writers = true) {
   return tools
 }
 
-fn lookup_call(tool_format = "text", narration = "", path = "app.txt") {
+fn lookup_call(tool_format: string = "text", narration: string = "", path: string = "app.txt") {
   if tool_format == "native" {
     return llm_tool_call("lookup", {path: path})
   }
@@ -65,7 +65,7 @@ fn mutate_call() {
   return llm_text("<tool_call>mutate({ path: \"app.txt\" })</tool_call>")
 }
 
-fn read_loop_script(tool_format = "text") {
+fn read_loop_script(tool_format: string = "text") {
   return [
     lookup_call(tool_format, "I will inspect one more location before changing it.\n"),
     lookup_call(tool_format, "The answer may be elsewhere, so I will inspect again.\n"),
@@ -77,13 +77,13 @@ fn read_loop_script(tool_format = "text") {
   ]
 }
 
-fn actuation_receipts(events) {
+fn actuation_receipts(events: any) {
   return events.filter({ event -> event.type == "typed_checkpoint" }).filter(
     { event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" },
   )
 }
 
-fn options(session, actuation = nil, tool_format = "text", extra = nil) {
+fn options(session: any, actuation: any = nil, tool_format: string = "text", extra: dict? = nil) {
   let stall_diagnostics = {enabled: true, no_progress_messages: 2}
   if actuation != nil {
     stall_diagnostics = stall_diagnostics + {monologue_actuation: actuation}
@@ -105,7 +105,14 @@ fn options(session, actuation = nil, tool_format = "text", extra = nil) {
     + (extra ?? {})
 }
 
-fn run_case(harness: Harness, script, session, actuation = nil, tool_format = "text", extra = nil) {
+fn run_case(
+  harness: Harness,
+  script: any,
+  session: any,
+  actuation: any = nil,
+  tool_format: string = "text",
+  extra: dict? = nil,
+) {
   return with_llm_script(
     harness.llm,
     script,

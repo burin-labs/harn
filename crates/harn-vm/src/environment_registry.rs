@@ -35,6 +35,7 @@ pub enum EnvironmentValueShape {
     UnsignedInteger,
     NonNegativeNumber,
     UnitInterval,
+    Enumerated(&'static [&'static str]),
 }
 
 /// Whether a value may contain credential material.
@@ -118,13 +119,23 @@ impl fmt::Display for EnvironmentValidationError {
 impl std::error::Error for EnvironmentValidationError {}
 
 impl EnvironmentValueShape {
-    fn description(self) -> &'static str {
+    fn description(self) -> String {
         match self {
-            Self::OwnerValidated => "valid for its owning subsystem",
-            Self::Boolean => "a boolean (`true`, `false`, `yes`, `no`, `on`, `off`, `1`, or `0`)",
-            Self::UnsignedInteger => "an unsigned integer",
-            Self::NonNegativeNumber => "a non-negative number",
-            Self::UnitInterval => "a number between 0 and 1",
+            Self::OwnerValidated => "valid for its owning subsystem".to_string(),
+            Self::Boolean => {
+                "a boolean (`true`, `false`, `yes`, `no`, `on`, `off`, `1`, or `0`)".to_string()
+            }
+            Self::UnsignedInteger => "an unsigned integer".to_string(),
+            Self::NonNegativeNumber => "a non-negative number".to_string(),
+            Self::UnitInterval => "a number between 0 and 1".to_string(),
+            Self::Enumerated(values) => format!(
+                "one of {}",
+                values
+                    .iter()
+                    .map(|value| format!("`{value}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 
@@ -147,6 +158,10 @@ impl EnvironmentValueShape {
                 .trim()
                 .parse::<f64>()
                 .is_ok_and(|parsed| parsed.is_finite() && (0.0..=1.0).contains(&parsed)),
+            Self::Enumerated(values) => {
+                let value = value.trim().to_ascii_lowercase();
+                values.contains(&value.as_str())
+            }
         }
     }
 }
@@ -287,6 +302,9 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         | "HARN_REQUIRE_SIGNED_SKILLS"
         | "HARN_TRACE"
         | "HARN_VERBOSE_CONFIG" => EnvironmentValueShape::Boolean,
+        crate::vm::subtask::PLACEMENT_ENV => {
+            EnvironmentValueShape::Enumerated(crate::vm::subtask::PLACEMENT_VALUES)
+        }
         _ => EnvironmentValueShape::OwnerValidated,
     }
 }
@@ -487,6 +505,27 @@ mod tests {
     }
 
     #[test]
+    fn subtask_placement_uses_the_runtime_owned_closed_vocabulary() {
+        let spec = variable_spec(crate::vm::subtask::PLACEMENT_ENV).unwrap();
+        assert_eq!(
+            spec.value_shape,
+            EnvironmentValueShape::Enumerated(crate::vm::subtask::PLACEMENT_VALUES)
+        );
+        validate_environment([(crate::vm::subtask::PLACEMENT_ENV, "worker")]).unwrap();
+        validate_environment([(crate::vm::subtask::PLACEMENT_ENV, "CURRENT_THREAD")]).unwrap();
+
+        let error =
+            validate_environment([(crate::vm::subtask::PLACEMENT_ENV, "workers")]).unwrap_err();
+        assert_eq!(
+            error.diagnostics()[0].kind,
+            EnvironmentDiagnosticKind::InvalidValue {
+                expected: EnvironmentValueShape::Enumerated(crate::vm::subtask::PLACEMENT_VALUES)
+            }
+        );
+        assert!(error.to_string().contains("`worker`, `current_thread`"));
+    }
+
+    #[test]
     fn diagnostics_cannot_render_values_even_for_credentials() {
         let secret = "must-never-appear";
         let error = validate_environment([("HARN_CLOUD_API_KEZ", secret)]).unwrap_err();
@@ -589,6 +628,7 @@ mod tests {
             }
             for entry in walkdir::WalkDir::new(source_root)
                 .into_iter()
+                .filter_entry(|entry| !is_pruned_reference_directory(entry))
                 .filter_map(Result::ok)
                 .filter(|entry| {
                     entry.file_type().is_file()
@@ -761,6 +801,7 @@ mod tests {
                 ".build"
                     | ".burin"
                     | ".git"
+                    | ".harn"
                     | ".harn-runs"
                     | ".harn-toolchain-cache"
                     | ".venv"
@@ -772,6 +813,20 @@ mod tests {
                     | "pkg"
                     | "target"
             )
+    }
+
+    #[test]
+    fn generated_harn_state_is_not_an_environment_contract_owner() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let state = root.path().join(".harn");
+        std::fs::create_dir(&state).expect("create generated Harn state");
+        let entry = walkdir::WalkDir::new(root.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .find(|entry| entry.path() == state)
+            .expect("walk generated Harn state");
+
+        assert!(is_pruned_reference_directory(&entry));
     }
 
     /// Generated protocol names describe wire contracts; they are not process

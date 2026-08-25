@@ -20,9 +20,9 @@ If the pipeline parameter list includes `task`, it is bound to `context.task`.
 If it includes `project`, it is bound to `context.projectRoot`.
 A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
 
-Pipeline parameters accept the same optional `name: TypeExpr` annotations as
-function parameters. The type checker uses declared types in the pipeline body
-and at local or imported call sites:
+Pipeline parameters use the same required `name: TypeExpr` annotations as
+function parameters. The type checker uses those types in the pipeline body and
+at local or imported call sites:
 
 ```harn
 pub pipeline deploy(config: DeployConfig, dry_run: bool) -> bool {
@@ -30,11 +30,9 @@ pub pipeline deploy(config: DeployConfig, dry_run: bool) -> bool {
 }
 ```
 
-Legacy untyped parameters remain valid syntax. Packages can require complete
-annotations on public functions and pipelines with
-`[lint] require_public_api_types = true`. Pipeline default values and rest
-parameters are rejected because pipeline invocation does not define those
-runtime semantics.
+An unannotated pipeline parameter is `HARN-TYP-028` under plain `harn check`.
+Pipeline default values and rest parameters are rejected because pipeline
+invocation does not define those runtime semantics.
 
 ### Pipeline return type
 
@@ -42,7 +40,10 @@ Pipelines may declare a return type with the same `-> TypeExpr` syntax
 as functions:
 
 ```harn
-pipeline ghost_text(harness: Harness, task) -> {text: string, code: int} {
+pipeline ghost_text(
+  harness: Harness,
+  task: dict,
+) -> {text: string, code: int} {
   return {text: "hello", code: 0}
 }
 ```
@@ -55,9 +56,8 @@ A declared return type is the typed contract that a host or bridge
 (ACP, A2A) can rely on when consuming the pipeline's output.
 
 Public pipelines (`pub pipeline`) without an explicit return type emit the
-`pipeline-return-type` lint warning by default. When
-`require_public_api_types` is enabled, `missing-public-api-type` owns both
-parameter and return completeness without duplicate diagnostics.
+`pipeline-return-type` lint warning by default. Return types remain inferable,
+so this is a public-contract lint rather than a checker error.
 
 ### Pipeline inheritance
 

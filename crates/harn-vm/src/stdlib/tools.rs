@@ -1,7 +1,5 @@
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 use crate::schema::json_to_vm_value;
@@ -1217,8 +1215,9 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
 }
 
 fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
-    let source =
-        format!("fn __harn_synthesized_tool(args) {{ return tool_synth_invoke(\"{id}\", args) }}");
+    let source = format!(
+        "fn __harn_synthesized_tool(args: unknown) {{ return tool_synth_invoke(\"{id}\", args) }}"
+    );
     let program = harn_parser::check_source_strict(&source).map_err(|error| {
         VmError::Runtime(format!("tool_synthesize: internal compile failed: {error}"))
     })?;

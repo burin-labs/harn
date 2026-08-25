@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // mcp_elicit must be called from inside an MCP-server tool
   // handler (i.e. while `harn serve mcp` is running). When invoked
   // outside that context, it raises a structured error rather than

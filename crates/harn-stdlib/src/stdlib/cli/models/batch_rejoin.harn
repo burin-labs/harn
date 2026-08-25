@@ -146,7 +146,7 @@ fn __read_line_rows(text: string, path: string) -> BatchRejoinParsed {
   return {rows: rows, errors: errors}
 }
 
-fn __rows_from_json(value) -> list<dict> {
+fn __rows_from_json(value: dict) -> list<dict> {
   if type_of(value) == "list" {
     let rows: list<dict> = []
     for raw in value {
@@ -225,7 +225,7 @@ fn __result_status_code(row: dict) -> int {
   return to_int(response["status_code"] ?? response["status"] ?? row["status_code"]) ?? 0
 }
 
-fn __has_error(value) -> bool {
+fn __has_error(value: dict) -> bool {
   if value == nil {
     return false
   }

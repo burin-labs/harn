@@ -1,5 +1,5 @@
 /** Test Ruby-inspired list methods */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const nums = [1, 2, 3, 4, 5, 6, 7, 8]
   // none
   harness.stdio.println(nums.none({ x -> x > 100 }))

@@ -1,5 +1,5 @@
 /** Verifies set_color_mode controls ANSI emission. */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.term.set_color_mode("never")
   harness.stdio.log(json_stringify(color("hi", "red")))
   harness.stdio.log(json_stringify(bold("hi")))

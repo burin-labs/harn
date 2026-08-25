@@ -16,7 +16,7 @@ fn edit_tools() {
   )
 }
 
-fn verify_after_tool_stop(payload) {
+fn verify_after_tool_stop(payload: dict) {
   if payload.stop_reason == "natural" && payload.iteration == 0 {
     return "verification required after edit"
   }

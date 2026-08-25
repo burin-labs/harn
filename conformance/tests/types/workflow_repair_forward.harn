@@ -8,7 +8,7 @@
 import { WorkflowRepairResult, workflow_run_repair } from "std/workflow/repair"
 import { summarize_repair } from "workflow_repair_forward_lib"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const token = "GOTOKEN"
   // Success after a repair: the inline executor emits the pass token only once
   // it has seen it threaded through the prior attempt's findings (attempt 2).

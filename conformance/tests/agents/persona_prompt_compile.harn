@@ -43,7 +43,7 @@ const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS.map(
 )
 
 @test
-pipeline test_persona_prompt_compile(harness: Harness, _task) {
+pipeline test_persona_prompt_compile(harness: Harness, _task: unknown) {
   with_llm_script(
     harness.llm,
     [

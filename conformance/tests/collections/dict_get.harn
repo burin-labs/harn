@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const d = {name: "Alice", age: 30, active: true}
   // 1-arg: key exists
   harness.stdio.log(d.get("name"))

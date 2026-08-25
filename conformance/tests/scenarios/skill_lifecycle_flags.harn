@@ -9,7 +9,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * - An empty top-1 match produces `skill_matched` with no candidates
  *   and no activation.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill private_work {
     description "Rotate database credentials"
     when_to_use "User requests a credential rotation"

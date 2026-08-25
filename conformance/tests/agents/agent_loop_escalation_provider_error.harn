@@ -20,7 +20,7 @@ import { agent_loop } from "std/agent/loop"
  * "escalation_provider_failure" onto its `iteration_end` event; an ordinary
  * (successful) turn end carries an empty skip_reason. Find the failure event.
  */
-fn first_provider_error_event(events) {
+fn first_provider_error_event(events: list) {
   for event in events {
     if event.type == "iteration_end" {
       const reason = to_string(event?.iteration_info?.skip_reason ?? "")
@@ -34,7 +34,7 @@ fn first_provider_error_event(events) {
   return nil
 }
 
-fn count_events(events, event_type) {
+fn count_events(events: list, event_type: string) {
   let n = 0
   for event in events {
     if event.type == event_type {

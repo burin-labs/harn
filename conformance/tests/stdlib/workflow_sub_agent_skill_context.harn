@@ -47,7 +47,7 @@ fn workflow_tools(harness: Harness) {
   return tools
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill only_look {
     description "Investigate the codebase safely"
     when_to_use "User asks to inspect or read files"

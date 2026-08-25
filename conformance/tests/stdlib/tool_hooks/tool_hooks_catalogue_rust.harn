@@ -6,7 +6,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * stays quiet on the negative-case variants the rule was designed to
  * skip (already-corrected commands, sibling subcommands, etc.).
  */
-fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg: any, cmd: string) {
   const m = tools.hooks_match(reg, cmd, {stacks: ["rust"]})
   if len(m) > 0 {
     stdio.println(m[0].rule_id + " " + m[0].severity)

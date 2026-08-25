@@ -544,7 +544,7 @@ async fn composition_state_runs_through_the_public_harn_builtin_path() {
     let _session = crate::agent_sessions::enter_current_session("state-builtin-session");
     let result = run_composition_dispatcher_source(
         r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const manifest = composition_binding_manifest([], {
     state: {max_value_bytes: 32, max_total_bytes: 64, max_keys: 2},
   })
@@ -586,7 +586,7 @@ pipeline default(harness: Harness, task) {
 async fn harn_composition_dispatcher_closure_can_call_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const tools = [
     {
       "name": "look",
@@ -638,7 +638,7 @@ pipeline default(harness: Harness, task) {
 async fn harn_composition_dispatcher_closure_preserves_custom_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const tools = [
     {
       "name": "look",

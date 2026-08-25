@@ -32,7 +32,7 @@ const __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
 
 const __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
 
-fn __coord_string(value) {
+fn __coord_string(value: any) {
   if value == nil {
     return ""
   }
@@ -42,7 +42,7 @@ fn __coord_string(value) {
   return to_string(value)
 }
 
-fn __coord_text(value) {
+fn __coord_text(value: any) {
   if value == nil {
     return ""
   }
@@ -55,14 +55,14 @@ fn __coord_text(value) {
   return to_string(value)
 }
 
-fn __coord_dict(value) {
+fn __coord_dict(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __coord_is_callable(value) -> bool {
+fn __coord_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
@@ -75,7 +75,7 @@ fn __coord_ctx(runtime: HarnessRuntime) {
   return {}
 }
 
-fn __coord_normalized_scope(scope) {
+fn __coord_normalized_scope(scope: any) {
   const value = lowercase(trim(__coord_string(scope)))
   if value == "" {
     return "session"
@@ -86,7 +86,7 @@ fn __coord_normalized_scope(scope) {
   throw "std/coordination: unsupported scope `" + value + "`"
 }
 
-fn __coord_validate_component(label, value) {
+fn __coord_validate_component(label: any, value: any) {
   const text = trim(__coord_string(value))
   if text == "" {
     throw "std/coordination: " + label + " is required"
@@ -97,11 +97,11 @@ fn __coord_validate_component(label, value) {
   return text
 }
 
-fn __coord_topic_component(value) {
+fn __coord_topic_component(value: any) {
   return regex_replace("[^A-Za-z0-9._-]", "_", __coord_validate_component("topic component", value))
 }
 
-fn __coord_channel_name(parts) {
+fn __coord_channel_name(parts: any) {
   let normalized = [__COORD_CHANNEL_PREFIX]
   for part in parts {
     normalized = normalized + [__coord_topic_component(part)]
@@ -109,7 +109,7 @@ fn __coord_channel_name(parts) {
   return join(normalized, ".")
 }
 
-fn __coord_scope_id(scope, opts, ctx) {
+fn __coord_scope_id(scope: any, opts: any, ctx: any) {
   if scope == "session" {
     return opts?.session_id
       ?? opts?.scope_id
@@ -135,7 +135,7 @@ fn __coord_scope_id(scope, opts, ctx) {
   return opts?.tenant_id ?? opts?.scope_id ?? ctx?.tenant_id ?? "default"
 }
 
-fn __coord_resolution(runtime: HarnessRuntime, scope, room, options) {
+fn __coord_resolution(runtime: HarnessRuntime, scope: any, room: any, options: any) {
   const opts = __coord_dict(options)
   const ctx = __coord_ctx(runtime)
   const logical_scope = __coord_normalized_scope(scope)
@@ -182,7 +182,7 @@ fn __coord_resolution(runtime: HarnessRuntime, scope, room, options) {
   }
 }
 
-fn __coord_channel_options(resolution, options, id = nil) {
+fn __coord_channel_options(resolution: any, options: any, id: any = nil) {
   const opts = __coord_dict(options)
   let out = {scope: resolution.channel_scope}
   if id != nil {
@@ -210,7 +210,7 @@ fn __coord_channel_options(resolution, options, id = nil) {
   return out
 }
 
-fn __coord_list(value) {
+fn __coord_list(value: any) {
   if value == nil {
     return []
   }
@@ -220,7 +220,7 @@ fn __coord_list(value) {
   return [value]
 }
 
-fn __coord_nonnegative_int(value, fallback, label) {
+fn __coord_nonnegative_int(value: any, fallback: any, label: any) {
   if value == nil {
     return fallback
   }
@@ -231,7 +231,7 @@ fn __coord_nonnegative_int(value, fallback, label) {
   return parsed
 }
 
-fn __coord_positive_int(value, fallback, label) {
+fn __coord_positive_int(value: any, fallback: any, label: any) {
   if value == nil {
     return fallback
   }
@@ -242,7 +242,7 @@ fn __coord_positive_int(value, fallback, label) {
   return parsed
 }
 
-fn __coord_address_identifier(address) {
+fn __coord_address_identifier(address: any) {
   if address == nil {
     return nil
   }
@@ -261,7 +261,7 @@ fn __coord_address_identifier(address) {
   return nil
 }
 
-fn __coord_consumer_id(runtime: HarnessRuntime, options, fallback = nil) {
+fn __coord_consumer_id(runtime: HarnessRuntime, options: any, fallback: any = nil) {
   const opts = __coord_dict(options)
   const ctx = __coord_ctx(runtime)
   const address_id = __coord_address_identifier(opts?.to ?? opts?.recipient)
@@ -279,7 +279,7 @@ fn __coord_consumer_id(runtime: HarnessRuntime, options, fallback = nil) {
   )
 }
 
-fn __coord_text_matches(value, expected) {
+fn __coord_text_matches(value: any, expected: any) {
   const needle = trim(__coord_string(expected))
   if needle == "" {
     return true
@@ -295,7 +295,7 @@ fn __coord_text_matches(value, expected) {
   return trim(__coord_string(value)) == needle
 }
 
-fn __coord_address_matches(address, expected) {
+fn __coord_address_matches(address: any, expected: any) {
   const needle = trim(__coord_string(__coord_address_identifier(expected) ?? expected))
   if needle == "" {
     return true
@@ -320,7 +320,7 @@ fn __coord_address_matches(address, expected) {
   return false
 }
 
-fn __coord_kind_matches(kind, expected) {
+fn __coord_kind_matches(kind: any, expected: any) {
   if expected == nil || trim(__coord_string(expected)) == "" {
     return true
   }
@@ -335,7 +335,7 @@ fn __coord_kind_matches(kind, expected) {
   return kind == lowercase(trim(__coord_string(expected)))
 }
 
-fn __coord_message_from_input(value, options) {
+fn __coord_message_from_input(value: any, options: any) {
   const opts = __coord_dict(options)
   if type_of(value) == "dict" {
     const message = value?.message ?? value
@@ -350,7 +350,7 @@ fn __coord_message_from_input(value, options) {
   return filter_nil({id: id, thread_id: opts?.thread_id ?? id, from: opts?.from})
 }
 
-fn __coord_wait_reply_options(runtime: HarnessRuntime, request, options) {
+fn __coord_wait_reply_options(runtime: HarnessRuntime, request: any, options: any) {
   const opts = __coord_dict(options)
   const fallback_consumer = "reply." + request.id
   const consumer_id = __coord_consumer_id(runtime, opts, fallback_consumer)
@@ -368,7 +368,7 @@ fn __coord_wait_reply_options(runtime: HarnessRuntime, request, options) {
   )
 }
 
-fn __coord_message_matches(message, options, default_to) {
+fn __coord_message_matches(message: any, options: any, default_to: any) {
   const opts = __coord_dict(options)
   if !__coord_kind_matches(message?.kind, opts?.kind) {
     return false
@@ -391,7 +391,7 @@ fn __coord_message_matches(message, options, default_to) {
   return true
 }
 
-fn __coord_dir_lock_path(resource_path, options) {
+fn __coord_dir_lock_path(resource_path: any, options: any) {
   const opts = __coord_dict(options)
   const explicit = trim(__coord_string(opts?.lock_path))
   if explicit != "" {
@@ -404,15 +404,20 @@ fn __coord_dir_lock_path(resource_path, options) {
   return resource + ".lock.d"
 }
 
-fn __coord_dir_lock_record_path(lock_path) {
+fn __coord_dir_lock_record_path(lock_path: string) -> string {
   return path_join(lock_path, "owner.json")
 }
 
-fn __coord_dir_lock_reaper_path(lock_path) {
+fn __coord_dir_lock_reaper_path(lock_path: string) -> string {
   return lock_path + ".reap.d"
 }
 
-fn __coord_dir_lock_owner(runtime: HarnessRuntime, random: HarnessRandom, owner, options) {
+fn __coord_dir_lock_owner(
+  runtime: HarnessRuntime,
+  random: HarnessRandom,
+  owner: any,
+  options: any,
+) {
   const opts = __coord_dict(options)
   const ctx = __coord_ctx(runtime)
   const raw = if type_of(owner) == "dict" {
@@ -456,11 +461,11 @@ fn __coord_dir_lock_owner(runtime: HarnessRuntime, random: HarnessRandom, owner,
 
 fn __coord_dir_lock_record(
   random: HarnessRandom,
-  resource_path,
-  lock_path,
-  owner,
-  options,
-  now_ms,
+  resource_path: any,
+  lock_path: any,
+  owner: any,
+  options: any,
+  now_ms: any,
 ) {
   const opts = __coord_dict(options)
   const ttl_ms = __coord_nonnegative_int(
@@ -491,7 +496,7 @@ fn __coord_dir_lock_record(
   )
 }
 
-fn __coord_dir_lock_same_record(record, expected) {
+fn __coord_dir_lock_same_record(record: any, expected: any) {
   if type_of(record) != "dict" || type_of(expected) != "dict" {
     return false
   }
@@ -500,7 +505,7 @@ fn __coord_dir_lock_same_record(record, expected) {
     && record?.acquired_at_ms == expected?.acquired_at_ms
 }
 
-fn __coord_dir_lock_existing(fs: HarnessFs, lock_path, now_ms) {
+fn __coord_dir_lock_existing(fs: HarnessFs, lock_path: any, now_ms: any) {
   const record_path = __coord_dir_lock_record_path(lock_path)
   if !fs.exists(lock_path) {
     return {status: "absent", lock_path: lock_path, record_path: record_path}
@@ -529,7 +534,12 @@ fn __coord_dir_lock_existing(fs: HarnessFs, lock_path, now_ms) {
   }
 }
 
-fn __coord_dir_lock_clear_if_same(fs: HarnessFs, clock: HarnessClock, lock_path, expected_record) {
+fn __coord_dir_lock_clear_if_same(
+  fs: HarnessFs,
+  clock: HarnessClock,
+  lock_path: any,
+  expected_record: any,
+) {
   const current = __coord_dir_lock_existing(fs, lock_path, clock.now_ms())
   if current.status == "absent" {
     return true
@@ -541,12 +551,12 @@ fn __coord_dir_lock_clear_if_same(fs: HarnessFs, clock: HarnessClock, lock_path,
   return true
 }
 
-fn __coord_dir_lock_stale(record, now_ms) {
+fn __coord_dir_lock_stale(record: any, now_ms: any) {
   const expires_at_ms = to_int(record?.expires_at_ms)
   return expires_at_ms != nil && expires_at_ms <= now_ms
 }
 
-fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
+fn __coord_dir_lock_conflict(resource_path: any, lock_path: any, existing: any, options: any) {
   const opts = __coord_dict(options)
   const result = filter_nil(
     {
@@ -568,7 +578,7 @@ fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
   return result
 }
 
-fn __coord_dir_lock_reaper_options(random: HarnessRandom, options, lock_path) {
+fn __coord_dir_lock_reaper_options(random: HarnessRandom, options: any, lock_path: any) {
   const opts = __coord_dict(options)
   const ttl_ms = __coord_positive_int(
     opts?.reaper_ttl_ms,
@@ -587,9 +597,9 @@ fn __coord_dir_lock_reaper_options(random: HarnessRandom, options, lock_path) {
 fn __coord_dir_lock_reaper_conflict(
   fs: HarnessFs,
   clock: HarnessClock,
-  resource_path,
-  lock_path,
-  options,
+  resource_path: any,
+  lock_path: any,
+  options: any,
 ) {
   const opts = __coord_dict(options)
   const reaper_path = __coord_dir_lock_reaper_path(lock_path)
@@ -611,11 +621,11 @@ fn __coord_dir_lock_take_stale(
   fs: HarnessFs,
   clock: HarnessClock,
   random: HarnessRandom,
-  resource_path,
-  lock_path,
-  owner,
-  options,
-  existing,
+  resource_path: any,
+  lock_path: any,
+  owner: any,
+  options: any,
+  existing: any,
 ) {
   const opts = __coord_dict(options)
   const reaper_opts = __coord_dir_lock_reaper_options(random, opts, lock_path)
@@ -666,11 +676,11 @@ fn __coord_dir_lock_try_acquire(
   fs: HarnessFs,
   clock: HarnessClock,
   random: HarnessRandom,
-  resource_path,
-  lock_path,
-  owner,
-  options,
-  stale_removed = nil,
+  resource_path: any,
+  lock_path: any,
+  owner: any,
+  options: any,
+  stale_removed: any = nil,
 ) {
   const opts = __coord_dict(options)
   if opts?.ensure_parent ?? true {
@@ -687,7 +697,12 @@ fn __coord_dir_lock_try_acquire(
   }
   const now_ms = clock.now_ms()
   const record = __coord_dir_lock_record(random, resource_path, lock_path, owner, opts, now_ms)
-  write_json(fs, record.record_path, record, {pretty: true, ensure_parent: false})
+  write_json(
+    fs,
+    __coord_dir_lock_record_path(lock_path),
+    record,
+    {pretty: true, ensure_parent: false},
+  )
   return filter_nil(
     {
       schema: __COORD_DIR_LOCK_SCHEMA,
@@ -705,7 +720,7 @@ fn __coord_dir_lock_try_acquire(
   )
 }
 
-fn __coord_actor(message, options, ctx) {
+fn __coord_actor(message: any, options: any, ctx: any) {
   const raw = __coord_dict(options?.from ?? message?.from)
   return filter_nil(
     raw
@@ -721,7 +736,7 @@ fn __coord_actor(message, options, ctx) {
   )
 }
 
-fn __coord_body(message, options) {
+fn __coord_body(message: any, options: any) {
   if type_of(message) == "string" {
     return message
   }
@@ -730,7 +745,7 @@ fn __coord_body(message, options) {
   )
 }
 
-fn __coord_subject(message, options, body) {
+fn __coord_subject(message: any, options: any, body: any) {
   const explicit = options?.subject ?? message?.subject ?? message?.title
   if explicit != nil {
     return trim(__coord_string(explicit))
@@ -742,7 +757,14 @@ fn __coord_subject(message, options, body) {
   return first_line
 }
 
-fn __coord_envelope(runtime: HarnessRuntime, random: HarnessRandom, scope, room, message, options) {
+fn __coord_envelope(
+  runtime: HarnessRuntime,
+  random: HarnessRandom,
+  scope: any,
+  room: any,
+  message: any,
+  options: any,
+) {
   const msg = __coord_dict(message)
   const opts = __coord_dict(options)
   append_metadata.reject_write(msg, opts)
@@ -794,11 +816,11 @@ pub fn coord_request(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   random: HarnessRandom,
-  scope,
-  room,
-  recipient,
-  message,
-  options = nil,
+  scope: any,
+  room: any,
+  recipient: any,
+  message: any,
+  options: any = nil,
 ) {
   const msg = __coord_dict(message)
   const opts = __coord_dict(options)
@@ -832,7 +854,7 @@ pub fn coord_request(
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_dir_lock_path(resource_path, options = nil) -> string {
+pub fn coord_dir_lock_path(resource_path: any, options: any = nil) -> string {
   return __coord_dir_lock_path(resource_path, options)
 }
 
@@ -862,7 +884,7 @@ pub fn coord_dir_lock_reaper_path(lock_path: string) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn coord_dir_lock_conflict_message(conflict) -> string {
+pub fn coord_dir_lock_conflict_message(conflict: any) -> string {
   const state = conflict?.reason ?? conflict?.status ?? "active"
   const holder = conflict?.holder ?? conflict?.record
   const owner = holder?.owner ?? {}
@@ -905,8 +927,8 @@ pub fn coord_acquire_dir_lock(
   clock: HarnessClock,
   random: HarnessRandom,
   resource_path: string,
-  owner = nil,
-  options = nil,
+  owner: any = nil,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const lock_path = __coord_dir_lock_path(resource_path, opts)
@@ -959,7 +981,7 @@ pub fn coord_acquire_dir_lock(
  * @effects: [fs.read, fs.write]
  * @errors: [runtime]
  */
-pub fn coord_release_dir_lock(fs: HarnessFs, clock: HarnessClock, lock, options = nil) {
+pub fn coord_release_dir_lock(fs: HarnessFs, clock: HarnessClock, lock: any, options: any = nil) {
   const opts = __coord_dict(options)
   const lock_path = if type_of(lock) == "string" {
     lock
@@ -1004,9 +1026,9 @@ pub fn coord_with_dir_lock(
   clock: HarnessClock,
   random: HarnessRandom,
   resource_path: string,
-  body,
-  owner = nil,
-  options = nil,
+  body: any,
+  owner: any = nil,
+  options: any = nil,
 ) {
   if !__coord_is_callable(body) {
     throw "std/coordination: coord_with_dir_lock body must be callable; got " + type_of(body)
@@ -1043,11 +1065,11 @@ pub fn coord_send(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   random: HarnessRandom,
-  scope,
-  room,
-  recipient,
-  message,
-  options = nil,
+  scope: any,
+  room: any,
+  recipient: any,
+  message: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   return coord_post(runtime, channels, random, scope, room, message, opts + {to: recipient})
@@ -1067,11 +1089,11 @@ pub fn coord_reply(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   random: HarnessRandom,
-  scope,
-  room,
-  original,
-  message,
-  options = nil,
+  scope: any,
+  room: any,
+  original: any,
+  message: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const parent = original?.message ?? original
@@ -1110,10 +1132,10 @@ pub fn coord_post(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   random: HarnessRandom,
-  scope,
-  room,
-  message,
-  options = nil,
+  scope: any,
+  room: any,
+  message: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
@@ -1168,10 +1190,10 @@ pub fn coord_wait_reply(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   clock: HarnessClock,
-  scope,
-  room,
-  request_or_id,
-  options = nil,
+  scope: any,
+  room: any,
+  request_or_id: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const request = __coord_message_from_input(request_or_id, opts)
@@ -1246,10 +1268,10 @@ pub fn coord_wait_reply(
 pub fn coord_cursor(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
-  scope,
-  room,
-  consumer_id,
-  options = nil,
+  scope: any,
+  room: any,
+  consumer_id: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
@@ -1272,11 +1294,11 @@ pub fn coord_cursor(
 pub fn coord_ack(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
-  scope,
-  room,
-  consumer_id,
-  cursor,
-  options = nil,
+  scope: any,
+  room: any,
+  consumer_id: any,
+  cursor: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
@@ -1304,7 +1326,13 @@ pub fn coord_ack(
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_inbox(runtime: HarnessRuntime, channels: HarnessChannels, scope, room, options = nil) {
+pub fn coord_inbox(
+  runtime: HarnessRuntime,
+  channels: HarnessChannels,
+  scope: any,
+  room: any,
+  options: any = nil,
+) {
   const opts = __coord_dict(options)
   const consumer_id = __coord_consumer_id(runtime, opts)
   const from_cursor = opts?.from_cursor ?? opts?.cursor
@@ -1351,7 +1379,13 @@ pub fn coord_inbox(runtime: HarnessRuntime, channels: HarnessChannels, scope, ro
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_read(runtime: HarnessRuntime, channels: HarnessChannels, scope, room, options = nil) {
+pub fn coord_read(
+  runtime: HarnessRuntime,
+  channels: HarnessChannels,
+  scope: any,
+  room: any,
+  options: any = nil,
+) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
   return append_metadata.read_messages(
@@ -1374,9 +1408,9 @@ pub fn coord_read(runtime: HarnessRuntime, channels: HarnessChannels, scope, roo
 pub fn coord_subscribe(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
-  scope,
-  room,
-  options = nil,
+  scope: any,
+  room: any,
+  options: any = nil,
 ) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(runtime, scope, room, opts)
@@ -1393,7 +1427,7 @@ pub fn coord_subscribe(
  * @effects: []
  * @errors: [runtime]
  */
-pub fn coord_remember(memory: HarnessMemory, message_or_receipt, options = nil) {
+pub fn coord_remember(memory: HarnessMemory, message_or_receipt: any, options: any = nil) {
   const opts = __coord_dict(options)
   const message = message_or_receipt?.message ?? message_or_receipt
   if type_of(message) != "dict" || message?.schema != COORD_SCHEMA {

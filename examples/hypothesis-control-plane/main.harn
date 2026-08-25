@@ -59,7 +59,7 @@ fn arg_value(args: list<string>, prefix: string) -> string? {
   return nil
 }
 
-fn dispatch(harness: Harness, action: string, input) {
+fn dispatch(harness: Harness, action: string, input: dict) {
   if action == "design" {
     return design(harness, input.request, input.context, input.options)
   }

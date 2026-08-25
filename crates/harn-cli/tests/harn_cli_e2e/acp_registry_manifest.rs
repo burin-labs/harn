@@ -3,13 +3,16 @@ use serde_json::{json, Value as JsonValue};
 const AGENT_MANIFEST: &str = include_str!("../../../../spec/acp-registry/harn/agent.json");
 
 #[test]
-fn acp_registry_manifest_tracks_current_binary_distribution() {
+fn acp_registry_manifest_has_complete_binary_distribution() {
     let manifest: JsonValue =
         serde_json::from_str(AGENT_MANIFEST).expect("ACP registry manifest parses");
-    let version = env!("CARGO_PKG_VERSION");
+    // Release metadata validation owns which stable version is published. This
+    // test checks that every binary entry uses the advertised version.
+    let version = manifest["version"]
+        .as_str()
+        .expect("ACP registry manifest version");
 
     assert_eq!(manifest["id"], "harn");
-    assert_eq!(manifest["version"], version);
 
     let binary = manifest["distribution"]["binary"]
         .as_object()

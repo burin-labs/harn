@@ -39,7 +39,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
 }
 
 @test
-pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task) {
+pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) {
   // `make check-python-boundary` owns the live repository scan. Keep this suite
   // to bounded fixtures so the per-test deadline is independent of checkout size.
   assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, false)
@@ -54,7 +54,7 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task) {
 }
 
 @test
-pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task) {
+pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -90,7 +90,7 @@ pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task)
 @test
 pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   with_temp_dir(
     harness.fs,
@@ -130,7 +130,7 @@ pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(
 @test
 pipeline test_python_invocation_pattern_ignores_mentions_but_catches_shell_commands(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   assert_eq(line_invokes_python("echo \"python3 must not run\""), false)
   assert_eq(line_invokes_python("cat > \"$fake_bin/python3\" <<'SH'"), false)

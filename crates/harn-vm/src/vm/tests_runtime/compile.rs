@@ -22,7 +22,7 @@ fn compile_named_pipeline_ignores_unbound_params() {
         local
             .run_until(async {
                 let source = r#"
-pipeline selected(harness: Harness, task) {
+pipeline selected(harness: Harness, task: unknown) {
   harness.stdio.log("ok")
 }
 "#;
@@ -254,7 +254,7 @@ fn uses_later_alias() {
 
 type UserShape = {name: string}
 
-pipeline t(harness: Harness, task) {
+pipeline t(harness: Harness, task: unknown) {
   harness.stdio.log(accepts_schema(UserShape))
   harness.stdio.log(uses_later_alias())
 }
@@ -266,7 +266,8 @@ pipeline t(harness: Harness, task) {
 
 #[test]
 fn test_disassembly() {
-    let mut lexer = Lexer::new("pipeline t(harness: Harness, task) { harness.stdio.log(2 + 3) }");
+    let mut lexer =
+        Lexer::new("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(2 + 3) }");
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();

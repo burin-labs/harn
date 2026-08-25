@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = harness.agent.open(
     "anchor-conformance",
     {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},

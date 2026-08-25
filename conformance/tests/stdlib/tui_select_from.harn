@@ -5,7 +5,7 @@
 // under `mock_stdin`.
 import { select_from } from "std/tui"
 
-fn show(stdio: HarnessStdio, result) {
+fn show(stdio: HarnessStdio, result: dict) {
   const value_kind = type_of(result?.value)
   const value_repr = if value_kind == "dict" {
     result.value?.id ?? to_string(result.value)

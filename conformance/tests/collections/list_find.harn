@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const items = ["foo", "bar", "baz"]
   const found = items.find({ x -> x.starts_with("ba") })
   harness.stdio.log(found)

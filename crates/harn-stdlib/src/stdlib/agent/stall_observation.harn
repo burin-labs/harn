@@ -63,7 +63,7 @@ pub fn __agent_stall_reset_action(state: AgentStallState) -> AgentStallState {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_result_snippet(result) -> string {
+pub fn __agent_stall_result_snippet(result: dict) -> string {
   if __agent_stall_result_ok(result) {
     return ""
   }
@@ -84,7 +84,7 @@ pub fn __agent_stall_result_snippet(result) -> string {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_clip_head_tail(text, cap) {
+pub fn __agent_clip_head_tail(text: any, cap: int) {
   const total = len(text)
   if total <= cap {
     return text
@@ -141,7 +141,7 @@ pub fn __agent_stall_delta_previous(state: AgentStallState) {
   }
 }
 
-pub fn __agent_stall_gate_failure(gate) -> bool {
+pub fn __agent_stall_gate_failure(gate: any) -> bool {
   return gate != nil && (gate?.gate_bearing_failure ?? false)
 }
 
@@ -421,7 +421,7 @@ const __AGENT_STALL_MONOLOGUE_SCAFFOLDING = [
   "working",
 ]
 
-fn __agent_stall_monologue_tokens(text) -> list<string> {
+fn __agent_stall_monologue_tokens(text: string) -> list<string> {
   const cleaned = trim(regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text))))
   if cleaned == "" {
     return ["generic_status"]
@@ -562,7 +562,7 @@ pub fn __agent_stall_register_recovery(state: AgentStallState) -> AgentStallStat
  */
 pub fn __agent_stall_observation(
   state: AgentStallState,
-  warning,
+  warning: any,
   config: AgentStallConfig,
   feedback_deferred: bool,
 ) -> AgentStallObservation {
@@ -597,7 +597,7 @@ pub fn __agent_stall_emit_diagnostic_trip(
   count: int,
   threshold: int,
   defer_feedback: bool,
-  remediation_delivered = false,
+  remediation_delivered: bool = false,
 ) -> AgentStallObservation {
   let warning = __agent_stall_warning_record(
     {
@@ -647,8 +647,8 @@ pub fn __agent_stall_observe_no_progress(
   config: AgentStallConfig,
   state: AgentStallState,
   defer_feedback: bool,
-  turn_text = "",
-  turn_stop_reason = "",
+  turn_text: string = "",
+  turn_stop_reason: string = "",
 ) -> AgentStallObservation {
   // An agent message breaks any action-repeat / ping-pong run.
   let next_state = __agent_stall_reset_action(state)
@@ -782,14 +782,14 @@ pub fn __agent_stall_observe_core(
   session_id: string,
   tool_calls: list,
   iteration: int,
-  raw_config,
+  raw_config: dict | bool | nil,
   state: AgentStallState,
   defer_feedback: bool,
   prev_dispatch: AgentToolDispatch = nil,
-  turn_text = "",
-  had_parse_errors = false,
-  turn_stop_reason = "",
-  turn_made_edit = false,
+  turn_text: string = "",
+  had_parse_errors: bool = false,
+  turn_stop_reason: string = "",
+  turn_made_edit: bool = false,
 ) -> AgentStallObservation {
   const config = __agent_stall_config(raw_config)
   if !config.enabled {
@@ -937,10 +937,10 @@ pub fn agent_stall_observe_completed_dispatch(
   tool_calls: list,
   dispatch: AgentToolDispatch,
   iteration: int,
-  raw_config,
+  raw_config: dict | bool | nil,
   state: AgentStallState,
-  registry,
-  policy = nil,
+  registry: any,
+  policy: any = nil,
   defer_feedback: bool = false,
 ) -> AgentCompletedObservation {
   const config = __agent_stall_config(raw_config)
@@ -1045,7 +1045,7 @@ pub fn agent_stall_observe_completed_dispatch(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_eval_remediation(state: AgentStallState, signature: string, raw) -> dict {
+pub fn __agent_stall_eval_remediation(state: AgentStallState, signature: string, raw: any) -> dict {
   if type_of(raw) == "int" {
     const same_sig = state.remediation_delivered_signature == signature
     const baseline = if same_sig {
@@ -1266,7 +1266,7 @@ pub fn __agent_stall_apply_action_signal(
   config: AgentStallConfig,
   observation: AgentStallObservation,
   iteration: int,
-  payload,
+  payload: any,
   defer_feedback: bool,
 ) -> AgentStallObservation {
   if config.action_signal == nil {
@@ -1338,15 +1338,15 @@ pub fn agent_stall_observe_tool_calls(
   session_id: string,
   tool_calls: list,
   iteration: int,
-  raw_config,
+  raw_config: dict | bool | nil,
   state: AgentStallState,
   defer_feedback: bool,
   prev_dispatch: AgentToolDispatch = nil,
-  turn_text = "",
-  had_parse_errors = false,
-  turn_made_edit = false,
-  turn_stop_reason = "",
-  payload = nil,
+  turn_text: string = "",
+  had_parse_errors: bool = false,
+  turn_made_edit: bool = false,
+  turn_stop_reason: string = "",
+  payload: any = nil,
 ) -> AgentStallObservation {
   const observation = __agent_stall_observe_core(
     agent,

@@ -6,7 +6,8 @@
 //! thread-local LIFO stacks or single slots. The same hazard applies to
 //! single-slot contexts installed for the whole agent loop. That model is sound for a
 //! synchronous call stack, but a guard held across an `.await` is **not**:
-//! workers use [`tokio::task::spawn_local`] and can interleave or migrate. A
+//! runtime tasks can interleave on one thread or migrate between worker
+//! threads. A
 //! child that installs context across an await would otherwise read a
 //! *sibling's* file scope, env, worktree, tool ceiling, approval, secret scope,
 //! or event attribution.
@@ -61,8 +62,10 @@ use crate::stdlib::process::{
     swap_session_environment, swap_source_dir, swap_thread_execution_context,
 };
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
-
 pub(crate) mod blocking;
+mod subtask_state;
+
+use subtask_state::SubtaskAmbientState;
 
 /// An isolated snapshot of every ambient capability/identity stack a worker
 /// task owns while it runs. `Default` is the empty scope (no policies, depth 0).
@@ -139,6 +142,9 @@ pub(crate) struct AmbientExecutionScope {
     /// fresh for a new logical call stack.
     precheck: Vec<std::sync::Arc<crate::value::VmClosure>>,
     precheck_depth: usize,
+    /// State whose inheritance is specific to child-interpreter subtasks.
+    /// Grouping it makes capture and per-poll restoration one typed contract.
+    subtask: SubtaskAmbientState,
 }
 
 /// Clone the contents of one ambient slot without disturbing it: swap it out,
@@ -164,6 +170,15 @@ impl AmbientExecutionScope {
         llm_mock: LlmMockContext,
     ) -> Self {
         let mut scope = Self::capture_for_inline_subtask();
+        let tool_call_cancellations = scope
+            .host_bridge
+            .as_ref()
+            .map_or_else(crate::tool_call_cancellations::fresh_registry, |bridge| {
+                bridge.tool_call_cancellation_registry()
+            });
+        scope
+            .subtask
+            .set_tool_call_cancellations(tool_call_cancellations);
         scope.execution_scope.push(owner);
         scope.llm_mock = llm_mock;
         scope
@@ -224,6 +239,7 @@ impl AmbientExecutionScope {
                 crate::observability::execution_scope::swap_execution_scope_stack,
             ),
             run_event_sink: clone_via_swap(swap_run_event_sink),
+            subtask: SubtaskAmbientState::capture(),
             ..Self::default()
         }
     }
@@ -289,7 +305,16 @@ impl AmbientExecutionScope {
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
             precheck: clone_via_swap(swap_tool_precheck_stack),
             precheck_depth: clone_via_swap(swap_tool_precheck_depth),
+            subtask: SubtaskAmbientState::capture(),
         }
+    }
+
+    /// Set the placement every subtask of this scope's execution tree uses.
+    pub(crate) fn set_subtask_placement(
+        &mut self,
+        placement: Option<crate::vm::subtask::SubtaskPlacement>,
+    ) {
+        self.subtask.set_placement(placement);
     }
 
     /// Swap this scope with the ambient thread-locals one field at a time.
@@ -348,6 +373,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.command_hook_depth, swap_command_policy_hook_depth);
         swap_slot(&mut self.precheck, swap_tool_precheck_stack);
         swap_slot(&mut self.precheck_depth, swap_tool_precheck_depth);
+        self.subtask.swap_in_place();
     }
 }
 
@@ -571,16 +597,38 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // Ordered run events follow the same execution tree without leaking into a
     // concurrently-polled sibling run.
     ("RUN_EVENT_SINK_CONTEXT", AmbientScoping::Captured),
+    // Where this execution tree's subtasks run. Captured so a nested fan-out
+    // keeps the placement its run started with.
+    ("SUBTASK_PLACEMENT_CONTEXT", AmbientScoping::Captured),
+    // Security policy and the two egress enforcement depths all fail OPEN when
+    // unset, so a subtask reading a worker thread's default would silently drop
+    // the strict-security, explicit-egress-policy, and SSRF gates.
+    ("SECURITY_POLICY_STACK", AmbientScoping::Captured),
+    (
+        "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+        AmbientScoping::Captured,
+    ),
+    ("REQUIRE_SSRF_GUARD_DEPTH", AmbientScoping::Captured),
+    // Operator-registered secret patterns: an empty set on a worker thread
+    // writes secrets to a subtask's transcript in the clear.
+    ("CUSTOM_PATTERNS", AmbientScoping::Captured),
+    // The observable event log, captured as a shared Arc so parent and subtask
+    // append to one log instead of one unread log per worker thread.
+    ("ACTIVE_EVENT_LOG", AmbientScoping::Captured),
+    // Per-dispatch call ceilings. The count is shared, not copied: a branch
+    // that got its own count could spend the whole `@budget(...)` allowance.
+    ("MCP_CALL_BUDGET", AmbientScoping::Captured),
+    ("PG_QUERY_BUDGET", AmbientScoping::Captured),
+    // One execution tree's in-flight tool calls remain addressable when
+    // registration, cancellation, and guard teardown land on different
+    // runtime workers, without becoming visible to sibling embedded VMs.
+    (
+        "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+        AmbientScoping::Captured,
+    ),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
     // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
-    (
-        "SECURITY_POLICY_STACK",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] security/mod.rs MCP-schema/security policy; not \
-             set per-worker today. Capture when a fan-out child reads it across an await.",
-        ),
-    ),
     (
         "ACTIVE_TENANT_STACK",
         AmbientScoping::Uncaptured(
@@ -591,19 +639,6 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
         "ACTIVE_PRINCIPAL_STACK",
         AmbientScoping::Uncaptured(
             "[latent-capability] harness_auth.rs principal identity; not set per-worker today.",
-        ),
-    ),
-    (
-        "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] egress/mod.rs egress-policy enforcement depth; not entered \
-             per-worker today.",
-        ),
-    ),
-    (
-        "REQUIRE_SSRF_GUARD_DEPTH",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] egress/mod.rs SSRF-guard depth; not entered per-worker today.",
         ),
     ),
     (
@@ -673,13 +708,7 @@ mod drift_tests;
 /// must wire it into [`AmbientExecutionScope`]. `audited_latent_capabilities_are_cataloged`
 /// asserts each stays present and `Uncaptured` so they cannot silently flip.
 #[cfg(test)]
-const AUDITED_LATENT_CAPABILITIES: &[&str] = &[
-    "SECURITY_POLICY_STACK",
-    "ACTIVE_TENANT_STACK",
-    "ACTIVE_PRINCIPAL_STACK",
-    "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
-    "REQUIRE_SSRF_GUARD_DEPTH",
-];
+const AUDITED_LATENT_CAPABILITIES: &[&str] = &["ACTIVE_TENANT_STACK", "ACTIVE_PRINCIPAL_STACK"];
 
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
@@ -781,6 +810,9 @@ impl<F: Future> Future for Scoped<F> {
         result
     }
 }
+
+#[cfg(test)]
+mod cancellation_tests;
 
 #[cfg(test)]
 mod tests {

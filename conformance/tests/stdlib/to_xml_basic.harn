@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Flat dict
   const flat = to_xml({name: "Ada", year: 1815})
   assert_eq(flat, "<root><name>Ada</name><year>1815</year></root>", "to_xml renders flat dict")

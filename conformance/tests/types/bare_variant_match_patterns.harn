@@ -17,7 +17,7 @@ fn half(v: int) -> Result<int, string> {
   return Err("odd: ${v}")
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Bare call-shaped variant patterns on the builtin Result enum.
   match half(10) {
     Ok(v) -> { harness.stdio.log("ok ${v}") }

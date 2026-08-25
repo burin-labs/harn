@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(base64url_encode(">>>???///"))
   harness.stdio.println(base64url_decode("Pj4-Pz8_Ly8v"))
   // Binary-safe URL-safe base64: non-UTF-8 octets round-trip, padded or not.

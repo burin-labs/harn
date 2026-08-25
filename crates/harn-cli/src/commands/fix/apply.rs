@@ -54,10 +54,16 @@ fn apply_repairs_with_options_inner(
     // The LAST pass's freeze set: an earlier pass can resolve a freeze by
     // changing a caller, so only the settled state is worth reporting.
     let mut frozen_callables = Vec::new();
+    // The FIRST pass's annotation summary: later passes see the annotations
+    // already written, so only the opening state describes the migration.
+    let mut parameter_annotations = None;
 
-    for _ in 0..max_passes {
+    for pass in 0..max_passes {
         let plan = build_plan_with_options(targets, None, options)?;
         frozen_callables = plan.frozen_callables.clone();
+        if pass == 0 {
+            parameter_annotations = plan.parameter_annotations.clone();
+        }
         let retired_testing_prerequisite = plan.repairs.iter().any(|repair| {
             repair.repair.id == "imports/remove-retired-testing-helper"
                 && repair.applies_cleanly
@@ -163,6 +169,7 @@ fn apply_repairs_with_options_inner(
         skipped_files: remaining.skipped_files,
         declared_invalid_files: remaining.declared_invalid_files,
         post_apply_diagnostics_count: remaining.count,
+        parameter_annotations,
         dry_run,
         frozen_callables,
     })
@@ -520,24 +527,23 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
     for file in &files {
         let mut config = package::load_check_config(Some(file));
         commands::check::apply_harn_lint_config(file, &mut config);
-        let output =
-            match commands::check::analyze_file(&mut analysis, file, &config, &module_graph) {
-                Ok(output) => output,
-                Err(skipped) => {
-                    let wire = skipped_file_from_analysis_error(
-                        file.to_string_lossy().into_owned(),
-                        skipped,
-                    );
-                    // A fixture the repo declares expected-invalid is still not
-                    // repairable, but it must not fail the run (harn#6264).
-                    if super::declares_expected_invalid(file) {
-                        declared_invalid_files.push(wire);
-                    } else {
-                        skipped_files.push(wire);
-                    }
-                    continue;
+        let output = commands::check::analyze_file(&mut analysis, file, &config, &module_graph);
+        analysis.remove_source(&SourceId::path(file));
+        let output = match output {
+            Ok(output) => output,
+            Err(skipped) => {
+                let wire =
+                    skipped_file_from_analysis_error(file.to_string_lossy().into_owned(), skipped);
+                // A fixture the repo declares expected-invalid is still not
+                // repairable, but it must not fail the run (harn#6264).
+                if super::declares_expected_invalid(file) {
+                    declared_invalid_files.push(wire);
+                } else {
+                    skipped_files.push(wire);
                 }
-            };
+                continue;
+            }
+        };
         let source = output.source;
         let program = output.program;
 

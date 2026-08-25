@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const nums = [2, 4, 6]
   harness.stdio.log(nums.any({ x -> x > 5 }))
   harness.stdio.log(nums.all({ x -> x > 0 }))

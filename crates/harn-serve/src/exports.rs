@@ -1488,7 +1488,7 @@ pub fn handler_echo(req: dict) -> dict { return req }
         std::fs::write(
             &path,
             r"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(task)
 }
 ",

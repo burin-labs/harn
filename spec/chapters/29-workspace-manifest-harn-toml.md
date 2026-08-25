@@ -409,8 +409,8 @@ pipeline revision metadata, package data, and judge configuration. Paired eval
 statistics compare rows only when both the case and harness fingerprints are
 compatible.
 
-`eval_pack_run(manifest, options?)` appends one durable eval-ledger row per
-trial cell keyed by `(suite, model, split, commit, case,
+`harness.runtime.eval_pack_run(manifest, options?)` appends one durable
+eval-ledger row per trial cell keyed by `(suite, model, split, commit, case,
 case_fingerprint, harness_config_fingerprint, trial)` to the active event-log
 backend, defaulting to the sqlite event log under the manifest `base_dir` /
 `HARN_STATE_DIR`. Before running a cell, the runner reuses an exact matching
@@ -446,8 +446,8 @@ holdout = ["case-c"]
 
 `eval_pack_validate_split(manifest)` rejects duplicate case ids, duplicate
 partition entries, overlapping partitions, unknown case ids, and under-covered
-splits. `eval_pack_run(manifest)` performs the same validation before running
-cases.
+splits. `harness.runtime.eval_pack_run(manifest)` performs the same validation
+before running cases.
 
 An `eval_pack` block may include ordinary Harn statements and one
 `summarize { ... }` block. These statements run when the declaration is
@@ -805,18 +805,22 @@ fn admin_merge(ctx) {
 }
 
 pipeline default(harness: Harness) {
-  register_persona_hook("merge_*", "PreStep", { ctx -> nil })
-  register_step_hook("merge_captain", "admin_merge", "PostStep", { ctx ->
-    {output: ctx.output}
-  })
+  harness.agent.register_persona_hook(
+    "merge_*", "PreStep", { ctx -> nil },
+  )
+  harness.agent.register_step_hook(
+    "merge_captain", "admin_merge", "PostStep", { ctx ->
+      {output: ctx.output}
+    },
+  )
 }
 ```
 
-`register_persona_hook(persona_pattern, event, handler)` matches a
-glob-style persona name and fires for matching lifecycle events.
-`register_step_hook(persona_pattern, step_name, event, handler)` further
-narrows the hook to one statically declared `@step(name: ...)`. `harn
-check` rejects literal step-hook targets whose persona pattern matches a
+`harness.agent.register_persona_hook(persona_pattern, event, handler)`
+matches a glob-style persona name and fires for matching lifecycle events.
+`harness.agent.register_step_hook(persona_pattern, step_name, event, handler)`
+further narrows the hook to one statically declared `@step(name: ...)`.
+`harn check` rejects literal step-hook targets whose persona pattern matches a
 statically declared `@persona` but whose step name is not declared by
 that persona.
 
@@ -865,7 +869,7 @@ shaped for `agent_loop`'s tool registry. Recognized keys:
 
 - `stacks` (`list<string>`, default `[]`) — drives both
   `tool_hooks_filter` and registry auto-seed.
-- `registry` (`tool_hooks_registry()` value, default
+- `registry` (`harness.tools.hooks_registry()` value, default
   `tool_hooks_seed_registry(stacks)`) — explicit override.
 - `custom_rules` (`list<tool_rule>`, default `[]`) — matched before
   the registry regardless of stack scoping.
@@ -902,9 +906,9 @@ Three shipped modes return a uniform decision envelope:
   original command unchanged and records a `tool_rule_warning`
   lifecycle audit entry.
 
-Custom modes call the same `tool_hooks_emit_audit(kind, payload)` and
-`tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` primitives
-and return any envelope shape the caller wants — unknown `action`
+Custom modes call the same `harness.tools.hooks_emit_audit(kind, payload)`
+and `harness.tools.hooks_inject_reminder({tags, body, ttl_turns, ...})`
+primitives and return any envelope shape the caller wants — unknown `action`
 strings are treated as advisory extensions by replay tooling.
 
 The optional `llm_classifier` runs a small model against any command
@@ -930,7 +934,6 @@ guide for harn-canon rules is in
 disabled = ["unused-import"]
 require_file_header = false
 require_docstrings = false
-require_public_api_types = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -944,11 +947,6 @@ persona_step_allowlist = ["legacy_helper"]
   default — out of the box, `pub fn` needs no docs, and editor
   tooling derives a usage example from the type signature. Embedded
   stdlib sources enforce docstrings regardless of this flag.
-- `require_public_api_types` opts into `missing-public-api-type`, which
-  requires explicit parameter and return annotations on every public function
-  and pipeline. Private callables remain inferable, and explicit `unknown` or
-  `any` satisfies the declaration contract. The same policy is available for
-  a focused migration with `harn lint --require-public-api-types`.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

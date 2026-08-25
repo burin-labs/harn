@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn sum(...nums) {
+pipeline test(harness: Harness, task: unknown) {
+  fn sum(...nums: int) {
     let total = 0
     for n in nums {
       total += n
@@ -10,14 +10,14 @@ pipeline test(harness: Harness, task) {
   harness.stdio.log(sum(10))
   harness.stdio.log(sum())
   // Rest param with leading required params
-  fn greet(greeting, ...names) {
+  fn greet(greeting: string, ...names: string) {
     for name in names {
       harness.stdio.log("${greeting}, ${name}!")
     }
   }
   greet("Hello", "Alice", "Bob")
   // Rest param is always a list
-  fn check_type(...args) {
+  fn check_type(...args: any) {
     harness.stdio.log(type_of(args))
   }
   check_type()

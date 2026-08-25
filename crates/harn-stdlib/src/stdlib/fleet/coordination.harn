@@ -25,14 +25,14 @@ const __FLEET_DEFAULT_LEASE_MS = 5 * 60 * 1000
 
 const __FLEET_DEFAULT_GRACE_MS = 60 * 1000
 
-fn __fleet_dict(value) {
+fn __fleet_dict(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __fleet_list(value) {
+fn __fleet_list(value: any) {
   if value == nil {
     return []
   }
@@ -42,7 +42,7 @@ fn __fleet_list(value) {
   return [value]
 }
 
-fn __fleet_text(value) -> string {
+fn __fleet_text(value: string) -> string {
   if value == nil {
     return ""
   }
@@ -52,7 +52,7 @@ fn __fleet_text(value) -> string {
   return to_string(value)
 }
 
-fn __fleet_required_text(value, label) -> string {
+fn __fleet_required_text(value: string, label: string) -> string {
   const text = trim(__fleet_text(value))
   if text == "" {
     throw "std/fleet/coordination: " + label + " is required"
@@ -60,7 +60,7 @@ fn __fleet_required_text(value, label) -> string {
   return text
 }
 
-fn __fleet_nonnegative_int(value, fallback, label) -> int {
+fn __fleet_nonnegative_int(value: any, fallback: int, label: string) -> int {
   if value == nil {
     return fallback
   }
@@ -71,14 +71,14 @@ fn __fleet_nonnegative_int(value, fallback, label) -> int {
   return parsed
 }
 
-fn __fleet_required_nonnegative_int(value, label) -> int {
+fn __fleet_required_nonnegative_int(value: any, label: string) -> int {
   if value == nil {
     throw "std/fleet/coordination: " + label + " is required"
   }
   return __fleet_nonnegative_int(value, 0, label)
 }
 
-fn __fleet_options(options) {
+fn __fleet_options(options: any) {
   const opts = __fleet_dict(options)
   if opts?.created_at != nil || opts?.ts != nil {
     throw "std/fleet/coordination: authoritative timestamps are runtime-owned"
@@ -86,7 +86,7 @@ fn __fleet_options(options) {
   return opts
 }
 
-fn __fleet_typed_data(value, schema, label) {
+fn __fleet_typed_data(value: any, schema: any, label: string) {
   const report = get_typed_report(value, schema)
   if !report.ok {
     throw "std/fleet/coordination: invalid " + label + ": " + join(report.errors, "; ")
@@ -94,7 +94,15 @@ fn __fleet_typed_data(value, schema, label) {
   return get_typed_value(value, schema)
 }
 
-fn __fleet_post(harness: Harness, scope, room, kind, subject, data, options) {
+fn __fleet_post(
+  harness: Harness,
+  scope: any,
+  room: any,
+  kind: string,
+  subject: any,
+  data: any,
+  options: any,
+) {
   const opts = __fleet_options(options)
   return coord_post(
     harness.runtime,
@@ -364,7 +372,7 @@ pub fn fleet_snapshot_schema() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn fleet_snapshot_report(value) {
+pub fn fleet_snapshot_report(value: any) {
   return get_typed_report(value, fleet_snapshot_schema())
 }
 
@@ -378,7 +386,7 @@ pub fn fleet_snapshot_report(value) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_claim(harness: Harness, scope, room, work_key, options = nil) {
+pub fn fleet_claim(harness: Harness, scope: any, room: any, work_key: string, options: any = nil) {
   const opts = __fleet_options(options)
   const key = __fleet_required_text(work_key, "work_key")
   const data = __fleet_typed_data(
@@ -407,7 +415,14 @@ pub fn fleet_claim(harness: Harness, scope, room, work_key, options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted", options = nil) {
+pub fn fleet_ack(
+  harness: Harness,
+  scope: any,
+  room: any,
+  target_id: string,
+  decision: string? = "accepted",
+  options: any = nil,
+) {
   const opts = __fleet_options(options)
   const target = __fleet_required_text(target_id, "target_id")
   const data = __fleet_typed_data(
@@ -435,12 +450,12 @@ pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted"
  */
 pub fn fleet_done(
   harness: Harness,
-  scope,
-  room,
-  claim_id,
-  work_key,
-  outcome = "completed",
-  options = nil,
+  scope: any,
+  room: any,
+  claim_id: string,
+  work_key: string,
+  outcome: string? = "completed",
+  options: any = nil,
 ) {
   const opts = __fleet_options(options)
   const claim = __fleet_required_text(claim_id, "claim_id")
@@ -476,7 +491,7 @@ pub fn fleet_done(
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
+pub fn fleet_finding(harness: Harness, scope: any, room: any, premise: string, options: any = nil) {
   const opts = __fleet_options(options)
   const normalized = lowercase(trim(__fleet_required_text(premise, "premise")))
   const data = __fleet_typed_data(
@@ -516,7 +531,13 @@ pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_heartbeat(harness: Harness, scope, room, state = "busy", options = nil) {
+pub fn fleet_heartbeat(
+  harness: Harness,
+  scope: any,
+  room: any,
+  state: string? = "busy",
+  options: any = nil,
+) {
   const opts = __fleet_options(options)
   const data = __fleet_typed_data(
     {
@@ -552,7 +573,7 @@ pub fn fleet_heartbeat(harness: Harness, scope, room, state = "busy", options = 
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_checkin(harness: Harness, scope, room, sections, options = nil) {
+pub fn fleet_checkin(harness: Harness, scope: any, room: any, sections: any, options: any = nil) {
   const opts = __fleet_options(options)
   const input = __fleet_dict(sections)
   const data = __fleet_typed_data(
@@ -580,7 +601,7 @@ pub fn fleet_checkin(harness: Harness, scope, room, sections, options = nil) {
   )
 }
 
-fn __fleet_row(item) {
+fn __fleet_row(item: any) {
   const value = __fleet_dict(item)
   const message = __fleet_dict(value?.message ?? value?.event?.payload ?? value?.payload ?? value)
   const event = __fleet_dict(value?.event ?? value?.channel ?? value)
@@ -588,7 +609,7 @@ fn __fleet_row(item) {
   return {message: message, event: event, at_ms: at_ms}
 }
 
-fn __fleet_actor_id(message) -> string {
+fn __fleet_actor_id(message: dict) -> string {
   const actor = __fleet_dict(message?.from)
   const id = actor?.session_id
     ?? actor?.worker_id
@@ -602,7 +623,7 @@ fn __fleet_actor_id(message) -> string {
   return trim(__fleet_text(id))
 }
 
-fn __fleet_known_data(message) -> bool {
+fn __fleet_known_data(message: dict) -> bool {
   const data = message?.data
   if message?.kind == "claim" {
     return get_typed_report(data, fleet_claim_schema()).ok
@@ -625,7 +646,7 @@ fn __fleet_known_data(message) -> bool {
   return false
 }
 
-fn __fleet_contains(items, needle) -> bool {
+fn __fleet_contains(items: any, needle: any) -> bool {
   for item in __fleet_list(items) {
     if item == needle {
       return true
@@ -634,7 +655,7 @@ fn __fleet_contains(items, needle) -> bool {
   return false
 }
 
-fn __fleet_claim_state(claim, ack, done, heartbeat, now_ms) {
+fn __fleet_claim_state(claim: dict, ack: dict?, done: dict?, heartbeat: dict?, now_ms: any) {
   const data = claim.message.data
   let state = "active"
   if done != nil && done.message.data.work_key == data.work_key {
@@ -665,7 +686,7 @@ fn __fleet_claim_state(claim, ack, done, heartbeat, now_ms) {
   return {state: state, expires_at_ms: expires_at_ms}
 }
 
-fn __fleet_liveness(heartbeat, now_ms, grace_ms) {
+fn __fleet_liveness(heartbeat: dict?, now_ms: any, grace_ms: any) {
   if heartbeat == nil || heartbeat.at_ms <= 0 {
     return {status: "unknown"}
   }
@@ -700,7 +721,7 @@ fn __fleet_liveness(heartbeat, now_ms, grace_ms) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn fleet_project(messages, options = nil) {
+pub fn fleet_project(messages: list, options: any = nil) {
   if type_of(messages) != "list" {
     throw "std/fleet/coordination: fleet_project messages must be a list"
   }

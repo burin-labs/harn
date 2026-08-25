@@ -15,7 +15,7 @@ import {
   with_temp_dir,
 } from "std/testing"
 
-pipeline test_testing_toolkit(harness: Harness, task) {
+pipeline test_testing_toolkit(harness: Harness, task: unknown) {
   // Optional fixture controls are genuinely optional record fields, not
   // required fields whose values happen to admit nil.
   const fixture_result = with_capability_fixtures(

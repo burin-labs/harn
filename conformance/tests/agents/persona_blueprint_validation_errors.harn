@@ -1,6 +1,6 @@
 import { persona_blueprint_validate } from "std/personas/compiler"
 
-fn has_code(report, code) {
+fn has_code(report: dict, code: string) {
   return report.errors.any({ error -> error.code == code })
 }
 

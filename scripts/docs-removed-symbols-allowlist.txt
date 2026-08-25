@@ -65,51 +65,6 @@ docs/src/stdlib/tool-middleware.md                 with_rate_limit
 # concurrently, and a gate that waits for a 312-site burn-down protects
 # nothing in the meantime. Delete lines as pages are corrected.
 
-docs/llm/harn-quickref.md                          atomic
-docs/llm/harn-quickref.md                          cancel_in_flight_tool_call
-docs/llm/harn-quickref.md                          channel_guardrail_register
-docs/llm/harn-quickref.md                          channel_select
-docs/llm/harn-quickref.md                          clear_path_scope_guard
-docs/llm/harn-quickref.md                          clear_reminder_providers
-docs/llm/harn-quickref.md                          daemon_resume
-docs/llm/harn-quickref.md                          daemon_snapshot
-docs/llm/harn-quickref.md                          daemon_spawn
-docs/llm/harn-quickref.md                          daemon_stop
-docs/llm/harn-quickref.md                          daemon_trigger
-docs/llm/harn-quickref.md                          durable_rate_limit_acquire
-docs/llm/harn-quickref.md                          ed25519_keypair
-docs/llm/harn-quickref.md                          notify_file_edited
-docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_snapshot
-docs/llm/harn-quickref.md                          pipeline_lifecycle_audit_log_take
-docs/llm/harn-quickref.md                          pipeline_on_finish
-docs/llm/harn-quickref.md                          register_path_scope_guard
-docs/llm/harn-quickref.md                          register_persona_hook
-docs/llm/harn-quickref.md                          register_reminder_provider
-docs/llm/harn-quickref.md                          register_session_hook
-docs/llm/harn-quickref.md                          register_tool_hook
-docs/llm/harn-quickref.md                          routing_policy
-docs/llm/harn-quickref.md                          trace_spans
-docs/llm/harn-quickref.md                          trigger_fire
-docs/llm/harn-quickref.md                          trigger_inspect_dlq
-docs/llm/harn-quickref.md                          trigger_inspect_lifecycle
-docs/llm/harn-quickref.md                          trigger_list
-docs/llm/harn-quickref.md                          trigger_register
-docs/llm/harn-quickref.md                          trigger_replay
-docs/llm/harn-quickref.md                          trust_query
-docs/llm/harn-quickref.md                          trust_record
-docs/llm/harn-quickref.md                          x25519_keypair
-docs/llm/harn-quickref.md                          yield_now
-
-docs/src/agent-channels.md                         channel
-docs/src/agent-channels.md                         channel_guardrail_register
-docs/src/agent-channels.md                         trigger_register
-
-docs/src/agent-lifecycle.md                        daemon_resume
-docs/src/agent-lifecycle.md                        trigger_register
-
-docs/src/agent-pools.md                            channel
-docs/src/agent-pools.md                            trigger_register
-
 docs/src/builtins.md                               agent_trace
 docs/src/builtins.md                               agent_trace_summary
 docs/src/builtins.md                               artifact_emit
@@ -192,9 +147,6 @@ docs/src/builtins.md                               with_autonomy_policy
 docs/src/builtins.md                               with_command_policy
 docs/src/builtins.md                               with_dynamic_permissions
 
-docs/src/concepts/steering-seams.md                cancel_in_flight_tool_call
-docs/src/concepts/steering-seams.md                register_session_hook
-
 docs/src/concurrency.md                            channel_select
 docs/src/concurrency.md                            close_channel
 docs/src/concurrency.md                            durable_rate_limit_acquire
@@ -224,29 +176,7 @@ docs/src/concurrency.md                            sync_rwlock_acquire
 docs/src/concurrency.md                            sync_semaphore_acquire
 docs/src/concurrency.md                            try_receive
 
-docs/src/context-maintenance-hooks.md              transcript_auto_compact
-
-docs/src/cookbooks/channels.md                     channel
-docs/src/cookbooks/channels.md                     pipeline_on_finish
-docs/src/cookbooks/channels.md                     register_step_hook
-docs/src/cookbooks/channels.md                     register_tool_hook
-docs/src/cookbooks/channels.md                     trigger_register
-
-docs/src/cookbooks/lifecycle.md                    pipeline_lifecycle_audit_log_take
-docs/src/cookbooks/lifecycle.md                    pipeline_on_finish
-
-docs/src/dev/testbench.md                          testbench_fs_diff
-docs/src/dev/testbench.md                          testbench_is_active
-
-docs/src/dev/testing.md                            mkdtemp_in_workspace
-
-docs/src/extensibility/hooks.md                    register_step_hook
-
-docs/src/flow-predicates.md                        agent_inject_feedback
-
 docs/src/hitl.md                                   trigger_replay
-
-docs/src/how-harn-compares.md                      load_skill
 
 docs/src/llm/agent_loop.md                         daemon_resume
 docs/src/llm/agent_loop.md                         daemon_snapshot
@@ -259,75 +189,12 @@ docs/src/modules.md                                metadata_status
 docs/src/modules.md                                pg_mock_pool
 docs/src/modules.md                                sqlite_mock_db
 
-docs/src/orchestrator.md                           trigger_replay
-
-docs/src/personas/stages.md                        with_execution_policy
-
 docs/src/pipeline-lifecycle.md                     pipeline_on_finish
-
-docs/src/postgres.md                               pg_mock_pool
-
-docs/src/project-scan.md                           prompt_explain
 
 docs/src/prompt-assembly.md                        llm_mock_calls
 docs/src/prompt-assembly.md                        prompt_explain
 
-docs/src/runtime-context.md                        atomic
-docs/src/runtime-context.md                        channel
-docs/src/runtime-context.md                        mailbox_open
-docs/src/runtime-context.md                        shared_cell
-docs/src/runtime-context.md                        shared_map
-
-docs/src/scripting-cheatsheet.md                   atomic
-docs/src/scripting-cheatsheet.md                   atomic_add
-docs/src/scripting-cheatsheet.md                   atomic_get
-
-docs/src/sessions.md                               agent_subscribe
-
-docs/src/skill-provenance.md                       load_skill
-
-docs/src/skills.md                                 load_skill
-
-docs/src/spec/harn-extensions/v1.md                artifact_emit
-
-docs/src/sqlite.md                                 sqlite_mock_db
-
-docs/src/stdlib/daemon.md                          daemon_resume
-docs/src/stdlib/daemon.md                          daemon_snapshot
-docs/src/stdlib/daemon.md                          daemon_spawn
-docs/src/stdlib/daemon.md                          daemon_stop
-docs/src/stdlib/daemon.md                          daemon_trigger
-
 docs/src/stdlib/llm-handlers.md                    routing_policy
-
-docs/src/stdlib/timing.md                          trace_spans
-
-docs/src/stdlib/tool-middleware.md                 atomic
-docs/src/stdlib/tool-middleware.md                 with_execution_policy
-
-docs/src/stdlib/triggers.md                        trigger_fire
-docs/src/stdlib/triggers.md                        trigger_inspect_action_graph
-docs/src/stdlib/triggers.md                        trigger_inspect_dlq
-docs/src/stdlib/triggers.md                        trigger_inspect_lifecycle
-docs/src/stdlib/triggers.md                        trigger_list
-docs/src/stdlib/triggers.md                        trigger_register
-docs/src/stdlib/triggers.md                        trigger_replay
-docs/src/stdlib/triggers.md                        trust_graph_policy_for
-docs/src/stdlib/triggers.md                        trust_graph_query
-docs/src/stdlib/triggers.md                        trust_graph_record
-docs/src/stdlib/triggers.md                        trust_graph_verify_chain
-docs/src/stdlib/triggers.md                        trust_query
-docs/src/stdlib/triggers.md                        trust_record
-
-docs/src/stdlib/verification.md                    verification_profile_matches
-
-docs/src/streams.md                                parallel_race
-
-docs/src/system-reminders.md                       clear_reminder_providers
-docs/src/system-reminders.md                       register_reminder_provider
-docs/src/system-reminders.md                       register_tool_hook
-
-docs/src/team-learning.md                          friction_record
 
 docs/src/tool-hooks.md                             tool_hooks_emit_audit
 docs/src/tool-hooks.md                             tool_hooks_filter
@@ -338,77 +205,11 @@ docs/src/tool-hooks.md                             tool_hooks_register
 docs/src/tool-hooks.md                             tool_hooks_registry
 docs/src/tool-hooks.md                             tool_hooks_unregister
 
-docs/src/triggers.md                               trigger_fire
-docs/src/triggers.md                               trigger_register
-docs/src/triggers.md                               trigger_replay
-
-docs/src/triggers/manifest.md                      eval_pack_run
-
-docs/src/triggers/registry.md                      trigger_fire
-docs/src/triggers/registry.md                      trigger_replay
-docs/src/triggers/registry.md                      trigger_test_harness
-
-docs/src/triggers/webhook-intake.md                webhook_intake_deregister
-docs/src/triggers/webhook-intake.md                webhook_intake_feed
-docs/src/triggers/webhook-intake.md                webhook_intake_list
-docs/src/triggers/webhook-intake.md                webhook_intake_recent
-docs/src/triggers/webhook-intake.md                webhook_intake_register
-
-docs/src/trust-graph.md                            trust_graph_policy_for
-docs/src/trust-graph.md                            trust_graph_query
-docs/src/trust-graph.md                            trust_graph_record
-docs/src/trust-graph.md                            trust_graph_verify_chain
-docs/src/trust-graph.md                            trust_query
-docs/src/trust-graph.md                            trust_record
-
 docs/src/workflow-runtime.md                       eval_suite_run
 docs/src/workflow-runtime.md                       load_run_tree
 
-spec/chapters/10-concurrency.md                    channel
-spec/chapters/10-concurrency.md                    mailbox_close
-spec/chapters/10-concurrency.md                    mailbox_lookup
-spec/chapters/10-concurrency.md                    mailbox_metrics
-spec/chapters/10-concurrency.md                    mailbox_open
-spec/chapters/10-concurrency.md                    mailbox_receive
-spec/chapters/10-concurrency.md                    mailbox_send
-spec/chapters/10-concurrency.md                    mailbox_try_receive
-spec/chapters/10-concurrency.md                    parallel_race
-spec/chapters/10-concurrency.md                    shared_cas
-spec/chapters/10-concurrency.md                    shared_cell
-spec/chapters/10-concurrency.md                    shared_get
-spec/chapters/10-concurrency.md                    shared_map
-spec/chapters/10-concurrency.md                    shared_map_cas
-spec/chapters/10-concurrency.md                    shared_map_delete
-spec/chapters/10-concurrency.md                    shared_map_entries
-spec/chapters/10-concurrency.md                    shared_map_get
-spec/chapters/10-concurrency.md                    shared_map_set
-spec/chapters/10-concurrency.md                    shared_map_snapshot
-spec/chapters/10-concurrency.md                    shared_metrics
-spec/chapters/10-concurrency.md                    shared_set
-spec/chapters/10-concurrency.md                    shared_snapshot
-spec/chapters/10-concurrency.md                    supervisor_events
-spec/chapters/10-concurrency.md                    supervisor_metrics
-spec/chapters/10-concurrency.md                    supervisor_start
-spec/chapters/10-concurrency.md                    supervisor_state
-spec/chapters/10-concurrency.md                    supervisor_stop
-spec/chapters/10-concurrency.md                    supervisor_wait
-spec/chapters/10-concurrency.md                    sync_gate_acquire
-spec/chapters/10-concurrency.md                    sync_metrics
-spec/chapters/10-concurrency.md                    sync_release
-spec/chapters/10-concurrency.md                    sync_semaphore_acquire
-
-spec/chapters/11-pipeline-lifecycle.md             pipeline_on_finish
-
 spec/chapters/13-functions-and-closures.md         command_policy_pop
 spec/chapters/13-functions-and-closures.md         command_policy_push
-
-spec/chapters/18-attributes.md                     with_approval_policy
-spec/chapters/18-attributes.md                     with_autonomy_policy
-spec/chapters/18-attributes.md                     with_command_policy
-spec/chapters/18-attributes.md                     with_dynamic_permissions
-spec/chapters/18-attributes.md                     with_execution_policy
-
-spec/chapters/20-built-in-methods.md               cookie_delete
 
 spec/chapters/26-checkpoint-resume.md              checkpoint
 spec/chapters/26-checkpoint-resume.md              checkpoint_clear
@@ -417,13 +218,3 @@ spec/chapters/26-checkpoint-resume.md              checkpoint_exists
 spec/chapters/26-checkpoint-resume.md              checkpoint_get
 spec/chapters/26-checkpoint-resume.md              checkpoint_list
 spec/chapters/26-checkpoint-resume.md              pg_mock_pool
-
-spec/chapters/27-agent-lifecycle-suspend-resume.md daemon_resume
-spec/chapters/27-agent-lifecycle-suspend-resume.md trigger_register
-
-spec/chapters/29-workspace-manifest-harn-toml.md   eval_pack_run
-spec/chapters/29-workspace-manifest-harn-toml.md   register_persona_hook
-spec/chapters/29-workspace-manifest-harn-toml.md   register_step_hook
-spec/chapters/29-workspace-manifest-harn-toml.md   tool_hooks_emit_audit
-spec/chapters/29-workspace-manifest-harn-toml.md   tool_hooks_inject_reminder
-spec/chapters/29-workspace-manifest-harn-toml.md   tool_hooks_registry

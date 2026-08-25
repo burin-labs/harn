@@ -4,7 +4,7 @@
  * discriminant narrows the object path. Both flow into typed positions
  * without coercion, and run correctly.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn describe(o: {val: string | int}) -> string {
     return match type_of(o.val) {
       "string" -> { "s:${o.val}" }

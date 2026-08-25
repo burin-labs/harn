@@ -12,11 +12,11 @@ const FIXTURE_BASE = {
   http_options: {fetched_at: "fixture-time"},
 }
 
-fn make_env(secrets) {
+fn make_env(secrets: dict?) {
   return FIXTURE_BASE + {secrets: secrets ?? {}}
 }
 
-fn provider_obs(model_id, pricing, ctx) {
+fn provider_obs(model_id: string, pricing: dict?, ctx: int?) {
   return observation(
     "anthropic",
     model_id,
@@ -32,7 +32,7 @@ fn provider_obs(model_id, pricing, ctx) {
   )
 }
 
-fn aggregator_obs(model_id, pricing) {
+fn aggregator_obs(model_id: string, pricing: dict) {
   return observation(
     "anthropic",
     model_id,
@@ -78,7 +78,7 @@ const SAMPLE_CATALOG = {
 }
 
 @test
-pipeline test_normalize_picks_provider_owned_on_conflict(harness: Harness, task) {
+pipeline test_normalize_picks_provider_owned_on_conflict(harness: Harness, task: unknown) {
   const raw = [
     aggregator_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.5, output_per_mtok: 7.5}),
     provider_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.0, output_per_mtok: 5.0}, 200000),
@@ -97,7 +97,7 @@ pipeline test_normalize_picks_provider_owned_on_conflict(harness: Harness, task)
 }
 
 @test
-pipeline test_normalize_merges_disjoint_fields(harness: Harness, task) {
+pipeline test_normalize_merges_disjoint_fields(harness: Harness, task: unknown) {
   const raw = [
     provider_obs("claude-haiku-4-5-20251001", {input_per_mtok: 1.0, output_per_mtok: 5.0}, nil),
     aggregator_obs("claude-haiku-4-5-20251001", {cache_read_per_mtok: 0.1}),
@@ -110,7 +110,7 @@ pipeline test_normalize_merges_disjoint_fields(harness: Harness, task) {
 }
 
 @test
-pipeline test_build_drift_flags_added_changed_unknown(harness: Harness, task) {
+pipeline test_build_drift_flags_added_changed_unknown(harness: Harness, task: unknown) {
   const obs_existing = provider_obs(
     "claude-haiku-4-5-20251001",
     {
@@ -145,7 +145,7 @@ pipeline test_build_drift_flags_added_changed_unknown(harness: Harness, task) {
 }
 
 @test
-pipeline test_build_drift_skips_removal_for_unseen_provider(harness: Harness, task) {
+pipeline test_build_drift_skips_removal_for_unseen_provider(harness: Harness, task: unknown) {
   const other_provider_obs = observation(
     "openai",
     "gpt-4o",
@@ -165,7 +165,7 @@ pipeline test_build_drift_skips_removal_for_unseen_provider(harness: Harness, ta
 }
 
 @test
-pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harness, task) {
+pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harness, task: unknown) {
   const only_one = provider_obs(
     "claude-haiku-4-5-20251001",
     {
@@ -182,7 +182,7 @@ pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harnes
 }
 
 @test
-pipeline test_build_drift_ignores_already_deprecated_removals(harness: Harness, task) {
+pipeline test_build_drift_ignores_already_deprecated_removals(harness: Harness, task: unknown) {
   const catalog = {
     models: [
       {id: "served", provider: "provider", deprecation: {status: "active"}},
@@ -210,7 +210,10 @@ pipeline test_build_drift_ignores_already_deprecated_removals(harness: Harness, 
 }
 
 @test
-pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(harness: Harness, task) {
+pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(
+  harness: Harness,
+  task: unknown,
+) {
   const catalog = {
     models: [
       {
@@ -239,7 +242,7 @@ pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(harness: H
 }
 
 @test
-pipeline test_build_drift_matches_provider_wire_model(harness: Harness, task) {
+pipeline test_build_drift_matches_provider_wire_model(harness: Harness, task: unknown) {
   const catalog = {
     models: [
       {
@@ -271,7 +274,7 @@ pipeline test_build_drift_matches_provider_wire_model(harness: Harness, task) {
 }
 
 @test
-pipeline test_render_markdown_report_includes_diagnostics(harness: Harness, task) {
+pipeline test_render_markdown_report_includes_diagnostics(harness: Harness, task: unknown) {
   const obs = provider_obs(
     "claude-haiku-4-5-20251001",
     {
@@ -309,7 +312,7 @@ pipeline test_render_markdown_report_includes_diagnostics(harness: Harness, task
 }
 
 @test
-pipeline test_render_candidate_toml_emits_added_and_changed_only(harness: Harness, task) {
+pipeline test_render_candidate_toml_emits_added_and_changed_only(harness: Harness, task: unknown) {
   const added_obs = provider_obs(
     "claude-haiku-5-20260601",
     {input_per_mtok: 0.8, output_per_mtok: 4.0},
@@ -348,7 +351,7 @@ pipeline test_render_candidate_toml_emits_added_and_changed_only(harness: Harnes
 @test
 pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const discovered = aggregator_obs(
     "claude-next-unverified",
@@ -363,7 +366,7 @@ pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(
 }
 
 @test
-pipeline test_render_candidate_toml_handles_no_changes(harness: Harness, task) {
+pipeline test_render_candidate_toml_handles_no_changes(harness: Harness, task: unknown) {
   const unchanged_obs = provider_obs(
     "claude-haiku-4-5-20251001",
     {
@@ -393,7 +396,7 @@ pipeline test_render_candidate_toml_handles_no_changes(harness: Harness, task) {
 }
 
 @test
-pipeline test_html_adapter_parses_table(harness: Harness, task) {
+pipeline test_html_adapter_parses_table(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
@@ -434,7 +437,7 @@ pipeline test_html_adapter_parses_table(harness: Harness, task) {
 }
 
 @test
-pipeline test_html_adapter_skips_columns_not_in_map(harness: Harness, task) {
+pipeline test_html_adapter_skips_columns_not_in_map(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
@@ -472,7 +475,7 @@ pipeline test_html_adapter_skips_columns_not_in_map(harness: Harness, task) {
 }
 
 @test
-pipeline test_html_adapter_reports_fetch_error(harness: Harness, task) {
+pipeline test_html_adapter_reports_fetch_error(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
@@ -492,7 +495,7 @@ pipeline test_html_adapter_reports_fetch_error(harness: Harness, task) {
 }
 
 @test
-pipeline test_json_adapter_parses_payload(harness: Harness, task) {
+pipeline test_json_adapter_parses_payload(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
@@ -531,7 +534,7 @@ pipeline test_json_adapter_parses_payload(harness: Harness, task) {
 }
 
 @test
-pipeline test_key_required_adapter_skips_without_key(harness: Harness, task) {
+pipeline test_key_required_adapter_skips_without_key(harness: Harness, task: unknown) {
   const env = make_env({})
   const config = {
     id: "fireworks-models-api",
@@ -550,7 +553,7 @@ pipeline test_key_required_adapter_skips_without_key(harness: Harness, task) {
 }
 
 @test
-pipeline test_key_required_adapter_runs_with_key(harness: Harness, task) {
+pipeline test_key_required_adapter_runs_with_key(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",

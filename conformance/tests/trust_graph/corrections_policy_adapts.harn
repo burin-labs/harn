@@ -1,6 +1,6 @@
 import "std/corrections"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = harness.random.uuid_v7()
   const actor_id = "correction-policy-" + unique
   const action = "github.issue.opened"

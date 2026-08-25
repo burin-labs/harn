@@ -7,7 +7,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/session-fork.harn
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const base = harness.agent.open()
   harness.agent.inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
   harness.agent.inject(

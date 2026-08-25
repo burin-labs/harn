@@ -12,7 +12,7 @@ description = "Declarative structural rule engine for Harn — rule model, patte
 # AST mechanism + the Harn grammar only. Other language families are opted in
 # by product embedders (or by `harn-hostlib/full`) so lean clients are not
 # forced through `grammars-all` (#6416).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.115", default-features = false, features = [
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.116", default-features = false, features = [
     "ast",
     "grammar-harn",
 ] }
@@ -30,7 +30,7 @@ tempfile = "3"
 # Unit tests cover TS/Python/Rust/Go/… pattern compilation. Enabling grammars
 # here unifies only for `cargo test -p harn-rules`; library dependents keep the
 # lean `ast` + `grammar-harn` edge above (#6416).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.115", default-features = false, features = [
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.116", default-features = false, features = [
     "ast",
     "grammars-all",
 ] }

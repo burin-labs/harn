@@ -25,7 +25,7 @@ type OAuthProvider = {
   documentation_url: string?,
 }
 
-fn __refresh(strategy, refresh_grant, rotates_refresh_token, notes) {
+fn __refresh(strategy: string, refresh_grant: string, rotates_refresh_token: bool, notes: list) {
   return {
     strategy: strategy,
     expires_in_field: "expires_in",
@@ -36,11 +36,11 @@ fn __refresh(strategy, refresh_grant, rotates_refresh_token, notes) {
   }
 }
 
-fn __with_overrides(record, overrides = nil) {
+fn __with_overrides(record: any, overrides: dict? = nil) {
   return merge(record, overrides ?? {})
 }
 
-fn __trim_trailing_slash(value) {
+fn __trim_trailing_slash(value: string?) {
   let text = trim(to_string(value ?? ""))
   while ends_with(text, "/") {
     text = substring(text, 0, len(text) - 1)
@@ -48,7 +48,7 @@ fn __trim_trailing_slash(value) {
   return text
 }
 
-fn __require_url(value, field) {
+fn __require_url(value: string?, field: string) {
   const text = trim(to_string(value ?? ""))
   if text == "" {
     throw "std/oauth/providers: " + field + " is required"
@@ -92,7 +92,7 @@ fn __github_record() {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn github(overrides = nil) -> OAuthProvider {
+pub fn github(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(__github_record(), overrides)
 }
 
@@ -104,7 +104,7 @@ pub fn github(overrides = nil) -> OAuthProvider {
  * @api_stability: experimental
  * @example: github_enterprise("https://ghe.example.com")
  */
-pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
+pub fn github_enterprise(base_url: string?, overrides: dict? = nil) -> OAuthProvider {
   const web_url = __trim_trailing_slash(base_url)
   if web_url == "" {
     throw "std/oauth/providers: github_enterprise base_url is required"
@@ -138,7 +138,7 @@ pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn slack(overrides = nil) -> OAuthProvider {
+pub fn slack(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "slack",
@@ -176,7 +176,7 @@ pub fn slack(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn linear(overrides = nil) -> OAuthProvider {
+pub fn linear(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "linear",
@@ -213,7 +213,7 @@ pub fn linear(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn notion(overrides = nil) -> OAuthProvider {
+pub fn notion(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "notion",
@@ -250,7 +250,7 @@ pub fn notion(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn google(overrides = nil) -> OAuthProvider {
+pub fn google(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "google",
@@ -287,7 +287,7 @@ pub fn google(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn microsoft(overrides = nil) -> OAuthProvider {
+pub fn microsoft(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "microsoft",
@@ -324,7 +324,7 @@ pub fn microsoft(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn atlassian(overrides = nil) -> OAuthProvider {
+pub fn atlassian(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "atlassian",
@@ -360,7 +360,7 @@ pub fn atlassian(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn discord(overrides = nil) -> OAuthProvider {
+pub fn discord(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "discord",
@@ -395,7 +395,7 @@ pub fn discord(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn gitlab(overrides = nil) -> OAuthProvider {
+pub fn gitlab(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "gitlab",
@@ -432,7 +432,7 @@ pub fn gitlab(overrides = nil) -> OAuthProvider {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn bitbucket(overrides = nil) -> OAuthProvider {
+pub fn bitbucket(overrides: dict? = nil) -> OAuthProvider {
   return __with_overrides(
     {
       id: "bitbucket",
@@ -492,7 +492,7 @@ pub fn provider_names() -> list<string> {
  * @api_stability: experimental
  * @example: provider("github", {default_scopes: ["read:user"]})
  */
-pub fn provider(name, overrides = nil) -> OAuthProvider {
+pub fn provider(name: string?, overrides: dict? = nil) -> OAuthProvider {
   const key = lowercase(trim(to_string(name ?? "")))
   if key == "github" {
     return github(overrides)
@@ -535,7 +535,7 @@ pub fn provider(name, overrides = nil) -> OAuthProvider {
  * @api_stability: experimental
  * @example: provider_catalog({github: {default_scopes: ["read:user"]}})
  */
-pub fn provider_catalog(overrides = nil) {
+pub fn provider_catalog(overrides: any = nil) {
   let out = {}
   for name in provider_names() {
     out = out + {[name]: provider(name, overrides?.[name])}
@@ -552,7 +552,7 @@ pub fn provider_catalog(overrides = nil) {
  * @api_stability: experimental
  * @example: providers().github_enterprise("https://ghe.example.com")
  */
-pub fn providers(overrides = nil) {
+pub fn providers(overrides: any = nil) {
   return provider_catalog(overrides)
     + {
       github_enterprise: { base_url, factory_overrides = nil ->
@@ -570,7 +570,7 @@ pub fn providers(overrides = nil) {
  * @api_stability: experimental
  * @example: custom({id: "acme", auth_url: "https://idp.example/authorize", token_url: "https://idp.example/token"})
  */
-pub fn custom(config, overrides = nil) -> OAuthProvider {
+pub fn custom(config: dict, overrides: dict? = nil) -> OAuthProvider {
   if type_of(config) != "dict" {
     throw "std/oauth/providers: custom config must be a dict"
   }

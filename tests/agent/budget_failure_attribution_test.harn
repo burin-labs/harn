@@ -6,7 +6,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 
-fn run_budget_limit(harness: Harness, limit) {
+fn run_budget_limit(harness: Harness, limit: string) {
   const session = "budget-failure-" + limit + "-" + harness.random.uuid()
   const caller = { _call ->
     return {
@@ -43,7 +43,7 @@ fn run_budget_limit(harness: Harness, limit) {
   )
 }
 
-pipeline test_preserves_each_llm_budget_limit(harness: Harness, task) {
+pipeline test_preserves_each_llm_budget_limit(harness: Harness, task: unknown) {
   for limit in ["total_cost", "per_call_cost", "input_tokens", "output_tokens"] {
     const captured = run_budget_limit(harness, limit)
     assert_eq(captured.result.status, "budget_exhausted")

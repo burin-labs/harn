@@ -41,6 +41,7 @@ use url::Url;
 
 pub(crate) use manifest::json_path_child;
 pub use manifest::{RedactionEntry, UnredactedSecret};
+pub(crate) use patterns::swap_custom_patterns;
 pub use patterns::{
     clear_audit_ring, clear_custom_patterns, custom_pattern_names, default_pattern_names,
     drain_audit_ring, install_audit_sink, register_custom_pattern, scan_secret_patterns, AuditSink,

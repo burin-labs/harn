@@ -47,13 +47,13 @@ fn write_burin(fs: HarnessFs, root: string, swift: string, rust: string, ts: str
 }
 
 @test
-pipeline test_normalize_protocol_text_line_endings(harness: Harness, task) {
+pipeline test_normalize_protocol_text_line_endings(harness: Harness, task: unknown) {
   assert_eq(normalize_protocol_text("a\r\nb\rc\n"), "a\nb\nc\n")
 }
 
 @test
 @heavy(threads: 2)
-pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harness, task) {
+pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -81,7 +81,10 @@ pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harne
 }
 
 @test
-pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: Harness, task) {
+pipeline test_stale_and_missing_bindings_are_reported_in_target_order(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -118,7 +121,7 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: H
 }
 
 @test
-pipeline test_missing_root_respects_required_flag(harness: Harness, task) {
+pipeline test_missing_root_respects_required_flag(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->

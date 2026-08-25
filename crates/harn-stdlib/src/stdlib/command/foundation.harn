@@ -1,6 +1,8 @@
 import { command_combined } from "std/command/output"
 import { CommandResult } from "std/command/results"
 
+pub type CommandSpec = list<string> | dict
+
 const COMMAND_COMMON_OPTION_KEYS = [
   "cwd",
   "env",
@@ -22,18 +24,18 @@ const COMMAND_COMMON_OPTION_KEYS = [
  * @effects: []
  * @errors: []
  */
-pub fn __command_options(options) -> dict {
+pub fn __command_options(options: dict?) -> dict {
   return options ?? {}
 }
 
-fn __command_require_argv(argv) {
+fn __command_require_argv(argv: any) {
   if type_of(argv) != "list" || len(argv) == 0 {
     throw "command_run: argv must be a non-empty list"
   }
   return argv
 }
 
-fn __command_copy_common(req, source) {
+fn __command_copy_common(req: dict, source: CommandSpec) {
   if source == nil {
     return req
   }
@@ -54,7 +56,7 @@ fn __command_copy_common(req, source) {
   return out
 }
 
-fn __command_apply_option_defaults(req, options) {
+fn __command_apply_option_defaults(req: any, options: dict?) {
   const opts = __command_options(options)
   let out = req
   for key in COMMAND_COMMON_OPTION_KEYS {
@@ -80,7 +82,7 @@ fn __command_apply_option_defaults(req, options) {
   return out
 }
 
-fn __command_request(spec, options) {
+fn __command_request(spec: CommandSpec, options: dict?) {
   if type_of(spec) == "list" {
     return __command_apply_option_defaults(
       {mode: "argv", argv: __command_require_argv(spec)},
@@ -113,7 +115,7 @@ fn __command_request(spec, options) {
   return __command_apply_option_defaults(__command_copy_common(req, spec), options)
 }
 
-fn __command_success(result) -> bool {
+fn __command_success(result: dict?) -> bool {
   if result?.success != nil {
     return result.success ? true : false
   }
@@ -127,7 +129,7 @@ fn __command_success(result) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn __command_normalize_result(result) -> CommandResult {
+pub fn __command_normalize_result(result: dict?) -> CommandResult {
   const raw = result ?? {}
   const success = __command_success(raw)
   const status = if raw?.status != nil {
@@ -168,6 +170,10 @@ pub fn __command_normalize_result(result) -> CommandResult {
  * @effects: [process]
  * @errors: [process_spawn]
  */
-pub fn command_run_impl(tools: HarnessTools, spec, options = nil) -> CommandResult {
+pub fn command_run_impl(
+  tools: HarnessTools,
+  spec: CommandSpec,
+  options: dict? = nil,
+) -> CommandResult {
   return __command_normalize_result(tools.run_command(__command_request(spec, options)))
 }

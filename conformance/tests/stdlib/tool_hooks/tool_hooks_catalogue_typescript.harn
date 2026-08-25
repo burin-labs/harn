@@ -4,7 +4,7 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * TypeScript seed catalogue (TH-04 #1897). Verifies find/npm rules
  * fire on real-world invocations and respect their negative cases.
  */
-fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg: any, cmd: string) {
   const m = tools.hooks_match(reg, cmd, {stacks: ["typescript"]})
   if len(m) > 0 {
     stdio.println(m[0].rule_id + " " + m[0].severity)

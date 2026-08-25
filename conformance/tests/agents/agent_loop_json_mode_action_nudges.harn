@@ -31,7 +31,7 @@ fn edit_tools() {
   return tools
 }
 
-fn injected_in(calls, idx, marker) {
+fn injected_in(calls: any, idx: int, marker: string) {
   if idx >= len(calls) {
     return false
   }
@@ -57,7 +57,7 @@ fn edit_missing_tool_call_recovery() {
   }
 }
 
-fn json_call(path) {
+fn json_call(path: string) {
   return "```tool\n{ \"name\": \"edit\", \"args\": { \"path\": \"" + path + "\" } }\n```"
 }
 
@@ -77,7 +77,7 @@ fn read_tools() {
   return tools
 }
 
-fn json_read_call(path) {
+fn json_read_call(path: string) {
   return "```tool\n{ \"name\": \"inspect\", \"args\": { \"path\": \"" + path + "\" } }\n```"
 }
 

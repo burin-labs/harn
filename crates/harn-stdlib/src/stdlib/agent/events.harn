@@ -313,7 +313,7 @@ pub fn agent_next_tool_claim_receipt_schema() -> dict {
   )
 }
 
-fn __agent_event_contract_report(value) {
+fn __agent_event_contract_report(value: dict) {
   if type_of(value) != "dict" {
     return nil
   }
@@ -344,7 +344,7 @@ fn __agent_event_contract_report(value) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_report(value, schema = nil, apply_defaults = false) {
+pub fn agent_event_report(value: dict, schema: any = nil, apply_defaults: bool = false) {
   const contract_report = __agent_event_contract_report(value)
   if contract_report != nil {
     return contract_report
@@ -360,7 +360,7 @@ pub fn agent_event_report(value, schema = nil, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_event_value(value, schema = nil, apply_defaults = false) {
+pub fn agent_event_value(value: dict, schema: any = nil, apply_defaults: bool = false) {
   const contract_report = __agent_event_contract_report(value)
   if contract_report != nil {
     throw contract_report.message
@@ -375,7 +375,7 @@ pub fn agent_event_value(value, schema = nil, apply_defaults = false) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_event_capture_report(value, apply_defaults = false) {
+pub fn agent_event_capture_report(value: any, apply_defaults: bool = false) {
   return get_typed_report(value, agent_event_capture_schema(), apply_defaults)
 }
 
@@ -387,7 +387,7 @@ pub fn agent_event_capture_report(value, apply_defaults = false) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_event_capture_value(value, apply_defaults = false) {
+pub fn agent_event_capture_value(value: any, apply_defaults: bool = false) {
   return get_typed_value(value, agent_event_capture_schema(), apply_defaults)
 }
 
@@ -398,6 +398,6 @@ pub fn agent_event_capture_value(value, apply_defaults = false) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_capture_events(agent: HarnessAgent, session_id, body) {
+pub fn agent_capture_events(agent: HarnessAgent, session_id: any, body: any) {
   return agent.capture_events(session_id, body)
 }

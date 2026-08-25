@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `parallel each` shares `parallel`'s fail-fast semantics: an erroring
   // branch cancels in-flight siblings and queued branches never start.
   const survived = harness.runtime.atomic(0)

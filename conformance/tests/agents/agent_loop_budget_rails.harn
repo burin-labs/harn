@@ -1,7 +1,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 
-fn first_event(events, event_type) {
+fn first_event(events: list, event_type: string) {
   for event in events {
     if event.type == event_type {
       return event

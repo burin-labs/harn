@@ -154,7 +154,7 @@ fn base_opts(clock: HarnessClock) {{
   }}
 }}
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   let handles = []
   for i in 0 to {WORKER_COUNT} exclusive {{
     handles = handles.appending(sub_agent_run(harness, "bg worker " + to_string(i), base_opts(harness.clock) + {{background: true}}))

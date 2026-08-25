@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * must receive the live `agent_loop` session id so `${HARN_SESSION_ID}`
  * does not reach the next model turn as a literal.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const registry = [
     {
       name: "host-session-card",

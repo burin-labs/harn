@@ -4,7 +4,7 @@
 // by ACP hosts. It must preserve cache usage from the provider response.
 import { __iteration_info_payload } from "std/agent/loop_internal"
 
-pipeline test_iteration_info_preserves_cache_usage(harness: Harness, task) {
+pipeline test_iteration_info_preserves_cache_usage(harness: Harness, task: unknown) {
   const info = __iteration_info_payload(
     {
       provider: "openai",
@@ -25,7 +25,7 @@ pipeline test_iteration_info_preserves_cache_usage(harness: Harness, task) {
   assert_eq(info.cache_supported, true)
 }
 
-pipeline test_iteration_info_defaults_missing_cache_usage(harness: Harness, task) {
+pipeline test_iteration_info_defaults_missing_cache_usage(harness: Harness, task: unknown) {
   const info = __iteration_info_payload({usage: {}}, 0, "")
   assert_eq(info.cache_read_tokens, 0)
   assert_eq(info.cache_write_tokens, 0)

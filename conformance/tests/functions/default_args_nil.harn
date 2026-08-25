@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn show(_x, y = "default") {
+pipeline test(harness: Harness, task: unknown) {
+  fn show(_x: string, y: any = "default") {
     harness.stdio.log(y)
   }
   // Explicit nil should NOT trigger the default

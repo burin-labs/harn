@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Mixed pass/fail/skip with classname qualification, time attribute,
   // and embedded system-out/system-err.
   const xml =

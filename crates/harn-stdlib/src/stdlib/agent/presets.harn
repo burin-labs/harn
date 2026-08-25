@@ -68,7 +68,7 @@ const __PRESET_PACK_KEYS = [
   "timeout_ms",
 ]
 
-fn __preset_kind_string(value) {
+fn __preset_kind_string(value: string?) {
   if value == nil {
     throw "agent_preset(kind, options?): kind is required"
   }
@@ -83,7 +83,7 @@ fn __preset_kind_string(value) {
  * Shared by the built-in registration and `agent_preset_register` so
  * user-defined kinds are held to the same contract as the built-ins.
  */
-fn __validate_preset_spec(kind, spec) {
+fn __validate_preset_spec(kind: string, spec: dict) {
   if type_of(spec) != "dict" {
     throw "agent_preset_register(\"" + kind + "\"): spec must be a dict; got " + type_of(spec)
   }
@@ -113,7 +113,7 @@ fn __validate_preset_spec(kind, spec) {
  * std/agent/pins). Validate it loudly so a typo like `kinds: ["goals"]` fails at
  * registration instead of silently carrying an unknown pin kind downstream.
  */
-fn __validate_pin_policy(kind, pin_policy) {
+fn __validate_pin_policy(kind: string, pin_policy: dict?) {
   if pin_policy == nil {
     return nil
   }
@@ -288,7 +288,7 @@ fn __preset_registry() {
  * @effects: []
  * @errors: []
  */
-pub fn agent_preset_register(kind, spec) {
+pub fn agent_preset_register(kind: string?, spec: dict) {
   const normalized = __preset_kind_string(kind)
   if normalized == "" {
     throw "agent_preset_register: kind must be a non-empty string"
@@ -308,7 +308,7 @@ pub fn agent_preset_kinds() {
   return __preset_registry().keys().sorted()
 }
 
-fn __dict_or_empty(value) {
+fn __dict_or_empty(value: any) {
   if value == nil {
     return {}
   }
@@ -318,20 +318,20 @@ fn __dict_or_empty(value) {
   return value
 }
 
-fn __has_key(opts, key) {
+fn __has_key(opts: dict, key: string) {
   return contains(opts.keys(), key)
 }
 
-fn __has_non_nil_key(opts, key) {
+fn __has_non_nil_key(opts: dict, key: any) {
   return type_of(opts) == "dict" && contains(opts.keys(), key) && opts[key] != nil
 }
 
-fn __is_captain(kind) {
+fn __is_captain(kind: any) {
   const registry = __preset_registry()
   return registry[kind]?.family == "captain"
 }
 
-fn __preset_kind(value) {
+fn __preset_kind(value: any) {
   const kind = __preset_kind_string(value)
   const registry = __preset_registry()
   if !contains(registry.keys(), kind) {
@@ -343,7 +343,7 @@ fn __preset_kind(value) {
   return kind
 }
 
-fn __caller_set_low_level_reasoning(opts) {
+fn __caller_set_low_level_reasoning(opts: dict) {
   if __has_key(opts, "thinking") || __has_key(opts, "effort") {
     return true
   }
@@ -353,19 +353,19 @@ fn __caller_set_low_level_reasoning(opts) {
       || contains(llm_overrides.keys(), "effort"))
 }
 
-fn __caller_set_reasoning_policy(opts) {
+fn __caller_set_reasoning_policy(opts: dict) {
   return __has_key(opts, "reasoning_policy")
 }
 
-fn __caller_set_reasoning_scale(opts) {
+fn __caller_set_reasoning_scale(opts: dict) {
   return __has_key(opts, "reasoning_scale")
 }
 
-fn __caller_set_reasoning_task(opts) {
+fn __caller_set_reasoning_task(opts: dict) {
   return __has_key(opts, "reasoning_task")
 }
 
-fn __reasoning_task_for_kind(kind) {
+fn __reasoning_task_for_kind(kind: string) {
   if kind == "summary" {
     return "summarize"
   }
@@ -378,7 +378,7 @@ fn __reasoning_task_for_kind(kind) {
   return "agent"
 }
 
-fn __default_iteration_budget_for_kind(kind) {
+fn __default_iteration_budget_for_kind(kind: string) {
   if kind == "audit" {
     return {mode: "adaptive", initial: 4, max: 12, extend_by: 2}
   }
@@ -408,7 +408,7 @@ fn __default_iteration_budget_for_kind(kind) {
   return {mode: "fixed", initial: 50, max: 50, extend_by: 0}
 }
 
-fn __resolve_iteration_budget(kind, opts) {
+fn __resolve_iteration_budget(kind: string, opts: dict) {
   if __has_key(opts, "iteration_budget") {
     const raw = opts.iteration_budget
     if type_of(raw) == "string" {
@@ -425,7 +425,7 @@ fn __resolve_iteration_budget(kind, opts) {
   return __default_iteration_budget_for_kind(kind)
 }
 
-fn __turn_policy_for_kind(kind, opts) {
+fn __turn_policy_for_kind(kind: string, opts: dict) {
   if __has_key(opts, "turn_policy") {
     return opts.turn_policy
   }
@@ -443,7 +443,7 @@ fn __turn_policy_for_kind(kind, opts) {
   return {allow_done_sentinel: false, max_prose_chars: 30000}
 }
 
-fn __summary_defaults(opts) {
+fn __summary_defaults(opts: unknown) {
   return {
     profile: "completer",
     loop_until_done: false,
@@ -457,7 +457,7 @@ fn __verify_defaults() {
   return {profile: "verifier", loop_until_done: false, max_nudges: 0, done_judge: true}
 }
 
-fn __tool_using_defaults(kind) {
+fn __tool_using_defaults(kind: string) {
   const profile = if kind == "audit" {
     "verifier"
   } else {
@@ -509,7 +509,7 @@ fn __tool_using_defaults(kind) {
   }
 }
 
-fn __apply_tool_format(llm: HarnessLlm, opts, kind) {
+fn __apply_tool_format(llm: HarnessLlm, opts: dict, kind: string) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
@@ -523,7 +523,7 @@ fn __apply_tool_format(llm: HarnessLlm, opts, kind) {
   return opts + {tool_format: resolved.tool_format}
 }
 
-fn __kind_defaults(kind, opts) {
+fn __kind_defaults(kind: string, opts: any) {
   if kind == "summary" {
     return __summary_defaults(opts)
   }
@@ -533,7 +533,7 @@ fn __kind_defaults(kind, opts) {
   return __tool_using_defaults(kind)
 }
 
-fn __apply_reasoning_defaults(opts, kind) {
+fn __apply_reasoning_defaults(opts: dict, kind: string) {
   if __caller_set_low_level_reasoning(opts) {
     return opts
   }
@@ -550,7 +550,7 @@ fn __apply_reasoning_defaults(opts, kind) {
   return resolved
 }
 
-fn __apply_iteration_budget(opts, kind) {
+fn __apply_iteration_budget(opts: dict, kind: string) {
   const budget = __resolve_iteration_budget(kind, opts)
   if budget == nil {
     return opts
@@ -558,11 +558,11 @@ fn __apply_iteration_budget(opts, kind) {
   return opts + {iteration_budget: budget}
 }
 
-fn __apply_turn_policy(opts, kind) {
+fn __apply_turn_policy(opts: dict, kind: string) {
   return opts + {turn_policy: __turn_policy_for_kind(kind, opts)}
 }
 
-fn __apply_kind_defaults(kind, raw_opts) {
+fn __apply_kind_defaults(kind: string, raw_opts: any) {
   const defaults = __kind_defaults(kind, raw_opts)
   return defaults + raw_opts
 }
@@ -578,7 +578,7 @@ fn __apply_kind_defaults(kind, raw_opts) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn __captain_consent_default(kind) {
+fn __captain_consent_default(kind: string) {
   if kind == "merge_captain" {
     // Approve read-only annotated tools without prompting; require an
     // explicit consent callable for everything that mutates state.
@@ -600,7 +600,7 @@ fn __captain_consent_default(kind) {
   return nil
 }
 
-fn __captain_rate_limit_default(kind) {
+fn __captain_rate_limit_default(kind: string) {
   if kind == "oncall_captain" {
     return {max_calls: 50, message: "oncall_captain rate-limit reached"}
   }
@@ -613,7 +613,7 @@ fn __captain_rate_limit_default(kind) {
  * entirely. If the caller passed nothing for `key`, returns the
  * supplied `default_value`.
  */
-fn __captain_layer_value(opts, key, default_value) {
+fn __captain_layer_value(opts: dict, key: string, default_value: any) {
   if !__has_key(opts, key) {
     return default_value
   }
@@ -624,7 +624,7 @@ fn __captain_layer_value(opts, key, default_value) {
   return supplied
 }
 
-fn __captain_tool_layers(harness: Harness, kind, opts) {
+fn __captain_tool_layers(harness: Harness, kind: string, opts: dict) {
   let layers = []
   const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
@@ -666,7 +666,7 @@ fn __captain_tool_layers(harness: Harness, kind, opts) {
   return layers
 }
 
-fn __apply_captain_tool_caller(harness: Harness, opts, kind) {
+fn __apply_captain_tool_caller(harness: Harness, opts: dict, kind: string) {
   if !__is_captain(kind) {
     return opts
   }
@@ -680,7 +680,7 @@ fn __apply_captain_tool_caller(harness: Harness, opts, kind) {
   return opts + {tool_caller: compose_tool_callers(harness.clock, layers)}
 }
 
-fn __captain_handler_layers(harness: Harness, opts) {
+fn __captain_handler_layers(harness: Harness, opts: dict) {
   let layers = []
   const logging_sink = opts?.logging_sink
   if logging_sink != nil {
@@ -694,7 +694,7 @@ fn __captain_handler_layers(harness: Harness, opts) {
   return layers
 }
 
-fn __apply_captain_llm_caller(harness: Harness, opts, kind) {
+fn __apply_captain_llm_caller(harness: Harness, opts: dict, kind: any) {
   if !__is_captain(kind) {
     return opts
   }
@@ -742,7 +742,7 @@ fn __preset_pack_route_keys() {
   return ["fallback_chain", "ladder", "models", "provider"]
 }
 
-fn __preset_has_route_owner(opts) {
+fn __preset_has_route_owner(opts: dict) {
   for key in __preset_route_keys() {
     if __has_non_nil_key(opts, key) {
       return true
@@ -760,7 +760,7 @@ fn __preset_has_route_owner(opts) {
   return false
 }
 
-fn __preset_model_steps(models, provider) {
+fn __preset_model_steps(models: list?, provider: any) {
   let steps = []
   for model in models ?? [] {
     if type_of(model) == "dict" || provider == nil {
@@ -772,7 +772,7 @@ fn __preset_model_steps(models, provider) {
   return steps
 }
 
-fn __apply_preset_route_pack(opts, pack) {
+fn __apply_preset_route_pack(opts: dict, pack: dict) {
   // Routing is one ownership group. A caller-owned provider, model, ladder,
   // or policy suppresses every route default from the preset.
   if __preset_has_route_owner(opts) {
@@ -805,7 +805,7 @@ fn __apply_preset_route_pack(opts, pack) {
  * that key is the documented alternative spelling, and filling the pack
  * budget on top would shadow it.
  */
-fn __apply_preset_pack(opts, kind) {
+fn __apply_preset_pack(opts: any, kind: any) {
   const spec = __preset_registry()[kind]
   const pack = spec?.pack ?? {}
   let resolved = opts
@@ -870,7 +870,7 @@ fn __apply_preset_pack(opts, kind) {
  * @effects: []
  * @errors: []
  */
-pub fn agent_preset(harness: Harness, kind, options = nil) {
+pub fn agent_preset(harness: Harness, kind: string, options: any = nil) {
   const resolved_kind = __preset_kind(kind)
   let opts = __dict_or_empty(options)
   const caller_supplied_llm_caller = __has_key(opts, "llm_caller")

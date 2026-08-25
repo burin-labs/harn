@@ -70,6 +70,17 @@ pub trait TypeContractValue: Sized {
     }
 }
 
+/// Whether a declared parameter type needs a runtime guard.
+///
+/// `any` and `unknown` are explicit unchecked boundaries: both accept every
+/// runtime value, so compiling an empty-schema guard would add call overhead
+/// without enforcing a contract. Keep this conservative for composite and
+/// generic types; they can still constrain the outer value shape even when an
+/// element or branch is unconstrained.
+pub fn requires_runtime_type_check(expected: &TypeExpr) -> bool {
+    !matches!(expected, TypeExpr::Named(name) if name == "any" || name == "unknown")
+}
+
 fn is_nominal(name: &str, nominal_type_names: &[String]) -> bool {
     nominal_type_names.iter().any(|ty| ty == name)
 }
@@ -457,6 +468,18 @@ mod tests {
         ShapeFieldDescriptor::new("name", STRING),
         ShapeFieldDescriptor::optional("note", STRING),
     ];
+
+    #[test]
+    fn explicit_dynamic_types_do_not_compile_redundant_runtime_guards() {
+        assert!(!requires_runtime_type_check(&TypeExpr::Named("any".into())));
+        assert!(!requires_runtime_type_check(&TypeExpr::Named(
+            "unknown".into()
+        )));
+        assert!(requires_runtime_type_check(&TypeExpr::Named("int".into())));
+        assert!(requires_runtime_type_check(&TypeExpr::List(Box::new(
+            TypeExpr::Named("unknown".into())
+        ))));
+    }
 
     #[test]
     fn manifest_types_use_the_source_type_contract() {

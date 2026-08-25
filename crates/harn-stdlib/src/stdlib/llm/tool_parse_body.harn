@@ -16,7 +16,7 @@ import { tool_call_label_body } from "std/llm/tool_parse_envelope"
 import { json_fields } from "std/llm/tool_parse_json_support"
 import { registry_names } from "std/llm/tool_parse_result"
 
-fn __tool_parse_schema_type(tools, tool_name: string, parameter_name: string) {
+fn __tool_parse_schema_type(tools: unknown, tool_name: string, parameter_name: string) {
   if type_of(tools) != "dict" {
     return nil
   }
@@ -43,7 +43,7 @@ fn __tool_parse_unframe_markup_value(value: string) -> string {
   return framed
 }
 
-fn __tool_parse_markup_value(raw: string, schema_type) {
+fn __tool_parse_markup_value(raw: string, schema_type: string) {
   const framed = __tool_parse_unframe_markup_value(raw)
   if schema_type == nil || schema_type == "string" {
     return framed
@@ -67,7 +67,7 @@ fn __tool_parse_markup_value(raw: string, schema_type) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __tool_parse_markup(body: string, tools) -> dict {
+pub fn __tool_parse_markup(body: string, tools: unknown) -> dict {
   const trimmed = trim(body)
   let opener = ""
   let close_tag = ""
@@ -202,7 +202,7 @@ pub fn __tool_parse_markup(body: string, tools) -> dict {
   }
 }
 
-fn __tool_parse_nested_xml(body: string, tools) -> dict {
+fn __tool_parse_nested_xml(body: string, tools: unknown) -> dict {
   const trimmed = trim(body)
   const captures = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>\\s*", trimmed)
   if len(captures) == 0 {
@@ -267,7 +267,7 @@ fn __tool_parse_nested_xml(body: string, tools) -> dict {
   return {matched: true, ok: true, call: {id: "tc_xml_" + name, name: name, arguments: arguments}}
 }
 
-fn __tool_parse_narration(body: string, tools) -> dict {
+fn __tool_parse_narration(body: string, tools: any) -> dict {
   let rest = trim(body)
   let prose: list<string> = []
   for tag in ["assistant_prose", "assistantprose", "thinking", "reasoning"] {
@@ -308,7 +308,7 @@ fn __tool_parse_narration(body: string, tools) -> dict {
   return {matched: false}
 }
 
-fn __tool_parse_json_call_from_body(source: string, tools, name_hint: string = "") -> dict {
+fn __tool_parse_json_call_from_body(source: string, tools: dict, name_hint: string = "") -> dict {
   const decoded = try {
     json_parse(source)
   } catch (error) {
@@ -410,10 +410,10 @@ fn __tool_parse_json_call_from_body(source: string, tools, name_hint: string = "
  */
 pub fn __tool_parse_call_from_body(
   body: string,
-  tools,
+  tools: any,
   head_name: string = "",
   head_sep: string = "",
-  direct_candidate = nil,
+  direct_candidate: any = nil,
 ) -> dict {
   const trimmed = trim(body)
   if trimmed == "" {

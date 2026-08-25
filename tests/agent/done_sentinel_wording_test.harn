@@ -24,7 +24,7 @@ const WRAPPER = "<done>##DONE##</done>"
 
 const PLAIN = "`##DONE##` exactly once in assistant text"
 
-pipeline test_hosts_receive_exact_completion_prompt_bindings(harness: Harness, task) {
+pipeline test_hosts_receive_exact_completion_prompt_bindings(harness: Harness, task: unknown) {
   const json = agent_completion_prompt_bindings(
     harness.llm,
     {tool_format: "json", done_sentinel: "##DONE##"},
@@ -67,7 +67,7 @@ pipeline test_hosts_receive_exact_completion_prompt_bindings(harness: Harness, t
 
 pipeline test_completion_prompt_bindings_follow_missing_and_malformed_input_policy(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const missing = agent_completion_prompt_bindings(harness.llm)
   assert_eq(missing.tool_format, "json")
@@ -88,7 +88,10 @@ pipeline test_completion_prompt_bindings_follow_missing_and_malformed_input_poli
   assert_eq(contains(to_string(unwrap_err(malformed_sentinel)), "done_sentinel"), true)
 }
 
-pipeline test_completion_prompt_bindings_preserve_denied_format_policy(harness: Harness, task) {
+pipeline test_completion_prompt_bindings_preserve_denied_format_policy(
+  harness: Harness,
+  task: unknown,
+) {
   harness.llm.provider_capabilities_install(
     """
 [[provider.completionbindingtest]]
@@ -133,7 +136,7 @@ fn _system_prompt(harness: Harness, format: string) -> string {
   return out
 }
 
-pipeline test_json_lane_teaches_only_the_plain_text_sentinel(harness: Harness, task) {
+pipeline test_json_lane_teaches_only_the_plain_text_sentinel(harness: Harness, task: unknown) {
   // The json tool contract already says "as plain text (NOT inside a ```tool
   // block)". The completion contract must not answer that with a block.
   const rendered = _system_prompt(harness, "json")
@@ -141,7 +144,7 @@ pipeline test_json_lane_teaches_only_the_plain_text_sentinel(harness: Harness, t
   assert_eq(contains(rendered, WRAPPER), false)
 }
 
-pipeline test_text_lane_still_teaches_the_done_block(harness: Harness, task) {
+pipeline test_text_lane_still_teaches_the_done_block(harness: Harness, task: unknown) {
   // The tagged grammar is the one route where a parsed `<done>` block is
   // authoritative, and its own tool contract teaches the same wrapper.
   const rendered = _system_prompt(harness, "text")
@@ -149,7 +152,7 @@ pipeline test_text_lane_still_teaches_the_done_block(harness: Harness, task) {
   assert_eq(contains(rendered, PLAIN), false)
 }
 
-pipeline test_native_lane_still_teaches_the_plain_text_sentinel(harness: Harness, task) {
+pipeline test_native_lane_still_teaches_the_plain_text_sentinel(harness: Harness, task: unknown) {
   const rendered = _system_prompt(harness, "native")
   assert_eq(contains(rendered, PLAIN), true)
   assert_eq(contains(rendered, WRAPPER), false)

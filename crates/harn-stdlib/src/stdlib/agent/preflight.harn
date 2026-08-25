@@ -12,7 +12,7 @@ import {
 } from "std/agent/state"
 import { tool_call_shape } from "std/llm/call_shape"
 
-fn __agent_done_sentinel(opts) {
+fn __agent_done_sentinel(opts: dict) {
   const sentinel = opts?.done_sentinel
   if sentinel == nil {
     return nil
@@ -20,7 +20,7 @@ fn __agent_done_sentinel(opts) {
   return sentinel
 }
 
-fn __agent_tool_format(llm: HarnessLlm, opts) {
+fn __agent_tool_format(llm: HarnessLlm, opts: any) {
   return agent_tool_format(llm, opts)
 }
 
@@ -47,7 +47,7 @@ fn __agent_tool_format(llm: HarnessLlm, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
+pub fn agent_tool_call_paradigm(llm: HarnessLlm, options: any = nil) {
   return tool_call_shape(__agent_tool_format(llm, options))
 }
 
@@ -60,8 +60,12 @@ pub type AgentCompletionPromptBindings = {
   done_sentinel_rendered: string,
 }
 
-fn __agent_completion_prompt_bindings(paradigm, options) -> AgentCompletionPromptBindings {
-  const sentinel = __agent_done_sentinel(options)
+fn __agent_completion_prompt_bindings(
+  paradigm: dict,
+  options: dict?,
+) -> AgentCompletionPromptBindings {
+  const opts = options ?? {}
+  const sentinel = __agent_done_sentinel(opts)
   __validate_done_sentinel(sentinel)
   if sentinel == nil {
     return {
@@ -107,7 +111,7 @@ fn __agent_completion_prompt_bindings(paradigm, options) -> AgentCompletionPromp
  */
 pub fn agent_completion_prompt_bindings(
   llm: HarnessLlm,
-  options = nil,
+  options: dict? = nil,
 ) -> AgentCompletionPromptBindings {
   const paradigm = agent_tool_call_paradigm(llm, options)
   return __agent_completion_prompt_bindings(paradigm, options)
@@ -144,7 +148,12 @@ fn __verbatim_exemplar_tag(body_lines: list<string>, index: int) -> string {
  * @api_stability: experimental
  * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
  */
-pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = nil) {
+pub fn agent_render_tool_call_exemplar(
+  llm: HarnessLlm,
+  name: string,
+  args: list?,
+  options: any = nil,
+) {
   const p = agent_tool_call_paradigm(llm, options)
   if p.kind == "json" {
     // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
@@ -202,7 +211,7 @@ pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = ni
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_render_tool_call_prefix(llm: HarnessLlm, name: string, options = nil) -> string {
+pub fn agent_render_tool_call_prefix(llm: HarnessLlm, name: string, options: any = nil) -> string {
   const p = agent_tool_call_paradigm(llm, options)
   if p.kind == "native" || name == "" {
     return ""
@@ -222,7 +231,7 @@ pub fn agent_render_tool_call_prefix(llm: HarnessLlm, name: string, options = ni
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_has_tools(opts = nil) -> bool {
+pub fn agent_has_tools(opts: any = nil) -> bool {
   const registry = opts?.tools
   if registry == nil {
     return false
@@ -239,7 +248,7 @@ pub fn agent_has_tools(opts = nil) -> bool {
   return true
 }
 
-fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict) {
   const paradigm = agent_tool_call_paradigm(llm, opts)
   const completion = __agent_completion_prompt_bindings(paradigm, opts)
   const sentinel = completion.done_sentinel
@@ -265,7 +274,7 @@ fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
   )
 }
 
-fn __agent_native_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+fn __agent_native_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict) {
   if !agent_has_tools(opts) || __agent_tool_format(llm, opts) != "native" {
     return ""
   }
@@ -277,7 +286,7 @@ fn __agent_native_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
   )
 }
 
-fn __agent_json_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+fn __agent_json_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict) {
   if !agent_has_tools(opts) || __agent_tool_format(llm, opts) != "json" {
     return ""
   }
@@ -293,7 +302,7 @@ fn __agent_json_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
   )
 }
 
-fn __agent_schema_text(value) {
+fn __agent_schema_text(value: any) {
   if value == nil {
     return ""
   }
@@ -303,7 +312,7 @@ fn __agent_schema_text(value) {
   return json_stringify(value)
 }
 
-fn __agent_tool_listing_prompt(registry) {
+fn __agent_tool_listing_prompt(registry: dict) {
   const tools = registry?.tools ?? []
   if len(tools) == 0 {
     return "No tools are available."
@@ -335,7 +344,7 @@ fn __agent_tool_listing_prompt(registry) {
   return trim(out)
 }
 
-fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
+fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict) {
   if opts?.tools == nil || __agent_tool_format(llm, opts) == "native" {
     return ""
   }
@@ -390,7 +399,7 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
   )
 }
 
-fn __agent_active_skill_prompt(active) {
+fn __agent_active_skill_prompt(active: list?) {
   if len(active ?? []) == 0 {
     return ""
   }
@@ -424,7 +433,7 @@ fn __agent_active_skill_prompt(active) {
   return out
 }
 
-fn __agent_mcp_initialize_advisory_prompt(opts) {
+fn __agent_mcp_initialize_advisory_prompt(opts: dict) {
   if !opts?.mcp_initialize_advisory || !opts?.mcp_context?.initialize_advisory {
     return ""
   }
@@ -455,7 +464,7 @@ fn __agent_mcp_initialize_advisory_prompt(opts) {
   return out
 }
 
-fn __agent_timestamped_content(content, timestamp) {
+fn __agent_timestamped_content(content: unknown, timestamp: any) {
   const marker = "[harn timestamp: " + timestamp + "]"
   if type_of(content) == "string" {
     return marker + "\n" + content
@@ -466,7 +475,7 @@ fn __agent_timestamped_content(content, timestamp) {
   return content
 }
 
-fn __agent_timestamp_message(message, timestamp) {
+fn __agent_timestamp_message(message: dict, timestamp: string) {
   if type_of(message) != "dict" {
     return message
   }
@@ -482,7 +491,14 @@ fn __agent_timestamp_message(message, timestamp) {
   return out
 }
 
-fn __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp) {
+fn __agent_decorate_turn_message(
+  message: any,
+  opts: dict,
+  session: dict,
+  iteration: int,
+  index: int,
+  timestamp: string,
+) {
   let out = message
   if opts?.timestamp_messages ?? opts?.message_timestamps ?? false {
     out = __agent_timestamp_message(out, timestamp)
@@ -507,7 +523,7 @@ fn __agent_decorate_turn_message(message, opts, session, iteration, index, times
   return decorated
 }
 
-fn __agent_system_prompt_option_present(value) {
+fn __agent_system_prompt_option_present(value: string | bytes | list | dict | set | range | nil) {
   if value == nil || !value || value == "" {
     return false
   }
@@ -517,13 +533,13 @@ fn __agent_system_prompt_option_present(value) {
   return true
 }
 
-fn __agent_has_system_prompt_options(opts) {
+fn __agent_has_system_prompt_options(opts: dict) {
   return __agent_system_prompt_option_present(opts?._primary_system)
     || type_of(opts?.system)
       == "string"
 }
 
-fn __agent_push_system_fragment(fragments, id, body) {
+fn __agent_push_system_fragment(fragments: list, id: string, body: string?) {
   const trimmed = trim(body ?? "")
   if trimmed == "" {
     return fragments
@@ -544,7 +560,7 @@ fn __agent_push_system_fragment(fragments, id, body) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __with_prompt_fragment(agent_options, fragment) {
+pub fn __with_prompt_fragment(agent_options: any, fragment: any) {
   const opts = if type_of(agent_options) == "dict" {
     agent_options
   } else {
@@ -566,7 +582,7 @@ pub fn __with_prompt_fragment(agent_options, fragment) {
   return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
 }
 
-fn __agent_context_profile_fragments(opts) {
+fn __agent_context_profile_fragments(opts: dict) {
   let fragments = []
   const profile = opts?.context_profile ?? opts?.project_context_profile ?? {}
   for fragment in profile?.prompt_fragments ?? [] {
@@ -587,7 +603,7 @@ fn __agent_context_profile_fragments(opts) {
   return fragments
 }
 
-fn __agent_primary_system_text(agent: HarnessAgent, session, opts) {
+fn __agent_primary_system_text(agent: HarnessAgent, session: dict, opts: dict) {
   if opts?._primary_system != nil && opts._primary_system != "" {
     return opts._primary_system
   }
@@ -635,7 +651,12 @@ fn __agent_primary_system_text(agent: HarnessAgent, session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_build_turn_system_fragments(harness: Harness, session, opts, iteration) {
+pub fn agent_build_turn_system_fragments(
+  harness: Harness,
+  session: dict,
+  opts: any,
+  iteration: unknown,
+) {
   let fragments = []
   fragments = __agent_push_system_fragment(
     fragments,
@@ -700,7 +721,7 @@ pub fn agent_build_turn_system_fragments(harness: Harness, session, opts, iterat
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_build_turn_system(harness: Harness, session, opts, iteration) {
+pub fn agent_build_turn_system(harness: Harness, session: dict, opts: any, iteration: any) {
   let parts = []
   for fragment in agent_build_turn_system_fragments(harness, session, opts, iteration) {
     parts = parts.appending(fragment.body)
@@ -708,7 +729,7 @@ pub fn agent_build_turn_system(harness: Harness, session, opts, iteration) {
   return join(parts, "\n\n")
 }
 
-fn __agent_projection_options(opts) {
+fn __agent_projection_options(opts: dict) {
   const raw = opts?.transcript_projection
   if raw == nil {
     return nil
@@ -722,15 +743,15 @@ fn __agent_projection_options(opts) {
   throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(raw)
 }
 
-fn __agent_reachability_projection(policy) {
+fn __agent_reachability_projection(policy: string) {
   return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
 }
 
 fn __agent_projection_with_scratchpad_barrier(
   agent: HarnessAgent,
-  session_id,
-  projection_opts,
-  opts,
+  session_id: any,
+  projection_opts: dict,
+  opts: dict?,
 ) {
   const policy_label = projection_opts?.policy ?? "raw"
   if !__agent_reachability_projection(policy_label) {
@@ -757,7 +778,7 @@ fn __agent_projection_with_scratchpad_barrier(
     }
 }
 
-fn __agent_apply_projection(agent: HarnessAgent, session_id, messages, opts) {
+fn __agent_apply_projection(agent: HarnessAgent, session_id: any, messages: any, opts: any) {
   let projection_opts = __agent_projection_options(opts)
   if projection_opts == nil {
     return messages
@@ -786,9 +807,9 @@ fn __agent_apply_projection(agent: HarnessAgent, session_id, messages, opts) {
 pub fn agent_build_turn_messages(
   agent: HarnessAgent,
   clock: HarnessClock,
-  session,
-  opts,
-  iteration,
+  session: dict,
+  opts: dict,
+  iteration: int,
 ) {
   const raw_messages = agent_session_messages(agent, session.session_id)
   const projected_messages = __agent_apply_projection(agent, session.session_id, raw_messages, opts)

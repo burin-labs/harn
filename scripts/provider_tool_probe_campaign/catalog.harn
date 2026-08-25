@@ -425,7 +425,7 @@ pub fn __route_is_local(provider: string, meta: dict) -> bool {
   return provider == "local" || provider == "ollama" || provider == "llamacpp" || provider == "mlx"
 }
 
-pub fn __has_string(values, target: string) -> bool {
+pub fn __has_string(values: list?, target: string) -> bool {
   if type_of(values) != "list" {
     return false
   }

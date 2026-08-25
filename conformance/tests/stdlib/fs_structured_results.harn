@@ -41,21 +41,24 @@ type StructuredCase = {
 }
 
 fn manifest_schema() -> Schema<Manifest> {
-  return schema_closed_object(
-    {
-      name: schema_field(schema_string()),
-      mode: schema_field(schema_enum(["strict", "relaxed"])),
-      owners: schema_field(
-        schema_list(
-          schema_closed_object(
-            {name: schema_field(schema_string()), active: schema_field(schema_bool())},
+  return schema_refine(
+    schema_of(Manifest),
+    schema_closed_object(
+      {
+        name: schema_field(schema_string()),
+        mode: schema_field(schema_enum(["strict", "relaxed"])),
+        owners: schema_field(
+          schema_list(
+            schema_closed_object(
+              {name: schema_field(schema_string()), active: schema_field(schema_bool())},
+            ),
           ),
         ),
-      ),
-      settings: schema_field(schema_closed_object({enabled: schema_field(schema_bool())})),
-      retries: schema_default(schema_int(), 3),
-      note: schema_field(schema_string(), false),
-    },
+        settings: schema_field(schema_closed_object({enabled: schema_field(schema_bool())})),
+        retries: schema_default(schema_int(), 3),
+        note: schema_field(schema_string(), false),
+      },
+    ),
   )
 }
 
@@ -108,7 +111,7 @@ fn format_typed_read_failure(failure: TypedReadFailure) -> string {
   return failure.format + ":" + failure.kind + ":" + to_string(failure.path != "")
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-fs-structured-results-" + harness.random.uuid_v7(),
@@ -161,8 +164,11 @@ pipeline default(harness: Harness, task) {
   harness.stdio.println(deep_malformed.kind)
   const typed_path = path_join(root, "typed.json")
   harness.fs.write_text(typed_path, "{\"name\":\"Ada\"}")
-  const user_schema = schema_closed_object(
-    {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
+  const user_schema = schema_refine(
+    schema_of(User),
+    schema_closed_object(
+      {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
+    ),
   )
   const typed = read_json_typed_result(harness.fs, typed_path, user_schema, true)
   harness.stdio.println(unwrap(typed).name)

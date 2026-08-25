@@ -26,7 +26,7 @@ fn receipt(language: string, version: string, digest: string) -> string {
 }
 
 @test
-pipeline test_a_moved_grammar_version_is_named(harness: Harness, task) {
+pipeline test_a_moved_grammar_version_is_named(harness: Harness, task: unknown) {
   // Both halves of the identity travel, because a version alone does not say
   // which artifact was resolved and a digest alone does not say what moved.
   assert_eq(
@@ -36,7 +36,7 @@ pipeline test_a_moved_grammar_version_is_named(harness: Harness, task) {
 }
 
 @test
-pipeline test_a_republished_artifact_at_one_version_is_drift(harness: Harness, task) {
+pipeline test_a_republished_artifact_at_one_version_is_drift(harness: Harness, task: unknown) {
   // The case a version comparison alone would miss: same version string, a
   // different artifact underneath it.
   assert_eq(
@@ -46,12 +46,12 @@ pipeline test_a_republished_artifact_at_one_version_is_drift(harness: Harness, t
 }
 
 @test
-pipeline test_an_unchanged_grammar_is_not_drift(harness: Harness, task) {
+pipeline test_an_unchanged_grammar_is_not_drift(harness: Harness, task: unknown) {
   assert_eq(grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("swift", "0.7.2", "aaa")), [])
 }
 
 @test
-pipeline test_a_corpus_only_change_reports_no_grammar_drift(harness: Harness, task) {
+pipeline test_a_corpus_only_change_reports_no_grammar_drift(harness: Harness, task: unknown) {
   // The falsifier for the whole feature: an edited corpus must keep taking the
   // ordinary "regenerate the receipt" advice, or the new message would fire on
   // every fixture edit and mean nothing.
@@ -62,7 +62,7 @@ pipeline test_a_corpus_only_change_reports_no_grammar_drift(harness: Harness, ta
 }
 
 @test
-pipeline test_an_unreadable_committed_receipt_degrades(harness: Harness, task) {
+pipeline test_an_unreadable_committed_receipt_degrades(harness: Harness, task: unknown) {
   // A drift report explains a failure that is already decided, so malformed
   // committed bytes must not throw over the check they were meant to clarify.
   assert_eq(grammar_drift("{not json", receipt("swift", "0.7.3", "bbb")), [])
@@ -70,7 +70,7 @@ pipeline test_an_unreadable_committed_receipt_degrades(harness: Harness, task) {
 }
 
 @test
-pipeline test_a_newly_registered_language_is_not_drift(harness: Harness, task) {
+pipeline test_a_newly_registered_language_is_not_drift(harness: Harness, task: unknown) {
   // Adding a grammar has no prior artifact to have moved from; the receipt is
   // stale for the ordinary reason and takes the ordinary advice.
   assert_eq(grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("zig", "1.1.0", "ccc")), [])

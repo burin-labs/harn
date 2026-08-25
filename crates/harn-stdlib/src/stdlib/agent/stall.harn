@@ -263,7 +263,11 @@ pub fn agent_futility_verdict(
   }
 }
 
-fn __agent_futility_default_policy(verdict, repeat_count, threshold) {
+fn __agent_futility_default_policy(
+  verdict: AgentFutilityVerdict,
+  repeat_count: int,
+  threshold: int,
+) {
   if verdict.kind == "unobservable" {
     return "escalate"
   }
@@ -288,7 +292,7 @@ pub fn agent_futility_decide(
   verdict: AgentFutilityVerdict,
   repeat_count: int = 1,
   threshold: int = 1,
-  policy = nil,
+  policy: any = nil,
 ) -> AgentFutilityDecision {
   if threshold <= 0 {
     throw "agent_futility_decide: threshold must be a positive int"

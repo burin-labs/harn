@@ -1,5 +1,5 @@
 @persona(name: "merge_captain")
-pub fn merge_captain_persona(ctx) {
+pub fn merge_captain_persona(ctx: dict) {
   return build_merge_plan_step(ctx)
 }
 
@@ -15,7 +15,7 @@ fn sample_pull_request() {
   }
 }
 
-fn merge_risk(pr) {
+fn merge_risk(pr: dict) {
   if len(pr.failing_checks) > 0 || len(pr.stale_threads) > 0 || len(pr.release_blockers) > 0 {
     return "high"
   }
@@ -26,7 +26,7 @@ fn merge_risk(pr) {
 }
 
 @step(name: "build_merge_plan", approval: required, receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
-fn build_merge_plan_step(pr) {
+fn build_merge_plan_step(pr: dict) {
   const risk = merge_risk(pr)
   const handoff = if risk == "high" {
     "review_captain"
@@ -55,7 +55,7 @@ fn build_merge_plan_step(pr) {
   }
 }
 
-pub pipeline run(harness: Harness, task) -> dict {
+pub pipeline run(harness: Harness, task: unknown) -> dict {
   const result = build_merge_plan_step(sample_pull_request())
   harness.stdio.println(json_stringify(result))
   return result

@@ -4,7 +4,7 @@
  * mirrors the exactly-once guarantee documented in
  * `finally_runs_once.harn` for plain `throw`.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn boom() {
     throw "x"
   }

@@ -88,8 +88,8 @@ fn pool_worker_boundary_uses_task_local_registry_not_thread_local_registry() {
         "pool registry must be scoped through a Tokio task-local so it follows spawned work"
     );
     assert!(
-        pool_source.contains("spawn_pool_worker"),
-        "pool worker spawning should stay behind the documented work-stealing boundary helper"
+        pool_source.contains("subtask::spawn_child"),
+        "pool worker spawning should stay behind the typed child-interpreter boundary"
     );
 }
 

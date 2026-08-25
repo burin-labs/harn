@@ -77,7 +77,7 @@ fn resolve_snippet(provider: &str, model: &str, requested: &str) -> String {
     format!(
         r#"
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const r = agent_tool_format_resolution(harness.llm, {opts})
   harness.stdio.log("tool_format=" + to_string(r.tool_format))
   harness.stdio.log("source=" + to_string(r.source))
@@ -116,7 +116,7 @@ fn resolution_fields(opts: &str) -> Vec<String> {
     let src = format!(
         r#"
 import {{ agent_tool_format_resolution }} from "std/agent/options"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const r = agent_tool_format_resolution(harness.llm, {opts})
   harness.stdio.log("tool_format=" + to_string(r.tool_format))
   harness.stdio.log("source=" + to_string(r.source))
@@ -288,7 +288,7 @@ fn requested_format_axis_rejects_or_resolves_concretely() {
 fn capability_facts(provider: &str, model: &str) -> (bool, bool, String) {
     let src = format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const c = harness.llm.provider_capabilities("{provider}", "{model}")
   harness.stdio.log("native=" + to_string(c.native_tools))
   harness.stdio.log("text=" + to_string(c.text_tool_wire_format_supported))
@@ -401,7 +401,7 @@ tool_mode_parity = "{parity}"
     let src = format!(
         r#"
 import {{ agent_tool_format_resolution }} from "std/agent/options"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.llm.provider_capabilities_install({install:?})
   let r = agent_tool_format_resolution(harness.llm, {{
     model: "{model}",
@@ -549,7 +549,7 @@ text_tool_wire_format_supported = true
     let src = format!(
         r#"
 import {{ agent_tool_format_resolution, agent_tool_format }} from "std/agent/options"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.llm.provider_capabilities_install({install:?})
   const auto = agent_tool_format_resolution(harness.llm, {{
     model: "bootcamp-unpinned-text-1",

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_eq(regex_match("hello", "HeLLo", "i"), ["HeLLo"])
   assert_eq(regex_match("^b", "a\nB", "im"), ["B"])
   assert_eq(regex_match("a.+c", "a\nb\nc", "s"), ["a\nb\nc"])

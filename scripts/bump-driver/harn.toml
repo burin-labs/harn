@@ -11,7 +11,6 @@ docs_url = "https://github.com/burin-labs/harn/blob/main/scripts/bump-driver/REA
 default = "github_remote.harn"
 
 [lint]
-require_public_api_types = true
 
 [dependencies]
 # Immutable release tag plus the content-addressed lockfile keep CI and local

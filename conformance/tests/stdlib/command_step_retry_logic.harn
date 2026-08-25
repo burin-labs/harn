@@ -8,11 +8,11 @@ import {
 } from "std/command"
 import { command_step_ref_impl } from "std/command/step_ref"
 
-fn failed_result(code, text) {
+fn failed_result(code: int, text: string) {
   return {status: "completed", exit_code: code, stdout: text, stderr: "", timed_out: false}
 }
 
-fn success_result(text) {
+fn success_result(text: string) {
   return {status: "completed", exit_code: 0, stdout: text, stderr: "", timed_out: false}
 }
 

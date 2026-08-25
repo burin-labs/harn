@@ -371,7 +371,7 @@ fn __collect(
   return __sort_models_by_provider_id(out)
 }
 
-fn __render_batch_value(value, suffix: string, fallback: string) -> string {
+fn __render_batch_value(value: int?, suffix: string, fallback: string) -> string {
   const parsed = __safe_int(value)
   if parsed == nil {
     return fallback

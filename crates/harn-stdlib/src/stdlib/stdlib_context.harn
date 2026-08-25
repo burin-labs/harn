@@ -7,7 +7,7 @@ import { ContextArtifact } from "std/context/artifact_types"
  * the untyped `raw`/`opts` input, so they are genuinely any-valued; the
  * ranking code defensively coerces them through `__context_num`.
  */
-fn __context_list(value) {
+fn __context_list(value: any) {
   if value == nil {
     return []
   }
@@ -17,7 +17,7 @@ fn __context_list(value) {
   return [value]
 }
 
-fn __context_string(value) {
+fn __context_string(value: any) {
   if value == nil {
     return ""
   }
@@ -27,7 +27,7 @@ fn __context_string(value) {
   return to_string(value)
 }
 
-fn __context_text(value) {
+fn __context_text(value: any) {
   if value == nil {
     return ""
   }
@@ -40,7 +40,7 @@ fn __context_text(value) {
   return to_string(value)
 }
 
-fn __context_string_list(value) {
+fn __context_string_list(value: any) {
   let out = []
   for item in __context_list(value) {
     const text = trim(__context_string(item))
@@ -51,7 +51,7 @@ fn __context_string_list(value) {
   return out
 }
 
-fn __context_unique_strings(values) {
+fn __context_unique_strings(values: list?) {
   let out = []
   for value in values ?? [] {
     const text = trim(__context_string(value))
@@ -62,7 +62,7 @@ fn __context_unique_strings(values) {
   return out
 }
 
-fn __context_optional_list(values) {
+fn __context_optional_list(values: any) {
   const normalized = __context_string_list(values)
   if len(normalized) == 0 {
     return nil
@@ -70,14 +70,14 @@ fn __context_optional_list(values) {
   return normalized
 }
 
-fn __context_num(value, fallback = nil) {
+fn __context_num(value: any, fallback: any = nil) {
   if type_of(value) == "int" || type_of(value) == "float" {
     return value
   }
   return fallback
 }
 
-fn __context_confidence(value) {
+fn __context_confidence(value: any) {
   const number = __context_num(value, nil)
   if number == nil {
     return nil
@@ -91,7 +91,7 @@ fn __context_confidence(value) {
   return number * 1.0
 }
 
-fn __context_token_estimate(body, explicit = nil) {
+fn __context_token_estimate(body: string?, explicit: any = nil) {
   const number = __context_num(explicit, nil)
   if number != nil && number >= 0 {
     return to_int(ceil(number))
@@ -99,7 +99,7 @@ fn __context_token_estimate(body, explicit = nil) {
   return to_int(ceil(len(body ?? "") * 1.0 / 4.0))
 }
 
-fn __context_scope(input, opts) {
+fn __context_scope(input: dict, opts: dict) {
   const raw = opts?.scope ?? input?.scope ?? {}
   const base = if type_of(raw) == "dict" {
     raw
@@ -122,7 +122,7 @@ fn __context_scope(input, opts) {
   )
 }
 
-fn __context_applicability(input, opts, scope) {
+fn __context_applicability(input: dict, opts: dict, scope: dict) {
   const raw = opts?.applicability ?? input?.applicability ?? {}
   const base = if type_of(raw) == "dict" {
     raw
@@ -143,7 +143,7 @@ fn __context_applicability(input, opts, scope) {
   )
 }
 
-fn __context_provenance(input, opts) {
+fn __context_provenance(input: dict, opts: dict) {
   const raw = opts?.provenance ?? input?.provenance ?? {}
   const base = if type_of(raw) == "dict" {
     raw
@@ -173,7 +173,7 @@ fn __context_provenance(input, opts) {
   )
 }
 
-fn __context_source_hashes(input, opts, body, provenance) {
+fn __context_source_hashes(input: dict, opts: dict, body: unknown, provenance: dict) {
   const explicit = opts?.source_hashes
     ?? input?.source_hashes
     ?? opts?.source_hash
@@ -189,7 +189,7 @@ fn __context_source_hashes(input, opts, body, provenance) {
   return []
 }
 
-fn __context_sensitivity_rank(value) {
+fn __context_sensitivity_rank(value: string) {
   const label = lowercase(trim(__context_string(value)))
   if label == "credential" {
     return 5
@@ -212,7 +212,7 @@ fn __context_sensitivity_rank(value) {
   return 2
 }
 
-fn __context_most_sensitive(values) {
+fn __context_most_sensitive(values: list?) {
   let best = nil
   let best_rank = -1
   for value in values ?? [] {
@@ -226,7 +226,7 @@ fn __context_most_sensitive(values) {
   return best
 }
 
-fn __context_redaction(input, opts) {
+fn __context_redaction(input: dict, opts: dict) {
   const input_raw = input?.redaction ?? {}
   const opts_raw = opts?.redaction ?? {}
   const input_base = if type_of(input_raw) == "dict" {
@@ -291,7 +291,7 @@ fn __context_redaction(input, opts) {
   )
 }
 
-fn __context_artifact_body(input, opts) {
+fn __context_artifact_body(input: dict, opts: dict) {
   return __context_text(
     opts?.body ?? input?.body ?? input?.text ?? input?.content ?? input?.data ?? "",
   )
@@ -303,7 +303,7 @@ fn __context_artifact_body(input, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
+pub fn context_artifact(input: any = nil, options: dict? = nil) -> ContextArtifact {
   const raw = if type_of(input) == "dict" {
     input
   } else {
@@ -396,7 +396,7 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
 pub fn context_artifact_from_burin_digest(
   path: string,
   body: string,
-  options = nil,
+  options: dict? = nil,
 ) -> ContextArtifact {
   const opts = options ?? {}
   const metadata_base = if opts?.metadata == nil {
@@ -427,7 +427,7 @@ pub fn context_artifact_from_burin_digest(
   )
 }
 
-fn __context_freshness_rank(value) {
+fn __context_freshness_rank(value: any) {
   const label = lowercase(trim(__context_string(value)))
   if label == "live" {
     return 4.0
@@ -453,7 +453,7 @@ fn __context_freshness_rank(value) {
   return 1.0
 }
 
-fn __context_authority_rank(value) {
+fn __context_authority_rank(value: any) {
   const label = lowercase(trim(__context_string(value)))
   if label == "tier0_deterministic" || label == "deterministic" {
     return 4.0
@@ -470,7 +470,7 @@ fn __context_authority_rank(value) {
   return 1.5
 }
 
-fn __context_any_match(haystack, needles) {
+fn __context_any_match(haystack: any, needles: any) {
   const values = __context_string_list(haystack)
   const query = __context_string_list(needles)
   if len(values) == 0 || len(query) == 0 {
@@ -484,7 +484,7 @@ fn __context_any_match(haystack, needles) {
   return -1.0
 }
 
-fn __context_path_match(paths, query_paths) {
+fn __context_path_match(paths: any, query_paths: any) {
   const values = __context_string_list(paths)
   const query = __context_string_list(query_paths)
   if len(values) == 0 || len(query) == 0 {
@@ -506,7 +506,7 @@ fn __context_path_match(paths, query_paths) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_rank(artifact, options = nil) {
+pub fn context_artifact_rank(artifact: any, options: dict? = nil) {
   const item = context_artifact(artifact)
   const opts = options ?? {}
   const confidence = __context_confidence(item.confidence) ?? 0.5
@@ -557,12 +557,12 @@ pub fn context_artifact_rank(artifact, options = nil) {
   return score - token_penalty
 }
 
-fn __context_artifact_key(artifact) {
+fn __context_artifact_key(artifact: any) {
   const item = context_artifact(artifact)
   return "body:" + sha256(item.kind + "|" + __context_string(item.path) + "|" + item.body)
 }
 
-fn __context_hashes_overlap(left, right) {
+fn __context_hashes_overlap(left: dict, right: dict) {
   const left_hashes = __context_string_list(left?.source_hashes)
   const right_hashes = __context_string_list(right?.source_hashes)
   if len(left_hashes) == 0 || len(right_hashes) == 0 {
@@ -576,7 +576,7 @@ fn __context_hashes_overlap(left, right) {
   return false
 }
 
-fn __context_same_artifact_identity(left, right) {
+fn __context_same_artifact_identity(left: any, right: any) {
   const l = context_artifact(left)
   const r = context_artifact(right)
   if __context_hashes_overlap(l, r) {
@@ -588,7 +588,7 @@ fn __context_same_artifact_identity(left, right) {
   return false
 }
 
-fn __context_merge_provenance(left, right) {
+fn __context_merge_provenance(left: dict?, right: dict?) {
   const l = left ?? {}
   const r = right ?? {}
   const left_sources = l?.sources ?? []
@@ -615,7 +615,7 @@ fn __context_merge_provenance(left, right) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_merge(left, right, options = nil) -> ContextArtifact {
+pub fn context_artifact_merge(left: any, right: any, options: dict? = nil) -> ContextArtifact {
   const opts = options ?? {}
   const l = context_artifact(left)
   const r = context_artifact(right)
@@ -666,7 +666,7 @@ pub fn context_artifact_merge(left, right, options = nil) -> ContextArtifact {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_dedupe(artifacts = nil, options = nil) {
+pub fn context_artifact_dedupe(artifacts: list? = nil, options: dict? = nil) {
   let out = []
   for raw in artifacts ?? [] {
     const artifact = context_artifact(raw)
@@ -688,7 +688,7 @@ pub fn context_artifact_dedupe(artifacts = nil, options = nil) {
   return out
 }
 
-fn __context_insert_ranked(sorted, artifact, options) {
+fn __context_insert_ranked(sorted: list, artifact: any, options: dict?) {
   let out = []
   let inserted = false
   const score = context_artifact_rank(artifact, options)
@@ -711,7 +711,7 @@ fn __context_insert_ranked(sorted, artifact, options) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_sort(artifacts = nil, options = nil) {
+pub fn context_artifact_sort(artifacts: list? = nil, options: dict? = nil) {
   let sorted = []
   for raw in artifacts ?? [] {
     sorted = __context_insert_ranked(sorted, context_artifact(raw), options ?? {})
@@ -719,7 +719,7 @@ pub fn context_artifact_sort(artifacts = nil, options = nil) {
   return sorted
 }
 
-fn __context_artifact_matches_policy(artifact, options) {
+fn __context_artifact_matches_policy(artifact: dict, options: dict) {
   const include_kinds = __context_string_list(options?.include_kinds)
   const exclude_kinds = __context_string_list(options?.exclude_kinds)
   if len(include_kinds) > 0 && !contains(include_kinds, artifact?.kind) {
@@ -746,7 +746,7 @@ fn __context_artifact_matches_policy(artifact, options) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_budget(artifacts = nil, options = nil) {
+pub fn context_artifact_budget(artifacts: list? = nil, options: dict? = nil) {
   const opts = options ?? {}
   const ranked = context_artifact_sort(context_artifact_dedupe(artifacts ?? [], opts), opts)
   const max_tokens = opts?.max_tokens ?? opts?.budget_tokens
@@ -785,7 +785,7 @@ pub fn context_artifact_budget(artifacts = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_select(artifacts = nil, options = nil) {
+pub fn context_artifact_select(artifacts: list? = nil, options: dict? = nil) {
   return context_artifact_budget(artifacts, options).artifacts ?? []
 }
 
@@ -816,7 +816,7 @@ pub fn context_artifact_select(artifacts = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_select_one(artifacts = nil, options = nil) {
+pub fn context_artifact_select_one(artifacts: list? = nil, options: dict? = nil) {
   const opts = options ?? {}
   const items = artifacts ?? []
   if len(items) == 0 {
@@ -872,7 +872,7 @@ pub fn context_artifact_select_one(artifacts = nil, options = nil) {
   return {reason: "selected", artifact: best.artifact, score: best.score, candidates: [best.id]}
 }
 
-fn __context_dir_norm(raw) {
+fn __context_dir_norm(raw: any) {
   const normalized = trim(regex_replace("/+$", "", __context_string(raw).replace("\\", "/")))
   if normalized == "." || normalized == "/" {
     return ""
@@ -880,7 +880,7 @@ fn __context_dir_norm(raw) {
   return normalized
 }
 
-fn __context_path_depth(dir) {
+fn __context_path_depth(dir: any) {
   const norm = __context_dir_norm(dir)
   if norm == "" {
     return 0
@@ -895,7 +895,7 @@ fn __context_path_depth(dir) {
  * `require_path_match`). This is the "altitude" term the soft `__context_path_match`
  * lacks.
  */
-fn __context_path_altitude(paths, query) {
+fn __context_path_altitude(paths: any, query: any) {
   const scopes = __context_string_list(paths)
   const queries = __context_string_list(query)
   if len(queries) == 0 {
@@ -929,7 +929,7 @@ fn __context_path_altitude(paths, query) {
   return best
 }
 
-fn __context_render_caps(llm: HarnessLlm, options) {
+fn __context_render_caps(llm: HarnessLlm, options: dict?) {
   const opts = options ?? {}
   if opts?.capabilities != nil {
     return opts.capabilities
@@ -943,7 +943,7 @@ fn __context_render_caps(llm: HarnessLlm, options) {
   return {}
 }
 
-fn __context_render_variant(llm: HarnessLlm, options, default_variant = "plain") {
+fn __context_render_variant(llm: HarnessLlm, options: dict?, default_variant: string = "plain") {
   const opts = options ?? {}
   const explicit = opts?.variant ?? opts?.render
   if explicit != nil && explicit != "auto" {
@@ -963,15 +963,15 @@ fn __context_render_variant(llm: HarnessLlm, options, default_variant = "plain")
   return default_variant
 }
 
-fn __context_escape(text) {
+fn __context_escape(text: any) {
   return __context_string(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 
-fn __context_one_line(text) {
+fn __context_one_line(text: any) {
   return trim(regex_replace("\\s+", " ", __context_string(text)))
 }
 
-fn __context_artifact_title(artifact) {
+fn __context_artifact_title(artifact: dict) {
   const title = artifact?.title
   if title != nil && title != "" {
     return title
@@ -982,7 +982,7 @@ fn __context_artifact_title(artifact) {
   return artifact?.kind + " " + artifact?.id
 }
 
-fn __context_meta_pairs(artifact, compact = false) {
+fn __context_meta_pairs(artifact: dict, compact: bool = false) {
   let pairs = []
   for entry in [
     ["kind", artifact?.kind],
@@ -1015,7 +1015,7 @@ fn __context_meta_pairs(artifact, compact = false) {
   return pairs
 }
 
-fn __context_render_body(artifact, options) {
+fn __context_render_body(artifact: dict, options: dict?) {
   const opts = options ?? {}
   const sensitivity = lowercase(
     __context_string(artifact?.sensitivity ?? artifact?.redaction?.sensitivity),
@@ -1028,7 +1028,7 @@ fn __context_render_body(artifact, options) {
   return clip_text(artifact?.body ?? "", opts?.artifact_max_chars ?? opts?.section_max_chars)
 }
 
-fn __context_render_artifact_markdown(artifact, options) {
+fn __context_render_artifact_markdown(artifact: dict, options: dict?) {
   const pairs = __context_meta_pairs(artifact)
   const meta = if len(pairs) > 0 {
     join(pairs, " ") + "\n\n"
@@ -1039,7 +1039,7 @@ fn __context_render_artifact_markdown(artifact, options) {
     + __context_render_body(artifact, options)
 }
 
-fn __context_render_artifact_xml(artifact, options) {
+fn __context_render_artifact_xml(artifact: dict, options: dict?) {
   let out = "<context_artifact id=\"" + __context_escape(artifact?.id) + "\" kind=\""
     + __context_escape(artifact?.kind)
     + "\">\n"
@@ -1068,7 +1068,7 @@ fn __context_render_artifact_xml(artifact, options) {
   return out
 }
 
-fn __context_render_artifact_plain(artifact, options) {
+fn __context_render_artifact_plain(artifact: dict, options: dict?) {
   const pairs = __context_meta_pairs(artifact, true)
   const meta = if len(pairs) > 0 {
     " [" + join(pairs, " ") + "]"
@@ -1078,7 +1078,7 @@ fn __context_render_artifact_plain(artifact, options) {
   return __context_artifact_title(artifact) + meta + "\n" + __context_render_body(artifact, options)
 }
 
-fn __context_render_artifact_compact(artifact, options) {
+fn __context_render_artifact_compact(artifact: dict, options: dict?) {
   const pairs = __context_meta_pairs(artifact, true)
   const prefix = if len(pairs) > 0 {
     "[" + join(pairs, " ") + "] "
@@ -1103,7 +1103,7 @@ pub fn context_render_logical_section(
   name: string,
   title: string,
   body: string,
-  options = nil,
+  options: dict? = nil,
 ) {
   const variant = __context_render_variant(llm, options ?? {}, "plain")
   const label = if title == nil || title == "" {
@@ -1129,7 +1129,7 @@ pub fn context_render_logical_section(
  * @effects: []
  * @errors: []
  */
-pub fn context_render_artifacts(llm: HarnessLlm, artifacts = nil, options = nil) {
+pub fn context_render_artifacts(llm: HarnessLlm, artifacts: list? = nil, options: dict? = nil) {
   const opts = options ?? {}
   const variant = __context_render_variant(llm, opts, "plain")
   const skip_budget = opts?.skip_budget ?? false
@@ -1191,7 +1191,7 @@ pub fn context_render_artifacts(llm: HarnessLlm, artifacts = nil, options = nil)
  * @effects: []
  * @errors: []
  */
-pub fn clip_text(text, max_chars) {
+pub fn clip_text(text: any, max_chars: any) {
   if max_chars == nil || max_chars <= 0 {
     return text
   }
@@ -1210,7 +1210,7 @@ pub fn clip_text(text, max_chars) {
  * @effects: []
  * @errors: []
  */
-pub fn render_section(section, include_headers, section_max_chars) {
+pub fn render_section(section: dict, include_headers: any, section_max_chars: any) {
   if section == nil {
     return ""
   }
@@ -1236,7 +1236,7 @@ pub fn render_section(section, include_headers, section_max_chars) {
  * @effects: []
  * @errors: []
  */
-pub fn context_section(name, content, options = nil) {
+pub fn context_section(name: any, content: any, options: dict? = nil) {
   const opts = options ?? {}
   return filter_nil(
     {
@@ -1258,7 +1258,7 @@ pub fn context_section(name, content, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn section(name, content, options = nil) {
+pub fn section(name: any, content: any, options: dict? = nil) {
   return context_section(name, content, options)
 }
 
@@ -1268,7 +1268,7 @@ pub fn section(name, content, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_attach(name, path, content, options = nil) {
+pub fn context_attach(name: any, path: string, content: any, options: dict? = nil) {
   const opts = options ?? {}
   return context_section(
     name,
@@ -1283,7 +1283,7 @@ pub fn context_attach(name, path, content, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context(sections, options = nil) {
+pub fn context(sections: list?, options: dict? = nil) {
   const opts = options ?? {}
   return filter_nil(
     {
@@ -1304,7 +1304,7 @@ pub fn context(sections, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_add(ctx, new_section) {
+pub fn context_add(ctx: dict?, new_section: any) {
   const existing = ctx?.sections ?? []
   const sections = existing + [new_section]
   return context(sections, ctx)
@@ -1316,7 +1316,7 @@ pub fn context_add(ctx, new_section) {
  * @effects: []
  * @errors: []
  */
-pub fn context_add_artifact(ctx, artifact) {
+pub fn context_add_artifact(ctx: dict?, artifact: any) {
   const base = ctx ?? {}
   const existing = ctx?.artifacts ?? []
   return context(base.sections ?? [], base + {artifacts: existing + [context_artifact(artifact)]})
@@ -1328,7 +1328,7 @@ pub fn context_add_artifact(ctx, artifact) {
  * @effects: []
  * @errors: []
  */
-pub fn context_render(llm: HarnessLlm, ctx, options = nil) {
+pub fn context_render(llm: HarnessLlm, ctx: dict?, options: dict? = nil) {
   const base = ctx ?? {}
   const overrides = options ?? {}
   const opts = base + overrides
@@ -1379,7 +1379,7 @@ pub fn context_render(llm: HarnessLlm, ctx, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_compact(ctx, options = nil) {
+pub fn context_compact(ctx: dict?, options: dict? = nil) {
   const base = ctx ?? {}
   const overrides = options ?? {}
   const opts = base + overrides
@@ -1395,7 +1395,7 @@ pub fn context_compact(ctx, options = nil) {
   )
 }
 
-fn __context_prompt_xml(task, rendered, opts, task_label) {
+fn __context_prompt_xml(task: string, rendered: string, opts: unknown, task_label: string) {
   return "<workflow_task>\n<label>"
     + task_label
     + "</label>\n<instructions>\n"
@@ -1411,7 +1411,13 @@ fn __context_prompt_xml(task, rendered, opts, task_label) {
     + "</workflow_response_contract>"
 }
 
-fn __context_prompt_text(llm: HarnessLlm, task, rendered, opts, task_label) {
+fn __context_prompt_text(
+  llm: HarnessLlm,
+  task: string,
+  rendered: string,
+  opts: dict?,
+  task_label: string,
+) {
   const task_section = context_render_logical_section(llm, "workflow_task", task_label, task, opts)
   const context_section_text = context_render_logical_section(
     llm,
@@ -1439,7 +1445,7 @@ fn __context_prompt_text(llm: HarnessLlm, task, rendered, opts, task_label) {
  * @effects: []
  * @errors: []
  */
-pub fn prompt_compose(llm: HarnessLlm, task, ctx, options = nil) {
+pub fn prompt_compose(llm: HarnessLlm, task: string, ctx: dict?, options: dict? = nil) {
   const opts = options ?? {}
   const rendered = context_render(llm, ctx, opts)
   const task_label = opts?.task_label ?? "Task"

@@ -87,7 +87,7 @@ pub type TokenSet = {
  */
 type Storage = dict
 
-fn __wrap_host_handle(auth: HarnessAuth, inner) {
+fn __wrap_host_handle(auth: HarnessAuth, inner: dict) {
   return inner
     + {
       _namespace: "oauth_storage",
@@ -124,7 +124,7 @@ pub fn memory(auth: HarnessAuth) -> Storage {
  * @api_stability: experimental
  * @example: file("/var/lib/harn/tokens.bin", env("HARN_OAUTH_KEY"))
  */
-pub fn file(auth: HarnessAuth, path, encryption_key) -> Storage {
+pub fn file(auth: HarnessAuth, path: string, encryption_key: any) -> Storage {
   if type_of(path) != "string" || path == "" {
     throw "std/oauth/storage: file path must be a non-empty string"
   }
@@ -180,7 +180,7 @@ pub fn harn_cloud_org(auth: HarnessAuth) -> Storage {
  * @api_stability: experimental
  * @example: custom({get: my_get, set: my_set, delete: my_delete})
  */
-pub fn custom(auth: HarnessAuth, handlers) -> Storage {
+pub fn custom(auth: HarnessAuth, handlers: dict) -> Storage {
   if type_of(handlers) != "dict" {
     throw "std/oauth/storage: custom handlers must be a dict"
   }
@@ -217,7 +217,7 @@ pub fn custom(auth: HarnessAuth, handlers) -> Storage {
   return base + {with_refresh_lock: with_lock}
 }
 
-fn __secrets_split_scopes(text) {
+fn __secrets_split_scopes(text: any) {
   let out = []
   for raw in split(to_string(text), " ") {
     const part = trim(to_string(raw ?? ""))
@@ -228,7 +228,7 @@ fn __secrets_split_scopes(text) {
   return out
 }
 
-fn __secrets_is_missing(err) {
+fn __secrets_is_missing(err: dict) {
   // A caught `harness.secrets` NotFound means the secret is simply absent —
   // the storage protocol wants `nil`, not an error. A completely unbound
   // secret host is also `not_found`-categorized but is a configuration bug
@@ -243,7 +243,7 @@ fn __secrets_is_missing(err) {
   return !contains(message, "no secret provider bound")
 }
 
-fn __secrets_secret_name(cfg, key) {
+fn __secrets_secret_name(cfg: dict, key: string?) {
   // Map a storage key to a `harness.secrets` id. Absolute connector ids
   // (`namespace/name` or `harn-secret://…`) pass through verbatim so a
   // client can be pointed straight at an existing credential. The default
@@ -263,7 +263,7 @@ fn __secrets_secret_name(cfg, key) {
   return cfg.provider + "/" + leaf
 }
 
-fn __secrets_read_raw(secrets: HarnessSecrets, cfg, name) {
+fn __secrets_read_raw(secrets: HarnessSecrets, cfg: dict, name: any) {
   return try {
     secrets.read(name, cfg.scope)
   } catch (err) {
@@ -275,7 +275,7 @@ fn __secrets_read_raw(secrets: HarnessSecrets, cfg, name) {
   }
 }
 
-fn __secrets_parse(cfg, name, raw) {
+fn __secrets_parse(cfg: dict, name: string, raw: string?) {
   return try {
     json_parse(raw)
   } catch (err) {
@@ -287,7 +287,7 @@ fn __secrets_parse(cfg, name, raw) {
   }
 }
 
-fn __secrets_get(secrets: HarnessSecrets, cfg, key) {
+fn __secrets_get(secrets: HarnessSecrets, cfg: dict, key: string?) {
   const name = __secrets_secret_name(cfg, key)
   const raw = __secrets_read_raw(secrets, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
@@ -305,7 +305,7 @@ fn __secrets_get(secrets: HarnessSecrets, cfg, key) {
   return parsed
 }
 
-fn __secrets_merge(prev, incoming) {
+fn __secrets_merge(prev: dict?, incoming: dict) {
   if type_of(prev) != "dict" {
     return incoming
   }
@@ -326,7 +326,7 @@ fn __secrets_merge(prev, incoming) {
   return out
 }
 
-fn __secrets_set(secrets: HarnessSecrets, cfg, key, token_set) {
+fn __secrets_set(secrets: HarnessSecrets, cfg: dict, key: string?, token_set: dict) {
   if type_of(token_set) != "dict" {
     throw "std/oauth/storage: secrets backend set expects a TokenSet dict"
   }
@@ -342,7 +342,7 @@ fn __secrets_set(secrets: HarnessSecrets, cfg, key, token_set) {
   return nil
 }
 
-fn __secrets_get_stored(secrets: HarnessSecrets, cfg, name) {
+fn __secrets_get_stored(secrets: HarnessSecrets, cfg: dict, name: string) {
   const raw = __secrets_read_raw(secrets, cfg, name)
   if raw == nil || trim(to_string(raw)) == "" {
     return nil
@@ -350,7 +350,7 @@ fn __secrets_get_stored(secrets: HarnessSecrets, cfg, name) {
   return __secrets_parse(cfg, name, raw)
 }
 
-fn __secrets_delete(secrets: HarnessSecrets, cfg, key) {
+fn __secrets_delete(secrets: HarnessSecrets, cfg: dict, key: string?) {
   const name = __secrets_secret_name(cfg, key)
   try {
     const _ = secrets.delete(name, cfg.scope)
@@ -404,7 +404,7 @@ fn __secrets_delete(secrets: HarnessSecrets, cfg, key) {
  * @api_stability: experimental
  * @example: secrets(harness, {provider: "github"})
  */
-pub fn secrets(auth: HarnessAuth, secret_store: HarnessSecrets, opts) -> Storage {
+pub fn secrets(auth: HarnessAuth, secret_store: HarnessSecrets, opts: unknown) -> Storage {
   if type_of(opts) != "dict" {
     throw "std/oauth/storage: secrets opts must be a dict"
   }

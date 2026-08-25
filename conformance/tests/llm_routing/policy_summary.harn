@@ -2,7 +2,7 @@
  * Returns a tagged dict with the canonicalized config so scripts can
  * reflect on the policy they built before piping it through llm_call.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const policy = harness.llm.routing_policy(
     {
       chain: [

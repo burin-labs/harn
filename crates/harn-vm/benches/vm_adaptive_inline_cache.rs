@@ -20,7 +20,7 @@ fn run_chunk(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> String {
 
 fn bench_stable_integer_add_and_closure_call(c: &mut Criterion) {
     let chunk = compile_source(
-        r"pipeline t(task) {
+        r"pipeline t(task: unknown) {
 fn erase(x) {
   return x
 }
@@ -46,7 +46,7 @@ return total
 
 fn bench_mixed_numeric_add_deopt(c: &mut Criterion) {
     let chunk = compile_source(
-        r"pipeline t(task) {
+        r"pipeline t(task: unknown) {
 fn erase(x) {
   return x
 }

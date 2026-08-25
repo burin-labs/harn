@@ -1,5 +1,5 @@
 /** Verifies move_file, read_lines, walk_dir, and glob. */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(harness.fs.workspace_temp_dir(), "fs_extras_test")
   if harness.fs.exists(root) {
     harness.fs.delete(root)

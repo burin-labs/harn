@@ -2,7 +2,7 @@
 // adapter owns conversion to OpenAI's wire-level effort field.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const r = pack_for(harness.agent, harness.llm, {model: "gpt-5", reasoning_policy: "high"})
   assert_eq(r.provider, "openai")
   assert_eq(r.thinking.mode, "effort")

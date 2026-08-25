@@ -5,7 +5,7 @@ import {
   agent_tool_single_workspace_write_name,
 } from "std/agent/tool_annotations"
 
-fn entry(name, annotations) {
+fn entry(name: string, annotations: dict) {
   return {name: name, annotations: annotations}
 }
 

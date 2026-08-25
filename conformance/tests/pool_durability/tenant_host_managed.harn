@@ -3,7 +3,7 @@
 // when no embedding host wires a backend.
 import { pool_create } from "std/lifecycle/pool"
 
-fn has_text(result, snippet) {
+fn has_text(result: any, snippet: string) {
   return is_err(result) && contains(to_string(unwrap_err(result)), snippet)
 }
 

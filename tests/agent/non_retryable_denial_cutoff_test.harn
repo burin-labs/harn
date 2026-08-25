@@ -38,22 +38,22 @@ fn toolset() {
   return tools
 }
 
-fn edit_call(id) {
+fn edit_call(id: string) {
   return {
     text: "",
     tool_calls: [{id: id, name: "edit", arguments: {path: "src/app.rs", text: "fixed"}}],
   }
 }
 
-fn look_call(id) {
+fn look_call(id: string) {
   return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "src/app.rs"}}]}
 }
 
-fn terminal_lifecycle(events) {
+fn terminal_lifecycle(events: any) {
   return events.filter({ event -> event.type == "tool_call_update" && event.status == "failed" })
 }
 
-fn cutoff_receipts(events) {
+fn cutoff_receipts(events: any) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -63,7 +63,7 @@ fn cutoff_receipts(events) {
   )
 }
 
-fn base_opts(session, extra = {}) {
+fn base_opts(session: any, extra: any = {}) {
   const opts: AgentSpec = {
     provider: "mock",
     tools: toolset(),
@@ -79,7 +79,7 @@ fn base_opts(session, extra = {}) {
   return opts + extra
 }
 
-pipeline test_repeated_permanent_denial_cuts_as_harness_infra(harness: Harness, task) {
+pipeline test_repeated_permanent_denial_cuts_as_harness_infra(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3"), edit_call("edit-4")],
@@ -118,7 +118,7 @@ pipeline test_repeated_permanent_denial_cuts_as_harness_infra(harness: Harness, 
   )
 }
 
-pipeline test_retryable_denial_does_not_cut(harness: Harness, task) {
+pipeline test_retryable_denial_does_not_cut(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [edit_call("retryable-1"), edit_call("retryable-2"), llm_text("Recovered. ##DONE##")],
@@ -167,7 +167,10 @@ pipeline test_retryable_denial_does_not_cut(harness: Harness, task) {
   )
 }
 
-pipeline test_permanent_denial_with_permitted_progress_does_not_cut(harness: Harness, task) {
+pipeline test_permanent_denial_with_permitted_progress_does_not_cut(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [

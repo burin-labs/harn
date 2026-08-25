@@ -50,14 +50,14 @@ type SessionUpdate = AgentMessageChunk | ToolCall | ToolCallUpdate | Plan | Hand
 
 type PipelineResult = {text: string?, events: list<SessionUpdate>?, run_record: dict?}
 
-pub fn agent_message_chunk(text) {
+pub fn agent_message_chunk(text: any) {
   return {
     sessionUpdate: "agent_message_chunk",
     content: {type: "text", text: text, annotations: nil},
   }
 }
 
-pub fn tool_call(tool_call_id, title) {
+pub fn tool_call(tool_call_id: any, title: any) {
   return {
     sessionUpdate: "tool_call",
     toolCallId: tool_call_id,
@@ -71,7 +71,7 @@ pub fn tool_call(tool_call_id, title) {
   }
 }
 
-pub fn tool_call_update(tool_call_id, status) {
+pub fn tool_call_update(tool_call_id: any, status: any) {
   return {
     sessionUpdate: "tool_call_update",
     toolCallId: tool_call_id,
@@ -84,7 +84,7 @@ pub fn tool_call_update(tool_call_id, status) {
   }
 }
 
-pub fn plan(entries) {
+pub fn plan(entries: any) {
   return {sessionUpdate: "plan", entries: entries}
 }
 
@@ -94,7 +94,7 @@ pub fn plan(entries) {
  * @effects: []
  * @errors: []
  */
-pub fn harn_plan(plan_document) {
+pub fn harn_plan(plan_document: dict) {
   return {
     sessionUpdate: "plan",
     entries: plan_entries(plan_document.current_revision.plan),
@@ -102,7 +102,7 @@ pub fn harn_plan(plan_document) {
   }
 }
 
-pub fn handoff_update(handoff_id, artifact_id, handoff) {
+pub fn handoff_update(handoff_id: any, artifact_id: any, handoff: any) {
   return {
     sessionUpdate: "handoff",
     handoffId: handoff_id,

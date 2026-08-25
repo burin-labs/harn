@@ -5,6 +5,78 @@
 use super::*;
 
 #[test]
+fn unknown_value_repair_inserts_a_fail_fast_closed_shape_validator() {
+    let source = "consume(payload)\n";
+    let start = source.find("payload").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "payload".len(), 1, 9);
+    let expected = TypeExpr::Shape(vec![
+        harn_parser::ShapeField::synthetic("id", named_type("string"), false),
+        harn_parser::ShapeField::synthetic("attempt", named_type("int"), true),
+    ]);
+
+    let (repair, edits, impact) =
+        synthesize_unknown_type_validation(span, &expected, &named_type("unknown"), source, &[])
+            .expect("unknown boundary repair");
+
+    assert_eq!(repair.id.as_str(), "types/validate-unknown-value");
+    assert_eq!(impact.classification, "runtime-type-validation");
+    assert_eq!(
+        FixEdit::apply_all(source, &edits),
+        concat!(
+            "consume(schema_expect(payload, {type: \"dict\", properties: ",
+            "{\"id\": {type: \"string\"}, \"attempt\": {type: \"int\"}}, ",
+            "required: [\"id\"], additional_properties: false}))\n",
+        )
+    );
+}
+
+#[test]
+fn unknown_value_repair_refuses_dynamic_targets_and_known_values() {
+    let span = harn_lexer::Span::with_offsets(0, 5, 1, 1);
+    assert!(synthesize_unknown_type_validation(
+        span,
+        &named_type("any"),
+        &named_type("unknown"),
+        "value",
+        &[],
+    )
+    .is_none());
+    assert!(synthesize_unknown_type_validation(
+        span,
+        &named_type("string"),
+        &named_type("string"),
+        "value",
+        &[],
+    )
+    .is_none());
+}
+
+#[test]
+fn dict_schema_repair_preserves_the_nominal_witness() {
+    let source = "schema_closed_object({id: schema_string()})";
+    let span = harn_lexer::Span::with_offsets(0, source.len(), 1, 1);
+    let expected = TypeExpr::Applied {
+        name: "Schema".to_string(),
+        args: vec![TypeExpr::Shape(vec![harn_parser::ShapeField::synthetic(
+            "id",
+            named_type("string"),
+            false,
+        )])],
+    };
+
+    let (repair, edits, impact) =
+        synthesize_schema_witness_refinement(span, &expected, &named_type("dict"), source)
+            .expect("schema witness repair");
+
+    assert_eq!(repair.id.as_str(), "types/refine-schema-witness");
+    assert_eq!(impact.strategy.as_deref(), Some("schema-refine"));
+    assert_eq!(
+        FixEdit::apply_all(source, &edits),
+        "schema_refine(schema_of({id: string}), schema_closed_object({id: schema_string()}))"
+    );
+}
+
+#[test]
 #[expect(clippy::string_slice, reason = "test input is ASCII")]
 fn callable_param_insert_handles_dict_defaults_before_body() {
     let source = "pub fn poll(check, options: dict = {}) -> any {\n  harness.clock.now_ms()\n}\n";

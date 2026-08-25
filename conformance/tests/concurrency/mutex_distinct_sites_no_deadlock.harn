@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Two distinct bare `mutex {}` blocks key on their own lexical call-sites,
   // so nesting them no longer self-deadlocks (they are independent locks).
   mutex {

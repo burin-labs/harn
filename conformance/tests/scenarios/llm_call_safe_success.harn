@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * llm_call_safe wraps a successful llm_call in an {ok, response, error}
  * envelope with no throwing.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("ok")],
