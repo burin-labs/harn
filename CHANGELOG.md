@@ -9,6 +9,218 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.116
+
+### Breaking
+
+- **The published provider catalog now omits `cache_usage_accounting` for routes
+  that never declared it, instead of publishing `false` (#7215).** The field was
+  projected with `.unwrap_or(false)`, typed as a bare `bool`, and listed in the
+  schema's `required` set, so "nobody declared either way" and "declared as
+  reporting nothing" reached every artifact consumer as the same value. Those are
+  different claims: an explicit `false` asserts the route reports no cache usage,
+  and consumers surface that as an audited zero rather than an unmeasured field.
+  Of 44 baseline providers, 38 were silent and every one of them was published as
+  an explicit `false`. The field is now `Option<bool>` with
+  `skip_serializing_if`, matching `stream_usage_accounting` in the same struct;
+  the six real declarations are unchanged and no route flipped `true` to `false`.
+
+  Consumers must handle the field being absent. The TypeScript declaration
+  narrows to `cache_usage_accounting?: boolean`, so a reader that assumed presence
+  needs a null check; in JavaScript the runtime reading is unchanged, since both
+  absent and `false` are falsy. A validator holding a vendored copy of the older
+  schema will reject newly generated artifacts, though `validate_artifact` already
+  requires an exact `schema_version` match, so such a consumer fails on version
+  before shape. Anything wanting the previous reading can write
+  `.unwrap_or(false)` explicitly.
+
+  The Swift accessor is deliberately unchanged: `cacheUsageAccounting: Bool` still
+  collapses via `?? false` for catalogs written before the field existed, which
+  means pre-v7 absence and undeclared-today currently share one reading. That
+  compatibility question is left to its owner rather than settled here.
+
+### Added
+
+- **Embeddings backends report who they are.** `hostlib_embed_info` and
+  `hostlib_embed_top_k` now include `backend` and `is_semantic`. The default
+  remains lexical hashing. An operator-supplied static table or an opt-in
+  local ONNX encoder can take over when present; neither ships weights in
+  the binary, and neither claims semantic ranking. Provider catalog v9 adds
+  `embeddings_endpoint` plus embedding model dimensions. Catalog JSON/TS/Swift
+  rows are generated from `catalog_sources/` (#6801, #6817, #6820).
+- **`make check-docs-symbols` fails documentation that still names a removed
+  runtime API.** `check-docs-snippets` type-checks fenced Harn blocks, so
+  stale API names survived in the two surfaces nothing read: ordinary prose
+  and the bodies of blocks tagged `harn,ignore`. The new gate reads both,
+  reports the file and line, and names the replacement. The old-to-new
+  mapping comes from the compiler's own harness-migration table rather than a
+  list in this repository, so it cannot go stale: the checker hands every
+  call-shaped identifier the docs mention to one `harn check` and keeps the
+  answers whose suggested replacement is a typed `harness.*` path.
+  `scripts/docs-removed-symbols-allowlist.txt` holds the 312 pre-existing
+  references plus 13 reviewed exemptions, and the gate fails when one of its
+  entries stops applying, so it can only shrink.
+- **Streamed provider calls now record how long the first frame took.**
+  `provider_telemetry.client_first_frame_ms` measures the wait from request
+  dispatch to the first well-formed provider frame, sharing an origin with the
+  existing `client_wall_ms` so the two subtract: a slow call that was slow to
+  start can finally be told apart from one that was slow to stream, even on
+  providers that report no server-side timing of their own. The same value
+  reaches the `iteration_end` event's `iteration_info` beside `response_ms`, so
+  consumers that follow the event stream do not have to re-read the transcript
+  to attribute latency.
+
+  A call that did not stream reports the field as absent rather than zero, so
+  "not streamed" cannot be mistaken for "arrived instantly". The stamp is taken
+  only once a provider frame has actually parsed, which keeps SSE comments and
+  gateway keepalives arriving during prefill from reporting a near-zero latency.
+
+### Changed
+
+- **Durable-reminder maintenance contract.** The runtime now documents why a
+  same-key durable reminder must retain its complete body during injection and
+  points callers that need unchanged carry-forward behavior to append-only
+  reminders (#7188).
+- **Published Harn snippets now fit a reading measure, and `make
+  check-docs-snippets` keeps them there (#7197).** Docs body text wraps at a
+  34.5rem measure while code blocks break out past it, so a long line cost the
+  reader a horizontal scroll. The gate now rejects any line in a `harn` or
+  `harn-prompt` fence over 88 columns and echoes the offending line. Width is a
+  property of the rendered page rather than of the type checker, so a
+  `harn,ignore` block — exempt from checking, still rendered — is measured like
+  any other. All 243 lines that were over budget across README, `docs/`, and the
+  language spec were rewrapped; every snippet still parses and checks.
+- **Docs navigation separates deploying Harn from contributing to it (#7201).**
+  The former "Operating Harn" tab mixed two audiences: a reader hosting a
+  pipeline, and a maintainer cutting a release. It is now a `Deploy` tab
+  (platform support, bootstrapping a pinned release, the Render/Fly/Railway
+  guides) and a `Contributing` tab (release process, repo CI guards, test
+  conventions, and runtime implementation notes). `harn playground` moved to
+  How-to guides, where the other local-iteration tools live.
+- **The Harn on harnlang.com no longer advertises an untyped, unused parameter,
+  and the site gate now covers every scenario the site renders (#7233).** The
+  homepage hero opened with `pipeline review(harness: Harness, task)` — a
+  parameter that is optional, untyped, and never read — and 21 bundled demo
+  scenarios carried the same thing spelled `_task`. All of them drop it; pipeline
+  input has one canonical reader, `harness.runtime.pipeline_input`. Untyped `fn`
+  parameters and missing return types across the demo bundle are annotated, with
+  named record types where the shape is real and `dict` only where the host hands
+  back an open envelope. `make check-site-snippets` is why this rotted: it globbed
+  `website/src/examples/*.harn.txt` but enumerated exactly three gallery scenarios
+  by hand while the homepage rendered four, so `review-captain` — the "Code review
+  agent" tab — was displayed by the site and checked by nothing. The hand list is
+  gone. The gate globs `crates/harn-cli/assets/demo/*/*.harn`, the same directory
+  `gallery.ts` imports from, runs `lint --strict --require-public-api-types`
+  alongside `check`, and fails if either glob comes back empty. Coverage went
+  from 4 files to 26.
+
+### Fixed
+
+- Ordinary modules now reject privileged host calls in tail-return positions. A trusted host-dispatch
+  manifest remains the only way to grant that authority.
+- **A conformance run that executed no tests now exits non-zero (#7048).**
+  The exit status was previously derived from a "nothing failed" check, which
+  an all-zero result satisfies trivially — so a selection that matched nothing
+  was indistinguishable from a suite that fully passed, and any caller gating
+  on the exit code read the vacuous run as green. Both the sequential and the
+  parallel path now check that something actually ran, and report
+  `conformance_empty_selection` with a diagnosis naming the selection, the
+  filter, and how many selected files have no `.expected`, `.error`, or `.lint`
+  sibling. Pass `--allow-empty` where an empty selection is expected; parallel
+  workers set it for themselves, because a shard may legitimately be empty and
+  the parent applies the check to the aggregate.
+- **Provider token quotas now pace subsequent LLM calls after the first 429
+  (#7141).** Harn retains structured TPM headers as a typed quota receipt and
+  feeds its live route limiter, so growing requests wait proactively instead of
+  repeatedly hitting the provider. Rate-limit sleeps are now visible in ordinary
+  run output and therefore included in existing eval wait summaries.
+- **Reliable LoRA record floors.** `harn models lora preflight` now reads
+  `min_records` from its training config, lets `--min-records` override it, and
+  requires an explicit record floor when `--check` is used (#7190).
+- **Agent structured-output requests now degrade to prompt mode when a provider
+  rejects the native response format (#7194).** The fallback is driven by the
+  failed request's structured contract rather than provider-specific error
+  wording, covering grammar-constraining local runtimes and typed
+  `invalid_request` responses alike.
+- **Next-tool recovery no longer combines competing tool and output grammars
+  (#7199).** Agent-loop claim requests derive their constrained JSON schema from
+  the full tool registry, then omit native tool declarations for that request so
+  grammar-backed local providers can decode and dispatch the claimed tool.
+- Corrected six factual defects in the documentation, each verified against
+  the runtime: the `type_of` narrowing vocabulary in the type-annotations
+  chapter listed nine tags when the checker narrows on 26 (and does not
+  narrow on `struct`/`enum`/`builtin`); "no annotation" was described as
+  disabling checking when an unannotated `let`/`const` is inferred and
+  fully checked and only an unannotated *parameter* opens a hole; falsy-
+  branch narrowing of a union type (which subtracts the tested type) was
+  undocumented; the `never`-type `while` rule was unreadable; the
+  human-in-the-loop sections documented named-argument syntax that does not
+  parse, plus a `dual_control` example whose closure was written as a dict
+  literal; and prose across the docs still presented the removed ambient
+  `llm_call` family as callable instead of `harness.llm.call*`. Also
+  documented the precedence between the positional `system` argument and
+  the `system` option on `harness.llm.call`.
+- Docs code blocks no longer scroll horizontally on harnlang.com. The published
+  snippet width budget was derived from the prose measure, which code blocks are
+  deliberately exempt from; it is now measured from the article column that
+  actually sizes them (`max-w-3xl` minus padding and border = 654px of code text,
+  at JetBrains Mono 13.6px whose character advance is 8.734px = 74 columns). All
+  703 snippet lines that were over the corrected budget were rewrapped without
+  changing any example's meaning.
+- **A release tagged before its changelog fragments were folded can now be
+  finalized (#7218).** `release_ship.sh --finalize` accepts
+  `--allow-unfolded-fragments`. Finalization publishes from the tag's own tree,
+  so fragments left inside it are immutable and every other remedy is out of
+  reach once the tag exists. The flag records what it omits rather than hiding
+  it, and those entries surface in the next release, which folds them from the
+  default branch.
+- Release merge-queue checks now reject an exact candidate tree that still
+  needs changelog folding, preventing fragments merged after preparation from
+  entering the immutable release tag.
+- **The approval-result lint follows the approval primitive to its supported
+  spelling (#7223).** `HARN-LNT-013 unhandled-approval-result` matched only the
+  bare `request_approval(...)` call. That form is the removed ambient builtin,
+  and calling it also raises `HARN-LNT-071` telling the author to move to
+  `harness.interaction.request_approval(...)` — so taking the linter's advice
+  silently turned the approval guard off, on the one rule that notices a
+  discarded approver receipt. The capability-method shape is now recognized as
+  well, and the bare form still warns so a script mid-migration never goes quiet
+  in between.
+- Post-release development bumps now follow the published stable tag and current
+  workspace version instead of requiring the release commit to remain the branch
+  tip, and every skip reports its typed reason.
+- **A failed `harn-bootstrap` now reports the release state it observed, not
+  just the last HTTP status (#7228).** An unpublished release and one whose
+  asset upload stalled both answered `HTTP 404` on every verification source,
+  so a half-published release read as a flaky download: v0.10.115 blocked every
+  docs-touching PR for ~70 minutes and ejected one from the merge queue with
+  nothing reporting that the release was incomplete. When both sources are
+  exhausted, bootstrap now asks the release API once and says whether the
+  release is absent, present without this asset (naming the asset and listing
+  what the release does publish), or present and mid-finalization. A stalled
+  upload is a one-line diagnosis instead of a two-minute mystery. The retry
+  budget, the dual-source race, and the immutability guard are unchanged, and a
+  throttled query degrades to the previous message rather than guessing.
+- **Documentation no longer tells you to call runtime APIs that were removed
+  (#7229).** 132 of the 312 stale references recorded when
+  `make check-docs-symbols` landed now name the typed `harness.*` capability
+  method the compiler suggests, and their allowlist entries are gone. Examples
+  that called a bare global at file scope gained the `harness` binding they need
+  to compile, and four imports that never resolved (`std/hooks`, and
+  `trigger_register` / `register_step_hook` / `pipeline_on_finish` from
+  `std/triggers` and `std/lifecycle`) were removed rather than rewritten.
+- **The LLM quick reference no longer teaches removed runtime APIs (#7239).**
+  `docs/llm/harn-quickref.md` is what agents fetch as a one-pass reference, so
+  its 34 stale entries were not merely a worse doc — they instructed readers to
+  call `daemon_spawn(...)`, `trigger_register(...)`, and 32 more ambient globals
+  the compiler removed. Each now names its typed `harness.*` capability method,
+  and seven fragments that called those globals at file scope gained the
+  `fn main(harness: Harness)` entrypoint the page itself documents. Also drops a
+  `30_000` literal from the routing-policy example: Harn has no numeric
+  separator, so that line never lexed.
+- Collapsed repeated fenced-JSON tool-call instructions into one runtime-owned
+  body-transport hint, reducing prompt weight without changing the accepted wire grammar.
+
 ## v0.10.115
 
 ### Added
