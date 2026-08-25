@@ -1364,17 +1364,9 @@ fn provider_classification(provider: &ProviderDef) -> ProviderClassification {
 }
 
 fn provider_protocols(id: &str, provider: &ProviderDef) -> Vec<String> {
-    match id {
-        "anthropic" => vec!["anthropic_messages".to_string()],
-        "gemini" => vec!["gemini_generate_content".to_string()],
-        "vertex" => vec!["vertex_generate_content".to_string()],
-        "bedrock" => vec!["bedrock_converse".to_string()],
-        "azure_openai" => vec!["azure_openai_chat_completions".to_string()],
-        "ollama" if provider.chat_endpoint.starts_with("/api/") => {
-            vec!["ollama_native".to_string()]
-        }
-        _ => vec!["openai_chat_completions".to_string()],
-    }
+    vec![llm_config::provider_wire_protocol(id, provider)
+        .catalog_name()
+        .to_string()]
 }
 
 fn provider_caveats(id: &str, provider: &ProviderDef) -> Vec<String> {

@@ -17,6 +17,7 @@ mod provider_def;
 mod resolution;
 mod reviewer;
 mod taxonomy;
+mod usage_accounting_audit;
 
 #[cfg(test)]
 mod local_runtime_tests;
@@ -45,3 +46,4 @@ pub use provider_def::*;
 pub use resolution::*;
 pub use reviewer::*;
 pub use taxonomy::*;
+pub use usage_accounting_audit::*;
