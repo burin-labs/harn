@@ -435,14 +435,13 @@ jobs:
             echo "::notice::Development bump already open: $existing"
             exit 0
           fi
-          git config user.name "harn-release-bot[bot]"
-          git config user.email "harn-release-bot[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git add Cargo.toml Cargo.lock crates/*/Cargo.toml tree-sitter-harn/Cargo.toml \
-            crates/harn-hostlib/data/grammar-fitness/receipt.v1.json \
-            conformance/protocols/fixtures spec/protocol-artifacts
-          git commit -m "Start $DEVELOPMENT_VERSION development"
-          git push -u origin "$branch"
+          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
+          HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN" \
+            HARN_DEVELOPMENT_BUMP_BRANCH="$branch" \
+            HARN_DEVELOPMENT_BUMP_BASE_OID="$(git rev-parse HEAD)" \
+            HARN_DEVELOPMENT_BUMP_VERSION="$DEVELOPMENT_VERSION" \
+            "$harn_bin" run --no-sandbox \
+              scripts/bump-driver/publish_development_bump.harn
           body_file="$(mktemp)"
           trap 'rm -f "$body_file"' EXIT
           printf '%s\n' \

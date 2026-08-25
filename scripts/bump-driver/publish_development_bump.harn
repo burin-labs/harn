@@ -1,0 +1,28 @@
+#!/usr/bin/env harn
+/** Publish a prepared development-version worktree as a GitHub-signed commit. */
+import { github_bump_remote } from "./github_remote"
+
+fn required_env(env: HarnessEnv, name: string) -> string {
+  const value = trim(env.get_or(name, ""))
+  if value == "" {
+    throw "publish_development_bump: " + name + " is required"
+  }
+  return value
+}
+
+fn main(harness: Harness) {
+  const repo = required_env(harness.env, "GITHUB_REPOSITORY")
+  const token = required_env(harness.env, "HARN_DEVELOPMENT_BUMP_TOKEN")
+  const branch = required_env(harness.env, "HARN_DEVELOPMENT_BUMP_BRANCH")
+  const base_oid = required_env(harness.env, "HARN_DEVELOPMENT_BUMP_BASE_OID")
+  const version = required_env(harness.env, "HARN_DEVELOPMENT_BUMP_VERSION")
+  const remote = github_bump_remote(
+    harness,
+    {repo: repo, release_repo: repo, token: token, branch: branch, base: "main", repo_dir: "."},
+  )
+  const receipt = remote.publish_commit(
+    {branch: branch, headline: "Start " + version + " development", base_sha: base_oid},
+  )
+  harness.stdio.println(json_stringify_pretty(receipt))
+  return 0
+}
