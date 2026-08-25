@@ -50,7 +50,7 @@ pub(crate) enum StreamAction {
     None,
     /// Newly streamed assistant text, ready to forward to a delta channel.
     Text(String),
-    /// `interaction.completed` or the `[DONE]` sentinel arrived.
+    /// A terminal Interaction event arrived.
     Done,
 }
 

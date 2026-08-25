@@ -212,6 +212,8 @@ pub(crate) async fn consume_interaction_sse<R: tokio::io::AsyncBufRead + Unpin>(
 
     let mut lines = reader.lines();
     let mut stream = InteractionStream::new();
+    let mut saw_provider_frame = false;
+    let mut saw_terminal_event = false;
     while let Some(line) = lines
         .next_line()
         .await
@@ -220,18 +222,41 @@ pub(crate) async fn consume_interaction_sse<R: tokio::io::AsyncBufRead + Unpin>(
         let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
             continue;
         };
-        if payload.is_empty() || payload == DONE_SENTINEL {
+        if payload.is_empty() {
             continue;
+        }
+        // `[DONE]` only closes the SSE framing. A completed interaction carries
+        // the status and usage needed to turn streamed deltas into a response.
+        if payload == DONE_SENTINEL {
+            break;
         }
         let Ok(event) = serde_json::from_str::<Value>(payload) else {
             continue;
         };
+        saw_provider_frame = true;
         match stream.push(&event) {
             StreamAction::Text(text) => maybe_emit_delta(delta_tx.clone(), &text),
-            StreamAction::Done => break,
+            StreamAction::Done => {
+                saw_terminal_event = true;
+                break;
+            }
             StreamAction::None => {}
         }
     }
+
+    if !saw_terminal_event {
+        return Err(crate::llm::api::premature_stream_eof(
+            "gemini",
+            if saw_provider_frame {
+                crate::value::ProviderStreamPhase::Streaming
+            } else {
+                crate::value::ProviderStreamPhase::AwaitingFirstChunk
+            },
+            saw_provider_frame,
+            "interaction.completed",
+        ));
+    }
+
     Ok(stream.finish())
 }
 
