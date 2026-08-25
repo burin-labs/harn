@@ -2480,7 +2480,7 @@
       },
       "deprecation": {
         "status": "active",
-        "superseded_by": "claude-opus-4-8"
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2589,7 +2589,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2710,7 +2711,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2861,7 +2863,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
