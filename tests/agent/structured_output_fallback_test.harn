@@ -1,0 +1,158 @@
+// Run: harn test tests/agent/structured_output_fallback_test.harn
+//
+// A grammar-backed provider can reject an otherwise valid response-format
+// request before decoding. The agent loop must retry that same logical turn in
+// prompt mode, without depending on provider-specific error prose.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+const LOOK_CALL = "```tool\n{\"name\": \"look\", \"args\": {}}\n```"
+
+const VERIFY_CALL = "{\"name\": \"verify\", \"args\": {}}"
+
+fn _bump(runtime: HarnessRuntime, cell) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value + 1)
+}
+
+fn _record(runtime: HarnessRuntime, cell, value: string) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value.appending(value))
+}
+
+fn _tools(runtime: HarnessRuntime, calls) {
+  const tools = tool_define(
+    tool_registry(),
+    "look",
+    "Inspect the workspace.",
+    {
+      parameters: {},
+      handler: { _args ->
+        _record(runtime, calls, "look")
+        return "workspace inspected"
+      },
+    },
+  )
+  return tool_define(
+    tools,
+    "verify",
+    "Verify the workspace.",
+    {
+      parameters: {},
+      handler: { _args ->
+        _record(runtime, calls, "verify")
+        return "verification passed"
+      },
+    },
+  )
+}
+
+fn _run_rejected_structured_turn(harness: Harness, suffix: string, rejection) {
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-calls-" + suffix, initial: []},
+  )
+  const attempts = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-attempts-" + suffix, initial: 0},
+  )
+  const structured_requests = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-native-" + suffix, initial: 0},
+  )
+  const prompt_fallbacks = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-prompt-" + suffix, initial: 0},
+  )
+  const ordinary_after = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-ordinary-" + suffix, initial: 0},
+  )
+  const tools = _tools(harness.runtime, calls)
+  const mock_llm = { call ->
+    const attempt = harness.runtime.shared_snapshot(attempts).value
+    _bump(harness.runtime, attempts)
+    if attempt == 0 {
+      return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+    }
+    if attempt == 1 {
+      if call?.opts?.output?.schema != nil {
+        _bump(harness.runtime, structured_requests)
+      }
+      return rejection
+    }
+    if attempt == 2 {
+      const prompt = to_string(call?.prompt ?? "")
+      if call?.opts?.output == "text"
+        && call?.opts?.tools == nil
+        && contains(prompt, "Structured output transport is unavailable")
+        && contains(prompt, "verify") {
+        _bump(harness.runtime, prompt_fallbacks)
+      }
+      return {ok: true, value: {text: VERIFY_CALL, provider: "mock", model: "mock"}}
+    }
+    if call?.opts?.output == nil && call?.opts?.tools != nil {
+      _bump(harness.runtime, ordinary_after)
+    }
+    return {
+      ok: true,
+      value: {text: "Verified and finished. ##DONE##", provider: "mock", model: "mock"},
+    }
+  }
+  const session = "structured-output-fallback-" + suffix
+  const opts: AgentSpec = {
+    provider: "mock",
+    session_id: session,
+    tools: tools,
+    tool_format: "json",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 3,
+    llm_caller: mock_llm,
+    post_turn_callback: { info ->
+      if info.iteration == 0 {
+        return {next_tool_claim: {tool_name: "verify"}}
+      }
+      return nil
+    },
+  }
+  const result = agent_loop(harness, "Inspect once, verify, then finish.", nil, opts)
+  assert_eq(result.status, "done")
+  assert_eq(harness.runtime.shared_snapshot(calls).value, ["look", "verify"])
+  assert_eq(harness.runtime.shared_snapshot(structured_requests).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(prompt_fallbacks).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(ordinary_after).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(attempts).value, 4)
+}
+
+pipeline test_grammar_500_degrades_to_prompt_mode(harness: Harness, task) {
+  _run_rejected_structured_turn(
+    harness,
+    "grammar-500-" + harness.random.uuid(),
+    {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {
+        kind: "transient",
+        category: "provider_5xx",
+        reason: "provider_5xx",
+        status: 500,
+        message: "Failed to initialize samplers: failed to parse grammar",
+      },
+    },
+  )
+}
+
+pipeline test_classified_invalid_request_degrades_without_message_matching(harness: Harness, task) {
+  _run_rejected_structured_turn(
+    harness,
+    "invalid-request-" + harness.random.uuid(),
+    {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {
+        kind: "terminal",
+        category: "provider_error",
+        reason: "invalid_request",
+        message: "opaque provider refusal",
+      },
+    },
+  )
+}
