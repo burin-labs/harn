@@ -91,6 +91,31 @@ async fn execute_run_with_eager_project_handlers(path: &str) -> super::RunOutcom
         timing: None,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: true,
+        project_triggers: true,
+        project_context: ProjectContextMode::Project,
+    })
+    .await
+}
+
+async fn execute_run_with_project_triggers(path: &str) -> super::RunOutcome {
+    crate::ensure_builtin_signatures_installed();
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace: false,
+        denied_builtins: HashSet::new(),
+        script_argv: Vec::new(),
+        skill_dirs_raw: Vec::new(),
+        llm_mock_mode: CliLlmMockMode::Off,
+        attestation: None,
+        profile: RunProfileOptions::default(),
+        sandbox: RunSandboxOptions::default(),
+        interrupt_tokens: None,
+        json: None,
+        aux: RunAuxOptions::default(),
+        timing: None,
+        harnpack: HarnpackRunOptions::default(),
+        eager_project_handlers: false,
+        project_triggers: true,
         project_context: ProjectContextMode::Project,
     })
     .await
@@ -117,6 +142,7 @@ async fn execute_standalone_run_with_denied(
         timing: None,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: false,
+        project_triggers: false,
         project_context: ProjectContextMode::Standalone,
     })
     .await

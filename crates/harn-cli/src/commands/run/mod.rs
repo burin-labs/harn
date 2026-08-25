@@ -176,6 +176,7 @@ struct ExecuteRunInputs<'a> {
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
     eager_project_handlers: bool,
+    project_triggers: bool,
     project_context: ProjectContextMode,
 }
 
@@ -272,6 +273,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         timing: None,
         harnpack,
         eager_project_handlers: control.eager_project_handlers,
+        project_triggers: control.project_triggers,
         project_context: control.project_context,
     })
     .await;
@@ -574,6 +576,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         timing: None,
         harnpack,
         eager_project_handlers: false,
+        project_triggers: false,
         project_context: ProjectContextMode::Project,
     })
     .await
@@ -613,6 +616,7 @@ pub async fn execute_run_json(
         timing: None,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: false,
+        project_triggers: false,
         project_context: ProjectContextMode::Project,
     })
     .await
@@ -643,6 +647,7 @@ pub(crate) async fn execute_run_with_timing(
         timing,
         harnpack: HarnpackRunOptions::default(),
         eager_project_handlers: false,
+        project_triggers: false,
         project_context: ProjectContextMode::Project,
     })
     .await
@@ -701,6 +706,7 @@ async fn execute_run_inner_scoped(
         timing,
         harnpack,
         eager_project_handlers,
+        project_triggers,
         project_context,
     } = inputs;
     let RunAuxOptions {
@@ -1056,15 +1062,18 @@ async fn execute_run_inner_scoped(
     };
     vm.set_harness(runtime_harness);
 
-    // Declarations and callable signatures are validated during installation.
-    // Handler module graphs initialize only when an event dispatches to them,
-    // unless the operator explicitly requests fail-fast initialization.
+    // Hook declarations and callable signatures are always validated because
+    // hooks can supply policy authority. Manifest triggers also validate when
+    // explicitly enabled; their durable lifecycle reconciliation is otherwise
+    // kept off an ordinary entrypoint's startup path. Handler module graphs
+    // initialize only on dispatch unless fail-fast initialization was requested.
     let _manifest_runtime = if project_context == ProjectContextMode::Project {
         Some(
             match manifest_runtime::install_manifest_runtime(
                 Path::new(path),
                 &mut vm,
                 handler_initialization,
+                project_triggers,
             )
             .await
             {

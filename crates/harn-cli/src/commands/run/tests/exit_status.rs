@@ -6,9 +6,9 @@
 //! moved for every failure would satisfy it.
 
 use super::{
-    execute_run, execute_run_with_eager_project_handlers, execute_standalone_run,
-    execute_standalone_run_with_denied, write_manifest_trigger_project, CliLlmMockMode,
-    RunProfileOptions,
+    execute_run, execute_run_with_eager_project_handlers, execute_run_with_project_triggers,
+    execute_standalone_run, execute_standalone_run_with_denied, write_manifest_trigger_project,
+    CliLlmMockMode, RunProfileOptions,
 };
 use std::collections::HashSet;
 
@@ -141,6 +141,20 @@ pipeline main(harness: Harness) {
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "target-ran");
+    assert!(
+        harn_vm::snapshot_trigger_bindings().is_empty(),
+        "ordinary runs must not register manifest triggers"
+    );
+
+    let outcome = execute_run_with_project_triggers(&script.to_string_lossy()).await;
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(
+        harn_vm::snapshot_trigger_bindings()
+            .iter()
+            .any(|binding| binding.id == "cron-handler"),
+        "explicit trigger runs must install the declared binding"
+    );
+    harn_vm::reset_thread_local_state();
 
     let outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
 

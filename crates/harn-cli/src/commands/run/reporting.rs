@@ -54,6 +54,7 @@ pub struct RunAuxOptions {
 pub struct RunControlOptions {
     pub timeout: Option<Duration>,
     pub eager_project_handlers: bool,
+    pub project_triggers: bool,
     pub project_context: super::ProjectContextMode,
 }
 
@@ -142,6 +143,7 @@ pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunCo
     RunControlOptions {
         timeout: args.timeout,
         eager_project_handlers: args.eager_project_handlers,
+        project_triggers: args.project_triggers || args.eager_project_handlers,
         project_context: if args.standalone {
             super::ProjectContextMode::Standalone
         } else {

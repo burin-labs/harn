@@ -48,6 +48,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
+| `--project-triggers` | Register manifest triggers and reconcile their durable state for this run |
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
@@ -82,13 +83,20 @@ records a receipt on the protected operation and never relaxes the generic
 
 ### Project handler startup
 
-`harn run` parses and validates project trigger and hook declarations, exports,
-and callable signatures before it runs the entry script. It initializes each
-handler module and its imports only when an event dispatches to that handler.
-This keeps unrelated project code off the startup path.
+`harn run` installs project hooks by default so policy remains fail-closed, but
+does not register manifest triggers or reconcile their durable state unless the
+run passes `--project-triggers`. Trigger-oriented commands continue to register
+the triggers they operate. This makes durable project side effects explicit for
+ordinary entrypoint runs.
+
+With `--project-triggers`, Harn parses and validates project trigger and hook
+declarations, exports, and callable signatures before it runs the entry script.
+It initializes each handler module and its imports only when an event dispatches
+to that handler. This keeps unrelated project code off the startup path.
 
 Use `--eager-project-handlers` to diagnose failures in top-level handler module
-initialization. It restores fail-fast initialization for every project handler.
+initialization. It restores fail-fast initialization for every project handler
+and implies `--project-triggers`.
 
 Use `--standalone` for latency-sensitive utilities and policy scripts that must
 behave the same regardless of their containing directory. Relative and standard

@@ -65,13 +65,15 @@ impl fmt::Display for ManifestRuntimeSetupError {
 
 /// Install runtime extensions declared by the entry package.
 ///
-/// Callers choose whether manifest handler modules initialize during startup
-/// or when their handler first fires. Both modes validate the manifest handler
-/// contract during startup.
+/// Hooks remain part of every project-aware run because they can supply policy
+/// authority. Manifest triggers mutate durable lifecycle state, so callers opt
+/// into them explicitly. Enabled handler families validate their contracts at
+/// startup and initialize modules according to `handler_initialization`.
 pub(crate) async fn install_manifest_runtime(
     path: &Path,
     vm: &mut harn_vm::Vm,
     handler_initialization: package::ManifestHandlerInitialization,
+    project_triggers: bool,
 ) -> Result<harn_vm::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
     // Report rather than leave. `load_runtime_extensions` exits the process on
     // failure, which on this path would cut a `--json` stream off before its
@@ -88,9 +90,15 @@ pub(crate) async fn install_manifest_runtime(
             connect_mcp_servers(&manifest.mcp, vm).await;
         }
     }
-    package::install_manifest_triggers_with_initialization(vm, &extensions, handler_initialization)
+    if project_triggers {
+        package::install_manifest_triggers_with_initialization(
+            vm,
+            &extensions,
+            handler_initialization,
+        )
         .await
         .map_err(ManifestRuntimeSetupError::triggers)?;
+    }
     package::install_manifest_hooks_with_initialization(vm, &extensions, handler_initialization)
         .await
         .map_err(ManifestRuntimeSetupError::hooks)?;
