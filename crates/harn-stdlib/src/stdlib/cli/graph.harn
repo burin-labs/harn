@@ -42,7 +42,9 @@
  *       "graph": {
  *         "nodes": ["..."],
  *         "edges": [{"from": "...", "to": "..."}, ...],
- *       }
+ *         "references": [{"from": "...", "to": "...", "name": "..."}, ...],
+ *       },
+ *       "indexed": { "source": "disk", "files": ["..."] }
  *     }
  *   HARN_OUTPUT_JSON     — "1" iff the host saw `--json`, else
  *                          human-readable text tree.
@@ -188,15 +190,37 @@ fn __strip_absent(report: dict) -> dict {
     const edge_entry = {from: __safe_string(e["from"], ""), to: __safe_string(e["to"], "")}
     cleaned_edges = cleaned_edges.appending(edge_entry)
   }
+  const references = __safe_list(graph["references"])
+  let cleaned_references = []
+  for reference in references {
+    const r = __safe_dict(reference)
+    cleaned_references = cleaned_references.appending(
+      {
+        from: __safe_string(r["from"], ""),
+        to: __safe_string(r["to"], ""),
+        name: __safe_string(r["name"], ""),
+      },
+    )
+  }
+  const indexed_in = __safe_dict(report["indexed"])
+  const indexed = {
+    source: __safe_string(indexed_in["source"], "disk"),
+    files: __safe_list(indexed_in["files"]),
+  }
   return {
     modules: cleaned_modules,
-    graph: {nodes: __safe_list(graph["nodes"]), edges: cleaned_edges},
+    graph: {
+      nodes: __safe_list(graph["nodes"]),
+      edges: cleaned_edges,
+      references: cleaned_references,
+    },
+    indexed: indexed,
   }
 }
 
 fn __render_envelope(report: dict) -> string {
   const cleaned = __strip_absent(report)
-  const envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
+  const envelope = {schemaVersion: 2, ok: true, data: cleaned, error: nil, warnings: []}
   return json_stringify_pretty(envelope)
 }
 

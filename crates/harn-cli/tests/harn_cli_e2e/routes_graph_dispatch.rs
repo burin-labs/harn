@@ -382,7 +382,7 @@ fn graph_json_is_structurally_identical_across_runs() {
         "graph JSON envelope diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["schemaVersion"], 2);
     assert_eq!(harn_value["ok"], true);
 }
 

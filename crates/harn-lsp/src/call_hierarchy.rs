@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use harn_lexer::Span;
+use harn_modules::DefSite;
 use harn_parser::{MatchArm, Node, SNode};
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range,
@@ -9,6 +10,7 @@ use tower_lsp::lsp_types::{
 
 use crate::document::DocumentState;
 use crate::helpers::{span_to_full_range, word_at_position};
+use crate::resolution::WorkspaceRefs;
 use crate::source_text::SourceText;
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
@@ -58,18 +60,28 @@ pub(crate) fn prepare_call_hierarchy(
 pub(crate) fn incoming_call_hierarchy(
     item: &CallHierarchyItem,
     docs: &HashMap<Url, DocumentState>,
+    workspace: Option<&WorkspaceRefs>,
 ) -> Option<Vec<CallHierarchyIncomingCall>> {
-    let target_name = &item.name;
+    let target_def = item_definition(item, workspace);
     let mut grouped: BTreeMap<CallGroupKey, CallGroup> = BTreeMap::new();
 
     for (uri, state) in docs {
         let Some(program) = state.cached_ast.as_deref() else {
             continue;
         };
+        let file = uri.to_file_path().ok();
         for callable in collect_callables(program) {
             let calls = collect_calls_in_span(program, callable.span)
                 .into_iter()
-                .filter(|call| call.name == *target_name)
+                .filter(|call| {
+                    call_resolves_to(
+                        workspace,
+                        file.as_deref(),
+                        call,
+                        target_def.as_ref(),
+                        &item.name,
+                    )
+                })
                 .map(|call| span_to_full_range(&call.span, &state.source))
                 .collect::<Vec<_>>();
             if calls.is_empty() {
@@ -107,6 +119,7 @@ pub(crate) fn incoming_call_hierarchy(
 pub(crate) fn outgoing_call_hierarchy(
     item: &CallHierarchyItem,
     docs: &HashMap<Url, DocumentState>,
+    workspace: Option<&WorkspaceRefs>,
 ) -> Option<Vec<CallHierarchyOutgoingCall>> {
     let state = docs.get(&item.uri)?;
     let program = state.cached_ast.as_deref()?;
@@ -117,8 +130,14 @@ pub(crate) fn outgoing_call_hierarchy(
     let mut targets: BTreeMap<CallGroupKey, CallGroup> = BTreeMap::new();
 
     for call in collect_calls_in_span(program, owner.span) {
-        let Some((target_uri, target_state, target_sym)) =
-            find_callable_symbol(docs, &call.name, Some(&item.uri))
+        let file = item.uri.to_file_path().ok();
+        let resolved = file
+            .as_deref()
+            .and_then(|path| workspace.and_then(|ws| ws.graph.definition_of(path, &call.name)));
+        let Some((target_uri, target_state, target_sym)) = resolved
+            .as_ref()
+            .and_then(|def| find_callable_at(docs, def))
+            .or_else(|| find_callable_symbol(docs, &call.name, Some(&item.uri)))
         else {
             continue;
         };
@@ -212,6 +231,50 @@ fn find_callable_symbol<'a>(
             .symbols
             .iter()
             .find(|sym| is_callable_symbol(sym) && sym.name == name)
+        {
+            return Some((uri, state, sym));
+        }
+    }
+    None
+}
+
+fn item_definition(item: &CallHierarchyItem, workspace: Option<&WorkspaceRefs>) -> Option<DefSite> {
+    let path = item.uri.to_file_path().ok()?;
+    workspace?.graph.definition_of(&path, &item.name)
+}
+
+fn call_resolves_to(
+    workspace: Option<&WorkspaceRefs>,
+    file: Option<&std::path::Path>,
+    call: &CallSite,
+    target_def: Option<&DefSite>,
+    fallback_name: &str,
+) -> bool {
+    match (workspace, file, target_def) {
+        (Some(ws), Some(path), Some(target)) => {
+            ws.graph.definition_of(path, &call.name).is_some_and(|def| {
+                def.file == target.file && def.name == target.name && def.span == target.span
+            })
+        }
+        _ => call.name == fallback_name,
+    }
+}
+
+fn find_callable_at<'a>(
+    docs: &'a HashMap<Url, DocumentState>,
+    def: &DefSite,
+) -> Option<(&'a Url, &'a DocumentState, &'a SymbolInfo)> {
+    for (uri, state) in docs {
+        let Ok(path) = uri.to_file_path() else {
+            continue;
+        };
+        if harn_modules::canonical_path(&path) != def.file {
+            continue;
+        }
+        if let Some(sym) = state
+            .symbols
+            .iter()
+            .find(|sym| is_callable_symbol(sym) && sym.name == def.name)
         {
             return Some((uri, state, sym));
         }
@@ -771,7 +834,7 @@ mod tests {
         let mut docs = HashMap::new();
         docs.insert(uri.clone(), state);
 
-        let incoming = incoming_call_hierarchy(&prepared[0], &docs).expect("incoming calls");
+        let incoming = incoming_call_hierarchy(&prepared[0], &docs, None).expect("incoming calls");
         let incoming_names = incoming
             .iter()
             .map(|call| call.from.name.as_str())
@@ -787,7 +850,7 @@ mod tests {
         )
         .expect("main should prepare")
         .remove(0);
-        let outgoing = outgoing_call_hierarchy(&main_item, &docs).expect("outgoing calls");
+        let outgoing = outgoing_call_hierarchy(&main_item, &docs, None).expect("outgoing calls");
         let outgoing_names = outgoing
             .iter()
             .map(|call| call.to.name.as_str())

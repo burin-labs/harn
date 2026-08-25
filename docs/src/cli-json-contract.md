@@ -94,7 +94,7 @@ versions.
 | `harn run --emit-rusage-json`  | One terminal raw NDJSON CPU sample on stderr/file/fd      |
 | `harn replay --json`           | Per-stage replay summary + embedded fixture verdict      |
 | `harn test conformance --json` | Conformance results, xfail accounting, and duration distribution |
-| `harn graph --json`            | Static module graph: symbols, imports, capabilities      |
+| `harn graph --json`            | Static module graph: symbols, imports, references, capabilities |
 | `harn routes --json`           | Trigger route + budget + capability inventory            |
 | `harn dev --watch --json`      | Streaming NDJSON incremental rebuild events              |
 | `harn time run --json`         | Per-phase wall-clock + per-LLM/tool-call latency         |

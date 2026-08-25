@@ -427,7 +427,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "graph",
             schema_version: crate::commands::graph::GRAPH_SCHEMA_VERSION,
             description:
-                "Static module graph with public symbols, imports, capabilities, effects, and host-call surface.",
+                "Static module graph with public symbols, imports, resolution-backed references, capabilities, effects, host-call surface, and indexed-file provenance.",
             schema_json: None,
         },
         SchemaEntry {

@@ -82,9 +82,15 @@ max_loc = 805
 # `derived_example` wire field is extraction-layer plumbing that belongs
 # in Rust (`synthesize_example` call sites + per-arm field init); the
 # render layer stays in stdlib/cli/graph.harn.
+#
+# 720 → 786 (2026-08-24, resolution-backed references): `references` and
+# `indexed` are extraction, not rendering — they come off the ModuleGraph
+# reference index, which the .harn render layer cannot reach. The growth is
+# the wire structs plus the edge projection in `analyze_graph`; the render
+# layer stays in stdlib/cli/graph.harn.
 [[handler]]
 path = "crates/harn-cli/src/commands/graph.rs"
-max_loc = 720
+max_loc = 786
 
 [[handler]]
 path = "crates/harn-cli/src/commands/doctor.rs"

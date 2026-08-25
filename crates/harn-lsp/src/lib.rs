@@ -15,6 +15,7 @@ mod handlers;
 mod helpers;
 mod prompt;
 mod references;
+mod resolution;
 mod rules;
 mod semantic_tokens;
 mod source_text;

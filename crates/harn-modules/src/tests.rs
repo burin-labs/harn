@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
@@ -998,5 +999,154 @@ fn namespace_member_signature_leaves_generics_gradual() {
         !namespaces[0].member_signatures.contains_key("pick"),
         "a generic member must not be lowered: {:?}",
         namespaces[0].member_signatures
+    );
+}
+
+#[test]
+fn same_named_symbols_in_different_modules_do_not_collapse() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    let importer = write_file(
+        root,
+        "importer.harn",
+        "import { run } from \"./exported\"\nfn helper() { run() }\n",
+    );
+    let local = write_file(
+        root,
+        "local.harn",
+        "fn run() { 2 }\nfn helper() { run() }\n",
+    );
+
+    let build =
+        build_for_reference_index(&[exported.clone(), importer.clone(), local.clone()], None);
+    let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let local = canonical_path(&local);
+    assert_eq!(
+        index.files.len(),
+        3,
+        "the index must have walked every seeded file, or a missing cross-file hit is a silent skip"
+    );
+
+    let exported_def = build
+        .graph
+        .definition_of(&exported, "run")
+        .expect("exported run");
+    let local_def = build.graph.definition_of(&local, "run").expect("local run");
+    assert_ne!(
+        exported_def.file, local_def.file,
+        "the two run symbols must be distinct definitions"
+    );
+
+    let exported_refs = index.references_to(&exported_def);
+    let exported_files: HashSet<_> = exported_refs.iter().map(|site| site.file.clone()).collect();
+    assert!(
+        exported_files.contains(&exported),
+        "definition site must appear: {exported_refs:?}"
+    );
+    assert!(
+        exported_files.contains(&importer),
+        "cross-file use must appear: {exported_refs:?}"
+    );
+    assert!(
+        !exported_files.contains(&local),
+        "the other run must not collapse into this one: {exported_refs:?}"
+    );
+
+    let local_refs = index.references_to(&local_def);
+    let local_files: HashSet<_> = local_refs.iter().map(|site| site.file.clone()).collect();
+    assert!(local_files.contains(&local), "local refs: {local_refs:?}");
+    assert!(
+        !local_files.contains(&importer) && !local_files.contains(&exported),
+        "local run must not pick up the imported symbol: {local_refs:?}"
+    );
+}
+
+#[test]
+fn lexical_shadow_does_not_resolve_to_same_named_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    let importer_source =
+        "import { run } from \"./exported\"\nfn helper() {\n  let run = 2\n  run\n}\n";
+    let importer = write_file(root, "importer.harn", importer_source);
+
+    let build = build_for_reference_index(&[exported.clone(), importer.clone()], None);
+    let index = index_references(&build.graph, &build.parsed_sources, &HashSet::new());
+    let exported = canonical_path(&exported);
+    let importer = canonical_path(&importer);
+    let local_use = importer_source.rfind("run").expect("local run use");
+
+    let local_def = index
+        .definition_at(&importer, "run", local_use + 1)
+        .expect("local shadow definition");
+    assert_eq!(
+        local_def.file, importer,
+        "the lexical binding must win over the imported function"
+    );
+
+    let exported_def = build
+        .graph
+        .definition_of(&exported, "run")
+        .expect("exported run");
+    assert!(
+        index
+            .references_to(&exported_def)
+            .iter()
+            .all(|site| site.file != importer),
+        "the local shadow must not create an importer -> exported.run edge"
+    );
+}
+
+#[test]
+fn omitting_the_importer_from_the_index_is_a_visible_gap_not_a_pass() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let exported = write_file(root, "exported.harn", "pub fn run() { 1 }\n");
+    write_file(
+        root,
+        "importer.harn",
+        "import { run } from \"./exported\"\nfn helper() { run() }\n",
+    );
+
+    // Seed only the defining file. The importer is reachable via the
+    // import graph but its AST is still retained by build_for_reference_index
+    // (retain-all). The negative control is the opposite: a graph built
+    // without the importer file on disk being walked as a seed is not
+    // enough — we assert that when the importer source is absent from
+    // `parsed_sources`, the cross-file use is missing.
+    let disk_only = build_closed_program(std::slice::from_ref(&exported));
+    let without_importer: HashMap<_, _> = disk_only
+        .parsed_sources
+        .into_iter()
+        .filter(|(path, _)| path == &exported)
+        .collect();
+    assert!(
+        !without_importer.keys().any(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("importer.harn")
+        }),
+        "control requires the importer AST to be absent"
+    );
+    let index = index_references(&disk_only.graph, &without_importer, &HashSet::new());
+    let def = disk_only
+        .graph
+        .definition_of(&exported, "run")
+        .expect("exported run");
+    let files: HashSet<_> = index
+        .references_to(&def)
+        .into_iter()
+        .map(|site| {
+            site.file
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(
+        !files.contains("importer.harn"),
+        "a use whose AST was never walked must not appear: {files:?}"
     );
 }

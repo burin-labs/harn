@@ -44,6 +44,10 @@ impl Default for RuleWorkspace {
 }
 
 impl RuleWorkspace {
+    pub(crate) fn root(&self) -> Option<&Path> {
+        self.root.as_deref()
+    }
+
     pub(crate) fn from_initialize(params: &tower_lsp::lsp_types::InitializeParams) -> Self {
         let root = workspace_root(params);
         let settings = RuleSettings::from_value(params.initialization_options.as_ref());

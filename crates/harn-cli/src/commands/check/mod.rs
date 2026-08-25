@@ -36,7 +36,7 @@ pub(crate) use command::run_check_command;
 pub(crate) use config::{
     apply_harn_lint_config, apply_loaded_harn_lint_config, build_module_graph,
     build_module_graph_and_seed_analysis, collect_cross_file_imports, collect_harn_targets,
-    load_harn_lint_config, HarnLintConfig,
+    ensure_module_dependencies, load_harn_lint_config, HarnLintConfig,
 };
 pub(crate) use driver::{check_files, check_files_independently, CheckCliOverrides};
 pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION};

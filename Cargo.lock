@@ -3742,6 +3742,7 @@ dependencies = [
  "harn-parser",
  "harn-rules",
  "harn-vm",
+ "ignore",
  "line-index",
  "serde",
  "serde_json",

@@ -1,6 +1,7 @@
 //! Go-to-definition, find-references, and rename.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use harn_lexer::{Lexer, Span, TokenKind};
 use harn_modules::DefKind;
@@ -14,7 +15,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::constants::is_builtin;
 use crate::helpers::{infer_dot_receiver_name, span_to_full_range, word_at_position};
-use crate::references::{find_references, identifier_token_spans_within};
+use crate::references::identifier_token_spans_within;
+use crate::resolution::{definition_at, workspace_refs};
 use crate::source_text::SourceText;
 use crate::symbols::HarnSymbolKind;
 use crate::HarnLsp;
@@ -247,41 +249,67 @@ impl HarnLsp {
             None => return Ok(None),
         };
         let source = state.source.clone();
-        let ast = state.cached_ast.clone();
-        drop(docs);
-
         let word = match word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
-
-        let program = match ast {
-            Some(p) => p,
-            None => return Ok(None),
+        let Ok(current_path) = uri.to_file_path() else {
+            return Ok(None);
         };
-
-        let ref_spans = find_references(&program, &word);
-        if ref_spans.is_empty() {
+        let current_path = harn_modules::canonical_path(&current_path);
+        let workspace_root = self
+            .rule_workspace
+            .lock()
+            .unwrap()
+            .root()
+            .map(PathBuf::from);
+        let Some(workspace) = workspace_refs(&docs, workspace_root.as_deref()) else {
             return Ok(None);
+        };
+        let mut open_sources: HashMap<PathBuf, SourceText> = HashMap::new();
+        for (open_uri, open_state) in docs.iter() {
+            if let Ok(path) = open_uri.to_file_path() {
+                open_sources.insert(
+                    harn_modules::canonical_path(&path),
+                    open_state.source.clone(),
+                );
+            }
         }
+        drop(docs);
 
-        // Raw AST spans cover whole declarations for definition sites;
-        // narrow each hit to the identifier token so the references list
-        // doesn't highlight entire functions.
-        let token_spans = identifier_token_spans_within(&source, &word, &ref_spans);
-        if token_spans.is_empty() {
+        let Some(def) = definition_at(&workspace, &current_path, &word, source.offset(position))
+        else {
             return Ok(None);
+        };
+        let include_declaration = params.context.include_declaration;
+        let mut locations = Vec::new();
+        for site in workspace.index.references_to(&def) {
+            if !include_declaration
+                && site.file == def.file
+                && site.span.start == def.span.start
+                && site.span.end == def.span.end
+            {
+                continue;
+            }
+            let Ok(site_uri) = Url::from_file_path(&site.file) else {
+                continue;
+            };
+            let site_source = open_sources.get(&site.file).cloned().unwrap_or_else(|| {
+                SourceText::new(std::fs::read_to_string(&site.file).unwrap_or_default())
+            });
+            let token_spans = identifier_token_spans_within(&site_source, &site.name, &[site.span]);
+            for span in token_spans {
+                locations.push(Location {
+                    uri: site_uri.clone(),
+                    range: span_to_full_range(&span, &site_source),
+                });
+            }
         }
-
-        let locations: Vec<Location> = token_spans
-            .iter()
-            .map(|span| Location {
-                uri: uri.clone(),
-                range: span_to_full_range(span, &source),
-            })
-            .collect();
-
-        Ok(Some(locations))
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
     }
 
     pub(super) async fn handle_rename(
@@ -298,10 +326,6 @@ impl HarnLsp {
             None => return Ok(None),
         };
         let source = state.source.clone();
-        let ast = state.cached_ast.clone();
-        let symbols = state.symbols.clone();
-        drop(docs);
-
         let old_name = match word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
@@ -312,49 +336,69 @@ impl HarnLsp {
             return Ok(None);
         }
 
-        let symbol_exists = symbols.iter().any(|s| s.name == old_name);
-        if !symbol_exists {
+        let Ok(current_path) = uri.to_file_path() else {
             return Ok(None);
-        }
-
-        let program = match ast {
-            Some(p) => p,
-            None => return Ok(None),
         };
-        let ref_spans = find_references(&program, &old_name);
-        if ref_spans.is_empty() {
+        let current_path = harn_modules::canonical_path(&current_path);
+        let workspace_root = self
+            .rule_workspace
+            .lock()
+            .unwrap()
+            .root()
+            .map(PathBuf::from);
+        let Some(workspace) = workspace_refs(&docs, workspace_root.as_deref()) else {
             return Ok(None);
+        };
+        let mut open_sources: HashMap<PathBuf, SourceText> = HashMap::new();
+        for (open_uri, open_state) in docs.iter() {
+            if let Ok(path) = open_uri.to_file_path() {
+                open_sources.insert(
+                    harn_modules::canonical_path(&path),
+                    open_state.source.clone(),
+                );
+            }
         }
+        drop(docs);
 
-        // AST reference spans cover whole declarations, so rescan the lexer
-        // tokens within each span to pin down the exact identifier position.
-        let mut edits: Vec<TextEdit> =
-            identifier_token_spans_within(&source, &old_name, &ref_spans)
-                .into_iter()
-                .map(|span| TextEdit {
+        let Some(def) = definition_at(
+            &workspace,
+            &current_path,
+            &old_name,
+            source.offset(position),
+        ) else {
+            return Ok(None);
+        };
+
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        for site in workspace.index.references_to(&def) {
+            let Ok(site_uri) = Url::from_file_path(&site.file) else {
+                continue;
+            };
+            let site_source = open_sources.get(&site.file).cloned().unwrap_or_else(|| {
+                SourceText::new(std::fs::read_to_string(&site.file).unwrap_or_default())
+            });
+            for span in identifier_token_spans_within(&site_source, &site.name, &[site.span]) {
+                changes.entry(site_uri.clone()).or_default().push(TextEdit {
                     range: Range {
-                        start: source.position(span.start),
-                        end: source.position(span.end),
+                        start: site_source.position(span.start),
+                        end: site_source.position(span.end),
                     },
                     new_text: new_name.clone(),
-                })
-                .collect();
-
-        if edits.is_empty() {
+                });
+            }
+        }
+        if changes.is_empty() {
             return Ok(None);
         }
-
-        // Sort bottom-up so applying edits doesn't shift later offsets.
-        edits.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-
-        let mut changes = HashMap::new();
-        changes.insert(uri.clone(), edits);
+        for edits in changes.values_mut() {
+            edits.sort_by(|a, b| {
+                b.range
+                    .start
+                    .line
+                    .cmp(&a.range.start.line)
+                    .then(b.range.start.character.cmp(&a.range.start.character))
+            });
+        }
 
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),

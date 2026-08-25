@@ -20,6 +20,7 @@ mod package_imports;
 pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
+mod references;
 mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
@@ -34,12 +35,13 @@ pub use namespace_signatures::NamespaceMemberSignature;
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
 };
+pub use references::{index_references, RefSite, ReferenceEdge, ReferenceIndex};
 pub use symbol_reachability::{
     closed_program_reachability, ExportDemand, ModuleSymbolDemand, SymbolReachability,
 };
 
 /// A resolved definition site within a module.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefSite {
     pub name: String,
     pub file: PathBuf,
@@ -262,6 +264,20 @@ impl ParsedSourceRetention<'_> {
             Self::All => true,
         }
     }
+}
+
+/// Build a module graph that retains every reachable AST and honors unsaved
+/// buffer overrides.
+///
+/// This is the construction find-references and `harn graph` share: one
+/// resolution graph, one inverse index. `source_overrides` replace disk
+/// contents for the named files so an editor buffer wins over the file it
+/// just edited.
+pub fn build_for_reference_index(
+    files: &[PathBuf],
+    source_overrides: Option<&HashMap<PathBuf, String>>,
+) -> ModuleGraphBuild {
+    build_inner(files, ParsedSourceRetention::All, source_overrides)
 }
 
 fn build_inner(
