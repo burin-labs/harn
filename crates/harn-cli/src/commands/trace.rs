@@ -1,3 +1,5 @@
+mod prefix_stability;
+
 use crate::cli::{TraceArgs, TraceCommand, TraceImportArgs};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -5,6 +7,7 @@ use crate::env_guard::ScopedEnvVar;
 pub(crate) async fn handle(args: TraceArgs) -> Result<(), String> {
     match args.command {
         TraceCommand::Import(import) => run_import(import).await,
+        TraceCommand::PrefixStability(check) => prefix_stability::run(&check),
     }
 }
 
