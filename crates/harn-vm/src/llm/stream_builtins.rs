@@ -9,7 +9,6 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 
 use super::api;
 use super::call::{build_llm_error_dict, execute_llm_call};
-use super::helpers::extract_llm_options;
 use super::stream::vm_stream_llm;
 
 fn llm_stream_error_item(err: &VmError, provider: &str, model: &str) -> VmValue {
@@ -17,7 +16,7 @@ fn llm_stream_error_item(err: &VmError, provider: &str, model: &str) -> VmValue 
 }
 
 pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let opts = extract_llm_options(&args)?;
+    let opts = super::helpers::prepare_llm_options(&args).await?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
     let prompt_text = opts
@@ -111,7 +110,7 @@ async fn send_llm_stream_error(
 /// Shared implementation of `llm_stream_call`: a first-class `Stream`
 /// of structured chunks using `llm_call`'s provider error taxonomy.
 pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let opts = extract_llm_options(&args)?;
+    let opts = super::helpers::prepare_llm_options(&args).await?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
 
@@ -254,7 +253,7 @@ pub(super) async fn llm_stream_collect_impl(
         _ => None,
     };
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let opts = extract_llm_options(&args)?;
+    let opts = super::helpers::prepare_llm_options(&args).await?;
 
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut child_vm = ctx.child_vm();

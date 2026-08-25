@@ -124,9 +124,11 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | no |
 | `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
 | `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*` | `any` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `local` | `*` | `any` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `minimax` | `minimax-m3*` | `any` | `adaptive` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `minimax` | `minimax-m2.5*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -138,6 +140,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mistral` | `devstral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `mlx` | `*` | `any` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `moonshot` | `*kimi-k3*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `moonshot` | `*kimi-k2.7-code*` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `moonshot` | `*kimi*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -165,6 +168,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | no | `native_only` | yes | no |
 | `ollama` | `devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `ollama` | `*` | `any` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openai` | `gpt-4o*` | `any` | no | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-4.1*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*codex*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |

@@ -388,14 +388,24 @@ pub(crate) struct ResolvedProvider {
 
 impl ResolvedProvider {
     pub fn resolve(provider: &str) -> ResolvedProvider {
+        Self::resolve_inner(provider, true)
+    }
+
+    pub(crate) fn resolve_without_capabilities(provider: &str) -> ResolvedProvider {
+        Self::resolve_inner(provider, false)
+    }
+
+    fn resolve_inner(provider: &str, inspect_capabilities: bool) -> ResolvedProvider {
         let pdef = crate::llm_config::provider_config(provider);
         let uses_anthropic_endpoint = pdef
             .as_ref()
             .map(|p| p.chat_endpoint.contains("/messages"))
             .unwrap_or_else(|| {
-                crate::llm::capabilities::lookup(provider, "")
-                    .message_wire_format
-                    .is_anthropic()
+                inspect_capabilities && {
+                    crate::llm::capabilities::lookup(provider, "")
+                        .message_wire_format
+                        .is_anthropic()
+                }
             });
         let (default_base, default_endpoint) = if uses_anthropic_endpoint {
             ("https://api.anthropic.com/v1", "/messages")

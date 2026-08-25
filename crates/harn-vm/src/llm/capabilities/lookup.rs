@@ -123,7 +123,9 @@ pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
 /// rules (and ultimately provider / built-in defaults) to fill the rest.
 pub fn lookup(provider: &str, model: &str) -> Capabilities {
     let user = current_user_overrides();
-    lookup_with_user_overrides(provider, model, user.as_ref())
+    let mut caps = lookup_with_user_overrides(provider, model, user.as_ref());
+    super::runtime_probe::apply_cached_measurement(provider, model, &mut caps);
+    caps
 }
 
 pub(crate) fn should_use_responses_transport(
@@ -766,13 +768,11 @@ mod tests {
     }
 
     #[test]
-    fn dashscope_and_llamacpp_resolve_capabilities() {
+    fn dashscope_resolves_inherited_capabilities() {
         reset();
-        // New sibling providers should fall through to `openai` for
-        // gpt-*  models even without dedicated rules.
+        // Hosted sibling providers fall through to `openai` for gpt-* models
+        // even without dedicated rules.
         let caps = lookup("dashscope", "gpt-5.4-preview");
-        assert!(caps.defer_loading);
-        let caps = lookup("llamacpp", "gpt-5.4-preview");
         assert!(caps.defer_loading);
     }
 

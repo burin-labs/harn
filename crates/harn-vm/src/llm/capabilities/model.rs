@@ -603,6 +603,9 @@ pub enum ToolModeParitySource {
     /// `text_tool_wire_format_supported`. A consumer that needs evidence
     /// should treat this as "not established" rather than as a finding.
     Derived,
+    /// A live self-hosted endpoint reported its loaded template's tool
+    /// capability. Runtime evidence outranks a catalog declaration.
+    RuntimeProbe,
 }
 
 impl ToolModeParitySource {
@@ -610,6 +613,33 @@ impl ToolModeParitySource {
         match self {
             Self::Declared => "declared",
             Self::Derived => "derived",
+            Self::RuntimeProbe => "runtime_probe",
+        }
+    }
+}
+
+/// Runtime evidence attached to the effective capability answer for a
+/// self-hosted route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityProbeReceipt {
+    pub status: CapabilityProbeStatus,
+    pub endpoint: String,
+    pub native_tools: Option<bool>,
+    pub supports_parallel_tool_calls: Option<bool>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityProbeStatus {
+    Measured,
+    Unavailable,
+}
+
+impl CapabilityProbeStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::Unavailable => "unavailable",
         }
     }
 }
@@ -775,6 +805,8 @@ pub struct Capabilities {
     /// → `Inline`, everything else → `Fold`). See [`SystemMessagePlacement`]
     /// and [`resolve_system_message_placement`](super::resolve_system_message_placement).
     pub system_message_placement: Option<SystemMessagePlacement>,
+    /// Present after Harn has attempted the endpoint-owned runtime probe.
+    pub runtime_probe: Option<CapabilityProbeReceipt>,
 }
 
 impl Default for Capabilities {
@@ -878,6 +910,7 @@ impl Default for Capabilities {
             screenshot_scaling: None,
             safety_ack_flow: false,
             system_message_placement: None,
+            runtime_probe: None,
         }
     }
 }

@@ -67,7 +67,7 @@ pub(super) use super::{
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).
-pub(crate) use extract::{extract_llm_options, validate_options};
+pub(crate) use extract::{extract_llm_options, prepare_llm_options, validate_options};
 pub(crate) use json::{expects_structured_output, extract_json};
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,

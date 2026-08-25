@@ -417,6 +417,14 @@ top_k_supported = false
 [provider_defaults.local]
 top_k_supported = false
 
+[provider_defaults.llamacpp]
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+
+[provider_defaults.mlx]
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+
 [provider_defaults.together]
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
@@ -2445,6 +2453,42 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+
+# Catch-all decisions keep an unknown self-hosted model on Harn's portable
+# fenced-JSON tool contract until the running endpoint reports otherwise.
+# The runtime probe supersedes this row in memory; it does not rewrite catalog
+# evidence or pretend one server's template applies to another.
+[[provider.llamacpp]]
+model_match = "*"
+native_tools = false
+preferred_tool_format = "json"
+tool_format_justification = { assumed = "Unknown llama.cpp model/template combination. Harn uses fenced-JSON tools until this endpoint's /props response proves native tool definitions and tool calls are both supported." }
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.local]]
+model_match = "*"
+native_tools = false
+preferred_tool_format = "json"
+tool_format_justification = { assumed = "Unknown OpenAI-compatible local runtime. Harn uses fenced-JSON tools unless this endpoint exposes llama.cpp /props data that proves native tool definitions and tool calls are both supported." }
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.mlx]]
+model_match = "*"
+native_tools = false
+preferred_tool_format = "json"
+tool_format_justification = { assumed = "Unknown MLX model/template combination. mlx_lm.server exposes no stable template-capability endpoint, so Harn uses fenced-JSON tools unless a future runtime probe can measure this server." }
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.ollama]]
+model_match = "*"
+native_tools = false
+preferred_tool_format = "json"
+tool_format_justification = { assumed = "Unknown Ollama model package. Harn uses fenced-JSON tools until /api/show reports the tools capability for this exact model." }
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
 
 # --- source: 20-providers/30-qwen-routed.toml ---
 # ---------- Qwen3.6 family (routed providers) --------------------------------
