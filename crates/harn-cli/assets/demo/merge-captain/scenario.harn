@@ -9,7 +9,6 @@
  * runs against a real provider when invoked via `harn demo
  * merge-captain --live`.
  */
-/** One queued pull request, as merge_captain sees it. */
 type PullRequest = {
   repo: string,
   number: int,

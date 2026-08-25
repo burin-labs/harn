@@ -24,10 +24,10 @@
  * `harn.mcp.call`; this scenario stays in lazy-mode by design so the
  * tape stays small and offline.
  */
-/** A registration spec: `stdio` carries command/args, `http` carries a url. */
 type McpServerSpec = {
   name: string,
   transport: string,
+  // A `stdio` server carries command/args; an `http` server carries a url.
   command?: string,
   args?: list<string>,
   url?: string,

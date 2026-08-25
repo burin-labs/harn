@@ -13,10 +13,9 @@
  * `assets/demo/review-captain/`. The same script runs against a real provider
  * via `harn demo review-captain --live`.
  */
-/** One changed file in the PR under review. */
 type DiffFile = {path: string, loc_added: int, loc_removed: int, risk: string}
 
-/** The PR-level diff review_captain reasons over. */
+/** The PR-level diff review_captain reasons over, one entry per changed file. */
 type DiffSummary = {repo: string, pr_number: int, files: list<DiffFile>}
 
 fn diff_summary() -> DiffSummary {
