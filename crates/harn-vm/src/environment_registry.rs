@@ -74,13 +74,13 @@ impl fmt::Display for EnvironmentDiagnostic {
             EnvironmentDiagnosticKind::UnknownName { suggestion } => {
                 write!(
                     formatter,
-                    "{}: unknown Harn environment variable `{}`",
+                    "{}: unknown Harn environment variable `{}`.",
                     self.code, self.key
                 )?;
                 if let Some(suggestion) = suggestion {
-                    write!(formatter, "; did you mean `{suggestion}`?")?;
+                    write!(formatter, " Did you mean `{suggestion}`?")?;
                 }
-                Ok(())
+                formatter.write_str(" Use `HARN_EXT_<NAME>` for settings owned by a calling tool.")
             }
             EnvironmentDiagnosticKind::InvalidValue { expected } => write!(
                 formatter,

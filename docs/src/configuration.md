@@ -107,8 +107,9 @@ suggestion. Registered scalar shapes such as timeouts and booleans are checked
 at the same boundary; domain-specific values remain checked by their owning
 subsystem. Diagnostic messages never include environment values.
 
-Embedding hosts that need private names should use the structural
-`HARN_EXT_<NAME>` namespace. The suffix must be a nonempty uppercase identifier.
+Tools and embedding hosts that need private names should use the structural
+`HARN_EXT_<NAME>` namespace. For example, a release wrapper can use
+`HARN_EXT_RELEASE_REPO`. The suffix must be a nonempty uppercase identifier.
 Runtime-generated model-role, rate-limit, and secret-provider names have their
 own narrower grammars; no broad `HARN_*` prefix bypass exists. Embedders should
 invoke `harn_vm::initialize_runtime()` during bootstrap to apply the same
