@@ -101,7 +101,10 @@ pub(crate) struct Linter<'a> {
     pub(super) test_pipeline_depth: usize,
     /// An enclosing attribute binds the pipeline's positional slots to a
     /// table, fixture, or another declaration-owned invocation contract.
-    pub(super) pipeline_parameter_removal_blocked: bool,
+    /// True only while walking a pipeline structurally owned by a bare
+    /// `@test` declaration. The test runner derives its argument vector from
+    /// that declaration; names such as `test_*` are not reachability.
+    pub(super) test_pipeline_input_owned: bool,
     /// Track type declarations for the `unused-type` lint rule.
     pub(super) type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
@@ -197,7 +200,7 @@ impl<'a> Linter<'a> {
             connector_runtime_module: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
-            pipeline_parameter_removal_blocked: false,
+            test_pipeline_input_owned: false,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),

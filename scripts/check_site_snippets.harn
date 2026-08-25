@@ -20,9 +20,9 @@
 // mandatory parameter annotations; strict lint holds the rest of the showcase
 // to the style the docs teach.
 //
-// HARN-LNT-016 checks pipeline inputs too. Private pipelines can delete an
-// unused input; caller-, fixture-, and table-bound pipelines keep their
-// positional contract.
+// HARN-LNT-016 checks pipeline inputs too. HARN-LNT-074 offers an explicit
+// surface-changing repair for unused bare-@test inputs; unattributed, caller-,
+// fixture-, and table-bound pipelines keep their positional contract.
 //
 // Usage:
 //   harn run scripts/check_site_snippets.harn

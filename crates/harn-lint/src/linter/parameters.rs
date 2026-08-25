@@ -42,8 +42,8 @@ impl Linter<'_> {
         }
     }
 
-    /// Declare an explicitly unused private pipeline input whose positional
-    /// slot can be deleted when no caller reference survives the full walk.
+    /// Declare an explicitly unused test-runner input whose positional slot can
+    /// be deleted when no caller reference survives the full walk.
     pub(super) fn declare_removable_pipeline_parameter(
         &mut self,
         name: &str,

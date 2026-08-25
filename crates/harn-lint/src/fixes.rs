@@ -2,7 +2,7 @@
 //! AST nodes and raw source so it can be unit-tested without `Linter`
 //! state.
 
-use harn_lexer::{FixEdit, Span};
+use harn_lexer::{FixEdit, Lexer, Span, TokenKind};
 use harn_parser::{Node, SNode, TypedParam};
 
 /// Replace a simple `let`/`const` binding's identifier with the discard binding
@@ -98,7 +98,7 @@ pub(crate) fn pipeline_parameter_removal_fix(
         (current.span.start, current.span.end, None)
     } else if let Some(next) = params.get(index + 1) {
         let between = source.get(current.span.end..next.span.start)?;
-        let comma = between.find(',')?;
+        let comma = separator_comma_offset(between)?;
         let after_comma = between.get(comma + 1..)?;
         let end = if after_comma.chars().all(char::is_whitespace) {
             next.span.start
@@ -109,7 +109,7 @@ pub(crate) fn pipeline_parameter_removal_fix(
     } else {
         let previous = params.get(index.checked_sub(1)?)?;
         let between = source.get(previous.span.end..current.span.start)?;
-        let comma = between.find(',')?;
+        let comma = separator_comma_offset(between)?;
         (
             previous.span.end + comma,
             current.span.end,
@@ -132,6 +132,17 @@ pub(crate) fn pipeline_parameter_removal_fix(
         }],
         after_removed_previous,
     ))
+}
+
+/// Find the syntactic separator in a trivia-only parameter gap. Lexing the
+/// bounded gap prevents commas inside line and block comments from becoming
+/// edit boundaries.
+fn separator_comma_offset(between: &str) -> Option<usize> {
+    Lexer::new(between)
+        .tokenize()
+        .ok()?
+        .into_iter()
+        .find_map(|token| matches!(token.kind, TokenKind::Comma).then_some(token.span.start))
 }
 
 fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {

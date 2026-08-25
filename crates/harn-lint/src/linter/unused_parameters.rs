@@ -56,7 +56,7 @@ impl Linter<'_> {
                 (
                     Code::LintUnusedPipelineInput,
                     "unused-pipeline-input",
-                    "remove the unused pipeline input; pipelines declare only the inputs they use"
+                    "remove the unused test pipeline input; tests declare only the inputs they use"
                         .to_string(),
                     Some(fix.clone()),
                 )

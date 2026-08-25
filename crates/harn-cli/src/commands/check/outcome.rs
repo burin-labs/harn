@@ -12,7 +12,7 @@ pub(crate) struct CommandOutcome {
     pub has_warning: bool,
     /// Total findings emitted for this file.
     pub findings: usize,
-    /// Findings carrying a machine-applicable autofix (`fix.is_some()`).
+    /// Findings carrying a machine-applicable autofix.
     pub fixable: usize,
 }
 
@@ -23,7 +23,7 @@ impl CommandOutcome {
 }
 
 /// Render each diagnostic to stderr. Returns `(has_error, fixable_count)`,
-/// where `fixable_count` mirrors the `diag.fix.is_some()` tally that the JSON
+/// where `fixable_count` mirrors the machine-applicable tally that the JSON
 /// report uses so the CLI and JSON surfaces agree on "fixable".
 ///
 /// # The output channel
@@ -66,7 +66,7 @@ pub(super) fn render_lint_diagnostics(
     let mut fixable = 0usize;
     let mut out = String::new();
     for diag in diagnostics {
-        if diag.fix.is_some() {
+        if diag.machine_applicable_fix().is_some() {
             fixable += 1;
         }
         let severity = match diag.severity {

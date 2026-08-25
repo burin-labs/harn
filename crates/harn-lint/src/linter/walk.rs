@@ -56,7 +56,7 @@ impl<'a> Linter<'a> {
                 }
                 self.push_scope();
                 let removal_allowed =
-                    !*is_pub && extends.is_none() && !self.pipeline_parameter_removal_blocked;
+                    !*is_pub && extends.is_none() && self.test_pipeline_input_owned;
                 self.declare_pipeline_parameters(params, name, removal_allowed);
                 self.references.insert(name.clone());
                 if Self::is_test_pipeline_name(name) {
@@ -1342,10 +1342,11 @@ impl<'a> Linter<'a> {
                         self.record_attribute_argument_references(&argument.value);
                     }
                 }
-                let previous_removal_block = self.pipeline_parameter_removal_blocked;
-                self.pipeline_parameter_removal_blocked |= attributes
-                    .iter()
-                    .any(|attribute| attribute.name != "test" || !attribute.args.is_empty());
+                let previous_test_input_owner = self.test_pipeline_input_owned;
+                self.test_pipeline_input_owned = attributes.len() == 1
+                    && attributes.first().is_some_and(|attribute| {
+                        attribute.name == "test" && attribute.args.is_empty()
+                    });
                 if suppresses_complexity {
                     self.complexity_suppression_depth += 1;
                 }
@@ -1353,7 +1354,7 @@ impl<'a> Linter<'a> {
                 if suppresses_complexity {
                     self.complexity_suppression_depth -= 1;
                 }
-                self.pipeline_parameter_removal_blocked = previous_removal_block;
+                self.test_pipeline_input_owned = previous_test_input_owner;
             }
 
             Node::OrPattern(alternatives) => {

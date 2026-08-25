@@ -225,7 +225,7 @@ pub(crate) fn lint_file_report(
             LintSeverity::Warning => has_warning = true,
             LintSeverity::Info => {}
         }
-        if diag.fix.is_some() {
+        if diag.machine_applicable_fix().is_some() {
             fixable += 1;
             fixable_diagnostics.push(diagnostics.len());
         }
@@ -245,7 +245,7 @@ pub(crate) fn lint_file_report(
             LintSeverity::Warning => has_warning = true,
             LintSeverity::Info => {}
         }
-        if diag.fix.is_some() {
+        if diag.machine_applicable_fix().is_some() {
             fixable += 1;
             fixable_diagnostics.push(diagnostics.len());
         }
