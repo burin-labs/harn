@@ -54,6 +54,7 @@
 - [Build an interactive Harn app](./cookbooks/build-interactive-app.md)
 - [Run Harn app logic in the browser](./cookbooks/run-app-logic-in-browser.md)
 - [OAuth client + provider cookbook](./oauth.md)
+- [Playground](./playground.md)
 - [Debugging agent runs](./debugging.md)
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
@@ -352,30 +353,32 @@
 - [ADR 0007: Compile hypotheses into Harn's existing experiment and workflow owners](./adr/0007-hypothesis-compiler-ownership.md)
 - [ADR 0008: Harn owns prepared-run authority](./adr/0008-harn-owns-prepared-run-authority.md)
 
-# Operating Harn
+# Deploy
 
-- [Playground](./playground.md)
+- [Platform compatibility](./dev/platform-compatibility.md)
+- [Bootstrap an exact Harn release](./dev/bootstrap-harn.md)
 - [Deploy to Render](./deploy/render.md)
 - [Deploy to Fly.io](./deploy/fly.md)
 - [Deploy to Railway](./deploy/railway.md)
+
+# Contributing
+
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
 - [Release runner policy](./dev/release-runner-policy.md)
 - [Release binary-size policy](./dev/release-binary-size-policy.md)
-- [Bootstrap an exact Harn release](./dev/bootstrap-harn.md)
-- [Agent shell guard](./dev/agent-shell-guard.md)
-- [Merge overrides](./dev/merge-overrides.md)
 - [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
-- [Platform compatibility](./dev/platform-compatibility.md)
-- [Windows test coverage](./dev/windows-test-coverage.md)
+- [Merge overrides](./dev/merge-overrides.md)
+- [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
+- [Windows test coverage](./dev/windows-test-coverage.md)
+- [Testbench mode](./dev/testbench.md)
+- [DES runtime mode](./dev/des-mode.md)
+- [Tape format](./dev/tape-format.md)
+- [Annotation tape format](./dev/annotation-tape-format.md)
 - [Update Harn's MCP integration](./dev/mcp-maintenance.md)
 - [Update Harn's ACP integration](./dev/acp-maintenance.md)
 - [Thread-local work-stealing audit](./dev/thread-local-work-stealing-audit.md)
-- [Testbench mode](./dev/testbench.md)
-- [Tape format](./dev/tape-format.md)
-- [Annotation tape format](./dev/annotation-tape-format.md)
-- [DES runtime mode](./dev/des-mode.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 

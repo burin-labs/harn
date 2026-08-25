@@ -173,14 +173,20 @@ function descriptionFromHtml(html: string, fallback: string): string {
 // concept material has its own part, folded into Introduction.
 //
 // Migrations has no tab. Version-upgrade instructions are how-to material, and
-// they sit under How-to guides rather than claiming a seventh tab of their own.
+// they sit under How-to guides rather than claiming a tab of their own.
+//
+// Deploy and Contributing were one "Operating Harn" part, which mixed two
+// audiences: someone running Harn somewhere, and someone working on the Harn
+// repo. Splitting them means a reader hosting a pipeline never scrolls past
+// this project's release policy and CI guards to find it.
 const SECTION_TABS: { id: string; title: string; parts: string[] }[] = [
   { id: "introduction", title: "Introduction", parts: ["Introduction", "Concepts"] },
   { id: "tutorials", title: "Tutorials", parts: ["Tutorials"] },
   { id: "guides", title: "Guides", parts: ["How-to guides"] },
   { id: "reference", title: "Reference", parts: ["Reference"] },
   { id: "explanation", title: "Internals", parts: ["Internals"] },
-  { id: "operations", title: "Operating Harn", parts: ["Operating Harn"] },
+  { id: "deploy", title: "Deploy", parts: ["Deploy"] },
+  { id: "contributing", title: "Contributing", parts: ["Contributing"] },
 ]
 
 // ---------------------------------------------------------------------------
