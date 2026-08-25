@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::FixArgs;
 use crate::commands;
 use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
+use crate::commands::declares_expected_invalid;
 use crate::package::{self, CheckConfig, PreflightSeverity};
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
@@ -607,27 +608,6 @@ fn build_plan_with_options(
             })
             .collect(),
     })
-}
-
-/// Whether the repository declares that this file is *supposed* to be
-/// unparseable.
-///
-/// Conformance suites keep fixtures whose whole purpose is to be rejected, and
-/// they already say so: the expected diagnostic lives in a sibling `.error`
-/// file next to the `.harn`. Both this repo (`conformance/tests/modules/*.error`)
-/// and burin-code (`conformance/errors/*.error`) use that convention.
-///
-/// Without this, `harn fix --apply .` reads such a fixture, fails to parse it,
-/// and fails the whole run — which made every consuming repo that tests its own
-/// parser errors permanently un-bumpable, because the reusable bump workflow
-/// runs the codemod repo-wide under `set -euo pipefail` (harn#6264). burin-code
-/// sat nine patch releases behind on exactly this.
-///
-/// A file with no such declaration still fails the run. That distinction is the
-/// point: an undeclared parse error is a corrupt file, and staying loud about
-/// it is why this reads a declaration rather than suppressing the category.
-fn declares_expected_invalid(file: &Path) -> bool {
-    file.with_extension("error").is_file()
 }
 
 fn collect_file_candidates(

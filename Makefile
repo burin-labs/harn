@@ -502,8 +502,17 @@ lint-harn:
 	@echo "    Harn lint OK."
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.
-# Skip syntax cases the formatter intentionally normalizes.
-FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn import_broken_module_lib.harn
+#
+# Unparseable fixtures do not belong here: `harn fmt` reads the sibling `.error`
+# declaration and skips them on its own, the same way `harn fix` does. This list
+# held four such fixtures until that landed, and every name it carries is a name
+# no consumer repo can know — which is how a repo-wide `harn fmt .` in the
+# reusable bump workflow broke consumers that this gate stayed green on.
+#
+# What is left is the one case the declaration cannot express: a fixture that
+# parses fine, but whose semicolon style the formatter would normalize away,
+# erasing the thing it exists to test.
+FMT_HARN_SKIP := semicolon_statements.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # Extra directories that contain user-facing .harn fixtures but were
