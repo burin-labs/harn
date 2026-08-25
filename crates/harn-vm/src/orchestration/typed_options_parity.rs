@@ -1,5 +1,6 @@
 //! Key-parity pins between the typed Harn option aliases in
-//! `std/{llm,agent,workflow}/options.harn` and their Rust policy twins.
+//! `std/llm/options`, `std/agent/options_types`, and
+//! `std/workflow/options` and their Rust policy twins.
 //!
 //! Design: serialize each Rust struct's `Default` to JSON (serde is the
 //! single source of truth for the accepted wire keys, including renames like
@@ -21,7 +22,6 @@ use crate::llm::cost::LlmBudgetEnvelope;
 
 const LLM_OPTIONS_MODULE: &str = "llm/options";
 const LLM_ENVELOPE_MODULE: &str = "llm/envelope";
-const AGENT_OPTIONS_MODULE: &str = "agent/options";
 const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
 const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
 const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
@@ -49,10 +49,6 @@ fn llm_options_harn() -> &'static str {
 
 fn llm_envelope_harn() -> &'static str {
     stdlib_source(LLM_ENVELOPE_MODULE)
-}
-
-fn agent_options_harn() -> &'static str {
-    stdlib_source(AGENT_OPTIONS_MODULE)
 }
 
 fn agent_options_types_harn() -> &'static str {
@@ -97,7 +93,7 @@ fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
 }
 
 fn agent_spec_keys() -> BTreeSet<String> {
-    agent_spec_keys_from(agent_options_harn())
+    agent_spec_keys_from(agent_options_types_harn())
 }
 
 /// Extract the top-level keys declared by `type <name> = ... { ... }` in a
@@ -195,11 +191,11 @@ fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
 
 #[test]
 fn typed_contract_parsers_accept_crlf_sources() {
-    let crlf_options = crlf_harn_source(agent_options_harn());
+    let crlf_options = crlf_harn_source(agent_options_types_harn());
     assert_eq!(crlf_harn_source(&crlf_options), crlf_options);
     assert_eq!(
         agent_spec_keys_from(&crlf_options),
-        agent_spec_keys_from(agent_options_harn()),
+        agent_spec_keys_from(agent_options_types_harn()),
         "AgentSpec extraction must be independent of checkout line endings",
     );
 
@@ -328,7 +324,7 @@ fn stage_spec_matches_workflow_node() {
 fn turn_policy_matches_turn_policy() {
     assert_key_parity(
         "TurnPolicy ↔ TurnPolicy",
-        &harn_alias_keys(agent_options_harn(), "TurnPolicy"),
+        &harn_alias_keys(agent_options_types_harn(), "TurnPolicy"),
         &serde_default_keys::<TurnPolicy>(),
         &[],
         &[],
@@ -339,7 +335,7 @@ fn turn_policy_matches_turn_policy() {
 fn compaction_policy_matches_compaction_policy() {
     assert_key_parity(
         "CompactionPolicy ↔ CompactionPolicy",
-        &harn_alias_keys(agent_options_harn(), "CompactionPolicy"),
+        &harn_alias_keys(agent_options_types_harn(), "CompactionPolicy"),
         &serde_default_keys::<CompactionPolicy>(),
         &[],
         &[],
@@ -424,36 +420,8 @@ fn agent_loop_options_is_superset_of_llm_call_options() {
     let missing: Vec<&String> = llm_keys.difference(&agent_keys).collect();
     assert!(
         missing.is_empty(),
-        "AgentSpec must inline every LlmCallOptions key (add these to std/agent/options): {missing:?}"
+        "AgentSpec must inline every LlmCallOptions key (add these to std/agent/options_types): {missing:?}"
     );
-}
-
-/// Harn's type checker currently requires the public facade to redeclare type
-/// aliases instead of re-exporting the canonical internal declarations. Keep
-/// that compatibility projection mechanical rather than maintaining two
-/// independently evolving option surfaces.
-#[test]
-fn agent_spec_public_projection_matches_internal_owner() {
-    assert_eq!(
-        agent_spec_keys_from(agent_options_harn()),
-        agent_spec_keys_from(agent_options_types_harn()),
-        "std/agent/options AgentSpec projection drifted from std/agent/options_types",
-    );
-    for alias in [
-        "ConsecutiveFailureBudget",
-        "MissingToolCallRecoveryRequest",
-        "MissingToolCallRecoveryOptions",
-        "ToolSurfaceNarrowingOptions",
-        "ReadOnlyStanceClassification",
-        "ReadOnlyStanceConsent",
-        "ReadOnlyStanceOptions",
-    ] {
-        assert_eq!(
-            harn_alias_keys(agent_options_harn(), alias),
-            harn_alias_keys(agent_options_types_harn(), alias),
-            "std/agent/options `{alias}` projection drifted from std/agent/options_types",
-        );
-    }
 }
 
 /// Smoke-pin the agent-side aliases that have no Rust struct twin
@@ -462,7 +430,7 @@ fn agent_spec_public_projection_matches_internal_owner() {
 /// unnoticed by CI even before the conformance suite runs.
 #[test]
 fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
-    let budget = harn_alias_keys(agent_options_harn(), "IterationBudget");
+    let budget = harn_alias_keys(agent_options_types_harn(), "IterationBudget");
     for key in [
         "mode",
         "initial",
@@ -472,14 +440,15 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
     ] {
         assert!(budget.contains(key), "IterationBudget lost key `{key}`");
     }
-    let failure_budget = harn_alias_keys(agent_options_harn(), "ConsecutiveFailureBudget");
+    let failure_budget = harn_alias_keys(agent_options_types_harn(), "ConsecutiveFailureBudget");
     for key in ["max", "kinds", "paused_for_ms"] {
         assert!(
             failure_budget.contains(key),
             "ConsecutiveFailureBudget lost key `{key}`"
         );
     }
-    let missing_tool = harn_alias_keys(agent_options_harn(), "MissingToolCallRecoveryOptions");
+    let missing_tool =
+        harn_alias_keys(agent_options_types_harn(), "MissingToolCallRecoveryOptions");
     for key in [
         "enabled",
         "classifier",
@@ -491,25 +460,25 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
             "MissingToolCallRecoveryOptions lost key `{key}`"
         );
     }
-    let narrowing = harn_alias_keys(agent_options_harn(), "ToolSurfaceNarrowingOptions");
+    let narrowing = harn_alias_keys(agent_options_types_harn(), "ToolSurfaceNarrowingOptions");
     for key in ["window_turns", "mode", "hard_keep", "unknown_tool_policy"] {
         assert!(
             narrowing.contains(key),
             "ToolSurfaceNarrowingOptions lost key `{key}`"
         );
     }
-    let stance = harn_alias_keys(agent_options_harn(), "ReadOnlyStanceOptions");
+    let stance = harn_alias_keys(agent_options_types_harn(), "ReadOnlyStanceOptions");
     for key in ["armed", "classifier", "consent_check", "min_confidence"] {
         assert!(
             stance.contains(key),
             "ReadOnlyStanceOptions lost key `{key}`"
         );
     }
-    let stall = harn_alias_keys(agent_options_harn(), "StallDiagnostics");
+    let stall = harn_alias_keys(agent_options_types_harn(), "StallDiagnostics");
     for key in ["enabled", "threshold", "inject_feedback", "max_feedback"] {
         assert!(stall.contains(key), "StallDiagnostics lost key `{key}`");
     }
-    let judge = harn_alias_keys(agent_options_harn(), "JudgeConfig");
+    let judge = harn_alias_keys(agent_options_types_harn(), "JudgeConfig");
     for key in ["provider", "model", "max_invocations", "cadence"] {
         assert!(judge.contains(key), "JudgeConfig lost key `{key}`");
     }
