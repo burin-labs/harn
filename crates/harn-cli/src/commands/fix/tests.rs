@@ -174,7 +174,7 @@ fn plan_reports_repairable_diagnostics_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
     let before = fs::read(&script).unwrap();
 
@@ -234,7 +234,7 @@ fn plan_skips_invalid_files_and_keeps_repairing_valid_files() {
     let invalid = temp.path().join("invalid.harn");
     fs::write(
         &valid,
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
     fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -267,7 +267,7 @@ fn apply_writes_clean_repairs_and_reports_post_check_count() {
     let script = temp.path().join("repair_demo.harn");
     fs::write(
         &script,
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
 
@@ -288,7 +288,7 @@ fn apply_directory_skips_invalid_files_after_applying_valid_files() {
     let invalid = temp.path().join("invalid.harn");
     fs::write(
         &valid,
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
     fs::write(&invalid, "fn bad() {\n").unwrap();
@@ -312,7 +312,7 @@ fn apply_dry_run_reports_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
 
     let result = apply_repairs(&script, RepairSafety::BehaviorPreserving, true).unwrap();
@@ -414,7 +414,7 @@ fn apply_skips_repairs_above_safety_ceiling() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");
     let source =
-        "pipeline main(harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
+        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n";
     fs::write(&script, source).unwrap();
 
     let result = apply_repairs(&script, RepairSafety::FormatOnly, false).unwrap();

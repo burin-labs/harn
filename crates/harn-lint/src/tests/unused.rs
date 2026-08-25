@@ -358,18 +358,20 @@ pipeline test_helper(_value: int) {
 pipeline default() {
   return test_helper(2)
 }";
-    assert!(
-        apply_fixes(called, &lint_source(called)).contains("pipeline test_helper(_value: int)"),
-        "a local caller owns the helper's positional slot"
+    assert_eq!(
+        apply_fixes(called, &lint_source(called)),
+        called,
+        "a local caller owns the helper's positional slot and its binding name"
     );
 
     let table = r#"@test(cases: [{name: "one", args: [1]}])
 pipeline test_case(value: int) {
   assert(true)
 }"#;
-    assert!(
-        apply_fixes(table, &lint_source(table)).contains("pipeline test_case(_value: int)"),
-        "table rows own the test pipeline's positional slots"
+    assert_eq!(
+        apply_fixes(table, &lint_source(table)),
+        table,
+        "table rows own the test pipeline's positional slots and binding names"
     );
 }
 
@@ -378,9 +380,10 @@ fn extended_pipeline_slots_keep_positional_arity() {
     let extended = r"pipeline child(value: int) extends base {
   return 1
 }";
-    assert!(
-        apply_fixes(extended, &lint_source(extended)).contains("pipeline child(_value: int)"),
-        "an extended pipeline inherits a positional contract"
+    assert_eq!(
+        apply_fixes(extended, &lint_source(extended)),
+        extended,
+        "an extended pipeline inherits an opaque positional contract"
     );
 }
 
@@ -389,9 +392,10 @@ fn public_pipeline_slots_keep_positional_arity() {
     let source = r"pub pipeline exported(value: int) {
   return 1
 }";
-    assert!(
-        apply_fixes(source, &lint_source(source)).contains("pub pipeline exported(_value: int)"),
-        "external callers may depend on a public pipeline's arity"
+    assert_eq!(
+        apply_fixes(source, &lint_source(source)),
+        source,
+        "external callers may depend on a public pipeline's full declaration contract"
     );
 }
 

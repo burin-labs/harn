@@ -35,9 +35,10 @@ impl Linter<'_> {
                 );
             } else {
                 self.declare_parameter(&parameter.name, parameter.span);
-                if removal_allowed {
-                    self.references.insert(parameter.name.clone());
-                }
+                // A non-removable pipeline slot belongs to an invocation
+                // contract outside this declaration. Its body cannot prove
+                // the slot unused, so do not manufacture a rename warning.
+                self.references.insert(parameter.name.clone());
             }
         }
     }
