@@ -566,7 +566,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.115",
+  "artifactVersion": "0.10.116-dev",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
