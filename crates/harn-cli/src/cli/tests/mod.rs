@@ -5,22 +5,11 @@ pub(crate) use clap::{CommandFactory, Parser};
 pub(crate) use std::path::PathBuf;
 pub(crate) use std::time::Duration as StdDuration;
 
-pub(crate) use super::provider::{
-    ProviderDispatchAuditVariantArg, ProviderToolProbeCaseArg, ProviderToolProbeFormatArg,
-    ProviderToolProbeModeArg,
-};
 use super::{
-    CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
-    CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand, FlowCommand,
-    HostCommand, HostLeaseCommand, HostLeasePriorityArg, HostLeaseResourceClassArg,
-    HostLeaseRunCommand, LocalCommand, McpCommand, McpMockCommand, MergeCaptainCommand,
-    ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
-    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
-    OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PackageRegistryCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
-    ProviderCapabilitiesCommand, ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand,
-    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    Cli, Command, ConnectCommand, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
+    HostLeaseRunCommand, LocalCommand, MergeCaptainCommand, ModelsCommand, ModelsLoraCommand,
+    OrchestratorCommand, OrchestratorQueueCommand, PersonaCommand, ProjectTemplate,
+    ProviderCommand, SessionCommand, SkillCommand, TimeCommand, ToolCommand, TriggerCommand,
 };
 pub(crate) use crate::cli::runs::RunsCommand;
 
@@ -31,11 +20,7 @@ fn clap_definition_is_valid() {
 
 mod parse_cmds;
 mod parse_core;
-mod parse_models;
 mod parse_orchestration;
-mod parse_packaging;
-mod parse_provider_catalog;
-mod parse_provider_dispatch_audit;
 mod parse_provider_tool_calibrate;
 mod parse_provider_tool_probe_audit;
 mod parse_providers;
