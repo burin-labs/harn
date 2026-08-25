@@ -8,6 +8,77 @@ arc_registry_scope = "Runtime/resource registry. Promote to an Arc-backed VM/run
 thread_private_cache = "Thread-private cache, mock, or warning de-dupe state. Safe to keep thread-local because it is non-authoritative and resettable."
 thread_private_test = "Test harness state. Safe to keep thread-local because tests install/reset it on the owning thread and production work-stealing tasks must not depend on it."
 
+# The subset carried by AmbientExecutionScope across the typed child-interpreter
+# boundary. Every other static remains governed by its [[thread_local]] category
+# and plan below: logical/runtime state must not become reachable from a worker
+# until it moves into `captured`, while thread-private state is never inherited.
+# `tests/harn_vm/thread_local_audit.rs` checks this list against the runtime
+# projection beside SubtaskAmbientState, so this manifest is the policy owner.
+[subtask_scope]
+captured = [
+  "EXECUTION_POLICY_STACK",
+  "EXECUTION_APPROVAL_POLICY_STACK",
+  "OPERATOR_APPROVAL_GRANT_STACK",
+  "COMMAND_POLICY_STACK",
+  "DYNAMIC_PERMISSION_STACK",
+  "RUNTIME_CONTEXT_OVERLAY_STACK",
+  "AUTONOMY_POLICY_STACK",
+  "PERSONA_STACK",
+  "STEP_STACK",
+  "ACTIVE_CONTEXT_SUSPENSION_STACK",
+  "LLM_RENDER_STACK",
+  "TRANSCRIPT_DIR_STACK",
+  "ACTIVE_HARN_CONNECTOR_CTX",
+  "TRUSTED_BRIDGE_CALL_DEPTH",
+  "COMMAND_POLICY_HOOK_DEPTH",
+  "TOOL_PRECHECK_STACK",
+  "TOOL_PRECHECK_DEPTH",
+  "VM_EXECUTION_CONTEXT",
+  "VM_SOURCE_DIR",
+  "CURRENT_MUTATION_SESSION",
+  "SESSION_ENVIRONMENT_CONTEXT",
+  "PROCESS_ADMISSION_CONTEXT",
+  "CURRENT_HOST_BRIDGE",
+  "CURRENT_LOOP_SINKS",
+  "CURRENT_SESSION_STACK",
+  "LLM_CONFIG_OVERRIDES_CONTEXT",
+  "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
+  "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+  "LLM_MOCK_CONTEXT",
+  "EGRESS_POLICY_CONTEXT",
+  "ACTIVE_EXECUTION_SCOPE_STACK",
+  "RUN_EVENT_SINK_CONTEXT",
+  "SUBTASK_PLACEMENT_CONTEXT",
+  "SECURITY_POLICY_STACK",
+  "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+  "REQUIRE_SSRF_GUARD_DEPTH",
+  "CUSTOM_PATTERNS",
+  "ACTIVE_EVENT_LOG",
+  "MCP_CALL_BUDGET",
+  "PG_QUERY_BUDGET",
+  "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+  "ACTIVE_WORKER_REGISTRY",
+  "ACTIVE_DAEMON_REGISTRY",
+  "ACTIVE_TRIGGER_REGISTRY",
+  "ACTIVE_SESSION_RUNTIME",
+  "ACTIVE_TRACING_RUNTIME",
+  "ACTIVE_AGENT_HOST_SESSION_RUNTIME",
+]
+
+# These ambient-shaped statics have been reviewed but do not cross the child
+# interpreter seam. Keeping the reasons here removes the former second catalog
+# from ambient_scope.rs while retaining the decision record.
+reviewed_exclusions = [
+  { name = "ACTIVE_TENANT_STACK", reason = "[latent-capability] tenant identity is not installed per worker today; capture it before fan-out reads it" },
+  { name = "ACTIVE_PRINCIPAL_STACK", reason = "[latent-capability] principal identity is not installed per worker today; capture it before fan-out reads it" },
+  { name = "REDACTION_POLICY_STACK", reason = "redaction policy is pushed around synchronous redaction and is not held across a child await" },
+  { name = "ACTIVE_REQUEST_ID_STACK", reason = "request-id attribution is not a capability decision and is not read by child interpreters" },
+  { name = "CURRENT_TOOL_CALL_STACK", reason = "tool-call breadcrumb is pushed and popped within one synchronous dispatch frame" },
+  { name = "VM_TRACE_STACK", reason = "log trace breadcrumb is attribution only and is not read by child interpreters" },
+  { name = "ACTIVE_DISPATCH_CONTEXT", reason = "trigger-dispatch context belongs to the dispatcher runner, not fan-out workers" },
+  { name = "CURRENT_WORKFLOW_SKILL_CONTEXT", reason = "workflow stages remain on their workflow LocalSet and do not cross this seam" },
+]
+
 [[thread_local]]
 path = "src/atomic_io.rs"
 statics = ["TEST_FAILURE_STAGE"]
