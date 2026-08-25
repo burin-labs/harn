@@ -71,7 +71,9 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   stdio.println(
     "  hard token estimate limit: " + safe_int_string(thresholds["hard_token_limit"], "0"),
   )
-  stdio.println("  minimum records: " + safe_int_string(thresholds["min_records"], "0"))
+  stdio.println(
+    "  minimum records: " + safe_int_string(thresholds["min_records"], "not configured"),
+  )
   stdio.println("  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]))
   const marker = safe_string(thresholds["done_marker"], "")
   if marker != "" {

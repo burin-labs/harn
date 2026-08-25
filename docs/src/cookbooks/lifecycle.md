@@ -28,9 +28,11 @@ import { on_finish_handoff_to } from "std/lifecycle"
 pipeline ingest(harness: Harness, events) {
   // Any deferred items become partial-handoff envelopes via
   // harness.handoff_to so they show up in unsettled_state().
-  pipeline_on_finish(on_finish_handoff_to("nightly-settle", {
-    note: "live ingest deferred bucket",
-  }))
+  harness.agent.pipeline_on_finish(
+    on_finish_handoff_to("nightly-settle", {
+      note: "live ingest deferred bucket",
+    }),
+  )
 
   for event in events {
     const outcome = try_process_now(event)
@@ -103,7 +105,7 @@ pipeline triage(harness: Harness, input) {
 
   // 2. Drain on finish, wrapped in an OTel span so dashboards can
   //    pin on the duration distribution.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "triage_drain"),
   )
 
@@ -251,7 +253,7 @@ pipeline multi_suspend_fixture(harness: Harness) {
   harness.testing.clock_set(1_700_000_000_000)
 
   // 2. Capture audits via the per-run log instead of wall-clock spans.
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(on_finish_drain, "fixture_drain"),
   )
 
@@ -273,7 +275,7 @@ pipeline multi_suspend_fixture(harness: Harness) {
 pipeline assert_replay_determinism(harness: Harness) {
   // 4. Drain the audit log; the conformance harness compares this
   //    byte-for-byte against the recorded fixture.
-  const entries = pipeline_lifecycle_audit_log_take()
+  const entries = harness.obs.pipeline_lifecycle_audit_log_take()
   return {audits: entries, count: len(entries)}
 }
 ```

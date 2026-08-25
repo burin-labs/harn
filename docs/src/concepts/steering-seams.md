@@ -92,8 +92,8 @@ harness.agent.register_checkpoint_hook(
 every seam. The handler receives the `LoopCheckpoint` payload directly.
 
 Under the hood this registers a `loop_checkpoint` session hook with a
-pattern derived from `kinds` — `register_session_hook("loop_checkpoint", ...)`
-works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
+pattern derived from `kinds` —
+`harness.agent.register_session_hook("loop_checkpoint", ...)` works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
 `kind=~"^(iteration_start|loop_exit)$"`).
 
 ## Migration from the old drain sites
@@ -105,8 +105,8 @@ code should cross `agent_stage`; hosts and plugins should observe the projected
 event through `harness.agent.register_checkpoint_hook`.
 
 For one-off hooks on a single seam the
-`register_session_hook("loop_checkpoint", pattern, ...)` plumbing is still
-available, but `harness.agent.register_checkpoint_hook` covers every seam in one
+`harness.agent.register_session_hook("loop_checkpoint", pattern, ...)`
+plumbing is still available, but `harness.agent.register_checkpoint_hook` covers every seam in one
 call and exposes the `dispatch_skipped` signal that per-event hooks never see.
 
 ## Mid-tool preemption
@@ -115,7 +115,8 @@ Steering at iteration boundaries handles "stop before the next tool fires."
 For the case where a tool is *already in flight* and the host wants to abort
 *that* call — e.g. one click cancels a runaway `git push --force` without
 losing the rest of the session — Harn ships
-`cancel_in_flight_tool_call(session_id, call_id, opts?)` and the matching
+`harness.agent.cancel_in_flight_tool_call(session_id, call_id, opts?)` and the
+matching
 ACP method `session/cancel_tool_call`. Both share a per-call cancellation
 registry keyed by `(session_id, call_id)`:
 

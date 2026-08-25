@@ -190,7 +190,7 @@ claims, and invalid PEM keys throw runtime errors.
 |---|---|
 | `cookie_parse(headers)` | Parses request `Cookie` header strings, lists, or header dicts into `{cookies, pairs, duplicates, invalid}` |
 | `cookie_serialize(name, value, options?)` | Serializes one `Set-Cookie` header value. Options support `HttpOnly`, `Secure`, `SameSite`, `Path`, `Domain`, `Max-Age`, and `Expires` through snake_case or header-style keys |
-| `cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
+| `harness.net.cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
 | `cookie_sign(value, secret)` / `cookie_verify(value, secret)` | Signs and verifies a string cookie value using the `cookie` crate's signed-jar format and at least 32 bytes of random key material |
 | `session_sign(payload, secret)` / `session_verify(token, secret)` | Signs and verifies a stateless JSON session payload. Verification returns `{ok, payload, error}` and does not throw on bad signatures |
 | `session_cookie(name, payload, secret, options?)` | Serializes a signed session cookie with secure defaults: `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |

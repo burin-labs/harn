@@ -8,9 +8,9 @@ an A2A target, or a worker queue.
 Use the trigger surface that matches how you want to manage the binding:
 
 - `[[triggers]]` in `harn.toml` for declarative, manifest-loaded bindings
-- `trigger_register(...)` from `std/triggers` for dynamic runtime bindings
-- `trigger_fire(...)` / `trigger_replay(...)` when tests or operators need to
-  inject or replay events manually
+- `harness.runtime.trigger_register(...)` for dynamic runtime bindings
+- `harness.runtime.trigger_fire(...)` / `harness.runtime.trigger_replay(...)`
+  when tests or operators need to inject or replay events manually
 
 Manifest triggers support one source per binding or a parent handler with
 multiple `[[triggers.sources]]` entries. `kind = "stream"` covers cataloged
@@ -110,9 +110,9 @@ Predicate evaluation is safety-defaulted:
 - if a predicate budget is exceeded, the predicate short-circuits to `false`;
   if aggregate trigger spend is already exhausted before a handler starts, the
   dispatcher applies `budget.on_budget_exhausted`
-- replay caches predicate `harness.llm.call(...)` responses so `trigger_replay(...)`
-  can deterministically re-evaluate the predicate without hitting a live
-  provider
+- replay caches predicate `harness.llm.call(...)` responses so
+  `harness.runtime.trigger_replay(...)` can deterministically re-evaluate the
+  predicate without hitting a live provider
 
 Every predicate evaluation emits `predicate.evaluated`, and budget violations
 emit `predicate.budget_exceeded` or `predicate.daily_budget_exceeded` on the

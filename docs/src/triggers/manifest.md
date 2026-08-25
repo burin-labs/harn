@@ -98,7 +98,8 @@ enqueues the job. An explicit event header `priority` still overrides it at
 dispatch time.
 
 `eval_pack://...` handlers run an eval pack through the same
-`eval_pack_run(manifest, options?)` path as scripts. A bare target resolves by
+`harness.runtime.eval_pack_run(manifest, options?)` path as scripts. A bare
+target resolves by
 pack `id`, `name`, or file stem from root and installed package eval
 declarations (`[package].evals` or `harn.eval.toml`); a path-like target
 resolves relative to `harn.toml`. Cron bindings use the normal trigger

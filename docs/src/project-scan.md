@@ -113,7 +113,8 @@ const _opts = agent_loop_options({
 })
 ```
 
-The same profile can be handed to `prompt_explain(...)`; the resulting
+The same profile can be handed to `harness.agent.prompt_explain(...)`; the
+resulting
 provenance shows each `profile:*` fragment and the capability that caused it to
 be included.
 

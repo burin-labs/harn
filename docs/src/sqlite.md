@@ -40,7 +40,7 @@ pipeline default(harness: Harness) {
 | `sqlite_rollback_to_savepoint(tx, name)` | `bool` | Roll back to a savepoint while keeping the outer transaction open. |
 | `sqlite_migrate(db, {dir, table?, dry_run?})` | `SqliteMigrateResult` | Apply pending `.sql` files from a directory. |
 | `sqlite_close(db)` | `bool` | Close and unregister a database handle. |
-| `sqlite_mock_db(fixtures)` | `SqliteMockDb` | Create an in-process fixture-backed database for tests. |
+| `harness.testing.sqlite_mock_db(fixtures)` | `SqliteMockDb` | Create an in-process fixture-backed database for tests. |
 | `sqlite_mock_calls(mock)` | `list<dict>` | Inspect recorded mock calls. |
 
 ## Open Options

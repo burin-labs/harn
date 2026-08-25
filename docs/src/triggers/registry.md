@@ -82,9 +82,10 @@ zeroed metrics for newly installed triggers.
 
 The trigger stdlib’s manual replay path also depends on the registry:
 
-- `trigger_fire(...)` records the synthetic event on `triggers.events`
-- `trigger_replay(...)` looks up that recorded envelope plus any pending
-  stdlib DLQ summary entry on `triggers.dlq`
+- `harness.runtime.trigger_fire(...)` records the synthetic event on
+  `triggers.events`
+- `harness.runtime.trigger_replay(...)` looks up that recorded envelope plus
+  any pending stdlib DLQ summary entry on `triggers.dlq`
 - the wrapper then re-enters the dispatcher against the resolved live binding
   version and threads `replay_of_event_id` through dispatch observability
 
@@ -113,6 +114,7 @@ fixtures. The harness owns:
   retry/backoff, DLQ/replay, dedupe, rate limiting, cost guards, crash
   recovery, hot reload, and dead-man alerts
 
-The script-facing entrypoint is the `trigger_test_harness(...)` builtin,
-which returns a structured report for the selected fixture instead of
-requiring each conformance script to rebuild connector state by hand.
+The script-facing entrypoint is the
+`harness.runtime.trigger_test_harness(...)` capability method, which returns
+a structured report for the selected fixture instead of requiring each
+conformance script to rebuild connector state by hand.

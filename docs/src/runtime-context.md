@@ -68,11 +68,11 @@ Explicit handle values are shared by design:
 
 | Handle | Shared behavior |
 |---|---|
-| `channel(...)` | Message transport shared by every task that receives the handle |
-| `atomic(...)` | Shared integer cell |
-| `sync_*_acquire(...)` | Shared named synchronization runtime |
-| `shared_cell(...)` / `shared_map(...)` | Scoped process-local shared state |
-| `mailbox_open(...)` | Targeted actor-style inbox |
+| `harness.runtime.channel(...)` | Message transport shared by every task that receives the handle |
+| `harness.runtime.atomic(...)` | Shared integer cell |
+| `harness.runtime.sync_*_acquire(...)` | Shared named synchronization runtime |
+| `harness.runtime.shared_cell(...)` / `harness.runtime.shared_map(...)` | Scoped process-local shared state |
+| `harness.runtime.mailbox_open(...)` | Targeted actor-style inbox |
 
 `agent_loop` calls do not share transcript internals with tasks. A named
 `session_id` shares durable transcript history through the agent session store.
