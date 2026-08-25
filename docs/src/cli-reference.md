@@ -3283,6 +3283,25 @@ The source file is JSONL. Each line should contain at least
 used directly with `harn run --llm-mock ...`, `harn eval
 --llm-mock ...`, or `harn test --determinism`.
 
+## harn trace prefix-stability
+
+Check whether each captured provider request keeps the prior request's prompt
+prefix unchanged:
+
+```bash
+harn trace prefix-stability .harn-runs/<run-id>-llm --json
+```
+
+The directory must contain `llm_transcript.jsonl` and the `raw-provider/`
+files written when `HARN_LLM_TRANSCRIPT_RAW=1` is set. The command checks each
+consecutive request pair. Prior messages must remain byte-for-byte equal and in
+the same positions. The system block and ordered tool list must also remain
+equal. New messages may only be appended.
+
+The command exits with status 1 when a prefix changes. Its report names the
+first changed message's index and role, then shows the values before and after
+the change. `--json` emits a `harn.trace.prefix_stability.v1` report.
+
 ## harn crystallize
 
 Mine repeated traces into a reviewable deterministic workflow candidate.

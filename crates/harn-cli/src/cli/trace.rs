@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(crate) struct TraceArgs {
@@ -10,6 +11,18 @@ pub(crate) struct TraceArgs {
 pub(crate) enum TraceCommand {
     /// Convert a generic JSONL trace into a replayable `--llm-mock` fixture.
     Import(TraceImportArgs),
+    /// Check captured provider requests for an append-only prompt prefix.
+    #[command(name = "prefix-stability")]
+    PrefixStability(TracePrefixStabilityArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TracePrefixStabilityArgs {
+    /// Transcript directory that contains `llm_transcript.jsonl` and raw provider captures.
+    pub transcript_dir: PathBuf,
+    /// Emit the versioned report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
