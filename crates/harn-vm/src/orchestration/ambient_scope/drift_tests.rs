@@ -153,6 +153,7 @@ fn captured_catalog_matches_scope_fields() {
         "ACTIVE_EVENT_LOG",
         "MCP_CALL_BUDGET",
         "PG_QUERY_BUDGET",
+        "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
     ]);
     assert_eq!(
         captured, expected,

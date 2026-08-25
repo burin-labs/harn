@@ -170,6 +170,15 @@ impl AmbientExecutionScope {
         llm_mock: LlmMockContext,
     ) -> Self {
         let mut scope = Self::capture_for_inline_subtask();
+        let tool_call_cancellations = scope
+            .host_bridge
+            .as_ref()
+            .map_or_else(crate::tool_call_cancellations::fresh_registry, |bridge| {
+                bridge.tool_call_cancellation_registry()
+            });
+        scope
+            .subtask
+            .set_tool_call_cancellations(tool_call_cancellations);
         scope.execution_scope.push(owner);
         scope.llm_mock = llm_mock;
         scope
@@ -610,6 +619,13 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // that got its own count could spend the whole `@budget(...)` allowance.
     ("MCP_CALL_BUDGET", AmbientScoping::Captured),
     ("PG_QUERY_BUDGET", AmbientScoping::Captured),
+    // One execution tree's in-flight tool calls remain addressable when
+    // registration, cancellation, and guard teardown land on different
+    // runtime workers, without becoming visible to sibling embedded VMs.
+    (
+        "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+        AmbientScoping::Captured,
+    ),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
     // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
@@ -851,6 +867,61 @@ mod tests {
             crate::agent_sessions::current_session_id().as_deref(),
             Some("ambient-session")
         );
+    }
+
+    #[tokio::test]
+    async fn top_level_execution_owns_one_isolated_cancellation_registry() {
+        crate::tool_call_cancellations::clear_registry_for_test();
+        crate::llm::clear_current_host_bridge();
+        let outer = crate::tool_call_cancellations::register("session", "call", "outer")
+            .expect("outer registration");
+        let bridge = std::sync::Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            std::sync::Arc::new(|_| Ok(())),
+            1,
+        ));
+        crate::llm::install_current_host_bridge(bridge.clone());
+        let scope = AmbientExecutionScope::capture_for_top_level_execution(
+            std::sync::Arc::from("isolated-execution"),
+            LlmMockContext::default(),
+        );
+
+        scope_ambient(scope, async {
+            assert!(crate::tool_call_cancellations::lookup("session", "call").is_none());
+            let inner = crate::tool_call_cancellations::register("session", "call", "inner")
+                .expect("top-level registration");
+            assert_eq!(
+                bridge
+                    .tool_call_cancellation_registry()
+                    .cancel("session", "call", "host stop", false)
+                    .status,
+                crate::tool_call_cancellations::CancelStatus::Cancelled
+            );
+            assert!(inner.0.is_cancelled());
+
+            scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), async {
+                assert_eq!(
+                    crate::tool_call_cancellations::lookup("session", "call")
+                        .as_ref()
+                        .map(|handle| handle.tool_name.as_str()),
+                    Some("inner")
+                );
+            })
+            .await;
+            drop(inner);
+        })
+        .await;
+
+        assert_eq!(
+            crate::tool_call_cancellations::lookup("session", "call")
+                .as_ref()
+                .map(|handle| handle.tool_name.as_str()),
+            Some("outer")
+        );
+        drop(outer);
+        assert!(crate::tool_call_cancellations::lookup("session", "call").is_none());
+        crate::llm::clear_current_host_bridge();
     }
 
     async fn spawn_pending_llm_context_task(

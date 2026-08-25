@@ -262,20 +262,20 @@ fn attach_test_host_bridge(
     server: &mut AcpServer,
     session_id: &str,
 ) -> Arc<harn_vm::bridge::HostBridge> {
-    let inject_state = server
-        .sessions
-        .get(session_id)
-        .expect("session")
-        .inject_state
-        .clone();
+    let session = server.sessions.get(session_id).expect("session");
+    let inject_state = session.inject_state.clone();
+    let tool_call_cancellations = session.concurrent_control.tool_call_cancellations.clone();
     let host_bridge = Arc::new(
-        harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+        harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            std::sync::Arc::new(tokio::sync::Notify::new()),
             std::sync::Arc::new(|_| Ok(())),
             1,
-            Some(inject_state),
+            harn_vm::bridge::HostBridgeControlState::new(
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                std::sync::Arc::new(tokio::sync::Notify::new()),
+                inject_state,
+                tool_call_cancellations,
+            ),
         ),
     );
     server
@@ -553,10 +553,11 @@ async fn session_cancel_tool_call_targets_registered_call() {
         .expect("session id")
         .to_string();
 
-    // Pretend a tool call is in flight by registering one directly.
-    let (_handle, _guard) =
-        harn_vm::tool_call_cancellations::register(session_id.clone(), "call_42", "git_push")
-            .expect("registered");
+    // Pretend a bridge-routed tool call is in flight in this session's
+    // explicit cancellation address space.
+    let host_bridge = attach_test_host_bridge(&mut server, &session_id);
+    let registry = host_bridge.tool_call_cancellation_registry();
+    let (_handle, _guard) = registry.register(session_id.clone(), "call_42", "git_push");
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -917,14 +918,24 @@ async fn session_inject_state_survives_prompt_bridge_replacement() {
     assert_eq!(replace["result"]["messageId"], message_id);
     assert_eq!(replace["result"]["status"], "replaced");
 
+    let tool_call_cancellations = server
+        .sessions
+        .get(&session_id)
+        .expect("session")
+        .concurrent_control
+        .tool_call_cancellations
+        .clone();
     let replacement_bridge = Arc::new(
-        harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+        harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            std::sync::Arc::new(tokio::sync::Notify::new()),
             std::sync::Arc::new(|_| Ok(())),
             10_000,
-            Some(first_bridge.injection_state()),
+            harn_vm::bridge::HostBridgeControlState::new(
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                std::sync::Arc::new(tokio::sync::Notify::new()),
+                first_bridge.injection_state(),
+                tool_call_cancellations,
+            ),
         ),
     );
     server

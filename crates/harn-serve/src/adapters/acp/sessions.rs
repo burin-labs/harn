@@ -4,6 +4,7 @@ use super::*;
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
+    pub(super) tool_call_cancellations: Arc<harn_vm::tool_call_cancellations::CancellationRegistry>,
     prompt_active: Arc<AtomicBool>,
 }
 
@@ -11,6 +12,9 @@ impl ConcurrentSessionControl {
     pub(super) fn new() -> Self {
         Self {
             inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
+            tool_call_cancellations: Arc::new(
+                harn_vm::tool_call_cancellations::CancellationRegistry::default(),
+            ),
             prompt_active: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -216,6 +220,53 @@ impl ConcurrentSessionControls {
         true
     }
 
+    pub(super) fn preempt_active_tool_call_cancel(
+        &self,
+        msg: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
+        if msg.get("method").and_then(serde_json::Value::as_str) != Some("session/cancel_tool_call")
+        {
+            return false;
+        }
+        let null_id = serde_json::Value::Null;
+        let id = msg.get("id").unwrap_or(&null_id);
+        if self.reject_unauthenticated(id, output) {
+            return true;
+        }
+        let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+        let request = match ToolCallCancelRequest::parse(params) {
+            Ok(request) => request,
+            Err(message) => {
+                if !id.is_null() {
+                    send_routed_error(output, id, -32602, &message);
+                }
+                return true;
+            }
+        };
+        let control = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&request.session_id)
+            .cloned();
+        let Some(control) = control else {
+            return false;
+        };
+        if !control.prompt_is_active() {
+            return false;
+        }
+
+        let result = request.cancel(&control.tool_call_cancellations);
+        if !id.is_null() {
+            let response = harn_vm::jsonrpc::response(id.clone(), result.into_value());
+            let line = serde_json::to_string(&response)
+                .expect("tool-call cancellation response must serialize");
+            output.write_line(&line);
+        }
+        true
+    }
+
     fn reject_unauthenticated(&self, id: &serde_json::Value, output: &AcpOutput) -> bool {
         if self.authenticated.load(Ordering::SeqCst) {
             return false;
@@ -232,6 +283,79 @@ impl ConcurrentSessionControls {
             }
         }
         true
+    }
+}
+
+pub(super) struct ToolCallCancelRequest {
+    pub(super) session_id: String,
+    pub(super) call_id: String,
+    pub(super) reason: String,
+    pub(super) inject_reminder: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ToolCallCancelResult {
+    status: &'static str,
+    call_id: String,
+    tool: Option<String>,
+}
+
+impl ToolCallCancelResult {
+    pub(super) fn not_found(call_id: String) -> Self {
+        Self {
+            status: harn_vm::tool_call_cancellations::CancelStatus::NotFound.as_str(),
+            call_id,
+            tool: None,
+        }
+    }
+
+    pub(super) fn into_value(self) -> serde_json::Value {
+        serde_json::to_value(self).expect("typed tool-call cancellation result must serialize")
+    }
+}
+
+impl ToolCallCancelRequest {
+    pub(super) fn parse(params: &serde_json::Value) -> Result<Self, String> {
+        let session_id = session_id_param(params)
+            .ok_or_else(|| "session/cancel_tool_call requires sessionId".to_string())?;
+        let call_id = string_param(params, "toolCallId", "tool_call_id")
+            .or_else(|| string_param(params, "callId", "call_id"))
+            .filter(|call_id| !call_id.is_empty())
+            .ok_or_else(|| "session/cancel_tool_call requires toolCallId".to_string())?;
+        let reason = params
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("host cancelled in-flight tool call")
+            .to_string();
+        let inject_reminder = params
+            .get("injectReminder")
+            .or_else(|| params.get("inject_reminder"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        Ok(Self {
+            session_id,
+            call_id,
+            reason,
+            inject_reminder,
+        })
+    }
+
+    pub(super) fn cancel(
+        self,
+        registry: &harn_vm::tool_call_cancellations::CancellationRegistry,
+    ) -> ToolCallCancelResult {
+        let outcome = registry.cancel(
+            &self.session_id,
+            &self.call_id,
+            self.reason,
+            self.inject_reminder,
+        );
+        ToolCallCancelResult {
+            status: outcome.status.as_str(),
+            call_id: self.call_id,
+            tool: outcome.tool_name,
+        }
     }
 }
 
@@ -570,6 +694,42 @@ mod budget_rearm_tests {
         harn_vm::set_llm_cost_budget(None);
     }
 
+    #[test]
+    fn active_tool_call_cancel_is_handled_on_the_preemptive_control_lane() {
+        let controls = ConcurrentSessionControls::default();
+        let control = ConcurrentSessionControl::new();
+        control.set_prompt_active(true);
+        let (handle, _guard) =
+            control
+                .tool_call_cancellations
+                .register("session-1", "call-1", "shell");
+        controls.register("session-1", control);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let output = AcpOutput::Channel(tx);
+
+        assert!(controls.preempt_active_tool_call_cancel(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "session/cancel_tool_call",
+                "params": {
+                    "sessionId": "session-1",
+                    "toolCallId": "call-1",
+                    "reason": "host stop",
+                    "injectReminder": false,
+                },
+            }),
+            &output,
+        ));
+
+        assert!(handle.is_cancelled());
+        assert_eq!(handle.reason().as_deref(), Some("host stop"));
+        let response: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("cancellation response")).expect("json");
+        assert_eq!(response["result"]["status"], "cancelled");
+        assert_eq!(response["result"]["tool"], "shell");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn active_prompt_inject_is_handled_on_the_preemptive_control_lane() {
         let controls = ConcurrentSessionControls::default();
@@ -659,15 +819,17 @@ mod budget_rearm_tests {
             "stop before the next tool"
         );
 
-        let bridge =
-            harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
-                Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        let bridge = harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            Arc::new(|_: &str| Ok(())),
+            1,
+            harn_vm::bridge::HostBridgeControlState::new(
                 Arc::new(AtomicBool::new(false)),
                 Arc::new(tokio::sync::Notify::new()),
-                Arc::new(|_: &str| Ok(())),
-                1,
-                Some(control.inject_state.clone()),
-            );
+                control.inject_state.clone(),
+                control.tool_call_cancellations.clone(),
+            ),
+        );
         assert!(
             bridge
                 .take_queued_user_messages_for(

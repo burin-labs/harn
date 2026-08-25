@@ -1,8 +1,11 @@
 //! JSON-RPC 2.0 host bridge for VM effects when `harn run --bridge` is active.
 
 mod authority;
+mod control;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
+use control::handle_cancel_tool_call_notification;
+pub use control::HostBridgeControlState;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::io::Write;
@@ -75,6 +78,10 @@ pub struct HostBridge {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     /// Whether the host has sent a cancel notification.
     cancelled: Arc<AtomicBool>,
+    /// Tool calls routed through this bridge. The bridge owns the registry so
+    /// its transport task and every VM it drives share one explicit address
+    /// space even when they run on different executor tasks or OS threads.
+    tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
     /// Wakes pending host calls when cancellation arrives.
     cancel_notify: Arc<Notify>,
     /// Whether the host transport has closed. Checked while holding `pending`
@@ -756,44 +763,6 @@ fn session_remind_payload_from_value(
     })
 }
 
-/// Parse the params of a `session/cancel_tool_call` notification and fire
-/// the per-tool-call cancellation. Mirrors the shape used by the public
-/// `cancel_in_flight_tool_call` builtin so hosts have one wire format
-/// regardless of which surface they came through.
-///
-/// Stdio bridges send this as a notification (no id, no response); the
-/// builtin handles request/response semantics in Harn. We deliberately
-/// drop malformed payloads silently because notifications can't reply
-/// with an error — logging would also be too noisy for partial drops.
-fn handle_cancel_tool_call_notification(params: &serde_json::Value) {
-    let session_id = params
-        .get("sessionId")
-        .or_else(|| params.get("session_id"))
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let call_id = params
-        .get("toolCallId")
-        .or_else(|| params.get("tool_call_id"))
-        .or_else(|| params.get("callId"))
-        .or_else(|| params.get("call_id"))
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    if call_id.is_empty() {
-        return;
-    }
-    let reason = params
-        .get("reason")
-        .and_then(|value| value.as_str())
-        .unwrap_or("host cancelled in-flight tool call")
-        .to_string();
-    let inject_reminder = params
-        .get("injectReminder")
-        .or_else(|| params.get("inject_reminder"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
-    crate::tool_call_cancellations::cancel(session_id, call_id, reason, inject_reminder);
-}
-
 fn queued_session_remind_from_params(params: &serde_json::Value) -> Result<QueuedReminder, String> {
     let mode = QueuedUserMessageMode::from_str(
         params
@@ -832,6 +801,7 @@ impl HostBridge {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
+        let tool_call_cancellations = crate::tool_call_cancellations::fresh_registry();
         let cancel_notify = Arc::new(Notify::new());
         let disconnected = Arc::new(AtomicBool::new(false));
         let queued_transcript_injections = HostBridgeInjectionState::default();
@@ -847,6 +817,7 @@ impl HostBridge {
         let queued_clone = queued_transcript_injections.clone();
         let resume_clone = resume_requested.clone();
         let skills_reload_clone = skills_reload_requested.clone();
+        let tool_call_cancellations_clone = tool_call_cancellations.clone();
         tokio::task::spawn_local(async move {
             let stdin = tokio::io::stdin();
             let reader = tokio::io::BufReader::new(stdin);
@@ -879,7 +850,10 @@ impl HostBridge {
                                 queued_clone.push_session_reminder(reminder).await;
                             }
                         } else if method == "session/cancel_tool_call" {
-                            handle_cancel_tool_call_notification(&msg["params"]);
+                            handle_cancel_tool_call_notification(
+                                &tool_call_cancellations_clone,
+                                &msg["params"],
+                            );
                         }
                     }
                     continue;
@@ -905,6 +879,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending,
             cancelled,
+            tool_call_cancellations,
             cancel_notify,
             disconnected,
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
@@ -941,50 +916,31 @@ impl HostBridge {
         writer: HostBridgeWriter,
         start_id: u64,
     ) -> Self {
-        Self::from_parts_with_writer_and_cancel_notify(
+        Self::from_parts_with_writer_and_control(
             pending,
-            cancelled,
-            Arc::new(Notify::new()),
             writer,
             start_id,
+            HostBridgeControlState::isolated(cancelled),
         )
     }
 
-    pub fn from_parts_with_writer_and_cancel_notify(
+    pub fn from_parts_with_writer_and_control(
         pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
-        cancelled: Arc<AtomicBool>,
-        cancel_notify: Arc<Notify>,
         writer: HostBridgeWriter,
         start_id: u64,
-    ) -> Self {
-        Self::from_parts_with_writer_cancel_notify_and_injection_state(
-            pending,
-            cancelled,
-            cancel_notify,
-            writer,
-            start_id,
-            None,
-        )
-    }
-
-    pub fn from_parts_with_writer_cancel_notify_and_injection_state(
-        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
-        cancelled: Arc<AtomicBool>,
-        cancel_notify: Arc<Notify>,
-        writer: HostBridgeWriter,
-        start_id: u64,
-        injection_state: Option<HostBridgeInjectionState>,
+        control: HostBridgeControlState,
     ) -> Self {
         Self {
             next_id: AtomicU64::new(start_id),
             pending,
-            cancelled,
-            cancel_notify,
+            cancelled: control.cancelled,
+            tool_call_cancellations: control.tool_call_cancellations,
+            cancel_notify: control.cancel_notify,
             disconnected: Arc::new(AtomicBool::new(false)),
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_transcript_injections: injection_state.unwrap_or_default(),
+            queued_transcript_injections: control.queued_transcript_injections,
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
@@ -1003,6 +959,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             cancelled: Arc::new(AtomicBool::new(false)),
+            tool_call_cancellations: crate::tool_call_cancellations::fresh_registry(),
             cancel_notify: Arc::new(Notify::new()),
             disconnected: Arc::new(AtomicBool::new(false)),
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
@@ -1047,6 +1004,12 @@ impl HostBridge {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    pub fn tool_call_cancellation_registry(
+        &self,
+    ) -> Arc<crate::tool_call_cancellations::CancellationRegistry> {
+        self.tool_call_cancellations.clone()
     }
 
     /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
@@ -1725,13 +1688,16 @@ mod tests {
     }
 
     fn test_bridge_sharing_injection_state(owner: &HostBridge) -> HostBridge {
-        HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+        HostBridge::from_parts_with_writer_and_control(
             Arc::new(Mutex::new(HashMap::new())),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(Notify::new()),
             Arc::new(|_| Ok(())),
             100,
-            Some(owner.injection_state()),
+            HostBridgeControlState::new(
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Notify::new()),
+                owner.injection_state(),
+                crate::tool_call_cancellations::fresh_registry(),
+            ),
         )
     }
 

@@ -715,9 +715,9 @@ plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/tool_call_cancellations.rs"
-statics = ["REGISTRY"]
-category = "logical_task"
-plan = "task_local_or_explicit"
+statics = ["ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/tracing.rs"

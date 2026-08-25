@@ -25,6 +25,7 @@ pub(super) struct SubtaskAmbientState {
     event_log: Option<Arc<AnyEventLog>>,
     mcp_call_budget: Option<CallBudget>,
     pg_query_budget: Option<CallBudget>,
+    tool_call_cancellations: Arc<crate::tool_call_cancellations::CancellationRegistry>,
 }
 
 impl SubtaskAmbientState {
@@ -40,11 +41,21 @@ impl SubtaskAmbientState {
             event_log: clone_via_swap(crate::event_log::swap_active_event_log),
             mcp_call_budget: clone_via_swap(crate::call_budget::swap_mcp_call_budget),
             pg_query_budget: clone_via_swap(crate::call_budget::swap_pg_query_budget),
+            tool_call_cancellations: clone_via_swap(
+                crate::tool_call_cancellations::swap_active_registry,
+            ),
         }
     }
 
     pub(super) fn set_placement(&mut self, placement: Option<SubtaskPlacement>) {
         self.placement = placement;
+    }
+
+    pub(super) fn set_tool_call_cancellations(
+        &mut self,
+        registry: Arc<crate::tool_call_cancellations::CancellationRegistry>,
+    ) {
+        self.tool_call_cancellations = registry;
     }
 
     pub(super) fn swap_in_place(&mut self) {
@@ -77,6 +88,10 @@ impl SubtaskAmbientState {
         swap_slot(
             &mut self.pg_query_budget,
             crate::call_budget::swap_pg_query_budget,
+        );
+        swap_slot(
+            &mut self.tool_call_cancellations,
+            crate::tool_call_cancellations::swap_active_registry,
         );
     }
 }
