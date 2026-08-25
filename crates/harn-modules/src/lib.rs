@@ -193,7 +193,7 @@ pub struct ModuleImport {
 /// the embedded stdlib source table, so callers can parse resolved stdlib
 /// modules without knowing about the stdlib mirror layout.
 pub fn read_module_source(path: &Path) -> Option<String> {
-    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+    if let Some(stdlib_module) = stdlib_module_name(path) {
         return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
     }
     std::fs::read_to_string(path).ok()
@@ -1247,7 +1247,7 @@ impl ModuleGraph {
                     .get(name)
                     .map(|definition| definition.kind)
                     .or_else(|| {
-                        stdlib_module_from_path(&file).and_then(|stdlib_module| {
+                        stdlib_module_name(&file).and_then(|stdlib_module| {
                             stdlib::builtin_reexports(stdlib_module)
                                 .contains(&name)
                                 .then_some(DefKind::Function)
@@ -1384,7 +1384,7 @@ fn load_module(
         collect_type_declarations(node, &mut module.type_declarations);
         collect_callable_declarations(node, &mut module.callable_declarations);
     }
-    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+    if let Some(stdlib_module) = stdlib_module_name(path) {
         module.own_exports.extend(
             stdlib::builtin_reexports(stdlib_module)
                 .iter()
@@ -1404,7 +1404,7 @@ fn load_module(
 
 /// Extract the stdlib module name when `path` is a `<std>/<name>`
 /// virtual path, otherwise `None`.
-fn stdlib_module_from_path(path: &Path) -> Option<&str> {
+pub fn stdlib_module_name(path: &Path) -> Option<&str> {
     let s = path.to_str()?;
     s.strip_prefix("<std>/")
 }
@@ -1427,7 +1427,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 /// `<std>/` virtual paths pass through untouched.
 pub fn canonical_path(path: &Path) -> PathBuf {
     use std::sync::OnceLock;
-    if stdlib_module_from_path(path).is_some() {
+    if stdlib_module_name(path).is_some() {
         return path.to_path_buf();
     }
     static MEMO: OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();

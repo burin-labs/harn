@@ -8,8 +8,9 @@ use harn_modules::DefKind;
 
 use crate::bytecode_cache;
 use crate::module_artifact::{
-    compile_module_artifact_from_source, compile_trusted_host_dispatch_module_artifact_from_source,
-    ModuleImportBinding, ModuleProvenance,
+    compile_embedded_stdlib_module_artifact_from_source, compile_module_artifact_from_source,
+    compile_trusted_host_dispatch_module_artifact_from_source, ModuleImportBinding,
+    ModuleProvenance,
 };
 use crate::module_source::{self, ModuleSource};
 use crate::prepared_module::PreparedModuleArtifact;
@@ -395,6 +396,9 @@ impl Vm {
 
         let mut compile_span = self.module_compile_span();
         let compiled = match self.module_provenance {
+            ModuleProvenance::EmbeddedStdlib => {
+                compile_embedded_stdlib_module_artifact_from_source(&synthetic, source)?
+            }
             ModuleProvenance::TrustedHostDispatch => {
                 compile_trusted_host_dispatch_module_artifact_from_source(&synthetic, source)?
             }
@@ -1075,16 +1079,16 @@ impl Vm {
                         self.module_phase_recorder.as_ref(),
                         ModuleProvenance::TrustedHostDispatch,
                     )?,
-                    ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
-                        self.prepared_module_cache.prepare(
-                            &file_path,
-                            &canonical,
-                            &source,
-                            None,
-                            self.module_phase_recorder.as_ref(),
-                            ModuleProvenance::User,
-                        )?
-                    }
+                    ModuleProvenance::User
+                    | ModuleProvenance::EmbeddedStdlib
+                    | ModuleProvenance::PrivilegedWire => self.prepared_module_cache.prepare(
+                        &file_path,
+                        &canonical,
+                        &source,
+                        None,
+                        self.module_phase_recorder.as_ref(),
+                        ModuleProvenance::User,
+                    )?,
                 }
             };
 

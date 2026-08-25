@@ -122,6 +122,10 @@ type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ModuleCompilationContext
 pub enum ModuleProvenance {
     #[default]
     User,
+    /// Immutable source selected from the runtime-owned stdlib catalog.
+    /// There is no source spelling for this authority: only the embedded
+    /// module loader and closed-program linker can construct it.
+    EmbeddedStdlib,
     PrivilegedWire,
     /// A Rust embedder-selected route module and its private import graph.
     /// Unlike `PrivilegedWire`, callables may be exported because only the
@@ -399,6 +403,7 @@ fn compile_module_artifact_with_provenance(
 ) -> Result<ModuleArtifact, VmError> {
     let options = match provenance {
         ModuleProvenance::User => crate::CompilerOptions::from_env(),
+        ModuleProvenance::EmbeddedStdlib => crate::CompilerOptions::embedded_stdlib(),
         ModuleProvenance::PrivilegedWire | ModuleProvenance::TrustedHostDispatch => {
             crate::CompilerOptions::privileged_wire()
         }
@@ -640,6 +645,25 @@ pub fn compile_module_artifact_from_source(
         Some(source_path.display().to_string()),
         &imported_symbols.enum_candidates,
         &imported_symbols.source_callable_names,
+    )
+}
+
+/// Compile source selected from the runtime's embedded stdlib catalog.
+///
+/// The caller must already have resolved the source through that catalog;
+/// filesystem paths and source annotations cannot select this entry point.
+pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
+        ModuleProvenance::EmbeddedStdlib,
     )
 }
 
@@ -958,7 +982,7 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source_with_context(
         Some(source_path.display().to_string()),
         context.enum_candidates(),
         context.source_callable_names(),
-        ModuleProvenance::User,
+        ModuleProvenance::EmbeddedStdlib,
         crate::CompilerOptions::embedded_stdlib(),
     )
 }

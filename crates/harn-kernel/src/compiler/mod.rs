@@ -183,10 +183,10 @@ impl CompilerOptions {
 
     /// Options for Harn's immutable, embedder-owned stdlib sources.
     ///
-    /// This grants stdlib-private primitives and runtime implementation
-    /// primitives used by their public wrappers. Source text and paths cannot
-    /// select the authority; the embedded loader and repository checker grant
-    /// it explicitly.
+    /// This grants stdlib-private and runtime implementation primitives, but
+    /// not Harness methods or privileged wire calls. Source text and paths
+    /// cannot select the authority; the embedded loader and closed-program
+    /// linker grant it explicitly.
     #[doc(hidden)]
     pub fn embedded_stdlib() -> Self {
         let mut options = Self::from_env();
@@ -230,6 +230,14 @@ impl CompilerOptions {
     #[doc(hidden)]
     pub fn runtime_owned_source_authority(self) -> bool {
         self.runtime_source_authority == RuntimeSourceAuthority::RuntimeOwned
+    }
+
+    #[doc(hidden)]
+    pub fn runtime_internal_authority(self) -> bool {
+        matches!(
+            self.runtime_source_authority,
+            RuntimeSourceAuthority::EmbeddedStdlib | RuntimeSourceAuthority::RuntimeOwned
+        )
     }
 
     #[doc(hidden)]
