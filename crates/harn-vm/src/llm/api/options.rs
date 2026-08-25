@@ -1,6 +1,7 @@
 //! Option and payload types for `llm_call`: `LlmCallOptions`,
 //! `LlmRequestPayload`, plus the `tool_search` / `thinking` sub-configs.
 
+use crate::llm::providers::schema_compat::project_output_schema_for_provider;
 use crate::value::VmValue;
 
 /// Sender for streaming text deltas from an in-flight LLM call.
@@ -855,8 +856,48 @@ impl LlmRequestPayload {
     }
 }
 
+impl LlmCallOptions {
+    /// Return the provider-compatible schema that local response validation
+    /// must enforce. This is deliberately the same projection payload creation
+    /// records for the wire request; the original schema still owns retry
+    /// guidance and transcript context.
+    pub(crate) fn validation_output_schema(&self) -> Option<serde_json::Value> {
+        match &self.output_format {
+            OutputFormat::JsonSchema { schema, strict } => {
+                Some(project_output_schema_for_provider(
+                    &self.provider,
+                    &self.model,
+                    *strict,
+                    schema,
+                    false,
+                ))
+            }
+            _ => self.output_schema.clone(),
+        }
+    }
+}
+
 impl From<&LlmCallOptions> for LlmRequestPayload {
     fn from(opts: &LlmCallOptions) -> Self {
+        let (output_format, output_schema) = match &opts.output_format {
+            OutputFormat::JsonSchema { schema, strict } => {
+                let schema = project_output_schema_for_provider(
+                    &opts.provider,
+                    &opts.model,
+                    *strict,
+                    schema,
+                    true,
+                );
+                (
+                    OutputFormat::JsonSchema {
+                        schema: schema.clone(),
+                        strict: *strict,
+                    },
+                    Some(schema),
+                )
+            }
+            output_format => (output_format.clone(), opts.output_schema.clone()),
+        };
         let mut payload = Self {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
@@ -876,8 +917,8 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
             fast: opts.fast,
-            output_format: opts.output_format.clone(),
-            output_schema: opts.output_schema.clone(),
+            output_format,
+            output_schema,
             schema_stream_abort: opts.schema_stream_abort,
             thinking: opts.thinking.clone(),
             anthropic_beta_features: opts.anthropic_beta_features_for_request(),

@@ -110,15 +110,15 @@ fn schema_validation_errors(result: &VmValue) -> Vec<String> {
     }
 }
 
-/// Compute schema validation errors against `opts.output_schema` without
-/// deciding disposition (warn vs error vs off). Returns an empty vec when
-/// no schema is configured or the data validates. Used by the schema-retry
-/// loop in `llm_call`.
-pub(super) fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
-    let Some(schema_json) = &opts.output_schema else {
+/// Compute schema validation errors against the effective output schema
+/// without deciding disposition (warn vs error vs off). Returns an empty vec
+/// when no schema is configured or the data validates. Used by the
+/// schema-retry loop in `llm_call`.
+pub(crate) fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
+    let Some(schema_json) = opts.validation_output_schema() else {
         return Vec::new();
     };
-    let schema_vm = json_to_vm_value(schema_json);
+    let schema_vm = json_to_vm_value(&schema_json);
     let validation = schema_result_value(data, &schema_vm, false);
     schema_validation_errors(&validation)
 }
