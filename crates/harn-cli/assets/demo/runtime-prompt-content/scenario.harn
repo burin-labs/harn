@@ -5,7 +5,7 @@ import "std/runtime"
  * and image blocks. `host_mock` keeps the demo fully offline while preserving
  * the same `runtime.prompt_content` boundary used by an attached ACP host.
  */
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   harness.testing.respond(
     "runtime",
     "prompt_content",

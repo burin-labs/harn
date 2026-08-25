@@ -27,7 +27,7 @@ fn verdict_label(v: Verdict) -> string {
   }
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   harness.stdio.println("=== pub-type-exports demo ===")
   harness.stdio.println("")
   // 1. The imported alias as a plain annotation.

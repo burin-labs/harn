@@ -24,14 +24,23 @@
  * `harn.mcp.call`; this scenario stays in lazy-mode by design so the
  * tape stays small and offline.
  */
-fn server_specs() {
+type McpServerSpec = {
+  name: string,
+  transport: string,
+  // A `stdio` server carries command/args; an `http` server carries a url.
+  command?: string,
+  args?: list<string>,
+  url?: string,
+}
+
+fn server_specs() -> list<McpServerSpec> {
   return [
     {name: "alpha", transport: "stdio", command: "/bin/true", args: []},
     {name: "beta", transport: "http", url: "http://127.0.0.1:1/mcp"},
   ]
 }
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   // 1. Register both servers lazily — no eager connect, so the demo
   //    runs even without a network or a bundled MCP fixture.
   for spec in server_specs() {
@@ -71,10 +80,13 @@ pipeline default(harness: Harness, _task: unknown) {
 }
 
 /**
- * Compact predicates so the receipt stays small. The status entry
- * shape is documented in `crates/harn-vm/src/mcp_host.rs::McpHostStatus`.
+ * The two status fields the receipt predicates read. The full entry shape is
+ * documented in `crates/harn-vm/src/mcp_host.rs::McpHostStatus`.
  */
-fn all_lazy(entries: list) {
+type McpStatusEntry = {lazy: bool, circuit: string}
+
+/** Compact predicates so the receipt stays small. */
+fn all_lazy(entries: list<McpStatusEntry>) -> bool {
   let ok = true
   for entry in entries {
     if !entry.lazy {
@@ -84,7 +96,7 @@ fn all_lazy(entries: list) {
   return ok
 }
 
-fn all_closed(entries: list) {
+fn all_closed(entries: list<McpStatusEntry>) -> bool {
   let ok = true
   for entry in entries {
     if entry.circuit != "closed" {

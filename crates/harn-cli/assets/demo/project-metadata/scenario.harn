@@ -8,10 +8,10 @@
  * store. Product embedders such as Burin can still override these operations
  * through their host bridge; this offline demo covers the standalone CLI path.
  */
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   harness.fs.mkdir("demo", true)
   harness.fs.mkdir("demo/src", true)
-  harness.fs.write_text("demo/src/lib.harn", "pipeline default(_) { return 1 }\n")
+  harness.fs.write_text("demo/src/lib.harn", "pipeline default() { return 1 }\n")
   harness.project.metadata_set(
     {
       dir: "demo",
