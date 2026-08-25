@@ -64,7 +64,7 @@ Usage:
   ./scripts/release_ship.sh --prepare --bump patch [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
   ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch                  # release_harn.harn only
   ./scripts/release_ship.sh --bump patch [--skip-dry-run] [--base main]   # recovery
-  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
+  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--allow-unfolded-fragments] [--base main]
 
 Merge-queue-safe release sequence for a prepared Harn release.
 
@@ -156,6 +156,17 @@ FINALIZE MODE
        version), pushes the tag, and publishes. Used when a release
        was authored without release_harn.harn or the tag-push trigger
        failed and we're recovering via push:main drift.
+
+  --allow-unfolded-fragments is recovery for shape (a) only. Finalization
+  publishes from the tag's own tree, so unfolded fragments inside that tree
+  cannot be corrected: no commit on any branch changes what the tag selects,
+  and moving the branch away from the tag fails the anchoring check instead.
+  Without this flag a release tagged before its fragments were folded can
+  never be completed. The flag does not hide the omission — it prints the
+  fragment list and states that those entries will appear under the next
+  release, which folds them from the default branch where they still sit.
+  Rejected outside --finalize: with no tag yet, folding is still possible and
+  still the right answer.
 
   Steps in either case:
 
@@ -409,6 +420,31 @@ require_no_unfolded_fragments() {
     done
   done
   if (( ${#frags[@]} > 0 )); then
+    # Recovery: an already-tagged release cannot take remedy (a) or (b).
+    # Finalization publishes from the tag's own tree, so the fragments the
+    # guard is reading are immutable — no commit on any branch changes them,
+    # and moving the branch away from the tag fails the anchoring check
+    # instead. Without an escape, a release that was tagged before its
+    # fragments were folded can never be completed, and the only alternatives
+    # are deleting a published tag or publishing outside this script.
+    #
+    # So the escape records the omission rather than hiding it: it prints the
+    # same list, says plainly what will be missing from the notes, and where
+    # those entries will surface instead. It is deliberately restricted to
+    # finalize, because for any release that has not been tagged yet, remedy
+    # (a) or (b) is still available and still correct.
+    if (( ${ALLOW_UNFOLDED_FRAGMENTS:-0} == 1 )); then
+      {
+        echo "warning: finalizing with ${#frags[@]} unfolded changelog fragment(s):"
+        printf '  - %s\n' "${frags[@]}"
+        echo "These entries are NOT in this release's notes. They remain on the"
+        echo "default branch, so the next release folds them and they appear"
+        echo "under that version instead. This is recovery for a release that"
+        echo "was tagged before its fragments were folded; the tag's tree cannot"
+        echo "be corrected, so the omission is recorded here instead."
+      } >&2
+      return 0
+    fi
     {
       echo "error: ${#frags[@]} unfolded changelog fragment(s) remain in $dir/:"
       printf '  - %s\n' "${frags[@]}"
@@ -419,6 +455,9 @@ require_no_unfolded_fragments() {
       echo "        (b) fold them into CHANGELOG.md's top '## vX.Y.Z' section by hand"
       echo "            and 'git rm' the fragment files, then re-run."
       echo "      Shipping now would omit these entries from the release notes."
+      echo "      If the release is ALREADY TAGGED, neither remedy can reach the"
+      echo "      tag's tree; use --allow-unfolded-fragments with --finalize to"
+      echo "      complete it and record the omission."
     } >&2
     exit 1
   fi
@@ -735,6 +774,7 @@ require_main_anchored_tag_at_head() {
 BUMP="patch"
 PREID=""
 SKIP_DRY_RUN=0
+ALLOW_UNFOLDED_FRAGMENTS=0
 SKIP_AUDIT=0
 AUDIT_RECEIPT=""
 MATERIALIZE_CANDIDATE=0
@@ -771,6 +811,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-dry-run)
       SKIP_DRY_RUN=1
+      shift
+      ;;
+    --allow-unfolded-fragments)
+      ALLOW_UNFOLDED_FRAGMENTS=1
       shift
       ;;
     --audit-receipt)
@@ -815,6 +859,15 @@ done
 
 if [[ "$BUMP" != "patch" || -n "$PREID" ]]; then
   echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid"
+  exit 1
+fi
+
+if [[ "$ALLOW_UNFOLDED_FRAGMENTS" -eq 1 && "$MODE" != "finalize" ]]; then
+  # Recovery only. Before a tag exists the fragments are still reachable, so
+  # folding them is both possible and correct; allowing the escape there would
+  # turn a repair for an unfixable state into a way to skip the fold.
+  echo "error: --allow-unfolded-fragments is only valid with --finalize" >&2
+  echo "hint: without a tag, fold the fragments instead — they are still editable" >&2
   exit 1
 fi
 
