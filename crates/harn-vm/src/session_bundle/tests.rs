@@ -68,7 +68,7 @@ fn fixture_run() -> RunRecord {
             args_hash: "abc123".to_string(),
             result: synthetic_bearer,
             is_rejected: false,
-            duration_ms: 7,
+            duration_ms: Some(7),
             iteration: 1,
             timestamp: "2026-05-01T00:00:30Z".to_string(),
         }],

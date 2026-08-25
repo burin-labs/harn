@@ -153,7 +153,7 @@ pub struct RunReportToolCall {
     pub args_hash: String,
     pub result: String,
     pub is_rejected: bool,
-    pub duration_ms: u64,
+    pub duration_ms: Option<u64>,
     pub iteration: usize,
     pub timestamp: String,
 }

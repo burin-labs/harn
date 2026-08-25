@@ -629,7 +629,7 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
             timestamp: Some(tool.timestamp.clone()),
             output: Some(json!(tool.result)),
             observed_output: Some(json!(tool.result)),
-            duration_ms: Some(tool.duration_ms as i64),
+            duration_ms: tool.duration_ms.and_then(|value| i64::try_from(value).ok()),
             deterministic: Some(!tool.is_rejected),
             fuzzy: Some(false),
             metadata: BTreeMap::from([

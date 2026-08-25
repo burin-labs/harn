@@ -773,9 +773,8 @@ impl SessionFold {
         match status.as_deref() {
             Some("completed") | Some("failed") | Some("rejected") => {
                 record.is_rejected = status.as_deref() == Some("rejected");
-                if let Some(duration) = facts::i64_at(payload, facts::TOOL_DURATION_MS) {
-                    record.duration_ms = u64::try_from(duration).unwrap_or(0);
-                }
+                record.duration_ms = facts::i64_at(payload, facts::TOOL_DURATION_MS)
+                    .and_then(|duration| u64::try_from(duration).ok());
             }
             _ => {}
         }
