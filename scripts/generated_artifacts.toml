@@ -56,6 +56,7 @@ exempt_checks = [
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
   "check-docs-links",               # validates docs/src local links resolve, not a mirror
+  "check-docs-symbols",             # validates docs name no removed runtime API, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
@@ -619,6 +620,9 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-docs-cli-flags" = "binary"
 "check-trigger-examples" = "binary"
 "check-docs-snippets" = "binary"
+# The removed-API answer comes from the linked harness-migration table, so a
+# stale executable calls a just-migrated builtin live and reports nothing.
+"check-docs-symbols" = "binary"
 "check-site-snippets" = "binary"
 "check-stdlib-strict-types" = "binary"
 "check-stdlib-public-return-types" = "binary"

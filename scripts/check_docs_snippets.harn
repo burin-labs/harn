@@ -459,8 +459,11 @@ pub fn indent_output(output: string) -> list<string> {
  * Resolve the harn binary used to validate snippets: $HARN_BIN wins,
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
+ *
+ * Public because the sibling gates that also need a real binary import it
+ * from here rather than growing another copy of the ladder.
  */
-fn resolve_harn_bin(harness: Harness) -> string {
+pub fn resolve_harn_bin(harness: Harness) -> string {
   const env_bin = harness.env.get("HARN_BIN")
   if env_bin != nil && env_bin != "" {
     return env_bin
