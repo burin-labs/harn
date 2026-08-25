@@ -239,8 +239,14 @@ Runtime capability methods, reached through `harness.runtime`:
 A connector wires this in about thirty lines. `on_delivery` takes the narrow `HarnessRuntime` handle rather than root authority, which is what the `capability-attenuation` lint asks for:
 
 ```harn,check
+type WebhookRequest = {headers: dict, body: string, path: string}
+
 /** Feed one inbound delivery; the result is the HTTP reply. */
-fn on_delivery(runtime: HarnessRuntime, intake: string, req) -> dict {
+fn on_delivery(
+  runtime: HarnessRuntime,
+  intake: string,
+  req: WebhookRequest,
+) -> dict {
   const outcome = runtime.webhook_intake_feed(intake, {
     headers: req.headers,
     body: req.body,

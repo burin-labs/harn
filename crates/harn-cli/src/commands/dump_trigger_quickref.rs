@@ -288,8 +288,13 @@ bounded replay buffer. Reads the last `limit` accepted deliveries from the\n  to
     out.push_str("A connector wires this in about thirty lines. `on_delivery` takes the narrow `HarnessRuntime` handle rather than root authority, which is what the `capability-attenuation` lint asks for:\n\n");
     out.push_str(
         "```harn,check\n\
+type WebhookRequest = {headers: dict, body: string, path: string}\n\n\
 /** Feed one inbound delivery; the result is the HTTP reply. */\n\
-fn on_delivery(runtime: HarnessRuntime, intake: string, req) -> dict {\n  \
+fn on_delivery(\n  \
+runtime: HarnessRuntime,\n  \
+intake: string,\n  \
+req: WebhookRequest,\n\
+) -> dict {\n  \
 const outcome = runtime.webhook_intake_feed(intake, {\n    \
 headers: req.headers,\n    \
 body: req.body,\n    \
