@@ -18,6 +18,10 @@ on:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
         type: string
+      orchestration-sha:
+        description: "Exact Harn commit that owns this reusable workflow, setup action, and bump driver. Must match the caller's pinned uses SHA."
+        required: true
+        type: string
       refresh-command:
         description: "Repository-owned regeneration command run after the standard version-file write. Defaults to refreshing the Harn package lock."
         required: false
@@ -146,12 +150,24 @@ jobs:
             exit 1
           fi
 
-      # Resolve which Harn to INSTALL *before* checking out the orchestration,
-      # so we can pin that checkout to the exact target release tag. This must
-      # precede the orchestration checkout — an external caller cannot reference
-      # this reusable workflow's own commit (github.workflow_sha resolves to the
-      # CALLER's commit, which does not exist in burin-labs/harn), so the ref has
-      # to be a burin-labs/harn ref we can compute here.
+      # A reusable workflow cannot discover its own callee commit from
+      # github.workflow_sha: that context names the caller. The fleet registry
+      # therefore projects one reviewed SHA into both `uses:` and this typed
+      # input. Validate it before any privileged orchestration checkout.
+      - name: Validate exact orchestration SHA
+        env:
+          HARN_BUMP_ORCHESTRATION_SHA: ${{ inputs.orchestration-sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${HARN_BUMP_ORCHESTRATION_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "orchestration-sha must be an exact 40-character lowercase commit SHA" >&2
+            exit 1
+          fi
+
+      # Resolve which Harn binary to install independently from the
+      # orchestration source. The target runtime owns embedded std/bump/*;
+      # orchestration-sha owns the workflow adapter that drives it.
       - name: Resolve target and short-circuit when already current
         id: resolve
         env:
@@ -175,23 +191,22 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # The orchestration script and the checksum-verifying setup-harn action
-      # both live in burin-labs/harn. Pin this checkout to the resolved target
-      # release tag: it is always a valid burin-labs/harn ref (works for every
-      # external caller) and keeps the orchestration + setup-harn code
-      # version-consistent with the Harn being installed below.
+      # The orchestration script and checksum-verifying setup-harn action come
+      # from the same exact commit as this reusable workflow. The installed
+      # target may be older: the adapter owns compatibility while the target
+      # runtime continues to own embedded std/bump/* and its migrations.
       - name: Checkout Harn runtime orchestration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: burin-labs/harn
-          ref: ${{ steps.resolve.outputs.version }}
+          ref: ${{ inputs.orchestration-sha }}
           path: .harn-runtime
           persist-credentials: false
 
       # Install the TARGET Harn through the checksum-verifying setup-harn
-      # action. The target release embeds std/bump/*, so the orchestration runs
-      # under it and the lockfile refresh + validation use the version we are
-      # bumping to. setup-harn's bounded retry absorbs still-publishing assets.
+      # action. The target release embeds std/bump/*, so the driver runs under
+      # that binary and the lockfile refresh + validation use the version we
+      # are bumping to. setup-harn's bounded retry absorbs publishing lag.
       - name: Install target Harn
         uses: ./.harn-runtime/.github/actions/setup-harn
         with:
