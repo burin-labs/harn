@@ -32,7 +32,7 @@ pub fn schema_value() -> Value {
         "$defs": {
             "provider": {
                 "type": "object",
-                "required": ["id", "display_name", "classification", "endpoint", "auth", "cache_usage_accounting", "protocols", "features", "caveats"],
+                "required": ["id", "display_name", "classification", "endpoint", "auth", "protocols", "features", "caveats"],
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "display_name": {"type": "string", "minLength": 1},

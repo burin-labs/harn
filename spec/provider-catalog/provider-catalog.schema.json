@@ -1288,7 +1288,6 @@
         "classification",
         "endpoint",
         "auth",
-        "cache_usage_accounting",
         "protocols",
         "features",
         "caveats"
