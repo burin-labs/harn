@@ -277,7 +277,7 @@ pub fn build_for_reference_index(
     files: &[PathBuf],
     source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> ModuleGraphBuild {
-    build_inner(files, None, true, source_overrides)
+    build_inner(files, ParsedSourceRetention::All, source_overrides)
 }
 
 fn build_inner(

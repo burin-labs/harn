@@ -7,21 +7,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use harn_modules::{index_references, DefSite, ReferenceIndex};
+use ignore::WalkBuilder;
 use tower_lsp::lsp_types::Url;
 
 use crate::document::DocumentState;
 use crate::document_kind::DocumentKind;
-
-const SKIP_DIRS: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "target",
-    ".harn",
-    ".harn-runs",
-    ".burin",
-];
 
 pub(crate) struct WorkspaceRefs {
     pub index: ReferenceIndex,
@@ -73,29 +63,25 @@ pub(crate) fn definition_at(workspace: &WorkspaceRefs, file: &Path, name: &str) 
 }
 
 fn collect_harn_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("");
-                if SKIP_DIRS.contains(&name) {
-                    continue;
-                }
-                stack.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("harn") {
-                out.push(path);
-            }
-        }
-    }
-    out
+    let mut walker = WalkBuilder::new(root);
+    // Workspace intelligence uses the same committed, machine-independent
+    // candidate set as Harn's search and CLI surfaces. If the built-in layer
+    // cannot be configured, walking remains a visible over-inclusion rather
+    // than silently producing an empty index.
+    let _ = harn_vm::ignore_policy::configure(
+        &mut walker,
+        root,
+        harn_vm::ignore_policy::IgnorePolicy::Project,
+        true,
+    );
+    walker
+        .follow_links(false)
+        .build()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .map(|entry| entry.into_path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("harn"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -226,5 +212,43 @@ mod tests {
             edge_triples(&disk_index),
             "LSP and harn graph must answer from the same inverse of definition_of"
         );
+    }
+
+    #[test]
+    fn workspace_refs_use_the_shared_project_ignore_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::write(tmp.path().join("included.harn"), "fn included() { 1 }\n").unwrap();
+        fs::write(
+            tmp.path().join("git_ignored.harn"),
+            "fn git_ignored() { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("agent_ignored.harn"),
+            "fn agent_ignored() { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("dot_ignored.harn"),
+            "fn dot_ignored() { 1 }\n",
+        )
+        .unwrap();
+        fs::write(tmp.path().join(".gitignore"), "git_ignored.harn\n").unwrap();
+        fs::write(tmp.path().join(".agentignore"), "agent_ignored.harn\n").unwrap();
+        fs::write(tmp.path().join(".ignore"), "dot_ignored.harn\n").unwrap();
+
+        let workspace = workspace_refs(&HashMap::new(), Some(tmp.path())).expect("workspace index");
+        let indexed: HashSet<_> = workspace
+            .index
+            .files
+            .iter()
+            .map(|path| file_name(path))
+            .collect();
+
+        assert!(indexed.contains("included.harn"), "{indexed:?}");
+        assert!(indexed.contains("dot_ignored.harn"), "{indexed:?}");
+        assert!(!indexed.contains("git_ignored.harn"), "{indexed:?}");
+        assert!(!indexed.contains("agent_ignored.harn"), "{indexed:?}");
     }
 }
