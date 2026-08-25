@@ -1,7 +1,7 @@
 import { parallel_judge } from "std/llm/judge"
 import { propose_instructions } from "std/llm/refine"
 
-fn __require_config(config) {
+fn __require_config(config: dict) {
   require type_of(config) == "dict", "optimize_prompt: config must be a dict"
   require type_of(config?.base_prompt) == "string", "optimize_prompt: base_prompt must be a string"
   require type_of(config?.eval_set) == "list", "optimize_prompt: eval_set must be a list"
@@ -10,14 +10,14 @@ fn __require_config(config) {
   return config
 }
 
-fn __positive_int(value, fallback, label) {
+fn __positive_int(value: any, fallback: any, label: string) {
   const raw = value ?? fallback
   const n = to_int(raw)
   require n != nil && n > 0, label + " must be a positive integer"
   return n
 }
 
-fn __demo_sets(config) {
+fn __demo_sets(config: dict) {
   const demos = config?.demo_sets ?? config?.demos
   if demos == nil {
     return [[]]
@@ -32,7 +32,7 @@ fn __demo_sets(config) {
   return [demos]
 }
 
-fn __demo_text(demo) {
+fn __demo_text(demo: dict) {
   if type_of(demo) == "string" {
     return demo
   }
@@ -47,7 +47,11 @@ fn __demo_text(demo) {
   return json_stringify(demo)
 }
 
-fn __render_prompt(base_prompt, instruction, demos) {
+fn __render_prompt(
+  base_prompt: string?,
+  instruction: string?,
+  demos: string | bytes | list | dict | set | range | nil,
+) {
   let parts = []
   const instruction_text = trim(instruction ?? "")
   const base_text = trim(base_prompt)
@@ -67,7 +71,7 @@ fn __render_prompt(base_prompt, instruction, demos) {
   return join(parts, "\n\n")
 }
 
-fn __candidate_space(llm: HarnessLlm, config) {
+fn __candidate_space(llm: HarnessLlm, config: any) {
   const instructions = propose_instructions(llm, config.base_prompt, config)
   const demo_sets = __demo_sets(config)
   let candidates = []
@@ -88,17 +92,17 @@ fn __candidate_space(llm: HarnessLlm, config) {
   return candidates
 }
 
-fn __exploration(config) {
+fn __exploration(config: dict) {
   const value = to_float(config?.acquisition?.exploration ?? config?.exploration ?? 0.25)
   require value != nil, "optimize_prompt: acquisition.exploration must be numeric"
   return value
 }
 
-fn __judge_options(config) {
+fn __judge_options(config: dict) {
   return (config?.budget ?? {}) + (config?.judge ?? {})
 }
 
-fn __trial_limit(config, candidate_count) {
+fn __trial_limit(config: dict, candidate_count: int) {
   let limit = __positive_int(config?.trials, candidate_count, "optimize_prompt: trials")
   if config?.budget?.max_trials != nil {
     const max_trials = __positive_int(
@@ -128,12 +132,12 @@ fn __trial_limit(config, candidate_count) {
   return limit
 }
 
-fn __words(text) {
+fn __words(text: any) {
   const normalized = regex_replace("[^A-Za-z0-9_]+", " ", lowercase(to_string(text)))
   return split(trim(normalized), " ").filter({ word -> word != "" })
 }
 
-fn __text_similarity(a, b) {
+fn __text_similarity(a: any, b: any) {
   const left = __words(a)
   const right = __words(b)
   if len(left) == 0 || len(right) == 0 {
@@ -153,7 +157,7 @@ fn __text_similarity(a, b) {
   return common / (denom * 1.0)
 }
 
-fn __candidate_similarity(candidate, observed) {
+fn __candidate_similarity(candidate: dict, observed: dict) {
   let similarity = __text_similarity(candidate.instruction, observed.candidate.instruction)
   if len(candidate.demos) == len(observed.candidate.demos) {
     similarity = similarity + 0.2
@@ -164,7 +168,7 @@ fn __candidate_similarity(candidate, observed) {
   return similarity
 }
 
-fn __acquisition(candidate, observations, best_score, exploration) {
+fn __acquisition(candidate: dict, observations: any, best_score: float, exploration: any) {
   if len(observations) == 0 {
     return {
       kind: "expected_improvement",
@@ -193,7 +197,13 @@ fn __acquisition(candidate, observations, best_score, exploration) {
   }
 }
 
-fn __next_candidate(candidates, observed_indexes, observations, best_score, exploration) {
+fn __next_candidate(
+  candidates: list,
+  observed_indexes: list,
+  observations: any,
+  best_score: float,
+  exploration: any,
+) {
   let selected = nil
   let selected_acquisition = nil
   for candidate in candidates {
@@ -208,7 +218,7 @@ fn __next_candidate(candidates, observed_indexes, observations, best_score, expl
   return {candidate: selected, acquisition: selected_acquisition}
 }
 
-fn __insert_ranked(ranked, entry) {
+fn __insert_ranked(ranked: list, entry: dict) {
   let out = []
   let inserted = false
   for existing in ranked {
@@ -224,7 +234,7 @@ fn __insert_ranked(ranked, entry) {
   return out
 }
 
-fn __rank_observations(observations) {
+fn __rank_observations(observations: list) {
   let ranked = []
   for observation in observations {
     ranked = __insert_ranked(
@@ -247,7 +257,7 @@ fn __rank_observations(observations) {
  * @effects: []
  * @errors: []
  */
-pub fn optimize_prompt(llm: HarnessLlm, config) {
+pub fn optimize_prompt(llm: HarnessLlm, config: dict) {
   const cfg = __require_config(config)
   const candidates = __candidate_space(llm, cfg)
   require len(candidates) > 0, "optimize_prompt: no candidate prompts generated"

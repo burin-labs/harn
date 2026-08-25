@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   try {
     const _r = harness.net.get("http://127.0.0.1:1", {timeout_ms: 100})
     harness.stdio.println("unexpected_timeout_ms_success")

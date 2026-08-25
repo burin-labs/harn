@@ -23,7 +23,7 @@
       {"name":"summary", "kind":"method", "access_level":null, "signature":"fn summary(title: string)", "start_row":20, "end_row":22, "children":[]}
     ]
   },
-  {"name":"normalize", "kind":"function", "access_level":null, "signature":"fn normalize(task)", "start_row":25, "end_row":27, "children":[]},
-  {"name":"review", "kind":"function", "access_level":null, "signature":"pipeline review(harness: Harness, task)", "start_row":29, "end_row":32, "children":[]},
-  {"name":"_notify", "kind":"function", "access_level":null, "signature":"tool _notify(message)", "start_row":34, "end_row":37, "children":[]}
+  {"name":"normalize", "kind":"function", "access_level":null, "signature":"fn normalize(task: dict)", "start_row":25, "end_row":27, "children":[]},
+  {"name":"review", "kind":"function", "access_level":null, "signature":"pipeline review(harness: Harness, task: dict)", "start_row":29, "end_row":32, "children":[]},
+  {"name":"_notify", "kind":"function", "access_level":null, "signature":"tool _notify(message: string)", "start_row":34, "end_row":37, "children":[]}
 ]

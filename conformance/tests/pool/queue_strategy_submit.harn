@@ -1,6 +1,6 @@
 import { QueueStrategy, fifo, lifo, pool_create, pool_wait, priority } from "std/lifecycle/pool"
 
-fn stamp(runtime: HarnessRuntime, order) {
+fn stamp(runtime: HarnessRuntime, order: any) {
   return { -> runtime.atomic_add(order, 1) }
 }
 

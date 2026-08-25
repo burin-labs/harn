@@ -16,7 +16,7 @@ pub type CommandResult = {
  * @effects: []
  * @errors: []
  */
-pub fn command_result_ok(stdout: string = "", extra = nil) -> CommandResult {
+pub fn command_result_ok(stdout: string = "", extra: dict? = nil) -> CommandResult {
   const base = extra ?? {}
   return base
     + {
@@ -36,7 +36,11 @@ pub fn command_result_ok(stdout: string = "", extra = nil) -> CommandResult {
  * @effects: []
  * @errors: []
  */
-pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> CommandResult {
+pub fn command_result_fail(
+  exit_code: int = 1,
+  stderr: string = "",
+  extra: dict? = nil,
+) -> CommandResult {
   const base = extra ?? {}
   return base
     + {

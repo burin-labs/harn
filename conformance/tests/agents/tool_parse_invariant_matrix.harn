@@ -73,7 +73,7 @@ fn large_content() -> string {
  * `expect` is the call the span was written to produce, or nil when the span is
  * deliberately unparseable and only a diagnostic is acceptable.
  */
-fn cell(harness: Harness, pin: string, label: string, text: string, expect) -> nil {
+fn cell(harness: Harness, pin: string, label: string, text: string, expect: any) -> nil {
   const tools = corpus_registry()
   const turn_opts = {tool_format: pin, tools: tools}
   const parsed = agent_parse_tool_calls(harness.agent, text, tools, pin)

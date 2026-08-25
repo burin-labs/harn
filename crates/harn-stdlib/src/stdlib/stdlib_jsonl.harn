@@ -11,9 +11,21 @@ import {
 } from "std/fs"
 import { SchemaContract, ValidationIssue, schema_contract_check } from "std/schema"
 
-pub type ReadJsonlOptions = {strict?: bool, max_records?: int, max_bytes?: int, on_error?: any}
+pub type JsonlErrorHandler = fn(string, JsonlRecordFailure) -> unknown
 
-type ResolvedReadJsonlOptions = {strict: bool, max_records: int, max_bytes: int, on_error?: any}
+pub type ReadJsonlOptions = {
+  strict?: bool,
+  max_records?: int,
+  max_bytes?: int,
+  on_error?: JsonlErrorHandler,
+}
+
+type ResolvedReadJsonlOptions = {
+  strict: bool,
+  max_records: int,
+  max_bytes: int,
+  on_error: JsonlErrorHandler?,
+}
 
 pub type JsonlCursor = {offset: int, line: int}
 
@@ -61,7 +73,7 @@ pub type JsonlAppendPage<T> = {
 
 pub type JsonlAppendPageResult<T> = Result<JsonlAppendPage<T>, FsFailure>
 
-fn __read_options(options) -> ResolvedReadJsonlOptions {
+fn __read_options(options: ReadJsonlOptions) -> ResolvedReadJsonlOptions {
   const opts = options ?? {}
   return {
     strict: opts.strict ?? false,
@@ -107,7 +119,7 @@ fn __append_page_options(options: JsonlAppendPageOptions) -> FileAppendPageOptio
   return resolved
 }
 
-fn __malformed(line: FileLine, failure) -> JsonlRecordFailure {
+fn __malformed(line: FileLine, failure: dict) -> JsonlRecordFailure {
   return {
     kind: "malformed",
     line: line.line,
@@ -227,7 +239,7 @@ pub fn read_jsonl_page(
   return unwrap(read_jsonl_page_result(fs, path, options))
 }
 
-fn __contract_failure(record: JsonlRecord<unknown>, failure) -> JsonlRecordFailure {
+fn __contract_failure(record: JsonlRecord<unknown>, failure: dict) -> JsonlRecordFailure {
   return {
     kind: failure.kind,
     line: record.line,
@@ -379,7 +391,7 @@ pub fn write_jsonl(fs: HarnessFs, path: string, items: list) -> int {
  * @effects: [fs.write]
  * @errors: [FsFailure]
  */
-pub fn append_jsonl(fs: HarnessFs, path: string, item) -> int {
+pub fn append_jsonl(fs: HarnessFs, path: string, item: any) -> int {
   const line = json_stringify(item) + "\n"
   fs.append(path, line)
   return len(line)
@@ -391,7 +403,12 @@ pub fn append_jsonl(fs: HarnessFs, path: string, item) -> int {
  * @effects: []
  * @errors: [JsonlRecordFailure]
  */
-pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
+pub fn fold_jsonl<T>(
+  text: string,
+  initial: T,
+  reducer: unknown,
+  options: ReadJsonlOptions = {},
+) -> T {
   const opts = __read_options(options)
   let state = initial
   let index = 0
@@ -427,13 +444,13 @@ pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}
  * @effects: [fs.read]
  * @errors: [FsFailure, JsonlRecordFailure]
  */
-pub fn fold_jsonl_file(
+pub fn fold_jsonl_file<T>(
   fs: HarnessFs,
   path: string,
-  initial,
-  reducer,
+  initial: T,
+  reducer: unknown,
   options: ReadJsonlOptions = {},
-) -> any {
+) -> T {
   const opts = __read_options(options)
   let state = initial
   let index = 0

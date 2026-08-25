@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Match with no matching arm should throw
   const result = try {
     match "unexpected" {

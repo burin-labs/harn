@@ -17,7 +17,7 @@
 //   harn run examples/task_plan/eval.harn -- --plans=examples/task_plan/plans --out=runs/eval.jsonl
 import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
 
-fn parse_arg(args, prefix) {
+fn parse_arg(args: list?, prefix: any) {
   for arg in args ?? [] {
     if starts_with(arg, prefix) {
       return substring(arg, len(prefix))
@@ -26,7 +26,7 @@ fn parse_arg(args, prefix) {
   return nil
 }
 
-fn collect_plan_files(harness, dir) {
+fn collect_plan_files(harness: Harness, dir: string) {
   let paths = []
   for name in harness.fs.list_dir(dir) {
     if ends_with(name, ".json") {
@@ -36,7 +36,7 @@ fn collect_plan_files(harness, dir) {
   return paths
 }
 
-fn record_for(harness, plan_path) {
+fn record_for(harness: Harness, plan_path: any) {
   const plan = json_parse(harness.fs.read_text(plan_path))
   const report = task_plan_validate(plan)
   const compiled = task_plan_compile(plan)

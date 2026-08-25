@@ -1,6 +1,6 @@
 import "std/jsonl"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-jsonl-append-pages-" + harness.random.uuid_v7(),

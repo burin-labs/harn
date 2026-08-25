@@ -18,7 +18,7 @@ fn fingerprint_signature(fp: ProjectFingerprint) -> string {
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "project-fingerprint-" + harness.random.uuid(),

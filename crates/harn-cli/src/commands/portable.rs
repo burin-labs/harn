@@ -267,7 +267,7 @@ mod tests {
         let result = dir.path().join("result.json");
         fs::write(
             &source,
-            "fn greet(harness: Harness, input) { return harness.interaction.ask(input) }",
+            "fn greet(harness: Harness, input: string) { return harness.interaction.ask(input) }",
         )
         .unwrap();
         fs::write(&input, r#""continue""#).unwrap();

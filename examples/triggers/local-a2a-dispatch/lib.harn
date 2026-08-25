@@ -1,7 +1,7 @@
 import "std/triggers"
 
 /** Return deterministic issue triage output from normalized issue input. */
-pub fn triage_issue_payload(raw, trace_id, replay_of_event_id) -> dict {
+pub fn triage_issue_payload(raw: dict, trace_id: any, replay_of_event_id: any) -> dict {
   const issue = raw.issue ?? raw
   const title = issue.title ?? "untitled issue"
   return {

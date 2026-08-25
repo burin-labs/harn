@@ -8,7 +8,7 @@ use super::harness::*;
 #[test]
 fn test_slot_locals_preserve_shadowing_and_assignment() {
     let out = run_output(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 let x = 1
 if true {
   let x = 10
@@ -25,7 +25,7 @@ harness.stdio.log(x)
 #[test]
 fn test_slot_params_and_recursive_function_calls() {
     let out = run_output(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 fn sum_to(n, acc = 0) {
   if n <= 0 {
     return acc
@@ -41,7 +41,7 @@ harness.stdio.log(sum_to(5))
 #[test]
 fn test_slot_locals_sync_for_closure_capture() {
     let out = run_output(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 let x = 1
 x = 7
 const f = { -> x + 1 }
@@ -54,7 +54,7 @@ harness.stdio.log(f())
 #[test]
 fn test_slot_property_assignment_updates_slot_value() {
     let out = run_output(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 let d = {count: 1}
 d.count = d.count + 2
 harness.stdio.log(d.count)
@@ -66,7 +66,7 @@ harness.stdio.log(d.count)
 #[test]
 fn test_slot_subscript_assignment_updates_slot_value() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 let d = {}
 d["a"] = 1
 d["b"] = 2

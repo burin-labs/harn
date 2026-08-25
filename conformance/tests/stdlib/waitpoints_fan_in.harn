@@ -1,6 +1,6 @@
 import "std/waitpoint"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const id = "fan-in-" + harness.random.uuid()
   harness.runtime.waitpoint_create(id)
   const completed = harness.runtime.atomic(0)

@@ -83,7 +83,7 @@ pub type CommandHoldResult = {
   receipts: list,
 }
 
-fn __cl_pos_int(value, fallback: int) -> int {
+fn __cl_pos_int(value: any, fallback: int) -> int {
   const resolved = to_int(value)
   if resolved != nil && resolved > 0 {
     return resolved
@@ -104,7 +104,7 @@ fn __cl_pos_int(value, fallback: int) -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_wait_normalize(raw) -> CommandWaitOptions {
+pub fn command_wait_normalize(raw: any) -> CommandWaitOptions {
   const opts = if type_of(raw) == "dict" {
     raw
   } else {
@@ -153,7 +153,7 @@ pub fn command_ledger_new() -> list {
   return []
 }
 
-fn __cl_is_running_handle(result) -> bool {
+fn __cl_is_running_handle(result: dict) -> bool {
   if type_of(result) != "dict" {
     return false
   }
@@ -161,7 +161,7 @@ fn __cl_is_running_handle(result) -> bool {
   return to_string(result?.status ?? "") == "running" && handle != ""
 }
 
-fn __cl_row_index(ledger, handle_id) -> int {
+fn __cl_row_index(ledger: list, handle_id: any) -> int {
   let index = 0
   for row in ledger {
     if row?.handle_id == handle_id {
@@ -172,7 +172,7 @@ fn __cl_row_index(ledger, handle_id) -> int {
   return -1
 }
 
-fn __cl_replace_row(ledger, handle_id, new_row) {
+fn __cl_replace_row(ledger: list, handle_id: any, new_row: any) {
   let out = []
   for row in ledger {
     if row?.handle_id == handle_id {
@@ -184,7 +184,7 @@ fn __cl_replace_row(ledger, handle_id, new_row) {
   return out
 }
 
-fn __cl_new_row(result, now_ms, cw) {
+fn __cl_new_row(result: dict, now_ms: any, cw: dict) {
   const lease = if to_string(result?.lease ?? "") == "service" {
     "service"
   } else {
@@ -225,7 +225,7 @@ fn __cl_new_row(result, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) -> list {
+pub fn command_ledger_ingest(ledger: any, dispatch_results: list?, now_ms: any, cw: dict) -> list {
   let out = ledger
   for result in dispatch_results ?? [] {
     if __cl_is_running_handle(result) && __cl_row_index(out, to_string(result.handle_id)) < 0 {
@@ -235,7 +235,7 @@ pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) -> list {
   return out
 }
 
-fn __cl_awaited_running(ledger) {
+fn __cl_awaited_running(ledger: list) {
   let out = []
   for row in ledger {
     if row?.lease == "awaited" && row?.status == "running" {
@@ -253,7 +253,7 @@ fn __cl_awaited_running(ledger) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_has_awaited(ledger) -> bool {
+pub fn command_ledger_has_awaited(ledger: list) -> bool {
   return len(__cl_awaited_running(ledger)) > 0
 }
 
@@ -265,7 +265,7 @@ pub fn command_ledger_has_awaited(ledger) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_should_hold(ledger, tool_call_count) -> bool {
+pub fn command_ledger_should_hold(ledger: list, tool_call_count: int?) -> bool {
   return to_int(tool_call_count ?? 0) == 0 && command_ledger_has_awaited(ledger)
 }
 
@@ -277,7 +277,7 @@ pub fn command_ledger_should_hold(ledger, tool_call_count) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_retire(ledger, handle_id) -> list {
+pub fn command_ledger_retire(ledger: list, handle_id: any) -> list {
   let out = []
   for row in ledger {
     if row?.handle_id != handle_id {
@@ -296,7 +296,7 @@ pub fn command_ledger_retire(ledger, handle_id) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_release(ledger, handle_id) -> list {
+pub fn command_ledger_release(ledger: list, handle_id: any) -> list {
   const index = __cl_row_index(ledger, handle_id)
   if index < 0 {
     return ledger
@@ -312,7 +312,7 @@ pub fn command_ledger_release(ledger, handle_id) -> list {
 
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_parse_snapshot(entry) {
+fn __cl_parse_snapshot(entry: dict) {
   const parsed = try {
     json_parse(to_string(entry?.content ?? ""))
   } catch (e) {
@@ -324,7 +324,7 @@ fn __cl_parse_snapshot(entry) {
   return parsed + {__cl_kind: to_string(entry?.kind ?? "")}
 }
 
-fn __cl_apply_one(row, snapshot, now_ms, cw) {
+fn __cl_apply_one(row: dict, snapshot: dict, now_ms: any, cw: dict) {
   const is_terminal = to_string(snapshot?.__cl_kind ?? "") == "tool_result"
     || (to_string(snapshot?.status ?? "")
       != "running"
@@ -379,7 +379,7 @@ fn __cl_apply_one(row, snapshot, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_apply_updates(ledger, entries, now_ms, cw) -> list {
+pub fn command_ledger_apply_updates(ledger: any, entries: list?, now_ms: any, cw: dict) -> list {
   let out = ledger
   for entry in entries ?? [] {
     const snapshot = __cl_parse_snapshot(entry)
@@ -398,7 +398,7 @@ pub fn command_ledger_apply_updates(ledger, entries, now_ms, cw) -> list {
 // Decision pass: delta gate + event triggers + schedule. One mechanism.
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_row_fires(row, now_ms, cw) -> bool {
+fn __cl_row_fires(row: dict, now_ms: any, cw: dict) -> bool {
   if row.status != "running" {
     // Terminal: always fires immediately (the completion payload).
     return true
@@ -418,7 +418,7 @@ fn __cl_row_fires(row, now_ms, cw) -> bool {
   return false
 }
 
-fn __cl_advance_schedule_row(row, now_ms, cw) {
+fn __cl_advance_schedule_row(row: dict, now_ms: any, cw: dict) {
   const next_interval = min(row.decision_interval_ms * cw.decision_multiplier, cw.decision_cap_ms)
   return row + {decision_interval_ms: next_interval, next_decision_at_ms: now_ms + next_interval}
 }
@@ -437,7 +437,7 @@ fn __cl_advance_schedule_row(row, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_decide(ledger, now_ms, cw) -> dict {
+pub fn command_ledger_decide(ledger: list, now_ms: any, cw: dict) -> dict {
   let fire = false
   let out = []
   for row in ledger {
@@ -461,7 +461,7 @@ pub fn command_ledger_decide(ledger, now_ms, cw) -> dict {
   return {ledger: out, fire: fire}
 }
 
-fn __cl_earliest_deadline(ledger, cw) -> int {
+fn __cl_earliest_deadline(ledger: list, cw: dict) -> int {
   let earliest = nil
   for row in ledger {
     if row?.lease == "awaited" && row.status == "running" {
@@ -482,7 +482,7 @@ fn __cl_earliest_deadline(ledger, cw) -> int {
 // Digest builder — the ONE coalesced `command_status` block for N handles.
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_command_entry(row) {
+fn __cl_command_entry(row: dict) {
   if row.status != "running" {
     const snap = row?.terminal_snapshot ?? {}
     return {
@@ -508,7 +508,7 @@ fn __cl_command_entry(row) {
   }
 }
 
-fn __cl_decision_wording(ledger, cw) -> string {
+fn __cl_decision_wording(ledger: list, cw: dict) -> string {
   let stalled = false
   for row in ledger {
     if row?.lease == "awaited" && row.status == "running" && row.silence_ms >= cw.stall_after_ms {
@@ -540,7 +540,7 @@ fn __cl_decision_wording(ledger, cw) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_build_digest(ledger, now_ms, cw) -> string {
+pub fn command_ledger_build_digest(ledger: list, now_ms: any, cw: dict) -> string {
   let commands = []
   let next_update = nil
   for row in ledger {
@@ -573,7 +573,7 @@ pub fn command_ledger_build_digest(ledger, now_ms, cw) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_after_digest(ledger, now_ms, cw) -> list {
+pub fn command_ledger_after_digest(ledger: list, now_ms: any, cw: dict) -> list {
   let out = []
   for row in ledger {
     if row?.lease != "awaited" {
@@ -611,7 +611,7 @@ pub fn command_ledger_after_digest(ledger, now_ms, cw) -> list {
 
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_ceiling_breaches(ledger, now_ms, cw) {
+fn __cl_ceiling_breaches(ledger: list, now_ms: any, cw: dict) {
   let out = []
   for row in ledger {
     if row?.lease == "awaited" && row.status == "running" {
@@ -623,7 +623,7 @@ fn __cl_ceiling_breaches(ledger, now_ms, cw) {
   return out
 }
 
-fn __cl_kill_handle(tools: HarnessTools, handle_id) {
+fn __cl_kill_handle(tools: HarnessTools, handle_id: any) {
   return try {
     tools.cancel_handle({handle_id: handle_id, timed_out: true})
   } catch (e) {
@@ -646,10 +646,10 @@ fn __cl_kill_handle(tools: HarnessTools, handle_id) {
 pub fn command_ledger_apply_ceiling(
   agent: HarnessAgent,
   tools: HarnessTools,
-  ledger,
-  now_ms,
-  cw,
-  session_id,
+  ledger: list,
+  now_ms: any,
+  cw: dict,
+  session_id: string,
 ) -> dict {
   const breaches = __cl_ceiling_breaches(ledger, now_ms, cw)
   if len(breaches) == 0 {
@@ -736,9 +736,9 @@ fn __cl_now_ms(clock: HarnessClock) -> int {
  */
 pub fn command_ledger_hold(
   harness: Harness,
-  session_id,
-  ledger,
-  cw,
+  session_id: string,
+  ledger: any,
+  cw: dict,
   hold_state: CommandHoldState,
 ) -> CommandHoldResult {
   let live = ledger
@@ -826,7 +826,7 @@ pub fn command_ledger_hold(
   }
 }
 
-fn __cl_terminal_batch_succeeded(ledger) -> bool {
+fn __cl_terminal_batch_succeeded(ledger: list) -> bool {
   let saw_terminal = false
   for row in ledger {
     if row?.lease == "awaited" && row?.status != "running" {
@@ -840,7 +840,7 @@ fn __cl_terminal_batch_succeeded(ledger) -> bool {
   return saw_terminal
 }
 
-fn __cl_has_terminal_awaited(ledger) -> bool {
+fn __cl_has_terminal_awaited(ledger: list) -> bool {
   for row in ledger {
     if row?.lease == "awaited" && row.status != "running" {
       return true

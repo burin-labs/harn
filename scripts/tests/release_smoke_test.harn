@@ -12,7 +12,7 @@ fn config() {
   }
 }
 
-fn ready_adapters(command_runner = nil) {
+fn ready_adapters(command_runner: any = nil) {
   return {
     run: command_runner ?? { _spec, _options -> command_result_ok("ok") },
     start: { _spec, _options -> command_result_ok("", {status: "running", handle_id: "watch-1"}) },
@@ -41,7 +41,7 @@ fn ready_adapters(command_runner = nil) {
 }
 
 @test
-pipeline test_default_adapters_use_typed_harness_tools_boundary(harness: Harness, task) {
+pipeline test_default_adapters_use_typed_harness_tools_boundary(harness: Harness, task: unknown) {
   harness.testing.clear()
   harness.testing.respond("tools", "run_command", command_result_ok("ok"), nil, true)
   harness.testing.respond(
@@ -86,7 +86,7 @@ pipeline test_default_adapters_use_typed_harness_tools_boundary(harness: Harness
 }
 
 @test
-pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, task) {
+pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, task: unknown) {
   const report = run_release_smoke(harness.tools, harness.clock, config(), ready_adapters())
   assert_eq(report.success, true)
   assert_eq(report.steps.count, 12)
@@ -97,7 +97,7 @@ pipeline test_success_runs_every_capability_and_cancels_watch(harness: Harness, 
 @test
 pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   let calls = 0
   const adapters = ready_adapters(
@@ -117,7 +117,7 @@ pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(
 }
 
 @test
-pipeline test_multiple_failures_are_aggregated_in_source_order(harness: Harness, task) {
+pipeline test_multiple_failures_are_aggregated_in_source_order(harness: Harness, task: unknown) {
   let calls = 0
   const adapters = ready_adapters(
     { _spec, _options ->
@@ -135,7 +135,7 @@ pipeline test_multiple_failures_are_aggregated_in_source_order(harness: Harness,
 }
 
 @test
-pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, task) {
+pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, task: unknown) {
   const adapters = ready_adapters(
     { _spec, _options ->
       {
@@ -156,7 +156,10 @@ pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, 
 }
 
 @test
-pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness: Harness, task) {
+pipeline test_watch_deadline_without_readiness_fails_after_cancellation(
+  harness: Harness,
+  task: unknown,
+) {
   const adapters = ready_adapters()
     + {
       wait: { _started, _options ->
@@ -173,7 +176,10 @@ pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness:
 }
 
 @test
-pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(harness: Harness, task) {
+pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(
+  harness: Harness,
+  task: unknown,
+) {
   const early_exit = ready_adapters()
     + {
       wait: { _started, _options -> command_result_fail(9, "watch crashed") },

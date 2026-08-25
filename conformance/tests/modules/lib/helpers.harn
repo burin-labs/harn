@@ -1,9 +1,9 @@
 /** Double a value. */
-pub fn double(x) {
+pub fn double(x: int) {
   return x * 2
 }
 
 /** Greet by name. */
-pub fn greet(name) {
+pub fn greet(name: string) {
   return "hello " + name
 }

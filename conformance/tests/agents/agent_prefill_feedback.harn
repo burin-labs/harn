@@ -4,7 +4,7 @@ import {
   agent_session_inject_feedback,
 } from "std/agent/state"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const public_session = harness.agent.open("prefill-feedback-public")
   harness.agent.inject_feedback(public_session, "prefill_assistant", "<done>##DONE##</done>")
   const public_messages = harness.agent.snapshot(public_session).messages

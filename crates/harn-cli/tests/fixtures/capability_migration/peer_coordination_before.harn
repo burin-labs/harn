@@ -20,7 +20,7 @@ fn unrelated_operation_record() -> dict {
   return {capability: "audit", operation: "unrelated", result: true}
 }
 
-pipeline test_gate_is_noop_when_flag_off(_task) {
+pipeline test_gate_is_noop_when_flag_off(_task: unknown) {
   pin_peer_coordination(nil)
   assert(!peer_coordination_enabled(), "default must be OFF")
   const decision = run_peer_coordination_gate("edit src/foo.rs", {})
@@ -28,7 +28,7 @@ pipeline test_gate_is_noop_when_flag_off(_task) {
   assert(decision?.verdict == "disabled", "flag OFF => verdict disabled, got ${decision?.verdict}")
 }
 
-pipeline test_gate_proceeds_when_host_says_proceed(_task) {
+pipeline test_gate_proceeds_when_host_says_proceed(_task: unknown) {
   pin_peer_coordination("on")
   const decision = with_host_mocks(
     peer_presence_mock({verdict: "proceed", peers: []}),
@@ -40,7 +40,7 @@ pipeline test_gate_proceeds_when_host_says_proceed(_task) {
   assert(decision?.worktree_path == "", "proceed => no worktree pivot")
 }
 
-pipeline test_gate_pivots_to_worktree_on_overlap(_task) {
+pipeline test_gate_pivots_to_worktree_on_overlap(_task: unknown) {
   pin_peer_coordination("on")
   const decision = with_host_mocks(
     peer_presence_mock(
@@ -61,14 +61,12 @@ pipeline test_gate_pivots_to_worktree_on_overlap(_task) {
   assert(decision?.peer_count == 1, "gate counts the live peer, got ${decision?.peer_count}")
 }
 
-pipeline test_gate_escalates_when_pivot_unavailable(_task) {
+pipeline test_gate_escalates_when_pivot_unavailable(_task: unknown) {
   pin_peer_coordination("on")
   // The host could not isolate (e.g. not a git checkout) => request_permission.
   const result = with_host_mocks(
     peer_presence_mock({verdict: "request_permission", peers: []})
-      + [
-      {capability: "runtime", operation: "emit_response", unregistered_ok: true, result: true},
-    ],
+      + [{capability: "runtime", operation: "emit_response", unregistered_ok: true, result: true}],
     { _ ->
       let decision = run_peer_coordination_gate("edit src/foo.rs", {})
       let emitted = host_mock_calls().filter(
@@ -88,7 +86,7 @@ pipeline test_gate_escalates_when_pivot_unavailable(_task) {
   )
 }
 
-pipeline test_gate_degrades_safely_on_legacy_host(_task) {
+pipeline test_gate_degrades_safely_on_legacy_host(_task: unknown) {
   pin_peer_coordination("on")
   const decision = with_host_mocks(
     [{capability: "project", operation: "peer_presence", unregistered_ok: true, result: nil}],

@@ -7,7 +7,7 @@ import {
 } from "std/agent/state"
 import { agent_await_resumption } from "std/agent/workers"
 
-fn __daemon_compaction_summary(opts) {
+fn __daemon_compaction_summary(opts: dict) {
   if !(opts?.consolidate_on_idle ?? false) {
     return nil
   }
@@ -28,7 +28,7 @@ fn __daemon_compaction_summary(opts) {
   return nil
 }
 
-fn __agent_daemon_feedback(fs: HarnessFs, wake, opts) {
+fn __agent_daemon_feedback(fs: HarnessFs, wake: dict, opts: dict) {
   if wake?.reason == "timer" {
     return {kind: wake?.feedback_kind ?? "timer", text: daemon_timer_feedback_prompt(fs, opts)}
   }
@@ -50,7 +50,7 @@ fn __agent_daemon_feedback(fs: HarnessFs, wake, opts) {
   return nil
 }
 
-fn __agent_daemon_timeout_condition(timeout_ms) {
+fn __agent_daemon_timeout_condition(timeout_ms: any) {
   if timeout_ms <= 0 {
     return nil
   }
@@ -60,7 +60,7 @@ fn __agent_daemon_timeout_condition(timeout_ms) {
   }
 }
 
-fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
+fn __agent_daemon_raw_resume_conditions(opts: dict, timeout_ms: any) {
   let conditions = {}
   const timeout = __agent_daemon_timeout_condition(timeout_ms)
   if timeout != nil {
@@ -76,7 +76,13 @@ fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
   return conditions
 }
 
-fn __agent_daemon_await_resumption(agent: HarnessAgent, session, opts, iteration, timeout_ms) {
+fn __agent_daemon_await_resumption(
+  agent: HarnessAgent,
+  session: dict,
+  opts: dict,
+  iteration: int,
+  timeout_ms: any,
+) {
   const request = agent_await_resumption(
     agent,
     "daemon idle",
@@ -110,10 +116,10 @@ fn __agent_daemon_await_resumption(agent: HarnessAgent, session, opts, iteration
  */
 pub fn agent_daemon_snapshot(
   agent: HarnessAgent,
-  session,
-  opts,
-  daemon_state = "idle",
-  iteration = 0,
+  session: dict,
+  opts: dict,
+  daemon_state: string = "idle",
+  iteration: int = 0,
 ) {
   const summary = __daemon_compaction_summary(opts)
   let snapshot_opts = opts + {daemon_state: daemon_state, total_iterations: iteration}
@@ -130,7 +136,13 @@ pub fn agent_daemon_snapshot(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_daemon_step(agent: HarnessAgent, fs: HarnessFs, session, opts, iteration) {
+pub fn agent_daemon_step(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  session: dict,
+  opts: any,
+  iteration: int,
+) {
   const snapshot = agent_daemon_snapshot(agent, session, opts, "idle", iteration)
   const timeout = opts?.wake_interval_ms ?? 0
   __agent_daemon_await_resumption(agent, session, opts, iteration, timeout)

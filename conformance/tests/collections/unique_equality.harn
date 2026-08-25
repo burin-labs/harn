@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `unique()` must agree with the `==` operator (and with `contains`, which
   // uses the same value equality). `1 == 1.0`, so they are duplicates and
   // collapse to one element — keeping the first occurrence.

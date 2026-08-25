@@ -8,7 +8,7 @@ import "std/triggers"
  * record discriminator is covered by the Rust unit test
  * `trust_graph::tests::v0_records_still_parse_for_backward_compat`.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const agent_id = "trust-graph-v0-1-chain-" + unique

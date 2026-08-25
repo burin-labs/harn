@@ -3,11 +3,11 @@ import { agent_loop } from "std/agent/loop"
 import { with_structural_validator } from "std/llm/structural_validator"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn error_contains(result, fragment) {
+fn error_contains(result: any, fragment: string) {
   return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
 }
 

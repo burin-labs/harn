@@ -7,7 +7,7 @@ import { with_llm_script } from "std/testing"
  * an overloaded (503) transport failure the ladder escalates to the frontier
  * rung (which raises max_tokens) and the call round-trips.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

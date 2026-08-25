@@ -11,7 +11,7 @@
  */
 import "../_common"
 
-fn first_snapshot_line(text) {
+fn first_snapshot_line(text: string?) {
   const matches = regex_captures("snapshot=(.+)", text)
   if len(matches) == 0 {
     return nil
@@ -19,12 +19,12 @@ fn first_snapshot_line(text) {
   return matches[0].groups[0]
 }
 
-fn final_json_line(result) {
+fn final_json_line(result: dict) {
   const lines = result.stdout.trim().split("\n")
   return json_parse(lines[len(lines) - 1])
 }
 
-fn resume_signature(final) {
+fn resume_signature(final: dict) {
   return {
     event_type: to_string(final.data.event_type),
     status: to_string(final.data.value.status),
@@ -33,7 +33,7 @@ fn resume_signature(final) {
   }
 }
 
-fn llm_call_facts(transcript) {
+fn llm_call_facts(transcript: dict) {
   for event in transcript?.events ?? [] {
     if (event?.kind ?? "") == "llm_call" {
       return {

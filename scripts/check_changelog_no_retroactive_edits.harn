@@ -310,7 +310,7 @@ fn existing_tags(process: HarnessProcess) -> list<string> {
   return tags
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if harness.env.get("ALLOW_CHANGELOG_RETROACTIVE_EDIT") == "1" {
     harness.stdio.println("check_changelog_no_retroactive_edits: bypassed via env var")
     return 0

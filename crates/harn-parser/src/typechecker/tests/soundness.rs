@@ -344,6 +344,61 @@ fn use_grade() -> GraderOut {
 }
 
 #[test]
+fn schema_witness_accepts_only_runtime_schema_objects() {
+    let valid = errors(
+        r#"
+type Text = string
+fn string_schema() -> Schema<string> {
+  return schema_of(Text)
+}
+fn merge_options(schema: dict) -> dict { return schema + {description: "value"} }
+fn decorated_schema() -> dict { return merge_options(string_schema()) }
+"#,
+    );
+    assert!(
+        valid.is_empty(),
+        "schema dict should establish a witness: {valid:?}"
+    );
+
+    let invalid = errors(
+        r#"
+fn string_schema() -> Schema<string> {
+  return 1
+}
+fn forged_schema() -> Schema<string> {
+  return {type: "int"}
+}
+fn structural_schema() -> Schema<string> {
+  return {type: "string"}
+}
+fn opaque_schema(raw: dict) -> Schema<string> {
+  return raw
+}
+"#,
+    );
+    assert!(
+        invalid
+            .iter()
+            .any(|error| error.contains("expected Schema<string>, found int")),
+        "non-schema values must not establish a witness: {invalid:?}"
+    );
+    assert!(
+        invalid
+            .iter()
+            .filter(|error| error.contains("expected Schema<string>") && error.contains("type:"))
+            .count()
+            >= 2,
+        "schema-shaped records must not forge a witness: {invalid:?}"
+    );
+    assert!(
+        invalid
+            .iter()
+            .any(|error| error.contains("expected Schema<string>, found dict")),
+        "an opaque dict must not forge a witness: {invalid:?}"
+    );
+}
+
+#[test]
 fn schema_typed_llm_call_data_stays_optional_without_error_validation() {
     let errs = errors(
         r#"

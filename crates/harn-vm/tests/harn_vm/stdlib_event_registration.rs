@@ -44,7 +44,7 @@ fn documented_stdlib_events_reach_subscribers_and_live_transcript() {
 import { agent_capture_events } from "std/agent/events"
 import { agent_emit_event } from "std/agent/state"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = harness.agent.open("stdlib-event-registration")
   const captured = agent_capture_events(
     harness.agent,

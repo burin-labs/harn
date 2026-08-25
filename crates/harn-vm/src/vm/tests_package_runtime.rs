@@ -45,7 +45,7 @@ fn package_export_import_executes_through_manifest_alias() {
     let source = r#"
 import "acme/capabilities"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.stdio.println(exported_capability())
 }
 "#;

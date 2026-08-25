@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `chars` materializes a string into a list of single-character strings,
   // the linear-scan-friendly counterpart to repeated substring/index calls.
   const cs = chars("a{b}")

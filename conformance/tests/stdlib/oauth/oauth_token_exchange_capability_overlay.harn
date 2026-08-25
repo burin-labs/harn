@@ -8,17 +8,19 @@ import {
   token_type,
 } from "std/oauth/token_exchange"
 
-fn catches_message(label, fn_call, needle) {
+fn catches_message(label: string, fn_call: unknown, needle: string) {
   let matched = false
+  let observed = "no error"
   try {
     const _ = fn_call()
   } catch (err) {
-    matched = contains(to_string(err), needle)
+    observed = to_string(err)
+    matched = contains(observed, needle)
   }
-  require matched, label
+  require matched, label + "; observed: " + observed
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const subject_type = token_type("access_token")
   const actor_type = token_type("jwt")
   const requested_type = token_type("access_token")

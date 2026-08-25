@@ -1,10 +1,10 @@
 @persona(name: "merge_captain")
-fn merge_pr(pr) {
+fn merge_pr(pr: string) {
   return admin_merge(pr)
 }
 
 @step(name: "admin_merge")
-fn admin_merge(pr) {
+fn admin_merge(pr: string) {
   return "body:" + pr
 }
 

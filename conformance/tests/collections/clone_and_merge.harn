@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // clone gives a fresh dict — mutating the source dict's bindings
   // doesn't bleed into the clone. (Harn dicts are immutable by value,
   // but we still want to confirm the identity guarantees: structural

@@ -1,6 +1,6 @@
 import "std/triggers"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const events = [
     {provider: "kafka", key: "acct-1", value: {amount: 10}},
     {provider: "nats", key: "acct-2", value: {amount: 20}},

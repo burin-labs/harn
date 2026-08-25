@@ -72,7 +72,7 @@ const __ERROR_EXPIRED_TOKEN = "expired_token"
 
 const __ERROR_ACCESS_DENIED = "access_denied"
 
-fn __require_string(value, field) {
+fn __require_string(value: string?, field: string) {
   const text = to_string(value ?? "")
   if text == "" {
     throw "std/oauth/device_flow: " + field + " is required"
@@ -80,7 +80,7 @@ fn __require_string(value, field) {
   return text
 }
 
-fn __require_provider(provider) {
+fn __require_provider(provider: dict) {
   if type_of(provider) != "dict" {
     throw "std/oauth/device_flow: provider must be a dict (use std/oauth/providers)"
   }
@@ -96,7 +96,7 @@ fn __require_provider(provider) {
   return provider
 }
 
-fn __require_storage(storage) {
+fn __require_storage(storage: dict) {
   if type_of(storage) != "dict" {
     throw "std/oauth/device_flow: opts.storage is required (use std/oauth/storage)"
   }
@@ -115,7 +115,7 @@ fn __require_storage(storage) {
   return storage
 }
 
-fn __scope_separator(provider) {
+fn __scope_separator(provider: dict) {
   const id = lowercase(to_string(provider?.id ?? ""))
   if id == "linear" {
     return ","
@@ -123,7 +123,7 @@ fn __scope_separator(provider) {
   return " "
 }
 
-fn __join_scopes(scopes, separator) {
+fn __join_scopes(scopes: list, separator: string) {
   let parts = []
   if scopes != nil {
     for raw in scopes {
@@ -139,11 +139,11 @@ fn __join_scopes(scopes, separator) {
   return join(parts, separator)
 }
 
-fn __url_encode_value(value) {
+fn __url_encode_value(value: string?) {
   return url_encode(to_string(value ?? ""))
 }
 
-fn __form_body(params) {
+fn __form_body(params: list) {
   let parts = []
   for entry in params {
     parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
@@ -155,7 +155,7 @@ fn __now_seconds(clock: HarnessClock) {
   return to_int(clock.timestamp())
 }
 
-fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
+fn __default_on_user_code(stdio: HarnessStdio, user_code: any, verification_uri: any) {
   const _ = stdio.eprint(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
       + to_string(user_code)
@@ -164,7 +164,12 @@ fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
   return nil
 }
 
-fn __invoke_user_code_handler(stdio: HarnessStdio, handler, user_code, verification_uri) {
+fn __invoke_user_code_handler(
+  stdio: HarnessStdio,
+  handler: any,
+  user_code: any,
+  verification_uri: any,
+) {
   if handler == nil {
     return __default_on_user_code(stdio, user_code, verification_uri)
   }
@@ -174,7 +179,7 @@ fn __invoke_user_code_handler(stdio: HarnessStdio, handler, user_code, verificat
   return handler(to_string(user_code), to_string(verification_uri))
 }
 
-fn __redact_token(token) {
+fn __redact_token(token: dict) {
   if token == nil {
     return nil
   }
@@ -188,7 +193,11 @@ fn __redact_token(token) {
   }
 }
 
-fn __build_token_set(parsed, scopes, issued_at) {
+fn __build_token_set(
+  parsed: dict,
+  scopes: string | bytes | list | dict | set | range | nil,
+  issued_at: int,
+) {
   let token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
   const token_type = parsed?.token_type
   if token_type != nil {
@@ -214,7 +223,7 @@ fn __build_token_set(parsed, scopes, issued_at) {
   return token_set
 }
 
-fn __audit_obtained(obs: HarnessObs, provider_id, storage_key, token_set) {
+fn __audit_obtained(obs: HarnessObs, provider_id: any, storage_key: string, token_set: dict) {
   const payload = {
     provider: to_string(provider_id),
     storage_key: to_string(storage_key),
@@ -228,7 +237,7 @@ fn __audit_obtained(obs: HarnessObs, provider_id, storage_key, token_set) {
   )
 }
 
-fn __request_device_code(net: HarnessNet, cfg) {
+fn __request_device_code(net: HarnessNet, cfg: dict) {
   let form = [{key: "client_id", value: cfg.client_id}]
   const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
@@ -287,7 +296,7 @@ fn __request_device_code(net: HarnessNet, cfg) {
   }
 }
 
-fn __poll_once(net: HarnessNet, cfg, device_code) {
+fn __poll_once(net: HarnessNet, cfg: dict, device_code: any) {
   let form = [
     {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
     {key: "device_code", value: device_code},
@@ -333,10 +342,10 @@ fn __poll_once(net: HarnessNet, cfg, device_code) {
 fn __poll_until_done(
   clock: HarnessClock,
   net: HarnessNet,
-  cfg,
-  device_code,
-  initial_interval_seconds,
-  expires_in_seconds,
+  cfg: dict,
+  device_code: any,
+  initial_interval_seconds: any,
+  expires_in_seconds: int,
 ) {
   let interval_seconds = initial_interval_seconds
   let elapsed_seconds = 0
@@ -381,7 +390,7 @@ fn __poll_until_done(
  * @api_stability: experimental
  * @example: device_flow(harness, providers().github, {client_id: id, storage: memory()})
  */
-pub fn device_flow(harness: Harness, provider, opts) {
+pub fn device_flow(harness: Harness, provider: dict, opts: dict) {
   if type_of(opts) != "dict" {
     throw "std/oauth/device_flow: opts must be a dict"
   }

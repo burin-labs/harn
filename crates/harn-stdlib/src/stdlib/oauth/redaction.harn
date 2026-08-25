@@ -55,7 +55,7 @@
  * @api_stability: experimental
  * @example: register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
  */
-pub fn register_pattern(name, regex_source) {
+pub fn register_pattern(name: any, regex_source: any) {
   return __token_redaction_register_pattern(name, regex_source)
 }
 
@@ -82,7 +82,7 @@ pub fn clear_custom_patterns() {
  * @api_stability: experimental
  * @example: redact("Authorization: Bearer abcdef1234567890")
  */
-pub fn redact(text) {
+pub fn redact(text: string) {
   return __token_redaction_redact(text)
 }
 

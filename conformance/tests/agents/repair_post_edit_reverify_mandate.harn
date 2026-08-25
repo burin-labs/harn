@@ -50,14 +50,14 @@ const REVERIFY_MARKER = "REVERIFY_MANDATE_FIRED"
  * Confirms on every stop EXCEPT the post-edit re-verify, which it vetoes with a
  * recognizable marker so the test can observe that the mandate fired.
  */
-fn reverify_probe(info) {
+fn reverify_probe(info: dict) {
   if info.stop_reason == "post_edit_reverify" {
     return REVERIFY_MARKER
   }
   nil
 }
 
-fn run_scenario(harness: Harness, repair_aware, post_edit_reverify) {
+fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) {
   return with_llm_script(
     harness.llm,
     [
@@ -98,7 +98,7 @@ fn run_scenario(harness: Harness, repair_aware, post_edit_reverify) {
   )
 }
 
-fn first_event(events, event_type) {
+fn first_event(events: list, event_type: string) {
   for event in events {
     if event.type == event_type {
       return event
@@ -107,21 +107,21 @@ fn first_event(events, event_type) {
   return nil
 }
 
-fn confirm_post_edit_reverify(info) {
+fn confirm_post_edit_reverify(info: dict) {
   if info.stop_reason == "post_edit_reverify" {
     return nil
   }
   return "unexpected verification reason: " + to_string(info.stop_reason)
 }
 
-fn veto_post_edit_reverify(info) {
+fn veto_post_edit_reverify(info: dict) {
   if info.stop_reason == "post_edit_reverify" {
     return "still red after the edit"
   }
   return nil
 }
 
-fn run_cap_scenario(harness: Harness, verify_completion) {
+fn run_cap_scenario(harness: Harness, verify_completion: any) {
   return with_llm_script(
     harness.llm,
     [

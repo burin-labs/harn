@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const intake_a = harness.runtime.webhook_intake_register(
     {
       id: "intake-a",

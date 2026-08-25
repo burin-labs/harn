@@ -10,7 +10,7 @@ import { agent_loop } from "std/agent/loop"
 import { agent_build_turn_system, agent_build_turn_system_fragments } from "std/agent/preflight"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn contains_id(items, needle) {
+fn contains_id(items: list, needle: string) {
   for item in items {
     if item == needle {
       return true
@@ -19,7 +19,7 @@ fn contains_id(items, needle) {
   return false
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session = {session_id: "prompt-fragments-decompose"}
   const opts = {
     system: "You are a careful operator.",

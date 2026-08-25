@@ -122,14 +122,14 @@ const BULLETIN_VALID_ACTIONS = ["accept", "reject", "expire", "supersede"]
 
 const BULLETIN_VALID_SYNC = ["local_only", "host_default", "tenant", "shared"]
 
-fn __bulletin_text(value) {
+fn __bulletin_text(value: any) {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __bulletin_first(values) {
+fn __bulletin_first(values: list) {
   for value in values {
     const text = __bulletin_text(value)
     if text != "" {
@@ -139,7 +139,7 @@ fn __bulletin_first(values) {
   return nil
 }
 
-fn __bulletin_confidence(value) -> float {
+fn __bulletin_confidence(value: float) -> float {
   if value == nil {
     return 0.5
   }
@@ -150,7 +150,7 @@ fn __bulletin_confidence(value) -> float {
   return value + 0.0
 }
 
-fn __bulletin_list(value) {
+fn __bulletin_list(value: any) {
   if value == nil {
     return []
   }
@@ -160,7 +160,7 @@ fn __bulletin_list(value) {
   return value
 }
 
-fn __bulletin_in(needle, allowed) -> bool {
+fn __bulletin_in(needle: any, allowed: list) -> bool {
   for candidate in allowed {
     if candidate == needle {
       return true
@@ -169,7 +169,7 @@ fn __bulletin_in(needle, allowed) -> bool {
   return false
 }
 
-fn __bulletin_string_list(value) -> list<string> {
+fn __bulletin_string_list(value: any) -> list<string> {
   const raw = __bulletin_list(value)
   let out = []
   for entry in raw {
@@ -181,7 +181,7 @@ fn __bulletin_string_list(value) -> list<string> {
   return out
 }
 
-fn __bulletin_evidence_entry(entry) -> BulletinEvidence {
+fn __bulletin_evidence_entry(entry: dict) -> BulletinEvidence {
   if entry == nil {
     throw "std/personas/bulletins: evidence entries must not be nil"
   }
@@ -201,7 +201,7 @@ fn __bulletin_evidence_entry(entry) -> BulletinEvidence {
   return filter_nil({kind: kind, ref: ref, label: label, excerpt: excerpt})
 }
 
-fn __bulletin_evidence(value) -> list<BulletinEvidence> {
+fn __bulletin_evidence(value: any) -> list<BulletinEvidence> {
   const raw = __bulletin_list(value)
   let out = []
   for entry in raw {
@@ -210,7 +210,7 @@ fn __bulletin_evidence(value) -> list<BulletinEvidence> {
   return out
 }
 
-fn __bulletin_source(value) -> BulletinSource {
+fn __bulletin_source(value: dict) -> BulletinSource {
   if value == nil {
     return {}
   }
@@ -228,7 +228,7 @@ fn __bulletin_source(value) -> BulletinSource {
   )
 }
 
-fn __bulletin_privacy(value) -> BulletinPrivacy {
+fn __bulletin_privacy(value: dict?) -> BulletinPrivacy {
   const raw = value ?? {}
   if type_of(raw) != "dict" {
     throw "std/personas/bulletins: privacy must be a dict"
@@ -257,7 +257,13 @@ fn __bulletin_privacy(value) -> BulletinPrivacy {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_id(scope, scope_key, subject, assertion, persona = nil) -> string {
+pub fn bulletin_id(
+  scope: any,
+  scope_key: any,
+  subject: any,
+  assertion: any,
+  persona: any = nil,
+) -> string {
   const seed = lowercase(__bulletin_text(scope))
     + "\n"
     + __bulletin_text(scope_key)
@@ -270,7 +276,7 @@ pub fn bulletin_id(scope, scope_key, subject, assertion, persona = nil) -> strin
   return "bulletin_" + substring(sha256(seed), 0, 32)
 }
 
-fn __bulletin_resolve_scope(value) -> string {
+fn __bulletin_resolve_scope(value: any) -> string {
   const scope = lowercase(__bulletin_text(value))
   if scope == "" {
     throw "std/personas/bulletins: scope is required"
@@ -281,7 +287,7 @@ fn __bulletin_resolve_scope(value) -> string {
   return scope
 }
 
-fn __bulletin_resolve_status(value) -> string {
+fn __bulletin_resolve_status(value: any) -> string {
   const status = lowercase(__bulletin_text(value))
   if status == "" {
     return "proposed"
@@ -292,7 +298,7 @@ fn __bulletin_resolve_status(value) -> string {
   return status
 }
 
-fn __bulletin_resolve_action(value) -> string {
+fn __bulletin_resolve_action(value: string) -> string {
   const action = lowercase(__bulletin_text(value))
   if action == "" {
     throw "std/personas/bulletins: decision action is required"
@@ -303,7 +309,7 @@ fn __bulletin_resolve_action(value) -> string {
   return action
 }
 
-fn __bulletin_status_for_action(action) -> string {
+fn __bulletin_status_for_action(action: string) -> string {
   if action == "accept" {
     return "accepted"
   }
@@ -354,7 +360,7 @@ pub fn bulletin_validate(bulletin: ProfileBulletin) -> ProfileBulletin {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_propose(clock: HarnessClock, input, options = nil) -> ProfileBulletin {
+pub fn bulletin_propose(clock: HarnessClock, input: any, options: dict? = nil) -> ProfileBulletin {
   if input == nil || type_of(input) != "dict" {
     throw "std/personas/bulletins: bulletin_propose requires a dict input"
   }
@@ -439,8 +445,8 @@ pub fn bulletin_dedupe(clock: HarnessClock, bulletins: list) -> list<ProfileBull
 pub fn bulletin_emit(
   clock: HarnessClock,
   obs: HarnessObs,
-  input,
-  options = nil,
+  input: any,
+  options: dict? = nil,
 ) -> BulletinProposeReceipt {
   const opts = options ?? {}
   const raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(
@@ -479,8 +485,8 @@ pub fn bulletin_emit(
 pub fn bulletin_decide(
   clock: HarnessClock,
   bulletin: ProfileBulletin,
-  action,
-  options = nil,
+  action: string,
+  options: dict? = nil,
 ) -> ProfileBulletinDecision {
   const opts = options ?? {}
   const resolved_action = __bulletin_resolve_action(action)
@@ -522,7 +528,7 @@ pub fn bulletin_decide(
 pub fn bulletin_emit_decision(
   obs: HarnessObs,
   decision: ProfileBulletinDecision,
-  options = nil,
+  options: dict? = nil,
 ) -> BulletinDecisionReceipt {
   const opts = options ?? {}
   if decision.schema != BULLETIN_DECISION_SCHEMA {
@@ -566,7 +572,7 @@ pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
   return "personas/bulletins/" + scope + "/" + scope_key
 }
 
-fn __bulletin_remember_accepted(memory: HarnessMemory, bulletin: ProfileBulletin, options) {
+fn __bulletin_remember_accepted(memory: HarnessMemory, bulletin: ProfileBulletin, options: dict?) {
   const opts = options ?? {}
   const override_namespace = __bulletin_text(opts?.memory_namespace)
   const namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(
@@ -617,7 +623,7 @@ fn __bulletin_remember_accepted(memory: HarnessMemory, bulletin: ProfileBulletin
 pub fn bulletin_accept(
   harness: Harness,
   bulletin: ProfileBulletin,
-  options = nil,
+  options: dict? = nil,
 ) -> BulletinDecisionReceipt {
   const receipt = bulletin_emit_decision(
     harness.obs,
@@ -640,7 +646,7 @@ pub fn bulletin_reject(
   clock: HarnessClock,
   obs: HarnessObs,
   bulletin: ProfileBulletin,
-  options = nil,
+  options: dict? = nil,
 ) -> BulletinDecisionReceipt {
   return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "reject", options), options)
 }
@@ -655,7 +661,7 @@ pub fn bulletin_expire(
   clock: HarnessClock,
   obs: HarnessObs,
   bulletin: ProfileBulletin,
-  options = nil,
+  options: dict? = nil,
 ) -> BulletinDecisionReceipt {
   return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "expire", options), options)
 }
@@ -671,13 +677,13 @@ pub fn bulletin_supersede(
   obs: HarnessObs,
   bulletin: ProfileBulletin,
   supersedes: list<string>,
-  options = nil,
+  options: dict? = nil,
 ) -> BulletinDecisionReceipt {
   const merged = (options ?? {}) + {supersedes: supersedes}
   return bulletin_emit_decision(obs, bulletin_decide(clock, bulletin, "supersede", merged), merged)
 }
 
-fn __bulletin_decision_index(decisions) {
+fn __bulletin_decision_index(decisions: list) {
   let index = {}
   for raw in __bulletin_list(decisions) {
     if raw?.schema != BULLETIN_DECISION_SCHEMA {
@@ -753,7 +759,7 @@ pub fn bulletin_partition(bulletins: list) -> BulletinPartition {
   }
 }
 
-fn __bulletin_expired_now(bulletin, now_iso) -> bool {
+fn __bulletin_expired_now(bulletin: dict, now_iso: any) -> bool {
   const expires = __bulletin_text(bulletin?.expires_at)
   if expires == "" {
     return false
@@ -769,7 +775,11 @@ fn __bulletin_expired_now(bulletin, now_iso) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_active(clock: HarnessClock, bulletins: list, now = nil) -> list<ProfileBulletin> {
+pub fn bulletin_active(
+  clock: HarnessClock,
+  bulletins: list,
+  now: any = nil,
+) -> list<ProfileBulletin> {
   const now_iso = __bulletin_text(now) == "" ? clock.date_iso() : __bulletin_text(now)
   let out = []
   for bulletin in __bulletin_list(bulletins) {
@@ -781,7 +791,7 @@ pub fn bulletin_active(clock: HarnessClock, bulletins: list, now = nil) -> list<
   return out
 }
 
-fn __bulletin_render_line(bulletin) -> string {
+fn __bulletin_render_line(bulletin: dict) -> string {
   const confidence_pct = round(bulletin.confidence * 100.0)
   const subject = __bulletin_text(bulletin?.subject)
   const prefix = subject == "" ? "" : subject + ": "
@@ -800,7 +810,11 @@ fn __bulletin_render_line(bulletin) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_render_for_prompt(clock: HarnessClock, bulletins: list, options = nil) -> string {
+pub fn bulletin_render_for_prompt(
+  clock: HarnessClock,
+  bulletins: list,
+  options: dict? = nil,
+) -> string {
   const opts = options ?? {}
   const now = __bulletin_text(opts?.now)
   const {active_only = true, include_proposed = true} = opts ?? {}

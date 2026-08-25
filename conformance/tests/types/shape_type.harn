@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   type Config = {model: string, max_tokens: int}
   fn run(config: Config) -> string {
     return config.model

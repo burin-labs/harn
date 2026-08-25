@@ -4,7 +4,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn command_combined(result) -> string {
+pub fn command_combined(result: dict?) -> string {
   if result?.combined != nil {
     return result.combined
   }
@@ -21,7 +21,7 @@ pub fn command_combined(result) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn command_output_text_impl(result, stream: string = "combined") -> string {
+pub fn command_output_text_impl(result: dict?, stream: string = "combined") -> string {
   const mode = stream ?? "combined"
   if mode == "stdout" {
     return result?.stdout ?? ""

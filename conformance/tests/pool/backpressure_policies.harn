@@ -1,17 +1,17 @@
 import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
 
-fn gated(runtime: HarnessRuntime, gate, value) {
+fn gated(runtime: HarnessRuntime, gate: any, value: string) {
   return { ->
     runtime.receive(gate)
     return value
   }
 }
 
-fn constant(value) {
+fn constant(value: string) {
   return { -> value }
 }
 
-fn drop_oldest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn drop_oldest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp: any) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
     agent,
@@ -32,7 +32,7 @@ fn drop_oldest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: Harness
   stdio.println(results[2].result)
 }
 
-fn drop_newest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn drop_newest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp: any) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
     agent,
@@ -53,7 +53,7 @@ fn drop_newest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: Harness
   stdio.println(results[2].rejection_policy)
 }
 
-fn ring_buffer_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn ring_buffer_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp: any) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
     agent,
@@ -74,7 +74,7 @@ fn ring_buffer_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: Harness
   stdio.println(results[2].result)
 }
 
-fn fail_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn fail_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp: any) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
     agent,
@@ -93,7 +93,7 @@ fn fail_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: Harn
   stdio.println(results[1].result)
 }
 
-fn fail_fast_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn fail_fast_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp: dict) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
     agent,
@@ -111,7 +111,12 @@ fn fail_fast_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessSt
   stdio.println(result.result)
 }
 
-fn block_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn block_submitter_case(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  stdio: HarnessStdio,
+  bp: any,
+) {
   const gate = runtime.channel(nil, 1)
   const started = runtime.channel(nil, 1)
   const returned = runtime.channel(nil, 1)

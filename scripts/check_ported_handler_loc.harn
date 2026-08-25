@@ -44,7 +44,7 @@ pub fn loc_for(fs: HarnessFs, path: string) -> int? {
  * budget. Split out so tests can exercise the rules without touching
  * the filesystem.
  */
-pub fn evaluate_handler(path, max_loc, actual) {
+pub fn evaluate_handler(path: any, max_loc: any, actual: any) {
   if path == nil || path == "" || max_loc == nil {
     return {
       path: path,
@@ -68,7 +68,7 @@ pub fn evaluate_handler(path, max_loc, actual) {
  * files are surfaced as violations so a typo in the config fails the
  * gate instead of silently passing.
  */
-pub fn collect_violations(fs: HarnessFs, handlers) -> list {
+pub fn collect_violations(fs: HarnessFs, handlers: list) -> list {
   let violations = []
   for handler in handlers {
     const path = handler?.path
@@ -86,7 +86,7 @@ pub fn collect_violations(fs: HarnessFs, handlers) -> list {
   return violations
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if !harness.fs.exists(CONFIG_PATH) {
     harness.stdio.eprintln("error: missing ${CONFIG_PATH}")
     return 1

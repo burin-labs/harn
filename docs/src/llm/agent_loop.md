@@ -320,6 +320,12 @@ keys below. Annotate a binding
 `agent_preset(...)` / `agent_options(...)`; inline dict literals still
 execute but are flagged by the `unnormalized-options` lint.
 
+Nested policy dictionaries have named contracts too. Use
+`ConsecutiveFailureBudget`, `MissingToolCallRecoveryOptions`,
+`ToolSurfaceNarrowingOptions`, and `ReadOnlyStanceOptions` when a function
+accepts one policy in isolation. Classifier and consent callbacks on those
+records use typed request and verdict records rather than untyped dictionaries.
+
 Same as `harness.llm.call`, plus additional options:
 
 | Key | Type | Default | Description |
@@ -330,7 +336,7 @@ Same as `harness.llm.call`, plus additional options:
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
 | `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. Ordinary tool turns omit it so structured transport cannot interfere with tool calling. At a `"done"` completion, the loop parses JSON and validates schema forms; one failed result gets one repair call through `llm_caller`. The value is `run.output` and the verdict is `run.output_valid`. Use `harness.llm.call_structured` for one-shot extraction. |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
-| `iteration_budget` | string\|dict | nil | Adaptive or fixed iteration cap. Pass a dict `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
+| `iteration_budget` | string \| `IterationBudget` | nil | Adaptive or fixed iteration cap. Pass a record `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
@@ -344,7 +350,7 @@ Same as `harness.llm.call`, plus additional options:
 | `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls inside one independent effect phase from a planner turn. Results are recorded in emitted order even when calls complete out of order |
 | `intra_turn_resource_fail_fast` | bool | `true` | When an annotated mutating tool call fails, skip later sibling calls in the same assistant response that target the same declared path resource. Set `false` only for legacy dispatch-all behavior |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
-| `tool_surface_narrowing` | bool/dict | `{enabled: true, window_turns: 5, mode: "safe"}` | Between turns, remove model-visible tools that were unused across the rolling window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; dict configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
+| `tool_surface_narrowing` | bool \| `ToolSurfaceNarrowingOptions` | `{enabled: true, window_turns: 5, mode: "safe"}` | Between turns, remove model-visible tools that were unused across the rolling window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; record configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
 | `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive task-list entries as canonical `plan` updates and message-only reports as Harn `progress` narration |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
 | `daemon` | bool | `false` | Idle instead of terminating after text-only turns |

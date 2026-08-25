@@ -7,7 +7,7 @@ import { device_flow } from "std/oauth/device_flow"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = harness.testing.clock_set(1700000000000)
   const store = memory(harness.auth)
   const provider = custom(

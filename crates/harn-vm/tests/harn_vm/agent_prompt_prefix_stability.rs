@@ -100,7 +100,7 @@ fn prefix_probe_pipeline(session_id: &str, append_only: bool) -> String {
     };
     format!(
         r#"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   harness.tools.clear_hooks()
   const registry = tool_registry()
   const tools = tool_define(

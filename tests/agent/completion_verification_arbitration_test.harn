@@ -22,7 +22,7 @@ import { llm_done, with_llm_script } from "std/testing"
 
 const CONVERSION = "failed_verification_contradicted_by_gate"
 
-fn __completion_receipts(events) {
+fn __completion_receipts(events: unknown) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -35,7 +35,7 @@ fn __completion_receipts(events) {
 }
 
 /** Count conversions by `converted_from` ONLY. */
-fn __conversion_count(events) -> int {
+fn __conversion_count(events: unknown) -> int {
   let count = 0
   for receipt in __completion_receipts(events) {
     if receipt?.converted_from == CONVERSION {
@@ -45,7 +45,7 @@ fn __conversion_count(events) -> int {
   return count
 }
 
-fn __judge_says(gap_class, detail: string) -> dict {
+fn __judge_says(gap_class: string?, detail: string) -> dict {
   const body = if gap_class == nil {
     {verdict: "continue", detail: detail}
   } else {
@@ -119,7 +119,7 @@ fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
 
 // -------------------------------------------------------------------------------------------------
 
-pipeline test_arbitration_requires_every_clause(harness: Harness, task) {
+pipeline test_arbitration_requires_every_clause(harness: Harness, task: unknown) {
   assert(
     __completion_arbitration_converts(
       "failed_verification",
@@ -177,7 +177,7 @@ pipeline test_arbitration_requires_every_clause(harness: Harness, task) {
   )
 }
 
-pipeline test_absent_gap_class_reads_as_other(harness: Harness, task) {
+pipeline test_absent_gap_class_reads_as_other(harness: Harness, task: unknown) {
   // Cached and replayed judge responses outlive the schema that produced them.
   // The tolerant reading must also be the one that grants no authority.
   assert_eq(
@@ -209,11 +209,11 @@ fn __red_verify() {
   return {findings: "2 failed", ok: false}
 }
 
-fn __wrote_source(_ctx) {
+fn __wrote_source(_ctx: unknown) {
   return {source_write_count: 1}
 }
 
-pipeline test_gate_reports_the_verification_it_observed(harness: Harness, task) {
+pipeline test_gate_reports_the_verification_it_observed(harness: Harness, task: unknown) {
   const green = agent_completion_gate(
     harness.runtime,
     {facts: __wrote_source, verify_command: __green_verify},
@@ -237,7 +237,7 @@ pipeline test_gate_reports_the_verification_it_observed(harness: Harness, task) 
   assert_eq(unrun.verification.oracle_expected, false)
 }
 
-pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task) {
+pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task: unknown) {
   // The trap this mechanism is built around: this `confirm` means "I could not
   // look". Nothing it ships may read as a positive observation.
   const verdict = agent_completion_gate(harness.runtime, {}).verify_completion(
@@ -248,7 +248,10 @@ pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task) 
   assert_eq(verdict.verification.observed, "not_run")
 }
 
-pipeline test_judge_prompt_carries_the_deterministic_verification_block(harness: Harness, task) {
+pipeline test_judge_prompt_carries_the_deterministic_verification_block(
+  harness: Harness,
+  task: unknown,
+) {
   const captured = __run(
     harness,
     "judge-verification-block",
@@ -269,7 +272,7 @@ pipeline test_judge_prompt_carries_the_deterministic_verification_block(harness:
   assert_eq(captured.result.status, "done")
 }
 
-pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, task) {
+pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, task: unknown) {
   const messages = [
     {
       role: "assistant",
@@ -374,7 +377,7 @@ pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, 
 
 pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const captured = __run(
     harness,
@@ -403,7 +406,7 @@ pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
   assert_eq(captured.result.status, "done")
 }
 
-pipeline test_unmet_manner_clause_continue_still_vetoes(harness: Harness, task) {
+pipeline test_unmet_manner_clause_continue_still_vetoes(harness: Harness, task: unknown) {
   // Green verification, violated negative clause. The judge keeps this one
   // outright — it is where its discriminating power lives.
   const captured = __run(
@@ -422,7 +425,7 @@ pipeline test_unmet_manner_clause_continue_still_vetoes(harness: Harness, task) 
   assert_eq(__conversion_count(captured.events), 0)
 }
 
-pipeline test_absent_gap_class_continue_still_vetoes(harness: Harness, task) {
+pipeline test_absent_gap_class_continue_still_vetoes(harness: Harness, task: unknown) {
   const captured = __run(
     harness,
     "arbitration-unnamed",
@@ -433,7 +436,7 @@ pipeline test_absent_gap_class_continue_still_vetoes(harness: Harness, task) {
   assert_eq(__conversion_count(captured.events), 0)
 }
 
-pipeline test_unrun_verification_does_not_convert(harness: Harness, task) {
+pipeline test_unrun_verification_does_not_convert(harness: Harness, task: unknown) {
   // The verifier never ran. The refusal is premature only if you assume it ran.
   const captured = __run(
     harness,
@@ -449,7 +452,7 @@ pipeline test_unrun_verification_does_not_convert(harness: Harness, task) {
   assert_eq(__conversion_count(captured.events), 0)
 }
 
-pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, task) {
+pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, task: unknown) {
   // The real facts-free gate, through its real seam: `confirm: true` with
   // `reason: facts_unavailable`. Keying the conversion on `confirm` would
   // convert here, and this case is why it does not.
@@ -488,7 +491,7 @@ pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, 
   assert_eq(__conversion_count(captured.events), 0)
 }
 
-pipeline test_no_deterministic_gate_does_not_convert(harness: Harness, task) {
+pipeline test_no_deterministic_gate_does_not_convert(harness: Harness, task: unknown) {
   const captured = __run(
     harness,
     "arbitration-no-gate",
@@ -505,7 +508,7 @@ pipeline test_no_deterministic_gate_does_not_convert(harness: Harness, task) {
   assert_eq(__conversion_count(captured.events), 0)
 }
 
-pipeline test_red_verification_never_reaches_the_model_judge(harness: Harness, task) {
+pipeline test_red_verification_never_reaches_the_model_judge(harness: Harness, task: unknown) {
   // The gate vetoes first, so the model stage is never reached and there is
   // nothing to arbitrate. Unchanged by this mechanism, and asserted so.
   const captured = __run(

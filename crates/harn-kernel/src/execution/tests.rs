@@ -4,7 +4,7 @@ use crate::{compile_program, EntryKind};
 
 #[test]
 fn reducer_executes_and_round_trips_json() {
-    let source = "fn reduce(input) {\n  if input.reset { return {count: 0, tags: input.tags} }\n  return {count: input.count + 1, tags: input.tags + [\"increment\"]}\n}";
+    let source = "fn reduce(input: {count: int, reset: bool, tags: list<string>}) {\n  if input.reset { return {count: 0, tags: input.tags} }\n  return {count: input.count + 1, tags: input.tags + [\"increment\"]}\n}";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
     let input =
         DataValue::from_json(serde_json::json!({"count": 2, "reset": false, "tags": []})).unwrap();
@@ -20,7 +20,7 @@ fn reducer_executes_and_round_trips_json() {
 #[test]
 fn equality_is_structural_across_unlike_types() {
     let program = compile_program(
-        "fn reduce(input) { return [input != nil, input != 7, 1 == 1.0, nil == nil] }",
+        "fn reduce(input: string) { return [input != nil, input != 7, 1 == 1.0, nil == nil] }",
         "reduce",
         EntryKind::Function,
     )
@@ -46,7 +46,7 @@ fn equality_is_structural_across_unlike_types() {
 #[test]
 fn known_unimplemented_builtin_fails_only_when_execution_reaches_it() {
     let source = r#"
-        fn reduce(input) {
+        fn reduce(input: string) {
             if input == "parse" { return json_parse("{}") }
             return "pure"
         }
@@ -98,7 +98,7 @@ fn entry_parameter_types_are_enforced_at_the_host_boundary() {
 fn nested_calls_share_type_checks_and_rest_binding() {
     let source = r"
         fn collect(...values: int) -> list<int> { return values }
-        fn reduce(input) -> list<int> { return collect(input, 2) }
+        fn reduce(input: int) -> list<int> { return collect(input, 2) }
     ";
     let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
     let execution = start(&program, DataValue::Int(7), &GrantSet::pure());
@@ -230,7 +230,7 @@ fn spread_named_calls_resolve_lexical_functions_before_builtins() {
 #[test]
 fn closure_capture_arena_drops_without_rc_cycles() {
     let program = compile_program(
-        "fn reduce(input) {\n  fn identity(value) { return value }\n  return identity(input)\n}",
+        "fn reduce<T>(input: T) -> T {\n  fn identity<U>(value: U) -> U { return value }\n  return identity(input)\n}",
         "reduce",
         EntryKind::Function,
     )
@@ -276,7 +276,7 @@ fn escaping_closures_keep_their_environment_until_execution_ends() {
 #[test]
 fn shared_value_graphs_are_bounded_by_logical_work() {
     let source = r"
-        fn reduce(input) {
+        fn reduce(input: int) {
             let value = [input]
             let index = 0
             while index < 16 {
@@ -298,7 +298,7 @@ fn shared_value_graphs_are_bounded_by_logical_work() {
 #[test]
 fn recursive_equality_work_consumes_deterministic_fuel() {
     let source = r"
-        fn reduce(input) {
+        fn reduce(input: int) {
             let value = [input]
             let index = 0
             while index < 15 {
@@ -323,7 +323,8 @@ fn recursive_equality_work_consumes_deterministic_fuel() {
 
 #[test]
 fn capability_suspend_resume_is_deterministic() {
-    let source = "fn greet(harness: Harness, input) {\n  return harness.interaction.ask(input)\n}";
+    let source =
+        "fn greet(harness: Harness, input: string) {\n  return harness.interaction.ask(input)\n}";
     let program = compile_program(source, "greet", EntryKind::Function).unwrap();
     let grants = GrantSet::from_names(["interaction.ask".to_string()])
         .unwrap()
@@ -361,7 +362,7 @@ fn capability_suspend_resume_is_deterministic() {
 #[test]
 fn resume_replays_consumed_prefix_without_double_charging_fuel() {
     let source = r#"
-        fn run(harness: Harness, input) {
+        fn run(harness: Harness, input: int) {
             let value = [input]
             let index = 0
             while index < 16 {
@@ -409,7 +410,8 @@ fn resume_replays_consumed_prefix_without_double_charging_fuel() {
 
 #[test]
 fn denied_capability_fails_before_suspending() {
-    let source = "fn greet(harness: Harness, input) {\n  return harness.interaction.ask(input)\n}";
+    let source =
+        "fn greet(harness: Harness, input: unknown) {\n  return harness.interaction.ask(input)\n}";
     let program = compile_program(source, "greet", EntryKind::Function).unwrap();
     let Execution::Failed { diagnostic } = start(&program, DataValue::Nil, &GrantSet::pure())
     else {
@@ -423,7 +425,7 @@ fn capability_contracts_reject_unknown_grants_and_wrong_results() {
     let error = GrantSet::from_names(["stdio.not_a_method".to_string()]).unwrap_err();
     assert_eq!(error.code, "unknown_capability_grant");
 
-    let source = "fn width(harness: Harness, input) {\n  return harness.term.width()\n}";
+    let source = "fn width(harness: Harness, _input: unknown) {\n  return harness.term.width()\n}";
     let program = compile_program(source, "width", EntryKind::Function).unwrap();
     let grants = GrantSet::from_names(["term.width".to_string()])
         .unwrap()
@@ -481,7 +483,9 @@ fn host_grants_use_one_strict_record_contract() {
 #[test]
 fn capability_arguments_use_the_full_canonical_type_contract() {
     let source = r#"
-        fn call(harness: Harness, input) {
+        // Deliberate unchecked host boundary: this test exercises the runtime
+        // capability contract, not static call-site assignability.
+        fn call(harness: Harness, input: any) {
             return harness.llm.call("hello", nil, input)
         }
     "#;
@@ -499,7 +503,7 @@ fn capability_arguments_use_the_full_canonical_type_contract() {
 #[test]
 fn capability_results_use_the_full_canonical_type_contract() {
     let source = r#"
-        fn call(harness: Harness, input) {
+        fn call(harness: Harness, _input: unknown) {
             return harness.llm.call("hello", nil, {})
         }
     "#;
@@ -529,7 +533,7 @@ fn capability_results_use_the_full_canonical_type_contract() {
 
 #[test]
 fn snapshots_are_authenticated_and_bind_the_grant_ceiling() {
-    let source = "fn width(harness: Harness, input) {\n  return harness.term.width()\n}";
+    let source = "fn width(harness: Harness, _input: unknown) {\n  return harness.term.width()\n}";
     let program = compile_program(source, "width", EntryKind::Function).unwrap();
     let grants = GrantSet::from_names(["term.width".to_string()])
         .unwrap()
@@ -599,7 +603,8 @@ fn tagged_json_preserves_portable_edge_values() {
 
 #[test]
 fn non_finite_values_round_trip_through_requests_and_snapshots() {
-    let source = "fn echo(harness: Harness, input) { return harness.interaction.ask(input) }";
+    let source =
+        "fn echo(harness: Harness, input: unknown) { return harness.interaction.ask(input) }";
     let program = compile_program(source, "echo", EntryKind::Function).unwrap();
     let grants = GrantSet::from_names(["interaction.ask".to_string()])
         .unwrap()
@@ -636,7 +641,7 @@ fn non_finite_values_round_trip_through_requests_and_snapshots() {
 #[test]
 fn the_portable_kernel_enforces_a_binding_annotation() {
     let program = compile_program(
-        "fn reduce(input) {\n  const name: string = input.name\n  return name\n}",
+        "fn reduce(input: dict) {\n  const name: string = input.name\n  return name\n}",
         "reduce",
         EntryKind::Function,
     )
@@ -668,7 +673,7 @@ fn the_portable_kernel_enforces_a_binding_annotation() {
 #[test]
 fn the_portable_kernel_enforces_a_struct_field_annotation() {
     let program = compile_program(
-        "struct User { name: string }\nfn reduce(input) {\n  return User { name: input.name }\n}",
+        "struct User { name: string }\nfn reduce(input: dict) {\n  return User { name: input.name }\n}",
         "reduce",
         EntryKind::Function,
     )
@@ -694,13 +699,12 @@ fn the_portable_kernel_enforces_a_struct_field_annotation() {
     );
 }
 
-/// An unannotated binding is unchecked, and `any` is the written opt-out. Both
-/// must stay free: gradual typing is the reason a binding annotation is worth
-/// enforcing at all.
+/// `unknown` keeps a host boundary explicit while an unannotated local remains
+/// inferred and `any` remains the written opt-out from local checks.
 #[test]
-fn unannotated_and_any_bindings_stay_unchecked() {
+fn unknown_parameter_and_any_binding_stay_unchecked() {
     let program = compile_program(
-        "fn reduce(input) {\n  const loose = input\n  const opted: any = input\n  return [loose, opted]\n}",
+        "fn reduce(input: unknown) {\n  const loose = input\n  const opted: any = input\n  return [loose, opted]\n}",
         "reduce",
         EntryKind::Function,
     )

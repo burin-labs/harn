@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // int + float promotes to float
   harness.stdio.log(3 + 1.5)
   harness.stdio.log(1.5 + 3)

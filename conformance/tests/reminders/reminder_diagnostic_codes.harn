@@ -1,6 +1,6 @@
 import { agent_reminder_providers_fire } from "std/agent/state"
 
-fn has_code(result, code) {
+fn has_code(result: any, code: string) {
   return is_err(result) && contains(to_string(unwrap_err(result)), code)
 }
 

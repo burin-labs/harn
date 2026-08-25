@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const list = [1, 2, 3]
   harness.stdio.log(list.count)
   harness.stdio.log(list.empty)

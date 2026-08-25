@@ -35,7 +35,7 @@ type StudioState = {
   exported?: string,
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const png = bytes_from_base64(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   )
@@ -70,7 +70,7 @@ pipeline test(harness: Harness, task) {
       ],
     )
   }
-  fn respond(effects = []) {
+  fn respond(effects: list = []) {
     state.revision = state.revision + 1
     return ui.update(document(), effects)
   }
@@ -140,7 +140,7 @@ pipeline test(harness: Harness, task) {
     state.status = "exported"
     return respond()
   }
-  fn handle_event(raw) {
+  fn handle_event(raw: dict) {
     const event: UiEvent = ui.event(raw.event)
     if event.kind == "canvas.stroke" {
       state.strokes = state.strokes + 1

@@ -1,7 +1,7 @@
 /** A second Harn-only app proving the renderer is not logo-specific. */
 import * as ui from "std/ui"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const resource = ui.app_resource(
     "ui://harn/examples/decision-card",
     "Decision Card",
@@ -40,7 +40,7 @@ pipeline main(harness: Harness, task) {
     revision = revision + 1
     return ui.update(ui.document("Decision Card", revision, elements))
   }
-  fn handle_event(raw) {
+  fn handle_event(raw: dict) {
     const event = ui.event(raw.event)
     if event.kind == "input" && event.target == "choice" {
       choice = event.value ?? "approve"

@@ -53,7 +53,7 @@ pub fn review_rubrics() {
   }
 }
 
-pub fn review_rubric(name) {
+pub fn review_rubric(name: any) {
   const rubrics = review_rubrics()
   return rubrics[name]
 }

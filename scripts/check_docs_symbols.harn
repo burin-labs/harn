@@ -492,7 +492,7 @@ pub fn quote(line: string) -> string {
   return line.substring(0, MAX_QUOTE_COLUMNS - 1) + "…"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const harn_bin = resolve_harn_bin(harness)
   const registry = try {
     toml_parse(harness.fs.read_text(REGISTRY))

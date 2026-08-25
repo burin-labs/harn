@@ -1,6 +1,6 @@
 import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
 
-fn fixture(fs: HarnessFs, name) {
+fn fixture(fs: HarnessFs, name: string) {
   const root = fs.workspace_root()
   return json_parse(fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }

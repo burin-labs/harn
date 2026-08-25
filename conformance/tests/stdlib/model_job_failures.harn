@@ -6,7 +6,7 @@ import {
   model_job_transition_result,
 } from "std/model_job"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unknown = model_job_state_result("teleporting", "fixture", "job-1")
   harness.stdio.log(unwrap_err(unknown).kind)
   const canceled: ModelJobState = "canceled"

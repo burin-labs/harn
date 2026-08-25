@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Mock HTTP framework
   // Register a mock for GET requests
   harness.testing.http_mock(

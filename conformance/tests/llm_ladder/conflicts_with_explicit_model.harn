@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * combining it with a standalone `model:` pin is ambiguous and must error
  * before any provider work happens.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [{text: "should never run", model: "mock", provider: "mock"}],

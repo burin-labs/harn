@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const input = range(0, 1000).to_list()
   let iteration = 0
   let total = 0

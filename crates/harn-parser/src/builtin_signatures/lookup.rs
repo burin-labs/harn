@@ -44,6 +44,7 @@ pub fn lookup_with_privileged_wire(
                     entry.contract.exposure,
                     BuiltinExposure::HarnessMethod { .. }
                         | BuiltinExposure::PrivilegedWire
+                        | BuiltinExposure::StdlibInternal
                         | BuiltinExposure::RuntimeInternal
                 ))
             .then_some(entry.signature)

@@ -32,7 +32,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
 }
 
 @test
-pipeline test_rust_include_paths_extracts_normal_and_raw_literals(harness: Harness, task) {
+pipeline test_rust_include_paths_extracts_normal_and_raw_literals(harness: Harness, task: unknown) {
   const source = join(
     [
       "const A: &str = include_str!(\"data/schema.json\");",
@@ -52,7 +52,10 @@ pipeline test_rust_include_paths_extracts_normal_and_raw_literals(harness: Harne
 }
 
 @test
-pipeline test_packaged_include_errors_accepts_existing_in_package_targets(harness: Harness, task) {
+pipeline test_packaged_include_errors_accepts_existing_in_package_targets(
+  harness: Harness,
+  task: unknown,
+) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -72,7 +75,7 @@ pipeline test_packaged_include_errors_accepts_existing_in_package_targets(harnes
 @test
 pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_targets(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   with_temp_dir(
     harness.fs,

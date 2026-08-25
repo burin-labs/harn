@@ -12,7 +12,7 @@ import {
   register_client,
 } from "std/oauth/dynamic_registration"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const topic = "oauth.dynreg.audit"
   const existing = harness.channels.events(topic)
   const cursor = if len(existing) > 0 {

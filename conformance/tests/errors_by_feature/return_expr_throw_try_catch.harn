@@ -6,7 +6,7 @@ enum OtherError {
   Remote(msg)
 }
 
-fn direct_return_catches(body) {
+fn direct_return_catches(body: unknown) {
   try {
     return body()
   } catch (e) {
@@ -14,7 +14,7 @@ fn direct_return_catches(body) {
   }
 }
 
-fn pipe_fail(_value) {
+fn pipe_fail(_value: unknown) {
   throw "pipe"
 }
 
@@ -30,7 +30,7 @@ fn other_error() -> OtherError {
   return OtherError.Remote("body")
 }
 
-fn typed_catch_mismatch_propagates(body, _sample: AppError) {
+fn typed_catch_mismatch_propagates(body: unknown, _sample: AppError) {
   try {
     return body()
   } catch (e: AppError) {

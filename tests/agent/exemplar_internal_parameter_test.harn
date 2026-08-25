@@ -17,7 +17,7 @@ import {
   tool_required_argument_names,
 } from "std/llm/structural_validator"
 
-fn _look(params) {
+fn _look(params: dict) {
   return tool_define(
     tool_registry(),
     "look",
@@ -26,7 +26,7 @@ fn _look(params) {
   )
 }
 
-pipeline test_all_optional_tool_requires_nothing(harness: Harness, task) {
+pipeline test_all_optional_tool_requires_nothing(harness: Harness, task: unknown) {
   // `_nl_intent` is declared FIRST, so the old "first declared parameter"
   // fallback picked it and taught an argument no caller should ever write.
   // Nothing here is required, so nothing is named.
@@ -41,7 +41,7 @@ pipeline test_all_optional_tool_requires_nothing(harness: Harness, task) {
   assert_eq(tool_required_argument_names(registry, "nonexistent"), [])
 }
 
-pipeline test_required_internal_parameter_is_still_named(harness: Harness, task) {
+pipeline test_required_internal_parameter_is_still_named(harness: Harness, task: unknown) {
   // An underscore prefix marks a parameter the harness fills in, but a REQUIRED
   // one still has to be sent, so the model still has to be told about it.
   const registry = _look(
@@ -53,7 +53,7 @@ pipeline test_required_internal_parameter_is_still_named(harness: Harness, task)
   assert_eq(tool_required_argument_names(registry, "look"), ["_nl_intent"])
 }
 
-pipeline test_rendered_exemplar_carries_no_placeholder_token(harness: Harness, task) {
+pipeline test_rendered_exemplar_carries_no_placeholder_token(harness: Harness, task: unknown) {
   // The falsifier for the observed defect: whatever the tool declares, the
   // rendered call must contain no token a model could copy as a value. A
   // placeholder would show up here as `<`, and a required key rendered with a
@@ -88,7 +88,7 @@ pipeline test_rendered_exemplar_carries_no_placeholder_token(harness: Harness, t
   assert_eq(tool_required_argument_names(registry, "look"), ["path"])
 }
 
-pipeline test_published_exemplar_helper_remains_compatible(harness: Harness, task) {
+pipeline test_published_exemplar_helper_remains_compatible(harness: Harness, task: unknown) {
   const registry = _look(
     {
       path: {type: "string", description: "Where to look", required: true},

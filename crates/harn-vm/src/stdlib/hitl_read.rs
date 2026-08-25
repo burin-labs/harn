@@ -593,7 +593,7 @@ mod tests {
         reset_thread_local_state();
         let chunk = compile_source(
             r"
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const rows = harness.interaction.hitl_pending({})
   harness.stdio.println(len(rows))
 }

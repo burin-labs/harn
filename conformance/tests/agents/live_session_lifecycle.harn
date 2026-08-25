@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = harness.agent.open("live-session-lifecycle-conformance")
   harness.agent.reset(session)
   const observer = harness.agent.attach(session, "client-observer", {mode: "observer"})

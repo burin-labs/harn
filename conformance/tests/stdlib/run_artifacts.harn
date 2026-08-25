@@ -10,7 +10,7 @@ fn facts_descriptor(name: string = "facts.json") -> ArtifactDescriptor<Facts> {
   return artifact_descriptor(name, schema_contract(schema_of(Facts), []))
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-run-artifacts-" + harness.random.uuid_v7(),

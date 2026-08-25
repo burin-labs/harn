@@ -32,7 +32,7 @@ pub fn count_xfail_markers(fs: HarnessFs, root: string) -> int {
   return total
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const threshold_file = "scripts/xfail_threshold.txt"
   if !harness.fs.exists(threshold_file) {
     harness.stdio.eprintln("missing ${threshold_file}")

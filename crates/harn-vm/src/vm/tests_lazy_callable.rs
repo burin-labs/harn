@@ -172,7 +172,7 @@ pub pipeline run(harness: Harness, value: int) -> int {
 
     assert_eq!(
         error.to_string(),
-        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+        "Runtime error: TypeError: function 'run' parameter 'value' expected int, got string (wrong)"
     );
 }
 
@@ -201,7 +201,7 @@ pub pipeline run(harness: Harness, value: Count) -> int {
 
     assert_eq!(
         error.to_string(),
-        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+        "Runtime error: TypeError: function 'run' parameter 'value' expected int, got string (wrong)"
     );
 }
 

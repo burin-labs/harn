@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   let sum = 0
   for i in 1 to 6 exclusive {
     if i == 3 {

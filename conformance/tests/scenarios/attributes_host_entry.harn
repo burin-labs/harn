@@ -9,7 +9,7 @@ pub fn dispatch(harness: Harness, args: dict) -> string {
   return "dispatched"
 }
 
-pipeline test_host_entry(harness: Harness, task) {
+pipeline test_host_entry(harness: Harness, task: unknown) {
   assert(dispatch(harness, {name: "audit"}) == "dispatched", "still callable")
   harness.stdio.log("attributes_host_entry ok")
 }

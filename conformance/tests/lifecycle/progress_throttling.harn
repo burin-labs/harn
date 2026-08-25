@@ -9,7 +9,7 @@
 // that are present.
 import { progress_finish, progress_start, progress_tick } from "std/lifecycle/progress"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.testing.clock_set(0)
   // --- throttling: only the due tick prints -------------------------------
   let p = progress_start(harness, "index", {interval_ms: 60000, limit_ms: 300000})

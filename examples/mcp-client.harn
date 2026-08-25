@@ -9,7 +9,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/mcp-client.harn
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   // Locate the bundled echo server for demonstration
   const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get("HARN_BIN") ?? "harn"

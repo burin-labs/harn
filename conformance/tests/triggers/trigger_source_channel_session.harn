@@ -4,12 +4,12 @@ import "std/triggers"
  * CH-02 (#1872): session-scoped selector matches an emit on the same
  * session scope but ignores emits on the default tenant scope.
  */
-fn handle_session(harness: Harness, event) {
+fn handle_session(harness: Harness, event: dict) {
   const payload = event.provider_payload
   harness.channels.append("ch.session.fired", {scope: payload.scope, name: payload.name})
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(

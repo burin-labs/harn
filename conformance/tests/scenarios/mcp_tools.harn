@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // mcp_tools should accept a tool_registry (renamed from mcp_serve)
   let tools = tool_registry()
   tools = tool_define(

@@ -8,7 +8,7 @@ import "std/triggers"
  * `set_span_link` (P-05 / #1858), and emits a `transcript.channel.match`
  * event on the `transcript.channel.lifecycle` topic.
  */
-fn handle_event(harness: Harness, event) {
+fn handle_event(harness: Harness, event: dict) {
   harness.channels.append("ch.otel.fired", {repo: event.provider_payload.payload?.repo})
 }
 

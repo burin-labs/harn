@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const values = [3, 1, 2]
   harness.stdio.log(values.push(4))
   harness.stdio.log(values.pop())

@@ -13,7 +13,7 @@
 // budget, never below the historical 600 baseline on a non-reasoning route.
 import { repair_min_max_tokens, structured_min_max_tokens } from "std/llm/safe"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Non-reasoning route (mock model): historical 600 repair baseline, unchanged.
   const non_reasoning = repair_min_max_tokens(harness.llm, {provider: "mock", model: "mock-model"})
   harness.stdio.println("non_reasoning=" + to_string(non_reasoning))

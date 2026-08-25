@@ -22,7 +22,11 @@ fn blacksmith_timeout_expression() -> string {
 }
 
 /** Keep a compile lane on free hosted capacity with one complete coarse cache. */
-fn hosted_compile_lane_errors(workflow, job_name: string, rust_cache_key: string) -> list<string> {
+fn hosted_compile_lane_errors(
+  workflow: dict,
+  job_name: string,
+  rust_cache_key: string,
+) -> list<string> {
   const job = workflow?.jobs?.[job_name]
   if job == nil {
     return ["ci.yml:${job_name} must define the hosted Linux compile lane"]
@@ -61,7 +65,7 @@ fn hosted_compile_lane_errors(workflow, job_name: string, rust_cache_key: string
 
 /** Hold a compile lane to one Blacksmith tier with a cold-safe hosted fallback. */
 fn persistent_compile_lane_errors(
-  workflow,
+  workflow: dict,
   job_name: string,
   runner: string,
   sccache_key: string,
@@ -133,7 +137,7 @@ fn persistent_compile_lane_errors(
 }
 
 /** The main-scoped coarse-cache writer stays on GitHub-hosted infrastructure. */
-fn hosted_refresh_lane_errors(workflow) -> list<string> {
+fn hosted_refresh_lane_errors(workflow: dict) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
   if job == nil {
     return ["ci.yml:rust-cache-refresh must define the hosted Linux compile lane"]
@@ -156,7 +160,7 @@ fn hosted_refresh_lane_errors(workflow) -> list<string> {
 }
 
 /** Serialize the mutating cache tail without cancelling an in-flight save. */
-pub fn rust_cache_refresh_concurrency_errors(job) -> list<string> {
+pub fn rust_cache_refresh_concurrency_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   if trim(job?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
     errors = errors
@@ -179,7 +183,7 @@ const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
  * and the warm build is discarded with the runner. Every step that exists only
  * to produce the next generation must therefore be guarded on the miss.
  */
-pub fn rust_cache_refresh_miss_only_errors(job) -> list<string> {
+pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
   if trim(headroom?.if ?? "") != CACHE_MISS_GUARD {
@@ -200,7 +204,7 @@ pub fn rust_cache_refresh_miss_only_errors(job) -> list<string> {
 }
 
 /** Keep the post-merge main-scoped cache refresher wired to proof reuse. */
-fn rust_cache_refresh_errors(workflow) -> list<string> {
+fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
   if job == nil {
     return ["ci.yml:rust-cache-refresh must define the main-scoped cache writer"]
@@ -266,7 +270,7 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
   return errors
 }
 
-fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<string> {
+fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> list<string> {
   const producer = workflow?.jobs?.["rust-check-inputs"]
   const consumer = workflow?.jobs?.[job_name]
   if consumer == nil {
@@ -321,7 +325,7 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
   return errors
 }
 
-fn producer_artifact_order_errors(workflow) -> list<string> {
+fn producer_artifact_order_errors(workflow: dict) -> list<string> {
   const rust_job = workflow?.jobs?.["rust-check-inputs"]
   const producer_steps = rust_job?.steps ?? []
   const cli_build_step = step_by_name(producer_steps, "Build portable Harn CLI")
@@ -350,7 +354,7 @@ fn producer_artifact_order_errors(workflow) -> list<string> {
   return []
 }
 
-fn artifact_ready_barrier_errors(workflow) -> list<string> {
+fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_job = workflow?.jobs?.[ARTIFACT_READY_JOB]
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
@@ -380,7 +384,7 @@ fn artifact_ready_barrier_errors(workflow) -> list<string> {
   return []
 }
 
-fn security_ready_barrier_errors(workflow) -> list<string> {
+fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_job = workflow?.jobs?.[SECURITY_READY_JOB]
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for Linux security tests")
@@ -403,7 +407,7 @@ fn security_ready_barrier_errors(workflow) -> list<string> {
   return []
 }
 
-fn harn_audit_overlap_errors(workflow) -> list<string> {
+fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const audit = workflow?.jobs?.["harn-audit"]
   const steps = audit?.steps ?? []
   const wait_index = step_index_by_name(steps, "Wait for shared Harn binary")
@@ -438,7 +442,7 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
   return []
 }
 
-fn artifact_consumer_handoff_errors(workflow) -> list<string> {
+fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const rust_security = workflow?.jobs?.["rust-security"]
   const rust_security_needs = rust_security?.needs ?? []
@@ -480,7 +484,7 @@ fn artifact_consumer_handoff_errors(workflow) -> list<string> {
   return errors
 }
 
-fn live_artifact_handoff_errors(workflow) -> list<string> {
+fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
   return producer_artifact_order_errors(workflow)
     + artifact_ready_barrier_errors(workflow)
     + security_ready_barrier_errors(workflow)
@@ -488,7 +492,7 @@ fn live_artifact_handoff_errors(workflow) -> list<string> {
     + artifact_consumer_handoff_errors(workflow)
 }
 
-fn walltime_report_errors(workflow) -> list<string> {
+fn walltime_report_errors(workflow: dict) -> list<string> {
   const report_job = workflow?.jobs?.["ci-walltime-report"]
   const report_step = step_by_name(report_job?.steps ?? [], "Write CI timing report")
   const upload_report_step = step_by_name(report_job?.steps ?? [], "Upload CI timing report")
@@ -514,7 +518,7 @@ fn walltime_report_errors(workflow) -> list<string> {
   return []
 }
 
-fn colocated_rust_proof_errors(workflow) -> list<string> {
+fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   const rust_job = workflow?.jobs?.["rust-check-inputs"]
   const archive_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
@@ -573,7 +577,7 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
   return errors
 }
 
-fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
+fn strict_clippy_entrypoint_errors(rust_job: dict?) -> list<string> {
   const lint_step = step_by_name(rust_job?.steps ?? [], "Check Rust code with Clippy")
   if trim(lint_step?.if ?? "") == ""
     && trim(lint_step?.run ?? "")
@@ -585,7 +589,7 @@ fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
   return ["ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint"]
 }
 
-fn early_source_policy_errors(workflow) -> list<string> {
+fn early_source_policy_errors(workflow: dict) -> list<string> {
   const policy_steps = workflow?.jobs?.["audit-scripts"]?.steps ?? []
   const prompt_step = step_by_name(policy_steps, "Check prompts are not embedded in Rust")
   const verify_index = step_index_by_name(policy_steps, "Verify portable Harn CLI")
@@ -647,7 +651,7 @@ fn early_source_policy_errors(workflow) -> list<string> {
 }
 
 /** Keep one persistent producer, one lint lane, and one package lane. */
-pub fn ci_linux_lane_policy_errors(workflow) -> list<string> {
+pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
     + hosted_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
     + persistent_compile_lane_errors(

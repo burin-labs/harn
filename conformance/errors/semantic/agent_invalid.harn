@@ -1,6 +1,6 @@
 import { agent_config } from "std/agent/workers"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // agent_config with non-agent should error
   agent_config({name: "fake"}, "test")
 }

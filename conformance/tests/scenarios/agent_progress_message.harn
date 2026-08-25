@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_progress } from "std/agent/progress"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-fn progress_events(events) {
+fn progress_events(events: any) {
   return events.filter({ event -> event.type == "progress_reported" })
 }
 

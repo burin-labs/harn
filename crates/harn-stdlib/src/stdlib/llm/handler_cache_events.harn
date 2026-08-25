@@ -1,0 +1,83 @@
+import { agent_emit_event } from "std/agent/state"
+
+fn __with_cache_hit_metrics_from_envelope(cached_value: dict) -> dict {
+  let metrics = {model_calls_avoided: 1}
+  if type_of(cached_value) != "dict" {
+    return metrics
+  }
+  // The caller seam wraps the LLM dict in {ok: true, value: ...}; the direct
+  // form caches the LLM dict directly. Unwrap once so both read one shape.
+  const llm = if cached_value?.value != nil && type_of(cached_value.value) == "dict" {
+    cached_value.value
+  } else {
+    cached_value
+  }
+  const usage = llm?.usage
+  if type_of(usage) == "dict" {
+    let tokens_saved = 0
+    if usage?.input_tokens != nil {
+      tokens_saved = tokens_saved + to_int(usage.input_tokens)
+    }
+    if usage?.output_tokens != nil {
+      tokens_saved = tokens_saved + to_int(usage.output_tokens)
+    }
+    if tokens_saved > 0 {
+      metrics = metrics + {tokens_saved: tokens_saved}
+    }
+  }
+  if llm?.latency_ms != nil {
+    metrics = metrics + {latency_saved_ms: to_int(llm.latency_ms)}
+  }
+  return metrics
+}
+
+fn __with_cache_event(agent: HarnessAgent, session_id: string, name: string, payload: dict) {
+  if session_id == "" {
+    return
+  }
+  const _ = try {
+    agent_emit_event(agent, session_id, name, payload)
+  }
+}
+
+pub fn __with_cache_emit_hit(
+  agent: HarnessAgent,
+  session_id: string,
+  key: any,
+  cached: dict,
+  opts: dict,
+) -> nil {
+  __with_cache_event(
+    agent,
+    session_id,
+    "cache_hit",
+    {
+      key: key,
+      backend: cached?.backend ?? "",
+      namespace: cached?.namespace ?? "",
+      provider: opts?.provider ?? "",
+      model: opts?.model ?? "",
+      metrics: __with_cache_hit_metrics_from_envelope(cached?.value),
+    },
+  )
+}
+
+pub fn __with_cache_emit_miss(
+  agent: HarnessAgent,
+  session_id: string,
+  key: any,
+  cached: dict,
+  compute_ms: any,
+) -> nil {
+  __with_cache_event(
+    agent,
+    session_id,
+    "cache_miss",
+    {
+      key: key,
+      backend: cached?.backend ?? "",
+      namespace: cached?.namespace ?? "",
+      metrics: {compute_ms: compute_ms},
+    },
+  )
+}

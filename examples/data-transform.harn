@@ -1,6 +1,6 @@
 import { sum_by } from "std/collections"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const users = [
     {name: "Alice", age: 30, role: "engineer"},
     {name: "Bob", age: 25, role: "designer"},

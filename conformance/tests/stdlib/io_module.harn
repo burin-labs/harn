@@ -1,7 +1,7 @@
 /** Verifies the structured std/io terminal helpers. */
 import { is_tty, read_line, read_password, write_stderr } from "std/io"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.capture_stderr_start()
   write_stderr(harness.stdio, "warn")
   const written = harness.testing.capture_stderr_take()

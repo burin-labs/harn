@@ -6,7 +6,7 @@ import { with_llm_script } from "std/testing"
  * tightened prompt. The second attempt is clean and gets returned.
  * Both attempts must show up on the routing trace.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

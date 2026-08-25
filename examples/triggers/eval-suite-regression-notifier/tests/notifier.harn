@@ -7,7 +7,7 @@ const DEFAULT_MODEL = "mock-model"
 const SLACK_API_BASE_URL = "https://slack.com/api"
 
 @test
-pipeline test_regression_notification_posts(harness: Harness, task) {
+pipeline test_regression_notification_posts(harness: Harness, task: unknown) {
   harness.net.egress_policy({allow: ["slack.com"], default: "deny"})
   harness.testing.http_mock_clear()
   const base = SLACK_API_BASE_URL
@@ -55,7 +55,7 @@ pipeline test_regression_notification_posts(harness: Harness, task) {
 }
 
 @test
-pipeline test_no_prior_baseline_skips_notification(harness: Harness, task) {
+pipeline test_no_prior_baseline_skips_notification(harness: Harness, task: unknown) {
   harness.net.egress_policy({allow: ["slack.com"], default: "deny"})
   harness.testing.http_mock_clear()
   const base = SLACK_API_BASE_URL
@@ -76,7 +76,7 @@ pipeline test_no_prior_baseline_skips_notification(harness: Harness, task) {
   harness.testing.http_mock_clear()
 }
 
-fn notifier_event(config, base) -> dict {
+fn notifier_event(config: dict, base: any) -> dict {
   return {
     id: "tick-1",
     kind: "cron.tick",
@@ -114,7 +114,7 @@ fn load_eval_manifest(fs: HarnessFs) -> dict {
   return eval_pack_manifest(toml_parse(fs.read_text(path)) + {base_dir: base_dir})
 }
 
-fn ledger_options(config) -> dict {
+fn ledger_options(config: dict) -> dict {
   return {
     namespace: config.namespace,
     suite: config.suite,
@@ -125,7 +125,7 @@ fn ledger_options(config) -> dict {
   }
 }
 
-fn baseline_rows(manifest, harness_fingerprint, commit) -> list {
+fn baseline_rows(manifest: dict, harness_fingerprint: any, commit: string) -> list {
   let rows = []
   for case in manifest.cases {
     rows = rows

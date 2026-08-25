@@ -4,7 +4,7 @@
 // seam so they do not need a mock model or a full agent_loop run.
 import { agent_lifecycle_tools } from "std/agent/workers"
 
-fn _has_tool(registry, name) {
+fn _has_tool(registry: dict, name: string) {
   for entry in registry?.tools ?? [] {
     if entry?.name == name {
       return true
@@ -13,12 +13,12 @@ fn _has_tool(registry, name) {
   return false
 }
 
-pipeline test_agent_await_resumption_injected_by_default(harness: Harness, task) {
+pipeline test_agent_await_resumption_injected_by_default(harness: Harness, task: unknown) {
   const tools = agent_lifecycle_tools(harness.agent, tool_registry(), {})
   assert(_has_tool(tools, "agent_await_resumption"))
 }
 
-pipeline test_agent_await_resumption_can_be_disabled(harness: Harness, task) {
+pipeline test_agent_await_resumption_can_be_disabled(harness: Harness, task: unknown) {
   const tools = agent_lifecycle_tools(
     harness.agent,
     tool_registry(),
@@ -27,7 +27,10 @@ pipeline test_agent_await_resumption_can_be_disabled(harness: Harness, task) {
   assert(!_has_tool(tools, "agent_await_resumption"))
 }
 
-pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(harness: Harness, task) {
+pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(
+  harness: Harness,
+  task: unknown,
+) {
   const tools = agent_lifecycle_tools(
     harness.agent,
     tool_registry(),

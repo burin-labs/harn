@@ -12,7 +12,7 @@ import {
   agent_session_revoke_reminder,
 } from "std/agent/state"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.reset(s)
   // A reminder with room left on its TTL: delivered once, still carried.

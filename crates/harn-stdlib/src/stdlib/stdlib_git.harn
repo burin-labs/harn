@@ -273,14 +273,14 @@ pub fn git_noninteractive_env() -> dict {
   }
 }
 
-fn __git_non_empty_string(value, label) -> string {
+fn __git_non_empty_string(value: any, label: string) -> string {
   if type_of(value) != "string" || value == "" {
     throw "std/git: " + label + " must be a non-empty string"
   }
   return value
 }
 
-fn __git_ref_arg(value, label) -> string {
+fn __git_ref_arg(value: any, label: string) -> string {
   const text = __git_non_empty_string(value, label)
   if starts_with(text, "-") {
     throw "std/git: " + label + " must not start with '-'"
@@ -291,7 +291,7 @@ fn __git_ref_arg(value, label) -> string {
   return text
 }
 
-fn __git_sort_arg(value) -> string {
+fn __git_sort_arg(value: any) -> string {
   const text = __git_non_empty_string(value, "sort")
   if contains(text, "\n") || contains(text, "\r") {
     throw "std/git: sort must not contain newlines"
@@ -299,7 +299,7 @@ fn __git_sort_arg(value) -> string {
   return text
 }
 
-fn __git_string_list(value, label) -> list<string> {
+fn __git_string_list(value: any, label: string) -> list<string> {
   if value == nil {
     return []
   }
@@ -320,7 +320,7 @@ fn __git_string_list(value, label) -> list<string> {
  * @effects: []
  * @errors: []
  */
-pub fn git_repo_path(repo = ".") -> string {
+pub fn git_repo_path(repo: any = ".") -> string {
   if repo == nil {
     return "."
   }
@@ -343,7 +343,7 @@ pub fn git_repo_path(repo = ".") -> string {
   throw "std/git: repo must be a path string, repo dict, or git receipt"
 }
 
-fn __git_run_options(repo, options) -> dict {
+fn __git_run_options(repo: any, options: any) -> dict {
   const opts = options ?? {}
   let out = {
     cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
@@ -377,12 +377,12 @@ fn __git_run_options(repo, options) -> dict {
  * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
  * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
  */
-fn __git_with_repo(repo, options) -> GitRunOptions {
+fn __git_with_repo(repo: string, options: any) -> GitRunOptions {
   const opts = options ?? {}
   return opts + {repo: repo}
 }
 
-fn __git_argv(args) -> list<string> {
+fn __git_argv(args: list<string>) -> list<string> {
   const parts = __git_string_list(args, "args")
   if len(parts) == 0 {
     throw "std/git: args must be a non-empty list"
@@ -393,7 +393,7 @@ fn __git_argv(args) -> list<string> {
   return ["git"] + parts
 }
 
-fn __git_result(result, argv, cwd) -> GitCommandResult {
+fn __git_result(result: dict?, argv: any, cwd: any) -> GitCommandResult {
   const raw = result ?? {}
   const success = process_result_success(raw)
   const status = if raw?.status != nil {
@@ -446,7 +446,7 @@ pub fn git_run(
  * @effects: []
  * @errors: []
  */
-pub fn git_discover(process: HarnessProcess, path = ".") -> GitDiscoverReceipt {
+pub fn git_discover(process: HarnessProcess, path: string = ".") -> GitDiscoverReceipt {
   return process.git_repo_discover(path)
 }
 
@@ -456,7 +456,7 @@ pub fn git_discover(process: HarnessProcess, path = ".") -> GitDiscoverReceipt {
  * @effects: [process, fs.read]
  * @errors: []
  */
-pub fn git_status(process: HarnessProcess, repo = ".") -> GitStatusReceipt {
+pub fn git_status(process: HarnessProcess, repo: string = ".") -> GitStatusReceipt {
   return process.git_status(repo)
 }
 
@@ -466,7 +466,7 @@ pub fn git_status(process: HarnessProcess, repo = ".") -> GitStatusReceipt {
  * @effects: [process, fs.read]
  * @errors: []
  */
-pub fn git_conflicts(process: HarnessProcess, repo = ".") -> GitConflictsReceipt {
+pub fn git_conflicts(process: HarnessProcess, repo: string = ".") -> GitConflictsReceipt {
   return process.git_conflicts(repo)
 }
 
@@ -476,7 +476,11 @@ pub fn git_conflicts(process: HarnessProcess, repo = ".") -> GitConflictsReceipt
  * @effects: [process, fs.read]
  * @errors: []
  */
-pub fn git_diff(process: HarnessProcess, repo = ".", selector = nil) -> GitDiffReceipt {
+pub fn git_diff(
+  process: HarnessProcess,
+  repo: string = ".",
+  selector: dict? = nil,
+) -> GitDiffReceipt {
   return process.git_diff(repo, selector)
 }
 
@@ -490,7 +494,7 @@ pub fn git_merge_base(
   process: HarnessProcess,
   left: string,
   right: string,
-  repo = ".",
+  repo: string = ".",
 ) -> GitMergeBaseReceipt {
   return process.git_merge_base(repo, __git_ref_arg(left, "left"), __git_ref_arg(right, "right"))
 }
@@ -503,7 +507,7 @@ pub fn git_merge_base(
  */
 pub fn git_tag_list(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitTagListOptions = {},
 ) -> GitTagListReceipt {
   const pattern = if options.pattern == nil {
@@ -527,7 +531,7 @@ pub fn git_tag_list(
  */
 pub fn git_describe(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitDescribeOptions = {},
 ) -> GitDescribeReceipt {
   const pattern = if options.match == nil {
@@ -568,7 +572,11 @@ pub fn git_ls_remote(
  * @effects: [process, fs.write]
  * @errors: []
  */
-pub fn git_rebase(process: HarnessProcess, base_ref: string, repo = ".") -> GitRebaseReceipt {
+pub fn git_rebase(
+  process: HarnessProcess,
+  base_ref: string,
+  repo: string = ".",
+) -> GitRebaseReceipt {
   return process.git_rebase(repo, __git_ref_arg(base_ref, "base_ref"))
 }
 
@@ -593,8 +601,8 @@ pub fn git_push(
   process: HarnessProcess,
   remote: string,
   refspec: string,
-  repo = ".",
-  lease = nil,
+  repo: string = ".",
+  lease: any = nil,
   options: dict = {},
 ) -> GitPushReceipt {
   return process.git_push(
@@ -616,7 +624,7 @@ pub fn git_worktree_create(
   process: HarnessProcess,
   branch: string,
   path: string,
-  repo = ".",
+  repo: string = ".",
   options: dict = {},
 ) -> GitWorktreeCreateReceipt {
   return process.git_worktree_create(
@@ -649,7 +657,7 @@ pub fn git_worktree_remove(
  */
 pub fn git_current_branch(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitRunOptions = {},
 ) -> GitBranchResult {
   const result = git_run(process, ["branch", "--show-current"], __git_with_repo(repo, options))
@@ -665,7 +673,7 @@ pub fn git_current_branch(
  */
 pub fn git_log(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitLogOptions = {},
 ) -> GitCommandResult {
   const opts = options
@@ -713,7 +721,7 @@ pub fn git_log(
 pub fn git_show(
   process: HarnessProcess,
   rev: string,
-  repo = ".",
+  repo: string = ".",
   options: GitShowOptions = {},
 ) -> GitCommandResult {
   const opts = options
@@ -736,7 +744,7 @@ pub fn git_show(
  */
 pub fn git_branch_list(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitRunOptions = {},
 ) -> GitCommandResult {
   return git_run(process, ["branch", "--list"], __git_with_repo(repo, options))
@@ -750,7 +758,7 @@ pub fn git_branch_list(
  */
 pub fn git_remote_list(
   process: HarnessProcess,
-  repo = ".",
+  repo: string = ".",
   options: GitRunOptions = {},
 ) -> GitCommandResult {
   return git_run(process, ["remote", "-v"], __git_with_repo(repo, options))
@@ -765,7 +773,7 @@ pub fn git_remote_list(
 pub fn git_switch(
   process: HarnessProcess,
   branch: string,
-  repo = ".",
+  repo: string = ".",
   options: GitSwitchOptions = {},
 ) -> GitCommandResult {
   const opts = options
@@ -797,8 +805,8 @@ pub fn git_switch(
  */
 pub fn git_pull_ff_only(
   process: HarnessProcess,
-  repo = ".",
-  remote = "origin",
+  repo: string = ".",
+  remote: string = "origin",
   branch: string? = nil,
   options: GitPullOptions = {},
 ) -> GitCommandResult {
@@ -825,8 +833,8 @@ pub fn git_pull_ff_only(
  */
 pub fn git_fetch(
   process: HarnessProcess,
-  remote = "origin",
-  repo = ".",
+  remote: string = "origin",
+  repo: string = ".",
   refspecs: list<string> = [],
 ) -> GitFetchReceipt {
   return process.git_fetch(
@@ -855,7 +863,7 @@ pub fn git_checkout_sync(
   return git_checkout_run(options + {repo: repo, runner: runner})
 }
 
-fn __git_list_contains(values, needle) -> bool {
+fn __git_list_contains(values: any, needle: any) -> bool {
   if type_of(values) == "string" {
     return values == needle
   }
@@ -1057,12 +1065,12 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
   return out
 }
 
-fn __git_search_tokens(text) {
+fn __git_search_tokens(text: string?) {
   const normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(to_string(text ?? "")))
   return split(trim(normalized), " ").filter({ token -> token != "" })
 }
 
-fn __git_catalog_score(query, tokens, entry) {
+fn __git_catalog_score(query: string?, tokens: list, entry: dict) {
   const q = lowercase(trim(to_string(query ?? "")))
   const name = lowercase(entry.operation)
   const description = lowercase(entry.description)
@@ -1098,7 +1106,7 @@ fn __git_catalog_score(query, tokens, entry) {
   return score
 }
 
-fn __git_insert_ranked(ranked, entry) {
+fn __git_insert_ranked(ranked: list<GitToolSearchMatch>, entry: dict) {
   let out = []
   let inserted = false
   for existing in ranked {
@@ -1231,7 +1239,7 @@ pub fn git_run_tool(
   throw "std/git: git operation not implemented: " + op
 }
 
-fn __git_tool_enabled(options, key, group) -> bool {
+fn __git_tool_enabled(options: any, key: any, group: any) -> bool {
   const opts = options ?? {}
   const enabled = opts?.enabled_tools
     ?? [
@@ -1250,22 +1258,22 @@ fn __git_tool_enabled(options, key, group) -> bool {
     || __git_list_contains(enabled, group)
 }
 
-fn __git_tool_name(options, key) -> string {
+fn __git_tool_name(options: any, key: any) -> string {
   return (options ?? {})?.names?.[key] ?? key
 }
 
-fn __git_tool_description(options, key, fallback) -> string {
+fn __git_tool_description(options: any, key: any, fallback: any) -> string {
   return (options ?? {})?.descriptions?.[key] ?? fallback
 }
 
-fn __git_tool_annotations(options, key, defaults) -> dict {
+fn __git_tool_annotations(options: any, key: any, defaults: dict) -> dict {
   const opts = options ?? {}
   const shared = opts?.annotations?.["*"] ?? {}
   const local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
-fn __git_tool_config(options, key, config) {
+fn __git_tool_config(options: any, key: any, config: dict) {
   const opts = options ?? {}
   let out = config
   if opts?.defer_loading != nil {
@@ -1279,15 +1287,15 @@ fn __git_tool_config(options, key, config) {
   return out + shared + local
 }
 
-fn __git_tool_repo(args, options) {
+fn __git_tool_repo(args: GitToolRunArgs, options: any) {
   return args?.repo ?? (options ?? {})?.repo ?? (options ?? {})?.cwd ?? "."
 }
 
-fn __git_catalog_tool_key(entry) -> string {
+fn __git_catalog_tool_key(entry: dict) -> string {
   return "git_" + entry.operation
 }
 
-fn __git_catalog_tool_annotations(entry, opts, key) {
+fn __git_catalog_tool_annotations(entry: dict, opts: GitToolRegistryOptions, key: any) {
   if entry.group == "mutation" {
     return __git_tool_annotations(
       opts,
@@ -1298,14 +1306,14 @@ fn __git_catalog_tool_annotations(entry, opts, key) {
   return __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"})
 }
 
-fn __git_catalog_tool_run_options(entry, opts) {
+fn __git_catalog_tool_run_options(entry: dict, opts: any) {
   if entry.group == "mutation" {
     return opts + {include_mutations: true}
   }
   return opts
 }
 
-fn __git_define_catalog_tool(process: HarnessProcess, tools, entry, opts) {
+fn __git_define_catalog_tool(process: HarnessProcess, tools: any, entry: dict, opts: any) {
   const key = __git_catalog_tool_key(entry)
   if !__git_tool_enabled(opts, key, entry.group) {
     return tools
@@ -1347,7 +1355,7 @@ pub fn git_tools(
   return tools
 }
 
-fn __git_toolbox_enabled(options, key) -> bool {
+fn __git_toolbox_enabled(options: any, key: string) -> bool {
   const opts = options ?? {}
   const enabled = opts?.enabled_tools ?? ["find_git_tool", "run_git_tool"]
   const disabled = opts?.disabled_tools ?? []
@@ -1358,7 +1366,7 @@ fn __git_toolbox_enabled(options, key) -> bool {
     || __git_list_contains(enabled, key)
 }
 
-fn __git_toolbox_find_options(opts, args) {
+fn __git_toolbox_find_options(opts: GitToolRegistryOptions, args: dict) {
   let out = opts
   if args?.max_results != nil {
     out = out + {max_results: args.max_results}
@@ -1366,7 +1374,7 @@ fn __git_toolbox_find_options(opts, args) {
   return out
 }
 
-fn __git_toolbox_run_annotations(opts, key) {
+fn __git_toolbox_run_annotations(opts: GitToolRegistryOptions, key: string) {
   if opts?.include_mutations ?? false {
     return __git_tool_annotations(
       opts,

@@ -1,7 +1,7 @@
 import "std/agents"
 import "std/handoffs"
 
-fn review_captain_mock(harness: Harness, envelope) {
+fn review_captain_mock(harness: Harness, envelope: dict) {
   let _ = harness
   return {
     persona: "review_captain",

@@ -129,7 +129,7 @@ pub fn request_abort(runtime: HarnessRuntime, token: AbortToken, reason: AbortRe
 // Cancellation and internal engine errors are not branch outcomes; they must
 // reach the caller unchanged rather than becoming a collected `Err`. This
 // mirrors the rule the agent loop applies at its own parallel dispatch site.
-fn __abort_must_propagate(err) -> bool {
+fn __abort_must_propagate(err: any) -> bool {
   const category = error_category(err)
   return category == "cancelled" || category == "internal"
 }
@@ -150,10 +150,10 @@ fn __abort_threshold(options: SettleAbortOptions?) -> int? {
 
 fn __abort_note_failure(
   runtime: HarnessRuntime,
-  err,
+  err: any,
   index: int,
   token: AbortToken,
-  counter,
+  counter: any,
   options: SettleAbortOptions?,
 ) -> nil {
   const threshold = __abort_threshold(options)
@@ -178,10 +178,10 @@ fn __abort_note_failure(
 
 fn __abort_branch(
   runtime: HarnessRuntime,
-  entry,
-  body,
+  entry: dict,
+  body: unknown,
   token: AbortToken,
-  counter,
+  counter: any,
   options: SettleAbortOptions?,
 ) -> dict {
   const index = entry.index
@@ -247,7 +247,7 @@ pub fn settle_with_abort(
   random: HarnessRandom,
   runtime: HarnessRuntime,
   items: list,
-  body,
+  body: any,
   options: SettleAbortOptions? = nil,
 ) -> AbortSettleOutcome {
   const token = options?.token ?? abort_token(random, runtime)

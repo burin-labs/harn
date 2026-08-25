@@ -1,7 +1,7 @@
 import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn current_worker(agent: HarnessAgent, handle) {
+fn current_worker(agent: HarnessAgent, handle: dict) {
   const worker_id = handle?.id
   for worker in list_agents(agent) {
     if worker?.id == worker_id {
@@ -11,7 +11,7 @@ fn current_worker(agent: HarnessAgent, handle) {
   return nil
 }
 
-fn wait_for_status(agent: HarnessAgent, clock: HarnessClock, handle, status) {
+fn wait_for_status(agent: HarnessAgent, clock: HarnessClock, handle: dict, status: string) {
   let attempts = 0
   let worker = current_worker(agent, handle)
   while attempts < 200 && worker?.status != status {
@@ -22,12 +22,12 @@ fn wait_for_status(agent: HarnessAgent, clock: HarnessClock, handle, status) {
   return worker
 }
 
-fn worker_snapshot(agent: HarnessAgent, fs: HarnessFs, handle) {
+fn worker_snapshot(agent: HarnessAgent, fs: HarnessFs, handle: dict) {
   const worker = current_worker(agent, handle)
   return json_parse(fs.read_text(worker?.snapshot_path))
 }
 
-fn worker_snapshot_text(agent: HarnessAgent, fs: HarnessFs, handle) {
+fn worker_snapshot_text(agent: HarnessAgent, fs: HarnessFs, handle: dict) {
   const worker = current_worker(agent, handle)
   return fs.read_text(worker?.snapshot_path)
 }

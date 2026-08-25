@@ -16,7 +16,7 @@ import {
   model_job_run_result,
 } from "std/model_job"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const png = bytes_from_base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB")
   const task_kind: ModelTask = "image.generate"
   const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}

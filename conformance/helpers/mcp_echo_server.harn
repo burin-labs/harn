@@ -1,4 +1,4 @@
-fn record_echo_call(fs: HarnessFs, state_file: string, args) {
+fn record_echo_call(fs: HarnessFs, state_file: string, args: any) {
   if state_file == "" {
     return nil
   }

@@ -3,7 +3,7 @@ import "std/collections"
 import { JsonParseFailure } from "std/json"
 import { workflow_execute } from "std/workflow/execute"
 
-fn __action_graph_parse_input(raw) {
+fn __action_graph_parse_input(raw: unknown) {
   if type_of(raw) != "string" {
     return raw
   }
@@ -23,7 +23,7 @@ fn __action_graph_parse_input(raw) {
   return raw
 }
 
-fn __action_graph_non_empty_string(value) {
+fn __action_graph_non_empty_string(value: string?) {
   if type_of(value) != "string" {
     return nil
   }
@@ -34,7 +34,7 @@ fn __action_graph_non_empty_string(value) {
   return text
 }
 
-fn __action_graph_first_string(candidates) {
+fn __action_graph_first_string(candidates: list) {
   for value in candidates {
     const text = __action_graph_non_empty_string(value)
     if text != nil {
@@ -44,7 +44,7 @@ fn __action_graph_first_string(candidates) {
   return nil
 }
 
-fn __action_graph_listify(value) {
+fn __action_graph_listify(value: any) {
   if value == nil {
     return []
   }
@@ -54,7 +54,7 @@ fn __action_graph_listify(value) {
   return [value]
 }
 
-fn __action_graph_tool_list(raw) {
+fn __action_graph_tool_list(raw: dict) {
   const value = raw?.tools ?? raw?.tool ?? raw?.allowed_tools ?? raw?.capabilities
   if value == nil {
     return []
@@ -76,7 +76,10 @@ fn __action_graph_tool_list(raw) {
   return tools
 }
 
-fn __action_graph_tool_class(tools, phase) {
+fn __action_graph_tool_class(
+  tools: string | bytes | list | dict | set | range | nil,
+  phase: string,
+) {
   if phase == "verify" {
     return "verify"
   }
@@ -118,7 +121,12 @@ fn __action_graph_tool_class(tools, phase) {
   return "mixed"
 }
 
-fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
+fn __action_graph_phase(
+  raw: dict,
+  fallback_phase: string,
+  tools: string | bytes | list | dict | set | range | nil,
+  instruction: string?,
+) {
   const explicit = lowercase(
     trim(
       raw?.phase ?? raw?.kind ?? raw?.type ?? raw?.category ?? raw?.mode ?? fallback_phase ?? "",
@@ -156,7 +164,7 @@ fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
   return "execute"
 }
 
-fn __action_graph_dependency_refs(raw) {
+fn __action_graph_dependency_refs(raw: dict) {
   const source = raw?.depends_on ?? raw?.dependsOn ?? raw?.dependencies ?? raw?.needs ?? raw?.after
   if source == nil {
     return []
@@ -187,7 +195,7 @@ fn __action_graph_dependency_refs(raw) {
   return refs
 }
 
-fn __action_graph_collect_items(parsed) {
+fn __action_graph_collect_items(parsed: unknown) {
   if parsed == nil {
     return []
   }
@@ -246,7 +254,12 @@ fn __action_graph_collect_items(parsed) {
   return [parsed]
 }
 
-fn __action_graph_aliases_for(canonical_id, source_id, title, index) {
+fn __action_graph_aliases_for(
+  canonical_id: string,
+  source_id: string?,
+  title: string?,
+  index: int,
+) {
   let aliases = {}
   const numeric = format("{}", index + 1)
   aliases[canonical_id] = canonical_id
@@ -260,7 +273,7 @@ fn __action_graph_aliases_for(canonical_id, source_id, title, index) {
   return aliases
 }
 
-fn __action_graph_merge_aliases(base, extra) {
+fn __action_graph_merge_aliases(base: dict?, extra: dict?) {
   let merged = base ?? {}
   for entry in extra ?? {} {
     merged[entry.key] = entry.value
@@ -268,7 +281,7 @@ fn __action_graph_merge_aliases(base, extra) {
   return merged
 }
 
-fn __action_graph_append_unique_strings(items, values) {
+fn __action_graph_append_unique_strings(items: list?, values: any) {
   let result = items ?? []
   for value in __action_graph_listify(values) {
     const text = __action_graph_non_empty_string(value)
@@ -279,7 +292,7 @@ fn __action_graph_append_unique_strings(items, values) {
   return result
 }
 
-fn __action_graph_batch_target_paths(batch) {
+fn __action_graph_batch_target_paths(batch: dict) {
   let target_paths = []
   for action in batch.actions {
     target_paths = __action_graph_append_unique_strings(
@@ -290,7 +303,7 @@ fn __action_graph_batch_target_paths(batch) {
   return target_paths
 }
 
-fn __action_graph_batch_verification(batch) {
+fn __action_graph_batch_verification(batch: dict) {
   const target_paths = __action_graph_batch_target_paths(batch)
   if len(target_paths) == 0 {
     return nil
@@ -305,7 +318,7 @@ fn __action_graph_batch_verification(batch) {
   }
 }
 
-fn __action_graph_batch_prompt(batch) {
+fn __action_graph_batch_prompt(batch: dict) {
   let available_tools = []
   for action in batch.actions {
     for tool_name in action?.tools ?? [] {
@@ -396,7 +409,12 @@ fn __action_graph_batch_prompt(batch) {
   return join(lines, "\n")
 }
 
-fn __action_graph_batch(batch_index, phase, tool_class, actions) {
+fn __action_graph_batch(
+  batch_index: int,
+  phase: any,
+  tool_class: any,
+  actions: string | bytes | list | dict | set | range | nil,
+) {
   let action_ids = []
   let titles = []
   let depends_on = []
@@ -424,7 +442,7 @@ fn __action_graph_batch(batch_index, phase, tool_class, actions) {
   return batch + {prompt: __action_graph_batch_prompt(batch)}
 }
 
-fn __action_graph_batch_output_kind(phase) {
+fn __action_graph_batch_output_kind(phase: string) {
   if phase == "research" {
     return "summary"
   }
@@ -434,7 +452,7 @@ fn __action_graph_batch_output_kind(phase) {
   return "summary"
 }
 
-fn __action_graph_output_kind(template, default_output) {
+fn __action_graph_output_kind(template: dict?, default_output: any) {
   const outputs = template?.output_contract?.output_kinds ?? []
   if len(outputs) > 0 {
     return outputs[0]
@@ -442,7 +460,7 @@ fn __action_graph_output_kind(template, default_output) {
   return default_output
 }
 
-fn __action_graph_stage_template(config, phase) {
+fn __action_graph_stage_template(config: dict, phase: string) {
   if phase == "research" {
     return config?.research ?? config?.stage ?? {}
   }
@@ -452,7 +470,7 @@ fn __action_graph_stage_template(config, phase) {
   return config?.execute ?? config?.stage ?? {}
 }
 
-fn __action_graph_terminal_template(config, phase) {
+fn __action_graph_terminal_template(config: dict, phase: string) {
   if phase == "verify" {
     return config?.verify ?? {}
   }
@@ -462,7 +480,7 @@ fn __action_graph_terminal_template(config, phase) {
   return {}
 }
 
-fn __action_graph_terminal_kind(template, phase) {
+fn __action_graph_terminal_kind(template: dict?, phase: any) {
   if template?.kind != nil {
     return template.kind
   }
@@ -472,7 +490,7 @@ fn __action_graph_terminal_kind(template, phase) {
   return "stage"
 }
 
-fn __action_graph_node_system(base_system, prompt) {
+fn __action_graph_node_system(base_system: string?, prompt: any) {
   const prefix = __action_graph_non_empty_string(base_system)
   if prefix == nil {
     return prompt
@@ -480,7 +498,7 @@ fn __action_graph_node_system(base_system, prompt) {
   return prefix + "\n\n" + prompt
 }
 
-fn __action_graph_batch_tools(batch, template) {
+fn __action_graph_batch_tools(batch: dict, template: dict?) {
   const registry = template?.tools
   if registry == nil {
     return nil
@@ -502,7 +520,7 @@ fn __action_graph_batch_tools(batch, template) {
   return tool_select(registry, selected)
 }
 
-fn __action_graph_batch_context_kinds(batch, template) {
+fn __action_graph_batch_context_kinds(batch: dict, template: dict?) {
   const explicit = template?.context_policy?.include_kinds ?? []
   if len(explicit) > 0 {
     return explicit
@@ -516,7 +534,7 @@ fn __action_graph_batch_context_kinds(batch, template) {
   return ["summary"]
 }
 
-fn __action_graph_batch_node(batch, template) {
+fn __action_graph_batch_node(batch: dict, template: dict) {
   const local_verification = __action_graph_batch_verification(batch)
   const model_policy = template?.model_policy ?? {}
   const output_kind = __action_graph_output_kind(
@@ -555,14 +573,14 @@ fn __action_graph_batch_node(batch, template) {
     }
 }
 
-fn __action_graph_terminal_prompt(plan, phase) {
+fn __action_graph_terminal_prompt(plan: unknown, phase: any) {
   if phase == "verify" {
     return "Review the action-graph plan and produced artifacts, then verify whether the requested work is complete."
   }
   return "Evaluate the completed action-graph run and summarize whether the plan satisfied the task."
 }
 
-fn __action_graph_terminal_node(plan, phase, template) {
+fn __action_graph_terminal_node(plan: any, phase: any, template: dict) {
   const default_output = if phase == "verify" {
     "verification_result"
   } else {
@@ -610,7 +628,7 @@ fn __action_graph_terminal_node(plan, phase, template) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph(raw, options = nil) {
+pub fn action_graph(raw: any, options: any = nil) {
   const parsed = __action_graph_parse_input(raw)
   const items = __action_graph_collect_items(parsed)
   let staged = []
@@ -650,7 +668,12 @@ pub fn action_graph(raw, options = nil) {
     const source_id = __action_graph_first_string(
       [dict?.id, dict?.action_id, dict?.name, dict?.label],
     )
-    const phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
+    const phase = __action_graph_phase(
+      dict,
+      dict?.phase ?? options?.phase ?? "",
+      tools,
+      instruction,
+    )
     const canonical_id = format("action-{}", index + 1)
     staged = staged
       + [
@@ -728,7 +751,7 @@ pub fn action_graph(raw, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_batches(graph, completed = nil) {
+pub fn action_graph_batches(graph: dict, completed: any = nil) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {
@@ -810,7 +833,7 @@ pub fn action_graph_batches(graph, completed = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_render(graph) {
+pub fn action_graph_render(graph: dict) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {
@@ -853,7 +876,7 @@ pub fn action_graph_render(graph) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_flow(graph, config = nil) {
+pub fn action_graph_flow(graph: dict, config: any = nil) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {
@@ -916,7 +939,13 @@ pub fn action_graph_flow(graph, config = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn action_graph_run(harness: Harness, task, graph, config = nil, overrides = nil) {
+pub fn action_graph_run(
+  harness: Harness,
+  task: any,
+  graph: dict,
+  config: any = nil,
+  overrides: dict? = nil,
+) {
   const plan = if graph?._type == "action_graph" {
     graph
   } else {

@@ -1,6 +1,6 @@
 import "std/waitpoint"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const wp: Waitpoint = create(harness.runtime, "fan-in-" + harness.random.uuid())
   const first = spawn {
     wait(harness.runtime, wp).value + "-1"

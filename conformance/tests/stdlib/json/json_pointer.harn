@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const doc = json_parse(
     "{\"users\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\",\"active\":true},{\"name\":\"Bob\",\"email\":\"bob@example.com\",\"active\":false}],\"a/b\":{\"~key\":7}}",
   )

@@ -1,7 +1,7 @@
 import "std/project"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const namespace = "coding-enrichment-${harness.random.uuid()}"
   const root = path_join(
     harness.fs.workspace_temp_dir(),

@@ -16,9 +16,8 @@
 // renders sibling files (review-captain's two `.harn.prompt` templates) and a
 // scenario's imported modules are showcase code too.
 //
-// Each snippet must pass `harn check` and a strict `harn lint`. `check` alone
-// accepts plenty the language is moving away from — an untyped, unused
-// parameter type-checks fine — so the strict lint is what holds the showcase
+// Each snippet must pass `harn check` and a strict `harn lint`. `check` owns
+// mandatory parameter annotations; strict lint holds the rest of the showcase
 // to the style the docs teach.
 //
 // One gap this does not close: HARN-LNT-016 never fires on a *pipeline*
@@ -34,14 +33,11 @@ const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/*.harn"
 
 /**
  * The argv tail of every command a snippet must survive, in order; the
- * snippet's path is appended to each. `--strict` makes warnings fatal and
- * `--require-public-api-types` demands annotations on exported callables, so
- * showcase code is held to the bar its readers will be held to.
+ * snippet's path is appended to each. `--strict` makes warnings fatal.
+ * Ordinary typechecking enforces parameter annotations, so showcase code is
+ * held to the same bar as every Harn source.
  */
-const SNIPPET_CHECKS: list<list<string>> = [
-  ["check"],
-  ["lint", "--strict", "--require-public-api-types"],
-]
+const SNIPPET_CHECKS: list<list<string>> = [["check"], ["lint", "--strict"]]
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {

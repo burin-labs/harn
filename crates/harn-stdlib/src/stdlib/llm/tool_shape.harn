@@ -356,7 +356,7 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
  */
 pub fn tool_shape_violations(
   findings: list<ToolShapeFinding>,
-  tool_format = "",
+  tool_format: string? = "",
 ) -> list<ProtocolViolation> {
   const call_syntax = tool_call_shape(tool_format).call_syntax
   return findings.map(
@@ -383,7 +383,10 @@ pub fn tool_shape_violations(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_shape_feedback(findings: list<ToolShapeFinding>, tool_format = "") -> list<string> {
+pub fn tool_shape_feedback(
+  findings: list<ToolShapeFinding>,
+  tool_format: string? = "",
+) -> list<string> {
   return tool_shape_violations(findings, tool_format).map(
     fn(violation) { return violation.message },
   )

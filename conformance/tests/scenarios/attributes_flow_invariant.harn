@@ -5,7 +5,7 @@
 @invariant
 @deterministic
 @archivist(evidence: ["https://example.com/spec", "https://example.com/changelog"], confidence: 0.95, source_date: "2026-04-01", coverage_examples: ["case-a", "case-b"])
-fn no_secrets_in_diff(_slice) -> bool {
+fn no_secrets_in_diff(_slice: any) -> bool {
   return true
 }
 
@@ -13,12 +13,12 @@ fn no_secrets_in_diff(_slice) -> bool {
 @semantic(fallback: no_secrets_in_diff)
 @retroactive
 @archivist(evidence: ["https://example.com/style"], confidence: 0.6)
-fn naming_style(_slice) -> bool {
+fn naming_style(_slice: any) -> bool {
   return true
 }
 
 @test
-pipeline test_flow_attributes_smoke(harness: Harness, task) {
+pipeline test_flow_attributes_smoke(harness: Harness, task: unknown) {
   // Both predicates remain ordinary callable functions.
   assert(no_secrets_in_diff(nil), "deterministic predicate callable")
   assert(naming_style(nil), "semantic predicate callable")

@@ -9,7 +9,7 @@ fn failed(detail: string) -> GitHubApiAttempt {
   return {success: false, stdout: "", stderr: detail, timed_out: false}
 }
 
-pipeline test_github_api_retries_known_transport_failures(task) {
+pipeline test_github_api_retries_known_transport_failures(task: unknown) {
   let attempts = [
     failed("tls: failed to verify certificate: x509: certificate is not valid"),
     {success: true, stdout: "{\"ok\":true}", stderr: "", timed_out: false},
@@ -34,7 +34,7 @@ pipeline test_github_api_retries_known_transport_failures(task) {
   assert_eq(waits, [25])
 }
 
-pipeline test_github_api_fails_closed_after_bounded_transport_retries(task) {
+pipeline test_github_api_fails_closed_after_bounded_transport_retries(task: unknown) {
   let request_count = 0
   const adapters: GitHubApiAdapters = {
     request: { _path ->
@@ -54,7 +54,7 @@ pipeline test_github_api_fails_closed_after_bounded_transport_retries(task) {
   assert_eq(request_count, 3)
 }
 
-pipeline test_github_api_does_not_retry_semantic_or_malformed_responses(task) {
+pipeline test_github_api_does_not_retry_semantic_or_malformed_responses(task: unknown) {
   assert_eq(github_api_failure_kind(failed("gh: Not Found (HTTP 404)")), "command")
   let request_count = 0
   const adapters: GitHubApiAdapters = {

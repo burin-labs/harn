@@ -7,7 +7,7 @@
  * A tiny conversational assistant with a narrow prompt and a simple response
  * path. Useful as a baseline before wiring in tools or memory.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: string) {
   const system = """
 You are a helpful, concise chatbot for Harn users.
 Answer directly, ask one clarifying question if the request is ambiguous,

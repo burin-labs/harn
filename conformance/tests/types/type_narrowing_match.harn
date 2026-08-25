@@ -1,5 +1,5 @@
 /** Test match arm type narrowing */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn classify(x: string | int | nil) -> string {
     match x {
       nil -> { return "nil" }

@@ -81,14 +81,14 @@ const __DEFAULT_REGISTRATION_PATH = "/register"
 
 const __CONTENT_TYPE_JSON = "application/json"
 
-fn __require_dict(value, field) {
+fn __require_dict(value: any, field: string) {
   if type_of(value) != "dict" {
     throw "std/oauth/dynamic_registration: " + field + " must be a dict, got " + type_of(value)
   }
   return value
 }
 
-fn __safe_get(dict, key) {
+fn __safe_get(dict: dict, key: string) {
   const keys = dict.keys()
   if keys.contains(key) {
     return dict[key]
@@ -106,7 +106,7 @@ fn __safe_get(dict, key) {
  * @api_stability: experimental
  * @example: validate_metadata({redirect_uris: ["https://app.example/cb"]})
  */
-pub fn validate_metadata(metadata) -> dict {
+pub fn validate_metadata(metadata: any) -> dict {
   return oauth_dynreg_validate_metadata(__require_dict(metadata, "metadata"))
 }
 
@@ -122,7 +122,7 @@ pub fn validate_metadata(metadata) -> dict {
  * @api_stability: experimental
  * @example: client_metadata({redirect_uris: ["https://app.example/cb"], client_name: "Harn"})
  */
-pub fn client_metadata(opts) -> dict {
+pub fn client_metadata(opts: any) -> dict {
   return oauth_dynreg_build_client_metadata(__require_dict(opts, "opts"))
 }
 
@@ -138,7 +138,7 @@ pub fn client_metadata(opts) -> dict {
  * @api_stability: experimental
  * @example: authorization_server_metadata(providers().github, {registration_endpoint: "/register"})
  */
-pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
+pub fn authorization_server_metadata(provider: any, overrides: any = nil) -> dict {
   const provider_dict = __require_dict(provider, "provider")
   if overrides == nil {
     return oauth_dynreg_build_authorization_server_metadata(provider_dict, nil)
@@ -170,7 +170,7 @@ pub fn dynamic_registration_store(auth: HarnessAuth, channels: HarnessChannels) 
     }
 }
 
-fn __redact_shape(metadata, response) {
+fn __redact_shape(metadata: dict, response: dict) {
   const redirect_uris = __safe_get(metadata, "redirect_uris") ?? []
   const grant_types = __safe_get(response, "grant_types") ?? []
   const has_secret = __safe_get(response, "client_secret") != nil
@@ -196,7 +196,12 @@ fn __redact_shape(metadata, response) {
  * @api_stability: experimental
  * @example: register_client(harness.auth, harness.channels, store, {redirect_uris: ["https://app.example/cb"]})
  */
-pub fn register_client(auth: HarnessAuth, channels: HarnessChannels, store, metadata) -> dict {
+pub fn register_client(
+  auth: HarnessAuth,
+  channels: HarnessChannels,
+  store: any,
+  metadata: any,
+) -> dict {
   const store_dict = __require_dict(store, "store")
   const metadata_dict = __require_dict(metadata, "metadata")
   const response = auth.oauth_register_client(store_dict, metadata_dict)
@@ -222,7 +227,7 @@ pub fn register_client(auth: HarnessAuth, channels: HarnessChannels, store, meta
  * @api_stability: experimental
  * @example: get_client(store, "abc123")
  */
-pub fn get_client(auth: HarnessAuth, store, client_id) -> dict {
+pub fn get_client(auth: HarnessAuth, store: any, client_id: any) -> dict {
   return auth.oauth_registered_client(__require_dict(store, "store"), client_id)
 }
 
@@ -233,7 +238,7 @@ pub fn get_client(auth: HarnessAuth, store, client_id) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn list_clients(auth: HarnessAuth, store) -> list<string> {
+pub fn list_clients(auth: HarnessAuth, store: any) -> list<string> {
   return auth.oauth_registered_clients(__require_dict(store, "store"))
 }
 
@@ -247,7 +252,7 @@ pub fn list_clients(auth: HarnessAuth, store) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn well_known_paths(overrides = nil) -> dict {
+pub fn well_known_paths(overrides: any = nil) -> dict {
   const defaults = {
     client_metadata: __DEFAULT_CLIENT_METADATA_PATH,
     authorization_server_metadata: __DEFAULT_AUTH_SERVER_METADATA_PATH,
@@ -270,7 +275,7 @@ pub fn well_known_paths(overrides = nil) -> dict {
  * @api_stability: experimental
  * @example: well_known_response(client_metadata({redirect_uris: ["https://a/cb"]}))
  */
-pub fn well_known_response(metadata) -> dict {
+pub fn well_known_response(metadata: any) -> dict {
   const dict = __require_dict(metadata, "metadata")
   return {
     status: 200,

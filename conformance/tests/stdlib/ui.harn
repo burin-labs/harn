@@ -2,7 +2,7 @@ import * as ui from "std/ui"
 import { UiEffectKind, UiEvent } from "std/ui/contracts"
 import { UiTestOptions } from "std/ui/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const elements = [
     {id: "root", kind: "column"},
     {id: "title", kind: "heading", parent: "root", text: "Paint"},
@@ -105,7 +105,7 @@ pipeline test(harness: Harness, task) {
   }
   harness.stdio.println(is_err(bad_delay))
   let revision = 0
-  fn reduce(raw) {
+  fn reduce(raw: dict) {
     const incoming = ui.event(raw.event)
     revision = revision + 1
     let effects = []

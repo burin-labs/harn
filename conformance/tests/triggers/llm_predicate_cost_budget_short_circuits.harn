@@ -14,7 +14,7 @@ fn classify(harness: Harness, event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [{text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"}],

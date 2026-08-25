@@ -280,7 +280,11 @@ pub(crate) fn check_file_report_inner(
         let imported_callables = module_graph
             .imported_callable_names_for_file(path)
             .unwrap_or_default();
-        let compiler = if config.trusted_host_dispatch {
+        let compiler = if crate::commands::check::path_is_stdlib_source(path) {
+            harn_vm::Compiler::new_embedded_stdlib()
+                .with_imported_enum_candidates(imported_enums)
+                .with_imported_source_callable_names(imported_callables)
+        } else if config.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
                 .with_imported_enum_candidates(imported_enums)
                 .with_imported_source_callable_names(imported_callables)

@@ -10,7 +10,7 @@ pub import "std/json/stream"
  * @effects: []
  * @errors: []
  */
-pub fn pretty(value) {
+pub fn pretty(value: any) {
   return json_stringify_pretty(value)
 }
 

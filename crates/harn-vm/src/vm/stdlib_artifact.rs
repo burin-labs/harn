@@ -93,7 +93,7 @@ pub(super) fn stdlib_module_artifact(
                 synthetic,
                 bytecode_cache::CacheKey::from_embedded_stdlib_module_content_hash(
                     embedded.sha256(),
-                    ModuleProvenance::User,
+                    ModuleProvenance::EmbeddedStdlib,
                 ),
             )
         };

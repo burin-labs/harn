@@ -1,4 +1,4 @@
-fn __budget_envelope(opts) {
+fn __budget_envelope(opts: dict) {
   return opts?.budget
 }
 
@@ -9,7 +9,7 @@ fn __budget_envelope(opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session, opts) {
+pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session: dict, opts: dict) {
   const envelope = __budget_envelope(opts)
   if envelope == nil {
     return false
@@ -29,7 +29,7 @@ pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_budget_post_call_stop_reason(totals, opts) -> string {
+pub fn agent_budget_post_call_stop_reason(totals: dict, opts: dict) -> string {
   const envelope = __budget_envelope(opts)
   if envelope == nil && opts?.token_budget == nil {
     return ""
@@ -60,6 +60,6 @@ pub fn agent_budget_post_call_stop_reason(totals, opts) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_budget_post_call_blocked(totals, opts) -> bool {
+pub fn agent_budget_post_call_blocked(totals: dict, opts: dict) -> bool {
   return agent_budget_post_call_stop_reason(totals, opts) != ""
 }

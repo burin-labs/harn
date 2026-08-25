@@ -13,7 +13,7 @@ import "std/triggers"
  * Successful current-session injection is exercised at the integration
  * layer (via agent_loop, which pushes onto the current-session stack).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

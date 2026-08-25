@@ -5,7 +5,7 @@ import "../check_docs_cli_flags.harn"
 
 // --- bash_blocks ------------------------------------------------------------
 @test
-pipeline test_bash_blocks_basic(harness: Harness, task) {
+pipeline test_bash_blocks_basic(harness: Harness, task: unknown) {
   const md = "intro\n```bash\nharn run x\n```\n```sh\nharn lint y\n```\n```python\nnope\n```\n"
   const blocks = bash_blocks(md)
   assert_eq(blocks.count, 2)
@@ -15,14 +15,14 @@ pipeline test_bash_blocks_basic(harness: Harness, task) {
 }
 
 @test
-pipeline test_bash_blocks_info_string_exact(harness: Harness, task) {
+pipeline test_bash_blocks_info_string_exact(harness: Harness, task: unknown) {
   // ```bash with trailing text is not a tracked block.
   assert_eq(bash_blocks("```bash title\nharn run x\n```\n"), [])
 }
 
 // --- logical_lines ----------------------------------------------------------
 @test
-pipeline test_logical_lines_plain(harness: Harness, task) {
+pipeline test_logical_lines_plain(harness: Harness, task: unknown) {
   const out = logical_lines(["harn run a", "harn run b"], 10)
   assert_eq(out.count, 2)
   assert_eq(out[0].line_no, 10)
@@ -31,7 +31,7 @@ pipeline test_logical_lines_plain(harness: Harness, task) {
 }
 
 @test
-pipeline test_logical_lines_continuation(harness: Harness, task) {
+pipeline test_logical_lines_continuation(harness: Harness, task: unknown) {
   const out = logical_lines(["harn run x \\", "  --flag value"], 5)
   assert_eq(out.count, 1)
   assert_eq(out[0].line_no, 5)
@@ -39,14 +39,14 @@ pipeline test_logical_lines_continuation(harness: Harness, task) {
 }
 
 @test
-pipeline test_logical_lines_allow_stale_any_physical_line(harness: Harness, task) {
+pipeline test_logical_lines_allow_stale_any_physical_line(harness: Harness, task: unknown) {
   const out = logical_lines(["harn run x \\", "  --old # harn-doc-cli: allow-stale"], 1)
   assert_eq(out.count, 1)
   assert_eq(out[0].allow_stale, true)
 }
 
 @test
-pipeline test_logical_lines_trailing_continuation_flushes(harness: Harness, task) {
+pipeline test_logical_lines_trailing_continuation_flushes(harness: Harness, task: unknown) {
   const out = logical_lines(["harn run x \\"], 1)
   assert_eq(out.count, 1)
   // The pre-backslash spacing survives, like Python's rstrip()[:-1].
@@ -55,12 +55,12 @@ pipeline test_logical_lines_trailing_continuation_flushes(harness: Harness, task
 
 // --- shell_tokens -----------------------------------------------------------
 @test
-pipeline test_tokens_basic(harness: Harness, task) {
+pipeline test_tokens_basic(harness: Harness, task: unknown) {
   assert_eq(shell_tokens("harn run --json x.harn"), ["harn", "run", "--json", "x.harn"])
 }
 
 @test
-pipeline test_tokens_separators_padded(harness: Harness, task) {
+pipeline test_tokens_separators_padded(harness: Harness, task: unknown) {
   assert_eq(
     shell_tokens("harn a&&harn b|grep c"),
     ["harn", "a", "&&", "harn", "b", "|", "grep", "c"],
@@ -68,25 +68,25 @@ pipeline test_tokens_separators_padded(harness: Harness, task) {
 }
 
 @test
-pipeline test_tokens_quotes(harness: Harness, task) {
+pipeline test_tokens_quotes(harness: Harness, task: unknown) {
   assert_eq(shell_tokens("harn run 'a b' \"c d\""), ["harn", "run", "a b", "c d"])
   // Adjacent quoted/unquoted parts are one token.
   assert_eq(shell_tokens("pre'fix'post"), ["prefixpost"])
 }
 
 @test
-pipeline test_tokens_comment_strips_rest(harness: Harness, task) {
+pipeline test_tokens_comment_strips_rest(harness: Harness, task: unknown) {
   assert_eq(shell_tokens("harn run x # trailing note"), ["harn", "run", "x"])
 }
 
 @test
-pipeline test_tokens_unclosed_quote_is_error(harness: Harness, task) {
+pipeline test_tokens_unclosed_quote_is_error(harness: Harness, task: unknown) {
   assert_eq(shell_tokens("harn run \"unclosed"), nil)
   assert_eq(shell_tokens("harn run 'unclosed"), nil)
 }
 
 @test
-pipeline test_tokens_escapes(harness: Harness, task) {
+pipeline test_tokens_escapes(harness: Harness, task: unknown) {
   // Outside quotes a backslash escapes anything; inside double quotes it
   // only escapes `"` and `\` and stays literal otherwise.
   assert_eq(shell_tokens(r"a\ b"), ["a b"])
@@ -95,19 +95,19 @@ pipeline test_tokens_escapes(harness: Harness, task) {
 }
 
 @test
-pipeline test_tokens_empty_quoted_token(harness: Harness, task) {
+pipeline test_tokens_empty_quoted_token(harness: Harness, task: unknown) {
   assert_eq(shell_tokens("harn run ''"), ["harn", "run", ""])
 }
 
 // --- command_segments / find_harn_segment -----------------------------------
 @test
-pipeline test_segments_split(harness: Harness, task) {
+pipeline test_segments_split(harness: Harness, task: unknown) {
   const segs = command_segments(["a", "&&", "b", "c", ";", ";", "d"])
   assert_eq(segs, [["a"], ["b", "c"], ["d"]])
 }
 
 @test
-pipeline test_find_harn_segment_forms(harness: Harness, task) {
+pipeline test_find_harn_segment_forms(harness: Harness, task: unknown) {
   assert_eq(find_harn_segment(["harn", "run", "x"]), ["run", "x"])
   assert_eq(find_harn_segment(["$", "harn", "version"]), ["version"])
   assert_eq(find_harn_segment(["env", "HARN_LOG=1", "harn", "run"]), ["run"])
@@ -143,17 +143,17 @@ Options:
 """
 
 @test
-pipeline test_parse_command_names(harness: Harness, task) {
+pipeline test_parse_command_names(harness: Harness, task: unknown) {
   assert_eq(parse_command_names(HELP_ROOT), ["run", "lint"])
 }
 
 @test
-pipeline test_parse_command_names_requires_heading(harness: Harness, task) {
+pipeline test_parse_command_names_requires_heading(harness: Harness, task: unknown) {
   assert_eq(parse_command_names("no commands section\n  run  x\n"), [])
 }
 
 @test
-pipeline test_parse_help_flags(harness: Harness, task) {
+pipeline test_parse_help_flags(harness: Harness, task: unknown) {
   const parsed = parse_help_flags(HELP_ROOT)
   assert_eq(parsed.flags.contains("--json"), true)
   assert_eq(parsed.flags.contains("--config"), true)
@@ -162,14 +162,14 @@ pipeline test_parse_help_flags(harness: Harness, task) {
 }
 
 @test
-pipeline test_parse_help_flags_optional_value(harness: Harness, task) {
+pipeline test_parse_help_flags_optional_value(harness: Harness, task: unknown) {
   const parsed = parse_help_flags(HELP_RUN)
   assert_eq(parsed.takes["--as-job"], true)
   assert_eq(parsed.takes["--timeout"], true)
 }
 
 @test
-pipeline test_parse_help_flags_lookbehind_equivalent(harness: Harness, task) {
+pipeline test_parse_help_flags_lookbehind_equivalent(harness: Harness, task: unknown) {
   // `--` runs embedded in a word or after a hyphen do not count as flags
   // (the Python `(?<![\w-])` look-behind).
   const parsed = parse_help_flags("see foo--bar and legit --baz\n")
@@ -197,33 +197,33 @@ fn fresh_state() {
 }
 
 @test
-pipeline test_analyze_known_flags_ok(harness: Harness, task) {
+pipeline test_analyze_known_flags_ok(harness: Harness, task: unknown) {
   const res = analyze_harn_args(fresh_state(), ["run", "--timeout", "5", "x.harn"], fake_fetch)
   assert_eq(res.path, ["run"])
   assert_eq(res.missing, [])
 }
 
 @test
-pipeline test_analyze_parent_flags_accepted_in_subcommand(harness: Harness, task) {
+pipeline test_analyze_parent_flags_accepted_in_subcommand(harness: Harness, task: unknown) {
   // Root-level flags stay accepted below (union over path prefixes).
   const res = analyze_harn_args(fresh_state(), ["run", "--json", "x.harn"], fake_fetch)
   assert_eq(res.missing, [])
 }
 
 @test
-pipeline test_analyze_missing_flag_reported(harness: Harness, task) {
+pipeline test_analyze_missing_flag_reported(harness: Harness, task: unknown) {
   const res = analyze_harn_args(fresh_state(), ["run", "--bogus", "x.harn"], fake_fetch)
   assert_eq(res.missing, ["--bogus"])
 }
 
 @test
-pipeline test_analyze_stops_at_double_dash(harness: Harness, task) {
+pipeline test_analyze_stops_at_double_dash(harness: Harness, task: unknown) {
   const res = analyze_harn_args(fresh_state(), ["run", "x.harn", "--", "--not-checked"], fake_fetch)
   assert_eq(res.missing, [])
 }
 
 @test
-pipeline test_analyze_value_skip_does_not_eat_subcommand(harness: Harness, task) {
+pipeline test_analyze_value_skip_does_not_eat_subcommand(harness: Harness, task: unknown) {
   // `--json` takes no value, so the next token still counts as a
   // subcommand path element.
   const res = analyze_harn_args(fresh_state(), ["--json", "run", "--timeout", "5"], fake_fetch)
@@ -232,20 +232,20 @@ pipeline test_analyze_value_skip_does_not_eat_subcommand(harness: Harness, task)
 }
 
 @test
-pipeline test_analyze_flag_with_equals_value(harness: Harness, task) {
+pipeline test_analyze_flag_with_equals_value(harness: Harness, task: unknown) {
   const res = analyze_harn_args(fresh_state(), ["run", "--timeout=5", "x.harn"], fake_fetch)
   assert_eq(res.missing, [])
 }
 
 // --- misc -------------------------------------------------------------------
 @test
-pipeline test_has_long_flag(harness: Harness, task) {
+pipeline test_has_long_flag(harness: Harness, task: unknown) {
   assert_eq(has_long_flag(["run", "--json"]), true)
   assert_eq(has_long_flag(["run", "-v", "x"]), false)
 }
 
 @test
-pipeline test_is_assignment(harness: Harness, task) {
+pipeline test_is_assignment(harness: Harness, task: unknown) {
   assert_eq(is_assignment("FOO=bar"), true)
   assert_eq(is_assignment("_x1=2"), true)
   assert_eq(is_assignment("1FOO=bar"), false)
@@ -253,7 +253,7 @@ pipeline test_is_assignment(harness: Harness, task) {
 }
 
 @test
-pipeline test_right_trim(harness: Harness, task) {
+pipeline test_right_trim(harness: Harness, task: unknown) {
   assert_eq(right_trim("abc  \t"), "abc")
   assert_eq(right_trim("   "), "")
 }

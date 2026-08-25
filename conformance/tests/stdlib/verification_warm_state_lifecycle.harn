@@ -7,7 +7,7 @@ fn long_running_command(system: HarnessSystem) {
   return ["sh", "-c", "while true; do sleep 30; done"]
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const command = long_running_command(harness.system)
   if command == nil {
     harness.stdio.println("verification warm-state lifecycle skipped on windows")

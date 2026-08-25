@@ -1,6 +1,6 @@
 import "../_common"
 
-fn wait_for_readyz(harness: Harness, url, pid) {
+fn wait_for_readyz(harness: Harness, url: string, pid: string) {
   let attempts = 0
   while attempts < 200 {
     if !process_alive(harness.process, pid) {
@@ -18,7 +18,7 @@ fn wait_for_readyz(harness: Harness, url, pid) {
   return false
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-orchestrator-recover-" + harness.random.uuid(),

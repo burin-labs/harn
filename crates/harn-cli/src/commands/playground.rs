@@ -493,7 +493,7 @@ pub fn request_permission(tool_name, request_args) { return true }
         write_file(
             &host,
             r#"
-pub fn build_prompt(task) {
+pub fn build_prompt(task: string) {
   return "prompt: " + task
 }
 "#,
@@ -501,7 +501,7 @@ pub fn build_prompt(task) {
         write_file(
             &script,
             r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: any) {
   harness.llm.mock_enqueue({text: "done"})
   const result = harness.llm.call(
     build_prompt(harness.env.get_or("HARN_TASK", "")),
@@ -531,7 +531,7 @@ pipeline default(harness: Harness, task) {
         write_file(
             &script,
             r"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: any) {
   const snapshot = harness.llm.mock_snapshot()
   harness.stdio.println(len(keys(snapshot.queue_remaining)))
 }
@@ -566,7 +566,7 @@ pub fn helper() {
         write_file(
             &script,
             r#"
-pipeline default(task) {
+pipeline default(task: any) {
   run_shell("pwd")
 }
 "#,
@@ -596,7 +596,7 @@ pipeline default(task) {
         write_file(
             &host,
             r#"
-pub fn build_prompt(task) {
+pub fn build_prompt(task: string) {
   return "prompt: " + task
 }
 "#,
@@ -604,7 +604,7 @@ pub fn build_prompt(task) {
         write_file(
             &script,
             r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: any) {
   const result = harness.llm.call(
     build_prompt(harness.env.get_or("HARN_TASK", "")),
     "You are concise.",
@@ -648,7 +648,7 @@ pipeline default(harness: Harness, task) {
         write_file(
             &script,
             r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: any) {
   const first = harness.llm.call_safe("first", nil, {provider: "mock", model: "mock-model"})
   harness.stdio.println(first.ok)
   harness.stdio.println(first.error.status)

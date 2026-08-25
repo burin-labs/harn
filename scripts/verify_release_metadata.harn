@@ -427,7 +427,7 @@ fn verify_tag_state(
     + "rebase onto the tagged commit before continuing"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   try {
     const cargo_text = harness.fs.read_text(CARGO_PATH)
     const changelog_text = harness.fs.read_text(CHANGELOG_PATH)

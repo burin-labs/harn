@@ -5,7 +5,7 @@ fn _request() {
   return {repo: "example-org/example-app", pr_number: 42, head_sha: "abc", base_sha: "def"}
 }
 
-pipeline test_clean_receipt_returns_approve(harness: Harness, task) {
+pipeline test_clean_receipt_returns_approve(harness: Harness, task: unknown) {
   const receipt = build_review_receipt(
     {
       request: _request(),
@@ -26,7 +26,7 @@ pipeline test_clean_receipt_returns_approve(harness: Harness, task) {
   assert_eq(receipt.repo, "example-org/example-app")
 }
 
-pipeline test_secret_findings_set_blocking(harness: Harness, task) {
+pipeline test_secret_findings_set_blocking(harness: Harness, task: unknown) {
   const receipt = build_review_receipt(
     {
       request: _request(),
@@ -48,7 +48,7 @@ pipeline test_secret_findings_set_blocking(harness: Harness, task) {
   assert_eq(receipt.handoff, "merge_captain")
 }
 
-pipeline test_warning_findings_set_needs_follow_up(harness: Harness, task) {
+pipeline test_warning_findings_set_needs_follow_up(harness: Harness, task: unknown) {
   const receipt = build_review_receipt(
     {
       request: _request(),
@@ -74,7 +74,7 @@ pipeline test_warning_findings_set_needs_follow_up(harness: Harness, task) {
   assert_eq(len(receipt.findings), 1)
 }
 
-pipeline test_dedupe_drops_duplicate_ids(harness: Harness, task) {
+pipeline test_dedupe_drops_duplicate_ids(harness: Harness, task: unknown) {
   const receipt = build_review_receipt(
     {
       request: _request(),
@@ -106,7 +106,7 @@ pipeline test_dedupe_drops_duplicate_ids(harness: Harness, task) {
   assert_eq(len(receipt.findings), 1)
 }
 
-pipeline test_dry_run_envelope_skips_llm(harness: Harness, task) {
+pipeline test_dry_run_envelope_skips_llm(harness: Harness, task: unknown) {
   const receipt = envelope_for_dry_run(
     _request(),
     [],

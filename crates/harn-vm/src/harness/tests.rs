@@ -615,7 +615,7 @@ fn main(harness: Harness) {
         let source = r#"
 import { secrets } from "std/oauth/storage"
 
-fn assert_true(label, cond) {
+fn assert_true(label: string, cond: bool) {
   if !cond { throw label }
 }
 

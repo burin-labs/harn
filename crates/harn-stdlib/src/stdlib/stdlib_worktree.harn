@@ -261,7 +261,7 @@ pub fn worktree_noninteractive_env() -> dict {
  * `cwd`: non-interactive guard env merged with the inherited environment,
  * the std/git ambient-env strip, and any caller overrides from `options`.
  */
-fn __worktree_git_options(cwd, options) -> dict {
+fn __worktree_git_options(cwd: any, options: dict?) -> dict {
   const opts = options ?? {}
   // Caller `env` overrides individual guard keys; `env_mode` defaults to
   // "merge" so inherited PATH/HOME/credentials survive.
@@ -284,7 +284,7 @@ fn __worktree_git_options(cwd, options) -> dict {
  * __worktree_git runs one argv-mode git command in `cwd` with the
  * non-interactive guard applied. `args` omits the leading "git".
  */
-fn __worktree_git(process: HarnessProcess, cwd, args, options) {
+fn __worktree_git(process: HarnessProcess, cwd: any, args: list, options: dict?) {
   return process_run(process, ["git"] + args, __worktree_git_options(cwd, options))
 }
 
@@ -307,11 +307,11 @@ pub fn worktree_default_path(repo: string, name: string) -> string {
 pub fn worktree_create(
   fs: HarnessFs,
   process: HarnessProcess,
-  repo,
-  name,
-  base_ref,
-  path,
-  options = {},
+  repo: string,
+  name: string,
+  base_ref: any,
+  path: string?,
+  options: dict? = {},
 ) {
   const layout = runtime_state_paths_under(repo)
   const target = if path == nil || path == "" {
@@ -343,7 +343,13 @@ pub fn worktree_create(
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_remove(process: HarnessProcess, repo, path, force, options = {}) {
+pub fn worktree_remove(
+  process: HarnessProcess,
+  repo: any,
+  path: any,
+  force: any,
+  options: dict? = {},
+) {
   if force {
     return __worktree_git(process, repo, ["worktree", "remove", "--force", path], options)
   }
@@ -356,7 +362,7 @@ pub fn worktree_remove(process: HarnessProcess, repo, path, force, options = {})
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_status(process: HarnessProcess, path, options = {}) {
+pub fn worktree_status(process: HarnessProcess, path: any, options: dict? = {}) {
   return __worktree_git(process, path, ["status", "--short", "--branch"], options)
 }
 
@@ -366,7 +372,7 @@ pub fn worktree_status(process: HarnessProcess, path, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_diff(process: HarnessProcess, path, base_ref, options = {}) {
+pub fn worktree_diff(process: HarnessProcess, path: any, base_ref: string?, options: dict? = {}) {
   if base_ref == nil || base_ref == "" {
     return __worktree_git(process, path, ["diff", "--stat"], options)
   }
@@ -379,6 +385,6 @@ pub fn worktree_diff(process: HarnessProcess, path, base_ref, options = {}) {
  * @effects: [host]
  * @errors: []
  */
-pub fn worktree_shell(process: HarnessProcess, path, script, options = {}) {
+pub fn worktree_shell(process: HarnessProcess, path: any, script: any, options: dict? = {}) {
   return process_shell(process, script, __worktree_git_options(path, options))
 }

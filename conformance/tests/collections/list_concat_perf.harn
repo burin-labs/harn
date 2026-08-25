@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // List concat correctness
   harness.stdio.log([1, 2] + [3, 4])
   harness.stdio.log([] + [1])

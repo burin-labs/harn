@@ -5,7 +5,7 @@ import "std/triggers"
  * the `opentrustgraph/v0.1` discriminator end-to-end, and the chain still
  * verifies cleanly.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const agent_id = "trust-graph-v0-1-roundtrip-" + unique

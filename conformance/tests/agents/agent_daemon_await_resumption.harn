@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session_id = "daemon-await-resumption-" + harness.random.uuid()
   with_llm_script(
     harness.llm,

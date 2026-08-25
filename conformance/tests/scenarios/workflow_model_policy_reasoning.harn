@@ -1,6 +1,6 @@
 import { workflow_stage_agent_options } from "std/workflow/options"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const prepared = workflow_stage_agent_options(
     {
       mode: "agent",

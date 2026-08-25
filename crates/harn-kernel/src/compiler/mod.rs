@@ -115,11 +115,19 @@ pub(crate) fn ensure_chunk_addressable(
 pub const HARN_DISABLE_OPTIMIZATIONS_ENV: &str = "HARN_DISABLE_OPTIMIZATIONS";
 
 /// Controls semantic-preserving compiler optimizations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RuntimeSourceAuthority {
+    #[default]
+    None,
+    EmbeddedStdlib,
+    RuntimeOwned,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompilerOptions {
     optimize: bool,
     privileged_wire_authority: bool,
-    runtime_owned_source_authority: bool,
+    runtime_source_authority: RuntimeSourceAuthority,
     legacy_ambient_capabilities: bool,
     defer_builtin_linking: bool,
 }
@@ -129,7 +137,7 @@ impl CompilerOptions {
         Self {
             optimize: true,
             privileged_wire_authority: false,
-            runtime_owned_source_authority: false,
+            runtime_source_authority: RuntimeSourceAuthority::None,
             legacy_ambient_capabilities: false,
             defer_builtin_linking: false,
         }
@@ -139,7 +147,7 @@ impl CompilerOptions {
         Self {
             optimize: false,
             privileged_wire_authority: false,
-            runtime_owned_source_authority: false,
+            runtime_source_authority: RuntimeSourceAuthority::None,
             legacy_ambient_capabilities: false,
             defer_builtin_linking: false,
         }
@@ -155,7 +163,7 @@ impl CompilerOptions {
         Self {
             optimize: true,
             privileged_wire_authority: true,
-            runtime_owned_source_authority: false,
+            runtime_source_authority: RuntimeSourceAuthority::None,
             legacy_ambient_capabilities: false,
             defer_builtin_linking: false,
         }
@@ -169,7 +177,20 @@ impl CompilerOptions {
     #[doc(hidden)]
     pub fn runtime_owned_source() -> Self {
         let mut options = Self::from_env();
-        options.runtime_owned_source_authority = true;
+        options.runtime_source_authority = RuntimeSourceAuthority::RuntimeOwned;
+        options
+    }
+
+    /// Options for Harn's immutable, embedder-owned stdlib sources.
+    ///
+    /// This grants stdlib-private and runtime implementation primitives, but
+    /// not Harness methods or privileged wire calls. Source text and paths
+    /// cannot select the authority; the embedded loader and closed-program
+    /// linker grant it explicitly.
+    #[doc(hidden)]
+    pub fn embedded_stdlib() -> Self {
+        let mut options = Self::from_env();
+        options.runtime_source_authority = RuntimeSourceAuthority::EmbeddedStdlib;
         options
     }
 
@@ -208,7 +229,20 @@ impl CompilerOptions {
 
     #[doc(hidden)]
     pub fn runtime_owned_source_authority(self) -> bool {
-        self.runtime_owned_source_authority
+        self.runtime_source_authority == RuntimeSourceAuthority::RuntimeOwned
+    }
+
+    #[doc(hidden)]
+    pub fn runtime_internal_authority(self) -> bool {
+        matches!(
+            self.runtime_source_authority,
+            RuntimeSourceAuthority::EmbeddedStdlib | RuntimeSourceAuthority::RuntimeOwned
+        )
+    }
+
+    #[doc(hidden)]
+    pub fn stdlib_internal_authority(self) -> bool {
+        self.runtime_source_authority == RuntimeSourceAuthority::EmbeddedStdlib
     }
 
     #[doc(hidden)]

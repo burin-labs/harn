@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `parallel settle` is the run-everything form: a failing branch does NOT
   // cancel siblings. Every branch still runs to completion and the outcome
   // records each branch's settled result.

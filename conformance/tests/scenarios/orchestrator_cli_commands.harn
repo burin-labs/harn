@@ -1,6 +1,6 @@
 import "../_common"
 
-fn first_group(pattern, text) {
+fn first_group(pattern: any, text: string?) {
   const matches = regex_captures(pattern, text)
   if len(matches) == 0 {
     return nil
@@ -8,7 +8,7 @@ fn first_group(pattern, text) {
   return matches[0].groups[0]
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.fs.mkdtemp_in_workspace("harn-orchestrator-cli-")
   const replay_marker = path_join(root, "replay-ready.marker")
   harness.fs.write_text(

@@ -13,7 +13,7 @@
 // must carry the bare object type and no `properties` key at all.
 import { tool_call_output_schema } from "std/llm/structural_validator"
 
-fn _define(registry, name: string, params) {
+fn _define(registry: any, name: string, params: dict) {
   return tool_define(
     registry,
     name,
@@ -22,11 +22,11 @@ fn _define(registry, name: string, params) {
   )
 }
 
-fn _args_branch(schema) {
+fn _args_branch(schema: any) {
   return schema?.properties?.args
 }
 
-fn _branch_for(schema, name: string) {
+fn _branch_for(schema: any, name: string) {
   for branch in schema?.anyOf ?? [] {
     if contains(branch?.properties?.name?.enum ?? [], name) {
       return branch
@@ -35,7 +35,7 @@ fn _branch_for(schema, name: string) {
   return nil
 }
 
-pipeline test_zero_parameter_tool_emits_no_empty_properties(harness: Harness, task) {
+pipeline test_zero_parameter_tool_emits_no_empty_properties(harness: Harness, task: unknown) {
   const schema = tool_call_output_schema(_define(tool_registry(), "ping", {}), "")
   const args = _args_branch(schema)
   // The bare object type, and nothing else. Both keys are checked by absence
@@ -47,7 +47,7 @@ pipeline test_zero_parameter_tool_emits_no_empty_properties(harness: Harness, ta
   assert_eq(contains(args.keys(), "required"), false)
 }
 
-pipeline test_all_internal_parameters_reach_the_same_branch(harness: Harness, task) {
+pipeline test_all_internal_parameters_reach_the_same_branch(harness: Harness, task: unknown) {
   // Internal parameters are the harness's to fill, so they are left out of the
   // grammar — which empties `properties` for a tool that declares nothing else.
   // That is the same trap by a different route.
@@ -61,7 +61,7 @@ pipeline test_all_internal_parameters_reach_the_same_branch(harness: Harness, ta
   assert_eq(contains(args.keys(), "properties"), false)
 }
 
-pipeline test_tool_with_parameters_still_closes_its_arguments(harness: Harness, task) {
+pipeline test_tool_with_parameters_still_closes_its_arguments(harness: Harness, task: unknown) {
   // The other side of the pair: a tool that does enumerate keys still gets them
   // closed, so the guard cannot be mistaken for the grammar going open.
   const registry = _define(
@@ -80,7 +80,7 @@ pipeline test_tool_with_parameters_still_closes_its_arguments(harness: Harness, 
   assert_eq(contains(args?.properties.keys(), "depth"), true)
 }
 
-pipeline test_one_zero_parameter_tool_does_not_spoil_the_registry(harness: Harness, task) {
+pipeline test_one_zero_parameter_tool_does_not_spoil_the_registry(harness: Harness, task: unknown) {
   // The reason this matters: the branches share one request. A registry holding
   // both must emit a compilable branch for each.
   let registry = _define(tool_registry(), "ping", {})

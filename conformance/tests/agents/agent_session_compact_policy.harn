@@ -1,6 +1,6 @@
 import { compact_for_bug_fix_resumption } from "std/agent/autocompact"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session = harness.agent.open("host-compact-policy")
   harness.agent.inject(session, {role: "user", content: "Investigate the parser regression."})
   harness.agent.inject(

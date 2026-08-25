@@ -5,7 +5,7 @@
  * iterators pushed by the caller's for-loop leak into the caller's
  * caller — making the outer loop iterate too many times.
  */
-fn first_value(item) -> any {
+fn first_value(item: any) -> any {
   if type_of(item) == "dict" {
     for key in ["a", "b", "c"] {
       if item[key] != nil {

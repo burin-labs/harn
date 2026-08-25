@@ -52,7 +52,7 @@ fn _mentions(messages: list<string>, marker: string) -> bool {
   return false
 }
 
-pipeline test_agent_and_parser_correctives_share_one_owner(harness: Harness, task) {
+pipeline test_agent_and_parser_correctives_share_one_owner(harness: Harness, task: unknown) {
   for format in ["json", "text", "native"] {
     const owned = tool_call_shape(format)
     // The agent-side renderer resolves the session's format and returns the
@@ -63,7 +63,7 @@ pipeline test_agent_and_parser_correctives_share_one_owner(harness: Harness, tas
   }
 }
 
-pipeline test_a_recovered_call_is_named_in_its_own_corrective(harness: Harness, task) {
+pipeline test_a_recovered_call_is_named_in_its_own_corrective(harness: Harness, task: unknown) {
   // A note that already knows which call the model meant should name it — "emit
   // `add` like this" is a smaller ask than "emit calls like this". The named
   // form comes from the same owner, and an empty name falls back to the
@@ -78,7 +78,7 @@ pipeline test_a_recovered_call_is_named_in_its_own_corrective(harness: Harness, 
   assert_eq(_mentions(_violation_messages(MARKUP_CALL, "text"), "add"), true)
 }
 
-pipeline test_json_session_is_never_taught_the_tagged_dialect(harness: Harness, task) {
+pipeline test_json_session_is_never_taught_the_tagged_dialect(harness: Harness, task: unknown) {
   // The falsifier for the observed defect. Under a `json` pin every corrective
   // the turn produces must teach the fenced form, including the ones raised by
   // the tagged recovery lane that the pinned lane falls back to.
@@ -89,7 +89,7 @@ pipeline test_json_session_is_never_taught_the_tagged_dialect(harness: Harness, 
   assert_eq(_mentions(tool_shape_feedback(_finding(), "json"), "<tool_call>"), false)
 }
 
-pipeline test_text_session_is_never_taught_the_fenced_dialect(harness: Harness, task) {
+pipeline test_text_session_is_never_taught_the_fenced_dialect(harness: Harness, task: unknown) {
   // The other side of the pair: the same recovery under a `text` pin must still
   // teach the tagged form, so the fix cannot be "stop naming a dialect".
   const messages = _violation_messages(MARKUP_CALL, "text")

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // repeat
   assert_eq(repeat("ab", 3), "ababab", "repeat triples a string")
   assert_eq(repeat("x", 0), "", "repeat with zero gives empty")

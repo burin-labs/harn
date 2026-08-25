@@ -345,7 +345,7 @@ fn playground_llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
         temp.path(),
         "host.harn",
         r#"
-pub fn build_prompt(task) {
+pub fn build_prompt(task: string) {
   return "playground prompt: " + task
 }
 "#,
@@ -394,7 +394,7 @@ fn playground_llm_mock_record_replays_identical_output() {
         temp.path(),
         "host.harn",
         r#"
-pub fn build_prompt(task) {
+pub fn build_prompt(task: string) {
   return "playground prompt: " + task
 }
 "#,
@@ -463,11 +463,11 @@ pub fn workspace_root(fs: HarnessFs) {
   return fs.source_dir()
 }
 
-pub fn read_workspace(fs: HarnessFs, path) {
+pub fn read_workspace(fs: HarnessFs, path: string) {
   return fs.read_text(path_join(workspace_root(fs), path))
 }
 
-pub fn write_workspace(fs: HarnessFs, path, content) {
+pub fn write_workspace(fs: HarnessFs, path: string, content: string) {
   const resolved = path_join(workspace_root(fs), path)
   fs.write_text(resolved, content)
   return resolved
@@ -557,11 +557,11 @@ pub fn workspace_root(fs: HarnessFs) {
   return fs.source_dir()
 }
 
-pub fn read_workspace(fs: HarnessFs, path) {
+pub fn read_workspace(fs: HarnessFs, path: string) {
   return fs.read_text(path_join(workspace_root(fs), path))
 }
 
-pub fn write_workspace(fs: HarnessFs, path, content) {
+pub fn write_workspace(fs: HarnessFs, path: string, content: string) {
   const resolved = path_join(workspace_root(fs), path)
   fs.write_text(resolved, content)
   return resolved
@@ -660,7 +660,7 @@ pub fn workspace_root(fs: HarnessFs) {
   return fs.source_dir()
 }
 
-pub fn write_workspace(fs: HarnessFs, path, content) {
+pub fn write_workspace(fs: HarnessFs, path: string, content: string) {
   const resolved = path_join(workspace_root(fs), path)
   fs.write_text(resolved, content)
   return resolved

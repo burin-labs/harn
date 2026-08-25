@@ -86,7 +86,14 @@ fn verify_tools(fs: HarnessFs, process: HarnessProcess) {
   return edit_tools(fs, process)
 }
 
-fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
+fn planner_prompt(
+  task: any,
+  workspace_root: unknown,
+  profile: dict,
+  facts: list,
+  round_no: any,
+  force_ready: bool,
+) {
   return "[planner][task_id=${profile?.id}][token=${round_no}]\n"
     + "Task: ${task}\n"
     + "Workspace: current workspace only (use workspace-relative paths only; never emit absolute filesystem paths)\n"
@@ -117,7 +124,7 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
     + "- actions: [{id, title, task, depends_on, allowed_tools, target_paths?, command?}]\n"
 }
 
-fn planner_system(force_ready) {
+fn planner_system(force_ready: bool) {
   return "You are the DFS planner for a coding-agent playground experiment.\n"
     + "Think like a cheap, disciplined harness engineer.\n"
     + "Rules:\n"
@@ -151,7 +158,7 @@ fn planner_system(force_ready) {
     + "- Return strict JSON only."
 }
 
-fn research_prompt(workspace_root, profile, question) {
+fn research_prompt(workspace_root: unknown, profile: dict, question: dict) {
   return "[research][task_id=${profile?.id}][token=${question?.id}]\n"
     + "Workspace: current workspace only (all paths must be workspace-relative)\n"
     + "Research question: ${question?.question}\n"
@@ -199,7 +206,15 @@ fn execute_system() {
     + "Do not emit any additional visible prose after the final `<user_response>` block."
 }
 
-fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no, force_ready) {
+fn run_planner(
+  harness: Harness,
+  task: any,
+  workspace_root: any,
+  profile: dict,
+  facts: list,
+  round_no: any,
+  force_ready: bool,
+) {
   const result = sub_agent_run(
     harness,
     planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
@@ -210,11 +225,12 @@ fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no,
     const parsed = result?.data ?? parse_json_object(result?.summary ?? "")
     return {ok: true, error: nil, data: normalize_plan(profile, parsed)}
   }
-  const recovered = normalize_plan(profile, parse_json_object(result?.summary ?? ""))
-  if type_of(recovered?.ready) == "bool" || len(recovered?.questions ?? []) > 0
-    || len(recovered?.actions ?? [])
+  const recovered_raw = parse_json_object(result?.summary ?? "")
+  const recovered = normalize_plan(profile, recovered_raw)
+  if type_of(recovered_raw?.ready) == "bool" || len(recovered_raw?.questions ?? []) > 0
+    || len(recovered_raw?.actions ?? [])
       > 0
-    || trim(recovered?.plan_summary ?? "") != "" {
+    || trim(recovered_raw?.plan_summary ?? "") != "" {
     return {ok: true, error: nil, data: recovered}
   }
   return {
@@ -224,7 +240,7 @@ fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no,
   }
 }
 
-fn run_research(harness: Harness, workspace_root, profile, question) {
+fn run_research(harness: Harness, workspace_root: any, profile: dict, question: dict) {
   const result = sub_agent_run(
     harness,
     research_prompt(workspace_root, profile, question),
@@ -250,7 +266,7 @@ fn run_research(harness: Harness, workspace_root, profile, question) {
   }
 }
 
-fn collect_research_batch(harness: Harness, workspace_root, profile, questions) {
+fn collect_research_batch(harness: Harness, workspace_root: any, profile: dict, questions: list) {
   let facts = []
   for question in questions {
     const result = run_research(harness, workspace_root, profile, question)
@@ -261,7 +277,7 @@ fn collect_research_batch(harness: Harness, workspace_root, profile, questions) 
   return facts
 }
 
-fn bounded_questions(profile, questions) {
+fn bounded_questions(profile: dict, questions: any) {
   const limit = profile?.max_research_questions_per_round ?? 2
   if len(questions) <= limit {
     return questions
@@ -276,7 +292,7 @@ fn bounded_questions(profile, questions) {
   return selected
 }
 
-fn research_artifacts(facts, profile) {
+fn research_artifacts(facts: list, profile: dict) {
   let artifacts = []
   for fact in facts {
     artifacts = artifacts
@@ -344,7 +360,7 @@ fn graph_execute_template(harness: Harness) {
   }
 }
 
-fn graph_verify_template(profile) {
+fn graph_verify_template(profile: dict) {
   const command = effective_verify_command(profile)
   const contract = verification_contract(profile)
   if command == "none" && len(keys(contract ?? {})) == 0 {
@@ -361,7 +377,7 @@ fn graph_verify_template(profile) {
   }
 }
 
-fn execute_graph(harness: Harness, task, profile, facts, plan) {
+fn execute_graph(harness: Harness, task: any, profile: dict, facts: list, plan: dict) {
   const graph = plan_to_action_graph(task, plan)
   return action_graph_run(
     harness,
@@ -388,12 +404,12 @@ fn execute_graph(harness: Harness, task, profile, facts, plan) {
 
 fn run_read_only_evaluator(
   harness: Harness,
-  task,
-  workspace_root,
-  profile,
-  plan,
-  facts,
-  final_response,
+  task: any,
+  workspace_root: any,
+  profile: dict,
+  plan: dict,
+  facts: list,
+  final_response: any,
 ) {
   const result = sub_agent_run(
     harness,
@@ -424,7 +440,7 @@ fn run_read_only_evaluator(
   return {verdict: "fail", reason: result.error?.message ?? result?.summary ?? "evaluation failed"}
 }
 
-fn failed_stage_ids(execution) {
+fn failed_stage_ids(execution: any) {
   let failed = []
   for stage in execution?.run?.stages ?? [] {
     if stage?.status == "failed" {
@@ -434,18 +450,18 @@ fn failed_stage_ids(execution) {
   return failed
 }
 
-fn execution_completed_cleanly(execution) {
+fn execution_completed_cleanly(execution: any) {
   return execution?.runtime?.status == "completed" && len(failed_stage_ids(execution)) == 0
 }
 
-fn strip_done_sentinel(text) {
+fn strip_done_sentinel(text: string?) {
   if type_of(text) != "string" {
     return ""
   }
   return regex_replace("\\s*##DONE##\\s*", "\n", text).trim()
 }
 
-fn extract_user_response_text(text) {
+fn extract_user_response_text(text: string?) {
   const cleaned = strip_done_sentinel(text)
   const matches = regex_captures("(?s)<user_response>(.*?)</user_response>", cleaned)
   if len(matches) > 0 {
@@ -457,7 +473,7 @@ fn extract_user_response_text(text) {
   return cleaned
 }
 
-fn stage_visible_outputs(execution) {
+fn stage_visible_outputs(execution: any) {
   let outputs = []
   for stage in execution?.run?.stages ?? [] {
     const cleaned = extract_user_response_text(stage?.visible_text ?? "")
@@ -470,7 +486,7 @@ fn stage_visible_outputs(execution) {
   return outputs
 }
 
-fn execution_visible_text(execution) {
+fn execution_visible_text(execution: any) {
   const stage_outputs = stage_visible_outputs(execution)
   if len(stage_outputs) > 0 {
     let summaries = []
@@ -499,14 +515,15 @@ fn execution_visible_text(execution) {
 
 fn write_report(
   harness: Harness,
-  workspace_root,
-  profile,
-  task,
-  plan,
-  facts,
-  execution,
-  verdict,
-  final_response,
+  workspace_root: any,
+  profile: dict,
+  task: any,
+  plan: any,
+  facts: list,
+  execution: any,
+  verdict: string,
+  final_response: any,
+  planning_error: dict?,
 ) {
   const generated_dir = path_join(harness.fs.source_dir(), "evals", "generated")
   harness.fs.mkdir(generated_dir)
@@ -528,10 +545,12 @@ fn write_report(
     execution_status: execution?.status ?? "",
     workflow_status: execution?.runtime?.status ?? "",
     run_path: execution?.run?.persisted_path ?? "",
+    stages: execution?.run?.stages ?? [],
     visible_outputs: stage_visible_outputs(execution),
     observability: execution?.run?.observability ?? {},
     verdict: verdict,
     final_response: final_response,
+    planning_error: planning_error,
   }
   harness.fs.write_text(report_path, json_stringify(report))
   return report_path
@@ -542,7 +561,9 @@ pipeline default(harness: Harness) {
   const root = workspace_root(harness.fs)
   const profile = profile_for_task(request)
   let facts = []
-  let planning = run_planner(harness, request, root, profile, facts, 1, false)?.data ?? {}
+  const initial_plan_result = run_planner(harness, request, root, profile, facts, 1, false)
+  let planning = initial_plan_result?.data ?? {}
+  let planning_error = initial_plan_result?.error
   let rounds = 0
   const max_rounds = profile?.max_rounds ?? 2
   while rounds < max_rounds {
@@ -565,6 +586,7 @@ pipeline default(harness: Harness) {
     const plan_result = run_planner(harness, request, root, profile, facts, rounds + 1, false)
     planning = plan_result?.data ?? planning
     if !plan_result?.ok {
+      planning_error = plan_result?.error
       break
     }
   }
@@ -572,6 +594,8 @@ pipeline default(harness: Harness) {
     const commit_result = run_planner(harness, request, root, profile, facts, rounds + 2, true)
     if commit_result?.ok {
       planning = commit_result?.data ?? planning
+    } else {
+      planning_error = commit_result?.error
     }
   }
   let execution = nil
@@ -617,6 +641,7 @@ pipeline default(harness: Harness) {
     execution,
     verdict,
     final_response,
+    planning_error,
   )
   harness.stdio.println("task_id=${profile?.id}")
   harness.stdio.println("plan_ready=${planning?.ready}")

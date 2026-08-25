@@ -5,11 +5,11 @@ import "std/triggers"
  * registration time so the trigger never enters the registry with a
  * useless config.
  */
-fn handler(harness: Harness, event) {
+fn handler(harness: Harness, event: unknown) {
   return nil
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _ = harness.runtime.trigger_register(
     {
       id: "batch-bad-count",

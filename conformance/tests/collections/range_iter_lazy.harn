@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Map over a 10-million element range, take 5, materialize. Must be
   // lazy: only 5 elements actually flow through .map, so this finishes
   // instantly instead of allocating 10M Ints.

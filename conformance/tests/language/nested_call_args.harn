@@ -1,24 +1,24 @@
-fn identity(x) {
+fn identity(x: any) {
   return x
 }
 
-fn double(x) {
+fn double(x: int) {
   return x * 2
 }
 
-fn add(a, b) {
+fn add(a: any, b: any) {
   return a + b
 }
 
-fn concat3(a, b, c) {
+fn concat3(a: string, b: any, c: any) {
   return a + "|" + b + "|" + c
 }
 
-fn make_dict(v) {
+fn make_dict(v: any) {
   return {key: v}
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Simple nested call
   harness.stdio.log(identity(identity(42)))
   // Result of one call passed as arg to another

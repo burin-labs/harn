@@ -1,6 +1,6 @@
 import { agent_loop_options } from "std/agent/options"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const gpt = agent_loop_options(
     harness,
     {

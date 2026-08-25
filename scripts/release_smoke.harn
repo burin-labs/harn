@@ -95,7 +95,7 @@ fn command_specs(candidate: string) -> list {
   ]
 }
 
-fn command_options(config: ReleaseSmokeConfig, runner) {
+fn command_options(config: ReleaseSmokeConfig, runner: any) {
   return {
     cwd: config.root,
     env: {HARN_LLM_CALLS_DISABLED: "1"},
@@ -109,7 +109,7 @@ fn watch_ready(output: string) -> bool {
   return contains(output, "watching ") && contains(output, " for .harn changes")
 }
 
-fn result_output(result) -> string {
+fn result_output(result: dict) -> string {
   const combined = to_string(result?.combined ?? "")
   if combined != "" {
     return combined
@@ -127,7 +127,7 @@ fn first_result_output(results: list) -> string {
   return ""
 }
 
-fn release_smoke_adapters(tools: HarnessTools, overrides = nil) {
+fn release_smoke_adapters(tools: HarnessTools, overrides: dict? = nil) {
   return {
     run: { spec, options -> command_run(tools, spec, options) },
     start: { spec, options -> command_run(tools, spec, options) },
@@ -137,7 +137,7 @@ fn release_smoke_adapters(tools: HarnessTools, overrides = nil) {
     + (overrides ?? {})
 }
 
-fn watch_step(config: ReleaseSmokeConfig, adapters) {
+fn watch_step(config: ReleaseSmokeConfig, adapters: any) {
   const target = config.watch_target
   if target == nil {
     return command_result_fail(2, "release-smoke: watch_target is required")
@@ -196,7 +196,7 @@ pub fn run_release_smoke(
   tools: HarnessTools,
   clock: HarnessClock,
   config: ReleaseSmokeConfig,
-  adapters = nil,
+  adapters: dict? = nil,
 ) -> ReleaseSmokeReport {
   const resolved_adapters = release_smoke_adapters(tools, adapters)
   let steps = []

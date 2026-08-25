@@ -61,7 +61,7 @@ fn out_with_setup(source: &str, setup: impl FnOnce()) -> Vec<String> {
 #[test]
 fn post_event_then_drain_round_trips_through_inbox() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const s = harness.agent.open()
   harness.agent.post_event(s, "tool_result", "first", "test")
   harness.agent.post_event(s, "mcp_progress", "halfway", "mcp")
@@ -179,7 +179,7 @@ fn feedback_drain_ignores_queued_typed_host_injections() {
             r#"
 import {{ agent_session_drain_feedback }} from "std/agent/state"
 
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, task: unknown) {{
   const drained = harness.agent.session_drain_feedback("{session_id}")
   harness.stdio.log(len(drained))
   harness.stdio.log(drained[0].kind)

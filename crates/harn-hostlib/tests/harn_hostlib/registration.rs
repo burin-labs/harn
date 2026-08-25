@@ -492,7 +492,7 @@ fn registered_host_conditions_round_trip_through_the_real_typed_system_method() 
         r#"
 import { host_conditions_sample } from "std/host_conditions"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   return host_conditions_sample(harness.system)
 }
 "#,
@@ -511,7 +511,7 @@ pipeline default(harness: Harness, task) {
 fn registered_session_capability_round_trips_through_typed_harness_agent() {
     let result = execute_harn(
         r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const root = harness.fs.workspace_temp_dir()
   const opened = harness.agent.session_open({
     root: root,
@@ -594,7 +594,7 @@ import {
   with_host_lease,
 } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const scope = with_host_lease(
     harness.host_lease,
     harness.clock,
@@ -664,7 +664,7 @@ fn stdlib_host_lease_scope_releases_on_completion_exception_and_cancellation() {
     let completed = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const scope = with_host_lease(
     harness.host_lease,
     harness.clock,
@@ -701,7 +701,7 @@ pipeline default(harness: Harness, task) {
     let failed = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   try {
     with_host_lease(
       harness.host_lease,
@@ -720,7 +720,7 @@ pipeline default(harness: Harness, task) {
     let cancelled = r#"
 import { host_lease_status, with_host_lease } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const ready = harness.runtime.channel("lease-ready", 1)
   const blocked = harness.runtime.channel("lease-blocked", 1)
   const worker = spawn {
@@ -788,7 +788,7 @@ fn parallel_named_host_lease_scopes_release_before_reacquire() {
                             r#"
 import {{ with_host_lease }} from "std/host_lease"
 
-pipeline default(harness: Harness, task) {{
+pipeline default(harness: Harness, task: unknown) {{
 {first}
   const second = with_host_lease(
     harness.host_lease,
@@ -836,7 +836,7 @@ fn stdlib_host_lease_status_defaults_to_the_host_acquire_claims() {
     let source = r#"
 import { host_lease_acquire, host_lease_status } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const acquired = host_lease_acquire(
     harness.host_lease,
     {owner: "default-host-test", domain: "release-owner", ttl_ms: 60000},
@@ -885,7 +885,7 @@ fn stdlib_host_lease_status_rejects_an_explicitly_empty_host() {
     let source = r#"
 import { host_lease_status } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   return host_lease_status(harness.host_lease, "   ", "whole-machine", "release-owner")
 }
 "#;
@@ -907,7 +907,7 @@ fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
     let source = r#"
 import { host_lease_status } from "std/host_lease"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   return host_lease_status(harness.host_lease, "mac-local", "whole-machine", "release")
 }
 "#;
@@ -992,7 +992,7 @@ fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {
 fn registered_hostlib_builtins_validate_request_schema_before_handler() {
     let result = execute_harn(
         r"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   return harness.tools.run_command({argv: [1]})
 }
 ",
@@ -1024,7 +1024,7 @@ pipeline default(harness: Harness, task) {
 fn registered_terminal_session_round_trips_through_harn_and_schemas() {
     let result = execute_harn(
         r#"
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   let started = harness.terminal.start({
     argv: ["sh", "-c", "stty -echo; printf READY; IFS= read -r line; printf GOT:%s \"$line\"; cat"],
     rows: 4,
@@ -1126,7 +1126,7 @@ fn registered_safe_text_patch_validates_dollar_defs_expected_hash() {
     let expected_hash = sha256_label(b"alpha");
     let source = format!(
         r#"
-pipeline default(harness: Harness, task) {{
+pipeline default(harness: Harness, task: unknown) {{
   return harness.fs.safe_text_patch({{
     path: "{}",
     content: "beta",

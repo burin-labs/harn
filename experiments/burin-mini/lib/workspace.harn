@@ -5,7 +5,7 @@ pub fn workspace_root(fs: HarnessFs) {
   return path_join(fs.source_dir(), "..", "workspace")
 }
 
-fn workspace_alias_path(path) {
+fn workspace_alias_path(path: string?) {
   const raw = (path ?? "").trim()
   if starts_with(raw, "/workspace/") {
     return raw.replace("/workspace/", "")
@@ -14,7 +14,7 @@ fn workspace_alias_path(path) {
 }
 
 /** Normalize a model-provided path into a workspace-relative path. */
-pub fn workspace_path(fs: HarnessFs, path) {
+pub fn workspace_path(fs: HarnessFs, path: string?) {
   const normalized = workspace_normalize(workspace_alias_path(path), workspace_root(fs))
   guard normalized else {
     throw "Path is outside the experiment workspace: ${path ?? ""}"
@@ -23,24 +23,24 @@ pub fn workspace_path(fs: HarnessFs, path) {
 }
 
 /** Resolve a workspace-relative path to an on-disk host path. */
-pub fn resolve_workspace_path(fs: HarnessFs, path) {
+pub fn resolve_workspace_path(fs: HarnessFs, path: string?) {
   return path_join(workspace_root(fs), workspace_path(fs, path))
 }
 
 /** Read one file from the sample workspace. */
-pub fn read_workspace(fs: HarnessFs, path) {
+pub fn read_workspace(fs: HarnessFs, path: string?) {
   return fs.read_text(resolve_workspace_path(fs, path))
 }
 
 /** Write one file inside the sample workspace. */
-pub fn write_workspace(fs: HarnessFs, path, content) {
+pub fn write_workspace(fs: HarnessFs, path: string?, content: any) {
   const resolved = resolve_workspace_path(fs, path)
   fs.write_text(resolved, content)
   return resolved
 }
 
 /** Search the sample workspace with ripgrep. */
-pub fn search_workspace(fs: HarnessFs, process: HarnessProcess, query) {
+pub fn search_workspace(fs: HarnessFs, process: HarnessProcess, query: any) {
   const result = process.exec_at(
     workspace_root(fs),
     "rg",
@@ -92,7 +92,7 @@ pub fn list_workspace_files(fs: HarnessFs, process: HarnessProcess) {
  * "auth middleware" rarely match content literally; the filename pass
  * is what saves them.
  */
-pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query) {
+pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query: string?) {
   const q = (query ?? "").trim()
   if q == "" {
     return "(empty query)"
@@ -152,6 +152,6 @@ pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query) {
 }
 
 /** Run one shell command from the sample workspace root. */
-pub fn run_workspace(fs: HarnessFs, process: HarnessProcess, command) {
+pub fn run_workspace(fs: HarnessFs, process: HarnessProcess, command: any) {
   return process.shell_at(workspace_root(fs), command)
 }

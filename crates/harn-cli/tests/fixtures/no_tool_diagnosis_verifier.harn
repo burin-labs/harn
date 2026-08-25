@@ -5,7 +5,7 @@ import {
 const REPORTED_ANSWER =
   "The function `add` currently subtracts `b` from `a` (`a - b`), but the expectation is that it adds them. The smallest change is to replace the minus operator with a plus operator.\n\nPATCH_HINT: Replace `-` with `+` in the return statement."
 
-fn result(calls, text: string) {
+fn result(calls: list, text: string) {
   return {visible_text: text, tools: {calls: calls}}
 }
 

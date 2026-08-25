@@ -8,7 +8,7 @@ import { CommandResult } from "std/command"
 import { GitCommandResult, git_run } from "std/git"
 import { GitRunner, forward_git_run } from "git_command_result_forward_lib"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // The real `git_run` satisfies the producer-owned runner contract; a
   // synthetic stub does too. Binding both to `GitRunner` type-checks
   // `git_run`'s signature against the imported contract without a subprocess.

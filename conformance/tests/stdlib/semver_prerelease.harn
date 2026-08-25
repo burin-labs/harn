@@ -22,7 +22,7 @@ fn release_text(version: ReleaseVersion?) -> string {
   return "${version.major}.${version.minor}.${version.patch}-${version.prerelease ?? "stable"}"
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // The legacy parser remains intentionally stable-only.
   harness.stdio.log(parse("1.2.3-rc.1") == nil)
   harness.stdio.log(release_text(parse_release("1.2.3")))

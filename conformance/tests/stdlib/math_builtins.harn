@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(abs(-5))
   harness.stdio.log(min(3, 7))
   harness.stdio.log(max(3, 7))

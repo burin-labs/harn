@@ -91,7 +91,7 @@ pub fn wait(
 pub fn complete(
   runtime: HarnessRuntime,
   waitpoint: WaitpointHandle,
-  value,
+  value: any,
   options: WaitpointTerminalOptions = nil,
 ) -> Waitpoint {
   if options == nil {

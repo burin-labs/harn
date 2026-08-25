@@ -1,5 +1,5 @@
 /** Test sign, is_nan, is_infinite, atan2 */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // sign
   harness.stdio.println(sign(42))
   harness.stdio.println(sign(-7))

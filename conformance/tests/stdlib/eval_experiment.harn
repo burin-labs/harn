@@ -76,7 +76,7 @@ fn context() -> ExperimentValidationContext {
   return {supported_blocking_factors: ["host", "time_slot"], host_identity_available: true}
 }
 
-fn expect_invalid(value, label: string) {
+fn expect_invalid(value: any, label: string) {
   require !is_ok(validate_experiment_manifest(value, context())), label
 }
 
@@ -185,7 +185,7 @@ fn test_registration_and_assignment() {
 }
 
 fn observation(
-  registration,
+  registration: any,
   arm_id: string,
   case_id: string,
   trial_index: int,
@@ -217,7 +217,7 @@ fn observation(
   }
 }
 
-fn winner_input(registration) -> ExperimentDecisionInput {
+fn winner_input(registration: any) -> ExperimentDecisionInput {
   let observations: list<PairedObservation> = []
   for case_id in ["case-a", "case-b"] {
     let trial = 0
@@ -362,7 +362,7 @@ fn test_identical_arms_do_not_manufacture_a_winner() {
   require decision.winner == nil, "A/A evidence never manufactures a winner"
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   test_manifest_contract()
   test_registration_and_assignment()
   test_decision_and_promotion()

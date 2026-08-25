@@ -10,7 +10,7 @@
  * The events also round-trip through `parse_session_event` so they can
  * be registered via the snake_case names exposed in user scripts.
  */
-fn record(runtime: HarnessRuntime, observed, _payload) {
+fn record(runtime: HarnessRuntime, observed: any, _payload: unknown) {
   runtime.atomic_add(observed, 1)
   return nil
 }

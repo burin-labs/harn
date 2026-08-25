@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // `to` creates an inclusive range
   const r = 1 to 5
   harness.stdio.log(r)

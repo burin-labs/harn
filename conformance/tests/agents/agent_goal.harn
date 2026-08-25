@@ -6,7 +6,7 @@
 import { goal, goal_check, goal_judge, goal_pin, goal_reloop, goal_text } from "std/agent/goal"
 import { assert_throws } from "std/testing"
 
-fn __ci_is_green(facts) {
+fn __ci_is_green(facts: dict) {
   return facts?.ci_green == true
 }
 

@@ -1,5 +1,6 @@
 pub import {
   COMPLETION_JUDGE_DEFAULT_CAP,
+  CompletionReview,
   agent_completion_review,
   agent_completion_review_should_skip_llm,
   agent_done_judge_cap,
@@ -256,7 +257,7 @@ type CompletionPolicyEvaluation = {
   deterministic_reason: string,
 }
 
-fn __unique_names(names) -> list<string> {
+fn __unique_names(names: any) -> list<string> {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
@@ -284,7 +285,7 @@ fn __session_successful_tool_names(lifecycle: AgentTranscriptToolLifecycleReport
   return __unique_names(names)
 }
 
-fn __judge_tool_entries(opts) {
+fn __judge_tool_entries(opts: dict) {
   const registry = opts?.tools
   return if type_of(registry) == "dict" {
     registry?.tools ?? []
@@ -295,11 +296,11 @@ fn __judge_tool_entries(opts) {
   }
 }
 
-fn __judge_tool_name(entry) -> string {
+fn __judge_tool_name(entry: dict) -> string {
   return to_string(entry?.name ?? entry?.function?.name ?? "")
 }
 
-fn __judge_tool_entry(opts, name) {
+fn __judge_tool_entry(opts: dict, name: any) {
   for entry in __judge_tool_entries(opts) {
     if __judge_tool_name(entry) == name {
       return entry
@@ -308,7 +309,7 @@ fn __judge_tool_entry(opts, name) {
   return nil
 }
 
-fn __judge_declared_evidence_role(value) -> CompletionEvidenceRole? {
+fn __judge_declared_evidence_role(value: string?) -> CompletionEvidenceRole? {
   const role = lowercase(to_string(value ?? ""))
   if role == "observation" || role == "mutation" || role == "verification" {
     return role
@@ -334,7 +335,7 @@ fn __judge_evidence_role(
   return "other"
 }
 
-fn __judge_tool_descriptor(opts, name) -> CompletionToolSemantics {
+fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
   const entry = __judge_tool_entry(opts, name)
   const annotations = agent_tool_annotations(entry, opts?.policy, name)
   const read_only = entry != nil && agent_tool_is_read_only(entry, opts?.policy, name)
@@ -359,7 +360,7 @@ fn __judge_tool_descriptor(opts, name) -> CompletionToolSemantics {
   }
 }
 
-fn __judge_clip_evidence(value, limit) -> string {
+fn __judge_clip_evidence(value: any, limit: int) -> string {
   const text = if type_of(value) == "string" {
     value
   } else {
@@ -378,21 +379,21 @@ fn __judge_clip_evidence(value, limit) -> string {
     + substring(text, len(text) - tail_chars, len(text))
 }
 
-fn __judge_descriptor_is_verifier(descriptor) -> bool {
+fn __judge_descriptor_is_verifier(descriptor: dict) -> bool {
   return descriptor?.evidence_role == "verification"
 }
 
-fn __judge_descriptor_is_mutation(descriptor) -> bool {
+fn __judge_descriptor_is_mutation(descriptor: dict) -> bool {
   return descriptor?.evidence_role == "mutation"
 }
 
-fn __judge_descriptor_is_observation(descriptor) -> bool {
+fn __judge_descriptor_is_observation(descriptor: dict) -> bool {
   return descriptor?.evidence_role == "observation"
 }
 
 fn __judge_lifecycle_action(
   lifecycle: AgentTranscriptToolLifecycle,
-  opts,
+  opts: dict,
 ) -> CompletionEvidenceAction {
   const descriptor = __judge_tool_descriptor(opts, lifecycle.name)
   const result = lifecycle.result
@@ -469,10 +470,10 @@ fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssu
  * @api_stability: internal
  */
 fn __judge_evidence_projection_from_lifecycle(
-  messages,
+  messages: string | bytes | list | dict | set | range | nil,
   lifecycle: AgentTranscriptToolLifecycleReport,
-  opts,
-  raw_transcript_digest = nil,
+  opts: dict,
+  raw_transcript_digest: any = nil,
 ) -> CompletionEvidenceProjection {
   let relevant_call_count = 0
   let omitted_read_only_call_count = 0
@@ -563,9 +564,9 @@ fn __judge_evidence_projection_from_lifecycle(
 }
 
 pub fn __judge_evidence_projection(
-  messages,
-  opts,
-  raw_transcript_digest = nil,
+  messages: string | bytes | list | dict | set | range | nil,
+  opts: dict,
+  raw_transcript_digest: any = nil,
 ) -> CompletionEvidenceProjection {
   return __judge_evidence_projection_from_lifecycle(
     messages,
@@ -595,8 +596,8 @@ fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: 
 
 fn __judge_payload(
   agent: HarnessAgent,
-  session,
-  opts,
+  session: dict,
+  opts: dict,
   stop_reason: string,
   text: string,
   iteration: int,
@@ -716,7 +717,7 @@ pub fn __judge_completion_verdict_schema() -> dict {
  * @api_stability: experimental
  * @example: __judge_completion_verdict_read({verdict: "done", detail: "tests pass"})
  */
-pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
+pub fn __judge_completion_verdict_read(result: dict) -> CompletionJudgeVerdict {
   const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
   const verdict = if raw == "accept" {
     "done"
@@ -744,7 +745,13 @@ pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
   }
 }
 
-fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
+fn __judge_stable_prefix(
+  judge_cfg: any,
+  opts: dict,
+  payload: CompletionEvidenceSnapshot,
+  system: string,
+  schema: any,
+) -> string {
   const rubric = trim(to_string(judge_cfg?.rubric ?? opts?.rubric ?? ""))
   const rubric_block = if rubric == "" {
     ""
@@ -760,7 +767,7 @@ fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
 }
 
 fn __judge_invoke_closure(
-  verify_completion,
+  verify_completion: unknown,
   payload: CompletionEvidenceSnapshot,
 ) -> CompletionStageVerdict {
   const result = verify_completion(payload)
@@ -825,7 +832,7 @@ fn __judge_invoke_closure(
 fn __judge_invoke_structured(
   harness: Harness,
   judge_cfg: JudgeConfig,
-  opts,
+  opts: dict,
   payload: CompletionEvidenceSnapshot,
 ) -> CompletionStageVerdict {
   const system = judge_cfg.system ?? ""
@@ -952,7 +959,7 @@ fn __judge_invoke_structured(
  * @api_stability: experimental
  * @example: agent_judge_config(opts?.done_judge)
  */
-pub fn agent_judge_config(judge_cfg) -> JudgeConfig? {
+pub fn agent_judge_config(judge_cfg: JudgeConfig?) -> JudgeConfig? {
   return __normalize_judge_config(judge_cfg)
 }
 
@@ -970,11 +977,11 @@ pub fn agent_judge_config(judge_cfg) -> JudgeConfig? {
  * @api_stability: experimental
  * @example: agent_has_done_judge(opts?.done_judge)
  */
-pub fn agent_has_done_judge(judge_cfg) -> bool {
+pub fn agent_has_done_judge(judge_cfg: JudgeConfig?) -> bool {
   return agent_judge_config(judge_cfg) != nil
 }
 
-fn __done_contract_primary_prompt(opts) {
+fn __done_contract_primary_prompt(opts: dict) {
   const marker = to_string(opts?.done_sentinel ?? "the configured done sentinel")
   return join(
     [
@@ -986,7 +993,7 @@ fn __done_contract_primary_prompt(opts) {
   )
 }
 
-pub fn __done_contract_judge_system(opts) -> string {
+pub fn __done_contract_judge_system(opts: dict) -> string {
   const extra = trim(to_string(opts?.rubric ?? ""))
   let lines = [
     "You are a strict done-contract judge for an autonomous agent.",
@@ -1022,7 +1029,7 @@ pub fn __done_contract_judge_system(opts) -> string {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_done_contract(options = {}) -> dict {
+pub fn agent_done_contract(options: dict = {}) -> dict {
   const opts = if type_of(options) == "dict" {
     options
   } else {
@@ -1055,12 +1062,12 @@ pub fn agent_done_contract(options = {}) -> dict {
 }
 
 fn __judge_directive(
-  verdict,
-  payload,
-  invoked,
-  completion_judge_cap_reached,
-  done_judge_cap_reached,
-  feedback_composition,
+  verdict: dict,
+  payload: dict,
+  invoked: any,
+  completion_judge_cap_reached: any,
+  done_judge_cap_reached: any,
+  feedback_composition: any,
   feedback_history: dict,
   defer_feedback: bool,
 ) -> CompletionDirective {
@@ -1127,7 +1134,11 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
 }
 
 /** Build the one ordered plan for a completion boundary. */
-fn __completion_policy_plan(opts, stop_reason: string, review = {}) -> list<CompletionPolicyStage> {
+fn __completion_policy_plan(
+  opts: dict,
+  stop_reason: string,
+  review: CompletionReview = {scrutiny: "standard"},
+) -> list<CompletionPolicyStage> {
   let stages: list<CompletionPolicyStage> = []
   if opts?.verify_completion != nil {
     stages = stages + [CompletionPolicyStage.Deterministic(opts.verify_completion)]
@@ -1180,7 +1191,7 @@ fn __completion_policy_plan(opts, stop_reason: string, review = {}) -> list<Comp
  * @api_stability: experimental
  * @example: agent_completion_adjudicator_declared(opts, "stalled")
  */
-pub fn agent_completion_adjudicator_declared(opts, stop_reason: string) -> bool {
+pub fn agent_completion_adjudicator_declared(opts: dict, stop_reason: string) -> bool {
   return len(__completion_policy_plan(opts, stop_reason)) > 0
 }
 
@@ -1274,7 +1285,7 @@ fn __completion_arbitrate_verification(
 
 fn __completion_policy_run_stage(
   harness: Harness,
-  opts,
+  opts: dict,
   iteration: int,
   evaluation: CompletionPolicyEvaluation,
   stage: CompletionPolicyStage,
@@ -1337,7 +1348,7 @@ fn __completion_policy_run_stage(
 
 fn __completion_policy_evaluate(
   harness: Harness,
-  opts,
+  opts: dict,
   payload: CompletionEvidenceSnapshot,
   iteration: int,
   stages: list<CompletionPolicyStage>,
@@ -1367,8 +1378,8 @@ fn __completion_policy_evaluate(
  */
 pub fn agent_evaluate_completion(
   harness: Harness,
-  session,
-  opts,
+  session: dict,
+  opts: dict,
   stop_reason: string,
   text: string,
   iteration: int = 0,

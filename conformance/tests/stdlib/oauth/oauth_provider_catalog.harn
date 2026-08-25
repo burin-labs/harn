@@ -8,7 +8,7 @@ import {
   providers,
 } from "std/oauth/providers"
 
-fn missing_core_fields(record) {
+fn missing_core_fields(record: dict) {
   let missing = []
   for field in [
     "auth_url",
@@ -28,7 +28,7 @@ fn missing_core_fields(record) {
   return missing
 }
 
-fn mock_flow_for_provider(net: HarnessNet, testing: HarnessTesting, name) {
+fn mock_flow_for_provider(net: HarnessNet, testing: HarnessTesting, name: any) {
   const base = "https://mock-oauth.example/" + name
   const record = provider(
     name,
@@ -99,7 +99,7 @@ fn mock_flow_for_provider(net: HarnessNet, testing: HarnessTesting, name) {
   testing.http_mock_clear()
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const names = provider_names()
   // Required providers must be present; the exact catalogue size is not pinned
   // (adding a provider is not a regression). The catalogue and the name list

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn take_union(v: string | int) -> string {
     return to_string(v)
   }

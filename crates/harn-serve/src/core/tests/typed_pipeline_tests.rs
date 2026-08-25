@@ -46,7 +46,7 @@ pub pipeline deploy(replicas: int) -> bool {
     assert_eq!(
         error,
         DispatchError::Execution(
-            "Runtime error: TypeError: parameter 'replicas' expected int, got string (many)"
+            "Runtime error: TypeError: function 'deploy' parameter 'replicas' expected int, got string (many)"
                 .to_string()
         )
     );

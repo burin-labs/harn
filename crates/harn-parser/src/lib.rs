@@ -9,6 +9,7 @@ pub mod diagnostic_codes;
 pub mod interpolation;
 pub mod lexical;
 mod namespace_demand;
+pub mod param_annotations;
 mod parser;
 pub mod stdlib_metadata;
 pub mod typechecker;

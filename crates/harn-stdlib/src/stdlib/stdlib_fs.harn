@@ -263,15 +263,15 @@ pub fn search_evidence_background(
   )
 }
 
-fn __fs_norm(path) -> string {
+fn __fs_norm(path: string?) -> string {
   return replace(path ?? "", "\\", "/")
 }
 
-fn __fs_parent(path) -> string {
+fn __fs_parent(path: string?) -> string {
   return dirname(path ?? "")
 }
 
-fn __fs_with_newline(text, trailing_newline) {
+fn __fs_with_newline(text: any, trailing_newline: bool?) {
   if !(trailing_newline ?? true) || ends_with(text, "\n") {
     return text
   }
@@ -416,7 +416,7 @@ pub fn ensure_parent_dir(fs: HarnessFs, path: string) {
   }
 }
 
-fn __fs_replace_result(result) -> Result<FileReplaceReceipt, FsFailure> {
+fn __fs_replace_result(result: any) -> Result<FileReplaceReceipt, FsFailure> {
   if is_ok(result) {
     return Ok(schema_expect(unwrap(result), schema_of(FileReplaceReceipt)))
   }
@@ -570,7 +570,7 @@ pub fn read_json_contract<T>(fs: HarnessFs, path: string, contract: SchemaContra
  * @effects: [fs.read, fs.write]
  * @errors: []
  */
-pub fn write_json(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+pub fn write_json(fs: HarnessFs, path: string, value: any, options: WriteDataOptions = {}) {
   const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(fs, path)
@@ -589,7 +589,7 @@ pub fn write_json(fs: HarnessFs, path: string, value, options: WriteDataOptions 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_yaml(fs: HarnessFs, path: string, fallback = nil) {
+pub fn read_yaml(fs: HarnessFs, path: string, fallback: any = nil) {
   const result = read_yaml_result(fs, path)
   if is_ok(result) {
     return unwrap(result)
@@ -643,7 +643,7 @@ pub fn read_yaml_typed<T>(
  * @effects: [fs.read, fs.write]
  * @errors: []
  */
-pub fn write_yaml(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+pub fn write_yaml(fs: HarnessFs, path: string, value: any, options: WriteDataOptions = {}) {
   const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(fs, path)
@@ -657,7 +657,7 @@ pub fn write_yaml(fs: HarnessFs, path: string, value, options: WriteDataOptions 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_toml(fs: HarnessFs, path: string, fallback = nil) {
+pub fn read_toml(fs: HarnessFs, path: string, fallback: any = nil) {
   const result = read_toml_result(fs, path)
   if is_ok(result) {
     return unwrap(result)
@@ -711,7 +711,7 @@ pub fn read_toml_typed<T>(
  * @effects: [fs.read, fs.write]
  * @errors: []
  */
-pub fn write_toml(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+pub fn write_toml(fs: HarnessFs, path: string, value: any, options: WriteDataOptions = {}) {
   const opts = options ?? {}
   if opts.ensure_parent ?? true {
     ensure_parent_dir(fs, path)
@@ -768,7 +768,12 @@ pub fn touch(fs: HarnessFs, path: string) {
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn find_files(fs: HarnessFs, root: string, pattern: string, options = {}) -> list<string> {
+pub fn find_files(
+  fs: HarnessFs,
+  root: string,
+  pattern: string,
+  options: dict = {},
+) -> list<string> {
   const matches = fs.glob(pattern, {base: root, background: options?.background ?? false})
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
@@ -860,7 +865,7 @@ pub fn file_size(fs: HarnessFs, path: string) {
  * @effects: [host]
  * @errors: []
  */
-fn __fs_snapshot_session(agent: HarnessAgent, opts) -> string {
+fn __fs_snapshot_session(agent: HarnessAgent, opts: dict) -> string {
   const session = opts?.session_id ?? agent.current_id()
   if session == nil || session == "" {
     throw "fs_snapshot: no active agent session; pass an explicit `session_id`"
@@ -887,7 +892,7 @@ pub fn fs_snapshot(
   fs: HarnessFs,
   random: HarnessRandom,
   paths: list<string> = [],
-  opts = {},
+  opts: dict = {},
 ) -> dict {
   const session = __fs_snapshot_session(agent, opts)
   const scope = opts?.snapshot_id ?? ("snapshot-" + random.uuid_v7())
@@ -909,7 +914,7 @@ pub fn fs_restore(
   fs: HarnessFs,
   snapshot_id: string,
   paths: list<string> = [],
-  opts = {},
+  opts: dict = {},
 ) -> dict {
   const session = __fs_snapshot_session(agent, opts)
   return fs.restore({session_id: session, snapshot_id: snapshot_id, paths: paths ?? []})
@@ -924,7 +929,7 @@ pub fn fs_restore(
  * @api_stability: experimental
  * @example: for snap in fs_list_snapshots(harness.agent) { harness.stdio.println(snap.snapshot_id) }
  */
-pub fn fs_list_snapshots(agent: HarnessAgent, fs: HarnessFs, opts = {}) -> list<dict> {
+pub fn fs_list_snapshots(agent: HarnessAgent, fs: HarnessFs, opts: dict = {}) -> list<dict> {
   const session = __fs_snapshot_session(agent, opts)
   const result = fs.list_snapshots({session_id: session})
   return result?.snapshots ?? []
@@ -944,7 +949,7 @@ pub fn fs_drop_snapshot(
   agent: HarnessAgent,
   fs: HarnessFs,
   snapshot_id: string,
-  opts = {},
+  opts: dict = {},
 ) -> dict {
   const session = __fs_snapshot_session(agent, opts)
   return fs.drop_snapshot({session_id: session, snapshot_id: snapshot_id})

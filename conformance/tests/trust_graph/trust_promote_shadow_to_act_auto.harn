@@ -10,7 +10,7 @@ fn gated_handler(harness: Harness, event: TriggerEvent) -> dict {
   return {autonomy_tier: context?.autonomy_tier, file_path: file_path}
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const agent_id = "shadow-bot-" + unique

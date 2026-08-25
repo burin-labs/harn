@@ -13,7 +13,7 @@
 // `transcript_auto_compact` now returns `{ messages, archived, summary }`
 // with the engine's true archived count and the inserted summary text, so the
 // length-delta inference is gone.
-pipeline test_archive_exactly_one_reports_archived(harness: Harness, task) {
+pipeline test_archive_exactly_one_reports_archived(harness: Harness, task: unknown) {
   // keep_first 1 + keep_last 1 over 3 messages drains exactly the single
   // middle message and inserts one summary -> len(before) == len(after) == 3,
   // the precise case the length-delta heuristic got wrong.
@@ -35,7 +35,7 @@ pipeline test_archive_exactly_one_reports_archived(harness: Harness, task) {
   assert_eq(result.summary.contains("auto-compacted 1 older messages"), true)
 }
 
-pipeline test_archived_count_is_not_inferred_from_length(harness: Harness, task) {
+pipeline test_archived_count_is_not_inferred_from_length(harness: Harness, task: unknown) {
   // The bug was specifically `archived = if len(before) == len(after) { 0 }`.
   // Prove archived is reported even though the lengths match.
   const messages = [
@@ -54,7 +54,7 @@ pipeline test_archived_count_is_not_inferred_from_length(harness: Harness, task)
   assert_eq(result.archived > 0, true)
 }
 
-pipeline test_summary_index_follows_keep_first(harness: Harness, task) {
+pipeline test_summary_index_follows_keep_first(harness: Harness, task: unknown) {
   // The engine inserts the summary at index `keep_first`, not index 0. The
   // consumer must read the summary from the engine, not from messages[0].
   const messages = [
@@ -75,7 +75,7 @@ pipeline test_summary_index_follows_keep_first(harness: Harness, task) {
   assert_eq(result.summary.contains("auto-compacted"), true)
 }
 
-pipeline test_no_compaction_reports_zero_archived(harness: Harness, task) {
+pipeline test_no_compaction_reports_zero_archived(harness: Harness, task: unknown) {
   // Under threshold: nothing to do. archived is 0, messages unchanged, and the
   // summary is empty -- the genuine terminal/irreducible signal.
   const messages = [{role: "user", content: "small"}, {role: "assistant", content: "ok"}]

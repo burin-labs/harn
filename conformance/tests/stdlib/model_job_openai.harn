@@ -9,7 +9,7 @@ import {
   openai_responses_image_backend,
 } from "std/model_job"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const endpoint = "https://openai.example.test/v1"
   harness.testing.http_mock(
     "POST",

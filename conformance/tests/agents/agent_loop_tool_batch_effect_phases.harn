@@ -13,7 +13,7 @@ import { AgentSpec } from "std/agent/options"
 import { with_audit_log } from "std/llm/tool_middleware"
 import { with_llm_script } from "std/testing"
 
-fn reset_counts(runtime: HarnessRuntime, counters) {
+fn reset_counts(runtime: HarnessRuntime, counters: dict) {
   runtime.atomic_set(counters.read, 0)
   runtime.atomic_set(counters.edit, 0)
   runtime.atomic_set(counters.delete, 0)
@@ -23,7 +23,7 @@ fn reset_counts(runtime: HarnessRuntime, counters) {
   runtime.atomic_set(counters.done, 0)
 }
 
-fn run_tools(runtime: HarnessRuntime, counters) {
+fn run_tools(runtime: HarnessRuntime, counters: dict) {
   let tools = phase_tools(runtime, counters)
   return tool_define(
     tools,
@@ -40,11 +40,11 @@ fn run_tools(runtime: HarnessRuntime, counters) {
   )
 }
 
-fn run_call(command: string, id = "run") {
+fn run_call(command: string, id: string = "run") {
   return {id: id, name: "run", arguments: {command: command}}
 }
 
-fn phase_tools(runtime: HarnessRuntime, counters) {
+fn phase_tools(runtime: HarnessRuntime, counters: dict) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -137,11 +137,11 @@ fn phase_tools(runtime: HarnessRuntime, counters) {
   )
 }
 
-fn read_call(id = "read") {
+fn read_call(id: string = "read") {
   return {id: id, name: "read_state", arguments: {}}
 }
 
-fn edit_call(fail = false, id = "edit") {
+fn edit_call(fail: bool = false, id: string = "edit") {
   return {
     id: id,
     name: "edit_state",
@@ -156,23 +156,23 @@ fn edit_call(fail = false, id = "edit") {
   }
 }
 
-fn delete_call(id = "delete") {
+fn delete_call(id: string = "delete") {
   return {id: id, name: "delete_state", arguments: {}}
 }
 
-fn search_call(id = "search") {
+fn search_call(id: string = "search") {
   return {id: id, name: "search_state", arguments: {}}
 }
 
-fn verify_call(id = "verify") {
+fn verify_call(id: string = "verify") {
   return {id: id, name: "verify_state", arguments: {}}
 }
 
-fn done_call(id = "done") {
+fn done_call(id: string = "done") {
   return {id: id, name: "done", arguments: {}}
 }
 
-fn receipt_counts(events) {
+fn receipt_counts(events: list) {
   let executed = 0
   let deferred = 0
   let skipped = 0
@@ -237,7 +237,7 @@ fn receipt_counts(events) {
   }
 }
 
-fn run_phased(harness: Harness, counters) {
+fn run_phased(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -302,7 +302,7 @@ fn run_phased(harness: Harness, counters) {
   }
 }
 
-fn run_blocked_then_consumed(harness: Harness, counters) {
+fn run_blocked_then_consumed(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-blocked-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -351,7 +351,7 @@ fn run_blocked_then_consumed(harness: Harness, counters) {
   }
 }
 
-fn run_partitioned_reads(harness: Harness, counters) {
+fn run_partitioned_reads(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-partition-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -393,7 +393,7 @@ fn run_partitioned_reads(harness: Harness, counters) {
   return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
-fn run_read_effect_status(harness: Harness, counters) {
+fn run_read_effect_status(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-status-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -432,7 +432,7 @@ fn run_read_effect_status(harness: Harness, counters) {
   return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
-fn run_durable_reproposal(harness: Harness, counters) {
+fn run_durable_reproposal(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-durable-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -481,7 +481,7 @@ fn run_durable_reproposal(harness: Harness, counters) {
   return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
-fn run_rearmed_barrier(harness: Harness, counters) {
+fn run_rearmed_barrier(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-rearmed-" + harness.random.uuid()
   const captured = agent_capture_events(

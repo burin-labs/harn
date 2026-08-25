@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const nums = [1, 2, 3]
   const doubled = nums.map({ x -> x * 2 })
   harness.stdio.log(doubled)

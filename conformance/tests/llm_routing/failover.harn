@@ -5,7 +5,7 @@ import { with_llm_script } from "std/testing"
  * second link succeeds. The chain should advance and the envelope
  * should surface both attempts.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

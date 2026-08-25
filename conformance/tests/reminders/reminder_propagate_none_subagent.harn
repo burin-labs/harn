@@ -2,7 +2,7 @@ import { agent_loop } from "std/agent/loop"
 import { sub_agent_run } from "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn parent_tools(harness: Harness, child_session) {
+fn parent_tools(harness: Harness, child_session: string) {
   let tools = tool_registry()
   tools = tool_define(
     tools,

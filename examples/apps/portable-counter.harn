@@ -50,7 +50,7 @@ fn reduce(harness: Harness, input) {
 }
 """
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const compiled = portable.compile(REDUCER, "reduce")
   if !is_ok(compiled) {
     throw "portable counter did not compile: " + json_stringify(unwrap_err(compiled))
@@ -59,11 +59,11 @@ pipeline main(harness: Harness, task) {
   let state = {count: 0, revision: 0, tool_calls: 0}
   const native_grants = portable.grants(["tools.invoke"], harness.random.bytes(32))
   let double_calls = 0
-  fn double(raw) {
+  fn double(raw: dict) {
     double_calls = double_calls + 1
     return {value: raw.value * 2, calls: double_calls}
   }
-  fn service(request) {
+  fn service(request: any) {
     const args = request.arguments
     if request.capability == "tools" && request.operation == "invoke"
       && args[0] == "counter.double" {
@@ -71,7 +71,7 @@ pipeline main(harness: Harness, task) {
     }
     return portable.reject(request, "unsupported_tool", "portable counter supports counter.double")
   }
-  fn handle_event(raw) {
+  fn handle_event(raw: dict) {
     const input_state = raw.state ?? state
     const execution = portable.run(
       program,

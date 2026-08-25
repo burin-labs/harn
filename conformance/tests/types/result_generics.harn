@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn divide(a: int, b: int) -> Result<int, string> {
     if b == 0 {
       return Result.Err("division by zero")

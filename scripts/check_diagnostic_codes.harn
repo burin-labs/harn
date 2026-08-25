@@ -371,7 +371,7 @@ pub fn check_unknown_variants_text(
   return out
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let errors: list<string> = []
   const registry_text = harness.fs.read_text(REGISTRY)
   const reg = check_registry_text(registry_text)

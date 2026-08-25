@@ -5,7 +5,7 @@
 // redaction is auditable as HARN-OAU-001.
 import { drain_audit, redact } from "std/oauth/redaction"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Drop any audit entries left by earlier conformance cases so we
   // can attribute the entries appended below to this scan.
   const _ = drain_audit()

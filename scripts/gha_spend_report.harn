@@ -44,7 +44,7 @@ fn usage() -> string {
   )
 }
 
-fn format_float_2(value) -> string {
+fn format_float_2(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const sign = if f < 0.0 {
     "-"
@@ -62,7 +62,7 @@ fn format_float_2(value) -> string {
   return sign + to_string(whole) + "." + frac_text
 }
 
-fn number_value(value) -> float {
+fn number_value(value: any) -> float {
   return to_float(value) ?? 0.0
 }
 
@@ -86,7 +86,7 @@ fn sort_spend_rows(rows: list) -> list {
   return out
 }
 
-pub fn has_billing_usage_items(data) -> bool {
+pub fn has_billing_usage_items(data: any) -> bool {
   return type_of(data?.usageItems) == "list"
 }
 
@@ -97,7 +97,7 @@ fn repo_filter_allows(repo: string, include_repos: list<string>) -> bool {
   return include_repos.contains(repo)
 }
 
-pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
+pub fn billing_usage_rows(data: any, include_repos: list<string> = []) -> list {
   let totals = {}
   for item in data?.usageItems ?? [] {
     if item?.product != "actions" || item?.unitType != "Minutes" {
@@ -125,7 +125,7 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
   return sort_spend_rows(rows)
 }
 
-pub fn action_run_refs(data) -> list {
+pub fn action_run_refs(data: any) -> list {
   let out = []
   for run in data?.workflow_runs ?? [] {
     const id = run?.id

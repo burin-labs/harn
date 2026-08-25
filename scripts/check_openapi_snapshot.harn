@@ -68,7 +68,7 @@ pub fn collect_surface(spec_text: string) -> string {
   return lines.join("\n")
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const spec_text = harness.fs.read_text(SPEC_PATH)
   const actual = collect_surface(spec_text)
   const update = argv.contains("--update")

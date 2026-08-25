@@ -1,11 +1,11 @@
 pipeline default(harness: Harness) {
-  fn count_down(n, acc) {
+  fn count_down(n: int, acc: int) {
     if n <= 0 {
       return acc
     }
     return count_down(n - 1, acc + 1)
   }
-  fn sum_tail(n, acc) {
+  fn sum_tail(n: int, acc: int) {
     if n <= 0 {
       return acc
     }

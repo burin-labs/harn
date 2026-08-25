@@ -1,6 +1,6 @@
 import "std/triggers"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const providers: list<ProviderCatalogEntry> = list_providers(harness.llm)
   const builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
   assert(len(builtin) == 9, "expected nine builtin trigger providers")

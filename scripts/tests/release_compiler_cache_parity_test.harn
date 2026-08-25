@@ -5,12 +5,12 @@ fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
 
-fn step_by_name(steps, name: string) {
+fn step_by_name(steps: list, name: string) {
   return steps.find({ step -> trim(step?.name ?? "") == name })
 }
 
 @test
-pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness, task) {
+pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness, task: unknown) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const steps = workflow?.jobs?.build?.steps ?? []
   const rust_cache = steps.find(
@@ -59,7 +59,10 @@ pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness
 }
 
 @test
-pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(harness: Harness, task) {
+pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(
+  harness: Harness,
+  task: unknown,
+) {
   const policy = schema_expect(
     json_parse(harness.fs.read_text("../../.github/release-runner-policy.json")),
     schema_object(
@@ -93,7 +96,7 @@ pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(harness
 }
 
 @test
-pipeline test_warm_build_budget_ratchets_v01065_baseline(harness: Harness, task) {
+pipeline test_warm_build_budget_ratchets_v01065_baseline(harness: Harness, task: unknown) {
   const budget = schema_expect(
     json_parse(harness.fs.read_text("../../.github/release-warm-build-budget.json")),
     schema_object(

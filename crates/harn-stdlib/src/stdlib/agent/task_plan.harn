@@ -60,7 +60,7 @@ const __TASK_PLAN_DEFAULT_BUDGETS = {
   max_steps: 32,
 }
 
-fn __task_plan_optional_dict(fields) {
+fn __task_plan_optional_dict(fields: dict) {
   return schema_field(schema_object(fields, {additional_properties: schema_any()}), false)
 }
 
@@ -240,15 +240,15 @@ pub fn task_plan_schema() {
   )
 }
 
-fn __task_plan_push_error(report, code, path, message) {
+fn __task_plan_push_error(report: any, code: string, path: any, message: any) {
   return report + {errors: report.errors + [{code: code, path: path, message: message}]}
 }
 
-fn __task_plan_push_warning(report, code, path, message) {
+fn __task_plan_push_warning(report: dict, code: string, path: any, message: any) {
   return report + {warnings: report.warnings + [{code: code, path: path, message: message}]}
 }
 
-fn __task_plan_blank_report(plan) {
+fn __task_plan_blank_report(plan: dict) {
   return {
     valid: true,
     schema_version: plan?.schema_version,
@@ -261,7 +261,7 @@ fn __task_plan_blank_report(plan) {
   }
 }
 
-fn __task_plan_collect_node_ids(plan) {
+fn __task_plan_collect_node_ids(plan: any) {
   let ids = []
   const nodes = plan?.nodes ?? {}
   for entry in nodes {
@@ -270,7 +270,7 @@ fn __task_plan_collect_node_ids(plan) {
   return ids
 }
 
-fn __task_plan_validate_structure(plan, report) {
+fn __task_plan_validate_structure(plan: dict, report: any) {
   let out = report
   const {nodes = {}, edges = []} = plan ?? {}
   const node_ids = __task_plan_collect_node_ids(plan)
@@ -330,7 +330,7 @@ fn __task_plan_validate_structure(plan, report) {
   return out
 }
 
-fn __task_plan_validate_kind_fields(plan, report) {
+fn __task_plan_validate_kind_fields(plan: dict, report: any) {
   let out = report
   const nodes = plan?.nodes ?? {}
   for entry in nodes {
@@ -394,7 +394,7 @@ fn __task_plan_validate_kind_fields(plan, report) {
   return out
 }
 
-fn __task_plan_write_kinds_in_use(plan) {
+fn __task_plan_write_kinds_in_use(plan: dict) {
   const nodes = plan?.nodes ?? {}
   let seen = []
   for entry in nodes {
@@ -406,7 +406,7 @@ fn __task_plan_write_kinds_in_use(plan) {
   return seen
 }
 
-fn __task_plan_validate_node_count_budget(node_count, merged, report) {
+fn __task_plan_validate_node_count_budget(node_count: int, merged: dict, report: any) {
   let out = report
   if node_count > merged.max_nodes {
     out = __task_plan_push_error(
@@ -422,7 +422,7 @@ fn __task_plan_validate_node_count_budget(node_count, merged, report) {
   return out
 }
 
-fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) {
+fn __task_plan_validate_write_capability_budget(plan: dict, write_kinds_seen: any, report: any) {
   let out = report
   const caps = plan?.capabilities ?? {}
   const cap_tools = caps?.tools ?? []
@@ -443,7 +443,7 @@ fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) 
   return out
 }
 
-fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
+fn __task_plan_validate_scalar_loop_budgets(explicit: dict, report: any) {
   let out = report
   if explicit?.wall_clock_ms != nil
     && (type_of(explicit.wall_clock_ms) != "int"
@@ -471,14 +471,17 @@ fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
   return out
 }
 
-fn __task_plan_failure_kinds(failures) {
+fn __task_plan_failure_kinds(failures: dict) {
   if type_of(failures) == "dict" {
     return failures?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
   }
   return ["transient", "rate_limit", "provider_5xx"]
 }
 
-fn __task_plan_validate_failure_kind_items(kinds, report) {
+fn __task_plan_validate_failure_kind_items(
+  kinds: string | bytes | list | dict | set | range | nil,
+  report: any,
+) {
   let out = report
   if type_of(kinds) != "list" || len(kinds) == 0 {
     return __task_plan_push_error(
@@ -501,7 +504,7 @@ fn __task_plan_validate_failure_kind_items(kinds, report) {
   return out
 }
 
-fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
+fn __task_plan_validate_consecutive_failure_budget(explicit: dict, report: any) {
   let out = report
   const failures = explicit?.consecutive_failures
   if failures == nil {
@@ -538,7 +541,7 @@ fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
   return out
 }
 
-fn __task_plan_validate_budgets(plan, report) {
+fn __task_plan_validate_budgets(plan: dict, report: any) {
   let out = report
   const explicit = plan?.budgets ?? {}
   const merged = __TASK_PLAN_DEFAULT_BUDGETS + explicit
@@ -551,7 +554,7 @@ fn __task_plan_validate_budgets(plan, report) {
   return out + {budget_summary: merged + {node_count: node_count, write_kinds: write_kinds_seen}}
 }
 
-fn __task_plan_validate_promotion(plan, report) {
+fn __task_plan_validate_promotion(plan: dict, report: any) {
   let out = report
   const promotion = plan?.promotion_policy ?? {}
   if promotion?.shadow_runs_required != nil && promotion.shadow_runs_required < 0 {
@@ -574,7 +577,7 @@ fn __task_plan_validate_promotion(plan, report) {
   return out + {promotion_summary: promotion}
 }
 
-fn __task_plan_reachability(plan) {
+fn __task_plan_reachability(plan: dict) {
   const {nodes = {}, edges = []} = plan ?? {}
   const node_ids = __task_plan_collect_node_ids(plan)
   const entry = plan?.entry
@@ -602,7 +605,7 @@ fn __task_plan_reachability(plan) {
   return {reachable: seen, unreachable: unreachable}
 }
 
-fn __task_plan_validate_reachability(plan, report) {
+fn __task_plan_validate_reachability(plan: any, report: any) {
   let out = report
   const reach = __task_plan_reachability(plan)
   for id in reach.unreachable {
@@ -623,7 +626,7 @@ fn __task_plan_validate_reachability(plan, report) {
     }
 }
 
-fn __task_plan_finalize(report) {
+fn __task_plan_finalize(report: dict) {
   return report + {valid: len(report.errors) == 0}
 }
 
@@ -639,7 +642,7 @@ fn __task_plan_finalize(report) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn task_plan_validate(plan) {
+pub fn task_plan_validate(plan: any) {
   if type_of(plan) != "dict" {
     return {
       valid: false,
@@ -687,7 +690,7 @@ pub fn task_plan_validate(plan) {
   return __task_plan_finalize(report)
 }
 
-fn __task_plan_workflow_kind(ir_kind) {
+fn __task_plan_workflow_kind(ir_kind: string) {
   if ir_kind == "sub_agent" {
     return "subagent"
   } else if ir_kind == "workflow_map" {
@@ -700,7 +703,7 @@ fn __task_plan_workflow_kind(ir_kind) {
   return "stage"
 }
 
-fn __task_plan_workflow_mode(node) {
+fn __task_plan_workflow_mode(node: dict) {
   const kind = node?.kind
   if kind == "human_gate" {
     return "manual"
@@ -716,7 +719,7 @@ fn __task_plan_workflow_mode(node) {
   return "llm"
 }
 
-fn __task_plan_loop_budget_policy(plan) {
+fn __task_plan_loop_budget_policy(plan: dict) {
   const budgets = plan?.budgets ?? {}
   let policy = {}
   if budgets?.wall_clock_ms != nil {
@@ -731,7 +734,7 @@ fn __task_plan_loop_budget_policy(plan) {
   return policy
 }
 
-fn __task_plan_merge_iteration_budget(model_policy, budget_policy) {
+fn __task_plan_merge_iteration_budget(model_policy: dict, budget_policy: any) {
   if len(budget_policy) == 0 {
     return model_policy
   }
@@ -746,14 +749,17 @@ fn __task_plan_merge_iteration_budget(model_policy, budget_policy) {
   return model_policy + {iteration_budget: existing + budget_policy}
 }
 
-fn __task_plan_mode_budget_policy(mode, budget_policy) {
+fn __task_plan_mode_budget_policy(mode: any, budget_policy: any) {
   if mode == "agent" || mode == "llm" {
     return budget_policy
   }
   return {}
 }
 
-fn __task_plan_model_policy(node, budget_policy) {
+fn __task_plan_model_policy(
+  node: dict,
+  budget_policy: string | bytes | list | dict | set | range | nil,
+) {
   const model = node?.model ?? {}
   let policy = {}
   if model?.provider != nil {
@@ -774,7 +780,7 @@ fn __task_plan_model_policy(node, budget_policy) {
   return __task_plan_merge_iteration_budget(policy, budget_policy)
 }
 
-fn __task_plan_capability_policy(node) {
+fn __task_plan_capability_policy(node: dict?) {
   const {tools = [], effects = []} = node ?? {}
   let policy = {}
   if len(tools) > 0 {
@@ -786,7 +792,7 @@ fn __task_plan_capability_policy(node) {
   return policy
 }
 
-fn __task_plan_kind_metadata(node) {
+fn __task_plan_kind_metadata(node: dict) {
   const kind = node?.kind
   if kind == "agent_loop" && node?.agent_loop != nil {
     return {agent_loop: node.agent_loop}
@@ -815,7 +821,7 @@ fn __task_plan_kind_metadata(node) {
   return {}
 }
 
-fn __task_plan_map_policy(node) {
+fn __task_plan_map_policy(node: dict) {
   const map = node?.map ?? {}
   let policy = {}
   if map?.items != nil {
@@ -830,7 +836,7 @@ fn __task_plan_map_policy(node) {
   return policy
 }
 
-fn __task_plan_compact_policy(node) {
+fn __task_plan_compact_policy(node: dict) {
   let policy = {enabled: true}
   if node?.compact?.threshold_tokens != nil {
     policy = policy + {token_threshold: node.compact.threshold_tokens}
@@ -838,7 +844,7 @@ fn __task_plan_compact_policy(node) {
   return policy
 }
 
-fn __task_plan_kind_fields(node) {
+fn __task_plan_kind_fields(node: dict) {
   const kind = node?.kind
   let fields = {}
   if kind == "human_gate" {
@@ -863,7 +869,7 @@ fn __task_plan_kind_fields(node) {
   return fields
 }
 
-fn __task_plan_compile_node(node_id, node, budget_policy) {
+fn __task_plan_compile_node(node_id: any, node: any, budget_policy: any) {
   const mode = __task_plan_workflow_mode(node)
   const model_policy = __task_plan_model_policy(
     node,
@@ -901,7 +907,7 @@ fn __task_plan_compile_node(node_id, node, budget_policy) {
   return workflow_node + (node?.lowering_overrides ?? {})
 }
 
-fn __task_plan_compile_nodes(plan) {
+fn __task_plan_compile_nodes(plan: dict) {
   let compiled = {}
   const budget_policy = __task_plan_loop_budget_policy(plan)
   for entry in plan?.nodes ?? {} {
@@ -911,7 +917,7 @@ fn __task_plan_compile_nodes(plan) {
   return compiled
 }
 
-fn __task_plan_compile_edges(plan) {
+fn __task_plan_compile_edges(plan: dict) {
   let edges = []
   for edge in plan?.edges ?? [] {
     let compiled = {from: edge.from, to: edge.to}
@@ -926,7 +932,7 @@ fn __task_plan_compile_edges(plan) {
   return edges
 }
 
-fn __task_plan_compile_workflow_capability(plan) {
+fn __task_plan_compile_workflow_capability(plan: dict) {
   const caps = plan?.capabilities ?? {}
   let policy = {}
   if caps?.tools != nil {
@@ -944,7 +950,7 @@ fn __task_plan_compile_workflow_capability(plan) {
   return policy
 }
 
-fn __task_plan_metadata(plan, validation) {
+fn __task_plan_metadata(plan: dict, validation: dict) {
   return {
     task_plan: {
       schema_version: plan?.schema_version,
@@ -980,7 +986,7 @@ fn __task_plan_metadata(plan, validation) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn task_plan_compile(plan) {
+pub fn task_plan_compile(plan: dict) {
   const validation = task_plan_validate(plan)
   if !validation.valid {
     return {ok: false, validation: validation}
@@ -1015,7 +1021,7 @@ pub fn task_plan_compile(plan) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn task_plan_render_mermaid(plan) {
+pub fn task_plan_render_mermaid(plan: dict) {
   let lines = ["flowchart TD"]
   for entry in plan?.nodes ?? {} {
     const node_id = entry.key

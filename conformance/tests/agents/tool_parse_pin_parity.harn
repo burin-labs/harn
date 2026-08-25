@@ -18,7 +18,7 @@ fn outcome(
   capabilities: {agent: HarnessAgent, llm: HarnessLlm},
   text: string,
   pin: string,
-  tools,
+  tools: any,
 ) -> dict {
   const opts = {tool_format: pin, tools: tools}
   const parsed = agent_parse_tool_calls(capabilities.agent, text, tools, pin)

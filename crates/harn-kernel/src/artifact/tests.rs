@@ -11,10 +11,10 @@ use super::wire::{
 };
 use super::*;
 
-const SOURCE: &str = "fn reduce(input) {\n  if input.reset { return {count: 0} }\n  return {count: input.count + 1}\n}";
+const SOURCE: &str = "fn reduce(input: {reset: bool, count: int}) {\n  if input.reset { return {count: 0} }\n  return {count: input.count + 1}\n}";
 
 const STATE_REDUCER_SOURCE: &str = r"
-fn reduce(input) {
+fn reduce(input: {items: list<int>, weights: dict<string, int>}) {
   let state = {count: 0, seen: []}
   for item in input.items {
     state.count = state.count + item
@@ -68,8 +68,8 @@ fn package_artifact_links_one_import_and_executes_its_function() {
         parser.parse().unwrap()
     }
 
-    let root = parse("import { add } from \"lib\"\nfn reduce(input) { return add(input) }");
-    let module = parse("pub fn add(input) { return input + 1 }");
+    let root = parse("import { add } from \"lib\"\nfn reduce(input: int) { return add(input) }");
+    let module = parse("pub fn add(input: int) { return input + 1 }");
     let artifact = compile_program_package(
         PortablePackageSource {
             root_program: root,
@@ -106,7 +106,7 @@ fn package_artifact_links_one_import_and_executes_its_function() {
 #[test]
 fn source_package_manifest_uses_the_same_frontend_as_native_compilation() {
     let manifest = PortableSourcePackage {
-        root_source: "import { add } from \"lib\"\nfn reduce(input) { return add(input) }"
+        root_source: "import { add } from \"lib\"\nfn reduce(input: int) { return add(input) }"
             .to_string(),
         root_imports: vec![PortableImport {
             path: "lib".to_string(),
@@ -117,7 +117,7 @@ fn source_package_manifest_uses_the_same_frontend_as_native_compilation() {
         }],
         modules: vec![PortableSourceModule {
             id: "lib".to_string(),
-            source: "pub fn add(input) { return input + 1 }".to_string(),
+            source: "pub fn add(input: int) { return input + 1 }".to_string(),
             imports: Vec::new(),
             exports: BTreeMap::from([("add".to_string(), PortableExportKind::Function)]),
             imported_enum_candidates: Vec::new(),
@@ -138,7 +138,7 @@ fn namespace_member_calls_execute_the_exported_canonical_closure() {
     let artifact = compile_source_package(
         PortableSourcePackage {
             root_source:
-                "import * as math from \"lib\"\nfn reduce(input) { return math.add(input) }"
+                "import * as math from \"lib\"\nfn reduce(input: int) { return math.add(input) }"
                     .to_string(),
             root_imports: vec![PortableImport {
                 path: "lib".to_string(),
@@ -149,7 +149,7 @@ fn namespace_member_calls_execute_the_exported_canonical_closure() {
             }],
             modules: vec![PortableSourceModule {
                 id: "lib".to_string(),
-                source: "pub fn add(input) { return input + 1 }".to_string(),
+                source: "pub fn add(input: int) { return input + 1 }".to_string(),
                 imports: Vec::new(),
                 exports: BTreeMap::from([("add".to_string(), PortableExportKind::Function)]),
                 imported_enum_candidates: Vec::new(),
@@ -178,7 +178,7 @@ fn escaped_namespace_projects_every_export() {
     let artifact = compile_source_package(
         PortableSourcePackage {
             root_source: "import * as math from \"lib\"\n\
-                 fn reduce(input) { const ns = math; return ns.add(ns.double(input)) }"
+                 fn reduce(input: int) { const ns = math; return ns.add(ns.double(input)) }"
                 .to_string(),
             root_imports: vec![PortableImport {
                 path: "lib".to_string(),
@@ -189,8 +189,8 @@ fn escaped_namespace_projects_every_export() {
             }],
             modules: vec![PortableSourceModule {
                 id: "lib".to_string(),
-                source: "pub fn add(input) { return input + 1 }\n\
-                     pub fn double(input) { return input * 2 }"
+                source: "pub fn add(input: int) { return input + 1 }\n\
+                     pub fn double(input: int) { return input * 2 }"
                     .to_string(),
                 imports: Vec::new(),
                 exports: BTreeMap::from([
@@ -220,7 +220,7 @@ fn nested_package_calls_preserve_all_arguments_and_defaults() {
         PortableSourcePackage {
             root_source: r#"
                 import * as ui from "renderer"
-                fn reduce(input) {
+                fn reduce(input: string) {
                     return ui.app_resource("ui://portable", "Portable", input, {version: "2"})
                 }
             "#
@@ -237,7 +237,7 @@ fn nested_package_calls_preserve_all_arguments_and_defaults() {
                     id: "renderer".to_string(),
                     source: r#"
                         import { resource } from "resource"
-                        pub fn app_resource(uri, name, tool_name, options = nil) {
+                        pub fn app_resource(uri: string, name: string, tool_name: string, options: dict? = nil) {
                             return resource(uri, name, tool_name, options)
                         }
                     "#
@@ -259,8 +259,8 @@ fn nested_package_calls_preserve_all_arguments_and_defaults() {
                 PortableSourceModule {
                     id: "resource".to_string(),
                     source: r"
-                        pub fn resource(uri, name, tool_name, options = nil) {
-                            return [uri, name, tool_name, options.version]
+                        pub fn resource(uri: string, name: string, tool_name: string, options: dict? = nil) {
+                            return [uri, name, tool_name, options?.version]
                         }
                     "
                     .to_string(),
@@ -301,8 +301,9 @@ fn nested_package_calls_preserve_all_arguments_and_defaults() {
 fn source_package_typechecks_imported_signatures_in_the_kernel() {
     let diagnostics = compile_source_package(
         PortableSourcePackage {
-            root_source: "import { add } from \"lib\"\nfn reduce(input) { return add(\"wrong\") }"
-                .to_string(),
+            root_source:
+                "import { add } from \"lib\"\nfn reduce(input: int) { return add(\"wrong\") }"
+                    .to_string(),
             root_imports: vec![PortableImport {
                 path: "lib".to_string(),
                 target: "lib".to_string(),
@@ -395,7 +396,7 @@ fn reexported_callable_carries_its_owners_private_types() {
 fn package_link_failures_are_structured_and_deterministic() {
     let missing_target = compile_source_package(
         PortableSourcePackage {
-            root_source: "import { add } from \"lib\"\nfn reduce(input) { return add(input) }"
+            root_source: "import { add } from \"lib\"\nfn reduce(input: int) { return add(input) }"
                 .to_string(),
             root_imports: vec![PortableImport {
                 path: "lib".to_string(),
@@ -428,7 +429,7 @@ fn package_link_failures_are_structured_and_deterministic() {
     }];
     let cyclic = compile_source_package(
         PortableSourcePackage {
-            root_source: "import { a } from \"a\"\nfn reduce(input) { return a(input) }"
+            root_source: "import { a } from \"a\"\nfn reduce(input: int) { return a(input) }"
                 .to_string(),
             root_imports: vec![PortableImport {
                 path: "a".to_string(),
@@ -440,7 +441,8 @@ fn package_link_failures_are_structured_and_deterministic() {
             modules: vec![
                 PortableSourceModule {
                     id: "a".to_string(),
-                    source: "import { b } from \"b\"\npub fn a(input) { return input }".to_string(),
+                    source: "import { b } from \"b\"\npub fn a<T>(input: T) -> T { return input }"
+                        .to_string(),
                     imports: imports_a,
                     exports: BTreeMap::from([("a".to_string(), PortableExportKind::Function)]),
                     imported_enum_candidates: Vec::new(),
@@ -448,7 +450,8 @@ fn package_link_failures_are_structured_and_deterministic() {
                 },
                 PortableSourceModule {
                     id: "b".to_string(),
-                    source: "import { a } from \"a\"\npub fn b(input) { return input }".to_string(),
+                    source: "import { a } from \"a\"\npub fn b<T>(input: T) -> T { return input }"
+                        .to_string(),
                     imports: imports_b,
                     exports: BTreeMap::from([("b".to_string(), PortableExportKind::Function)]),
                     imported_enum_candidates: Vec::new(),
@@ -526,7 +529,7 @@ fn portable_compiler_policy_is_shared_by_every_adapter() {
 #[test]
 fn typed_defaults_compile_and_execute_through_the_shared_guard() {
     let artifact = compile_program(
-        "fn with_default(value: int = 7) -> int { return value }\nfn reduce(input) -> int { return with_default() }",
+        "fn with_default(value: int = 7) -> int { return value }\nfn reduce(_input: unknown) -> int { return with_default() }",
         "reduce",
         EntryKind::Function,
     )
@@ -617,7 +620,7 @@ fn semantic_abi_provenance_is_stable_hex() {
 #[test]
 fn rejects_incoherent_callable_metadata() {
     let artifact = compile_program(
-        "fn reduce(input, other) { return input + other }",
+        "fn reduce(input: int, other: int) -> int { return input + other }",
         "reduce",
         EntryKind::Function,
     )
@@ -929,7 +932,7 @@ fn validates_secondary_operands_and_builtin_identity() {
 #[test]
 fn captured_callable_parameter_survives_named_call_validation() {
     let source = r"
-fn wrap(callback) {
+fn wrap<T, U>(callback: fn(T) -> U) -> fn(T) -> U {
   return fn(value) { return callback(value) }
 }
 ";

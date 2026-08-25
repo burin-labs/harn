@@ -134,7 +134,11 @@ pub type ModelBackend = {
  * @effects: []
  * @errors: []
  */
-pub fn model_job_error(kind: ModelJobErrorKind, message: string, options = {}) -> ModelJobError {
+pub fn model_job_error(
+  kind: ModelJobErrorKind,
+  message: string,
+  options: dict? = {},
+) -> ModelJobError {
   const opts = options ?? {}
   let error: ModelJobError = {kind: kind, message: message, retryable: opts?.retryable ?? false}
   if opts?.backend != nil {
@@ -157,8 +161,8 @@ pub fn model_job_error(kind: ModelJobErrorKind, message: string, options = {}) -
  */
 pub fn model_job_state_result(
   raw_state: unknown,
-  backend = nil,
-  job_id = nil,
+  backend: any = nil,
+  job_id: any = nil,
 ) -> Result<ModelJobState, ModelJobError> {
   const state = lowercase(trim(to_string(raw_state ?? "")))
   if state == "queued" || state == "pending" || state == "created" || state == "submitted" {
@@ -194,8 +198,8 @@ pub fn model_job_state_result(
 pub fn model_job_transition_result(
   previous: ModelJobState,
   next: ModelJobState,
-  backend = nil,
-  job_id = nil,
+  backend: any = nil,
+  job_id: any = nil,
 ) -> Result<ModelJobState, ModelJobError> {
   if previous == next {
     return Ok(next)

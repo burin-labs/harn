@@ -25,6 +25,10 @@ pub enum BuiltinExposure {
     /// Trusted embedder wire primitive. User modules cannot name or re-export
     /// it; only artifacts stamped with privileged provenance may call it.
     PrivilegedWire,
+    /// Pure primitive exposed only while compiling Harn's embedded stdlib.
+    /// Public stdlib functions may wrap it, but ordinary source cannot call or
+    /// re-export the primitive itself.
+    StdlibInternal,
     /// Compiler/runtime implementation detail that is never source-visible.
     RuntimeInternal,
 }
@@ -498,6 +502,12 @@ impl BuiltinContract {
 
     pub const RUNTIME_INTERNAL: Self = Self {
         exposure: BuiltinExposure::RuntimeInternal,
+        effects: &[],
+        effects_authorized_by: None,
+    };
+
+    pub const STDLIB_INTERNAL: Self = Self {
+        exposure: BuiltinExposure::StdlibInternal,
         effects: &[],
         effects_authorized_by: None,
     };

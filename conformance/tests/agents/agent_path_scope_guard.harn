@@ -16,7 +16,7 @@ fn path_tools() {
   return tools
 }
 
-fn run_read(harness: Harness, session, path) {
+fn run_read(harness: Harness, session: any, path: string) {
   return with_llm_script(
     harness.llm,
     [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],

@@ -1,5 +1,5 @@
 /** Test catch without parentheses around error variable */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // catch e { ... } should work (no parens required)
   try {
     throw "test error"

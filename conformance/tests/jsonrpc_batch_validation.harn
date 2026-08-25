@@ -9,7 +9,7 @@ import { assert_error_contains } from "std/testing"
  * crates/harn-vm/src/stdlib/jsonrpc.rs cover the success/response
  * paths against a synthetic envelope.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert_error_contains(
     { -> harness.net.jsonrpc_batch("", [{method: "ping"}]) },
     "url is required",

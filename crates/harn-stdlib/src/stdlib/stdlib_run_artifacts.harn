@@ -50,7 +50,7 @@ type RunArtifactsRun = {
   paths: RunArtifactPaths,
 }
 
-fn __run_artifacts_required_text(value, label) -> string {
+fn __run_artifacts_required_text(value: string?, label: string) -> string {
   const text = trim(to_string(value ?? ""))
   if text == "" {
     throw "std/run_artifacts: " + label + " is required"
@@ -58,7 +58,7 @@ fn __run_artifacts_required_text(value, label) -> string {
   return text
 }
 
-fn __run_artifacts_clean_relative(value, label) -> string {
+fn __run_artifacts_clean_relative(value: string?, label: string) -> string {
   const raw = __run_artifacts_required_text(value, label)
   const posix = path_to_posix(raw)
   if path_is_absolute(posix) {
@@ -79,7 +79,7 @@ fn __run_artifacts_clean_relative(value, label) -> string {
   return normalized
 }
 
-fn __run_artifacts_clean_segment(value, label) -> string {
+fn __run_artifacts_clean_segment(value: string?, label: string) -> string {
   const clean = __run_artifacts_clean_relative(value, label)
   if contains(clean, "/") {
     throw "std/run_artifacts: " + label + " must be one path segment"
@@ -87,7 +87,7 @@ fn __run_artifacts_clean_segment(value, label) -> string {
   return clean
 }
 
-fn __run_artifacts_root(fs: HarnessFs, options) -> string {
+fn __run_artifacts_root(fs: HarnessFs, options: dict?) -> string {
   const opts = options ?? {}
   const root = to_string(opts?.root ?? fs.runtime_paths().run_root)
   if root == "" {
@@ -96,7 +96,7 @@ fn __run_artifacts_root(fs: HarnessFs, options) -> string {
   return path_normalize(root)
 }
 
-fn __run_artifacts_namespace(options) {
+fn __run_artifacts_namespace(options: dict?) {
   const raw = trim(to_string((options ?? {})?.namespace ?? ""))
   if raw == "" {
     return nil
@@ -104,7 +104,7 @@ fn __run_artifacts_namespace(options) {
   return __run_artifacts_clean_relative(raw, "namespace")
 }
 
-fn __run_artifacts_kind_dir(root, kind, namespace) -> string {
+fn __run_artifacts_kind_dir(root: any, kind: any, namespace: any) -> string {
   if namespace == nil {
     return path_join(root, kind)
   }
@@ -123,7 +123,7 @@ fn __run_artifacts_run_dir(run: {dir: string, ...rest}) -> string {
   return dir
 }
 
-fn __run_artifacts_path(run: {dir: string, ...rest}, name) -> string {
+fn __run_artifacts_path(run: {dir: string, ...rest}, name: string?) -> string {
   const rel = __run_artifacts_clean_relative(name, "artifact path")
   const root = path_normalize(__run_artifacts_run_dir(run))
   const joined = path_normalize(path_join(root, rel))
@@ -134,7 +134,7 @@ fn __run_artifacts_path(run: {dir: string, ...rest}, name) -> string {
   return joined
 }
 
-fn __run_artifact_json_text(value, options: ArtifactWriteOptions) -> string {
+fn __run_artifact_json_text(value: any, options: ArtifactWriteOptions) -> string {
   const opts = options ?? {}
   const body = if opts.pretty ?? false {
     pretty(value)
@@ -162,7 +162,14 @@ fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPat
   }
 }
 
-fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
+fn __run_artifacts_make_run(
+  kind: any,
+  namespace: any,
+  root: any,
+  run_id: any,
+  dir: string,
+  modified: any = nil,
+) -> RunArtifactsRun {
   const base = {
     kind: kind,
     namespace: namespace,
@@ -281,7 +288,7 @@ pub fn run_artifact_write_json_raw(
   fs: HarnessFs,
   run: RunArtifactsRun,
   name: string,
-  value,
+  value: any,
   options: ArtifactWriteOptions = {},
 ) -> FileReplaceReceipt {
   return unwrap(run_artifact_write_json_raw_result(fs, run, name, value, options))
@@ -297,7 +304,7 @@ pub fn run_artifact_write_json_raw_result(
   fs: HarnessFs,
   run: RunArtifactsRun,
   name: string,
-  value,
+  value: any,
   options: ArtifactWriteOptions = {},
 ) -> Result<FileReplaceReceipt, FsFailure> {
   return replace_text_result(

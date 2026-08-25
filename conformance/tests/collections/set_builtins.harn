@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Create sets
   const s = set(1, 2, 3)
   assert_eq(len(s), 3)

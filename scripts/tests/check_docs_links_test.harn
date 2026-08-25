@@ -3,7 +3,7 @@
 import "../check_docs_links.harn"
 
 @test
-pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(harness: Harness, task) {
+pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(harness: Harness, task: unknown) {
   const text = "a [x](y.md)\n```\n[hidden](z.md)\n```\nb [w](v.md)"
   const stripped = strip_fenced_blocks(text)
   // Line count is preserved (4 newlines -> 5 lines).
@@ -13,26 +13,26 @@ pipeline test_strip_fenced_blocks_blanks_fences_keeps_lines(harness: Harness, ta
 }
 
 @test
-pipeline test_strip_fenced_blocks_tilde_marker(harness: Harness, task) {
+pipeline test_strip_fenced_blocks_tilde_marker(harness: Harness, task: unknown) {
   const text = "~~~\ninside\n~~~\nout"
   assert_eq(strip_fenced_blocks(text), "\n\n\nout")
 }
 
 @test
-pipeline test_left_trim(harness: Harness, task) {
+pipeline test_left_trim(harness: Harness, task: unknown) {
   assert_eq(left_trim("   \t hi"), "hi")
   assert_eq(left_trim("nope"), "nope")
 }
 
 @test
-pipeline test_strip_chars(harness: Harness, task) {
+pipeline test_strip_chars(harness: Harness, task: unknown) {
   assert_eq(strip_chars("<foo>", "<>"), "foo")
   assert_eq(strip_chars("  bar  ", " \t\r\n"), "bar")
   assert_eq(strip_chars("<<a>>", "<>"), "a")
 }
 
 @test
-pipeline test_unquote_percent_decodes(harness: Harness, task) {
+pipeline test_unquote_percent_decodes(harness: Harness, task: unknown) {
   assert_eq(unquote("a%20b.md"), "a b.md")
   assert_eq(unquote("x%28y%29"), "x(y)")
   // Non-escape text untouched; malformed escape left literal.
@@ -41,7 +41,7 @@ pipeline test_unquote_percent_decodes(harness: Harness, task) {
 }
 
 @test
-pipeline test_has_scheme(harness: Harness, task) {
+pipeline test_has_scheme(harness: Harness, task: unknown) {
   assert_eq(has_scheme("https://x.com"), true)
   assert_eq(has_scheme("mailto:a@b.com"), true)
   assert_eq(has_scheme("tel:123"), true)
@@ -53,7 +53,7 @@ pipeline test_has_scheme(harness: Harness, task) {
 }
 
 @test
-pipeline test_local_path_local_targets(harness: Harness, task) {
+pipeline test_local_path_local_targets(harness: Harness, task: unknown) {
   assert_eq(local_path("foo.md"), "foo.md")
   assert_eq(local_path("foo.md#section"), "foo.md")
   assert_eq(local_path("../a/b.md"), "../a/b.md")
@@ -62,7 +62,7 @@ pipeline test_local_path_local_targets(harness: Harness, task) {
 }
 
 @test
-pipeline test_local_path_rejects_non_local(harness: Harness, task) {
+pipeline test_local_path_rejects_non_local(harness: Harness, task: unknown) {
   assert_eq(local_path(""), nil)
   assert_eq(local_path("#anchor"), nil)
   assert_eq(local_path("https://example.com/x"), nil)
@@ -72,7 +72,7 @@ pipeline test_local_path_rejects_non_local(harness: Harness, task) {
 }
 
 @test
-pipeline test_path_suffix(harness: Harness, task) {
+pipeline test_path_suffix(harness: Harness, task: unknown) {
   assert_eq(path_suffix("a/b.md"), ".md")
   assert_eq(path_suffix("a/b.html"), ".html")
   assert_eq(path_suffix("a/b"), "")
@@ -82,63 +82,63 @@ pipeline test_path_suffix(harness: Harness, task) {
 }
 
 @test
-pipeline test_with_md_suffix(harness: Harness, task) {
+pipeline test_with_md_suffix(harness: Harness, task: unknown) {
   assert_eq(with_md_suffix("docs/src/bar.html"), "docs/src/bar.md")
   assert_eq(with_md_suffix("docs/src/bar"), "docs/src/bar.md")
 }
 
 @test
-pipeline test_candidate_rel_paths_extensionless(harness: Harness, task) {
+pipeline test_candidate_rel_paths_extensionless(harness: Harness, task: unknown) {
   const c = candidate_rel_paths("docs/src/sub", "page", "docs/src")
   assert_eq(c, ["docs/src/sub/page", "docs/src/sub/page.md", "docs/src/sub/page/index.md"])
 }
 
 @test
-pipeline test_candidate_rel_paths_html(harness: Harness, task) {
+pipeline test_candidate_rel_paths_html(harness: Harness, task: unknown) {
   const c = candidate_rel_paths("docs/src", "bar.html", "docs/src")
   assert_eq(c, ["docs/src/bar.html", "docs/src/bar.md"])
 }
 
 @test
-pipeline test_candidate_rel_paths_md_only(harness: Harness, task) {
+pipeline test_candidate_rel_paths_md_only(harness: Harness, task: unknown) {
   const c = candidate_rel_paths("docs/src", "bar.md", "docs/src")
   assert_eq(c, ["docs/src/bar.md"])
 }
 
 @test
-pipeline test_candidate_rel_paths_trailing_slash(harness: Harness, task) {
+pipeline test_candidate_rel_paths_trailing_slash(harness: Harness, task: unknown) {
   // Trailing-slash with empty suffix takes the extensionless branch.
   const c = candidate_rel_paths("docs/src", "dir/", "docs/src")
   assert_eq(c, ["docs/src/dir", "docs/src/dir.md", "docs/src/dir/index.md"])
 }
 
 @test
-pipeline test_candidate_rel_paths_absolute_uses_docs_dir(harness: Harness, task) {
+pipeline test_candidate_rel_paths_absolute_uses_docs_dir(harness: Harness, task: unknown) {
   const c = candidate_rel_paths("docs/src/sub", "/top.md", "docs/src")
   assert_eq(c, ["docs/src/top.md"])
 }
 
 @test
-pipeline test_candidate_rel_paths_relative_parent(harness: Harness, task) {
+pipeline test_candidate_rel_paths_relative_parent(harness: Harness, task: unknown) {
   const c = candidate_rel_paths("docs/src/sub", "../up.md", "docs/src")
   assert_eq(c, ["docs/src/sub/../up.md"])
 }
 
 @test
-pipeline test_normalize_path_collapses_dots(harness: Harness, task) {
+pipeline test_normalize_path_collapses_dots(harness: Harness, task: unknown) {
   assert_eq(normalize_path("docs/src/sub/../builtins.md"), "docs/src/builtins.md")
   assert_eq(normalize_path("docs/src/a/../../README.md"), "docs/README.md")
   assert_eq(normalize_path("docs/src/./x/./y"), "docs/src/x/y")
 }
 
 @test
-pipeline test_normalize_path_absolute_clamps_at_root(harness: Harness, task) {
+pipeline test_normalize_path_absolute_clamps_at_root(harness: Harness, task: unknown) {
   assert_eq(normalize_path("/a/b/../../../../etc/passwd"), "/etc/passwd")
   assert_eq(normalize_path("/repo/docs/../README.md"), "/repo/README.md")
 }
 
 @test
-pipeline test_within_repo(harness: Harness, task) {
+pipeline test_within_repo(harness: Harness, task: unknown) {
   assert_eq(within_repo("/r", "/r/docs/x.md"), true)
   assert_eq(within_repo("/r", "/r"), true)
   assert_eq(within_repo("/r", "/etc/passwd"), false)
@@ -146,19 +146,19 @@ pipeline test_within_repo(harness: Harness, task) {
 }
 
 @test
-pipeline test_rel_path_recovers_repo_relative(harness: Harness, task) {
+pipeline test_rel_path_recovers_repo_relative(harness: Harness, task: unknown) {
   assert_eq(rel_path("/abs/root/./docs/src/foo.md"), "docs/src/foo.md")
   assert_eq(rel_path("no-marker.md"), "no-marker.md")
 }
 
 @test
-pipeline test_dir_of(harness: Harness, task) {
+pipeline test_dir_of(harness: Harness, task: unknown) {
   assert_eq(dir_of("docs/src/sub/a.md"), "docs/src/sub")
   assert_eq(dir_of("a.md"), "")
 }
 
 @test
-pipeline test_collect_links_inline_reference_html(harness: Harness, task) {
+pipeline test_collect_links_inline_reference_html(harness: Harness, task: unknown) {
   const text =
     "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
   const links = collect_links(text)
@@ -176,7 +176,7 @@ pipeline test_collect_links_inline_reference_html(harness: Harness, task) {
 }
 
 @test
-pipeline test_collect_links_reference_requires_low_indent(harness: Harness, task) {
+pipeline test_collect_links_reference_requires_low_indent(harness: Harness, task: unknown) {
   // Up to 3 leading spaces is a reference def; 4+ is not.
   const ok = collect_links("   [r]: ok.md")
   assert_eq(ok.count, 1)

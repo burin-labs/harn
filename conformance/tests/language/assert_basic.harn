@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert(true)
   assert(true)
   assert_eq(2 + 2, 4)

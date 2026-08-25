@@ -1,6 +1,6 @@
 import "std/path"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(ext("lib/main.rs"))
   harness.stdio.log(stem("archive.tar.gz"))
   harness.stdio.log(stem(".gitignore"))

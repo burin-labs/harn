@@ -37,10 +37,10 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
  * @api_stability: experimental
  * @example: preset_run_command(harness, {stacks: ["rust"], inner: shell_runner})
  */
-fn __preset_command_text(args) -> string {
+fn __preset_command_text(args: unknown) -> string {
   const kind = type_of(args)
   if kind == "string" {
-    return args
+    return to_string(args)
   }
   if kind == "dict" {
     return to_string(args?.command ?? args?.cmd ?? args?.run ?? "")
@@ -48,14 +48,14 @@ fn __preset_command_text(args) -> string {
   return to_string(args)
 }
 
-fn __preset_rewritten_args(args, rewritten_command) {
+fn __preset_rewritten_args(args: unknown, rewritten_command: any) {
   if type_of(args) == "dict" {
     return args + {command: rewritten_command}
   }
   return {command: rewritten_command}
 }
 
-fn __preset_envelope(rule, original_command, command) {
+fn __preset_envelope(rule: dict, original_command: any, command: any) {
   return {
     rule_id: rule?.rule_id ?? "",
     catalogue_id: rule?.catalogue_id ?? "",
@@ -67,7 +67,7 @@ fn __preset_envelope(rule, original_command, command) {
   }
 }
 
-fn __preset_invoke_rewrite(rewrite_fn, original_command, rule) -> string {
+fn __preset_invoke_rewrite(rewrite_fn: any, original_command: string, rule: dict) -> string {
   if rewrite_fn == nil {
     return original_command
   }
@@ -86,7 +86,7 @@ fn __preset_invoke_rewrite(rewrite_fn, original_command, rule) -> string {
   return to_string(rewritten)
 }
 
-fn __preset_audit_payload(rule, original_command, command) {
+fn __preset_audit_payload(rule: dict, original_command: any, command: any) {
   return {
     rule_id: rule?.rule_id ?? "",
     catalogue_id: rule?.catalogue_id ?? "",
@@ -97,7 +97,7 @@ fn __preset_audit_payload(rule, original_command, command) {
   }
 }
 
-fn __preset_reminder_body(rule, original_command, command, action) {
+fn __preset_reminder_body(rule: dict, original_command: any, command: any, action: string) {
   const rid = rule?.rule_id ?? ""
   const explanation = rule?.explanation ?? ""
   if action == "rewrite" {
@@ -142,7 +142,7 @@ fn __preset_reminder_body(rule, original_command, command, action) {
  * @api_stability: experimental
  * @example: preset_run_command(harness, {mode: tool_hooks_mode_rewrite_with_audit})
  */
-pub fn tool_hooks_mode_rewrite_with_audit(tools: HarnessTools, rule, args, inner) {
+pub fn tool_hooks_mode_rewrite_with_audit(tools: HarnessTools, rule: dict, args: any, inner: any) {
   const original_command = __preset_command_text(args)
   const rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
   const envelope = __preset_envelope(rule, original_command, rewritten_command)
@@ -180,7 +180,12 @@ pub fn tool_hooks_mode_rewrite_with_audit(tools: HarnessTools, rule, args, inner
  * @api_stability: experimental
  * @example: preset_run_command(harness, {mode: tool_hooks_mode_deny_with_explanation})
  */
-pub fn tool_hooks_mode_deny_with_explanation(tools: HarnessTools, rule, args, _inner) {
+pub fn tool_hooks_mode_deny_with_explanation(
+  tools: HarnessTools,
+  rule: dict,
+  args: unknown,
+  _inner: unknown,
+) {
   const original_command = __preset_command_text(args)
   const envelope = __preset_envelope(rule, original_command, original_command)
   tools.hooks_emit_audit(
@@ -207,7 +212,12 @@ pub fn tool_hooks_mode_deny_with_explanation(tools: HarnessTools, rule, args, _i
  * @api_stability: experimental
  * @example: preset_run_command(harness, {mode: tool_hooks_mode_passthrough_only_audit})
  */
-pub fn tool_hooks_mode_passthrough_only_audit(tools: HarnessTools, rule, args, inner) {
+pub fn tool_hooks_mode_passthrough_only_audit(
+  tools: HarnessTools,
+  rule: dict,
+  args: unknown,
+  inner: any,
+) {
   const original_command = __preset_command_text(args)
   const envelope = __preset_envelope(rule, original_command, original_command)
   tools.hooks_emit_audit(
@@ -221,7 +231,7 @@ pub fn tool_hooks_mode_passthrough_only_audit(tools: HarnessTools, rule, args, i
   return envelope + {action: "passthrough", result: result}
 }
 
-fn __preset_no_match(args, inner) {
+fn __preset_no_match(args: unknown, inner: any) {
   const original_command = __preset_command_text(args)
   if inner == nil {
     return {action: "passthrough", command: original_command, original_command: original_command}
@@ -256,7 +266,7 @@ fn __classifier_default_meta_prompt() -> string {
     + "Be conservative: when unsure, return `allow` with low confidence."
 }
 
-fn __classifier_validate_config(cfg) {
+fn __classifier_validate_config(cfg: dict) {
   if type_of(cfg) != "dict" {
     throw "preset_run_command: llm_classifier must be a dict"
   }
@@ -328,18 +338,18 @@ fn __classifier_validate_config(cfg) {
  * Forward `llm_options` verbatim so callers can pin temperature,
  * seed, retries, etc. without us re-marshalling each knob.
  */
-fn __classifier_normalize_command(command) -> string {
+fn __classifier_normalize_command(command: any) -> string {
   /* Collapse all whitespace runs so trivial reformatting doesn't bust the
    * cache (e.g. `cargo  build` vs `cargo build`). Trimmed for the same
    * reason. */
   return trim(regex_replace("\\s+", " ", to_string(command)))
 }
 
-fn __classifier_cache_key(scope, command) -> string {
+fn __classifier_cache_key(scope: any, command: any) -> string {
   return to_string(scope) + ":" + sha256(__classifier_normalize_command(command))
 }
 
-fn __classifier_build_options(classifier_cfg) {
+fn __classifier_build_options(classifier_cfg: dict) {
   /* Merge order: caller `llm_options` first so they can override our
    * defaults; then pin `model` (and `provider` when supplied) so the
    * classifier never silently falls back to the default agent model. */
@@ -350,7 +360,7 @@ fn __classifier_build_options(classifier_cfg) {
   return merged
 }
 
-fn __classifier_extract_text(envelope) -> string {
+fn __classifier_extract_text(envelope: dict) -> string {
   /* `llm_call_safe` returns `{ok, response, error}` where `response`
    * holds the full `llm_call` result dict (`{text, data?, ...}`). We
    * accept the text channel as the canonical verdict transport so the
@@ -362,7 +372,7 @@ fn __classifier_extract_text(envelope) -> string {
   return ""
 }
 
-fn __classifier_parse_verdict(text) {
+fn __classifier_parse_verdict(text: any) {
   const trimmed = trim(to_string(text))
   if len(trimmed) == 0 {
     return {kind: "error", error: "empty classifier response"}
@@ -397,7 +407,7 @@ fn __classifier_parse_verdict(text) {
   }
 }
 
-fn __classifier_synth_rule(verdict, classifier_cfg, original_command) {
+fn __classifier_synth_rule(verdict: dict, classifier_cfg: dict, original_command: any) {
   /* Wrap the verdict in the same shape `tool_hooks_match` returns so the
    * configured `mode` callback can handle it uniformly. The synthetic
    * rule's `rewrite` is a constant closure returning the model's
@@ -423,7 +433,13 @@ fn __classifier_synth_rule(verdict, classifier_cfg, original_command) {
   }
 }
 
-fn __classifier_audit_payload(classifier_cfg, command, verdict, cache_hit, action) {
+fn __classifier_audit_payload(
+  classifier_cfg: dict,
+  command: any,
+  verdict: dict,
+  cache_hit: any,
+  action: any,
+) {
   return {
     scope: classifier_cfg.scope,
     model: classifier_cfg.model,
@@ -440,7 +456,7 @@ fn __classifier_audit_payload(classifier_cfg, command, verdict, cache_hit, actio
   }
 }
 
-fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
+fn __classifier_run(harness: Harness, classifier_cfg: dict, args: unknown, inner: any) {
   const original_command = __preset_command_text(args)
   const cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
   const now = harness.clock.now_ms()
@@ -516,7 +532,7 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
  * `llm_call_safe` keeps the wrapper resilient: on transport errors
  * we audit + passthrough rather than blowing up the dispatch loop.
  */
-fn __preset_custom_registry(tools: HarnessTools, custom_rules) {
+fn __preset_custom_registry(tools: HarnessTools, custom_rules: any) {
   // Build a synthetic catalogue when the caller supplied custom rules.
   // The catalogue is stack-agnostic (no `stack` field) so it survives
   // the catalogue-stack filter below, and individual rule `applies_to`
@@ -578,7 +594,7 @@ fn __preset_custom_registry(tools: HarnessTools, custom_rules) {
  * @api_stability: experimental
  * @example: agent_loop(harness, message, tools: {tools: [{name: "run_command", handler: preset_run_command(harness, {stacks: ["rust"]})}]})
  */
-pub fn preset_run_command(harness: Harness, config = nil) {
+pub fn preset_run_command(harness: Harness, config: dict? = nil) {
   const cfg = config ?? {}
   if type_of(cfg) != "dict" {
     throw "preset_run_command: config must be a dict"

@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const root = harness.agent.open("ancestry-root")
   harness.agent.inject(root, {role: "user", content: "hello"})
   harness.agent.inject(root, {role: "assistant", content: "hi"})

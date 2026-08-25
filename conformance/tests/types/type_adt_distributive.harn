@@ -26,7 +26,7 @@ fn process_edit(stdio: HarnessStdio, a: "edit") {
   stdio.println("edit " + a)
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Scalar case: each annotation distributes `ActionContainer<Action>`
   // into `ActionContainer<"create"> | ActionContainer<"edit">`; the
   // literal-tagged shape on the RHS then fits one specific branch.

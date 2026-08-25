@@ -394,18 +394,12 @@ fn capability_apply_attenuates_root_to_a_typed_bundle_through_the_real_plan() {
 #[test]
 fn capability_apply_keeps_a_capability_used_only_inside_interpolation() {
     let (result, updated) = apply_single(
-        "fn with_temp_dir(harness: {fs: HarnessFs, process: HarnessProcess, random: HarnessRandom}, body) {\n  const dir = \".tmp-${harness.random.uuid_v7()}\"\n  harness.fs.mkdir(dir)\n  const outcome = body(dir)\n  harness.process.run({program: \"rm\", args: [\"-rf\", dir]})\n  return outcome\n}\n\nfn main(harness: Harness) {\n  with_temp_dir({fs: harness.fs, process: harness.process, random: harness.random}, { dir -> dir })\n}\n",
+        "fn with_temp_dir(harness: {fs: HarnessFs, process: HarnessProcess, random: HarnessRandom}, body: any) {\n  const dir = \".tmp-${harness.random.uuid_v7()}\"\n  harness.fs.mkdir(dir)\n  const outcome = body(dir)\n  harness.process.run({program: \"rm\", args: [\"-rf\", dir]})\n  return outcome\n}\n\nfn main(harness: Harness) {\n  with_temp_dir({fs: harness.fs, process: harness.process, random: harness.random}, { dir -> dir })\n}\n",
     );
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "with_temp_dir"),
-        vec![
-            param("harness", "Harness"),
-            ParamContract {
-                name: "body".to_string(),
-                type_expr: None
-            },
-        ],
+        vec![param("harness", "Harness"), param("body", "any"),],
         "three capabilities is the documented root-carrier shape, and none of \
          them may be dropped on the way there: {updated}"
     );
@@ -466,7 +460,7 @@ fn capability_apply_threads_a_new_typed_argument_through_local_callers() {
 #[test]
 fn capability_apply_threads_ast_into_a_predicate_entrypoint() {
     let (result, updated) = apply_single(
-        "import { ast_search } from \"std/ast\"\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.org/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npub fn inspect(slice, _ctx, _repo) {\n  return ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
+        "import { ast_search } from \"std/ast\"\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.org/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npub fn inspect(slice: string, _ctx: any, _repo: any) {\n  return ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -487,7 +481,7 @@ fn capability_apply_threads_ast_into_a_predicate_entrypoint() {
 #[test]
 fn capability_apply_does_not_classify_a_bare_invariant_pipeline_as_flow() {
     let (result, updated) = apply_single(
-        "import { ast_search } from \"std/ast\"\n\n@invariant\npipeline inspect(slice, _ctx, _repo) {\n  ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
+        "import { ast_search } from \"std/ast\"\n\n@invariant\npipeline inspect(slice: string, _ctx: any, _repo: any) {\n  ast_search({source: slice, query: \"(_) @node\", language: \"zig\"})\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -695,7 +689,7 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
 #[test]
 fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let (result, updated) = apply_single(
-        "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",
+        "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body: any) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body: any) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -705,10 +699,7 @@ fn capability_apply_recognizes_a_local_named_capability_bundle() {
         callable_params(&updated, "with_scenario"),
         vec![
             param("capabilities", "ScenarioCapabilities"),
-            ParamContract {
-                name: "body".to_string(),
-                type_expr: None,
-            },
+            param("body", "any"),
         ],
         "the alias already supplies both capabilities and needs no duplicate parameter"
     );
@@ -851,7 +842,7 @@ fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
 #[test]
 fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
     let (result, updated) = apply_single(
-        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count, with_mocks } from \"std/testing\"\n\npipeline main(harness: Harness, task) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
+        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count, with_mocks } from \"std/testing\"\n\npipeline main(harness: Harness, task: any) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -912,7 +903,7 @@ fn capability_apply_repairs_session_ids_from_agent_session_producers() {
 #[test]
 fn capability_apply_projects_retired_host_call_count_through_testing() {
     let (result, updated) = apply_single(
-        "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness, task) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
+        "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness, task: any) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -1011,7 +1002,7 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() 
     let script = temp.path().join("predicate.harn");
     fs::write(
         &script,
-        "fn scan(slice, pattern) {\n  return []\n}\n\nfn block_on_match(slice, rule, pattern, remediation) {\n  const findings = scan(slice, pattern)\n  return {verdict: \"Allow\", rule: rule, findings: findings, remediation: remediation}\n}\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.com/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npub fn no_source_heredocs(slice, _ctx, _repo_at_base) {\n  return block_on_match(slice, \"no_source_heredocs\", r\"abc\", \"msg\")\n}\n",
+        "fn scan(slice: any, pattern: any) {\n  return []\n}\n\nfn block_on_match(slice: any, rule: any, pattern: any, remediation: any) {\n  const findings = scan(slice, pattern)\n  return {verdict: \"Allow\", rule: rule, findings: findings, remediation: remediation}\n}\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.com/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npub fn no_source_heredocs(slice: any, _ctx: any, _repo_at_base: any) {\n  return block_on_match(slice, \"no_source_heredocs\", r\"abc\", \"msg\")\n}\n",
     )
     .unwrap();
 
@@ -1130,7 +1121,7 @@ fn capability_apply_preserves_root_values_that_escape() {
 #[test]
 fn capability_apply_projects_accesses_to_added_split_capabilities() {
     let (result, updated) = apply_single(
-        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(harness: HarnessFs, body) {\n  return with_temp_dir(harness, { dir ->\n    harness.write_text(path_join(dir, \"probe.txt\"), \"ok\")\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe(harness.fs, { _ -> nil })\n}\n",
+        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(harness: HarnessFs, body: any) {\n  return with_temp_dir(harness, { dir ->\n    harness.write_text(path_join(dir, \"probe.txt\"), \"ok\")\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe(harness.fs, { _ -> nil })\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -1141,10 +1132,7 @@ fn capability_apply_projects_accesses_to_added_split_capabilities() {
         vec![
             param("fs", "HarnessFs"),
             param("testing", "HarnessTesting"),
-            ParamContract {
-                name: "body".to_string(),
-                type_expr: None,
-            },
+            param("body", "any"),
         ]
     );
     assert_eq!(
@@ -1162,7 +1150,7 @@ fn capability_apply_projects_accesses_to_added_split_capabilities() {
 #[test]
 fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
     let (result, updated) = apply_single(
-        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(body) {\n  return with_temp_dir(harness, { dir ->\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe({ _ -> nil })\n}\n",
+        "import { with_temp_dir } from \"std/testing\"\n\nfn with_probe(body: any) {\n  return with_temp_dir(harness, { dir ->\n    harness.testing.calls()\n    return body(dir)\n  })\n}\n\nfn main(harness: Harness) {\n  with_probe({ _ -> nil })\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -1173,10 +1161,7 @@ fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
         vec![
             param("testing", "HarnessTesting"),
             param("fs", "HarnessFs"),
-            ParamContract {
-                name: "body".to_string(),
-                type_expr: None,
-            },
+            param("body", "any"),
         ]
     );
     assert_eq!(
@@ -1231,7 +1216,7 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
     let entry = temp.path().join("main.harn");
     fs::write(
         &entry,
-        "import { append_trailers } from \"./trailers\"\n\npipeline render_trailers(task) {\n  return append_trailers(\"note.txt\")\n}\n",
+        "import { append_trailers } from \"./trailers\"\n\npipeline render_trailers(task: any) {\n  return append_trailers(\"note.txt\")\n}\n",
     )
     .unwrap();
 
@@ -1322,7 +1307,7 @@ fn capability_apply_threads_testing_into_a_retired_host_mock_wrapper() {
     // while the retired call survived. `probe` keeping a bare `(task)` here, or
     // `with_host_mocks` surviving the apply, is that regression.
     let (result, updated) = apply_single(
-        "import { with_host_mocks } from \"std/testing\"\n\npipeline probe(task) {\n  with_host_mocks(\n    [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n    { _ -> task },\n  )\n}\n",
+        "import { with_host_mocks } from \"std/testing\"\n\npipeline probe(task: any) {\n  with_host_mocks(\n    [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n    { _ -> task },\n  )\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -1350,7 +1335,7 @@ fn capability_apply_projects_with_mocks_onto_with_scenario() {
     // host entries also still say `operation` where fixtures now say `method`.
     // Falsifier: without the recipe, `with_mocks` survives the apply verbatim.
     let (result, updated) = apply_single(
-        "import { with_mocks } from \"std/testing\"\n\npipeline probe(task) {\n  with_mocks(\n    {\n      host_mocks: [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n      llm_mocks: [],\n    },\n    { _ -> task },\n  )\n}\n",
+        "import { with_mocks } from \"std/testing\"\n\npipeline probe(task: any) {\n  with_mocks(\n    {\n      host_mocks: [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n      llm_mocks: [],\n    },\n    { _ -> task },\n  )\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,

@@ -4,7 +4,7 @@
 // and `omit` preserve the `dict<string, V>` value contract.
 import { merge, omit, pick } from "std/json"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const scores: dict<string, int> = {alice: 1, bob: 2}
   const bonus: dict<string, int> = {bob: 5, carol: 3}
   const combined: dict<string, int> = merge(scores, bonus)

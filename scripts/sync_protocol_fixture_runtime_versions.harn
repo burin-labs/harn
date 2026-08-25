@@ -73,7 +73,7 @@ pub fn replace_literals(text: string, old: string, new: string) -> string {
   return text.replace(json_literal(old), json_literal(new))
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const parsed = parse_args()
   if parsed.error != nil {
     harness.stdio.eprintln(parsed.error)

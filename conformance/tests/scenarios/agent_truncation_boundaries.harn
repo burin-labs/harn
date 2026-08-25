@@ -40,7 +40,7 @@ fn truncating_tools(agent: HarnessAgent) {
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const session_id = "agent-truncation-boundary-" + harness.random.uuid()
   const seen = harness.runtime.atomic(0)
   const dropped_bytes = harness.runtime.atomic(0)

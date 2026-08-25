@@ -70,7 +70,7 @@ fn out_lines(raw: &str) -> Vec<String> {
 fn off_shape_terminal_answer_reasks_once_and_validates() {
     let raw = run_with_bridge(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "output-schema-repair"
   const repair_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-repair-" + session, initial: 0},
@@ -139,7 +139,7 @@ pipeline main(harness: Harness, task) {
 fn already_valid_terminal_answer_fires_no_repair() {
     let raw = run_with_bridge(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "output-schema-direct"
   const repair_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-direct-" + session, initial: 0},
@@ -208,7 +208,7 @@ pipeline main(harness: Harness, task) {
 fn persistently_off_shape_yields_output_valid_false() {
     let raw = run_with_bridge(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "output-schema-fail"
   const schema = {
     type: "object",
@@ -260,7 +260,7 @@ pipeline main(harness: Harness, task) {
 fn unset_output_leaves_run_unchanged() {
     let raw = run_with_bridge(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = "output-schema-unset"
   const mock_llm = { _call ->
     return {
@@ -309,7 +309,7 @@ pipeline main(harness: Harness, task) {
 fn tool_calling_still_works_with_output_set() {
     let raw = run_with_bridge(
         r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.tools.clear_hooks()
   const session = "output-schema-tools"
   const registry = tool_registry()

@@ -3,7 +3,7 @@ import { agent_loop } from "std/agent/loop"
 // `verify_completion_judge.max_invocations` caps the per-session veto loop and
 // must be a non-negative integer (0 disables the cap). A negative value is a
 // configuration error, surfaced loudly rather than silently clamped.
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   agent_loop(
     harness,
     "do work",

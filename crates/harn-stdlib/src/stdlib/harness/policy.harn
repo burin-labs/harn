@@ -21,7 +21,7 @@
  * tenant, subject, or resource ids. Guards fail closed — unauthenticated
  * callers cannot satisfy scope/kind clauses or auth/tenant-bound matches.
  */
-fn __policy_list(value, label) {
+fn __policy_list(value: any, label: string) {
   if value == nil {
     return []
   }
@@ -31,7 +31,7 @@ fn __policy_list(value, label) {
   return value
 }
 
-fn __policy_match_list(value, label) {
+fn __policy_match_list(value: any, label: string) {
   if value == nil {
     return []
   }
@@ -58,7 +58,7 @@ fn __policy_tenant_view(tenant: HarnessTenant) {
   return {id: tenant.try_id()}
 }
 
-fn __policy_request_body(req) {
+fn __policy_request_body(req: dict?) {
   const raw = req?.body
   if raw == nil {
     return nil
@@ -79,7 +79,7 @@ fn __policy_request_body(req) {
   return raw
 }
 
-fn __policy_follow_path(root, parts, start_index) {
+fn __policy_follow_path(root: any, parts: any, start_index: int) {
   let current = root
   let index = start_index
   while index < len(parts) {
@@ -92,14 +92,14 @@ fn __policy_follow_path(root, parts, start_index) {
   return current
 }
 
-fn __policy_path_root(path) {
+fn __policy_path_root(path: string?) {
   if type_of(path) != "string" || trim(path) == "" {
     return nil
   }
   return split(path, ".")[0]
 }
 
-fn __policy_ref_path(ref) {
+fn __policy_ref_path(ref: unknown) {
   if type_of(ref) == "dict" {
     return ref.path
   }
@@ -109,12 +109,18 @@ fn __policy_ref_path(ref) {
   return nil
 }
 
-fn __policy_ref_needs_auth(ref) {
+fn __policy_ref_needs_auth(ref: unknown) {
   const root = __policy_path_root(__policy_ref_path(ref))
   return root == "auth" || root == "tenant"
 }
 
-fn __policy_resolve_ref(auth: HarnessAuth, tenant: HarnessTenant, ref, req, ctx) {
+fn __policy_resolve_ref(
+  auth: HarnessAuth,
+  tenant: HarnessTenant,
+  ref: unknown,
+  req: dict,
+  ctx: dict?,
+) {
   if type_of(ref) == "dict" && ref.keys().contains("value") {
     return ref.value
   }
@@ -142,7 +148,13 @@ fn __policy_resolve_ref(auth: HarnessAuth, tenant: HarnessTenant, ref, req, ctx)
   return __policy_follow_path(req ?? {}, parts, 0)
 }
 
-fn __policy_enforce_segment(auth: HarnessAuth, tenant: HarnessTenant, opts, req, ctx) {
+fn __policy_enforce_segment(
+  auth: HarnessAuth,
+  tenant: HarnessTenant,
+  opts: dict,
+  req: any,
+  ctx: dict?,
+) {
   const kinds = __policy_list(opts?.kinds, "require_policy: kinds")
   const scopes = __policy_list(opts?.scopes, "require_policy: scopes")
   const matches = __policy_match_list(opts?.matches, "require_policy: matches")
@@ -222,7 +234,13 @@ fn __policy_enforce_segment(auth: HarnessAuth, tenant: HarnessTenant, opts, req,
  * @effects: []
  * @errors: []
  */
-pub fn require_policy(auth: HarnessAuth, tenant: HarnessTenant, opts, req = nil, ctx = nil) {
+pub fn require_policy(
+  auth: HarnessAuth,
+  tenant: HarnessTenant,
+  opts: dict?,
+  req: any = nil,
+  ctx: dict? = nil,
+) {
   if opts != nil && type_of(opts) != "dict" {
     throw "require_policy: opts must be a dict"
   }

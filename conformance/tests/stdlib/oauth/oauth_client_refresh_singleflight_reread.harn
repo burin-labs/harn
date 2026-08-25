@@ -8,7 +8,7 @@ import { client, refresh, request, token } from "std/oauth/client"
 import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
-fn provider(id) {
+fn provider(id: string) {
   return custom(
     {
       id: id,
@@ -19,7 +19,7 @@ fn provider(id) {
   )
 }
 
-fn locking_store(inner, rotated_token) {
+fn locking_store(inner: dict, rotated_token: dict) {
   return inner
     + {
       with_refresh_lock: { key, body ->
@@ -29,7 +29,7 @@ fn locking_store(inner, rotated_token) {
     }
 }
 
-fn require_eq(label, actual, expected) {
+fn require_eq(label: string, actual: any, expected: any) {
   if actual != expected {
     throw label + ": expected " + to_string(expected) + ", got " + to_string(actual)
   }
@@ -238,7 +238,7 @@ fn exercise_forced_refresh(harness: Harness) {
   const _ = harness.testing.clock_reset()
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   exercise_fresh_token_no_lock(harness)
   exercise_ttl_threshold(harness)
   exercise_post_401(harness)

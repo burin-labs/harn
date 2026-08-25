@@ -1,27 +1,27 @@
 import { workflow_select_stage_artifacts } from "std/workflow/context"
 
-fn __map_list(value) {
+fn __map_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __map_string(value, fallback = "") {
+fn __map_string(value: any, fallback: string = "") {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __map_int(value, fallback = 0) {
+fn __map_int(value: any, fallback: int = 0) {
   if type_of(value) == "int" {
     return value
   }
   return fallback
 }
 
-fn __map_count(value) {
+fn __map_count(value: unknown) {
   if type_of(value) == "int" {
     return max(value, 0)
   }
@@ -31,14 +31,14 @@ fn __map_count(value) {
   return 0
 }
 
-fn __map_take(values, max_items) {
+fn __map_take(values: list, max_items: any) {
   if type_of(max_items) != "int" {
     return values
   }
   return values.take(max(max_items, 0))
 }
 
-fn __map_filter_item_kind(artifacts, item_kind) {
+fn __map_filter_item_kind(artifacts: list, item_kind: string?) {
   if type_of(item_kind) != "string" || trim(item_kind) == "" {
     return artifacts
   }
@@ -51,7 +51,7 @@ fn __map_filter_item_kind(artifacts, item_kind) {
   return out
 }
 
-fn __map_artifact_ids(artifacts) {
+fn __map_artifact_ids(artifacts: list) {
   let ids = []
   for artifact in artifacts {
     if type_of(artifact?.id) == "string" {
@@ -61,7 +61,7 @@ fn __map_artifact_ids(artifacts) {
   return ids
 }
 
-fn __map_item_lineage(items) {
+fn __map_item_lineage(items: list) {
   let ids = []
   for item in items {
     if item?.kind == "artifact" && type_of(item?.artifact?.id) == "string" {
@@ -71,14 +71,14 @@ fn __map_item_lineage(items) {
   return ids
 }
 
-fn __map_item_index(item) {
+fn __map_item_index(item: dict) {
   if type_of(item?.index) == "int" {
     return item.index
   }
   return 0
 }
 
-fn __map_join_target(plan) {
+fn __map_join_target(plan: dict) {
   const total = len(__map_list(plan?.items))
   if total == 0 {
     return 0
@@ -89,7 +89,7 @@ fn __map_join_target(plan) {
   return total
 }
 
-fn __map_execute_branch(node_id, plan, opts, item) {
+fn __map_execute_branch(node_id: any, plan: dict, opts: dict?, item: any) {
   const branch_artifact = __host_workflow_map_branch_artifact(
     node_id,
     item,
@@ -98,7 +98,7 @@ fn __map_execute_branch(node_id, plan, opts, item) {
   return __host_workflow_map_execute_branch(node_id, plan, item, branch_artifact, opts ?? {})
 }
 
-fn __map_collect_branch_outcomes(branches, join_target) {
+fn __map_collect_branch_outcomes(branches: any, join_target: int) {
   let completed = []
   let failures = []
   let produced = []
@@ -142,7 +142,9 @@ fn __map_collect_branch_outcomes(branches, join_target) {
   return {completed: completed, failures: failures, produced: produced}
 }
 
-fn __map_artifact_items(artifacts) {
+fn __map_artifact_items(
+  artifacts: list | dict | string | set | range | iter | Generator | stream | channel,
+) {
   let items = []
   for (index, artifact) in iter(artifacts).enumerate() {
     items = items.appending({kind: "artifact", index: index, artifact: artifact})
@@ -150,7 +152,10 @@ fn __map_artifact_items(artifacts) {
   return items
 }
 
-fn __map_value_items(values, artifact_kind) {
+fn __map_value_items(
+  values: list | dict | string | set | range | iter | Generator | stream | channel,
+  artifact_kind: any,
+) {
   let items = []
   for (index, value) in iter(values).enumerate() {
     items = items.appending(
@@ -160,7 +165,7 @@ fn __map_value_items(values, artifact_kind) {
   return items
 }
 
-fn __map_has_tool_names(value) {
+fn __map_has_tool_names(value: any) {
   if type_of(value) == "list" {
     for item in value {
       if type_of(item?.name) == "string" && trim(item.name) != "" {
@@ -178,7 +183,7 @@ fn __map_has_tool_names(value) {
   return false
 }
 
-fn __map_has_model_policy(policy) {
+fn __map_has_model_policy(policy: any) {
   if type_of(policy) != "dict" {
     return false
   }
@@ -205,7 +210,7 @@ fn __map_has_model_policy(policy) {
   return false
 }
 
-fn __map_output_kind(node) {
+fn __map_output_kind(node: dict) {
   const explicit = node?.map_policy?.output_kind
   if type_of(explicit) == "string" && trim(explicit) != "" {
     return explicit
@@ -224,7 +229,7 @@ fn __map_output_kind(node) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_map_stage_plan(config = nil) {
+pub fn workflow_map_stage_plan(config: any = nil) {
   const node = config?.node ?? {}
   const output_kind = __map_output_kind(node)
   let runs_stage = false
@@ -253,7 +258,7 @@ pub fn workflow_map_stage_plan(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_map_work_items(config = nil) {
+pub fn workflow_map_work_items(config: any = nil) {
   const node = config?.node ?? {}
   const map_policy = node?.map_policy ?? {}
   const selected = workflow_select_stage_artifacts(
@@ -284,7 +289,7 @@ pub fn workflow_map_work_items(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_map_execution_plan(config = nil) {
+pub fn workflow_map_execution_plan(config: any = nil) {
   const node = config?.node ?? {}
   const stage_plan = workflow_map_stage_plan({node: node})
   const work = workflow_map_work_items({node: node, artifacts: config?.artifacts ?? []})
@@ -315,7 +320,7 @@ pub fn workflow_map_execution_plan(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_map_join_target(config = nil) {
+pub fn workflow_map_join_target(config: any = nil) {
   const total = max(__map_int(config?.total, 0), 0)
   if total == 0 {
     return 0
@@ -338,7 +343,7 @@ pub fn workflow_map_join_target(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_map_finalize(config = nil) {
+pub fn workflow_map_finalize(config: any = nil) {
   const strategy = __map_string(config?.strategy, "all")
   const total_items = max(__map_int(config?.total_items, 0), 0)
   const produced_count = __map_count(config?.produced_count ?? config?.produced)
@@ -383,10 +388,10 @@ pub fn workflow_map_finalize(config = nil) {
  */
 pub fn workflow_execute_map_stage(
   _runtime: HarnessRuntime,
-  node_id,
-  node,
-  artifacts = nil,
-  opts = nil,
+  node_id: any,
+  node: any,
+  artifacts: any = nil,
+  opts: dict? = nil,
 ) {
   const plan = __host_workflow_map_plan(node, __map_list(artifacts))
   const branches = parallel each plan.items with { max_concurrent: plan.max_concurrent } { item ->

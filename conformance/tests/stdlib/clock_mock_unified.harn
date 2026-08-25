@@ -10,7 +10,7 @@
  * only `sleep_ms` honored the mock — leaving conformance fixtures with
  * two different timing models depending on which builtin they used.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clock_set(1700000000000)
   const start_wall = harness.clock.now_ms()
   const start_mono = harness.clock.monotonic_ms()

@@ -1,14 +1,14 @@
 import { agent_skills_match, agent_skills_preview } from "std/agent/skills"
 import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
-fn tool_names(options) -> list<string> {
+fn tool_names(options: dict) -> list<string> {
   return (options?.tools?.tools ?? []).map(
     { entry -> to_string(entry?.function?.name ?? entry?.name ?? "") },
   )
     .to_list()
 }
 
-fn active_skill(options, id) {
+fn active_skill(options: dict, id: string) {
   for entry in options?.active_skills ?? [] {
     if entry?.id == id {
       return entry
@@ -17,7 +17,7 @@ fn active_skill(options, id) {
   return nil
 }
 
-fn fragment_by_id(fragments, id) {
+fn fragment_by_id(fragments: list<dict>, id: string) {
   for fragment in fragments {
     if fragment?.id == id {
       return fragment
@@ -42,7 +42,7 @@ fn git_context_profile() -> dict {
   }
 }
 
-pipeline test(harness: Harness, _task) {
+pipeline test(harness: Harness, _task: unknown) {
   skill git {
     description "Git repository and pull request workflow"
     when_to_use "Use for Git branches, commits, pull requests, and repository history"

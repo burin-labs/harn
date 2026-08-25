@@ -1,4 +1,4 @@
 /** Return the approval-first Fixer action envelope for a Flow remediation event. */
-pub fn run(event) {
+pub fn run(event: any) {
   {persona: "fixer", mode: "approval_first", event: event, action: "propose_remediation_slice"}
 }

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // 1-arg form is unchanged: nearest integer, halves away from zero.
   harness.stdio.log(round(2.5))
   harness.stdio.log(round(-2.5))

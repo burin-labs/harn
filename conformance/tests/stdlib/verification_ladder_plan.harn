@@ -1,6 +1,6 @@
 import { verification_ladder_plan } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.runtime.verification_profiles_set(
     {
       rows: [

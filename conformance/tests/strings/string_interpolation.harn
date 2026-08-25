@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const _name = "world"
   harness.stdio.log("hello ${_name}!")
   const _x = 5

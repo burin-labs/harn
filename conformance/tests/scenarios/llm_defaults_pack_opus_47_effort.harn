@@ -3,7 +3,7 @@
 // its eventual wire representation.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const model = "claude-opus-4-7-20260101"
   const r = pack_for(
     harness.agent,

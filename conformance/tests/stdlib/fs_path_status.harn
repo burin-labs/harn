@@ -1,5 +1,5 @@
 /** Verifies structured path visibility probes for hard preflight callers. */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-fs-status-" + harness.random.uuid())
   if harness.fs.exists(root) {
     harness.fs.delete(root)

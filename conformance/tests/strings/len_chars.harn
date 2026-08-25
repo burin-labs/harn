@@ -1,5 +1,5 @@
 /** Test that len() counts characters, not bytes, for Unicode strings */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const ascii = "hello"
   harness.stdio.println(len(ascii))
   // Multi-byte Unicode: "café" is 4 characters but 5 bytes

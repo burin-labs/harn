@@ -47,7 +47,7 @@ fn __sitrep_available_providers(llm: HarnessLlm) {
   return available
 }
 
-fn __sitrep_messages_from(input) {
+fn __sitrep_messages_from(input: list | dict | Transcript) {
   if input == nil {
     return []
   }
@@ -63,7 +63,7 @@ fn __sitrep_messages_from(input) {
   throw "agent_sitrep: expected a message list, transcript, or {messages} dict"
 }
 
-fn __sitrep_message_text(value) {
+fn __sitrep_message_text(value: unknown) {
   if value == nil {
     return ""
   }
@@ -87,7 +87,7 @@ fn __sitrep_message_text(value) {
   return to_string(value)
 }
 
-fn __sitrep_truncate(text, max_chars) {
+fn __sitrep_truncate(text: any, max_chars: int) {
   if max_chars == nil || max_chars <= 0 || len(text) <= max_chars {
     return text
   }
@@ -106,7 +106,7 @@ fn __sitrep_truncate(text, max_chars) {
     + substring(text, total - tail_chars, total)
 }
 
-fn __sitrep_format_messages(messages, max_chars_per_message) {
+fn __sitrep_format_messages(messages: list, max_chars_per_message: int) {
   let rendered = []
   for message in messages {
     const role = uppercase(to_string(message?.role ?? "user"))
@@ -119,7 +119,7 @@ fn __sitrep_format_messages(messages, max_chars_per_message) {
   return join(rendered, "\n\n")
 }
 
-fn __sitrep_route_is_available(route, available) {
+fn __sitrep_route_is_available(route: dict, available: any) {
   const provider = route?.provider
   if provider == nil || provider == "" {
     return false
@@ -127,7 +127,7 @@ fn __sitrep_route_is_available(route, available) {
   return available[provider]
 }
 
-fn __sitrep_resolved_routes(llm: HarnessLlm, opts) {
+fn __sitrep_resolved_routes(llm: HarnessLlm, opts: dict) {
   const explicit = opts?.routes
   if type_of(explicit) == "list" && len(explicit) > 0 {
     return explicit
@@ -135,7 +135,7 @@ fn __sitrep_resolved_routes(llm: HarnessLlm, opts) {
   return llm.model_ladder(__SITREP_LADDER)?.steps ?? []
 }
 
-fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
+fn __sitrep_pick_route(llm: HarnessLlm, opts: dict) -> {provider: string, model: string}? {
   if opts?.provider != nil && opts?.model != nil {
     return {provider: to_string(opts.provider), model: to_string(opts.model)}
   }
@@ -151,7 +151,7 @@ fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: strin
   return nil
 }
 
-fn __sitrep_user_prompt(fs: HarnessFs, messages, opts) {
+fn __sitrep_user_prompt(fs: HarnessFs, messages: list, opts: dict) {
   const max_chars_per_message = opts?.max_chars_per_message ?? 1200
   const formatted = __sitrep_format_messages(messages, max_chars_per_message)
   return fs.render_prompt(
@@ -164,7 +164,7 @@ fn __sitrep_user_prompt(fs: HarnessFs, messages, opts) {
   )
 }
 
-fn __sitrep_normalize_lines(text) {
+fn __sitrep_normalize_lines(text: any) {
   if text == nil || trim(text) == "" {
     return []
   }
@@ -178,7 +178,7 @@ fn __sitrep_normalize_lines(text) {
   return lines
 }
 
-fn __sitrep_empty_result(reason) {
+fn __sitrep_empty_result(reason: string) {
   return {
     summary: "",
     lines: [],
@@ -209,7 +209,12 @@ fn __sitrep_empty_result(reason) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sitrep(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
+pub fn agent_sitrep(
+  fs: HarnessFs,
+  llm: HarnessLlm,
+  input: list | dict | Transcript,
+  opts: any = nil,
+) {
   const messages = __sitrep_messages_from(input)
   if len(messages) == 0 {
     return __sitrep_empty_result("empty_transcript")
@@ -253,7 +258,12 @@ pub fn agent_sitrep(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sitrep_append(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
+pub fn agent_sitrep_append(
+  fs: HarnessFs,
+  llm: HarnessLlm,
+  input: list | dict | Transcript,
+  opts: any = nil,
+) {
   const result = agent_sitrep(fs, llm, input, opts)
   if result.skipped || result.summary == "" {
     return input

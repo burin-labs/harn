@@ -6,13 +6,16 @@ type Payload = {count: int}
 type Receipt = {id: string, version: int, payload: Payload, mode?: string}
 
 fn receipt_contract(expected_version: int) -> SchemaContract<Receipt> {
-  const shape: Schema<Receipt> = schema_closed_object(
-    {
-      id: schema_field(schema_string()),
-      version: schema_field(schema_int()),
-      payload: schema_field(schema_closed_object({count: schema_field(schema_int())})),
-      mode: schema_default(schema_string(), "audit"),
-    },
+  const shape = schema_refine(
+    schema_of(Receipt),
+    schema_closed_object(
+      {
+        id: schema_field(schema_string()),
+        version: schema_field(schema_int()),
+        payload: schema_field(schema_closed_object({count: schema_field(schema_int())})),
+        mode: schema_default(schema_string(), "audit"),
+      },
+    ),
   )
   const matches_context = validation_rule(
     "expected_version",
@@ -47,7 +50,7 @@ fn receipt_contract(expected_version: int) -> SchemaContract<Receipt> {
   return schema_contract(shape, [matches_context, consistent_fields], true)
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const contract = receipt_contract(2)
   const valid = unwrap(
     schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, contract),

@@ -458,7 +458,7 @@ fn run_hosted_effect() {
   }
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const resource = ui.app_resource(
     "ui://burin-labs/logo-studio",
     "Burin Logo Studio",
@@ -471,7 +471,7 @@ pipeline main(harness: Harness, task) {
   const tool_meta = ui.tool_metadata(resource, {visibility: ["model", "app"]})
   const io: LogoIo = {env: harness.env, fs: harness.fs}
   let state = reopen_work(io)
-  fn respond(effects = []) {
+  fn respond(effects: list = []) {
     state = bump(state)
     remember_work(io, state)
     return ui.update(document(state), effects)
@@ -651,7 +651,7 @@ pipeline main(harness: Harness, task) {
     }
     return respond()
   }
-  fn handle_event(raw) {
+  fn handle_event(raw: dict) {
     const event: UiEvent = ui.event(raw.event)
     if event.kind == "ready" {
       return state.running == nil ? respond() : respond([poll_effect()])

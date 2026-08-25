@@ -4,7 +4,7 @@ import {
   context_maintenance_transition,
 } from "std/context/maintenance"
 
-fn __queue(stdio: HarnessStdio, job_id, event, options = nil) {
+fn __queue(stdio: HarnessStdio, job_id: string, event: any, options: dict? = nil) {
   const receipt = context_maintenance_queue_receipt(job_id, event, options ?? {})
   stdio.log("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
   return receipt
@@ -81,7 +81,7 @@ pub fn on_session_end(harness: Harness, event: TriggerEvent) {
 }
 
 /** Worker stub for hosts that run a refresh lane outside the hook. */
-pub fn run_refresh_job(receipt) {
+pub fn run_refresh_job(receipt: ContextMaintenanceJobReceipt) {
   const running = context_maintenance_transition(receipt, "running", {duration_ms: 1})
   return context_maintenance_transition(
     running,
@@ -91,8 +91,8 @@ pub fn run_refresh_job(receipt) {
 }
 
 /** Worker stub for hosts that run a crystallization lane outside the hook. */
-pub fn run_crystallize_job(receipt) {
-  const decision = context_maintenance_replay_decision(receipt, receipt?.replay ?? {})
+pub fn run_crystallize_job(receipt: ContextMaintenanceJobReceipt) {
+  const decision = context_maintenance_replay_decision(receipt, receipt.replay ?? {})
   if !decision.should_run {
     return decision.receipt
   }

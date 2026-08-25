@@ -85,7 +85,7 @@ pub fn rate_limit_profile() {
 }
 
 /** Map a task prompt onto one of the canonical experiment profiles. */
-pub fn profile_for_task(task) {
+pub fn profile_for_task(task: string?) {
   const lower = lowercase(task)
   if contains(lower, "comment what this file does") {
     return comment_profile()

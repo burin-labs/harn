@@ -28,7 +28,7 @@ type CacheEnvelope = {value: unknown, hit: bool, key: string, metrics: dict}
  * @effects: []
  * @errors: []
  */
-pub fn cache_get(llm: HarnessLlm, key: string, options = nil) -> dict {
+pub fn cache_get(llm: HarnessLlm, key: string, options: dict? = nil) -> dict {
   return llm.cache_get(key, options ?? {})
 }
 
@@ -38,7 +38,7 @@ pub fn cache_get(llm: HarnessLlm, key: string, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_put(llm: HarnessLlm, key: string, value, options = nil) -> dict {
+pub fn cache_put(llm: HarnessLlm, key: string, value: any, options: dict? = nil) -> dict {
   return llm.cache_put(key, value, options ?? {})
 }
 
@@ -49,7 +49,7 @@ pub fn cache_put(llm: HarnessLlm, key: string, value, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_clear(llm: HarnessLlm, options = nil) {
+pub fn cache_clear(llm: HarnessLlm, options: dict? = nil) {
   return llm.cache_clear(options ?? {})
 }
 
@@ -59,7 +59,7 @@ pub fn cache_clear(llm: HarnessLlm, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn cache_stats(llm: HarnessLlm, options = nil) -> dict {
+pub fn cache_stats(llm: HarnessLlm, options: dict? = nil) -> dict {
   return llm.cache_stats(options ?? {})
 }
 
@@ -70,7 +70,7 @@ pub fn cache_stats(llm: HarnessLlm, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn cache_stats_reset(llm: HarnessLlm, options = nil) {
+pub fn cache_stats_reset(llm: HarnessLlm, options: dict? = nil) {
   return llm.cache_stats_reset(options ?? {})
 }
 
@@ -96,7 +96,7 @@ pub fn cache_stats_reset(llm: HarnessLlm, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn mem_cache(options = nil) -> dict {
+pub fn mem_cache(options: dict? = nil) -> dict {
   const opts = options ?? {}
   return __cache_store_dict("mem", nil, opts)
 }
@@ -111,7 +111,7 @@ pub fn mem_cache(options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn fs_cache(path: string, options = nil) -> dict {
+pub fn fs_cache(path: string, options: dict? = nil) -> dict {
   const opts = options ?? {}
   return __cache_store_dict("fs", path, opts)
 }
@@ -125,12 +125,12 @@ pub fn fs_cache(path: string, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn sqlite_cache(path: string, options = nil) -> dict {
+pub fn sqlite_cache(path: string, options: dict? = nil) -> dict {
   const opts = options ?? {}
   return __cache_store_dict("sqlite", path, opts)
 }
 
-fn __cache_store_dict(backend, path, opts) -> dict {
+fn __cache_store_dict(backend: string, path: string?, opts: dict) -> dict {
   let store = {backend: backend}
   if path != nil {
     store = store + {path: path}
@@ -187,7 +187,7 @@ fn __cache_store_dict(backend, path, opts) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn with_cache(harness: Harness, key: string, compute, options = nil) {
+pub fn with_cache(harness: Harness, key: string, compute: any, options: dict? = nil) {
   return with_cache_envelope(harness, key, compute, options).value
 }
 
@@ -202,7 +202,12 @@ pub fn with_cache(harness: Harness, key: string, compute, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_cache_envelope(harness: Harness, key: string, compute, options = nil) -> CacheEnvelope {
+pub fn with_cache_envelope(
+  harness: Harness,
+  key: string,
+  compute: any,
+  options: dict? = nil,
+) -> CacheEnvelope {
   const opts = options ?? {}
   const store_opts = __with_cache_store_opts(opts)
   const session_id = to_string(opts?.session_id ?? "")
@@ -249,7 +254,7 @@ pub fn with_cache_envelope(harness: Harness, key: string, compute, options = nil
   return {value: value, hit: false, key: key, metrics: {compute_ms: compute_ms}}
 }
 
-fn __with_cache_store_opts(opts) -> dict {
+fn __with_cache_store_opts(opts: dict) -> dict {
   let passthrough = {}
   if opts?.store != nil {
     passthrough = passthrough + {store: opts.store}
@@ -266,7 +271,7 @@ fn __with_cache_store_opts(opts) -> dict {
   return passthrough
 }
 
-fn __with_cache_hit_metrics(opts) -> dict {
+fn __with_cache_hit_metrics(opts: dict) -> dict {
   const estimate = opts?.estimate ?? {}
   let metrics = {model_calls_avoided: estimate?.model_calls_avoided ?? 1}
   if estimate?.tokens_saved != nil {
@@ -278,7 +283,7 @@ fn __with_cache_hit_metrics(opts) -> dict {
   return metrics
 }
 
-fn __with_cache_emit(agent: HarnessAgent, session_id, name, payload) {
+fn __with_cache_emit(agent: HarnessAgent, session_id: string, name: string, payload: dict) {
   const _ = try {
     agent_emit_event(agent, session_id, name, payload)
   }

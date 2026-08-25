@@ -9,7 +9,7 @@
 // Run with: cargo run --bin harn -- run examples/multi-agent.harn
 import "std/agents"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const subtasks = [
     {name: "researcher", prompt: "List 3 benefits of Rust for CLI tools. Be brief."},
     {name: "critic", prompt: "List 3 downsides of Rust for CLI tools. Be brief."},

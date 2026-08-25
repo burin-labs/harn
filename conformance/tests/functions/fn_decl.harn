@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn add(a, b) {
+pipeline test(harness: Harness, task: unknown) {
+  fn add(a: int, b: int) {
     return a + b
   }
   harness.stdio.log(add(3, 4))

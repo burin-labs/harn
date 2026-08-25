@@ -164,6 +164,10 @@ pub enum DiagnosticDetails {
     /// information, but `harn lint` should surface and filter them like
     /// ordinary lint rules.
     LintRule { rule: &'static str },
+    /// A declared parameter with no type annotation. The owning declaration
+    /// and the parameter name let a migration tool find the site without
+    /// parsing the human-readable message.
+    ImplicitAnyParameter { owner: String, parameter: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

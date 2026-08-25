@@ -22,7 +22,7 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 
 @complexity(allow)
-pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
+pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
   let opts = initial_opts
   let iteration = 0
   let session_finalized = false

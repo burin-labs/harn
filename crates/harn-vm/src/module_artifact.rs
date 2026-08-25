@@ -122,6 +122,10 @@ type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ModuleCompilationContext
 pub enum ModuleProvenance {
     #[default]
     User,
+    /// Immutable source selected from the runtime-owned stdlib catalog.
+    /// There is no source spelling for this authority: only the embedded
+    /// module loader and closed-program linker can construct it.
+    EmbeddedStdlib,
     PrivilegedWire,
     /// A Rust embedder-selected route module and its private import graph.
     /// Unlike `PrivilegedWire`, callables may be exported because only the
@@ -399,6 +403,7 @@ fn compile_module_artifact_with_provenance(
 ) -> Result<ModuleArtifact, VmError> {
     let options = match provenance {
         ModuleProvenance::User => crate::CompilerOptions::from_env(),
+        ModuleProvenance::EmbeddedStdlib => crate::CompilerOptions::embedded_stdlib(),
         ModuleProvenance::PrivilegedWire | ModuleProvenance::TrustedHostDispatch => {
             crate::CompilerOptions::privileged_wire()
         }
@@ -640,6 +645,25 @@ pub fn compile_module_artifact_from_source(
         Some(source_path.display().to_string()),
         &imported_symbols.enum_candidates,
         &imported_symbols.source_callable_names,
+    )
+}
+
+/// Compile source selected from the runtime's embedded stdlib catalog.
+///
+/// The caller must already have resolved the source through that catalog;
+/// filesystem paths and source annotations cannot select this entry point.
+pub(crate) fn compile_embedded_stdlib_module_artifact_from_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
+        ModuleProvenance::EmbeddedStdlib,
     )
 }
 
@@ -958,8 +982,8 @@ pub(crate) fn compile_embedded_stdlib_module_artifact_from_source_with_context(
         Some(source_path.display().to_string()),
         context.enum_candidates(),
         context.source_callable_names(),
-        ModuleProvenance::User,
-        crate::CompilerOptions::runtime_owned_source(),
+        ModuleProvenance::EmbeddedStdlib,
+        crate::CompilerOptions::embedded_stdlib(),
     )
 }
 
@@ -971,9 +995,10 @@ mod tests {
     use harn_parser::Parser;
 
     use super::{
-        compile_module_artifact, compile_module_artifact_from_source,
-        compile_privileged_wire_module_artifact_from_source, needs_imported_enum_candidates,
-        parse_module_source, ModuleImportBinding, ModuleProvenance,
+        compile_embedded_stdlib_module_artifact_from_source_with_context, compile_module_artifact,
+        compile_module_artifact_from_source, compile_privileged_wire_module_artifact_from_source,
+        needs_imported_enum_candidates, parse_module_source, ModuleCompilationContext,
+        ModuleImportBinding, ModuleProvenance,
     };
     use crate::chunk::Constant;
 
@@ -1086,6 +1111,25 @@ pub fn call() { return lib.greet() }
         let source = r#"fn probe() { return host_call("project.scan", {}) }"#;
         let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
             .expect_err("a tail call must not acquire wire authority");
+        assert!(
+            error.to_string().contains("not callable source API"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn embedded_stdlib_can_wrap_runtime_internal_builtins_without_exposing_them() {
+        let source = r#"pub fn ansi_enabled() { return __ansi_enabled("stdout") }"#;
+        let context = ModuleCompilationContext::default();
+        compile_embedded_stdlib_module_artifact_from_source_with_context(
+            Path::new("<stdlib>/ansi.harn"),
+            source,
+            &context,
+        )
+        .expect("embedded stdlib wrapper compiles");
+
+        let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
+            .expect_err("ordinary source must not acquire stdlib authority");
         assert!(
             error.to_string().contains("not callable source API"),
             "{error}"

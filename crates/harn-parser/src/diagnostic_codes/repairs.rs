@@ -192,6 +192,7 @@ impl Code {
             | Code::InvalidIndexType => Some(&REPAIR_INSERT_EXPLICIT_CONVERSION),
             Code::StringInterpolationRewrite => Some(&REPAIR_REWRITE_STRING_INTERPOLATION),
             Code::UnknownTypeName => Some(&REPAIR_IMPORTS_FIX_PATH),
+            Code::ImplicitAnyParameter => Some(&REPAIR_TYPES_ANNOTATE_PARAMETER),
             Code::InvalidCast => Some(&REPAIR_CASTS_REMOVE_UNCHECKED),
 
             // --- NAM / IMP: imports & names -------------------------------
@@ -603,6 +604,21 @@ const REPAIR_TYPES_ADD_SHAPE_ANNOTATION: RepairTemplate = RepairTemplate {
     safety: RepairSafety::SurfaceChanging,
 };
 
+/// The repair for a parameter that never got a type.
+///
+/// Surface-changing rather than scope-local: the annotation lands on a
+/// signature, and once it is there every caller is checked against it. That is
+/// the point of the repair, and it is also why it is not auto-applied under a
+/// lower ceiling. `harn fix` infers the type from the body and the call sites,
+/// so the mechanical part of the migration is covered; `unknown` is what it
+/// writes when it can prove nothing, preserving the need to narrow dynamic
+/// values before use.
+const REPAIR_TYPES_ANNOTATE_PARAMETER: RepairTemplate = RepairTemplate {
+    id: "types/annotate-parameter",
+    summary: "Annotate the parameter with the inferred type, or `unknown` and narrow it at the dynamic boundary",
+    safety: RepairSafety::SurfaceChanging,
+};
+
 /// The repair for a boundary value read without validation.
 ///
 /// Since harn#6252 a binding annotation *is* enforced, so annotating a
@@ -689,6 +705,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_PROMPTS_ADD_TOOL_TO_SURFACE,
     &REPAIR_STYLE_RENAME_TO_CONVENTION,
     &REPAIR_TYPES_ADD_SHAPE_ANNOTATION,
+    &REPAIR_TYPES_ANNOTATE_PARAMETER,
     &REPAIR_TYPES_VALIDATE_BOUNDARY_VALUE,
     &REPAIR_MANUAL_REVIEW_CAPABILITY,
     &REPAIR_MANUAL_NEEDS_HUMAN,

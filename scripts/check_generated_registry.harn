@@ -233,7 +233,7 @@ pub fn make_all_recipe(text: string) -> string {
  * Split out of `validate` to keep each function's branching local.
  */
 pub fn artifact_flag_errors(
-  art,
+  art: dict,
   check: string,
   all_recipe: string,
   workflow_text: string,
@@ -280,7 +280,7 @@ pub fn artifact_flag_errors(
  * the Harn registry checker prevents a misspelled lifecycle from silently
  * weakening checkout-presence validation.
  */
-pub fn artifact_lifecycle_errors(art) -> list {
+pub fn artifact_lifecycle_errors(art: dict) -> list {
   const aid = art?.id ?? "<missing id>"
   const lifecycle = art?.lifecycle ?? "source"
   if lifecycle == "source" {
@@ -544,7 +544,7 @@ fn read_workflows(fs: HarnessFs) -> string {
   return text
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const registry = try {
     toml_parse(harness.fs.read_text(REGISTRY))
   } catch (err) {

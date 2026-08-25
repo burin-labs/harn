@@ -20,6 +20,7 @@ use super::decls::CallableDeclarationContext;
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
+        self.check_parameter_annotations(program);
         // Pre-pass mutations: nobody else holds an `Rc` to `self.scope`
         // yet, so `Rc::make_mut` resolves to a direct `&mut TypeScope`
         // without copying. Once body children start to share the root
@@ -238,6 +239,34 @@ impl TypeChecker {
             diagnostics: self.diagnostics,
             inlay_hints: self.hints,
             binding_types: self.binding_types,
+        }
+    }
+
+    /// Report every declared parameter that carries no type.
+    ///
+    /// The rule itself lives in [`crate::param_annotations`] so the checker and
+    /// the `harn fix` migration agree, site for site, on what needs a type.
+    /// This method only turns each hit into a diagnostic.
+    fn check_parameter_annotations(&mut self, program: &[SNode]) {
+        let mut found = Vec::new();
+        crate::param_annotations::walk_unannotated_params(program, &mut |param| found.push(param));
+        for param in found {
+            self.diagnostics.push(crate::typechecker::TypeDiagnostic {
+                code: Code::ImplicitAnyParameter,
+                message: crate::param_annotations::message(&param),
+                severity: crate::typechecker::DiagnosticSeverity::Error,
+                span: Some(param.span),
+                help: Some(crate::param_annotations::help(&param)),
+                related: Vec::new(),
+                fix: None,
+                details: Some(
+                    crate::typechecker::DiagnosticDetails::ImplicitAnyParameter {
+                        owner: param.owner,
+                        parameter: param.name,
+                    },
+                ),
+                repair: super::super::default_repair(Code::ImplicitAnyParameter),
+            });
         }
     }
 

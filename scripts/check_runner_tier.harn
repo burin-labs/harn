@@ -39,7 +39,7 @@ const LADDER_INPUT_PATTERNS = [
 ]
 
 /** Collapse a folded YAML scalar and its `${{ }}` wrapper to a bare expression. */
-fn normalize_expression(raw) -> string {
+fn normalize_expression(raw: string?) -> string {
   let text = trim(to_string(raw ?? ""))
   text = replace(text, "\n", " ")
   if starts_with(text, "$" + "{{") {
@@ -52,7 +52,7 @@ fn normalize_expression(raw) -> string {
 }
 
 /** Every `${{ }}` body plus every bare `if:` condition reachable from a node. */
-fn expressions_in(value, path: string = "") -> list<string> {
+fn expressions_in(value: any, path: string = "") -> list<string> {
   if type_of(value) == "list" {
     let found: list<string> = []
     for {index, value: item} in value.enumerate() {
@@ -94,8 +94,8 @@ fn ladder_inputs(expression: string) -> list<string> {
 }
 
 /** True when this job's `runs-on` can select a Blacksmith runner. */
-fn blacksmith_capable(job) -> bool {
-  if contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_RUNNER_PREFIX) {
+fn blacksmith_capable(job: dict) -> bool {
+  if contains(to_string(job["runs-on"] ?? ""), BLACKSMITH_RUNNER_PREFIX) {
     return true
   }
   for row in job?.strategy?.matrix?.include ?? [] {
@@ -107,8 +107,8 @@ fn blacksmith_capable(job) -> bool {
 }
 
 /** The runner tiers named by this job's `runs-on` ladder and matrix rows. */
-fn runner_tiers(job) -> list<string> {
-  let runners = to_string(job?.["runs-on"] ?? "")
+fn runner_tiers(job: dict) -> list<string> {
+  let runners = to_string(job["runs-on"] ?? "")
   for row in job?.strategy?.matrix?.include ?? [] {
     runners = runners + " " + to_string(row?.runner ?? "")
   }
@@ -126,7 +126,7 @@ fn runner_tiers(job) -> list<string> {
 }
 
 /** Reject `runner.environment` anywhere inside a Blacksmith-capable job. */
-fn runner_environment_errors(job_name: string, job) -> list<string> {
+fn runner_environment_errors(job_name: string, job: dict) -> list<string> {
   if !blacksmith_capable(job) {
     return []
   }
@@ -156,7 +156,7 @@ fn declares_tier(declared: string, tier: string) -> bool {
 }
 
 /** A job that reads the tier must declare exactly the tiers in its runner ladder. */
-fn tier_declaration_errors(job_name: string, job) -> list<string> {
+fn tier_declaration_errors(job_name: string, job: dict) -> list<string> {
   const declared = normalize_expression(job?.env?.[TIER_ENV] ?? "")
   const reads = expressions_in({steps: job?.steps ?? []}).any(
     { entry -> contains(entry, "env.${TIER_ENV}") },
@@ -191,12 +191,12 @@ fn tier_declaration_errors(job_name: string, job) -> list<string> {
  * set and not the other. It does not prove the two agree on every combination
  * — it proves neither can be edited in isolation.
  */
-fn ladder_agreement_errors(job_name: string, job) -> list<string> {
+fn ladder_agreement_errors(job_name: string, job: dict) -> list<string> {
   const tier = normalize_expression(job?.env?.[TIER_ENV] ?? "")
   if tier == "" {
     return []
   }
-  const runs_on = normalize_expression(job?.["runs-on"] ?? "")
+  const runs_on = normalize_expression(job["runs-on"] ?? "")
   const runs_on_inputs = ladder_inputs(runs_on)
   const tier_inputs = ladder_inputs(tier)
   if runs_on_inputs == tier_inputs {
@@ -211,7 +211,7 @@ fn ladder_agreement_errors(job_name: string, job) -> list<string> {
 }
 
 /** Return every runner-tier violation without stopping at the first. */
-pub fn runner_tier_errors(workflow) -> list<string> {
+pub fn runner_tier_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     const name = to_string(job_name)

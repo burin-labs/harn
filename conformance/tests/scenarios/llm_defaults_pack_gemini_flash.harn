@@ -1,7 +1,7 @@
 // For a chat-sized Gemini request, auto policy resolves to disabled thinking.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const r = pack_for(
     harness.agent,
     harness.llm,

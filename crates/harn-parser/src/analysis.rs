@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
+use std::io::Write;
 use std::path::Path;
 
 use harn_lexer::{Lexer, LexerError, Token};
@@ -160,33 +161,35 @@ impl TypeCheckConfig {
             strict_types: self.strict_types,
             privileged_wire_builtins: self.privileged_wire_builtins,
             imported_names,
-            imported_type_decls_digest: debug_digest(&self.imported_type_decls),
-            imported_callable_decls_digest: debug_digest(&self.imported_callable_decls),
-            namespace_imports_digest: debug_digest(&namespace_aliases),
+            imported_type_decls_digest: structural_digest(&self.imported_type_decls),
+            imported_callable_decls_digest: structural_digest(&self.imported_callable_decls),
+            namespace_imports_digest: structural_digest(&namespace_aliases),
         }
     }
 
-    fn build_checker(&self) -> TypeChecker {
+    fn into_checker(self) -> TypeChecker {
         let mut checker = TypeChecker::with_strict_types(self.strict_types);
         checker = checker.with_privileged_wire_builtins(self.privileged_wire_builtins);
-        if let Some(imported) = self.imported_names.clone() {
+        if let Some(imported) = self.imported_names {
             checker = checker.with_imported_names(imported);
         }
         if !self.imported_type_decls.is_empty() {
-            checker = checker.with_imported_type_decls(self.imported_type_decls.clone());
+            checker = checker.with_imported_type_decls(self.imported_type_decls);
         }
         if !self.imported_callable_decls.is_empty() {
-            checker = checker.with_imported_callable_decls(self.imported_callable_decls.clone());
+            checker = checker.with_imported_callable_decls(self.imported_callable_decls);
         }
         if !self.namespace_imports.is_empty() {
-            checker = checker.with_namespace_imports(self.namespace_imports.clone());
+            checker = checker.with_namespace_imports(self.namespace_imports);
         }
         checker
     }
 
     /// Run the configured checker while retaining semantic binding facts.
     pub fn check_with_facts(&self, program: &[SNode], source: &str) -> TypeCheckFacts {
-        self.build_checker().check_with_facts(program, source)
+        self.clone()
+            .into_checker()
+            .check_with_facts(program, source)
     }
 }
 
@@ -252,6 +255,16 @@ impl AnalysisDatabase {
 
     pub fn stats(&self) -> AnalysisStats {
         self.stats.clone()
+    }
+
+    /// Evict one source and every cached projection derived from it.
+    ///
+    /// Long-running batch consumers that retain their own compact projection
+    /// of a parsed program should release the database entry as soon as that
+    /// projection is built. Otherwise tokens, the cached AST, type-check
+    /// diagnostics, and the consumer's projection all stay live together.
+    pub fn remove_source(&mut self, id: &SourceId) -> bool {
+        self.entries.remove(id).is_some()
     }
 
     pub fn set_source(
@@ -400,7 +413,7 @@ impl AnalysisDatabase {
 
         self.stats.typecheck_runs += 1;
         let (diagnostics, inlay_hints) = config
-            .build_checker()
+            .into_checker()
             .check_with_hints(&parsed.program, &parsed.source);
         let cached = CachedTypeCheck {
             diagnostics: diagnostics.clone(),
@@ -426,10 +439,24 @@ impl AnalysisDatabase {
     }
 }
 
-fn debug_digest<T: std::fmt::Debug>(value: &T) -> u64 {
+fn structural_digest<T: serde::Serialize>(value: &T) -> u64 {
     let mut hasher = StableHasher::default();
-    format!("{value:?}").hash(&mut hasher);
+    serde_json::to_writer(HasherWriter(&mut hasher), value)
+        .expect("typecheck cache-key values are JSON-serializable");
     hasher.finish()
+}
+
+struct HasherWriter<'a>(&'a mut StableHasher);
+
+impl Write for HasherWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.write(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]

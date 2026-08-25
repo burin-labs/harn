@@ -1,12 +1,12 @@
 import { post_message } from "std/connectors/slack"
 
 @persona(name: "merge_captain")
-fn merge_captain(ctx) -> string {
+fn merge_captain(ctx: dict) -> string {
   return admin_merge(ctx)
 }
 
 @step(name: "admin_merge", approval: required, receipt: audit)
-fn admin_merge(ctx) -> string {
+fn admin_merge(ctx: dict) -> string {
   return "merged " + ctx.pr
 }
 

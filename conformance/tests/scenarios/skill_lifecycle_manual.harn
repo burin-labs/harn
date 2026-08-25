@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * supplied registry. Harn must not add its catalog prompt until the model
  * explicitly loads a skill.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   skill alpha {
     description "Alpha workflow"
     when_to_use "Use alpha for alpha-shaped work"

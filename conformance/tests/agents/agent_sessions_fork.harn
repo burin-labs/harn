@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const src = harness.agent.open()
   harness.agent.inject(src, {role: "user", content: "shared"})
   const dst = harness.agent.fork(src)

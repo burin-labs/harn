@@ -19,7 +19,7 @@
 import { recommend_max_output_tokens } from "std/llm/budget"
 import { resolved_options } from "std/llm/catalog"
 
-fn __has_key(d, key) {
+fn __has_key(d: dict, key: any) {
   if type_of(d) != "dict" {
     return false
   }
@@ -35,7 +35,7 @@ fn __has_key(d, key) {
  * Only fills fields that effort/thinking layers haven't already set.
  * task ∈ {"chat","agent","refine","judge","summarize","code","json"}.
  */
-fn __task_overlay(task) {
+fn __task_overlay(task: string) {
   if task == "chat" {
     return {temperature: 0.7, top_p: 0.95, schema_retries: 0, output: "text"}
   }
@@ -65,7 +65,7 @@ fn __task_overlay(task) {
 // helpers
 // -------------------------------------------------------------------------------------------------
 
-fn __safe_resolved_options(llm: HarnessLlm, opts) {
+fn __safe_resolved_options(llm: HarnessLlm, opts: dict) {
   // Fall back to a minimal echo dict if resolved_options throws (e.g. when
   // opts.model is missing). pack_for already requires opts.model, so this
   // is defensive — never hit in normal paths.
@@ -78,7 +78,7 @@ fn __safe_resolved_options(llm: HarnessLlm, opts) {
   return unwrap(r)
 }
 
-fn __fill_unset(result, overlay) {
+fn __fill_unset(result: any, overlay: dict) {
   // task_overlay's "fill only when unset" semantics. Iterate overlay keys,
   // assign only those missing from result.
   let out = result
@@ -93,7 +93,7 @@ fn __fill_unset(result, overlay) {
 // `pack_for` has a richer task vocabulary than the runtime reasoning policy.
 // Lower task profiles onto the canonical reasoning-task vocabulary before the
 // capability owner selects a reasoning level.
-fn __reasoning_task(task) {
+fn __reasoning_task(task: string) {
   if task == "judge" {
     return "verify"
   }
@@ -126,7 +126,7 @@ fn __reasoning_task(task) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_for(_agent: HarnessAgent, llm: HarnessLlm, opts) {
+pub fn pack_for(_agent: HarnessAgent, llm: HarnessLlm, opts: dict) {
   if type_of(opts) != "dict" {
     throw "pack_for: opts must be a dict"
   }
@@ -193,7 +193,7 @@ pub fn pack_for(_agent: HarnessAgent, llm: HarnessLlm, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_chat(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_chat(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "chat"})
 }
@@ -204,7 +204,7 @@ pub fn pack_chat(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_agent(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_agent(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "agent"})
 }
@@ -215,7 +215,7 @@ pub fn pack_agent(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_refine(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_refine(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "refine"})
 }
@@ -226,7 +226,7 @@ pub fn pack_refine(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_judge(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_judge(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "judge"})
 }
@@ -237,7 +237,7 @@ pub fn pack_judge(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_summarize(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_summarize(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "summarize"})
 }
@@ -248,7 +248,7 @@ pub fn pack_summarize(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_code(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_code(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "code"})
 }
@@ -259,7 +259,7 @@ pub fn pack_code(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn pack_json(agent: HarnessAgent, llm: HarnessLlm, model, opts = nil) {
+pub fn pack_json(agent: HarnessAgent, llm: HarnessLlm, model: any, opts: dict? = nil) {
   const base = opts ?? {}
   return pack_for(agent, llm, base + {model: model, reasoning_task: "json"})
 }
