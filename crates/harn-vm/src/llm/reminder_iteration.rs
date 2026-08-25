@@ -226,6 +226,10 @@ fn prepare_reminder_for_iteration(
     attach_body_hash_tag(&mut reminder, &body_hash);
     let original_body_bytes = original_body.len();
     let mut delta_compressed = false;
+    // Keep durable reminders whole. Injection replaces the prior reminder with
+    // the same dedupe key, so a pointer to that prior body would immediately
+    // dangle. Callers that want to carry an unchanged durable reminder should
+    // enable `reminders.append_only` instead.
     if !reminder.preserve_on_compact {
         if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
             if previous_reminder_has_body_hash(session_id, dedupe_key, &body_hash) {
