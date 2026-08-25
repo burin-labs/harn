@@ -86,6 +86,41 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
     }
 }
 
+/// Structural JSON representation for values crossing a served-export
+/// boundary. Unlike display-oriented JSON conversion, enum variants retain
+/// their nominal identity and positional payload so an advertised output
+/// schema can describe the exact value on the wire.
+pub fn vm_value_to_export_json(val: &VmValue) -> serde_json::Value {
+    match val {
+        VmValue::EnumVariant(value) => serde_json::json!({
+            "enum": value.enum_name.as_str(),
+            "variant": value.variant.as_str(),
+            "fields": value
+                .fields
+                .iter()
+                .map(vm_value_to_export_json)
+                .collect::<Vec<_>>(),
+        }),
+        VmValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_export_json).collect())
+        }
+        VmValue::Dict(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.to_string(), vm_value_to_export_json(value)))
+                .collect(),
+        ),
+        VmValue::StructInstance(_) => serde_json::Value::Object(
+            val.struct_fields_map()
+                .expect("a struct instance always has a field map")
+                .iter()
+                .map(|(key, value)| (key.to_string(), vm_value_to_export_json(value)))
+                .collect(),
+        ),
+        _ => vm_value_to_json(val),
+    }
+}
+
 /// Strict variant of [`vm_value_to_json`] for durable persistence seams
 /// (worker snapshots, session state written to disk).
 ///

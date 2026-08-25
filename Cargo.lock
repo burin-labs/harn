@@ -3889,6 +3889,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "ipnet",
+ "jsonschema",
  "jsonwebtoken",
  "rcgen",
  "reqwest 0.12.28",

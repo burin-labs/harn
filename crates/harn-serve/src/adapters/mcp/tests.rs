@@ -56,7 +56,84 @@ pub fn greet(name: string) -> string {
         .get("openWorldHint")
         .is_none());
     assert_eq!(tools["tools"][0]["inputSchema"]["type"], "object");
-    assert_eq!(tools["tools"][0]["outputSchema"]["type"], "string");
+    assert_eq!(tools["tools"][0]["outputSchema"]["type"], "object");
+    assert_eq!(
+        tools["tools"][0]["outputSchema"]["properties"]["result"]["type"],
+        "string"
+    );
+    let output_schema = tools["tools"][0]["outputSchema"].clone();
+    let response = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            1,
+            "tools/call",
+            json!({"name": "greet", "arguments": {"name": "Ada"}}),
+        ),
+        SharedSession::new(),
+    )
+    .await;
+    assert_eq!(response["result"]["structuredContent"]["result"], "Ada");
+    let validator = jsonschema::validator_for(&output_schema).expect("valid output schema");
+    assert!(validator.is_valid(&response["result"]["structuredContent"]));
+}
+
+#[tokio::test]
+async fn advertised_nominal_output_schema_validates_structured_tool_result() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+pub struct Greeting {
+  message: string
+  tags: list<string>
+}
+pub enum Outcome<T> {
+  Success(value: T)
+  Failure(message: string)
+}
+pub fn greet(name: string) -> Outcome<Greeting> {
+  return Outcome.Success(Greeting {message: "hello ${name}", tags: ["typed"]})
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let listed = server.tools_list_result(&json!({}));
+    let output_schema = listed["tools"][0]["outputSchema"].clone();
+    let response = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            1,
+            "tools/call",
+            json!({"name": "greet", "arguments": {"name": "Ada"}}),
+        ),
+        SharedSession::new(),
+    )
+    .await;
+    let structured = &response["result"]["structuredContent"];
+
+    assert_eq!(structured["enum"], "Outcome");
+    assert_eq!(structured["variant"], "Success");
+    assert_eq!(structured["fields"][0]["message"], "hello Ada");
+    assert_eq!(
+        output_schema["oneOf"][0]["properties"]["variant"]["const"],
+        "Success"
+    );
+    let validator = jsonschema::validator_for(&output_schema).expect("valid output schema");
+    assert!(
+        validator.is_valid(structured),
+        "structuredContent must satisfy the exact tools/list outputSchema: {structured}"
+    );
+    assert!(
+        !validator.is_valid(&json!({
+            "enum": "Outcome",
+            "variant": "Success",
+            "fields": [{"message": 7, "tags": ["typed"]}],
+        })),
+        "the advertised schema must reject a value that violates the nested nominal type"
+    );
 }
 
 #[tokio::test]

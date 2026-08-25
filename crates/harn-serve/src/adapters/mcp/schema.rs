@@ -110,8 +110,8 @@ pub(super) fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
         "annotations": annotations,
         "inputSchema": function.input_schema,
     });
-    if let Some(output_schema) = function.output_schema.clone() {
-        entry["outputSchema"] = output_schema;
+    if let Some(output_schema) = function.output_schema.as_ref() {
+        entry["outputSchema"] = mcp_output_schema(output_schema);
     }
     // `@job` already means "this entrypoint is long-running" everywhere else in
     // Harn -- it is what routes a function through the trigger dispatcher. An
@@ -127,15 +127,48 @@ pub(super) fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
     entry
 }
 
-pub(super) fn tool_call_success(response: CallResponse) -> JsonValue {
+pub(super) fn tool_call_success(
+    response: CallResponse,
+    output_schema: Option<&JsonValue>,
+) -> JsonValue {
     let mut result = json!({
         "content": content_blocks(&response.value),
         "isError": false,
     });
-    if let JsonValue::Object(map) = response.value {
-        result["structuredContent"] = JsonValue::Object(map);
+    if let Some(output_schema) = output_schema {
+        result["structuredContent"] = if schema_guarantees_object(output_schema) {
+            response.value
+        } else {
+            json!({"result": response.value})
+        };
     }
     result
+}
+
+fn mcp_output_schema(output_schema: &JsonValue) -> JsonValue {
+    if schema_guarantees_object(output_schema) {
+        return output_schema.clone();
+    }
+    json!({
+        "type": "object",
+        "properties": {"result": output_schema},
+        "required": ["result"],
+        "additionalProperties": false,
+    })
+}
+
+fn schema_guarantees_object(schema: &JsonValue) -> bool {
+    if schema.get("type").and_then(JsonValue::as_str) == Some("object") {
+        return true;
+    }
+    ["oneOf", "anyOf"].iter().any(|keyword| {
+        schema
+            .get(keyword)
+            .and_then(JsonValue::as_array)
+            .is_some_and(|branches| {
+                !branches.is_empty() && branches.iter().all(schema_guarantees_object)
+            })
+    })
 }
 
 pub(super) fn tool_call_error(message: String) -> JsonValue {
