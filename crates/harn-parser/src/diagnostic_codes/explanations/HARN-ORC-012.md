@@ -15,8 +15,8 @@ scopes keep the guard from reporting a deadlock.
 Make sure every blocking `receive` has a task that can still send to that
 channel, and every blocking `send` on a full channel has a task that can still
 receive from it. If the wait is intentionally optional, use `try_receive`,
-`select timeout`, `channel_select(..., timeout_ms)`, or wrap the operation in a
-`deadline { ... }` block.
+`select timeout`, `harness.runtime.channel_select(..., timeout_ms)`, or wrap the
+operation in a `deadline { ... }` block.
 
 This error is non-retryable: it indicates a structural concurrency bug, not a
 transient failure.
