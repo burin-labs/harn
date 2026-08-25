@@ -68,13 +68,20 @@
 // here, and `probe_parse_error` fails loudly if a parse error slips
 // through anyway.
 //
-// GENERATED PAGES ARE NOT SCANNED
-// -------------------------------
+// GENERATED PAGES ARE NOT SCANNED — THEIR SOURCES ARE
+// ---------------------------------------------------
 // `docs/src/spec/language/`, `docs/src/diagnostics.md` and friends are
 // projections of another source; the excluded set is read out of
 // `scripts/generated_artifacts.toml` rather than restated here, so a new
-// generated page needs no edit to this file. `spec/chapters/*.md`, the
-// source those pages mirror, *is* scanned.
+// generated page needs no edit to this file. Editing a projection is the
+// wrong fix anyway — the next regeneration overwrites it — so DOCS_GLOBS
+// names the sources instead: `spec/chapters/*.md` behind the language
+// spec, and `crates/harn-parser/src/diagnostic_codes/explanations/*.md`
+// behind `docs/src/diagnostics.md`. Those two are markdown, so they can
+// be scanned as pages. A projection whose source is Rust — the
+// `out.push_str` literals of `harn dump-trigger-quickref` behind
+// `docs/llm/harn-triggers-quickref.md` — has no page to scan and stays
+// uncovered.
 //
 // THE ALLOWLIST IS A SHRINKING BASELINE
 // -------------------------------------
@@ -102,7 +109,12 @@ import {
   resolve_harn_bin,
 } from "./check_docs_snippets.harn"
 
-const DOCS_GLOBS = ["docs/src/**/*.md", "docs/llm/*.md", "spec/chapters/*.md"]
+const DOCS_GLOBS = [
+  "docs/src/**/*.md",
+  "docs/llm/*.md",
+  "spec/chapters/*.md",
+  "crates/harn-parser/src/diagnostic_codes/explanations/*.md",
+]
 
 const VOCABULARY = "spec/language-vocabulary.json"
 

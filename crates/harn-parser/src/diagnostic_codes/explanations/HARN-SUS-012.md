@@ -18,6 +18,6 @@ Common causes:
   drain receipt will line up.
 
 The recorded receipt is still safe to inspect via
-`lifecycle_receipts_snapshot()`, and its signed timestamp tells you
-when the original decision was minted. Treat the mismatch as a signal
-that the replay is no longer a determinism check.
+`harness.agent.lifecycle_receipts_snapshot()`, and its signed timestamp
+tells you when the original decision was minted. Treat the mismatch as a
+signal that the replay is no longer a determinism check.

@@ -32,6 +32,15 @@ docs/llm/harn-quickref.md                          hostname
 docs/llm/harn-quickref.md                          pid
 docs/llm/harn-quickref.md                          username
 
+# Migration crib: naming the removed global IS the content. HARN-LNT-071
+# is the diagnostic that *reports* a global builtin moving onto a Harness
+# capability, so its explanation has to show the before spelling next to
+# the after — "`platform()` becomes `harness.system.platform().os`". A
+# burn-down must not delete these two as dead weight; the page is only
+# correct while it still names the old spelling.
+crates/harn-parser/src/diagnostic_codes/explanations/HARN-LNT-071.md platform
+crates/harn-parser/src/diagnostic_codes/explanations/HARN-LNT-071.md username
+
 # A removed global whose name a std module also exports. The compiler
 # probe carries no imports, so it reads a documented `exec(handle,
 # query)` as the deleted ambient `exec`. These pages document

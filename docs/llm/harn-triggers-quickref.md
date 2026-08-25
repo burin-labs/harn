@@ -61,7 +61,7 @@ Audit a project before deploy with `harn routes <root> --json`; it reports each 
 
 ## Handler variants
 
-`handler:` accepts a closure (in-process), an `a2a://`, `worker://`, or `eval_pack://` URI string, or a handler-variant dict. `eval_pack://<target>` resolves a bare target from `[package].evals` by id/name/file stem or a path-like target relative to `harn.toml`, then dispatches through `eval_pack_run(manifest, options?)` under the trigger's normal budget, retry, DLQ, replay/cancel, and flow-control rules. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.
+`handler:` accepts a closure (in-process), an `a2a://`, `worker://`, or `eval_pack://` URI string, or a handler-variant dict. `eval_pack://<target>` resolves a bare target from `[package].evals` by id/name/file stem or a path-like target relative to `harn.toml`, then dispatches through `harness.runtime.eval_pack_run(manifest, options?)` under the trigger's normal budget, retry, DLQ, replay/cancel, and flow-control rules. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.
 
 ```harn
 import { SpawnToPool } from "std/triggers"
@@ -202,15 +202,17 @@ delivery-id deduplication (durable across process restarts), and
 republishing onto the chosen topic. Per-forge event normalization lives in
 the connector that consumes the topic.
 
-Builtins:
+Runtime capability methods, reached through `harness.runtime`:
 
-- `webhook_intake_register(config) -> dict` — register an intake. Returns
+- `harness.runtime.webhook_intake_register(config) -> dict` — register an
+  intake. Returns
   `{ id, path, topic, signature_header, signature_prefix,
   signature_encoding, algorithm, allow_legacy_sha1, delivery_id_header,
   dedupe_ttl_seconds }`. Config keys:
   - `id` (optional) — pin the intake id; one is generated if omitted.
-  - `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`
-    rejects deliveries on a different path.
+  - `path` (optional) — HTTP path scope. When set,
+    `harness.runtime.webhook_intake_feed` rejects deliveries on a
+    different path.
   - `secret` (string or bytes, required) — HMAC key.
   - `signature_header` (required) — e.g. `"x-hub-signature-256"`.
   - `signature_prefix` — defaults to `"<algorithm>="`. Pass `""` to opt out.
@@ -220,37 +222,62 @@ Builtins:
   - `delivery_id_header` (required) — e.g. `"x-github-delivery"`.
   - `topic` (required) — event-log topic accepted deliveries are appended to.
   - `dedupe_ttl_seconds` — defaults to 24h.
-- `webhook_intake_feed(intake_id, request) -> dict` — feed a delivery.
+- `harness.runtime.webhook_intake_feed(intake_id, request) -> dict` — feed a
+  delivery.
   Request keys: `headers` (dict), `body` (string or bytes), optional `path`
   and `received_at` (RFC3339). Returns `{ status, intake_id, topic,
   delivery_id, topic_event_id, reason, received_at }`. `status` is
   `"accepted"`, `"duplicate"`, or `"rejected"`.
-- `webhook_intake_recent(intake_id, limit?) -> list` — bounded replay
-  buffer. Reads the last `limit` accepted deliveries from the topic.
-- `webhook_intake_list() -> list` — all currently-registered intakes.
-- `webhook_intake_deregister(intake_id) -> bool` — remove an intake.
+- `harness.runtime.webhook_intake_recent(intake_id, limit?) -> list` — a
+  bounded replay buffer. Reads the last `limit` accepted deliveries from the
+  topic.
+- `harness.runtime.webhook_intake_list() -> list` — all currently-registered
+  intakes.
+- `harness.runtime.webhook_intake_deregister(intake_id) -> bool` — remove an
+  intake.
 
-A connector wires this in well under 30 lines:
+A connector wires this in about thirty lines. `on_delivery` takes the narrow `HarnessRuntime` handle rather than root authority, which is what the `capability-attenuation` lint asks for:
 
-```harn
-import "std/triggers"
+```harn,check
+type WebhookRequest = {headers: dict, body: string, path: string}
 
-const intake = webhook_intake_register({
-  id: "github",
-  path: "/hooks/github",
-  secret: harness.secrets.read("github/webhook-secret"),
-  signature_header: "x-hub-signature-256",
-  delivery_id_header: "x-github-delivery",
-  topic: "github.events",
-})
+/** Feed one inbound delivery; the result is the HTTP reply. */
+fn on_delivery(
+  runtime: HarnessRuntime,
+  intake: string,
+  req: WebhookRequest,
+) -> dict {
+  const outcome = runtime.webhook_intake_feed(intake, {
+    headers: req.headers,
+    body: req.body,
+    path: req.path,
+  })
+  if outcome.status == "rejected" {
+    return {status: 401, body: outcome.reason}
+  }
+  return {status: 202}
+}
 
-// In your inbound HTTP handler:
-const outcome = webhook_intake_feed(intake.id, {
-  headers: request.headers,
-  body: request.body,
-  path: request.path,
-})
-return { status: outcome.status == "rejected" ? 401 : 202 }
+fn main(harness: Harness) {
+  const intake = harness.runtime.webhook_intake_register({
+    id: "github",
+    path: "/hooks/github",
+    secret: harness.secrets.read("github/webhook-secret"),
+    signature_header: "x-hub-signature-256",
+    delivery_id_header: "x-github-delivery",
+    topic: "github.events",
+  })
+  // Call `on_delivery` for each request your HTTP listener accepts.
+  const reply = on_delivery(harness.runtime, intake.id, {
+    headers: {
+      "x-github-delivery": "8f3c",
+      "x-hub-signature-256": "sha256=...",
+    },
+    body: "{}",
+    path: "/hooks/github",
+  })
+  harness.stdio.println("replied ${reply.status}")
+}
 ```
 
 Rejections are appended to `triggers.webhook_intake.rejections` with the

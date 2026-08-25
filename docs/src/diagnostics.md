@@ -1595,8 +1595,8 @@ scopes keep the guard from reporting a deadlock.
 Make sure every blocking `receive` has a task that can still send to that
 channel, and every blocking `send` on a full channel has a task that can still
 receive from it. If the wait is intentionally optional, use `try_receive`,
-`select timeout`, `channel_select(..., timeout_ms)`, or wrap the operation in a
-`deadline { ... }` block.
+`select timeout`, `harness.runtime.channel_select(..., timeout_ms)`, or wrap the
+operation in a `deadline { ... }` block.
 
 This error is non-retryable: it indicates a structural concurrency bug, not a
 transient failure.
@@ -2388,9 +2388,9 @@ Common causes:
   drain receipt will line up.
 
 The recorded receipt is still safe to inspect via
-`lifecycle_receipts_snapshot()`, and its signed timestamp tells you
-when the original decision was minted. Treat the mismatch as a signal
-that the replay is no longer a determinism check.
+`harness.agent.lifecycle_receipts_snapshot()`, and its signed timestamp
+tells you when the original decision was minted. Treat the mismatch as a
+signal that the replay is no longer a determinism check.
 
 ### `HARN-SUS-013`
 
