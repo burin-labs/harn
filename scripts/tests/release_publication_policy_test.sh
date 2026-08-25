@@ -77,6 +77,10 @@ grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$publish_workflow" \
   || fail "post-release bump skip does not report its typed reason"
 grep -Fq 'HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh' "$publish_workflow" \
   || fail "post-release workflow bypasses the tested development preparation seam"
+grep -Fq 'echo "harn_bin=$harn_bin" >> "$GITHUB_OUTPUT"' "$publish_workflow" \
+  || fail "post-release workflow does not retain its pre-mutation Harn binary proof"
+grep -Fq 'HARN_BIN: ${{ steps.prepare.outputs.harn_bin }}' "$publish_workflow" \
+  || fail "signed publication re-resolves Harn after mutating version manifests"
 grep -Fq 'scripts/bump-driver/publish_development_bump.harn' "$publish_workflow" \
   || fail "post-release development bump bypasses signed GitHub publication"
 grep -Fq 'HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN"' "$publish_workflow" \

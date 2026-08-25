@@ -422,11 +422,13 @@ jobs:
             exit 1
           fi
           echo "version=$actual" >> "$GITHUB_OUTPUT"
+          echo "harn_bin=$harn_bin" >> "$GITHUB_OUTPUT"
 
       - name: Open auto-merge pull request
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVELOPMENT_VERSION: ${{ steps.prepare.outputs.version }}
+          HARN_BIN: ${{ steps.prepare.outputs.harn_bin }}
         run: |
           set -euo pipefail
           branch="automation/development-$DEVELOPMENT_VERSION"
@@ -435,12 +437,11 @@ jobs:
             echo "::notice::Development bump already open: $existing"
             exit 0
           fi
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN" \
             HARN_DEVELOPMENT_BUMP_BRANCH="$branch" \
             HARN_DEVELOPMENT_BUMP_BASE_OID="$(git rev-parse HEAD)" \
             HARN_DEVELOPMENT_BUMP_VERSION="$DEVELOPMENT_VERSION" \
-            "$harn_bin" run --no-sandbox \
+            "$HARN_BIN" run --no-sandbox \
               scripts/bump-driver/publish_development_bump.harn
           body_file="$(mktemp)"
           trap 'rm -f "$body_file"' EXIT
