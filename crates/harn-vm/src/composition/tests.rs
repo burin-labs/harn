@@ -16,6 +16,8 @@ use crate::value::{VmError, VmValue};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 
+mod policy;
+
 async fn run_composition_dispatcher_source(
     source: &str,
     configure: impl FnOnce(&mut crate::Vm),

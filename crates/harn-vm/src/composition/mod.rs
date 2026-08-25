@@ -1154,8 +1154,31 @@ fn validate_composition_program(
     program: &[harn_parser::SNode],
     manifest: &BindingManifest,
 ) -> Result<(), String> {
+    use harn_parser::lexical::{resolved_identifier_bindings, BindingId};
     use harn_parser::visit::walk_program;
-    use harn_parser::Node;
+    use harn_parser::{Node, TypeExpr};
+
+    let (harness_binding, resolved_bindings) = program
+        .iter()
+        .find_map(|node| {
+            match &node.node {
+            Node::Pipeline {
+                name, params, body, ..
+            } if name == "main" => params
+                .iter()
+                .find(|param| {
+                    matches!(&param.type_expr, Some(TypeExpr::Named(name)) if name == "Harness")
+                })
+                .map(|param| {
+                    (
+                        BindingId::from_declaration(&param.name, param.span),
+                        resolved_identifier_bindings(params, body),
+                    )
+                }),
+            _ => None,
+        }
+        })
+        .ok_or_else(|| "composition program is missing its Harness entrypoint".to_string())?;
 
     let bindings = manifest
         .bindings
@@ -1221,6 +1244,23 @@ fn validate_composition_program(
                              manifest.state is granted"
                         )
                     });
+                }
+            }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. } => {
+                if let Some((root, properties)) =
+                    harn_parser::lexical::resolved_receiver_path(object, &resolved_bindings)
+                        .filter(|(root, _)| *root == &harness_binding)
+                {
+                    let receiver = std::iter::once(root.name.as_str())
+                        .chain(properties)
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    error = Some(format!(
+                        "composition snippets cannot call `{receiver}.{method}`: they run \
+                         without harness capabilities, and their only egress is a manifest \
+                         binding"
+                    ));
                 }
             }
             _ => {}
