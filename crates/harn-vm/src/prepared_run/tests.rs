@@ -13,6 +13,8 @@ use crate::orchestration::{
 
 use super::*;
 
+mod executor_failures;
+
 const NOW_MS: u64 = 1_000;
 const DEADLINE_MS: u64 = 61_000;
 const SECRET_CANARY: &str = "secret-value-that-must-never-serialize";
@@ -25,6 +27,7 @@ struct FixtureExecutor {
 
 impl PreparedRunExecutor for FixtureExecutor {
     type Output = &'static str;
+    type Error = String;
 
     fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
         for requirement in &self.requirements {
@@ -42,6 +45,7 @@ struct ExpiringExecutor {
 
 impl PreparedRunExecutor for ExpiringExecutor {
     type Output = ();
+    type Error = String;
 
     fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
         authority.authorize(&AuthorityRequirement::FilesystemWrite {
@@ -412,7 +416,10 @@ fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
     );
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => panic!("materialized run failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("materialized run failed: {error}")
+        }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 
@@ -499,7 +506,10 @@ fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_author
             assert_eq!(output, "completed");
             receipt
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("steel thread failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("steel thread failed: {error}")
+        }
     };
 
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
@@ -539,7 +549,10 @@ fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
         };
         let (run, lease, _) = prepared(executor);
         let receipt = match run.execute(lease) {
-            ExecutionOutcome::Failed { receipt, .. } => receipt,
+            ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
+            ExecutionOutcome::AuthorityFailed { .. } => {
+                panic!("executor denial must remain an executor failure")
+            }
             ExecutionOutcome::Completed { .. } => panic!("changed authority must fail"),
         };
         assert_eq!(model_calls.load(Ordering::SeqCst), 0);
@@ -562,7 +575,10 @@ fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
     let (run, lease, _) = prepared(executor);
     let terminal = match run.execute(lease) {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
-        ExecutionOutcome::Failed { error, .. } => panic!("narrow path failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("narrow path failed: {error}")
+        }
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
     assert_eq!(terminal.used.len(), 1);
@@ -609,7 +625,10 @@ fn read_use_attenuates_existing_write_root_grants() {
             assert_eq!(receipt.used.len(), 2);
             assert!(receipt.denied.is_empty());
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("execution failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("execution failed: {error}")
+        }
     }
 }
 
@@ -640,7 +659,10 @@ fn lease_expiry_is_rechecked_at_each_material_operation() {
         other => panic!("expected ready, got {other:?}"),
     };
     let receipt = match run.execute(lease) {
-        ExecutionOutcome::Failed { receipt, .. } => receipt,
+        ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
+        ExecutionOutcome::AuthorityFailed { .. } => {
+            panic!("mid-execution expiry must remain an executor failure")
+        }
         ExecutionOutcome::Completed { .. } => panic!("expired lease must fail"),
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 0);
@@ -798,7 +820,10 @@ fn ten_noninteractive_preparations_and_executions_complete() {
         let (run, lease, _) = prepared(executor);
         match run.execute(lease) {
             ExecutionOutcome::Completed { .. } => {}
-            ExecutionOutcome::Failed { error, .. } => panic!("repeat failed: {error}"),
+            ExecutionOutcome::ExecutorFailed { error, .. }
+            | ExecutionOutcome::AuthorityFailed { error, .. } => {
+                panic!("repeat failed: {error}")
+            }
         }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 10);
@@ -1006,7 +1031,10 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
 
     let terminal = match run.execute(lease) {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
-        ExecutionOutcome::Failed { error, .. } => panic!("discovered root must execute: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("discovered root must execute: {error}")
+        }
     };
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
     assert!(terminal
@@ -1079,7 +1107,8 @@ fn denied_toolchain_discovery_leaves_parent_lease_executable() {
         .contains(SECRET_CANARY));
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => {
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("refused optional discovery invalidated the parent lease: {error}")
         }
     }
@@ -1143,7 +1172,8 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
     }
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => {
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("pending optional discovery invalidated the parent lease: {error}")
         }
     }
@@ -1288,7 +1318,10 @@ async fn identity_broker_is_readiness_bound_and_handle_is_opaque_and_consumer_ex
             assert!(!serialized.contains(SECRET_CANARY));
             assert!(serialized.contains("burin-workload"));
         }
-        ExecutionOutcome::Failed { error, .. } => panic!("identity run failed: {error}"),
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
+            panic!("identity run failed: {error}")
+        }
     }
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 }

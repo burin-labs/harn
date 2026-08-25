@@ -76,7 +76,8 @@ fn failed_optional_discovery_leaves_parent_lease_executable(error: &str) {
     }
     match run.execute(lease) {
         ExecutionOutcome::Completed { .. } => {}
-        ExecutionOutcome::Failed { error, .. } => {
+        ExecutionOutcome::ExecutorFailed { error, .. }
+        | ExecutionOutcome::AuthorityFailed { error, .. } => {
             panic!("failed optional discovery invalidated the parent lease: {error}")
         }
     }

@@ -12,10 +12,12 @@ use super::*;
 
 pub trait PreparedRunExecutor {
     type Output;
+    /// Host-owned failure evidence returned without rendering or erasure.
+    type Error;
 
     /// Perform the run. Every material operation must call
     /// AuthorityUse::authorize immediately before its side effect.
-    fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String>;
+    fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, Self::Error>;
 }
 
 pub struct PreparedRun<E> {
@@ -319,7 +321,10 @@ impl<E> PreparedRun<E> {
 }
 
 impl<E: PreparedRunExecutor> PreparedRun<E> {
-    pub fn execute(&self, authority_lease: Box<AuthorityLease>) -> ExecutionOutcome<E::Output> {
+    pub fn execute(
+        &self,
+        authority_lease: Box<AuthorityLease>,
+    ) -> ExecutionOutcome<E::Output, E::Error> {
         let now_ms = (self.now_ms)();
         let mut authority = AuthorityUse::new(&authority_lease, self.now_ms.clone());
         let result = if let Some(diagnostic) = &authority_lease.invalidated {
@@ -331,39 +336,50 @@ impl<E: PreparedRunExecutor> PreparedRun<E> {
             Err("authority lease expired before execution".to_string())
         } else {
             authority.executor_invoked = true;
-            self.executor.execute(&mut authority)
+            Ok(self.executor.execute(&mut authority))
         };
-        let mut receipt = authority.terminal_receipt(result.is_ok(), (self.now_ms)());
-        let persistence = self.receipts.persist(&receipt);
-        match (result, persistence) {
-            (Ok(output), Ok(())) => ExecutionOutcome::Completed { output, receipt },
-            (Err(error), Ok(())) => ExecutionOutcome::Failed { error, receipt },
-            (result, Err(error)) => {
-                receipt.status = AuthorityReceiptStatus::Failed;
-                receipt.diagnostics.push(diagnostic(
-                    "terminal_receipt_persistence",
-                    error,
-                    None,
-                    "Repair receipt persistence and inspect the retained startup receipt.",
-                ));
-                ExecutionOutcome::Failed {
-                    error: result.err().unwrap_or_else(|| {
-                        "execution completed but terminal authority receipt was not persisted"
-                            .to_string()
-                    }),
-                    receipt,
-                }
+        let succeeded = matches!(result, Ok(Ok(_)));
+        let mut receipt = authority.terminal_receipt(succeeded, (self.now_ms)());
+        let persistence_error = self.receipts.persist(&receipt).err();
+        if let Some(error) = &persistence_error {
+            receipt.status = AuthorityReceiptStatus::Failed;
+            receipt.diagnostics.push(diagnostic(
+                "terminal_receipt_persistence",
+                error,
+                None,
+                "Repair receipt persistence and inspect the retained startup receipt.",
+            ));
+        }
+        match result {
+            Ok(Ok(output)) if persistence_error.is_none() => {
+                ExecutionOutcome::Completed { output, receipt }
             }
+            Ok(Ok(_)) => ExecutionOutcome::AuthorityFailed {
+                error: "execution completed but terminal authority receipt was not persisted"
+                    .to_string(),
+                receipt,
+            },
+            Ok(Err(error)) => ExecutionOutcome::ExecutorFailed { error, receipt },
+            Err(error) => ExecutionOutcome::AuthorityFailed { error, receipt },
         }
     }
 }
 
-pub enum ExecutionOutcome<T> {
+/// The terminal result of a prepared run.
+///
+/// Executor failures preserve the executor's concrete error type. Failures in
+/// lease validation or receipt persistence remain separate because Harn, not
+/// the executor, owns those errors.
+pub enum ExecutionOutcome<T, E> {
     Completed {
         output: T,
         receipt: RunAuthorityReceipt,
     },
-    Failed {
+    ExecutorFailed {
+        error: E,
+        receipt: RunAuthorityReceipt,
+    },
+    AuthorityFailed {
         error: String,
         receipt: RunAuthorityReceipt,
     },
