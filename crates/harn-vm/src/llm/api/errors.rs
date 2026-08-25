@@ -135,6 +135,47 @@ pub(crate) struct LlmErrorInfo {
     pub(crate) message: String,
 }
 
+/// Provider-reported state for a tokens-per-minute quota window.
+///
+/// This is deliberately sourced only from structured HTTP headers. Provider
+/// error prose is useful to a human, but it is not a contract and must not
+/// become an orchestration input.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ProviderTokenQuotaSnapshot {
+    pub(crate) limit: u64,
+    pub(crate) used: u64,
+    pub(crate) window_ms: u64,
+}
+
+const TOKEN_QUOTA_HEADER_PAIRS: [(&str, &str); 2] = [
+    ("x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens"),
+    (
+        "x-ratelimit-limit-tokens-minute",
+        "x-ratelimit-remaining-tokens-minute",
+    ),
+];
+
+/// Read a provider TPM snapshot without consulting its error message.
+pub(crate) fn provider_token_quota_snapshot(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<ProviderTokenQuotaSnapshot> {
+    TOKEN_QUOTA_HEADER_PAIRS
+        .iter()
+        .find_map(|(limit_name, remaining_name)| {
+            let limit = header_u64(headers, limit_name)?;
+            let remaining = header_u64(headers, remaining_name)?.min(limit);
+            (limit > 0).then_some(ProviderTokenQuotaSnapshot {
+                limit,
+                used: limit.saturating_sub(remaining),
+                window_ms: 60_000,
+            })
+        })
+}
+
+fn header_u64(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
+    headers.get(name)?.to_str().ok()?.trim().parse::<u64>().ok()
+}
+
 /// Extract the `Retry-After` header for threading into
 /// [`classify_provider_http_error`]. Read it before consuming the response
 /// body — `Response::text()` takes the response by value.
@@ -143,6 +184,100 @@ pub(crate) fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option
         .get("retry-after")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
+}
+
+/// Parse an RFC 7231 Retry-After field value into a bounded delay.
+pub(crate) fn parse_retry_after_value(value: &str) -> Option<u64> {
+    const MAX_MS: u64 = 60_000;
+    let value = value.trim();
+    let numeric_prefix = value
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect::<String>();
+    if let Ok(seconds) = numeric_prefix.parse::<f64>() {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return None;
+        }
+        return Some(((seconds * 1000.0) as u64).min(MAX_MS));
+    }
+    let target = httpdate::parse_http_date(value).ok()?;
+    Some(
+        target
+            .duration_since(std::time::SystemTime::now())
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
+            .min(MAX_MS),
+    )
+}
+
+fn provider_http_error_value(
+    classified: LlmErrorInfo,
+    status: reqwest::StatusCode,
+    retry_after: Option<&str>,
+    quota: Option<ProviderTokenQuotaSnapshot>,
+) -> VmError {
+    use crate::value::VmDictExt;
+
+    let category = crate::value::error_category_for_http_status(status.as_u16()).unwrap_or(
+        match classified.reason {
+            LlmErrorReason::RateLimit => ErrorCategory::RateLimit,
+            LlmErrorReason::ServerError => ErrorCategory::ServerError,
+            LlmErrorReason::NetworkError => ErrorCategory::TransientNetwork,
+            LlmErrorReason::Timeout => ErrorCategory::Timeout,
+            LlmErrorReason::AuthFailure => ErrorCategory::Auth,
+            LlmErrorReason::ModelUnavailable => ErrorCategory::NotFound,
+            _ => ErrorCategory::Generic,
+        },
+    );
+    let mut fields = std::collections::BTreeMap::new();
+    fields.put_str("category", category.as_str());
+    fields.put_str("kind", classified.kind.as_str());
+    fields.put_str("reason", classified.reason.as_str());
+    fields.put_str("message", classified.message);
+    if let Some(ms) = retry_after.and_then(parse_retry_after_value) {
+        fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+    }
+    let quota = quota.and_then(|quota| {
+        Some((
+            i64::try_from(quota.limit).ok()?,
+            i64::try_from(quota.used).ok()?,
+            i64::try_from(quota.window_ms).ok()?,
+        ))
+    });
+    if let Some((limit, used, window_ms)) = quota {
+        let mut snapshot = std::collections::BTreeMap::new();
+        snapshot.put_str("schema", "harn.llm.provider_token_quota.v1");
+        snapshot.put_str("resource", "tokens");
+        snapshot.insert("limit".to_string(), VmValue::Int(limit));
+        snapshot.insert("used".to_string(), VmValue::Int(used));
+        snapshot.insert("window_ms".to_string(), VmValue::Int(window_ms));
+        fields.insert("provider_quota".to_string(), VmValue::dict(snapshot));
+    }
+    VmError::Thrown(VmValue::dict(fields))
+}
+
+/// Classify a drained non-success response while retaining structured quota
+/// headers in the thrown value consumed by the route limiter.
+pub(crate) fn provider_http_error(
+    dialect: Option<super::DialectContract>,
+    provider: &str,
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> VmError {
+    let retry_after = retry_after_header(headers);
+    let classified = match dialect {
+        Some(dialect) => {
+            dialect.classify_http_error(provider, status, retry_after.as_deref(), body)
+        }
+        None => classify_provider_http_error(provider, status, retry_after.as_deref(), body),
+    };
+    provider_http_error_value(
+        classified,
+        status,
+        retry_after.as_deref(),
+        provider_token_quota_snapshot(headers),
+    )
 }
 
 /// Build a tagged, provider-prefixed error message from a non-2xx HTTP
@@ -249,11 +384,9 @@ fn stream_error_thrown(
 /// takes the response by value.
 pub(crate) async fn err_for_non_success(provider: &str, response: reqwest::Response) -> VmError {
     let status = response.status();
-    let retry_after = retry_after_header(response.headers());
+    let headers = response.headers().clone();
     let body = response.text().await.unwrap_or_default();
-    let message =
-        classify_provider_http_error(provider, status, retry_after.as_deref(), &body).message;
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    provider_http_error(None, provider, status, &headers, &body)
 }
 
 /// Consume and classify a non-success response through the resolved dialect
@@ -265,12 +398,9 @@ pub(crate) async fn err_for_non_success_with_dialect(
     response: reqwest::Response,
 ) -> VmError {
     let status = response.status();
-    let retry_after = retry_after_header(response.headers());
+    let headers = response.headers().clone();
     let body = response.text().await.unwrap_or_default();
-    let message = dialect
-        .classify_http_error(provider, status, retry_after.as_deref(), &body)
-        .message;
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    provider_http_error(Some(dialect), provider, status, &headers, &body)
 }
 
 fn sanitize_provider_error_body(body: &str) -> String {
@@ -736,7 +866,8 @@ fn is_model_unavailable(lower: &str) -> bool {
 mod tests {
     use super::{
         classify_llm_error, classify_provider_http_error, classify_provider_stream_error,
-        LlmErrorKind, LlmErrorReason,
+        provider_http_error, provider_token_quota_snapshot, LlmErrorKind, LlmErrorReason,
+        ProviderTokenQuotaSnapshot,
     };
     use crate::value::{ErrorCategory, VmError, VmValue};
 
@@ -1222,6 +1353,68 @@ mod tests {
             info.message.contains("[model_unavailable]"),
             "msg was: {}",
             info.message
+        );
+    }
+
+    #[test]
+    fn token_quota_snapshot_uses_headers_and_ignores_provider_prose() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-limit-tokens", "200000".parse().unwrap());
+        headers.insert("x-ratelimit-remaining-tokens", "16751".parse().unwrap());
+
+        assert_eq!(
+            provider_token_quota_snapshot(&headers),
+            Some(ProviderTokenQuotaSnapshot {
+                limit: 200_000,
+                used: 183_249,
+                window_ms: 60_000,
+            })
+        );
+
+        let no_headers = reqwest::header::HeaderMap::new();
+        assert_eq!(
+            provider_token_quota_snapshot(&no_headers),
+            None,
+            "numeric Limit/Used prose must never become a quota contract"
+        );
+
+        let error = provider_http_error(
+            None,
+            "openai",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            r#"{"error":{"type":"tokens","message":"human wording may change"}}"#,
+        );
+        let VmError::Thrown(VmValue::Dict(error)) = error else {
+            panic!("provider error must retain a typed envelope");
+        };
+        let Some(VmValue::Dict(quota)) = error.get("provider_quota") else {
+            panic!("typed provider quota missing");
+        };
+        assert_eq!(
+            quota.get("limit").map(VmValue::display),
+            Some("200000".into())
+        );
+        assert_eq!(
+            quota.get("used").map(VmValue::display),
+            Some("183249".into())
+        );
+    }
+
+    #[test]
+    fn typed_http_error_preserves_overload_category() {
+        let error = provider_http_error(
+            None,
+            "anthropic",
+            reqwest::StatusCode::from_u16(529).unwrap(),
+            &reqwest::header::HeaderMap::new(),
+            r#"{"type":"error","error":{"type":"overloaded_error"}}"#,
+        );
+
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            ErrorCategory::Overloaded,
+            "the typed envelope must retain the status-owned overload signal"
         );
     }
 }

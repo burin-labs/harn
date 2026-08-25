@@ -467,7 +467,7 @@ async fn vm_call_llm_api_with_body_inner(
             .await?;
             if !response.status().is_success() {
                 let status = response.status();
-                let retry_after = super::retry_after_header(response.headers());
+                let headers = response.headers().clone();
                 let content_type = response_content_type(&response);
                 let body = response.text().await.unwrap_or_default();
                 crate::llm::agent_observe::persist_raw_provider_response(
@@ -480,10 +480,13 @@ async fn vm_call_llm_api_with_body_inner(
                     content_type.as_deref(),
                     &body,
                 );
-                let msg = dialect
-                    .classify_http_error(provider, status, retry_after.as_deref(), &body)
-                    .message;
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
+                return Err(super::provider_http_error(
+                    Some(dialect),
+                    provider,
+                    status,
+                    &headers,
+                    &body,
+                ));
             }
             let provider_request_id = response
                 .headers()
@@ -576,7 +579,7 @@ async fn vm_call_llm_api_with_body_inner(
     // parse results and the agent loop retries against the same bad context.
     if !response.status().is_success() {
         let status = response.status();
-        let retry_after = super::retry_after_header(response.headers());
+        let headers = response.headers().clone();
         let content_type = response_content_type(&response);
         let body = response.text().await.unwrap_or_default();
         crate::llm::agent_observe::persist_raw_provider_response(
@@ -589,10 +592,13 @@ async fn vm_call_llm_api_with_body_inner(
             content_type.as_deref(),
             &body,
         );
-        let msg = dialect
-            .classify_http_error(provider, status, retry_after.as_deref(), &body)
-            .message;
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
+        return Err(super::provider_http_error(
+            Some(dialect),
+            provider,
+            status,
+            &headers,
+            &body,
+        ));
     }
 
     let status = response.status();
