@@ -367,17 +367,13 @@ jobs:
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
               | sed -n '1p'
           } || true)"
-          required=false
-          development_version=""
-          if [[ -n "$latest_tag" && "$version" == "${latest_tag#v}" ]] \
-            && release_head_is_release_commit_for_version "$version"; then
-            development_version="$(release_next_patch_development "$version")"
-            required=true
-          fi
+          release_development_bump_plan "$version" "$latest_tag"
           {
-            echo "required=$required"
-            echo "version=$development_version"
+            echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"
+            echo "version=$RELEASE_DEVELOPMENT_BUMP_VERSION"
+            echo "reason=$RELEASE_DEVELOPMENT_BUMP_REASON"
           } >> "$GITHUB_OUTPUT"
+          echo "::notice::Post-release development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>}"
 
   open-development-bump:
     name: Open post-release development bump
