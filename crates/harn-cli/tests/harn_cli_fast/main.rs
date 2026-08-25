@@ -18,6 +18,7 @@
 #[path = "../test_util/mod.rs"]
 mod test_util;
 
+mod batch_download_cli;
 mod burin_mini_playground;
 mod bytecode_cache;
 mod check_cli;
