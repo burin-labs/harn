@@ -45,6 +45,7 @@ include!(env!("HARN_EMBEDDED_ASSET_WATCH_MODULE"));
 
 fn main() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    ensure_portal_fallback(manifest_dir);
     emit_watches(manifest_dir);
 }
 EOF
@@ -63,6 +64,22 @@ run_check() {
       --target-dir "$target_dir" \
       "$@" >"$log_path" 2>&1
 }
+
+# The fallback and Vite production build must expose the same stable entry
+# names. A ghost fallback file enters Cargo dep-info and then disappears when
+# Vite replaces the directory, forcing an avoidable freshness recovery build.
+rm -rf "$portal_root"
+run_check "$tmp_root/fallback.log" --quiet
+if [[ ! -f "$portal_root/index.html" \
+  || ! -f "$portal_root/assets/portal/app.js" \
+  || ! -f "$portal_root/assets/portal/styles.css" \
+  || -e "$portal_root/assets/portal/api.js" ]]; then
+  echo 'portal fallback entry points diverged from the production bundle' >&2
+  find "$portal_root" -type f -print >&2 || true
+  exit 1
+fi
+
+printf '%s\n' '// portal fixture' > "$portal_asset"
 
 assert_rebuilt_for() {
   local label=$1

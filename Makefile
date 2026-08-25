@@ -623,11 +623,13 @@ test-pr-gate-scripts:
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/harn_bin_recovery_batch_test.sh
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
+	./scripts/tests/sync_diagnostics_catalog_test.sh
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
@@ -981,8 +983,17 @@ check-docs-cookbook-entrypoints:
 # Run this whenever you add, rename, retire, or rewire a HARN-<CAT>-<NNN>
 # code or its repair template.
 sync-diagnostics-catalog:
-	$(HARN_CMD) explain --catalog --format markdown > docs/src/diagnostics.md
-	$(HARN_CMD) explain --catalog --format json > docs/diagnostics-catalog.json
+	@set -e; \
+	tmp_dir=$$(mktemp -d "$(CURDIR)/.diagnostics-catalog.XXXXXX"); \
+	tmp_md="$$tmp_dir/diagnostics.md"; \
+	tmp_json="$$tmp_dir/diagnostics-catalog.json"; \
+	trap 'rm -f "$$tmp_md" "$$tmp_json"; rmdir "$$tmp_dir" 2>/dev/null || true' EXIT; \
+	$(HARN_BIN_ASSIGN); \
+	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
+	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
+	mv "$$tmp_md" docs/src/diagnostics.md; \
+	mv "$$tmp_json" docs/diagnostics-catalog.json
 
 # CI guard: fail if docs/src/diagnostics.md or docs/diagnostics-catalog.json
 # drift from the in-binary registry. `make sync-diagnostics-catalog` fixes it.
@@ -992,8 +1003,10 @@ check-diagnostics-catalog:
 	tmp_md=$$(mktemp); \
 	tmp_json=$$(mktemp); \
 	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
-	$(HARN_CMD) explain --catalog --format markdown > "$$tmp_md"; \
-	$(HARN_CMD) explain --catalog --format json > "$$tmp_json"; \
+	$(HARN_BIN_ASSIGN); \
+	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	"$$harn_bin" explain --catalog --format markdown > "$$tmp_md"; \
+	"$$harn_bin" explain --catalog --format json > "$$tmp_json"; \
 	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \
 		echo "error: docs/src/diagnostics.md is stale relative to the diagnostic-code registry." >&2; \
 		echo "hint: run 'make sync-diagnostics-catalog' and commit the result." >&2; \

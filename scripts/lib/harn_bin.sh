@@ -503,11 +503,13 @@ harn_resolve_binary() (
   if [[ -x "$predicted_bin" ]] && \
      ! harn_require_binary_freshness_receipt "$predicted_bin" >/dev/null 2>&1; then
     # Never let a build-mode probe bless an unproven or externally changed
-    # artifact that Cargo's mtime fingerprint might otherwise call fresh. Read
-    # its authoritative dep-info while the helper is still runnable, then
-    # remove only the canonical build output so Cargo must relink it.
-    HARN_BUILD_FRESHNESS_ID="$(harn_build_freshness_id "$predicted_bin" 1)" || \
-      HARN_BUILD_FRESHNESS_ID="$(harn_build_freshness_id "$predicted_bin" 0)" || return $?
+    # artifact that Cargo's mtime fingerprint might otherwise call fresh. Use
+    # its authoritative dep-info while the helper is still runnable; if an
+    # input disappeared, the same probe returns the bootstrap identity that
+    # forces a relink. Do not recompute the whole worktree fingerprint merely
+    # to print an expected recovery diagnostic. Post-build and no-build proof
+    # remain strict and attributable.
+    HARN_BUILD_FRESHNESS_ID="$(harn_build_freshness_id "$predicted_bin" 0)" || return $?
     rm -f -- "$predicted_bin" "$predicted_checker" || return $?
   else
     HARN_BUILD_FRESHNESS_ID="$(harn_build_freshness_id "$predicted_bin" 0)" || return $?
