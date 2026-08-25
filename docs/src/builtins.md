@@ -1766,7 +1766,8 @@ deny), that disposition instead routes through the consent gate: an approval let
 the command run, a denial returns a `status: "consent_denied"` envelope without
 spawning. The consent closure receives the command context enriched with
 `consent.reason` and `consent.risk_labels` (the deterministic classification) and
-may call `request_approval` / `ask_user` to block on a human.
+may call `harness.interaction.request_approval` /
+`harness.interaction.ask_user` to block on a human.
 
 The never-approvable command floor runs before consent. It blocks fork bombs;
 `git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
@@ -1988,7 +1989,7 @@ event-log topics, bridge contract, and replay semantics.
 | `harness.interaction.request_approval(action, options?)` | action: string, options: `{detail?: any, args?: any, quorum?: int, reviewers?: list<string>, deadline?: duration, principal?: string, evidence_refs?: list<dict>, undo_metadata?: dict, capabilities_requested?: list<string>}` | `{approved, reviewers, approved_at, reason, signatures}` | Emit a durable approval request, wait for quorum, and return the approval record with signed reviewer timestamp receipts. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
-| `hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
+| `harness.interaction.hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
 
 ```harn
 // Queue specific responses for the mock provider

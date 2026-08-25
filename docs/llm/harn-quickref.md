@@ -3530,39 +3530,51 @@ const response = harness.net.request(
 
 ### Human-in-the-loop primitives
 
-`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
-**reserved keywords** — first-class typed expression syntax. The names
-cannot be shadowed; envelopes are signed by the VM; quorum requires
-distinct principals; replay is deterministic. Shared type aliases live
-in `std/hitl`.
+`harness.interaction.ask_user`, `.request_approval`, `.dual_control`,
+and `.escalate_to` are typed methods on the `interaction` capability.
+Envelopes are signed by the VM; quorum requires distinct principals;
+replay is deterministic. Shared type aliases live in `std/hitl`.
 
-Each primitive accepts named arguments (preferred) or the legacy
-positional form. Both lower to the same VM-enforced runtime.
+Arguments are **positional** — Harn has no keyword-argument call
+syntax. Optional settings go in a trailing options record. Writing
+`harness.interaction.ask_user(prompt: "x")` is a parse error, not an
+alternative form: `HARN-PAR-001: expected expression, found :`.
 
 ```harn,ignore
 const answer  = harness.interaction.ask_user(
-  prompt: "choose A or B", schema: schema_of(Choice),
+  "choose A or B",
+  {schema: schema_of(Choice)},
 )
 const record  = harness.interaction.request_approval(
-  action: "merge_pr", args: {pr: 123}, quorum: 2,
-  reviewers: ["alice", "bob", "carol"],
+  "merge_pr",
+  {
+    args: {pr: 123},
+    quorum: 2,
+    reviewers: ["alice", "bob", "carol"],
+  },
 )
 const result  = harness.interaction.dual_control(
-  n: 2, m: 3, action: destructive_step,
-                             approvers: ["alice", "bob", "carol"])
+  2, 3, destructive_step, ["alice", "bob", "carol"],
+)
 const handle  = harness.interaction.escalate_to(
-  role: "oncall", reason: "deploy failed",
+  "oncall",
+  "deploy failed",
 )
 ```
 
-- `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
-- `harness.interaction.request_approval(action, args?, detail?, quorum?, reviewers?, deadline?,
-  principal?, evidence_refs?, undo_metadata?, capabilities_requested?)
-  -> {approved, reviewers, approved_at, reason, signatures}`
-- `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
+- `harness.interaction.ask_user<T>(prompt,
+  options?: {schema?, timeout?, default?}) -> T`
+- `harness.interaction.request_approval(action, options?)` where
+  `options` is `{args?, detail?, quorum?, reviewers?, deadline?,
+  principal?, evidence_refs?, undo_metadata?,
+  capabilities_requested?}`
+  -> `{approved, reviewers, approved_at, reason, signatures}`
+- `harness.interaction.dual_control<T>(n, m, action: fn() -> T,
+  approvers?) -> T`
 - `harness.interaction.escalate_to(role, reason)
   -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
-- `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)
+- `harness.interaction.hitl_pending({since?, until?, kinds?, agent?,
+  limit?} | nil)
   -> list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>`
 
 Operational semantics:
