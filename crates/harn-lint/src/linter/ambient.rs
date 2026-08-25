@@ -6,7 +6,7 @@ use harn_parser::diagnostic::{
     harness_net_replacement, harness_random_replacement, harness_stdio_replacement,
     renamed_stdlib_symbol,
 };
-use harn_parser::{DiagnosticCode as Code, SNode, TypeExpr, TypedParam};
+use harn_parser::{DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
 use super::Linter;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -189,6 +189,30 @@ impl Linter<'_> {
         self.harness_param_stack
             .last()
             .and_then(|name| name.as_deref())
+    }
+
+    /// The capability segment of a `harness.<capability>` method receiver, so
+    /// `harness.interaction.request_approval(...)` yields `"interaction"`.
+    ///
+    /// The root is compared against the enclosing binding rather than the
+    /// literal name `harness`, because the parameter may be declared
+    /// `_harness`, and a local named `harness` that is not the host handle
+    /// must not be mistaken for one.
+    pub(super) fn harness_capability_of<'a>(&self, object: &'a SNode) -> Option<&'a str> {
+        let harness_name = self.harness_binding_name()?;
+        match &object.node {
+            Node::PropertyAccess {
+                object: root,
+                property,
+            }
+            | Node::OptionalPropertyAccess {
+                object: root,
+                property,
+            } if matches!(&root.node, Node::Identifier(name) if name == harness_name) => {
+                Some(property.as_str())
+            }
+            _ => None,
+        }
     }
 
     fn has_local_or_imported_name(&self, name: &str) -> bool {
