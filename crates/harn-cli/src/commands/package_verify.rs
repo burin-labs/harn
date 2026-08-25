@@ -641,6 +641,11 @@ fn validate_service_metadata(
         }
         return;
     };
+    if contract_version < 2 {
+        failures.push(format!(
+            "provider '{provider_id}' service metadata requires connector_contract.version = 2"
+        ));
+    }
     failures.extend(
         package::connector_service_issues(service)
             .into_iter()

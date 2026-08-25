@@ -391,6 +391,10 @@ policy, protected-profile disclosure, spend presentation, reconciliation, and
 redaction. Provider request and response schemas do not belong here; keep them
 inside the connector adapter.
 
+A provider that declares `[providers.service]` must set
+`connector_contract.version = 2`. `harn package verify` rejects service
+metadata under version 1 or an omitted version.
+
 ```toml
 [connector_contract]
 version = 2

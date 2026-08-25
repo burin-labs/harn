@@ -11,7 +11,35 @@ async fn connector_check_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 fn write_package(manifest_tail: &str, lib: &str) -> tempfile::TempDir {
+    write_package_with_service(manifest_tail, lib, false)
+}
+
+fn write_service_package(manifest_tail: &str, lib: &str) -> tempfile::TempDir {
+    write_package_with_service(manifest_tail, lib, true)
+}
+
+fn write_package_with_service(
+    manifest_tail: &str,
+    lib: &str,
+    with_service: bool,
+) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
+    let service = if with_service {
+        r#"
+[providers.service]
+name = "Echo"
+description = "Sends and receives deterministic test messages."
+
+[[providers.service.operations]]
+id = "messages.read"
+capability = "messages"
+purpose = "Read messages from Echo."
+effect = "read"
+environments = ["mock", "test", "live"]
+"#
+    } else {
+        ""
+    };
     fs::write(
         dir.path().join("harn.toml"),
         format!(
@@ -24,16 +52,7 @@ version = "0.1.0"
 id = "echo"
 connector = {{ harn = "./lib.harn" }}
 
-[providers.service]
-name = "Echo"
-description = "Sends and receives deterministic test messages."
-
-[[providers.service.operations]]
-id = "messages.read"
-capability = "messages"
-purpose = "Read messages from Echo."
-effect = "read"
-environments = ["mock", "test", "live"]
+{service}
 
 [providers.setup]
 auth_type = "api-key"
@@ -139,9 +158,32 @@ fn connector_contract_v2_requires_service_metadata() {
 }
 
 #[tokio::test]
+async fn connector_service_metadata_requires_contract_v2() {
+    let _guard = connector_check_test_guard().await;
+    let package = write_service_package(
+        "[connector_contract]\nversion = 1",
+        r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn methods() { return [{name: "messages.read"}] }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
+"#,
+    );
+
+    let error = check_connector_package(&check_args(package.path()))
+        .await
+        .expect_err("v2 service metadata must not pass under connector contract v1");
+    assert!(
+        error.contains("service metadata requires connector_contract.version = 2"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn connector_contract_v2_requires_manifest_and_runtime_method_parity() {
     let _guard = connector_check_test_guard().await;
-    let matching = write_package(
+    let matching = write_service_package(
         "[connector_contract]\nversion = 2",
         r#"
 pub fn provider_id() { return "echo" }
@@ -156,7 +198,7 @@ pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", stat
         .expect("matching contract-v2 method inventories should pass");
     assert_eq!(report.checked_connectors.len(), 1);
 
-    let drifted = write_package(
+    let drifted = write_service_package(
         "[connector_contract]\nversion = 2",
         r#"
 pub fn provider_id() { return "echo" }
