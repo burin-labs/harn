@@ -151,6 +151,19 @@ Behavior today:
 
 - stdio transport for local subprocess-style MCP clients
 - stable Streamable HTTP `POST` endpoint at `--path`
+- `tools/list` includes `outputSchema` from the resolved Harn return type.
+  Imported aliases, structs, enums, optional fields, lists, typed maps, unions,
+  and generic instantiations keep their structure. `inputSchema` continues to
+  project caller-owned parameters, inline records, and structural aliases.
+- `tools/call` returns object-shaped results in `structuredContent`. The value
+  satisfies the same `outputSchema` advertised by `tools/list`.
+- record and enum results are direct objects. Scalar, list, and nullable
+  top-level results use `{ "result": value }` because MCP structured content
+  and output schemas are object-valued contracts.
+- exported enum values use a discriminated object with `enum`, `variant`, and
+  positional `fields` keys. Each field schema has the declared parameter name
+  as its JSON Schema `title`. SDK generators don't need to parse enum display
+  text or Harn source.
 - TLS listener modes:
   `plain` for intentional HTTP,
   `edge` when public TLS is terminated by a proxy/load balancer,
@@ -168,6 +181,20 @@ Behavior today:
   API keys
   HMAC canonical-request signatures
   OAuth 2.1 claims injected by a hosting transport
+
+An exported enum result has this wire shape:
+
+```json
+{
+  "enum": "Outcome",
+  "variant": "Success",
+  "fields": [{ "message": "hello Ada", "tags": ["typed"] }]
+}
+```
+
+The corresponding `outputSchema` is a discriminated `oneOf`. Generic payloads
+are instantiated before projection, so `Outcome<Greeting>` contains the full
+`Greeting` field schema rather than an open object.
 
 ### Site
 

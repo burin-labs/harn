@@ -10,7 +10,7 @@ use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::event_log::{
     active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
-use harn_vm::llm::vm_value_to_json;
+use harn_vm::llm::vm_value_to_export_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
 use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm, VmValue};
@@ -624,7 +624,7 @@ impl DispatchCore {
                     let result = vm.call_closure_pub(closure, &args).await;
 
                     match result {
-                        Ok(value) => Ok((vm_value_to_json(&value), vm.output().to_string())),
+                        Ok(value) => Ok((vm_value_to_export_json(&value), vm.output().to_string())),
                         Err(error) => Err(classify_vm_error(error)),
                     }
                 })

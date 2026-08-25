@@ -694,7 +694,16 @@ impl McpServer {
         }
 
         let response = match result {
-            Ok(response) => harn_vm::jsonrpc::response(job.request_id, tool_call_success(response)),
+            Ok(response) => {
+                let output_schema = self
+                    .catalog
+                    .function(&response.function)
+                    .and_then(|function| function.output_schema.as_ref());
+                harn_vm::jsonrpc::response(
+                    job.request_id,
+                    tool_call_success(response, output_schema),
+                )
+            }
             Err(DispatchError::Validation(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
