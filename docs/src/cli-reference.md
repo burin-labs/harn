@@ -105,7 +105,7 @@ and sandbox roots still apply. Standalone mode does not load a surrounding
 `harn.toml`, project skills, project handlers, project state roots, or
 manifest-derived trusted-host authority. It conflicts with commands whose
 meaning requires project state, including `--eager-project-handlers`,
-`--resume`, and `--as-job`.
+`--project-triggers`, `--resume`, and `--as-job`.
 
 ### Environment policies and grants
 

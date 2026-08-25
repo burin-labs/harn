@@ -57,7 +57,6 @@ fn test_run_standalone_is_explicit_and_conflicts_with_project_handlers() {
             "run",
             "--standalone",
             "--eager-project-handlers",
-            "--project-triggers",
             "main.harn",
         ])
         .unwrap_err()
