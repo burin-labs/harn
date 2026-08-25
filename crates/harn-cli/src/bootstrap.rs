@@ -2,6 +2,7 @@ use std::{env, process};
 
 mod freshness_evidence;
 mod freshness_manifest;
+mod gate_receipt;
 
 const INTERNAL_EXECUTABLE_PATH_COMMAND: &str = "__internal-executable-path";
 
@@ -14,6 +15,9 @@ pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
 }
 
 fn handle_pre_runtime_command(raw_args: &[String]) -> bool {
+    if gate_receipt::handle(raw_args) {
+        return true;
+    }
     if freshness_evidence::handle(raw_args) {
         return true;
     }

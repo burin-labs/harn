@@ -46,6 +46,28 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Source gate receipts
+
+Run the combined conformance and audit gate from a clean commit:
+
+```bash
+HARN_EXT_GATE_PR_NUMBER=1234 ./scripts/audit_gates.sh
+```
+
+The command writes `.harn/receipts/source-gate.json` after every gate passes.
+Set `HARN_EXT_GATE_RECEIPT` to choose another path.
+`HARN_EXT_GATE_PR_NUMBER` is optional. When set, the gate checks that the
+remote PR head is the tested commit before it starts.
+
+The JSON receipt records the exact commit, binary path, build identity,
+runtime placement, worker counts, command, finish time, and result. The gate
+refuses a dirty tree, a changed PR head, or an explicit binary without source
+proof. An edit, amend, or rebase makes the old receipt invalid.
+
+Hosted CI uploads the same JSON shape as `harn-source-gate-audit` and
+`harn-source-gate-conformance` artifacts. Its downloaded binary is bound by
+the existing Rust artifact manifest before the gate runs.
+
 For a native nextest filter expression, use the shell-opaque focused target:
 
 ```bash
