@@ -103,6 +103,49 @@ pipeline test_advance_surface_reports_fence_lines_unscanned(harness: Harness, ta
   assert_eq(advance_surface(closed, "plain text").scan, "prose")
 }
 
+@test
+pipeline test_a_bare_backticked_name_in_a_table_row_is_not_a_call(harness: Harness, task) {
+  // `llm_call` is a removed builtin AND a live serialized name: the
+  // `AgentTraceEvent::LlmCall` variant and the `llm_call` tape-event
+  // kind. docs/src/dev/tape-format.md documents that row correctly.
+  // Flagging the bare spelling would order a factually wrong edit, so
+  // the call shape is the whole discriminator.
+  const row = "| `llm_call` | `request_digest`, `response` | interception |\n"
+  assert_eq(scan_mentions(row), [])
+}
+
+@test
+pipeline test_a_method_call_on_a_removed_name_is_not_a_call(harness: Harness, task) {
+  // docs/src/llm/agent_loop.md has `receipts.llm_call(record)` — a
+  // method on a user value that happens to share the name.
+  assert_eq(scan_mentions("`receipts.llm_call(record)` records it\n"), [])
+}
+
+@test
+pipeline test_a_longer_identifier_ending_in_a_removed_name_is_not_it(harness: Harness, task) {
+  // docs/src/cookbook.md defines `safe_llm_call(prompt, system)`.
+  const found = scan_mentions("`safe_llm_call(p, s)` wraps it\n")
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "safe_llm_call")
+}
+
+// --- the gate's own non-vacuity self-check ----------------------------------
+@test
+pipeline test_self_test_passes_when_the_scanner_works(harness: Harness, task) {
+  assert_eq(self_test_failures({llm_call: "harness.llm.call"}), [])
+}
+
+@test
+pipeline test_self_test_fails_when_nothing_is_found(harness: Harness, task) {
+  // The exact regression this guards: a probe that stopped parsing, or a
+  // scanner that stopped reading prose, answers "clean tree" for every
+  // page. The fixture has a known answer, so it cannot.
+  const failures = self_test_failures({})
+  assert_eq(failures.count, 1)
+  assert_eq(failures[0]?.contains("expected 1"), true)
+  assert_eq(failures[0]?.contains("never actually inspected"), true)
+}
+
 // --- line_call_targets ------------------------------------------------------
 @test
 pipeline test_line_call_targets_dedupes(harness: Harness, task) {

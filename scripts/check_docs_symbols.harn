@@ -38,6 +38,24 @@
 // would flag 57 non-issues. Treating a `harness.`-prefixed one as a
 // rename flags exactly the migration table.
 //
+// ONLY CALL SHAPES COUNT
+// ----------------------
+// A mention is read only when the identifier is immediately followed by
+// `(`. A bare backticked name is a name, and several removed builtins
+// are still live *as names*: `llm_call` is the `AgentTraceEvent::LlmCall`
+// serialization and the `llm_call` tape-event kind, which
+// `docs/src/dev/tape-format.md` documents correctly in a table row.
+// Flagging that row would order a factually wrong edit, so the call
+// shape is the discriminator rather than a list of exceptions — a list
+// would need maintaining every time a variant is added.
+//
+// The same rule covers two neighbours for free: `receipts.llm_call(x)`
+// is rejected because the character before the name is `.`, and
+// `safe_llm_call(p)` reads as `safe_llm_call` because the pattern takes
+// the whole identifier. The cost is that a genuinely stale bare mention
+// is not caught. That is the right side to err on: under-flagging leaves
+// a defect, over-flagging manufactures one.
+//
 // THE KEYWORD FILTER IS LOAD-BEARING
 // ----------------------------------
 // The probe is one file with one statement per candidate. Docs mention
@@ -420,6 +438,52 @@ pub fn is_generated(path: string, generated: list<string>) -> bool {
   return false
 }
 
+/**
+ * Failures from scanning a fixture whose answer is already known, so a
+ * run that reports nothing has to prove it looked.
+ *
+ * A gate whose whole job is catching a silent regression must not be
+ * able to regress silently itself, and the two ways this one can are
+ * opposite. Under-reading: one unfiltered reserved word turns the probe
+ * into a syntax error, name resolution never runs, and a broken checker
+ * reports a clean tree. Over-reading: `llm_call` is *also* a live
+ * serialized name — the `AgentTraceEvent::LlmCall` variant and the
+ * `llm_call` tape-event kind — so a checker keyed on the bare
+ * identifier rather than the call shape would demand a factually wrong
+ * edit to `docs/src/dev/tape-format.md`.
+ *
+ * The fixture names ORACLE_SENTINEL twice: once call-shaped, which must
+ * be reported, and once as a bare backticked name in a table cell,
+ * which must not. Both directions fail loudly.
+ */
+pub fn self_test_failures(removed: dict) -> list<string> {
+  const page = "# fixture\n\nCall `${ORACLE_SENTINEL}(req)` here.\n\n"
+    + "| `${ORACLE_SENTINEL}` | a tape event kind, not a call |\n"
+  let found: list = []
+  for mention in scan_mentions(page) {
+    if mention.symbol == ORACLE_SENTINEL && removed[mention.symbol] != nil {
+      found = found + [mention]
+    }
+  }
+  if found.count() != 1 {
+    return [
+      "self-test: a fixture that calls `${ORACLE_SENTINEL}(...)` once and "
+        + "names it once without a call produced ${found.count()} "
+        + "finding(s), expected 1. This run cannot report a clean tree "
+        + "it never actually inspected.",
+    ]
+  }
+  const line = found[0]?.line ?? 0
+  if line != 3 {
+    return [
+      "self-test: the one finding is on line ${line}, expected line 3 — "
+        + "the bare `${ORACLE_SENTINEL}` in the table row on line 5 is a "
+        + "serialized event name, not a call, and must not be flagged.",
+    ]
+  }
+  return []
+}
+
 /** `line` shortened to the failure quote budget. */
 pub fn quote(line: string) -> string {
   if line.len() <= MAX_QUOTE_COLUMNS {
@@ -522,6 +586,15 @@ pipeline main(harness: Harness, task) {
         + "crates/harn-parser/src/diagnostic/"
         + "harness_migrations_generated.rs.",
     )
+    return 1
+  }
+  // Prove the scanner still reads what it claims to before believing a
+  // clean verdict from it, in both directions.
+  const self_test = self_test_failures(removed)
+  if self_test.count() > 0 {
+    for problem in self_test {
+      harness.stdio.eprintln("error: ${problem}")
+    }
     return 1
   }
   // Pass 2: locate every mention of a symbol the compiler just told us
