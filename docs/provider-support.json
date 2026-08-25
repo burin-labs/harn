@@ -455,7 +455,7 @@
             "request_param": "speed",
             "request_value": "fast",
             "discount_percent": null,
-            "cost_multiplier": 2.0,
+            "cost_multiplier": 6.0,
             "status": "research_preview",
             "latency": "higher output-token throughput than standard Claude serving",
             "reliability": "research preview, account-manager gated",
@@ -463,7 +463,7 @@
             "unsuitable_workloads": [
               "batch"
             ],
-            "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache."
+            "note": "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate."
           }
         ],
         "usage_accounting_confidence": "high"

@@ -1903,8 +1903,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Retired 2026-01-05 per Anthropic deprecations page. Use claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2252,8 +2252,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Deprecated 2026-06-05 per Anthropic deprecations page; retires 2026-08-05. Use claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2366,8 +2366,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2480,7 +2480,7 @@
       },
       "deprecation": {
         "status": "active",
-        "superseded_by": "claude-opus-4-8"
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2589,9 +2589,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
-        "superseded_by": "claude-opus-4-8"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2712,9 +2711,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
-        "superseded_by": "claude-opus-4-8"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2865,8 +2863,7 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-5 (same $5/$25 pricing). No formal sunset yet; switch when convenient.",
+        "status": "active",
         "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
@@ -25979,6 +25976,89 @@
         "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.6",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.7",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.8",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
