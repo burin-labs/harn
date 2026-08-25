@@ -1069,6 +1069,8 @@ pub(crate) async fn run_as_job(args: &cli::RunArgs) {
     let job = job.to_string();
     let request = request.to_path_buf();
     let result_out = args.result_out.clone();
+    let tenant_id = args.tenant.clone();
+    let tenant_state_dir = args.tenant_state_dir.clone();
 
     // Pin the whole job run to the current thread: the trigger registry
     // and dispatcher state are thread-local, so the register → resolve →
@@ -1092,13 +1094,24 @@ pub(crate) async fn run_as_job(args: &cli::RunArgs) {
                             "failed to load job connectors: {error}"
                         ))
                     })?;
+            let tenant_scope = crate::worker_tenant::resolve_worker_tenant_scope(
+                &script_path,
+                tenant_id.as_deref(),
+                tenant_state_dir.as_deref(),
+            )
+            .map_err(harn_serve::DispatchError::Validation)?;
+            let mut options =
+                harn_serve::JobRunOptions::default().with_connector_registry(connector_registry);
+            if let Some(scope) = tenant_scope {
+                options = options.with_tenant_scope(scope);
+            }
             harn_serve::run_job_from_files_with_options(
                 &script_path,
                 &job,
                 &request,
                 result_out.as_deref(),
                 false,
-                harn_serve::JobRunOptions::default().with_connector_registry(connector_registry),
+                options,
             )
             .await
         })

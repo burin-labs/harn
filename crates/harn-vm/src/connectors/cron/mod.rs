@@ -19,6 +19,7 @@ use crate::triggers::{
     CronEventPayload, ProviderId, ProviderPayload, SignatureStatus, TriggerEvent,
     DEFAULT_INBOX_RETENTION_DAYS,
 };
+use crate::TenantId;
 
 use self::scheduler::{run_tick_loop, CronSchedule, ShutdownSignal, TickHandler};
 use self::state::{CronStateStore, PersistedCronState};
@@ -49,6 +50,7 @@ pub struct CronConnector {
     ctx: Mutex<Option<ConnectorCtx>>,
     clock: Arc<dyn Clock>,
     sink_override: Option<Arc<dyn CronEventSink>>,
+    tenant_id: Option<TenantId>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     shutdown: Mutex<Arc<ShutdownSignal>>,
 }
@@ -68,9 +70,18 @@ impl CronConnector {
             ctx: Mutex::new(None),
             clock,
             sink_override: None,
+            tenant_id: None,
             tasks: Mutex::new(Vec::new()),
             shutdown: Mutex::new(Arc::new(ShutdownSignal::default())),
         }
+    }
+
+    /// Build a cron connector whose durable state and emitted events belong
+    /// to one tenant.
+    pub fn for_tenant(tenant_id: TenantId) -> Self {
+        let mut connector = Self::new();
+        connector.tenant_id = Some(tenant_id);
+        connector
     }
 
     pub(crate) fn with_clock_and_sink(clock: Arc<dyn Clock>, sink: Arc<dyn CronEventSink>) -> Self {
@@ -154,13 +165,24 @@ impl Connector for CronConnector {
             .shutdown
             .lock()
             .expect("cron connector shutdown mutex poisoned") = shutdown.clone();
-        let state_store = Arc::new(CronStateStore::new(ctx.event_log.clone()));
-        let sink: Arc<dyn CronEventSink> = self.sink_override.clone().unwrap_or_else(|| {
-            Arc::new(EventLogCronEventSink::new(
-                ctx.event_log.clone(),
-                ctx.inbox.clone(),
-            ))
+        let state_store = Arc::new(match self.tenant_id.as_ref() {
+            Some(tenant_id) => CronStateStore::for_tenant(ctx.event_log.clone(), tenant_id)?,
+            None => CronStateStore::new(ctx.event_log.clone()),
         });
+        let sink: Arc<dyn CronEventSink> = match self.sink_override.clone() {
+            Some(sink) => sink,
+            None => match self.tenant_id.clone() {
+                Some(tenant_id) => Arc::new(EventLogCronEventSink::for_tenant(
+                    ctx.event_log.clone(),
+                    ctx.inbox.clone(),
+                    tenant_id,
+                )?),
+                None => Arc::new(EventLogCronEventSink::new(
+                    ctx.event_log.clone(),
+                    ctx.inbox.clone(),
+                )),
+            },
+        };
         {
             let mut tasks = self
                 .tasks
@@ -300,6 +322,7 @@ struct EventLogCronEventSink {
     event_log: Arc<AnyEventLog>,
     inbox: Arc<crate::triggers::InboxIndex>,
     topic: Topic,
+    tenant_id: Option<TenantId>,
 }
 
 impl EventLogCronEventSink {
@@ -308,7 +331,23 @@ impl EventLogCronEventSink {
             event_log,
             inbox,
             topic: Topic::new(CRON_TICK_TOPIC).expect("cron tick topic is valid"),
+            tenant_id: None,
         }
+    }
+
+    fn for_tenant(
+        event_log: Arc<AnyEventLog>,
+        inbox: Arc<crate::triggers::InboxIndex>,
+        tenant_id: TenantId,
+    ) -> Result<Self, ConnectorError> {
+        let topic = Topic::new(CRON_TICK_TOPIC).expect("cron tick topic is valid");
+        let topic = crate::tenant_topic(&tenant_id, &topic)?;
+        Ok(Self {
+            event_log,
+            inbox,
+            topic,
+            tenant_id: Some(tenant_id),
+        })
     }
 }
 
@@ -320,6 +359,9 @@ impl CronEventSink for EventLogCronEventSink {
         retention: StdDuration,
         mut event: TriggerEvent,
     ) -> Result<(), ConnectorError> {
+        if let Some(tenant_id) = self.tenant_id.as_ref() {
+            event.tenant_id = Some(tenant_id.clone());
+        }
         if !self
             .inbox
             .insert_if_new(binding_id, &event.dedupe_key, retention)

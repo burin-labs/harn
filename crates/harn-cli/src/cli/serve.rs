@@ -147,6 +147,12 @@ pub(crate) struct WorkerServeArgs {
     /// Maximum time to wait for in-flight dispatches during shutdown.
     #[arg(long = "drain-timeout-secs", default_value_t = 30)]
     pub drain_timeout_secs: u64,
+    /// Run every job under an active tenant from the local tenant registry.
+    #[arg(long = "tenant", value_name = "ID")]
+    pub tenant: Option<String>,
+    /// Orchestrator state directory that owns `--tenant`.
+    #[arg(long = "tenant-state-dir", value_name = "PATH", requires = "tenant")]
+    pub tenant_state_dir: Option<PathBuf>,
     /// Where to route `harness.obs.*` spans/metrics/logs.
     #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
     pub obs: ServeObsMode,

@@ -10,7 +10,7 @@ harn orchestrator serve --role multi-tenant --state-dir .harn/orchestrator
 Tenant records live under `<state-dir>/tenants/registry.json`. Each tenant gets:
 
 - a state root at `<state-dir>/tenants/<tenant-id>/`
-- a secret namespace named `harn.tenant.<tenant-id>`
+- a secret namespace rooted at `harn.tenant.<tenant-id>`
 - event-log topics prefixed with `tenant.<tenant-id>.`
 - an initial API key mapped to that tenant
 - optional daily/hourly budget metadata and an ingest rate limit
@@ -49,8 +49,10 @@ The runtime also exposes `TenantEventLog`, which transparently prefixes unscoped
 rejects attempts to append or read another tenant's `tenant.<id>.` topic.
 
 Signing secrets are loaded through a tenant-scoped provider in multi-tenant requests. A trigger that
-references `github/webhook-signing-secret` resolves that name inside `harn.tenant.<tenant-id>`; an
-explicit `harn.tenant.<other-id>/...` lookup is rejected.
+references `github/webhook-signing-secret` resolves it as
+`harn.tenant.<tenant-id>.github/webhook-signing-secret`. Keeping the source namespace prevents two
+connectors with the same secret name from colliding. An explicit
+`harn.tenant.<other-id>/...` lookup is rejected.
 
 ### What is not isolated
 

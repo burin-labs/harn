@@ -1,6 +1,6 @@
 use std::time::Duration as StdDuration;
 
-use harn_vm::{ConnectorRegistry, RetryPolicy, TriggerRetryConfig};
+use harn_vm::{ConnectorRegistry, RetryPolicy, TenantScope, TriggerRetryConfig};
 
 use super::{DEFAULT_CLAIM_TTL, DEFAULT_SHUTDOWN_DRAIN};
 
@@ -10,6 +10,8 @@ pub struct WorkerServeOptions {
     pub drain_timeout: StdDuration,
     /// Connector definitions resolved from the entry package by the host.
     pub connector_registry: Option<ConnectorRegistry>,
+    /// Tenant authority resolved by the host for every dispatch in this worker.
+    pub tenant_scope: Option<TenantScope>,
 }
 
 impl Default for WorkerServeOptions {
@@ -19,6 +21,7 @@ impl Default for WorkerServeOptions {
             claim_ttl: DEFAULT_CLAIM_TTL,
             drain_timeout: DEFAULT_SHUTDOWN_DRAIN,
             connector_registry: None,
+            tenant_scope: None,
         }
     }
 }
@@ -34,6 +37,8 @@ pub struct JobRunOptions {
     pub retry_override: Option<TriggerRetryConfig>,
     /// Connector definitions resolved from the entry package by the host.
     pub connector_registry: Option<ConnectorRegistry>,
+    /// Tenant authority resolved by the host for this dispatch.
+    pub tenant_scope: Option<TenantScope>,
 }
 
 impl JobRunOptions {
@@ -51,12 +56,19 @@ impl JobRunOptions {
                 RetryPolicy::Linear { delay_ms: 0 },
             )),
             connector_registry: None,
+            tenant_scope: None,
         }
     }
 
     /// Install connector definitions resolved from the entry package.
     pub fn with_connector_registry(mut self, registry: ConnectorRegistry) -> Self {
         self.connector_registry = Some(registry);
+        self
+    }
+
+    /// Run under a tenant scope already authenticated by the host.
+    pub fn with_tenant_scope(mut self, scope: TenantScope) -> Self {
+        self.tenant_scope = Some(scope);
         self
     }
 }

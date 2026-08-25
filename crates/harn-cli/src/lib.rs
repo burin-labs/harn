@@ -38,6 +38,7 @@ pub mod test_timing {
 #[doc(hidden)]
 pub mod tests;
 mod typecheck_imports;
+mod worker_tenant;
 pub use commands::dispatch_explain::DISPATCH_AUDIT_SCHEMA_VERSION;
 pub(crate) use compiler_context::{
     compiler_for_source, compiler_for_standalone_source, compiler_with_imported_enum_candidates,

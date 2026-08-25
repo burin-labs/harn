@@ -210,6 +210,13 @@ impl TenantStore {
         self.tenants.get(id)
     }
 
+    pub fn resolve_id(&self, id: &str) -> Result<TenantScope, TenantResolutionError> {
+        self.tenants
+            .get(id)
+            .ok_or(TenantResolutionError::Unknown)
+            .and_then(active_tenant_scope)
+    }
+
     pub fn suspend(&mut self, id: &str) -> Result<TenantRecord, String> {
         let record = self
             .tenants
@@ -249,15 +256,17 @@ impl TenantStore {
                     .into()
             });
             if matched {
-                return match record.status {
-                    TenantStatus::Active => Ok(record.scope.clone()),
-                    TenantStatus::Suspended => {
-                        Err(TenantResolutionError::Suspended(record.scope.id.clone()))
-                    }
-                };
+                return active_tenant_scope(record);
             }
         }
         Err(TenantResolutionError::Unknown)
+    }
+}
+
+fn active_tenant_scope(record: &TenantRecord) -> Result<TenantScope, TenantResolutionError> {
+    match record.status {
+        TenantStatus::Active => Ok(record.scope.clone()),
+        TenantStatus::Suspended => Err(TenantResolutionError::Suspended(record.scope.id.clone())),
     }
 }
 
@@ -368,18 +377,20 @@ impl TenantSecretProvider {
         Self { inner, scope }
     }
 
-    fn scoped_id(&self, id: &SecretId) -> Result<SecretId, SecretError> {
-        if id.namespace == self.scope.secret_namespace {
+    fn scoped_id(&self, operation: &str, id: &SecretId) -> Result<SecretId, SecretError> {
+        let own_prefix = format!("{}.", self.scope.secret_namespace);
+        if id.namespace == self.scope.secret_namespace || id.namespace.starts_with(&own_prefix) {
             return Ok(id.clone());
         }
         if id.namespace.starts_with(TENANT_SECRET_NAMESPACE_PREFIX) {
-            return Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
+            return Err(SecretError::AccessDenied {
+                operation: operation.to_string(),
                 id: id.clone(),
+                message: format!("namespace is outside tenant '{}'", self.scope.id.0),
             });
         }
         Ok(SecretId {
-            namespace: self.scope.secret_namespace.clone(),
+            namespace: format!("{}.{}", self.scope.secret_namespace, id.namespace),
             name: id.name.clone(),
             version: id.version.clone(),
         })
@@ -389,26 +400,26 @@ impl TenantSecretProvider {
 #[async_trait]
 impl SecretProvider for TenantSecretProvider {
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        self.inner.get(&self.scoped_id(id)?).await
+        self.inner.get(&self.scoped_id("read", id)?).await
     }
 
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-        self.inner.put(&self.scoped_id(id)?, value).await
+        self.inner.put(&self.scoped_id("write", id)?, value).await
     }
 
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        self.inner.rotate(&self.scoped_id(id)?).await
+        self.inner.rotate(&self.scoped_id("rotate", id)?).await
     }
 
     async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        self.inner.list(&self.scoped_id(prefix)?).await
+        self.inner.list(&self.scoped_id("list", prefix)?).await
     }
 
     async fn delete_scoped(&self, request: SecretDeleteRequest) -> Result<(), SecretError> {
         ensure_scoped_secret_access_allowed("delete", &request.id)?;
         self.inner
             .delete_scoped(SecretDeleteRequest {
-                id: self.scoped_id(&request.id)?,
+                id: self.scoped_id("delete", &request.id)?,
                 scope: request.scope,
                 audit: request.audit,
             })
@@ -587,12 +598,26 @@ mod tests {
             .await
             .unwrap();
 
-        let scoped_id = SecretId::new(scope.secret_namespace, "webhook");
+        let scoped_id = SecretId::new(format!("{}.github", scope.secret_namespace), "webhook");
         let value = inner.get(&scoped_id).await.unwrap();
         value.with_exposed(|bytes| assert_eq!(bytes, b"a-secret"));
 
-        let cross = SecretId::new("harn.tenant.tenant-b", "webhook");
-        assert!(provider.get(&cross).await.is_err());
+        provider
+            .put(
+                &SecretId::new("slack", "webhook"),
+                SecretBytes::from("slack-secret"),
+            )
+            .await
+            .unwrap();
+        let slack_id = SecretId::new(format!("{}.slack", scope.secret_namespace), "webhook");
+        let slack = inner.get(&slack_id).await.unwrap();
+        slack.with_exposed(|bytes| assert_eq!(bytes, b"slack-secret"));
+
+        let cross = SecretId::new("harn.tenant.tenant-b.github", "webhook");
+        assert!(matches!(
+            provider.get(&cross).await,
+            Err(SecretError::AccessDenied { operation, .. }) if operation == "read"
+        ));
     }
 
     #[test]

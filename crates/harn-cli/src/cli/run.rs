@@ -103,6 +103,12 @@ pub(crate) struct RunArgs {
     /// on stdout. Only meaningful with `--as-job`.
     #[arg(long = "result-out", value_name = "PATH", requires = "as_job")]
     pub result_out: Option<PathBuf>,
+    /// Run the `@job` with an active tenant from the local tenant registry.
+    #[arg(long = "tenant", value_name = "ID", requires = "as_job")]
+    pub tenant: Option<String>,
+    /// Orchestrator state directory that owns `--tenant`.
+    #[arg(long = "tenant-state-dir", value_name = "PATH", requires = "tenant")]
+    pub tenant_state_dir: Option<PathBuf>,
     /// Extra skill-discovery roots. Repeatable; each path is a
     /// directory of `<name>/SKILL.md` bundles, equivalent to a
     /// single-entry `$HARN_SKILLS_PATH`. Highest-priority layer —
