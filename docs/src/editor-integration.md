@@ -46,11 +46,11 @@ over stdin/stdout using the Language Server Protocol.
 | Feature | Description |
 |---------|-------------|
 | **Diagnostics** | Real-time parse errors, type errors (including cross-module undefined-call errors), lint warnings, and `@invariant(...)` violations. Shares the same module graph used by `harn check` and `harn run`, so `harn check --invariants` and editor squiggles stay aligned. |
-| **Completions** | Scope-aware: pipelines, functions, variables, parameters, enums, structs, interfaces. Dot-completions for methods plus inferred shape fields, struct members, and enum payload fields. Builtins and keywords. |
+| **Completions** | Scope-aware pipelines, functions, variables, parameters, enums, structs, and interfaces. Dot-completions include inferred shape fields, struct members, enum payload fields, `Harness` capabilities, and capability methods. Global builtins come from the same typed registry as `harn check`. |
 | **Go-to-definition** | Jump to the declaration of pipelines, functions, variables, enums, structs, and interfaces. Cross-file navigation walks the recursive module graph across relative paths and the leased package generation, so symbols reachable through any number of transitive imports resolve. |
 | **Find references** | Locate all usages of a symbol across the document |
 | **Call hierarchy** | Navigate incoming and outgoing calls for pipelines, functions, tools, and methods in open documents |
-| **Hover** | Shows type information and documentation for builtins |
+| **Hover** | Shows type information and documentation for global builtins and `Harness` capability methods |
 | **Signature help** | Parameter hints while typing function arguments |
 | **Document symbols** | Outline view of pipelines, functions, structs, enums |
 | **Workspace symbols** | Cross-file search for pipelines and functions |

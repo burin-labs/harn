@@ -316,22 +316,34 @@ fn read_to_string(path: string) -> string {
         // A member access must not consult the global builtin namespace: a
         // member that borrows a builtin's docs describes an API the receiver
         // does not have.
-        let source = "fn main(harness: Harness) {\n  harness.exit(2)\n}\n";
+        let source = "fn main(harness: Harness) {\n  harness.type_of(2)\n}\n";
 
-        // Column 11 is inside `exit`, after the dot.
+        // Column 11 is inside `type_of`, after the dot.
         assert!(
             hover_target_at(source, 1, 11).is_none(),
-            "hovering `.exit` must resolve to nothing: it is a member that does \
-             not exist, and the global `exit` builtin is not what it names"
+            "hovering `.type_of` must resolve to nothing: it is a member that does \
+             not exist, and the global `type_of` builtin is not what it names"
         );
 
         // The same word, named in its own right, is still the builtin. Suppressing
         // the member case must not cost the bare case.
-        let bare = "fn main(harness: Harness) {\n  exit(2)\n}\n";
+        let bare = "fn main(harness: Harness) {\n  type_of(2)\n}\n";
         assert!(
             matches!(hover_target_at(bare, 1, 3), Some(HoverTarget::Builtin(_))),
-            "a bare `exit` is the global builtin and must still hover"
+            "a bare `type_of` is the global builtin and must still hover"
         );
+    }
+
+    #[test]
+    fn hover_resolves_harness_capability_methods() {
+        let source = "fn main(harness: Harness) {\n  harness.llm.call(\"hello\")\n}\n";
+        match hover_target_at(source, 1, 15) {
+            Some(HoverTarget::Builtin(doc)) => {
+                assert!(doc.contains("call(prompt: string"), "{doc}");
+                assert!(doc.contains("model call"), "{doc}");
+            }
+            other => panic!("expected typed Harness method hover, got {other:?}"),
+        }
     }
 
     #[test]
@@ -339,10 +351,10 @@ fn read_to_string(path: string) -> string {
         // `..` is not a receiver. Reading `0..exit` as a member access would
         // suppress a genuine builtin, trading the old false positive for a new
         // false negative.
-        let source = "fn main(harness: Harness) {\n  const r = [0..exit]\n}\n";
+        let source = "fn main(harness: Harness) {\n  const r = [0..type_of]\n}\n";
         assert!(
             matches!(
-                hover_target_at(source, 1, 17),
+                hover_target_at(source, 1, 18),
                 Some(HoverTarget::Builtin(_))
             ),
             "a range bound must still resolve to the builtin"
