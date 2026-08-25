@@ -26,7 +26,7 @@ dedupe logic.
 
 The substrate is exposed as five Harn builtins.
 
-### `webhook_intake_register(config) -> dict`
+### `harness.runtime.webhook_intake_register(config) -> dict`
 
 Register an intake. Returns a snapshot dict
 (`{ id, path, topic, signature_header, signature_prefix,
@@ -36,7 +36,7 @@ dedupe_ttl_seconds }`). Config keys:
 | Key | Required | Default | Description |
 |---|:---:|---|---|
 | `id` | no | generated `intake_<uuid>` | Pin the intake id; needed for dedupe to survive process restart. |
-| `path` | no | none | HTTP path scope. When set, `webhook_intake_feed` rejects deliveries on a different path. |
+| `path` | no | none | HTTP path scope. When set, `harness.runtime.webhook_intake_feed` rejects deliveries on a different path. |
 | `secret` | yes | — | HMAC key. Accepts a string or a `bytes` value (e.g. from `harness.secrets.read`). |
 | `signature_header` | yes | — | Header name carrying the signature, e.g. `"x-hub-signature-256"`. |
 | `signature_prefix` | no | `"<algorithm>="` (e.g. `"sha256="`) | Prefix to strip before decoding. Pass `""` to opt out. |
@@ -47,7 +47,7 @@ dedupe_ttl_seconds }`). Config keys:
 | `topic` | yes | — | Event-log topic to append accepted deliveries onto. |
 | `dedupe_ttl_seconds` | no | 86400 (24h) | How long delivery ids stay claimed in the inbox. |
 
-### `webhook_intake_feed(intake_id, request) -> dict`
+### `harness.runtime.webhook_intake_feed(intake_id, request) -> dict`
 
 Feed a delivery through the substrate. `request` keys:
 
@@ -93,17 +93,17 @@ configured topic with payload:
 The published payload is **opaque** at this layer — connectors decode it
 into provider-specific shapes downstream.
 
-### `webhook_intake_recent(intake_id, limit?) -> list`
+### `harness.runtime.webhook_intake_recent(intake_id, limit?) -> list`
 
 Bounded replay buffer. Reads up to `limit` (default 32) accepted
 deliveries from the intake's topic. Useful for connector-side replay or
 debugging.
 
-### `webhook_intake_list() -> list`
+### `harness.runtime.webhook_intake_list() -> list`
 
 Snapshot of every currently-registered intake.
 
-### `webhook_intake_deregister(intake_id) -> bool`
+### `harness.runtime.webhook_intake_deregister(intake_id) -> bool`
 
 Remove an intake. The published deliveries on the topic remain.
 
@@ -112,7 +112,7 @@ Remove an intake. The published deliveries on the topic remain.
 ```harn,ignore
 import "std/triggers"
 
-const intake = webhook_intake_register({
+const intake = harness.runtime.webhook_intake_register({
   id: "github",
   path: "/hooks/github",
   secret: harness.secrets.read("github/webhook-secret"),
@@ -122,7 +122,7 @@ const intake = webhook_intake_register({
 })
 
 // In your inbound HTTP handler:
-const outcome = webhook_intake_feed(intake.id, {
+const outcome = harness.runtime.webhook_intake_feed(intake.id, {
   headers: request.headers,
   body: request.body,
   path: request.path,
@@ -146,12 +146,13 @@ return { status: 202 }
 
 ## Replay fixtures
 
-`webhook_intake_feed` does not require a live HTTP listener. To drive
+`harness.runtime.webhook_intake_feed` does not require a live HTTP listener.
+To drive
 the substrate from a recorded delivery in a test or replay job, build the
 request dict directly:
 
 ```harn,ignore
-const outcome = webhook_intake_feed("github", {
+const outcome = harness.runtime.webhook_intake_feed("github", {
   headers: load_json("fixtures/github_pr_opened_headers.json"),
   body: harness.fs.read_text("fixtures/github_pr_opened.body"),
 })

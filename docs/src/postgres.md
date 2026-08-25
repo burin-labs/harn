@@ -46,7 +46,7 @@ pipeline default(harness: Harness) {
 | `pg.jsonb.path(pool, document, jsonpath)` | `list<any>` | Run `jsonb_path_query($1::jsonb, $2::jsonpath)` with bound operands. |
 | `pg.jsonb.merge(pool, left, right)` | `any` | Run Postgres JSONB merge (`$1::jsonb \|\| $2::jsonb`). |
 | `pg.jsonb.contains(pool, left, right)` | `bool` | Run Postgres JSONB containment (`$1::jsonb @> $2::jsonb`). |
-| `pg_mock_pool(fixtures)` | `PgMockPool` | Create an in-process fixture-backed pool for tests. |
+| `harness.testing.pg_mock_pool(fixtures)` | `PgMockPool` | Create an in-process fixture-backed pool for tests. |
 | `pg_mock_calls(mock)` | `list<dict>` | Inspect SQL, params, and execute/query mode recorded by a mock pool. |
 
 `source` may be a raw Postgres URL, `env:VARIABLE_NAME`, `secret:namespace/name`,
@@ -211,24 +211,26 @@ Compared with direct `pg_query`, named query records make the SQL and params
 easy to inspect in tests while keeping execution explicit:
 
 ```harn,ignore
-const db = pg_mock_pool([
-  {
-    sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
-      + " = $1::uuid",
-    params: ["tenant-a"],
-    rows: [{id: "r1", payload: {ok: true}}],
-  },
-])
+fn mock_named_query_example(harness: Harness) {
+  const db = harness.testing.pg_mock_pool([
+    {
+      sql: "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
+        + " = $1::uuid",
+      params: ["tenant-a"],
+      rows: [{id: "r1", payload: {ok: true}}],
+    },
+  ])
 
-const rows = run(db, named(
-  "list_receipts",
-  "many",
-  "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
-    + " = $1::uuid",
-  ["tenant-a"],
-))
-assert_eq(rows[0].id, "r1")
-assert_eq(pg_mock_calls(db)[0].params[0], "tenant-a")
+  const rows = run(db, named(
+    "list_receipts",
+    "many",
+    "SELECT id::text AS id, payload FROM receipts WHERE tenant_id"
+      + " = $1::uuid",
+    ["tenant-a"],
+  ))
+  assert_eq(rows[0].id, "r1")
+  assert_eq(pg_mock_calls(db)[0].params[0], "tenant-a")
+}
 ```
 
 `one(handle, query)`, `many(handle, query)`, and `exec(handle, query)` force the
@@ -653,35 +655,37 @@ fall back to their textual representation.
 
 ## Mock fixtures
 
-Tests can avoid a live Postgres server with `pg_mock_pool`.
+Tests can avoid a live Postgres server with `harness.testing.pg_mock_pool`.
 
 ```harn
-const db = pg_mock_pool([
-  {
-    sql: "select id, payload from receipts where tenant_id = $1",
-    params: ["tenant-123"],
-    rows: [{id: "r1", payload: {ok: true}}],
-  },
-  {
-    sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
-    params: ["tenant-123", "receipt.read"],
-    rows_affected: 1,
-  },
-])
+fn mock_pool_example(harness: Harness) {
+  const db = harness.testing.pg_mock_pool([
+    {
+      sql: "select id, payload from receipts where tenant_id = $1",
+      params: ["tenant-123"],
+      rows: [{id: "r1", payload: {ok: true}}],
+    },
+    {
+      sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
+      params: ["tenant-123", "receipt.read"],
+      rows_affected: 1,
+    },
+  ])
 
-const rows = pg_query(
-  db, "select id, payload from receipts where tenant_id = $1", [
-    "tenant-123"
-  ],
-)
-assert_eq(rows[0].payload.ok, true)
+  const rows = pg_query(
+    db, "select id, payload from receipts where tenant_id = $1", [
+      "tenant-123"
+    ],
+  )
+  assert_eq(rows[0].payload.ok, true)
 
-const insert_audit = "insert into audit_records(tenant_id, action)"
-  + " values ($1, $2)"
-const result = pg_execute(db, insert_audit, [
-  "tenant-123",
-  "receipt.read",
-])
-assert_eq(result.rows_affected, 1)
-assert_eq(len(pg_mock_calls(db)), 2)
+  const insert_audit = "insert into audit_records(tenant_id, action)"
+    + " values ($1, $2)"
+  const result = pg_execute(db, insert_audit, [
+    "tenant-123",
+    "receipt.read",
+  ])
+  assert_eq(result.rows_affected, 1)
+  assert_eq(len(pg_mock_calls(db)), 2)
+}
 ```

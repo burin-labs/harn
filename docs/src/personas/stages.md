@@ -83,7 +83,7 @@ Persona load (`harn persona list`, `harn check`) rejects manifests where:
 ## Runtime semantics
 
 Stage policies are pushed onto the same `EXECUTION_POLICY_STACK` that
-`with_execution_policy(...)` uses. They intersect with whatever ambient
+`harness.runtime.with_execution_policy(...)` uses. They intersect with whatever ambient
 policy was already active — a stage can tighten the surface but never
 loosen it. When a step frame unwinds (success, error, or escape via
 `on_exit`), the runtime pops the stage policy, mirroring the existing

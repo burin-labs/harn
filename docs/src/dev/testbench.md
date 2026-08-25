@@ -355,7 +355,7 @@ when sidecar files are present next to the `.harn` test:
 | Sidecar | Effect |
 |---|---|
 | `<name>.process-tape.json` | Activates subprocess replay against the tape; a `cwd: null` entry acts as a wildcard for portable fixtures |
-| `<name>.fs-overlay/` (directory) | Mounts the directory as the overlay root for the run; `testbench_fs_diff()` returns the in-memory diff |
+| `<name>.fs-overlay/` (directory) | Mounts the directory as the overlay root for the run; `harness.testing.fs_diff()` returns the in-memory diff |
 | `<name>.testbench-tape` | Records a fresh unified tape during the run and compares `user_script` records byte-for-byte, with runtime-finalize records checked semantically |
 
 Any sidecar's presence also activates a paused clock pinned at
@@ -365,9 +365,9 @@ durations stay deterministic across runs.
 Two script-side builtins are wired for tests that need to introspect the
 testbench from inside a pipeline:
 
-- `testbench_is_active()` — `true` when a mock clock is currently
+- `harness.testing.is_active()` — `true` when a mock clock is currently
   installed.
-- `testbench_fs_diff()` — list of `{path, kind, content?}` dicts
+- `harness.testing.fs_diff()` — list of `{path, kind, content?}` dicts
   describing every overlay change made so far. Returns an empty list
   when no overlay is active.
 

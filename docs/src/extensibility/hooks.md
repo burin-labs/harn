@@ -49,11 +49,15 @@ transcript. The reminder spec uses the same keys as
 `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
 
 ```harn,ignore
-register_step_hook("merge_*", "audit", "PreStep", { _hook_harness, ctx ->
-  return {
-    reminder: {body: "Audit step is running", tags: ["audit"]},
-    then: {args: ctx.step.args},
-  }
+fn install_audit_hook(harness: Harness) {
+  harness.agent.register_step_hook(
+    "merge_*", "audit", "PreStep", { _hook_harness, ctx ->
+      return {
+        reminder: {body: "Audit step is running", tags: ["audit"]},
+        then: {args: ctx.step.args},
+      }
+    },
+  )
 }
 ```
 

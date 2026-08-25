@@ -305,7 +305,8 @@ still warming. Teardown cancels the stored background handle through
 
 ## Ladder Planning
 
-`verification_profile_matches(query, dir?)` returns every profile row that
+`harness.runtime.verification_profile_matches(query, dir?)` returns every
+profile row that
 matches `{repo?, path?, language?, task?}`, ordered by the same
 most-specific-wins selector semantics as `verification_profile_resolve`.
 Each result is `{row, specificity, index}` so scheduler code can rank rows
