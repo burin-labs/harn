@@ -343,7 +343,7 @@ harness.stdio.log(b) }"#,
 #[test]
 fn positive_assert_false_fallback_matches_native_truthiness() {
     let out = run_output(
-        r#"
+        r"
 fn direct_accepts(x: bool?) -> bool {
   return try {
     assert(x)
@@ -367,7 +367,7 @@ pipeline default(harness: Harness) {
     harness.stdio.log(direct_accepts(value) == coalesced_accepts(value))
   }
 }
-"#,
+",
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true");
 }
