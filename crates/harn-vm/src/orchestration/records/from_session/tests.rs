@@ -412,7 +412,8 @@ async fn tool_calls_join_their_updates_and_results_by_provider_call_id() {
     assert_eq!(look.tool_name, "look");
     assert_eq!(look.tool_use_id, "call_A");
     assert_eq!(
-        look.duration_ms, 5,
+        look.duration_ms,
+        Some(5),
         "duration comes from the terminal update, not the in_progress one"
     );
     assert!(look.result.contains("class CartTest"));
@@ -421,7 +422,7 @@ async fn tool_calls_join_their_updates_and_results_by_provider_call_id() {
 
     let edit = &run.tool_recordings[1];
     assert_eq!(edit.tool_name, "edit");
-    assert_eq!(edit.duration_ms, 12);
+    assert_eq!(edit.duration_ms, Some(12));
     assert_eq!(
         edit.iteration, 2,
         "a call is attributed to the iteration that was open when it was made"
@@ -460,9 +461,51 @@ async fn interleaved_tool_calls_do_not_cross_attribute_results() {
         .map(|record| (record.tool_use_id.as_str(), record))
         .collect();
     assert_eq!(by_id["call_first"].result, "first result");
-    assert_eq!(by_id["call_first"].duration_ms, 3);
+    assert_eq!(by_id["call_first"].duration_ms, Some(3));
     assert_eq!(by_id["call_second"].result, "second result");
-    assert_eq!(by_id["call_second"].duration_ms, 900);
+    assert_eq!(by_id["call_second"].duration_ms, Some(900));
+}
+
+#[tokio::test]
+async fn tool_duration_distinguishes_measured_zero_from_missing_timing() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let id = meta.id.clone();
+    for event in [
+        tool_call("call_measured_zero", "look"),
+        tool_update("call_measured_zero", "look", "completed", 0),
+        tool_result("call_measured_zero", "done"),
+        tool_call("call_without_timing", "look"),
+        AppendEvent::new(
+            custom("tool_call_update"),
+            transcript_event(
+                "tool_call_update",
+                json!({
+                    "status": "completed",
+                    "tool_call_id": "call_without_timing",
+                    "tool_name": "look",
+                }),
+            ),
+        ),
+        tool_result("call_without_timing", "done"),
+    ] {
+        store.append(&id, event).await.expect("append");
+    }
+
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project");
+    assert_eq!(run.tool_recordings[0].duration_ms, Some(0));
+    let record = &run.tool_recordings[1];
+    assert_eq!(record.duration_ms, None);
+    assert_eq!(
+        serde_json::to_value(record).expect("serialize record")["duration_ms"],
+        serde_json::Value::Null,
+        "an unavailable measurement must not be published as zero"
+    );
 }
 
 #[tokio::test]
@@ -536,6 +579,12 @@ async fn the_unrecoverable_field_list_matches_what_the_projector_actually_leaves
         ("transcript", run.transcript.is_none()),
         ("usage", run.usage.is_none()),
         ("tool_recordings", run.tool_recordings.is_empty()),
+        (
+            "tool_recordings[].duration_ms",
+            run.tool_recordings
+                .iter()
+                .all(|record| record.duration_ms.is_none()),
+        ),
         ("metadata", run.metadata.is_empty()),
     ]
     .into_iter()

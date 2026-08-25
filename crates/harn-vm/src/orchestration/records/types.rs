@@ -1068,7 +1068,10 @@ pub struct ToolCallRecord {
     pub args_hash: String,
     pub result: String,
     pub is_rejected: bool,
-    pub duration_ms: u64,
+    /// End-to-end tool latency when the terminal session event measured it.
+    /// `Some(0)` is a real sub-millisecond measurement; `None` means the
+    /// source record did not carry a measurement.
+    pub duration_ms: Option<u64>,
     pub iteration: usize,
     pub timestamp: String,
 }

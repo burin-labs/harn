@@ -1022,6 +1022,15 @@ pipeline main(harness: Harness, task: unknown) {{
                 && event.headers.get("turn_id") == Some(turn_id)
         }));
 
+        let projected = crate::orchestration::project_run_record_from_session(&store, session_id)
+            .await
+            .expect("project live session");
+        assert_eq!(projected.tool_recordings.len(), 1);
+        assert!(
+            projected.tool_recordings[0].duration_ms.is_some(),
+            "the live terminal tool update must retain its measured duration"
+        );
+
         crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();
     }

@@ -20,7 +20,7 @@ async fn report_retains_recorded_tool_evidence_without_a_sidecar() {
             args_hash: "sha256:args".to_string(),
             result: "offer off_test costs 275.94 USD".to_string(),
             is_rejected: false,
-            duration_ms: 9460,
+            duration_ms: Some(9460),
             iteration: 1,
             timestamp: "2026-08-12T01:42:15Z".to_string(),
         }],
@@ -46,7 +46,7 @@ async fn report_retains_recorded_tool_evidence_without_a_sidecar() {
         report.tool_calls[0].result,
         "offer off_test costs 275.94 USD"
     );
-    assert_eq!(report.tool_calls[0].duration_ms, 9460);
+    assert_eq!(report.tool_calls[0].duration_ms, Some(9460));
     assert_eq!(report.tool_calls[0].iteration, 1);
 
     let value = serde_json::to_value(&report).unwrap();
