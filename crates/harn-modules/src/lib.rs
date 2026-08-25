@@ -21,6 +21,7 @@ pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
 mod references;
+mod standalone;
 mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
@@ -36,6 +37,8 @@ pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
 };
 pub use references::{index_references, RefSite, ReferenceEdge, ReferenceIndex};
+pub use standalone::build_with_standalone_source;
+use standalone::PackageContext;
 pub use symbol_reachability::{
     closed_program_reachability, ExportDemand, ModuleSymbolDemand, SymbolReachability,
 };
@@ -76,16 +79,6 @@ pub struct ParsedModuleSource {
 pub struct ModuleGraphBuild {
     pub graph: ModuleGraph,
     pub parsed_sources: HashMap<PathBuf, ParsedModuleSource>,
-}
-
-/// Whether module resolution may consult package metadata discovered around
-/// the seed files. Standalone callers retain relative and standard-library
-/// imports while making package resolution independent of ambient projects.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PackageContext {
-    #[default]
-    Project,
-    Standalone,
 }
 
 #[derive(Debug, Default)]
@@ -239,20 +232,6 @@ pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
         ParsedSourceRetention::None,
         Some(&source_overrides),
         PackageContext::Project,
-    )
-    .graph
-}
-
-/// Build a module graph using caller-owned source without discovering package
-/// metadata around the entry file.
-pub fn build_with_standalone_source(file: &Path, source: &str) -> ModuleGraph {
-    let file = normalize_path(file);
-    let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
-    build_inner(
-        &[file],
-        ParsedSourceRetention::None,
-        Some(&source_overrides),
-        PackageContext::Standalone,
     )
     .graph
 }
