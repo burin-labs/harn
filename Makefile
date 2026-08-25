@@ -665,6 +665,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/connector_scaffold_strict_package_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
