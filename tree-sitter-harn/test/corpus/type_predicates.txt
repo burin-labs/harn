@@ -1,0 +1,47 @@
+==================
+Two-Sided Type Predicate
+==================
+
+fn is_text(value: unknown) -> value is string { return true }
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (type_predicate
+      parameter: (identifier)
+      type: (type_annotation
+        (identifier)))
+    body: (block
+      (return_statement
+        (true)))))
+
+==================
+One-Sided Type Predicate
+==================
+
+fn is_text(value: unknown) -> implies value is string { return true }
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (type_predicate
+      parameter: (identifier)
+      type: (type_annotation
+        (identifier)))
+    body: (block
+      (return_statement
+        (true)))))

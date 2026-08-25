@@ -9,79 +9,7 @@ impl TypeChecker {
                 type_ann,
                 value,
                 ..
-            } => {
-                let context_checked =
-                    self.check_node_with_expected(value, type_ann.as_ref(), scope);
-                let inferred = self.infer_type(value, scope);
-                if let BindingPattern::Identifier(name) = pattern {
-                    if let Some(expected) = type_ann {
-                        if !context_checked {
-                            if let Some(actual) = &inferred {
-                                if !self.types_compatible(expected, actual, scope) {
-                                    self.type_mismatch_at(
-                                        Code::VariableTypeMismatch,
-                                        format!("const binding `{name}`"),
-                                        expected,
-                                        actual,
-                                        value.span,
-                                        (
-                                            Some((span, "expected type declared here".to_string())),
-                                            Some(value.span),
-                                        ),
-                                        scope,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    // Collect inlay hint when type is inferred (no annotation)
-                    if type_ann.is_none() && !is_discard_name(name) {
-                        if let Some(ref ty) = inferred {
-                            if !is_obvious_type(value, ty) {
-                                self.hints.push(InlayHintInfo {
-                                    line: span.line,
-                                    column: span.column + "const ".len() + name.len(),
-                                    label: format!(": {}", format_type(ty)),
-                                });
-                            }
-                        }
-                    }
-                    let ty = type_ann.clone().or(inferred);
-                    if let Some(type_expr) = &ty {
-                        self.binding_types
-                            .push(super::super::super::BindingTypeInfo {
-                                name: name.clone(),
-                                span,
-                                type_expr: type_expr.clone(),
-                            });
-                    }
-                    scope.define_var(name, ty);
-                    if type_ann.is_some() {
-                        scope.mark_annotated(name);
-                    }
-                    scope.clear_nil_widenable(name);
-                    scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
-                    // Strict types: mark variables assigned from boundary APIs
-                    if self.strict_types {
-                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
-                            if !has_concrete_ann {
-                                scope.mark_untyped_source(name, &boundary);
-                            }
-                        }
-                    }
-                    // Fold when the initializer is in the pure const-eval subset
-                    // (registered for later const initializers in this module).
-                    // An impure initializer is simply not folded — not an error.
-                    if let Ok(folded) = crate::const_eval::const_eval(value, &self.const_env) {
-                        self.const_env.insert(name.clone(), folded);
-                    }
-                } else {
-                    self.check_pattern_defaults(pattern, scope);
-                    self.define_pattern_vars_typed(pattern, &inferred, scope, false);
-                }
-            }
+            } => self.check_const_binding(pattern, type_ann, value, span, scope),
 
             Node::LetBinding {
                 pattern,
@@ -166,6 +94,7 @@ impl TypeChecker {
                 type_params,
                 params,
                 return_type,
+                type_predicate,
                 throws,
                 where_clauses,
                 body,
@@ -178,6 +107,7 @@ impl TypeChecker {
                 let sig = Self::fn_signature_from_parts(
                     params,
                     callable_return_type,
+                    type_predicate.clone(),
                     Some(span),
                     type_params,
                     where_clauses,
@@ -185,14 +115,24 @@ impl TypeChecker {
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
-                self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
-                self.check_fn_body(
+                self.check_fn_decl_variance(
                     type_params,
                     params,
-                    return_type,
+                    return_type.as_ref(),
+                    type_predicate.as_ref(),
+                    name,
+                    span,
+                );
+                self.check_fn_body(
+                    CallableBodyContract {
+                        type_params,
+                        params,
+                        return_type,
+                        type_predicate: type_predicate.as_ref(),
+                        where_clauses,
+                        is_stream: *is_stream,
+                    },
                     body,
-                    where_clauses,
-                    *is_stream,
                     CallableDeclarationContext { span, scope },
                 );
                 if let Some(declared) = throws {

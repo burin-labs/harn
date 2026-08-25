@@ -520,6 +520,7 @@ fn typecheck_package_module(
                     member_types: std::collections::BTreeMap::new(),
                     member_param_names: std::collections::BTreeMap::new(),
                     member_required_params: std::collections::BTreeMap::new(),
+                    member_type_predicates: std::collections::BTreeMap::new(),
                 },
             ));
             continue;

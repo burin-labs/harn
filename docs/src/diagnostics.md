@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 28 |
+| [`TYP`](#typ--type-checker) | Type checker | 29 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 8 |
@@ -91,6 +91,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-026`](#harn-typ-026) | thrown value type is not covered by the callable's declared throws set | — | — |
 | [`HARN-TYP-027`](#harn-typ-027) | constant tuple index is outside the fixed arity | — | — |
 | [`HARN-TYP-028`](#harn-typ-028) | declared parameter has no type annotation | `types/annotate-parameter` | `surface-changing` |
+| [`HARN-TYP-029`](#harn-typ-029) | type predicate contract is invalid | — | — |
 
 ## PAR — Parser / lexer
 
@@ -766,6 +767,46 @@ genuine dynamic boundary, then narrow or validate it before use.
 how the body uses it and from the arguments at every call site in the module
 graph, writes the annotation, and reports how many parameters it could not
 prove anything about. Those fall back to `unknown` for a human to refine.
+
+### `HARN-TYP-029`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+type predicate contract is invalid
+
+A type predicate tells callers how a boolean result narrows one argument. Harn
+checks the function body before trusting that claim.
+
+This error means the declaration does not prove its contract. Common causes
+include:
+
+- The predicate names a missing, untyped, or rest parameter.
+- The narrower type is not a subtype of the parameter type.
+- The body does not end with one return condition.
+- The true branch does not prove the narrower type.
+- A two-sided predicate claims too much about the false branch.
+- The predicate targets a generic type parameter.
+
+#### Fix it
+
+Use a two-sided predicate when true and false both give exact type facts:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+```
+
+Add `implies` when only a true result proves the type:
+
+```harn
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+```
+
+A false result in the second example may still mean an empty string, so Harn
+does not narrow the false branch.
 
 ### `HARN-PAR-001`
 

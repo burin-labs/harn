@@ -178,6 +178,9 @@ pub(super) struct TypeScope {
     /// contain `.`). Optional (`?.`) and plain (`.`) links collapse to the
     /// same key — the runtime guard inspects the same value either way.
     pub(super) narrowed_paths: ScopeMap<PathNarrowing>,
+    /// Immutable expression aliases used by flow analysis. `None` shadows a
+    /// same-named alias from an outer scope.
+    pub(super) flow_aliases: ScopeMap<Option<SNode>>,
     /// Mutable vars declared as unannotated `let x = nil`. A local `false`
     /// entry shadows a parent widenable marker after a new declaration or
     /// after the first successful widening assignment.
@@ -241,6 +244,8 @@ pub(super) struct FnSignature {
     pub(super) where_clauses: Vec<(String, TypeExpr)>,
     /// True if the last parameter is a rest parameter.
     pub(super) has_rest: bool,
+    /// Caller-side narrowing contract declared by the function.
+    pub(super) type_predicate: Option<TypePredicate>,
 }
 
 impl TypeScope {
@@ -258,6 +263,7 @@ impl TypeScope {
             mutable_vars: ScopeSet::new(),
             narrowed_vars: ScopeMap::new(),
             narrowed_paths: ScopeMap::new(),
+            flow_aliases: ScopeMap::new(),
             nil_widenable_vars: ScopeMap::new(),
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
@@ -375,6 +381,7 @@ impl TypeScope {
             mutable_vars: ScopeSet::new(),
             narrowed_vars: ScopeMap::new(),
             narrowed_paths: ScopeMap::new(),
+            flow_aliases: ScopeMap::new(),
             nil_widenable_vars: ScopeMap::new(),
             schema_bindings: ScopeMap::new(),
             untyped_sources: ScopeMap::new(),
@@ -389,6 +396,38 @@ impl TypeScope {
         self.vars
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_var(name))
+    }
+
+    pub(super) fn define_flow_alias(&mut self, name: &str, expression: SNode) {
+        let is_flow_expression = matches!(
+            &expression.node,
+            Node::Identifier(_)
+                | Node::BoolLiteral(_)
+                | Node::NilLiteral
+                | Node::IntLiteral(_)
+                | Node::FloatLiteral(_)
+                | Node::StringLiteral(_)
+                | Node::RawStringLiteral(_)
+                | Node::BinaryOp { .. }
+                | Node::UnaryOp { .. }
+                | Node::FunctionCall { .. }
+                | Node::MethodCall { .. }
+                | Node::PropertyAccess { .. }
+                | Node::OptionalPropertyAccess { .. }
+                | Node::SubscriptAccess { .. }
+                | Node::OptionalSubscriptAccess { .. }
+        );
+        if !is_discard_name(name) && is_flow_expression {
+            self.flow_aliases.insert(name.to_string(), Some(expression));
+        }
+    }
+
+    pub(super) fn get_flow_alias(&self, name: &str) -> Option<&SNode> {
+        match self.flow_aliases.get(name) {
+            Some(Some(expression)) => Some(expression),
+            Some(None) => None,
+            None => self.parent.as_ref()?.get_flow_alias(name),
+        }
     }
 
     /// Record that a concrete `type_of` variant has been ruled out for
@@ -635,6 +674,7 @@ impl TypeScope {
             return;
         }
         self.vars.insert(name.to_string(), ty);
+        self.flow_aliases.insert(name.to_string(), None);
     }
 
     /// Bind `_` as the contextual value inside a pipe expression. Ordinary
@@ -718,6 +758,7 @@ impl TypeScope {
             return;
         }
         self.vars.insert(name.to_string(), ty);
+        self.flow_aliases.insert(name.to_string(), None);
         self.mutable_vars.insert(name.to_string());
     }
 
@@ -912,6 +953,25 @@ impl Refinements {
             truthy_ruled_out: self.falsy_ruled_out,
             falsy_ruled_out: self.truthy_ruled_out,
         }
+    }
+
+    /// Remove facts whose source can change after a `const` alias captured
+    /// it. Direct conditions do not call this filter: they observe the
+    /// mutable value at the branch itself and reassignment already clears the
+    /// resulting narrowing.
+    pub(super) fn retain_stable(mut self, scope: &TypeScope) -> Self {
+        fn stable(key: &str, scope: &TypeScope) -> bool {
+            let root = key.split(['.', '[']).next().unwrap_or(key);
+            !scope.is_mutable(root)
+        }
+        self.truthy.retain(|(name, _)| stable(name, scope));
+        self.falsy.retain(|(name, _)| stable(name, scope));
+        self.truthy_paths.retain(|(key, _)| stable(key, scope));
+        self.falsy_paths.retain(|(key, _)| stable(key, scope));
+        self.truthy_ruled_out
+            .retain(|(name, _)| stable(name, scope));
+        self.falsy_ruled_out.retain(|(name, _)| stable(name, scope));
+        self
     }
 
     /// Apply the truthy-branch narrowings and ruled-out additions to `scope`.

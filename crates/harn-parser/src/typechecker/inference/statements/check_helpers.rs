@@ -1,6 +1,79 @@
 use super::*;
 
 impl TypeChecker {
+    pub(super) fn check_const_binding(
+        &mut self,
+        pattern: &BindingPattern,
+        type_ann: &Option<TypeExpr>,
+        value: &SNode,
+        span: Span,
+        scope: &mut TypeScope,
+    ) {
+        let context_checked = self.check_node_with_expected(value, type_ann.as_ref(), scope);
+        let inferred = self.infer_type(value, scope);
+        let BindingPattern::Identifier(name) = pattern else {
+            self.check_pattern_defaults(pattern, scope);
+            self.define_pattern_vars_typed(pattern, &inferred, scope, false);
+            return;
+        };
+        if let (Some(expected), false, Some(actual)) =
+            (type_ann, context_checked, inferred.as_ref())
+        {
+            if !self.types_compatible(expected, actual, scope) {
+                self.type_mismatch_at(
+                    Code::VariableTypeMismatch,
+                    format!("const binding `{name}`"),
+                    expected,
+                    actual,
+                    value.span,
+                    (
+                        Some((span, "expected type declared here".to_string())),
+                        Some(value.span),
+                    ),
+                    scope,
+                );
+            }
+        }
+        if type_ann.is_none() && !is_discard_name(name) {
+            if let Some(ref ty) = inferred {
+                if !is_obvious_type(value, ty) {
+                    self.hints.push(InlayHintInfo {
+                        line: span.line,
+                        column: span.column + "const ".len() + name.len(),
+                        label: format!(": {}", format_type(ty)),
+                    });
+                }
+            }
+        }
+        let ty = type_ann.clone().or(inferred);
+        if let Some(type_expr) = &ty {
+            self.binding_types
+                .push(super::super::super::BindingTypeInfo {
+                    name: name.clone(),
+                    span,
+                    type_expr: type_expr.clone(),
+                });
+        }
+        scope.define_var(name, ty);
+        scope.define_flow_alias(name, value.clone());
+        if type_ann.is_some() {
+            scope.mark_annotated(name);
+        }
+        scope.clear_nil_widenable(name);
+        scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
+        if self.strict_types {
+            if let Some(boundary) = Self::detect_boundary_source(value, scope) {
+                let has_concrete_ann = type_ann.as_ref().is_some_and(Self::is_concrete_type);
+                if !has_concrete_ann {
+                    scope.mark_untyped_source(name, &boundary);
+                }
+            }
+        }
+        if let Ok(folded) = crate::const_eval::const_eval(value, &self.const_env) {
+            self.const_env.insert(name.clone(), folded);
+        }
+    }
+
     /// Walk a property/subscript assignment target to its root identifier.
     pub(super) fn assignment_root_identifier(target: &SNode) -> Option<&str> {
         match &target.node {

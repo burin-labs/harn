@@ -1,0 +1,3 @@
+fn is_nonempty_text(value: string | int) -> value is string {
+  return type_of(value) == "string" && len(value) > 0
+}

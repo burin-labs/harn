@@ -79,6 +79,7 @@ fn canonicalize_top_level(snode: &SNode) -> Option<String> {
             type_params,
             params,
             return_type,
+            type_predicate,
             where_clauses,
             is_pub,
             is_stream,
@@ -89,7 +90,7 @@ fn canonicalize_top_level(snode: &SNode) -> Option<String> {
                 stream = if *is_stream { "*" } else { "" },
                 generics = format_type_params(type_params),
                 params = format_typed_params(params),
-                ret = format_return(return_type),
+                ret = format_return_contract(return_type, type_predicate.as_ref()),
                 wheres = format_where_clauses(where_clauses),
             )
         }),
@@ -246,6 +247,21 @@ fn format_return(ret: &Option<TypeExpr>) -> String {
     match ret {
         Some(ty) => format!("->{}", format_type_expr(ty)),
         None => String::new(),
+    }
+}
+
+fn format_return_contract(
+    ret: &Option<TypeExpr>,
+    predicate: Option<&harn_parser::TypePredicate>,
+) -> String {
+    match predicate {
+        Some(predicate) => format!(
+            "->{}{} is {}",
+            if predicate.one_sided { "implies " } else { "" },
+            predicate.parameter,
+            format_type_expr(&predicate.type_expr)
+        ),
+        None => format_return(ret),
     }
 }
 
@@ -424,6 +440,14 @@ mod tests {
     fn changing_public_return_type_flips_fingerprint() {
         let before = fp("pub fn make() -> string { \"x\" }\n");
         let after = fp("pub fn make() -> int { 1 }\n");
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn changing_public_type_predicate_flips_fingerprint() {
+        let before = fp("pub fn check(value: string | int) -> value is string { return true }\n");
+        let after =
+            fp("pub fn check(value: string | int) -> implies value is string { return true }\n");
         assert_ne!(before, after);
     }
 

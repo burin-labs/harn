@@ -1,14 +1,8 @@
 //! Flow-sensitive narrowing: refinement extraction and exhaustiveness checks.
 //!
-//! `extract_refinements` is the dispatch entry — given a condition AST node
-//! it yields a `Refinements` describing the narrowings to apply on the
-//! truthy and falsy branches. The supporting `extract_*_refinements`
-//! helpers cover the specific patterns the type checker recognises:
-//! `x != nil`, `type_of(x) == "T"`, `x.has("k")`, `schema_is(x, S)`, and
-//! their negations.
-//!
-//! Match exhaustiveness and the `unknown`-variant fallback check live here
-//! too, sharing the same flow facts that refinement extraction populates.
+//! `extract_refinements` turns a condition into truthy and falsy facts for
+//! nil, runtime type, field-presence, and schema checks. Match exhaustiveness
+//! and the `unknown` fallback share those facts here.
 
 use crate::ast::*;
 use crate::diagnostic_codes::Code;
@@ -19,7 +13,7 @@ use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{PathNarrowing, Refinements, TypeScope};
 use super::super::union::{
     discriminant_field, extract_type_of_arg, intersect_types, narrow_shape_union_by_tag,
-    narrow_to_single, reference_path_key, remove_from_union, subtract_type, DiscriminantValue,
+    narrow_to_single, reference_path_key, remove_from_union, DiscriminantValue,
 };
 use super::super::TypeChecker;
 
@@ -550,19 +544,47 @@ impl TypeChecker {
         condition: &SNode,
         scope: &TypeScope,
     ) -> Refinements {
+        if let Node::Identifier(name) = &condition.node {
+            let is_bool = scope
+                .get_var(name)
+                .and_then(Option::as_ref)
+                .is_some_and(|ty| {
+                    matches!(self.resolve_alias(ty, scope), TypeExpr::Named(kind) if kind == "bool")
+                });
+            if is_bool {
+                if let Some(alias) = scope.get_flow_alias(name) {
+                    return self.extract_refinements(alias, scope).retain_stable(scope);
+                }
+            }
+        }
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
-                let nil_ref = self.extract_nil_refinements(op, left, right, scope);
+                let (left, left_aliased) = self.resolve_typeof_alias_node(left, scope);
+                let (right, right_aliased) = self.resolve_typeof_alias_node(right, scope);
+                let aliased = left_aliased || right_aliased;
+                let nil_ref = self.extract_nil_refinements(op, &left, &right, scope);
                 if !nil_ref.is_empty() {
-                    return nil_ref;
+                    return if aliased {
+                        nil_ref.retain_stable(scope)
+                    } else {
+                        nil_ref
+                    };
                 }
-                let typeof_ref = self.extract_typeof_refinements(op, left, right, scope);
+                let typeof_ref = self.extract_typeof_refinements(op, &left, &right, scope);
                 if !typeof_ref.is_empty() {
-                    return typeof_ref;
+                    return if aliased {
+                        typeof_ref.retain_stable(scope)
+                    } else {
+                        typeof_ref
+                    };
                 }
-                let tag_ref = self.extract_discriminator_refinements(op, left, right, scope);
+                let tag_ref = self.extract_discriminator_refinements(op, &left, &right, scope);
                 if !tag_ref.is_empty() {
-                    return tag_ref;
+                    return if aliased {
+                        tag_ref.retain_stable(scope)
+                    } else {
+                        tag_ref
+                    };
                 }
                 Refinements::empty()
             }
@@ -667,6 +689,14 @@ impl TypeChecker {
                 object,
                 method,
                 args,
+            } if matches!(&object.node, Node::Identifier(alias) if self.namespace_imports.contains_key(alias)) => {
+                self.extract_namespace_predicate_refinements(object, method, args, scope)
+            }
+
+            Node::MethodCall {
+                object,
+                method,
+                args,
             } if method == "has" && args.len() == 1 => {
                 self.extract_has_refinements(object, args, scope)
             }
@@ -676,6 +706,13 @@ impl TypeChecker {
             {
                 self.extract_schema_refinements(args, scope)
             }
+
+            Node::FunctionCall {
+                name,
+                args,
+                type_args,
+                ..
+            } => self.extract_declared_predicate_refinements(name, args, type_args, scope),
 
             _ => Refinements::empty(),
         }
@@ -1040,39 +1077,6 @@ impl TypeChecker {
             )]);
             return Refinements {
                 truthy_paths: vec![(path_key, PathNarrowing::Intersect(schema))],
-                ..Refinements::default()
-            };
-        }
-        Refinements::empty()
-    }
-
-    /// Extract `schema_is(x, S)` / `is_type(x, S)` refinements for a bare
-    /// variable (resolved intersect/subtract) or a reference path (deferred
-    /// `Intersect`/`Subtract` directives re-applied to the path's type).
-    fn extract_schema_refinements(&self, args: &[SNode], scope: &TypeScope) -> Refinements {
-        let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) else {
-            return Refinements::empty();
-        };
-        if let Node::Identifier(var_name) = &args[0].node {
-            let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
-                return Refinements::empty();
-            };
-            let truthy = intersect_types(&var_type, &schema_type)
-                .map(|ty| vec![(var_name.clone(), Some(ty))])
-                .unwrap_or_default();
-            let falsy = subtract_type(&var_type, &schema_type)
-                .map(|ty| vec![(var_name.clone(), Some(ty))])
-                .unwrap_or_default();
-            return Refinements {
-                truthy,
-                falsy,
-                ..Refinements::default()
-            };
-        }
-        if let Some(key) = reference_path_key(&args[0]) {
-            return Refinements {
-                truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(schema_type.clone()))],
-                falsy_paths: vec![(key, PathNarrowing::Subtract(schema_type))],
                 ..Refinements::default()
             };
         }

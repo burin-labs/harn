@@ -197,6 +197,7 @@ diagnostic_codes! {
     ThrowsTypeMismatch, "HARN-TYP-026", Typ, "thrown value type is not covered by the callable's declared throws set";
     TupleIndexOutOfBounds, "HARN-TYP-027", Typ, "constant tuple index is outside the fixed arity";
     ImplicitAnyParameter, "HARN-TYP-028", Typ, "declared parameter has no type annotation";
+    InvalidTypePredicate, "HARN-TYP-029", Typ, "type predicate contract is invalid";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";

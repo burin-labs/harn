@@ -305,6 +305,17 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/lexical-block/tape.jsonl"),
     },
     Scenario {
+        id: "flow-predicates",
+        title: "checked predicates keep narrowing facts reusable",
+        description: "Name a `type_of` check with immutable aliases, then move the same check \
+                      behind validated two-sided (`value is T`) and one-sided \
+                      (`implies value is T`) predicate helpers. The checker preserves useful \
+                      facts without trusting mutable or unproved claims. Fully offline — no \
+                      LLM, network, or subprocess.",
+        script: include_str!("../../assets/demo/flow-predicates/scenario.harn"),
+        tape: include_str!("../../assets/demo/flow-predicates/tape.jsonl"),
+    },
+    Scenario {
         id: "pub-type-exports",
         title: "`pub type` shares one alias across modules, annotations, and output",
         description: "Export a type alias from one module and consume it from another: the \

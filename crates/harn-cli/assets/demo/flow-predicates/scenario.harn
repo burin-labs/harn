@@ -1,0 +1,39 @@
+/**
+ * Immutable aliases keep flow facts, and checked predicate helpers carry the
+ * same facts across function calls.
+ */
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+
+fn describe(value: string | int) -> string {
+  const kind = type_of(value)
+  const text = kind == "string"
+  if text {
+    return value.upper()
+  }
+  return to_string(value + 1)
+}
+
+fn normalize(value: string | int) -> string {
+  if is_text(value) {
+    return value.upper()
+  }
+  return to_string(value)
+}
+
+pipeline default(harness: Harness) {
+  const receipt = {
+    kind: "flow_predicates_receipt",
+    alias_text: describe("ready"),
+    alias_number: describe(4),
+    predicate_text: normalize("checked"),
+    predicate_number: normalize(7),
+    empty_is_nonempty: is_nonempty_text(""),
+  }
+  harness.stdio.println(json_stringify(receipt))
+}

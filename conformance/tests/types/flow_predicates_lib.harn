@@ -1,0 +1,7 @@
+pub fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+
+pub fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}

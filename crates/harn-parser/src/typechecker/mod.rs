@@ -85,6 +85,8 @@ pub struct NamespaceImportBinding {
     /// Required argument count per member. Defaulted trailing parameters are
     /// omissible, so this is not the parameter count.
     pub member_required_params: std::collections::BTreeMap<String, usize>,
+    /// Validated narrowing contract for each callable namespace member.
+    pub member_type_predicates: std::collections::BTreeMap<String, TypePredicate>,
 }
 
 /// A diagnostic produced by the type checker.
@@ -244,6 +246,8 @@ pub struct TypeChecker {
     /// Namespace imports (`import * as alias from "..."`). The alias is bound
     /// as an annotated shape whose fields are the target module's exports.
     namespace_imports: std::collections::HashMap<String, NamespaceImportBinding>,
+    /// Local predicate functions whose bodies have passed contract checking.
+    validated_type_predicates: HashSet<(usize, usize)>,
     /// Compile-time environment populated by every successfully folded
     /// `const` binding. Later const initializers see earlier values so
     /// expressions like `const Y = X + 1` work.
@@ -429,6 +433,7 @@ impl TypeChecker {
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
+            validated_type_predicates: HashSet::new(),
             const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
@@ -455,6 +460,7 @@ impl TypeChecker {
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
             namespace_imports: std::collections::HashMap::new(),
+            validated_type_predicates: HashSet::new(),
             const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }

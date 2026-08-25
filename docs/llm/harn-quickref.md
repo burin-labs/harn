@@ -735,6 +735,28 @@ fn handle(v: unknown) -> string {
 }
 ```
 
+Narrowing survives `const` aliases. A helper can publish the same fact with a
+type predicate:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+
+fn normalize(value: string | int) -> string {
+  const text = is_text(value)
+  if text { return value.upper() }
+  return to_string(value)
+}
+```
+
+Use `value is T` when false rules out `T`. Use `implies value is T` when only
+true proves `T`. The checker rejects a false contract with `HARN-TYP-029`.
+
 `never` is the bottom type — expressions like `throw`, `return`,
 `unreachable()`, and blocks that always exit infer to `never`. It's a
 subtype of every type.

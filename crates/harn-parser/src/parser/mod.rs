@@ -23,6 +23,58 @@ mod tests {
     }
 
     #[test]
+    fn parses_two_sided_and_one_sided_type_predicates() {
+        let program = parse_source(
+            r#"
+fn is_text(value: unknown) -> value is string { return type_of(value) == "string" }
+fn has_name(value: unknown) -> implies value is {name: string} {
+  return schema_is(value, {type: "object", required: ["name"]})
+}
+"#,
+        )
+        .unwrap();
+
+        let Node::FnDecl {
+            return_type,
+            type_predicate: Some(two_sided),
+            ..
+        } = &program[0].node
+        else {
+            panic!("expected a two-sided predicate function");
+        };
+        assert_eq!(return_type, &Some(TypeExpr::Named("bool".into())));
+        assert_eq!(two_sided.parameter, "value");
+        assert_eq!(two_sided.type_expr, TypeExpr::Named("string".into()));
+        assert!(!two_sided.one_sided);
+
+        let Node::FnDecl {
+            type_predicate: Some(one_sided),
+            ..
+        } = &program[1].node
+        else {
+            panic!("expected a one-sided predicate function");
+        };
+        assert!(one_sided.one_sided);
+        assert!(matches!(one_sided.type_expr, TypeExpr::Shape(_)));
+    }
+
+    #[test]
+    fn keeps_implies_contextual_outside_a_predicate() {
+        let program = parse_source("type implies = bool\nfn check() -> implies { return true }")
+            .expect("implies remains a type name");
+        let Node::FnDecl {
+            return_type,
+            type_predicate,
+            ..
+        } = &program[1].node
+        else {
+            panic!("expected function declaration");
+        };
+        assert_eq!(return_type, &Some(TypeExpr::Named("implies".into())));
+        assert!(type_predicate.is_none());
+    }
+
+    #[test]
     fn parses_scope_block_and_keeps_scope_identifier_contextual() {
         fn count_scope_blocks(source: &str) -> usize {
             let program = parse_source(source).unwrap();
