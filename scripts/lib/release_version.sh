@@ -77,6 +77,46 @@ release_head_is_release_commit_for_version() {
     | grep -Eq "^\+version = \"$version\"$"
 }
 
+# Decide whether a published stable workspace needs the next development
+# identity. This is release state, not branch-tip authorship: after the tag is
+# public, unrelated commits may sit above the release commit without changing
+# which stable version the workspace still declares.
+#
+# Results are returned in RELEASE_DEVELOPMENT_BUMP_* globals so workflow source
+# and fixture tests consume one decision owner.
+# shellcheck disable=SC2034 # public result globals are consumed by sourcing callers
+release_development_bump_plan() {
+  local workspace_version="${1:-}"
+  local latest_tag="${2:-}"
+
+  RELEASE_DEVELOPMENT_BUMP_REQUIRED=false
+  RELEASE_DEVELOPMENT_BUMP_VERSION=""
+  RELEASE_DEVELOPMENT_BUMP_REASON=""
+
+  if [[ -z "$latest_tag" ]]; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="no_stable_release_tag"
+    return 0
+  fi
+  if ! release_tag_is_canonical "$latest_tag" \
+    || release_version_is_prerelease "${latest_tag#v}"; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="latest_tag_is_not_stable"
+    return 0
+  fi
+  if [[ "$workspace_version" != "${latest_tag#v}" ]]; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="workspace_does_not_match_latest_stable"
+    return 0
+  fi
+  if ! git merge-base --is-ancestor "$latest_tag" HEAD; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="latest_stable_tag_is_not_in_head_ancestry"
+    return 0
+  fi
+
+  RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$workspace_version")" \
+    || return 1
+  RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
+  RELEASE_DEVELOPMENT_BUMP_REASON="published_stable_needs_development_identity"
+}
+
 release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
 }
