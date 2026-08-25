@@ -30,7 +30,7 @@ fn parse_feedback_tools() {
   return tools
 }
 
-pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
+pipeline test_parse_feedback_is_counted_once(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
@@ -83,7 +83,10 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
   )
 }
 
-pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Harness, task) {
+pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(
+  harness: Harness,
+  task: unknown,
+) {
   const malformed = llm_text("<tool_call>\nadd({ left: })\n</tool_call>")
   with_llm_script(
     harness.llm,

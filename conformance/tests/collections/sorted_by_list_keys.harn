@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Multi-key sort: list-valued keys order lexicographically (element by
   // element), so `sorted_by` with `[primary, secondary]` works without
   // falling back to nested `pair(...)` keys.

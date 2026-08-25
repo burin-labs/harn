@@ -1,5 +1,5 @@
 /** Test tool registry builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Create registry
   let tools = tool_registry()
   harness.stdio.println(type_of(tools))

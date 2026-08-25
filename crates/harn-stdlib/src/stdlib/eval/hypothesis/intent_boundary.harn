@@ -14,7 +14,7 @@ pub type ExperimentIntentBoundaryFailure = {
   diagnostics: list<ExperimentCompileDiagnostic>,
 }
 
-fn __fingerprint(value) -> string {
+fn __fingerprint(value: any) -> string {
   return "sha256:" + sha256(json_stringify(value))
 }
 
@@ -48,7 +48,7 @@ fn __diagnostic(
   return diagnostic
 }
 
-fn __normalize(value) -> ExperimentIntent {
+fn __normalize(value: any) -> ExperimentIntent {
   if value.schema_version == 2 {
     const current: ExperimentIntent = value
     return current

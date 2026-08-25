@@ -15,7 +15,7 @@ fn mock_error(category: string, message: string) -> MockError {
  * `llm_call`. The safe-envelope path mirrors the same shape under
  * `r.error`.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const categories = [
     "rate_limit",
     "timeout",

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const registry_json = json_stringify(skills)
   assert(!contains(registry_json, "Long-form runbook"), "startup registry stays compact")
   const card = skill_find(skills, "triage")

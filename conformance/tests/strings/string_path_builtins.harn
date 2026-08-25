@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // starts_with
   harness.stdio.log(starts_with("hello world", "hello"))
   harness.stdio.log(starts_with("hello world", "world"))

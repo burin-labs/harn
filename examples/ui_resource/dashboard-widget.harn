@@ -17,7 +17,7 @@ import {
   ui_tool_result_validate,
 } from "std/ui_resource"
 
-fn render_dashboard_html(metrics) {
+fn render_dashboard_html(metrics: dict) {
   return "<!doctype html><html><head><style>"
     + ".tile { font: 14px system-ui; padding: 16px; }"
     + ".tile h1 { margin: 0 0 8px 0; font-size: 18px; }"

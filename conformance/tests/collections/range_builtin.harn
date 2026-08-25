@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // range(n) is half-open, 0-indexed. Ranges are lazy; printing them
   // mirrors the source form (half-open is always printed as `exclusive`).
   const xs = range(5)

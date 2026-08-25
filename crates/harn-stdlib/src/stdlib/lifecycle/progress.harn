@@ -21,7 +21,21 @@
 /** Default heartbeat spacing: often enough to show life, rare enough not to flood a pipe. */
 pub const PROGRESS_DEFAULT_INTERVAL_MS = 60000
 
-fn __progress_duration(ms) -> string {
+pub type ProgressOptions = {interval_ms?: int, limit_ms?: int}
+
+pub type ProgressReporter = {
+  _type: "progress_reporter",
+  stage: string,
+  interval_ms: int,
+  limit_ms: int?,
+  started_ms: int,
+  last_emit_ms: int,
+  state: string?,
+  finished: bool,
+  outcome?: string,
+}
+
+fn __progress_duration(ms: int) -> string {
   if ms < 1000 {
     return to_string(ms) + "ms"
   }
@@ -34,8 +48,8 @@ fn __progress_duration(ms) -> string {
   return to_string(minutes) + "m" + to_string(seconds) + "s"
 }
 
-fn __progress_emit(harness: Harness, line) {
-  harness.stdio.log(line)
+fn __progress_emit(stdio: HarnessStdio, line: string) {
+  stdio.log(line)
 }
 
 /**
@@ -51,15 +65,19 @@ fn __progress_emit(harness: Harness, line) {
  * @api_stability: experimental
  * @example: const p = progress_start(harness, "indexing", {limit_ms: 300000})
  */
-pub fn progress_start(harness: Harness, stage, options = nil) -> dict {
+pub fn progress_start(
+  harness: Harness,
+  stage: string,
+  options: ProgressOptions? = nil,
+) -> ProgressReporter {
   const now = harness.clock.now_ms()
   const interval = options?.interval_ms ?? PROGRESS_DEFAULT_INTERVAL_MS
   const limit = options?.limit_ms
   const name = to_string(stage)
   if limit == nil {
-    __progress_emit(harness, name + ": started")
+    __progress_emit(harness.stdio, name + ": started")
   } else {
-    __progress_emit(harness, name + ": started (limit " + __progress_duration(limit) + ")")
+    __progress_emit(harness.stdio, name + ": started (limit " + __progress_duration(limit) + ")")
   }
   return {
     _type: "progress_reporter",
@@ -88,26 +106,30 @@ pub fn progress_start(harness: Harness, stage, options = nil) -> dict {
  * @api_stability: experimental
  * @example: p = progress_tick(harness, p, "412/900 files")
  */
-pub fn progress_tick(harness: Harness, reporter, state = nil) -> dict {
-  if reporter?.finished ?? false {
+pub fn progress_tick(
+  harness: Harness,
+  reporter: ProgressReporter,
+  state: string? = nil,
+) -> ProgressReporter {
+  if reporter.finished {
     return reporter
   }
   const now = harness.clock.now_ms()
-  const elapsed = now - (reporter?.started_ms ?? now)
-  const changed = state != nil && state != reporter?.state
-  const interval = reporter?.interval_ms ?? PROGRESS_DEFAULT_INTERVAL_MS
-  const since_last = now - (reporter?.last_emit_ms ?? now)
+  const elapsed = now - reporter.started_ms
+  const changed = state != nil && state != reporter.state
+  const interval = reporter.interval_ms
+  const since_last = now - reporter.last_emit_ms
   const due = since_last >= interval
   if !changed && !due {
     return reporter
   }
-  const stage = to_string(reporter?.stage ?? "")
-  const shown = state ?? reporter?.state
+  const stage = reporter.stage
+  const shown = state ?? reporter.state
   if shown == nil {
-    __progress_emit(harness, stage + ": running " + __progress_duration(elapsed))
+    __progress_emit(harness.stdio, stage + ": running " + __progress_duration(elapsed))
   } else {
     __progress_emit(
-      harness,
+      harness.stdio,
       stage + ": running " + __progress_duration(elapsed) + " - " + to_string(shown),
     )
   }
@@ -129,13 +151,18 @@ pub fn progress_tick(harness: Harness, reporter, state = nil) -> dict {
  * @api_stability: experimental
  * @example: progress_finish(harness, p, "ok")
  */
-pub fn progress_finish(harness: Harness, reporter, outcome, detail = nil) -> dict {
-  if reporter?.finished ?? false {
+pub fn progress_finish(
+  harness: Harness,
+  reporter: ProgressReporter,
+  outcome: string,
+  detail: string? = nil,
+) -> ProgressReporter {
+  if reporter.finished {
     return reporter
   }
   const now = harness.clock.now_ms()
-  const elapsed = __progress_duration(now - (reporter?.started_ms ?? now))
-  const stage = to_string(reporter?.stage ?? "")
+  const elapsed = __progress_duration(now - reporter.started_ms)
+  const stage = reporter.stage
   const verdict = to_string(outcome)
   let line = if verdict == "ok" {
     stage + ": done in " + elapsed
@@ -149,6 +176,6 @@ pub fn progress_finish(harness: Harness, reporter, outcome, detail = nil) -> dic
   if detail != nil {
     line = line + " - " + to_string(detail)
   }
-  __progress_emit(harness, line)
+  __progress_emit(harness.stdio, line)
   return reporter + {finished: true, last_emit_ms: now, outcome: verdict}
 }

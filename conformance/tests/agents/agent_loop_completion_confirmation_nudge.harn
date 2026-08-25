@@ -56,7 +56,7 @@ fn failing_tools() {
   return tools
 }
 
-fn nudge_text_in(calls, idx) {
+fn nudge_text_in(calls: any, idx: int) {
   const msgs = calls[idx].messages
   return contains(json_stringify(msgs), "completion_confirmation")
     || contains(json_stringify(msgs), "If you intended to call a tool, call it now")

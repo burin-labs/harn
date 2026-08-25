@@ -1,7 +1,7 @@
 import { agent_loop_options } from "std/agent/options"
 import { agent_build_turn_system_fragments } from "std/agent/preflight"
 
-fn contains_id(items, needle) {
+fn contains_id(items: list, needle: string) {
   for item in items {
     if item == needle {
       return true
@@ -10,7 +10,7 @@ fn contains_id(items, needle) {
   return false
 }
 
-fn trace_by_id(traces, id) {
+fn trace_by_id(traces: list, id: string) {
   for trace in traces {
     if trace.id == id {
       return trace
@@ -19,7 +19,7 @@ fn trace_by_id(traces, id) {
   return nil
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-context-profile-" + harness.random.uuid_v7(),

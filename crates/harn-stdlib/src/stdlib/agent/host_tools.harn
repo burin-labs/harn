@@ -1,15 +1,15 @@
 import { command_capture_annotate, command_capture_plan_request } from "std/agent/command_capture"
 
-fn __agent_host_options(options) {
+fn __agent_host_options(options: dict?) {
   return options ?? {}
 }
 
-fn __agent_host_root(options) {
+fn __agent_host_root(options: dict?) {
   const opts = __agent_host_options(options)
   return opts?.root ?? opts?.cwd
 }
 
-fn __agent_host_list_contains(values, needle) {
+fn __agent_host_list_contains(values: list?, needle: any) {
   if type_of(values) == "string" {
     return values == needle
   }
@@ -24,7 +24,7 @@ fn __agent_host_list_contains(values, needle) {
   return false
 }
 
-fn __agent_host_string_list(value, label) {
+fn __agent_host_string_list(value: any, label: string) {
   if value == nil {
     return []
   }
@@ -37,11 +37,11 @@ fn __agent_host_string_list(value, label) {
   throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
 }
 
-fn __agent_host_nonempty_string(value) {
+fn __agent_host_nonempty_string(value: string?) {
   return type_of(value) == "string" && trim(value) != "" ? value : nil
 }
 
-fn __agent_host_tool_enabled(options, key, group) {
+fn __agent_host_tool_enabled(options: dict?, key: string, group: string) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   if enabled != nil && !__agent_host_list_contains(enabled, "all")
@@ -56,7 +56,7 @@ fn __agent_host_tool_enabled(options, key, group) {
   return true
 }
 
-fn __agent_host_lifecycle_tool_enabled(options, key) {
+fn __agent_host_lifecycle_tool_enabled(options: dict?, key: string) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   const explicitly_enabled = __agent_host_list_contains(enabled, key)
@@ -80,24 +80,24 @@ fn __agent_host_lifecycle_tool_enabled(options, key) {
   return true
 }
 
-fn __agent_host_name(options, key, default_name) {
+fn __agent_host_name(options: dict?, key: string, default_name: string) {
   const opts = __agent_host_options(options)
   return opts?.names?.[key] ?? opts[key + "_name"] ?? default_name
 }
 
-fn __agent_host_description(options, key, default_description) {
+fn __agent_host_description(options: dict?, key: string, default_description: any) {
   const opts = __agent_host_options(options)
   return opts?.descriptions?.[key] ?? default_description
 }
 
-fn __agent_host_annotations(options, key, defaults) {
+fn __agent_host_annotations(options: dict?, key: string, defaults: dict) {
   const opts = __agent_host_options(options)
   const shared = opts?.annotations?.["*"] ?? {}
   const local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
-fn __agent_host_file_annotations(options, key, kind) {
+fn __agent_host_file_annotations(options: dict?, key: string, kind: string) {
   return __agent_host_annotations(
     options,
     key,
@@ -105,7 +105,7 @@ fn __agent_host_file_annotations(options, key, kind) {
   )
 }
 
-fn __agent_host_config(options, key, config) {
+fn __agent_host_config(options: dict?, key: string, config: dict) {
   const opts = __agent_host_options(options)
   let out = config
   if opts?.defer_loading != nil {
@@ -120,7 +120,7 @@ fn __agent_host_config(options, key, config) {
   return out
 }
 
-fn __agent_host_path_has_parent_segment(path) {
+fn __agent_host_path_has_parent_segment(path: string?) {
   for segment in split(path, "/") {
     if segment == ".." {
       return true
@@ -129,7 +129,7 @@ fn __agent_host_path_has_parent_segment(path) {
   return false
 }
 
-fn __agent_host_resolve_path(path, options) {
+fn __agent_host_resolve_path(path: string?, options: dict?) {
   const opts = __agent_host_options(options)
   const raw = trim(path ?? "")
   if raw == "" {
@@ -155,7 +155,7 @@ fn __agent_host_resolve_path(path, options) {
   return normalized
 }
 
-fn __agent_host_render(value, options, key) {
+fn __agent_host_render(value: any, options: dict?, key: string) {
   const opts = __agent_host_options(options)
   const formatter = opts?.formatters?.[key] ?? opts?.result_formatter
   if formatter != nil {
@@ -171,7 +171,7 @@ fn __agent_host_render(value, options, key) {
   return json_stringify(value)
 }
 
-fn __agent_host_read_file_request(args, options) {
+fn __agent_host_read_file_request(args: dict, options: dict?) {
   let req = {path: __agent_host_resolve_path(args.path, options)}
   if args?.offset != nil {
     req = req + {offset: args.offset}
@@ -185,7 +185,7 @@ fn __agent_host_read_file_request(args, options) {
   return req
 }
 
-fn __agent_host_list_directory_request(args, options) {
+fn __agent_host_list_directory_request(args: dict, options: dict?) {
   const raw_path = trim(args?.path ?? ".")
   const path = if raw_path == "" {
     "."
@@ -202,7 +202,7 @@ fn __agent_host_list_directory_request(args, options) {
   return req
 }
 
-fn __agent_host_file_outline_request(args, options) {
+fn __agent_host_file_outline_request(args: dict, options: dict?) {
   let req = {path: __agent_host_resolve_path(args.path, options)}
   if args?.max_depth != nil {
     req = req + {max_depth: args.max_depth}
@@ -210,7 +210,7 @@ fn __agent_host_file_outline_request(args, options) {
   return req
 }
 
-fn __agent_host_search_request(args, options) {
+fn __agent_host_search_request(args: dict, options: dict?) {
   let req = {pattern: args.pattern}
   const raw_path = trim(args?.path ?? ".")
   const search_path = if raw_path == "" {
@@ -254,7 +254,7 @@ fn __agent_host_search_request(args, options) {
   return req
 }
 
-fn __agent_host_safe_relative_path(path) {
+fn __agent_host_safe_relative_path(path: string?) {
   const raw = path ?? ""
   if raw == "" {
     return raw
@@ -266,7 +266,7 @@ fn __agent_host_safe_relative_path(path) {
   return normalized
 }
 
-fn __agent_host_git_request(args, options) {
+fn __agent_host_git_request(args: dict, options: dict?) {
   let req = {operation: args.operation}
   const repo = __agent_host_nonempty_string(args?.repo) ?? __agent_host_root(options)
   if repo != nil && repo != "" {
@@ -283,7 +283,7 @@ fn __agent_host_git_request(args, options) {
   return req
 }
 
-fn __agent_host_prefix_matches(argv, prefix) {
+fn __agent_host_prefix_matches(argv: list, prefix: any) {
   if type_of(prefix) == "string" {
     return len(argv) > 0 && argv[0] == prefix
   }
@@ -303,7 +303,7 @@ fn __agent_host_prefix_matches(argv, prefix) {
   return true
 }
 
-fn __agent_host_argv_allowed(argv, options) {
+fn __agent_host_argv_allowed(argv: list, options: dict?) {
   const prefixes = __agent_host_options(options)?.allow_argv_prefixes
   if prefixes == nil || len(prefixes) == 0 {
     return true
@@ -316,7 +316,7 @@ fn __agent_host_argv_allowed(argv, options) {
   return false
 }
 
-fn __agent_host_blocked_command(argv, options) {
+fn __agent_host_blocked_command(argv: any, options: dict?) {
   return {
     blocked: true,
     status: "blocked",
@@ -326,7 +326,7 @@ fn __agent_host_blocked_command(argv, options) {
   }
 }
 
-fn __agent_host_policy_blocked(reason, request, args, options) {
+fn __agent_host_policy_blocked(reason: any, request: any, args: dict, options: dict?) {
   return {
     blocked: true,
     status: "blocked",
@@ -337,7 +337,7 @@ fn __agent_host_policy_blocked(reason, request, args, options) {
   }
 }
 
-fn __agent_host_policy_requires_approval(verdict, request, args) {
+fn __agent_host_policy_requires_approval(verdict: dict, request: any, args: dict) {
   const approval_request = verdict?.request ?? verdict?.rewrite ?? request
   let out = {
     requires_approval: true,
@@ -352,7 +352,7 @@ fn __agent_host_policy_requires_approval(verdict, request, args) {
   return out
 }
 
-fn __agent_host_apply_command_policy(request, args, options) {
+fn __agent_host_apply_command_policy(request: any, args: dict, options: dict?) {
   const opts = __agent_host_options(options)
   const policy = opts?.command_policy ?? opts?.allow_command
   if policy == nil {
@@ -401,7 +401,7 @@ fn __agent_host_apply_command_policy(request, args, options) {
   throw "agent_host_tools: command_policy must return bool, string, dict, or nil"
 }
 
-fn __agent_host_command_cwd(args, options) {
+fn __agent_host_command_cwd(args: dict, options: dict?) {
   const opts = __agent_host_options(options)
   const cwd = __agent_host_nonempty_string(args?.cwd) ?? opts?.cwd ?? opts?.root
   if cwd == nil || cwd == "" {
@@ -410,7 +410,7 @@ fn __agent_host_command_cwd(args, options) {
   return __agent_host_resolve_path(cwd, opts)
 }
 
-fn __agent_host_list_of_strings(value) {
+fn __agent_host_list_of_strings(value: string | bytes | list | dict | set | range | nil) {
   if type_of(value) != "list" || len(value) == 0 {
     return false
   }
@@ -422,7 +422,7 @@ fn __agent_host_list_of_strings(value) {
   return true
 }
 
-fn __agent_host_resolve_argv(args) {
+fn __agent_host_resolve_argv(args: dict) {
   // Resolve the effective argv from EITHER the canonical `argv` field OR a
   // list passed in `command`. The schema declares `argv` as the array and
   // `command` as a string, but the tool description tells the model to "pass
@@ -441,7 +441,7 @@ fn __agent_host_resolve_argv(args) {
   return nil
 }
 
-fn __agent_host_append_unique_string(values, value) {
+fn __agent_host_append_unique_string(values: list, value: string?) {
   const text = trim(value ?? "")
   if text == "" {
     return values
@@ -454,7 +454,7 @@ fn __agent_host_append_unique_string(values, value) {
   return values + [text]
 }
 
-fn __agent_host_command_sandbox_roots(request, options) {
+fn __agent_host_command_sandbox_roots(request: dict, options: dict?) {
   const opts = __agent_host_options(options)
   let roots = []
   const configured_root = __agent_host_root(opts)
@@ -471,7 +471,7 @@ fn __agent_host_command_sandbox_roots(request, options) {
   return roots
 }
 
-fn __agent_host_command_request(args, options) {
+fn __agent_host_command_request(args: dict, options: dict?) {
   const opts = __agent_host_options(options)
   const resolved_argv = __agent_host_resolve_argv(args)
   if resolved_argv != nil {
@@ -525,7 +525,7 @@ fn __agent_host_command_request(args, options) {
   throw "run_command: argv must be a non-empty list of strings"
 }
 
-fn __agent_host_command_request_common(base_request, args, options) {
+fn __agent_host_command_request_common(base_request: dict, args: dict, options: dict?) {
   const opts = __agent_host_options(options)
   const behavior = opts?.command_behavior ?? opts?.run_command_behavior ?? {}
   let req = base_request
@@ -581,7 +581,7 @@ fn __agent_host_command_request_common(base_request, args, options) {
   return req
 }
 
-fn __agent_host_reader_locator(args) {
+fn __agent_host_reader_locator(args: dict) {
   let req = {}
   if args?.command_id != nil {
     req = req + {command_id: args.command_id}
@@ -598,7 +598,7 @@ fn __agent_host_reader_locator(args) {
   return req
 }
 
-fn __agent_host_read_command_request(args, options) {
+fn __agent_host_read_command_request(args: dict, options: dict?) {
   let req = __agent_host_reader_locator(args)
   req = req
     + {
@@ -608,7 +608,7 @@ fn __agent_host_read_command_request(args, options) {
   return req
 }
 
-fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args, options) {
+fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args: dict, options: dict?) {
   const locator = __agent_host_reader_locator(args)
   const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
   const meta = tool_runtime.read_command_output(locator + {offset: 0, length: 0})
@@ -620,7 +620,7 @@ fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args, options) 
   return locator + {offset: offset, length: length}
 }
 
-fn __agent_host_tail_file_request(fs: HarnessFs, args, options) {
+fn __agent_host_tail_file_request(fs: HarnessFs, args: dict, options: dict?) {
   const path = __agent_host_resolve_path(args.path, options)
   const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
   const info = fs.stat(path)
@@ -632,7 +632,7 @@ fn __agent_host_tail_file_request(fs: HarnessFs, args, options) {
   return {path: path, offset: offset, limit_bytes: length}
 }
 
-fn __agent_host_command_result_readers(options, read_name, tail_name) {
+fn __agent_host_command_result_readers(options: dict?, read_name: any, tail_name: any) {
   let readers = []
   if __agent_host_tool_enabled(options, "read_command_output", "command") {
     readers = readers + [read_name]
@@ -643,7 +643,7 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
   return readers
 }
 
-fn __agent_host_command_handle_id(args, tool_name: string) -> string {
+fn __agent_host_command_handle_id(args: dict, tool_name: string) -> string {
   const handle_id = trim(to_string(args?.handle_id ?? args?.handle ?? ""))
   if handle_id != "" {
     return handle_id
@@ -651,7 +651,7 @@ fn __agent_host_command_handle_id(args, tool_name: string) -> string {
   throw tool_name + ": pass handle_id from a background run_command result"
 }
 
-fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
+fn __agent_host_wait_command_request(args: dict, tool_name: string, timeout_ms: any) {
   let req = {handle_id: __agent_host_command_handle_id(args, tool_name)}
   if timeout_ms != nil {
     req = req + {timeout_ms: timeout_ms}
@@ -662,7 +662,7 @@ fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
   return req
 }
 
-fn __agent_host_cancel_command_request(args) {
+fn __agent_host_cancel_command_request(args: dict) {
   let req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
   if args?.wait_result_ms != nil {
     req = req + {wait_result_ms: args.wait_result_ms}
@@ -680,7 +680,12 @@ fn __agent_host_cancel_command_request(args) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_read_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
+pub fn agent_read_tools(
+  fs: HarnessFs,
+  tool_runtime: HarnessTools,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "read_file", "read") {
@@ -921,7 +926,11 @@ pub fn agent_read_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = ni
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
+pub fn agent_command_tools(
+  harness: Harness,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   const read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
@@ -1198,7 +1207,7 @@ pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
  * Code mode is default-OFF. Expose it only with `code_mode: true` or
  * `enabled_tools: ["code_mode"]`; it can call other tools and must never be default.
  */
-fn __agent_host_code_mode_enabled(options) {
+fn __agent_host_code_mode_enabled(options: dict?) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   const explicitly_enabled = __agent_host_list_contains(enabled, "code_mode")
@@ -1226,7 +1235,10 @@ fn __agent_host_code_mode_enabled(options) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_composition_tools(registry = nil, options = nil) {
+pub fn agent_composition_tools(
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   if __agent_host_code_mode_enabled(opts) {
@@ -1282,7 +1294,7 @@ pub fn agent_composition_tools(registry = nil, options = nil) {
  * appear exactly once (unless `replace_all`); a missing or ambiguous match
  * is a hard error so the model never silently edits the wrong span.
  */
-fn __agent_host_edit_file_apply(tool_runtime: HarnessTools, args, options) {
+fn __agent_host_edit_file_apply(tool_runtime: HarnessTools, args: dict, options: dict?) {
   const opts = __agent_host_options(options)
   const path = __agent_host_resolve_path(args.path, opts)
   const old_string = args?.old_string
@@ -1339,7 +1351,12 @@ fn __agent_host_edit_file_apply(tool_runtime: HarnessTools, args, options) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_edit_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
+pub fn agent_edit_tools(
+  fs: HarnessFs,
+  tool_runtime: HarnessTools,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   const opts = __agent_host_options(options)
   let tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "write_file", "edit") {
@@ -1470,7 +1487,11 @@ pub fn agent_edit_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = ni
  * @errors: []
  * @api_stability: stable
  */
-pub fn agent_host_tools(harness: Harness, registry = nil, options = nil) {
+pub fn agent_host_tools(
+  harness: Harness,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: dict? = nil,
+) {
   let tools = agent_read_tools(harness.fs, harness.tools, registry, options)
   tools = agent_command_tools(harness, tools, options)
   tools = agent_composition_tools(tools, options)

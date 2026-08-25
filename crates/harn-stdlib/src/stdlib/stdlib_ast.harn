@@ -31,7 +31,7 @@
  * @api_stability: experimental
  * @example: ast_search({path: "src/lib.rs", query: "(let_declaration value: (_) @v)"})
  */
-pub fn ast_search(ast: HarnessAst, params) -> dict {
+pub fn ast_search(ast: HarnessAst, params: dict?) -> dict {
   const payload = ast.search(params ?? {}) ?? {}
   return payload.merging(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/ast", helper: "ast_search"}},

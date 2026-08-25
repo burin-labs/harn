@@ -6,7 +6,7 @@
  * The .fs-overlay/ sidecar directory activates the overlay; the runner
  * installs a paused clock automatically.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.fs.source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
   harness.fs.write_text(root + "/new_a.txt", "alpha")
   harness.fs.write_text(root + "/new_b.txt", "beta")

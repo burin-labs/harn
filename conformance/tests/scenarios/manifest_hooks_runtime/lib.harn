@@ -1,4 +1,4 @@
-pub fn deny_write_like_tools(_harness: Harness, event) {
+pub fn deny_write_like_tools(_harness: Harness, event: dict) {
   const name = event?.tool?.name ?? ""
   if contains(name, "write") || contains(name, "edit") {
     return {deny: "manifest denied " + name}
@@ -6,6 +6,6 @@ pub fn deny_write_like_tools(_harness: Harness, event) {
   return nil
 }
 
-pub fn rewrite_read_results(_harness: Harness, event) {
+pub fn rewrite_read_results(_harness: Harness, event: dict) {
   return "HOOKED:" + (event?.result?.text ?? "")
 }

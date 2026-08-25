@@ -6,7 +6,7 @@ enum Action {
   Delete
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const a = Action.Create
   match a.variant {
     "Create" -> { harness.stdio.log("c") }

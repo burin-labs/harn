@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Register a static resource
   const r1 = harness.tools.mcp_resource(
     {

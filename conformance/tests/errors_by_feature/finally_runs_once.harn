@@ -7,7 +7,7 @@
  * the catch body also threw. All three variants are verified here with
  * an explicit counter so any regression is immediately visible.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // --- try/catch/finally on caught-throw path: one run ---
   let counter_a = 0
   try {

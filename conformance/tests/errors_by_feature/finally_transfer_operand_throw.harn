@@ -1,8 +1,8 @@
-fn fail(message) {
+fn fail(message: string) {
   throw message
 }
 
-fn identity(value) {
+fn identity(value: any) {
   return value
 }
 

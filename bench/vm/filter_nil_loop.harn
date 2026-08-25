@@ -6,7 +6,7 @@ import { filter_nil, pick_keys } from "std/collections"
  * build option dicts. The fixture exercises both helpers to keep changes
  * honest about the path they share.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const raw = {
     repo: "burin-labs/harn",
     branch: "main",

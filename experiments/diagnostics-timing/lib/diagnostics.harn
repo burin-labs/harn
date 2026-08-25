@@ -87,7 +87,7 @@ pub fn collect(ast: HarnessAst, source: string, language: string, path: string) 
  * Keep only diagnostics whose signature is absent from `baseline` (the pre-edit
  * reading) and from `suppressed` (everything already shown to the model once).
  */
-pub fn novel(current: list, baseline, suppressed) -> list {
+pub fn novel(current: list, baseline: any, suppressed: any) -> list {
   let out: list = []
   for diag in current {
     const signature = to_string(diag.signature)

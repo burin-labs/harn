@@ -12,14 +12,14 @@ use super::harness::*;
 #[test]
 fn optimizer_differential_success_programs_match() {
     let programs = [
-        r#"pipeline test(harness: Harness, task) {
+        r#"pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(2 + 3 * 4)
   harness.stdio.println("ha" * 2)
   harness.stdio.println(([1] + [2, 3])[2])
   harness.stdio.println(({a: 1} + {b: 2}).b)
   harness.stdio.println((true && false) || !false)
 }"#,
-        r"pipeline test(harness: Harness, task) {
+        r"pipeline test(harness: Harness, task: unknown) {
   fn add(a: int, b: int = 4) {
     return a + b
   }
@@ -41,7 +41,7 @@ fn optimizer_differential_success_programs_match() {
 
 #[test]
 fn optimizer_differential_errors_match() {
-    let source = "pipeline test(harness: Harness, task) { harness.stdio.println(1 / 0) }";
+    let source = "pipeline test(harness: Harness, task: unknown) { harness.stdio.println(1 / 0) }";
     let optimized =
         run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap_err();
     let unoptimized =
@@ -54,7 +54,7 @@ fn optimizer_differential_errors_match() {
 #[test]
 fn inline_arithmetic_lambda_map_filter_optimization_path() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             const evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
             const doubled = evens.map({ x -> x * 2 })
             harness.stdio.log(doubled)
@@ -66,7 +66,7 @@ fn inline_arithmetic_lambda_map_filter_optimization_path() {
 #[test]
 fn self_recursive_named_fn_still_resolves_after_optimization() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             fn fact(n) {
                 if n <= 1 { return 1 }
                 return n * fact(n - 1)
@@ -84,7 +84,7 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
     // in the flag set so the late-bind walk runs and the cross-fn
     // resolution succeeds.
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             fn is_even(n) {
                 if n == 0 { return true }
                 return is_odd(n - 1)
@@ -103,7 +103,7 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
 #[test]
 fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             fn helper(x) { return x + 100 }
             const r = [1, 2, 3].map({ v -> helper(v) })
             harness.stdio.log(r)
@@ -115,7 +115,7 @@ fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
 #[test]
 fn anonymous_lambda_with_get_var_capture_flags() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             const bonus = 10
             const r = [1, 2, 3].map({ v -> v + bonus })
             harness.stdio.log(r)
@@ -127,7 +127,7 @@ fn anonymous_lambda_with_get_var_capture_flags() {
 #[test]
 fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             fn helper_a(x) { return x + 1 }
             fn helper_b(x) { return x + 2 }
             const r = [10, 20, 30].map({ v -> v * 2 })
@@ -142,7 +142,7 @@ fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
 #[test]
 fn nested_map_lambdas_skip_walk_independently() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             const grid = [[1, 2], [3, 4]]
             const r = grid.map({ row -> row.map({ x -> x * 10 }) })
             harness.stdio.log(r)
@@ -154,7 +154,7 @@ fn nested_map_lambdas_skip_walk_independently() {
 #[test]
 fn typed_param_lambda_uses_check_type_and_walks() {
     let out = run_vm(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
             const r = [1, 2, 3].map({ v: int -> v + 1 })
             harness.stdio.log(r)
         }",
@@ -170,7 +170,7 @@ fn typed_param_lambda_uses_check_type_and_walks() {
 /// "Typed int add expected int operands, got int and float".)
 #[test]
 fn var_reassigned_via_any_matches_unoptimized() {
-    let source = r#"pipeline default(harness: Harness, task) {
+    let source = r#"pipeline default(harness: Harness, task: unknown) {
   let x = 0
   let sum = 0
   let i = 0
@@ -199,7 +199,7 @@ fn var_reassigned_via_any_matches_unoptimized() {
 /// optimizer; it must now match the unoptimized result.
 #[test]
 fn for_item_reassigned_via_any_matches_unoptimized() {
-    let source = r#"pipeline default(harness: Harness, task) {
+    let source = r#"pipeline default(harness: Harness, task: unknown) {
   let sum = 0
   const cell = harness.runtime.shared_cell("k", 2.5)
   for n in [1, 2, 3] {
@@ -225,7 +225,7 @@ fn for_item_reassigned_via_any_matches_unoptimized() {
 /// over-demoting and silently changing arithmetic results).
 #[test]
 fn monomorphic_counter_loop_result_is_correct() {
-    let source = r#"pipeline default(harness: Harness, task) {
+    let source = r#"pipeline default(harness: Harness, task: unknown) {
   let i = 0
   let total = 0
   while i < 10 {
@@ -245,7 +245,7 @@ fn inplace_concat_untyped_accumulator_builds_correctly() {
     // take on the runtime value. The accumulated list must be correct.
     let source = r#"
 fn seed() -> any { return [] }
-pipeline t(harness: Harness, task) {
+pipeline t(harness: Harness, task: unknown) {
   let x = seed()
   for i in [1, 2, 3] {
     x = x + [i]
@@ -265,7 +265,7 @@ fn list_appending_assign_preserves_alias_immutability() {
     // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
     // pointing at the original immutable list.
     let source = r#"
-pipeline t(harness: Harness, task) {
+pipeline t(harness: Harness, task: unknown) {
   let x = []
   x = x.appending(1)
   const y = x
@@ -282,7 +282,7 @@ fn inplace_concat_preserves_binding_when_add_throws() {
     // must retain its previous value (it was cloned, not taken) rather than be
     // left as the placeholder.
     let source = r#"
-pipeline t(harness: Harness, task) {
+pipeline t(harness: Harness, task: unknown) {
   let x = 5
   try {
     x += [1]

@@ -3,11 +3,11 @@
  * The caller's relative depth shouldn't affect resolution — that's the
  * whole point of `@/...`.
  */
-pub fn render_root(fs: HarnessFs, who) {
+pub fn render_root(fs: HarnessFs, who: string) {
   return fs.render_prompt("@/prompts/greeting.harn.prompt", {who: who})
 }
 
-pub fn render_alias(fs: HarnessFs, who) {
+pub fn render_alias(fs: HarnessFs, who: string) {
   return fs.render_prompt("@partials/greeting.harn.prompt", {who: who})
 }
 

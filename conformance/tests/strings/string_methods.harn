@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log("hello world".replace("world", "harn"))
   harness.stdio.log("a,b,c".split(","))
   harness.stdio.log("  hello  ".trim())

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log("before yield")
 }
 // yield pauses execution — in test mode it throws YieldValue

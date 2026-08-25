@@ -46,7 +46,7 @@ fn _gen_sweep_id() {
  * `policy.repair_worker = { enabled: true, handles_kinds: [...] }`.
  * The classifier stays pure: it never mentions the worker.
  */
-pub fn repair_worker_kind_for(policy, classification) {
+pub fn repair_worker_kind_for(policy: dict, classification: dict) {
   if classification.action == "run_local_verification"
     && handles_kind(policy.repair_worker, "ci_failure") {
     return "ci_failure"
@@ -58,14 +58,14 @@ pub fn repair_worker_kind_for(policy, classification) {
   return nil
 }
 
-fn _outcome_from_repair_run(run, dry_run) {
+fn _outcome_from_repair_run(run: dict, dry_run: any) {
   if dry_run {
     return "repair_worker_dry_run"
   }
   return "repair_worker_${run.status}"
 }
 
-fn _command_for_repair_run(run) {
+fn _command_for_repair_run(run: dict) {
   return {
     action: "run_repair_worker",
     bundle_kind: run.bundle?.kind,
@@ -91,11 +91,11 @@ fn _command_for_repair_run(run) {
 pub fn apply_action(
   clock: HarnessClock,
   process: HarnessProcess,
-  adapter,
-  policy,
-  observation,
-  classification,
-  dry_run,
+  adapter: Harness,
+  policy: dict,
+  observation: dict,
+  classification: dict,
+  dry_run: any,
 ) {
   const action = classification.action
   if action == "noop" || action == "wait" {
@@ -187,7 +187,7 @@ pub fn apply_action(
   return {outcome: "noop", commands: []}
 }
 
-fn _dispatch_repair_worker(harness: Harness, kind, args) {
+fn _dispatch_repair_worker(harness: Harness, kind: string, args: dict) {
   const observation = args.observation
   const policy = args.policy
   const parent_receipt_ref = {
@@ -225,7 +225,7 @@ fn _dispatch_repair_worker(harness: Harness, kind, args) {
 }
 
 /** Process a single PR: classify, persist, act, build receipt. */
-pub fn process_pr(harness: Harness, args) {
+pub fn process_pr(harness: Harness, args: dict) {
   const adapter = args.adapter
   const policy = args.policy
   const raw_pr = args.pr
@@ -368,7 +368,7 @@ pub fn process_pr(harness: Harness, args) {
 }
 
 /** Reconcile PRs that disappeared from the open list (merged or closed remotely). */
-pub fn reconcile_disappeared(harness: Harness, args) {
+pub fn reconcile_disappeared(harness: Harness, args: dict) {
   const adapter = args.adapter
   const checkpoint_handle = args.checkpoint_handle
   const policy = args.policy
@@ -452,7 +452,7 @@ pub fn reconcile_disappeared(harness: Harness, args) {
 }
 
 /** Run a single sweep across all configured repos. */
-pub fn sweep(harness: Harness, args) {
+pub fn sweep(harness: Harness, args: any) {
   const adapter = args.adapter
   const policies = args.policies
   const checkpoint_handle = args.checkpoint_handle
@@ -508,7 +508,7 @@ pub fn sweep(harness: Harness, args) {
 }
 
 /** Helper for fixture-based runs: load a list of policy json paths. */
-pub fn load_policies(fs: HarnessFs, paths) {
+pub fn load_policies(fs: HarnessFs, paths: list) {
   let ok_policies = []
   let errors = []
   for path in paths {

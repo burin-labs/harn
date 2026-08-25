@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Start clean in case a previous run left state
   harness.runtime.checkpoint_clear()
   // Non-existent key returns false

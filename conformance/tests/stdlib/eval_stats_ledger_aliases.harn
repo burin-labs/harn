@@ -1,6 +1,14 @@
 import "std/eval/stats"
 
-fn meter_row(name, fingerprint, passes, fails, skips, pass_rate, cost) {
+fn meter_row(
+  name: string,
+  fingerprint: string,
+  passes: int,
+  fails: int,
+  skips: int,
+  pass_rate: float,
+  cost: float,
+) {
   return {
     case_name: name,
     case_fingerprint: fingerprint,
@@ -15,7 +23,7 @@ fn meter_row(name, fingerprint, passes, fails, skips, pass_rate, cost) {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const baseline = [
     meter_row("python-alpha", "a", 3, 1, 0, 0.75, 0.1),
     meter_row("python-beta", "b", 2, 2, 0, 0.5, 0.1),

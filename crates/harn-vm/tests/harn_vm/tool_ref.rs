@@ -35,7 +35,7 @@ fn out(source: &str) -> Vec<String> {
 #[test]
 fn tool_decl_direct_call_invokes_harn_handler() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   tool greet(name: string) -> string {
     return "hello " + name
   }
@@ -48,7 +48,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_decl_tail_call_invokes_harn_handler() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   tool greet(name: string) -> string {
     return "hello " + name
   }
@@ -66,7 +66,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_decl_callable_value_invokes_harn_handler() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   tool greet(name: string) -> string {
     return "hello " + name
   }
@@ -81,7 +81,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_decl_pipe_invokes_harn_handler() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   tool greet(name: string) -> string {
     return "hello " + name
   }
@@ -95,7 +95,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_decl_spread_call_invokes_harn_handler() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   tool greet(name: string) -> string {
     return "hello " + name
   }
@@ -110,7 +110,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_ref_returns_name_when_registered() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
@@ -123,7 +123,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_ref_throws_on_unknown_name() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
@@ -144,7 +144,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_ref_throws_without_binding() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(tool_ref("edit"))
 }
 "#)
@@ -158,7 +158,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_def_returns_registered_entry() {
     let lines = out(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
@@ -173,7 +173,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_def_throws_on_unknown_name() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)
@@ -190,7 +190,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_def_throws_without_binding() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(tool_def("edit"))
 }
 "#)
@@ -204,7 +204,7 @@ pipeline main(harness: Harness, task) {
 #[test]
 fn tool_bind_nil_clears_registry() {
     let err = run(r#"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let r = tool_registry()
   r = tool_define(r, "edit", "Edit a file", {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"})
   tool_bind(r)

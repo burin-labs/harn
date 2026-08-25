@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * tooling consumes these so the same tape reproduces the same control
  * flow.
  */
-fn count_kind(events, kind) {
+fn count_kind(events: list, kind: string) {
   let n = 0
   for ev in events {
     if to_string(ev?.kind ?? "") == kind {

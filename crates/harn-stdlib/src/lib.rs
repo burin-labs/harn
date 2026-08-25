@@ -201,6 +201,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/prompts" => "stdlib/llm/prompts.harn",
     "llm/defaults" => "stdlib/llm/defaults.harn",
     "llm/handlers" => "stdlib/llm/handlers.harn",
+    "llm/handler_cache_events" => "stdlib/llm/handler_cache_events.harn",
     "llm/resilience" => "stdlib/llm/resilience.harn",
     "llm/tool_telemetry" => "stdlib/llm/tool_telemetry.harn",
     "llm/tool_middleware" => "stdlib/llm/tool_middleware.harn",
@@ -267,6 +268,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/loop_foundation" => "stdlib/agent/loop_foundation.harn",
     "agent/loop_lifecycle" => "stdlib/agent/loop_lifecycle.harn",
     "agent/loop_provider_failure" => "stdlib/agent/loop_provider_failure.harn",
+    "agent/loop_audit_flushes" => "stdlib/agent/loop_audit_flushes.harn",
     "agent/loop_tool_calls" => "stdlib/agent/loop_tool_calls.harn",
     "agent/loop_resource_dispatch" => "stdlib/agent/loop_resource_dispatch.harn",
     "agent/loop_turn_options" => "stdlib/agent/loop_turn_options.harn",
@@ -689,7 +691,10 @@ fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
 fn parse_public_function_line(line: &str, doc: Option<String>) -> Option<StdlibPublicFunction> {
     let rest = line.strip_prefix("pub fn ")?.trim();
     let name_end = rest.find('(')?;
-    let name = rest[..name_end].trim();
+    let declaration_name = rest[..name_end].trim();
+    let name = declaration_name
+        .split_once('<')
+        .map_or(declaration_name, |(name, _)| name.trim());
     if name.is_empty() {
         return None;
     }
@@ -703,8 +708,8 @@ fn parse_public_function_line(line: &str, doc: Option<String>) -> Option<StdlibP
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let signature = match return_type {
-        Some(ret) => format!("{name}({params}) -> {ret}"),
-        None => format!("{name}({params})"),
+        Some(ret) => format!("{declaration_name}({params}) -> {ret}"),
+        None => format!("{declaration_name}({params})"),
     };
     let param_parts = split_top_level_params(params);
     let total_params = param_parts
@@ -948,7 +953,7 @@ mod tests {
         assert_eq!(exports[0].name, "workflow_execute");
         assert_eq!(
             exports[0].signature,
-            "workflow_execute(harness: Harness, task, graph, artifacts = nil, options = nil)"
+            "workflow_execute( harness: Harness, task: string, graph: dict, artifacts: list<unknown>? = nil, options: dict? = nil, )"
         );
         assert_eq!(exports[0].required_params, 3);
         assert_eq!(exports[0].total_params, 5);
@@ -1070,7 +1075,7 @@ mod tests {
             .expect("std/agent/workers should export suspend_agent");
         assert_eq!(
             suspend.signature,
-            "suspend_agent(agents: HarnessAgent, worker, reason = \"\", options = nil)"
+            "suspend_agent( agents: HarnessAgent, worker: unknown, reason: string = \"\", options: dict? = nil, ) -> unknown"
         );
         assert_eq!(suspend.required_params, 2);
         assert_eq!(suspend.total_params, 4);
@@ -1081,7 +1086,7 @@ mod tests {
             .expect("std/agent/workers should export resume_agent");
         assert_eq!(
             resume.signature,
-            "resume_agent( agents: HarnessAgent, worker_or_snapshot, resume_input = nil, continue_transcript = true, ) -> any"
+            "resume_agent( agents: HarnessAgent, worker_or_snapshot: unknown, resume_input: unknown = nil, continue_transcript: bool = true, ) -> unknown"
         );
         assert_eq!(resume.required_params, 2);
         assert_eq!(resume.total_params, 4);
@@ -1092,7 +1097,7 @@ mod tests {
             .expect("std/agent/workers should export agent_stop");
         assert_eq!(
             stop.signature,
-            "agent_stop(agents: HarnessAgent, worker, options: AgentStopOptions? = nil)"
+            "agent_stop( agents: HarnessAgent, worker: unknown, options: AgentStopOptions? = nil, ) -> unknown"
         );
         assert_eq!(stop.required_params, 2);
         assert_eq!(stop.total_params, 3);
@@ -1103,7 +1108,7 @@ mod tests {
             .expect("std/agent/workers should export parse_resume_conditions");
         assert_eq!(
             parse_resume.signature,
-            "parse_resume_conditions(agents: HarnessAgent, conditions = nil) -> ResumeConditions?"
+            "parse_resume_conditions( agents: HarnessAgent, conditions: ResumeConditions? = nil, ) -> ResumeConditions?"
         );
         assert_eq!(parse_resume.required_params, 1);
         assert_eq!(parse_resume.total_params, 2);
@@ -1114,7 +1119,7 @@ mod tests {
             .expect("std/agent/workers should export agent_lifecycle_tools");
         assert_eq!(
             lifecycle.signature,
-            "agent_lifecycle_tools(agents: HarnessAgent, registry = nil, options = nil)"
+            "agent_lifecycle_tools( agents: HarnessAgent, registry: ToolRegistry? = nil, options: AgentLifecycleToolsOptions? = nil, ) -> ToolRegistry"
         );
         assert_eq!(lifecycle.required_params, 1);
         assert_eq!(lifecycle.total_params, 3);
@@ -1234,5 +1239,21 @@ mod tests {
         assert_eq!(parsed.signature, "configure(opts: {retries: int}) -> bool");
         assert_eq!(parsed.total_params, 1);
         assert_eq!(parsed.required_params, 1);
+    }
+
+    #[test]
+    fn parse_public_function_line_indexes_generic_functions_by_base_name() {
+        let parsed = parse_public_function_line(
+            "pub fn map<T, U>(items: list<T>, project: fn(T) -> U) -> list<U>",
+            None,
+        )
+        .expect("generic public function should parse");
+        assert_eq!(parsed.name, "map");
+        assert_eq!(
+            parsed.signature,
+            "map<T, U>(items: list<T>, project: fn(T) -> U) -> list<U>"
+        );
+        assert_eq!(parsed.total_params, 2);
+        assert_eq!(parsed.required_params, 2);
     }
 }

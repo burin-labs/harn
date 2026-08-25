@@ -87,7 +87,7 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// ordinary lookup cannot accept an adjacent artifact compiled with privileged
 /// authority. `compiler_tag` could not express this: it folds the optimization
 /// and legacy-ambient bits only, never `privileged_wire_authority`.
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -925,8 +925,9 @@ fn encode_artifact_fingerprinted(
 fn provenance_tag(provenance: ModuleProvenance) -> u8 {
     match provenance {
         ModuleProvenance::User => 0,
-        ModuleProvenance::PrivilegedWire => 1,
-        ModuleProvenance::TrustedHostDispatch => 2,
+        ModuleProvenance::EmbeddedStdlib => 1,
+        ModuleProvenance::PrivilegedWire => 2,
+        ModuleProvenance::TrustedHostDispatch => 3,
     }
 }
 

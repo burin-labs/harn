@@ -1,5 +1,5 @@
 /** Test set predicate builtins (function-call syntax) */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const a = set(1, 2, 3, 4)
   const b = set(3, 4, 5, 6)
   const small = set(2, 3)

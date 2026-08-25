@@ -55,7 +55,7 @@ fn reading_tools() {
   return tools
 }
 
-fn identical_edit_batch(n) {
+fn identical_edit_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {
@@ -65,7 +65,7 @@ fn identical_edit_batch(n) {
   return calls
 }
 
-fn two_group_edit_batch(n) {
+fn two_group_edit_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {
@@ -80,7 +80,7 @@ fn two_group_edit_batch(n) {
   return calls
 }
 
-fn distinct_look_batch(n) {
+fn distinct_look_batch(n: int) {
   let calls = []
   let i = 0
   while i < n {

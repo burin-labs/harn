@@ -5,7 +5,7 @@ pipeline default(harness: Harness) {
   // A local that shadows a same-named function must resolve to the local even
   // when its static type is unknown — not fall through to the function (which
   // would mis-type the returned value as a function reference).
-  fn build(seed) {
+  fn build(seed: dict) {
     const registry = seed
     return registry
   }

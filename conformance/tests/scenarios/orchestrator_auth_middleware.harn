@@ -1,6 +1,6 @@
 import "../_common"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(
     harness.fs.workspace_temp_dir(),
     "harn-orchestrator-auth-" + harness.random.uuid(),

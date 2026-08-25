@@ -40,14 +40,14 @@
  * Moving more of the evaluation pipeline into .harn is gated on G4
  * (#2297).
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -59,7 +59,7 @@ fn __safe_dict(value) -> dict {
  * Rust's `format!("{:.1}", x)`. Used in the summary's `pass_rate * 100`
  * and `drop_pp` renderings.
  */
-fn __format_float_1(value) -> string {
+fn __format_float_1(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -82,7 +82,7 @@ fn __format_float_1(value) -> string {
  * Format a float as `"X.YY"` (2 decimals, half-up padded). Used for
  * `drop_pp` and `max_drop_pp` lines.
  */
-fn __format_float_2(value) -> string {
+fn __format_float_2(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -109,7 +109,7 @@ fn __format_float_2(value) -> string {
  * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Used
  * for the summary's `total_cost_usd={:.6}` line.
  */
-fn __format_float_6(value) -> string {
+fn __format_float_6(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {

@@ -35,7 +35,7 @@ const __VERDICT_SCHEMA = {
   },
 }
 
-fn __contexts_text(contexts) -> string {
+fn __contexts_text(contexts: any) -> string {
   const list = if type_of(contexts) == "list" {
     contexts
   } else if contexts == nil {
@@ -52,7 +52,7 @@ fn __contexts_text(contexts) -> string {
   return join(parts, "\n\n")
 }
 
-fn __decompose_prompt(answer) -> string {
+fn __decompose_prompt(answer: any) -> string {
   return join(
     [
       "Break the following ANSWER into its atomic factual claims — one simple,",
@@ -66,7 +66,7 @@ fn __decompose_prompt(answer) -> string {
   )
 }
 
-fn __verdict_prompt(claim, contexts_text) -> string {
+fn __verdict_prompt(claim: any, contexts_text: any) -> string {
   return join(
     [
       "You are checking whether a CLAIM is supported by the CONTEXT.",
@@ -83,7 +83,7 @@ fn __verdict_prompt(claim, contexts_text) -> string {
   )
 }
 
-fn __structured_value(llm: HarnessLlm, prompt, schema, llm_opts) -> dict {
+fn __structured_value(llm: HarnessLlm, prompt: any, schema: dict, llm_opts: any) -> dict {
   const envelope = safe_structured_call(llm, prompt, schema, llm_opts)
   if !(envelope?.ok ?? false) {
     throw {
@@ -100,7 +100,7 @@ fn __structured_value(llm: HarnessLlm, prompt, schema, llm_opts) -> dict {
   return {}
 }
 
-fn __decompose_claims(llm: HarnessLlm, answer, llm_opts) -> list {
+fn __decompose_claims(llm: HarnessLlm, answer: any, llm_opts: any) -> list {
   const value = __structured_value(llm, __decompose_prompt(answer), __CLAIM_SCHEMA, llm_opts)
   const raw = value?.claims ?? []
   if type_of(raw) != "list" {
@@ -116,7 +116,7 @@ fn __decompose_claims(llm: HarnessLlm, answer, llm_opts) -> list {
   return claims
 }
 
-fn __judge_claim(llm: HarnessLlm, claim, contexts_text, llm_opts) -> dict {
+fn __judge_claim(llm: HarnessLlm, claim: any, contexts_text: any, llm_opts: any) -> dict {
   const value = __structured_value(
     llm,
     __verdict_prompt(claim, contexts_text),
@@ -162,7 +162,7 @@ fn __judge_claim(llm: HarnessLlm, claim, contexts_text, llm_opts) -> dict {
  * @effects: [llm.call]
  * @errors: [faithfulness]
  */
-pub fn faithfulness_guard(llm: HarnessLlm, answer, contexts, opts = nil) -> dict {
+pub fn faithfulness_guard(llm: HarnessLlm, answer: any, contexts: any, opts: any = nil) -> dict {
   const cfg = if type_of(opts) == "dict" {
     opts
   } else {

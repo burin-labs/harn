@@ -26,9 +26,8 @@ use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
-use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
+use harn_parser::analysis::{AnalysisDatabase, SourceId};
 
 use crate::{package, CLI_RUNTIME_STACK_SIZE};
 
@@ -92,20 +91,18 @@ fn worker_count(files: usize) -> usize {
     configured.unwrap_or(default).min(files.max(1))
 }
 
-/// Check every file against the shared module graph, in parallel, returning
-/// results in input order. `parsed_sources` carries the ASTs the module-graph
-/// build already produced for the seed files so workers skip re-parsing;
-/// each entry is consumed by the first worker that checks that file.
+/// Check every file against the shared compact module graph, in parallel,
+/// returning results in input order. Workers parse only their current file;
+/// retaining every seed AST beside the graph makes peak memory scale with the
+/// corpus before the bounded worker pool starts.
 pub(crate) fn check_files(
     files: &[PathBuf],
     module_graph: &harn_modules::ModuleGraph,
-    parsed_sources: HashMap<PathBuf, harn_modules::ParsedModuleSource>,
     cross_file_imports: &HashSet<String>,
     overrides: &CheckCliOverrides,
     want_text: bool,
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
-    let parsed_sources = Mutex::new(parsed_sources);
     // Resolve directory-stable check inputs before worker fan-out. In
     // particular, an external host-capability manifest is read and parsed once
     // per source directory instead of once per checked file.
@@ -120,7 +117,6 @@ pub(crate) fn check_files(
                 analysis,
                 file,
                 module_graph,
-                &parsed_sources,
                 &config_by_dir,
                 cross_file_imports,
                 overrides,
@@ -155,16 +151,13 @@ pub(crate) fn check_files_independently(
         want_text,
         || (),
         |(), file| {
-            let (module_graph, parsed_sources) =
-                super::build_module_graph_with_parsed_sources(std::slice::from_ref(file));
+            let module_graph = super::build_module_graph(std::slice::from_ref(file));
             let cross_file_imports = super::collect_cross_file_imports(&module_graph);
-            let parsed_sources = Mutex::new(parsed_sources);
             let mut analysis = AnalysisDatabase::new();
             check_one(
                 &mut analysis,
                 file,
                 &module_graph,
-                &parsed_sources,
                 &config_by_dir,
                 &cross_file_imports,
                 overrides,
@@ -352,20 +345,37 @@ fn check_one(
     analysis: &mut AnalysisDatabase,
     file: &Path,
     module_graph: &harn_modules::ModuleGraph,
-    parsed_sources: &Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
     config_by_dir: &HashMap<PathBuf, EffectiveCheckConfig>,
     cross_file_imports: &HashSet<String>,
     overrides: &CheckCliOverrides,
     want_text: bool,
 ) -> CheckedFile {
-    if let Some(parsed) = take_parsed_source(parsed_sources, file) {
-        analysis.set_parsed_source(
-            SourceId::path(file),
-            parsed.source,
-            SourceVersion(1),
-            parsed.program,
-        );
-    }
+    let checked = check_one_retaining_analysis(
+        analysis,
+        file,
+        module_graph,
+        config_by_dir,
+        cross_file_imports,
+        overrides,
+        want_text,
+    );
+    // A batch result owns its compact report. Keeping the analysis entry as
+    // well retains source text, tokens, AST, and every typecheck projection
+    // for the rest of this worker's shard, making peak RSS scale with corpus
+    // size instead of bounded worker concurrency.
+    analysis.remove_source(&SourceId::path(file));
+    checked
+}
+
+fn check_one_retaining_analysis(
+    analysis: &mut AnalysisDatabase,
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+    config_by_dir: &HashMap<PathBuf, EffectiveCheckConfig>,
+    cross_file_imports: &HashSet<String>,
+    overrides: &CheckCliOverrides,
+    want_text: bool,
+) -> CheckedFile {
     let context = config_by_dir
         .get(&check_config_key(file))
         .expect("every checked file has a precomputed check context");
@@ -524,20 +534,6 @@ fn build_check_contexts_with(
     contexts
 }
 
-/// Claim the module-graph build's parsed AST for `file`, if still unclaimed.
-/// Keyed by canonical path exactly like the graph build's retention set; on
-/// any canonicalization failure the worker just re-parses from disk.
-fn take_parsed_source(
-    parsed_sources: &Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
-    file: &Path,
-) -> Option<harn_modules::ParsedModuleSource> {
-    let canonical = harn_modules::canonical_path(file);
-    parsed_sources
-        .lock()
-        .expect("parsed-source map lock poisoned")
-        .remove(&canonical)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -600,6 +596,35 @@ mod tests {
         assert_eq!(
             contexts[&check_config_key(&file)].config.disable_rules,
             ["assert-outside-test"]
+        );
+    }
+
+    #[test]
+    fn completed_batch_check_evicts_its_analysis_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("fixture.harn");
+        std::fs::write(&file, "pipeline main() { return nil }\n").unwrap();
+        let files = vec![file.clone()];
+        let overrides = CheckCliOverrides::default();
+        let module_graph = super::super::build_module_graph(&files);
+        let cross_file_imports = super::super::collect_cross_file_imports(&module_graph);
+        let contexts = build_check_contexts(&files, &overrides);
+        let mut analysis = AnalysisDatabase::new();
+
+        let checked = check_one(
+            &mut analysis,
+            &file,
+            &module_graph,
+            &contexts,
+            &cross_file_imports,
+            &overrides,
+            false,
+        );
+
+        assert_eq!(checked.report.path, file.to_string_lossy());
+        assert!(
+            !analysis.remove_source(&SourceId::path(&file)),
+            "the compact check report must be the only retained per-file projection"
         );
     }
 
@@ -762,13 +787,11 @@ host_served_capabilities_path = "served.json"
         std::fs::write(&consumer, "import { helper } from \"library\"\nhelper()\n").unwrap();
         let overrides = CheckCliOverrides::default();
 
-        let (single_graph, single_sources) =
-            super::super::build_module_graph_with_parsed_sources(std::slice::from_ref(&library));
+        let single_graph = super::super::build_module_graph(std::slice::from_ref(&library));
         let single_imports = super::super::collect_cross_file_imports(&single_graph);
         let single = check_files(
             std::slice::from_ref(&library),
             &single_graph,
-            single_sources,
             &single_imports,
             &overrides,
             false,
@@ -784,17 +807,9 @@ host_served_capabilities_path = "served.json"
             .any(|(_, code, _)| *code == Some("HARN-LNT-019")));
 
         let files = [library, consumer];
-        let (shared_graph, shared_sources) =
-            super::super::build_module_graph_with_parsed_sources(&files);
+        let shared_graph = super::super::build_module_graph(&files);
         let shared_imports = super::super::collect_cross_file_imports(&shared_graph);
-        let shared = check_files(
-            &files,
-            &shared_graph,
-            shared_sources,
-            &shared_imports,
-            &overrides,
-            false,
-        );
+        let shared = check_files(&files, &shared_graph, &shared_imports, &overrides, false);
         assert_ne!(diagnostic_facts(&shared[0]), diagnostic_facts(&single[0]));
     }
 }

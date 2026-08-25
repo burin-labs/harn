@@ -4,7 +4,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn __tool_call_name(call) {
+pub fn __tool_call_name(call: dict) {
   return to_string(call?.name ?? call?.tool_name ?? "")
 }
 
@@ -14,7 +14,7 @@ pub fn __tool_call_name(call) {
  * @effects: []
  * @errors: []
  */
-pub fn __tool_call_args(call) {
+pub fn __tool_call_args(call: dict) {
   const raw = call?.arguments ?? call?.tool_args
   if type_of(raw) == "dict" {
     return raw
@@ -22,11 +22,11 @@ pub fn __tool_call_args(call) {
   return {}
 }
 
-pub fn __tool_call_name_is_blank(call) -> bool {
+pub fn __tool_call_name_is_blank(call: dict) -> bool {
   return __tool_call_name(call).trim() == ""
 }
 
-pub fn __filter_blank_name_tool_calls(calls) {
+pub fn __filter_blank_name_tool_calls(calls: list?) {
   let kept = []
   let dropped = 0
   for call in calls ?? [] {
@@ -39,7 +39,7 @@ pub fn __filter_blank_name_tool_calls(calls) {
   return {calls: kept, dropped: dropped}
 }
 
-pub fn __resolve_tool_calls(llm_result, parsed) {
+pub fn __resolve_tool_calls(llm_result: dict, parsed: dict) {
   const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
   if len(native_calls) > 0 {
     return __filter_blank_name_tool_calls(native_calls).calls

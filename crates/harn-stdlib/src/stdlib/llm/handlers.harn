@@ -16,6 +16,7 @@
 // "context_overflow" is an alias of "context_window_exceeded".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
+import { __with_cache_emit_hit, __with_cache_emit_miss } from "std/llm/handler_cache_events"
 import { llm_call_options } from "std/llm/options"
 pub import { with_fallback, with_retry } from "std/llm/resilience"
 import { parse_first_json, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
@@ -30,7 +31,7 @@ import { get_typed_issues } from "std/schema"
 // shared helpers
 // -------------------------------------------------------------------------------------------------
 
-fn __opts_dict(opts) {
+fn __opts_dict(opts: any) {
   if type_of(opts) == "dict" {
     return opts
   }
@@ -39,26 +40,26 @@ fn __opts_dict(opts) {
 
 let __llm_handler_circuits = []
 
-fn __llm_handler_is_callable(value) -> bool {
+fn __llm_handler_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __circuit_name_for(call) -> string {
+fn __circuit_name_for(call: dict) -> string {
   const opts = call?.opts ?? {}
   const provider = to_string(opts?.provider ?? "<unset>")
   const model = to_string(opts?.model ?? "<unset>")
   return "llm:" + provider + ":" + model
 }
 
-fn __ensure_llm_handler_circuit(runtime: HarnessRuntime, name, threshold, reset_ms) {
+fn __ensure_llm_handler_circuit(runtime: HarnessRuntime, name: any, threshold: any, reset_ms: any) {
   if !contains(__llm_handler_circuits, name) {
     runtime.circuit_breaker(name, threshold, reset_ms)
     __llm_handler_circuits = __llm_handler_circuits + [name]
   }
 }
 
-fn __circuit_open_error(call, name) {
+fn __circuit_open_error(call: dict, name: string) {
   const opts = call?.opts ?? {}
   return {
     kind: "terminal",
@@ -71,7 +72,7 @@ fn __circuit_open_error(call, name) {
   }
 }
 
-fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
+fn __llm_handler_should_skip_cache(prompt: any, system: any, opts: dict) -> bool {
   const predicate = opts?.skip_when
   if predicate == nil {
     return opts?.tools != nil
@@ -82,7 +83,7 @@ fn __llm_handler_should_skip_cache(prompt, system, opts) -> bool {
   return predicate ? true : false
 }
 
-fn __llm_handler_cache_options(opts, default_store = "llm.with_cache") -> dict {
+fn __llm_handler_cache_options(opts: dict, default_store: string = "llm.with_cache") -> dict {
   // LLM caches default to a 10-minute TTL when the caller has not supplied
   // any TTL-equivalent. Deterministic builtins set their own.
   let cache_opts = {store: opts?.store ?? default_store}
@@ -108,7 +109,7 @@ fn __llm_handler_cache_options(opts, default_store = "llm.with_cache") -> dict {
   return cache_opts
 }
 
-fn __safe_invoke(next, call) {
+fn __safe_invoke(next: unknown, call: any) {
   const envelope = try {
     next(call)
   }
@@ -128,17 +129,17 @@ fn __safe_invoke(next, call) {
  *   with_X(next, opts)   // direct: returns a caller
  *   with_X(opts)         // curried: returns fn(next) -> caller, drops into compose
  */
-fn __partial(handler_impl, opts) {
+fn __partial(handler_impl: unknown, opts: any) {
   return { next -> handler_impl(next, opts) }
 }
 
 // Effectful middleware retains its attenuated root authority when curried;
 // the wrapper passed to `compose` accepts only the next caller.
-fn __partial_with_harness(handler_impl, harness: Harness, opts) {
+fn __partial_with_harness(handler_impl: unknown, harness: Harness, opts: any) {
   return { next -> handler_impl(harness, next, opts) }
 }
 
-fn __emit_event(agent: HarnessAgent, session_id, name, payload) {
+fn __emit_event(agent: HarnessAgent, session_id: string, name: string, payload: dict) {
   if to_string(session_id) == "" {
     return
   }
@@ -147,7 +148,7 @@ fn __emit_event(agent: HarnessAgent, session_id, name, payload) {
   }
 }
 
-fn __envelope_text(env) {
+fn __envelope_text(env: any) {
   if !(env?.ok ?? false) {
     return ""
   }
@@ -173,7 +174,7 @@ fn __envelope_text(env) {
  * @effects: []
  * @errors: []
  */
-pub fn with_shadow(agent: HarnessAgent, primary, shadow, opts = nil) {
+pub fn with_shadow(agent: HarnessAgent, primary: any, shadow: any, opts: any = nil) {
   const cfg = __opts_dict(opts)
   const sampler = cfg?.sampler
   const on_diff = cfg?.on_diff
@@ -252,7 +253,7 @@ pub fn with_shadow(agent: HarnessAgent, primary, shadow, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn with_prompt_rewrite(next, rewriter) {
+pub fn with_prompt_rewrite(next: any, rewriter: unknown) {
   return { call ->
     const rewritten = try {
       rewriter(call?.prompt, call?.system, call?.opts)
@@ -318,7 +319,7 @@ pub fn with_prompt_rewrite(next, rewriter) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_logging(harness: Harness, next, opts = nil) {
+pub fn with_logging(harness: Harness, next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial_with_harness(with_logging, harness, next)
   }
@@ -358,7 +359,7 @@ pub fn with_logging(harness: Harness, next, opts = nil) {
   }
 }
 
-fn __budget_check(limit_name, max_value, observed, on_exceed) {
+fn __budget_check(limit_name: string, max_value: any, observed: int, on_exceed: string) {
   if max_value == nil || observed < to_int(max_value) {
     return nil
   }
@@ -405,7 +406,7 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_budget(harness: Harness, next, opts = nil) {
+pub fn with_budget(harness: Harness, next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial_with_harness(with_budget, harness, next)
   }
@@ -452,7 +453,7 @@ pub fn with_budget(harness: Harness, next, opts = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
+pub fn llm_cache_key(prompt: any, system: any = nil, options: dict? = nil) -> string {
   return __llm_cache_key(prompt, system, options ?? {})
 }
 
@@ -476,7 +477,7 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_cache(harness: Harness, first, second = nil, third = nil) {
+pub fn with_cache(harness: Harness, first: any, second: any = nil, third: dict? = nil) {
   if __llm_handler_is_callable(first) {
     const next = first
     const cfg = __opts_dict(second)
@@ -513,7 +514,15 @@ pub fn with_cache(harness: Harness, first, second = nil, third = nil) {
   )
 }
 
-fn __with_cache_run(harness: Harness, prompt, system, opts, session_id, compute, should_store) {
+fn __with_cache_run(
+  harness: Harness,
+  prompt: any,
+  system: any,
+  opts: any,
+  session_id: string,
+  compute: unknown,
+  should_store: unknown,
+) {
   if __llm_handler_should_skip_cache(prompt, system, opts) {
     return compute()
   }
@@ -534,7 +543,7 @@ fn __with_cache_run(harness: Harness, prompt, system, opts, session_id, compute,
   return result
 }
 
-fn __llm_handler_should_store_direct_result(result) -> bool {
+fn __llm_handler_should_store_direct_result(result: dict) -> bool {
   // Direct-call form returns the raw llm_call envelope; cache anything
   // that is not an error envelope (i.e. has no `status` field).
   if type_of(result) != "dict" {
@@ -543,7 +552,7 @@ fn __llm_handler_should_store_direct_result(result) -> bool {
   return !contains(result.keys(), "status")
 }
 
-fn __llm_handler_should_store_result(result) -> bool {
+fn __llm_handler_should_store_result(result: dict) -> bool {
   // The caller seam returns `{ok: true, value}` on success and
   // `{ok: false, status: ...}` on failure. Only cache successes; failure
   // envelopes are transient retry state, not durable answers.
@@ -551,74 +560,6 @@ fn __llm_handler_should_store_result(result) -> bool {
     return false
   }
   return result?.ok ?? false
-}
-
-fn __with_cache_hit_metrics_from_envelope(cached_value) -> dict {
-  let metrics = {model_calls_avoided: 1}
-  if type_of(cached_value) != "dict" {
-    return metrics
-  }
-  // The caller seam wraps the LLM dict in {ok: true, value: ...}; the
-  // direct-call form caches the LLM dict directly. Unwrap once so this
-  // helper reads the same shape either way.
-  const llm = if cached_value?.value != nil && type_of(cached_value.value) == "dict" {
-    cached_value.value
-  } else {
-    cached_value
-  }
-  const usage = llm?.usage
-  if type_of(usage) == "dict" {
-    let tokens_saved = 0
-    if usage?.input_tokens != nil {
-      tokens_saved = tokens_saved + to_int(usage.input_tokens)
-    }
-    if usage?.output_tokens != nil {
-      tokens_saved = tokens_saved + to_int(usage.output_tokens)
-    }
-    if tokens_saved > 0 {
-      metrics = metrics + {tokens_saved: tokens_saved}
-    }
-  }
-  if llm?.latency_ms != nil {
-    metrics = metrics + {latency_saved_ms: to_int(llm.latency_ms)}
-  }
-  return metrics
-}
-
-fn __with_cache_emit_hit(agent: HarnessAgent, session_id, key, cached, opts) {
-  if session_id == "" {
-    return
-  }
-  __emit_event(
-    agent,
-    session_id,
-    "cache_hit",
-    {
-      key: key,
-      backend: cached?.backend ?? "",
-      namespace: cached?.namespace ?? "",
-      provider: opts?.provider ?? "",
-      model: opts?.model ?? "",
-      metrics: __with_cache_hit_metrics_from_envelope(cached?.value),
-    },
-  )
-}
-
-fn __with_cache_emit_miss(agent: HarnessAgent, session_id, key, cached, compute_ms) {
-  if session_id == "" {
-    return
-  }
-  __emit_event(
-    agent,
-    session_id,
-    "cache_miss",
-    {
-      key: key,
-      backend: cached?.backend ?? "",
-      namespace: cached?.namespace ?? "",
-      metrics: {compute_ms: compute_ms},
-    },
-  )
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -636,7 +577,7 @@ const __SEMANTIC_CACHE_DEFAULT_THRESHOLD = 0.95
 
 const __SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES = 512
 
-fn __semantic_cache_text(prompt, system) -> string {
+fn __semantic_cache_text(prompt: string?, system: string?) -> string {
   const user = to_string(prompt ?? "")
   const sys = to_string(system ?? "")
   if sys == "" {
@@ -645,7 +586,7 @@ fn __semantic_cache_text(prompt, system) -> string {
   return sys + "\n\n" + user
 }
 
-fn __semantic_embed_options(opts) -> dict {
+fn __semantic_embed_options(opts: dict) -> dict {
   let embed_opts = {}
   const model_hint = opts?.embed_model_hint ?? opts?.model_hint
   if model_hint != nil {
@@ -657,7 +598,7 @@ fn __semantic_embed_options(opts) -> dict {
   return embed_opts
 }
 
-fn __semantic_index_load(llm: HarnessLlm, cache_opts) -> list {
+fn __semantic_index_load(llm: HarnessLlm, cache_opts: any) -> list {
   const cached = cache_get(llm, __SEMANTIC_CACHE_INDEX_KEY, cache_opts)
   if (cached?.hit ?? false) && type_of(cached?.value) == "list" {
     return cached.value
@@ -665,7 +606,10 @@ fn __semantic_index_load(llm: HarnessLlm, cache_opts) -> list {
   return []
 }
 
-fn __semantic_similarity(query_vector, entry_vector) -> float {
+fn __semantic_similarity(
+  query_vector: string | bytes | list | dict | set | range | nil,
+  entry_vector: string | bytes | list | dict | set | range | nil,
+) -> float {
   if type_of(entry_vector) != "list" || len(entry_vector) != len(query_vector)
     || len(query_vector)
       == 0 {
@@ -680,7 +624,10 @@ fn __semantic_similarity(query_vector, entry_vector) -> float {
   return to_float(unwrap(scored))
 }
 
-fn __semantic_nearest(index, query_vector) -> dict {
+fn __semantic_nearest(
+  index: any,
+  query_vector: string | bytes | list | dict | set | range | nil,
+) -> dict {
   let best_index = -1
   let best_similarity = 0.0
   let i = 0
@@ -697,12 +644,12 @@ fn __semantic_nearest(index, query_vector) -> dict {
 
 fn __semantic_index_store(
   llm: HarnessLlm,
-  cache_opts,
-  index,
-  query_vector,
-  response,
-  query_text,
-  opts,
+  cache_opts: any,
+  index: list,
+  query_vector: any,
+  response: any,
+  query_text: any,
+  opts: dict,
 ) {
   const entry = {embedding: query_vector, response: response, prompt: query_text}
   let appended = index.appending(entry)
@@ -713,7 +660,13 @@ fn __semantic_index_store(
   cache_put(llm, __SEMANTIC_CACHE_INDEX_KEY, appended, cache_opts)
 }
 
-fn __semantic_emit_hit(agent: HarnessAgent, session_id, entry, similarity, opts) {
+fn __semantic_emit_hit(
+  agent: HarnessAgent,
+  session_id: string,
+  entry: dict,
+  similarity: any,
+  opts: dict,
+) {
   if session_id == "" {
     return
   }
@@ -730,7 +683,7 @@ fn __semantic_emit_hit(agent: HarnessAgent, session_id, entry, similarity, opts)
   )
 }
 
-fn __semantic_emit_miss(agent: HarnessAgent, session_id, similarity, compute_ms) {
+fn __semantic_emit_miss(agent: HarnessAgent, session_id: string, similarity: any, compute_ms: any) {
   if session_id == "" {
     return
   }
@@ -781,7 +734,7 @@ fn __semantic_emit_miss(agent: HarnessAgent, session_id, similarity, compute_ms)
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_semantic_cache(harness: Harness, next, opts = nil) {
+pub fn with_semantic_cache(harness: Harness, next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial_with_harness(with_semantic_cache, harness, next)
   }
@@ -836,7 +789,7 @@ pub fn with_semantic_cache(harness: Harness, next, opts = nil) {
 // with_result_schema
 // -------------------------------------------------------------------------------------------------
 
-fn __result_schema_extract(envelope) -> dict {
+fn __result_schema_extract(envelope: dict) -> dict {
   const value = if type_of(envelope?.value) == "dict" {
     envelope.value
   } else {
@@ -859,7 +812,7 @@ fn __result_schema_extract(envelope) -> dict {
   return {present: false, value: nil}
 }
 
-fn __result_schema_issue_text(candidate, schema) -> string {
+fn __result_schema_issue_text(candidate: any, schema: any) -> string {
   const issues = try {
     get_typed_issues(candidate, schema)
   }
@@ -914,7 +867,7 @@ fn __result_schema_issue_text(candidate, schema) -> string {
  * @effects: [llm.call]
  * @errors: [result_schema]
  */
-pub fn with_result_schema(harness: Harness, next, schema = nil, opts = nil) {
+pub fn with_result_schema(harness: Harness, next: any, schema: any = nil, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return { inner -> with_result_schema(harness, inner, next, schema) }
   }
@@ -995,7 +948,7 @@ pub fn with_result_schema(harness: Harness, next, schema = nil, opts = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_circuit_breaker(harness: Harness, handler, options = nil) {
+pub fn with_circuit_breaker(harness: Harness, handler: any, options: dict? = nil) {
   if !__llm_handler_is_callable(handler) {
     return __partial_with_harness(with_circuit_breaker, harness, handler)
   }
@@ -1029,7 +982,7 @@ pub fn with_circuit_breaker(harness: Harness, handler, options = nil) {
 // with_repair
 // -------------------------------------------------------------------------------------------------
 
-fn __repair_default_nudge(error_dict) {
+fn __repair_default_nudge(error_dict: dict) {
   let lines = [
     "Your previous response did not pass schema validation.",
     "Re-emit valid JSON only:",
@@ -1046,7 +999,14 @@ fn __repair_default_nudge(error_dict) {
   return join(lines, "\n")
 }
 
-fn __repair_apply_strategy(llm: HarnessLlm, call, envelope, strategy, max_tokens, temperature) {
+fn __repair_apply_strategy(
+  llm: HarnessLlm,
+  call: dict,
+  envelope: dict,
+  strategy: unknown,
+  max_tokens: any,
+  temperature: any,
+) {
   const nudge = if __llm_handler_is_callable(strategy) {
     const r = try {
       strategy(call?.prompt, call?.system, call?.opts, envelope)
@@ -1126,7 +1086,7 @@ fn __repair_apply_strategy(llm: HarnessLlm, call, envelope, strategy, max_tokens
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_repair(harness: Harness, next, opts = nil) {
+pub fn with_repair(harness: Harness, next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return { inner -> with_repair(harness, inner, next) }
   }
@@ -1163,7 +1123,7 @@ pub fn with_repair(harness: Harness, next, opts = nil) {
 // with_coerce
 // -------------------------------------------------------------------------------------------------
 
-fn __coerce_value_dict(value, lower_keys) {
+fn __coerce_value_dict(value: unknown, lower_keys: any) {
   if !lower_keys {
     return value
   }
@@ -1192,7 +1152,7 @@ fn __coerce_value_dict(value, lower_keys) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_coerce(next, opts = nil) {
+pub fn with_coerce(next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial(with_coerce, next)
   }
@@ -1235,7 +1195,7 @@ pub fn with_coerce(next, opts = nil) {
 // with_timeout
 // -------------------------------------------------------------------------------------------------
 
-fn __timeout_resolve_ms(opts) {
+fn __timeout_resolve_ms(opts: dict) {
   if type_of(opts) == "int" {
     return opts
   }
@@ -1284,7 +1244,7 @@ fn __timeout_resolve_ms(opts) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_timeout(harness: Harness, next, opts = nil) {
+pub fn with_timeout(harness: Harness, next: any, opts: any = nil) {
   if !__llm_handler_is_callable(next) {
     return __partial_with_harness(with_timeout, harness, next)
   }
@@ -1331,7 +1291,7 @@ pub fn with_timeout(harness: Harness, next, opts = nil) {
 // with_routing
 // -------------------------------------------------------------------------------------------------
 
-fn __routing_resolve(routes, call) {
+fn __routing_resolve(routes: any, call: any) {
   let idx = 0
   const total = if type_of(routes) == "list" {
     len(routes)
@@ -1399,7 +1359,7 @@ fn __routing_resolve(routes, call) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_routing(agent: HarnessAgent, opts) {
+pub fn with_routing(agent: HarnessAgent, opts: dict) {
   const cfg = __opts_dict(opts)
   const default_caller = cfg?.default
   const routes = if type_of(cfg?.routes) == "list" {
@@ -1452,7 +1412,7 @@ pub fn with_routing(agent: HarnessAgent, opts) {
  * @effects: []
  * @errors: []
  */
-pub fn compose(wrappers) {
+pub fn compose(wrappers: any) {
   const list = if type_of(wrappers) == "list" {
     wrappers
   } else {

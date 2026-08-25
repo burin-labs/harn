@@ -28,7 +28,7 @@ type OAuthTokenExchangeCapability = {
   notes: list<string>,
 }
 
-fn __normalize_token_type(name) {
+fn __normalize_token_type(name: string?) {
   const raw = trim(to_string(name ?? ""))
   if raw == "" {
     throw "std/oauth/token_exchange: token type is required"
@@ -60,7 +60,7 @@ fn __normalize_token_type(name) {
   throw "std/oauth/token_exchange: unsupported token type `" + raw + "`"
 }
 
-fn __normalize_token_types(values) {
+fn __normalize_token_types(values: list?) {
   let out = []
   for value in values ?? [] {
     out = out + [__normalize_token_type(value)]
@@ -72,7 +72,7 @@ fn __default_rows() {
   return token_exchange_capability_rows()
 }
 
-fn __normalize_row(raw) {
+fn __normalize_row(raw: dict) {
   if type_of(raw) != "dict" {
     throw "std/oauth/token_exchange: capability row must be a dict"
   }
@@ -99,7 +99,7 @@ fn __normalize_row(raw) {
   }
 }
 
-fn __catalog_from_rows(rows) {
+fn __catalog_from_rows(rows: list?) {
   let out = {}
   for raw in rows ?? [] {
     const row = __normalize_row(raw)
@@ -108,7 +108,7 @@ fn __catalog_from_rows(rows) {
   return out
 }
 
-fn __overlay_rows(overlays) {
+fn __overlay_rows(overlays: unknown) {
   if overlays == nil {
     return []
   }
@@ -129,7 +129,7 @@ fn __overlay_rows(overlays) {
   throw "std/oauth/token_exchange: overlays must be a list or dict"
 }
 
-fn __provider_id(provider_or_id) {
+fn __provider_id(provider_or_id: any) {
   if type_of(provider_or_id) == "dict" {
     return trim(to_string(provider_or_id?.id ?? ""))
   }
@@ -166,7 +166,7 @@ pub fn token_type(name: string) -> string {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn token_exchange_catalog(overlays = nil) -> dict {
+pub fn token_exchange_catalog(overlays: any = nil) -> dict {
   return __catalog_from_rows(__default_rows() + __overlay_rows(overlays))
 }
 
@@ -180,7 +180,10 @@ pub fn token_exchange_catalog(overlays = nil) -> dict {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn token_exchange_capability(provider_or_id, overlays = nil) -> OAuthTokenExchangeCapability? {
+pub fn token_exchange_capability(
+  provider_or_id: any,
+  overlays: any = nil,
+) -> OAuthTokenExchangeCapability? {
   if type_of(provider_or_id) == "dict" && provider_or_id?.token_exchange != nil {
     return __normalize_row(provider_or_id.token_exchange + {id: provider_or_id?.id})
   }
@@ -191,7 +194,7 @@ pub fn token_exchange_capability(provider_or_id, overlays = nil) -> OAuthTokenEx
   return token_exchange_catalog(overlays)[id]
 }
 
-fn __actor_dict(actor) {
+fn __actor_dict(actor: any) {
   if type_of(actor) == "dict" {
     const sub = trim(to_string(actor?.sub ?? ""))
     if sub == "" {

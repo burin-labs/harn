@@ -48,21 +48,21 @@
  * exposing `execute_run`, `snapshot_provider`, `llm_pricing_per_1k`,
  * and `provider_key_available` to script-land.
  */
-fn __safe_string(value, fallback: string) -> string {
+fn __safe_string(value: string, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_list(value) -> list {
+fn __safe_list(value: list) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_dict(value) -> dict {
+fn __safe_dict(value: dict) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -74,7 +74,7 @@ fn __safe_dict(value) -> dict {
  * Rust's `format!("{:.6}", x)` rounding/padding so the rendered
  * markdown/summary lines stay byte-identical with the host formatter.
  */
-fn __format_float_6(value) -> string {
+fn __format_float_6(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -102,7 +102,7 @@ fn __format_float_6(value) -> string {
  * half-up padded). Mirrors Rust's `format!("{:+.1}", x)` for the
  * baseline-comparison `net lift: **{:+.1}pp**` line.
  */
-fn __format_float_signed_1(value) -> string {
+fn __format_float_signed_1(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -128,7 +128,7 @@ fn __format_float_signed_1(value) -> string {
  * Format a float as `"X.Y"` (1 decimal, half-up padded). Used for the
  * parity summary percentages to mirror Rust's `"{:.1}%"`.
  */
-fn __format_float_1(value) -> string {
+fn __format_float_1(value: any) -> string {
   const f = to_float(value) ?? 0.0
   const negative = f < 0.0
   const abs_f = if negative {
@@ -178,7 +178,7 @@ fn __selector_label(selector: dict) -> string {
  * `value.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())`
  * pattern used in the native/text comparison table.
  */
-fn __optional_int_mark(value) -> string {
+fn __optional_int_mark(value: any) -> string {
   if type_of(value) == "int" {
     return to_string(value)
   }
@@ -192,7 +192,7 @@ fn __optional_int_mark(value) -> string {
  * Format an `Option<bool>` as `"yes"` / `"no"` / `"-"`. Mirrors Rust's
  * `optional_bool_mark`.
  */
-fn __optional_bool_mark(value) -> string {
+fn __optional_bool_mark(value: any) -> string {
   if type_of(value) == "bool" {
     if value {
       return "yes"
@@ -228,7 +228,7 @@ fn __comparison_evidence_links(comparison: dict) -> string {
   return join(links, "<br>")
 }
 
-fn __render_rollup_table(title: string, rollups) -> string {
+fn __render_rollup_table(title: string, rollups: list) -> string {
   let out = "## " + title + "\n\n"
   out = out + "| key | passed | failed | skipped | total | cost |\n"
   out = out + "|---|---:|---:|---:|---:|---:|\n"
@@ -252,7 +252,7 @@ fn __render_rollup_table(title: string, rollups) -> string {
   return out
 }
 
-fn __render_runs_table(runs) -> string {
+fn __render_runs_table(runs: list) -> string {
   let out = "\n## Runs\n\n"
   out = out
     + "| fixture | run | provider | model | tool format | fixture sequence | tool calls | status | iterations | tokens | cost | transcript | output |\n"
@@ -357,7 +357,7 @@ fn __render_baseline_comparison(comparison: dict) -> string {
   return out
 }
 
-fn __render_comparison_table(comparisons) -> string {
+fn __render_comparison_table(comparisons: list) -> string {
   let out = "\n## Native/Text Comparison\n\n"
   out = out
     + "| fixture | selector | native | text | equivalent | verifier | tools | rejected delta | token delta | iteration delta | evidence |\n"
@@ -402,7 +402,7 @@ fn __render_comparison_table(comparisons) -> string {
   return out
 }
 
-fn __render_divergence_evidence(comparisons) -> string {
+fn __render_divergence_evidence(comparisons: list) -> string {
   let diverged = []
   for comparison in __safe_list(comparisons) {
     const cd = __safe_dict(comparison)
@@ -432,7 +432,7 @@ fn __render_divergence_evidence(comparisons) -> string {
   return out
 }
 
-fn __render_parity_report(parity_by_pair) -> string {
+fn __render_parity_report(parity_by_pair: list) -> string {
   let out = "\n## Parity report — native vs text\n\n"
   out = out
     + "| selector | sample | native pass | text pass | agreement | verifier divergence | native_only | text_only | both_pass | both_fail |\n"

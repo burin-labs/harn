@@ -8,7 +8,7 @@ fn find_text_hits_chunk(root: &str, pattern: &str) -> Chunk {
     let pattern = serde_json::to_string(pattern).expect("pattern string literal");
     compile_source(&format!(
         r#"
-pipeline default(task) {{
+pipeline default(task: unknown) {{
   const hits = find_text({root}, {pattern}, {{
     include: ["**/*.harn"],
     max_matches: 100,
@@ -25,7 +25,7 @@ fn find_text_exists_chunk(root: &str, pattern: &str) -> Chunk {
     let pattern = serde_json::to_string(pattern).expect("pattern string literal");
     compile_source(&format!(
         r#"
-pipeline default(task) {{
+pipeline default(task: unknown) {{
   return find_text({root}, {pattern}, {{
     include: ["**/*.harn"],
     mode: "exists",
@@ -42,7 +42,7 @@ fn repeated_literal_search_chunk(root: &str) -> Chunk {
     let root = serde_json::to_string(root).expect("root string literal");
     compile_source(&format!(
         r#"
-pipeline default(task) {{
+pipeline default(task: unknown) {{
   let count = 0
   for pattern in ["needle", "ordinary", "const", "value", "main", "fn", "pkg", "missing"] {{
     count = count + len(find_text({root}, pattern, {{include: ["**/*.harn"], max_matches: 10000}}))
@@ -58,7 +58,7 @@ fn one_pass_evidence_chunk(root: &str) -> Chunk {
     let root = serde_json::to_string(root).expect("root string literal");
     compile_source(&format!(
         r#"
-pipeline default(task) {{
+pipeline default(task: unknown) {{
   return find_evidence(
     [{{id: "repo", path: {root}}}],
     [

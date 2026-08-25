@@ -128,7 +128,7 @@ pub fn rel_path(path: string) -> string {
   return path
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   let violations: list<string> = []
   let scanned = 0
   for path in harness.fs.glob("**/*.rs") {

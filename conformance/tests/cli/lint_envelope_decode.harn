@@ -10,7 +10,7 @@ fn read_fixture(fs: HarnessFs, kind: string, name: string) -> string {
   return fs.read_text(path_join(fixture_root(fs), kind, name + ".json"))
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   assert(type_of(lint_envelope_schema()) == "dict")
   for name in ["clean_ok", "warning_ok", "multiline_utf8_span", "changed_scope"] {
     const text = read_fixture(harness.fs, "positive", name)

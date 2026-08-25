@@ -1,12 +1,12 @@
-fn last_word(text) {
+fn last_word(text: string) {
   return text |> split(_, " ") |> _.last()
 }
 
 pipeline default(harness: Harness) {
-  fn add1(x) {
+  fn add1(x: int) {
     return x + 1
   }
-  fn double(x) {
+  fn double(x: int) {
     return x * 2
   }
   harness.stdio.println(3 |> add1 |> double)

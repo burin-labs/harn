@@ -119,7 +119,7 @@ fn pl_significant_words(text: string) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_state(harness: Harness, options = nil) -> dict {
+pub fn pattern_learning_state(harness: Harness, options: any = nil) -> dict {
   let best = nil
   for value in pl_record_values(harness.fs, harness.memory, "state", options) {
     if best == nil || pl_text(value?.updated_at) >= pl_text(best?.updated_at) {
@@ -136,18 +136,18 @@ pub fn pattern_learning_state(harness: Harness, options = nil) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_set_enabled(harness: Harness, enabled: bool, options = nil) -> dict {
+pub fn pattern_learning_set_enabled(harness: Harness, enabled: bool, options: any = nil) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const state = pattern_learning_state(harness, options)
   return pl_replace_state(harness, state + {enabled: enabled}, options)
 }
 
-fn pl_session_store_options(options = nil) -> SessionStoreOptions {
+fn pl_session_store_options(options: any = nil) -> SessionStoreOptions {
   const root = pl_text(options?.session_store_root)
   return root == "" ? {} : {root: root}
 }
 
-fn pl_session_store_list_options(limit: int, options = nil) -> SessionStoreListOptions {
+fn pl_session_store_list_options(limit: int, options: any = nil) -> SessionStoreListOptions {
   const root = pl_text(options?.session_store_root)
   return root == "" ? {limit: limit, sort_by: "updated_at", order: "descending"} : {
     root: root,
@@ -245,7 +245,7 @@ fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
  * conversation contain distinct ask, coding, curation, and evaluation turns
  * without allowing a control turn to taint the reusable-workflow corpus.
  */
-fn pl_observed_evidence_keys(fs: HarnessFs, memory: HarnessMemory, options = nil) -> list {
+fn pl_observed_evidence_keys(fs: HarnessFs, memory: HarnessMemory, options: any = nil) -> list {
   let ids = []
   for observation in pl_record_values(fs, memory, "observation", options) {
     const source_id = pl_text(observation?.source_id)
@@ -276,7 +276,7 @@ fn pl_run_observed_at(events: list, fallback: string) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_import_session_records(harness: Harness, options = nil) -> dict {
+pub fn pattern_learning_import_session_records(harness: Harness, options: any = nil) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const session_options = pl_session_store_options(options)
   const limit = min(
@@ -363,7 +363,7 @@ pub fn pattern_learning_import_session_records(harness: Harness, options = nil) 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_observations(harness: Harness, options = nil) -> list {
+pub fn pattern_learning_observations(harness: Harness, options: any = nil) -> list {
   return pl_record_values(harness.fs, harness.memory, "observation", options).sorted_by(
     { item -> pl_text(item?.observed_at) },
   )
@@ -386,7 +386,7 @@ fn pl_is_run_provenance_evidence(item: dict) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_curator_evidence(harness: Harness, options = nil) -> list {
+pub fn pattern_learning_curator_evidence(harness: Harness, options: any = nil) -> list {
   const allow_manual = options?.allow_manual_evidence ?? false
   return pattern_learning_observations(harness, options).filter(
     { item ->
@@ -398,11 +398,16 @@ pub fn pattern_learning_curator_evidence(harness: Harness, options = nil) -> lis
     .to_list()
 }
 
-fn pl_forget_observation(fs: HarnessFs, memory: HarnessMemory, id: string, options = nil) -> nil {
+fn pl_forget_observation(
+  fs: HarnessFs,
+  memory: HarnessMemory,
+  id: string,
+  options: any = nil,
+) -> nil {
   memory_forget(memory, pl_namespace(options), {id: id}, pl_memory_options(fs, options))
 }
 
-fn pl_cap_observations(harness: Harness, options = nil) -> nil {
+fn pl_cap_observations(harness: Harness, options: any = nil) -> nil {
   const observations = pattern_learning_observations(harness, options)
   const overflow = len(observations) - OBSERVATION_CAP
   if overflow <= 0 {
@@ -616,7 +621,7 @@ fn pl_make_tool_proposal(
   }
 }
 
-fn pl_skill_roots(fs: HarnessFs, options = nil) -> list {
+fn pl_skill_roots(fs: HarnessFs, options: any = nil) -> list {
   const root = pl_project_root(fs, options)
   const namespace = pl_namespace(options)
   // `.burin/skills` is a read-only compatibility root for skills installed by
@@ -645,7 +650,7 @@ fn pl_skill_namespace_dir(namespace: string) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_skill_root(fs: HarnessFs, options = nil) -> string {
+pub fn pattern_learning_skill_root(fs: HarnessFs, options: any = nil) -> string {
   const root = path_join(pl_project_root(fs, options), ".claude", "skills")
   const namespace = pl_namespace(options)
   if namespace == PATTERN_NAMESPACE {
@@ -689,7 +694,7 @@ fn pl_load_skill_file(fs: HarnessFs, name: string, path: string) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_accepted_skills(fs: HarnessFs, options = nil) -> list {
+pub fn pattern_learning_accepted_skills(fs: HarnessFs, options: any = nil) -> list {
   let seen = []
   let out = []
   for root in pl_skill_roots(fs, options) {
@@ -708,7 +713,7 @@ pub fn pattern_learning_accepted_skills(fs: HarnessFs, options = nil) -> list {
   return out
 }
 
-fn pl_skill_exists(fs: HarnessFs, name: string, options = nil) -> bool {
+fn pl_skill_exists(fs: HarnessFs, name: string, options: any = nil) -> bool {
   for root in pl_skill_roots(fs, options) {
     if fs.exists(path_join(root, name, "SKILL.md")) {
       return true
@@ -717,7 +722,7 @@ fn pl_skill_exists(fs: HarnessFs, name: string, options = nil) -> bool {
   return false
 }
 
-fn pl_existing_pending_by_id(harness: Harness, options = nil) -> dict {
+fn pl_existing_pending_by_id(harness: Harness, options: any = nil) -> dict {
   let out = {}
   for proposal in pattern_learning_pending(harness, options) {
     out = out + {[proposal.id]: proposal}
@@ -757,7 +762,7 @@ fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_refresh(harness: Harness, options = nil) -> list {
+pub fn pattern_learning_refresh(harness: Harness, options: any = nil) -> list {
   pattern_learning_ensure_migrated(harness, options)
   const state = pattern_learning_state(harness, options)
   if !(state?.enabled ?? true) {
@@ -848,7 +853,7 @@ pub fn pattern_learning_refresh(harness: Harness, options = nil) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_pending(harness: Harness, options = nil) -> list {
+pub fn pattern_learning_pending(harness: Harness, options: any = nil) -> list {
   return pl_record_values(harness.fs, harness.memory, "pending", options).sorted_by(
     { item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id },
   )
@@ -867,7 +872,7 @@ pub fn pattern_learning_record_curated_batch(
   harness: Harness,
   batch: dict,
   evidence: list,
-  options = nil,
+  options: any = nil,
 ) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const raw = batch?.proposals ?? []
@@ -936,7 +941,7 @@ pub fn pattern_learning_observe(
   session_id: string,
   message: string,
   tool_sequence: list = [],
-  options = nil,
+  options: any = nil,
 ) -> dict {
   return try {
     pattern_learning_observe_inner(harness, session_id, message, tool_sequence, options)
@@ -958,7 +963,7 @@ fn pattern_learning_observe_inner(
   session_id: string,
   message: string,
   tool_sequence: list = [],
-  options = nil,
+  options: any = nil,
 ) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const state = pattern_learning_state(harness, options)
@@ -1066,7 +1071,7 @@ pub fn pattern_learning_skill_matches(
   fs: HarnessFs,
   query: string,
   limit: int = 3,
-  options = nil,
+  options: any = nil,
 ) -> list {
   const query_words = pl_significant_words(query)
   let matches = []
@@ -1088,7 +1093,7 @@ pub fn pattern_learning_context(
   session_id: string,
   message: string,
   limit: int = 3,
-  options = nil,
+  options: dict? = nil,
 ) -> dict {
   return try {
     pattern_learning_context_inner(harness, session_id, message, limit, options)
@@ -1102,7 +1107,7 @@ fn pattern_learning_context_inner(
   session_id: string,
   message: string,
   limit: int = 3,
-  options = nil,
+  options: dict? = nil,
 ) -> dict {
   const read_options = (options ?? {}) + {skip_migration: true}
   const pending = pattern_learning_pending(harness, read_options)
@@ -1162,7 +1167,7 @@ fn pl_yaml_scalar(value: string) -> string {
   return "\"" + (value ?? "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 }
 
-fn pl_write_skill(fs: HarnessFs, proposal: dict, options = nil) -> string {
+fn pl_write_skill(fs: HarnessFs, proposal: dict, options: any = nil) -> string {
   const name = pl_text(proposal?.name)
   pl_validate_skill_name(name)
   const root = pattern_learning_skill_root(fs, options)
@@ -1194,7 +1199,7 @@ fn pl_write_skill(fs: HarnessFs, proposal: dict, options = nil) -> string {
 fn pl_write_candidate(
   capabilities: {clock: HarnessClock, fs: HarnessFs},
   proposal: dict,
-  options = nil,
+  options: any = nil,
 ) -> dict {
   const project = pl_project_root(capabilities.fs, options)
   const candidate_dir = path_join(
@@ -1232,7 +1237,7 @@ fn pl_write_candidate(
   }
 }
 
-fn pl_find_pending(harness: Harness, id: string, options = nil) -> dict {
+fn pl_find_pending(harness: Harness, id: string, options: any = nil) -> dict {
   for proposal in pattern_learning_pending(harness, options) {
     if proposal.id == id {
       return proposal
@@ -1253,7 +1258,7 @@ fn pl_find_pending(harness: Harness, id: string, options = nil) -> dict {
  * @errors: [HARN-PATTERN-002]
  * @api_stability: experimental
  */
-pub fn pattern_learning_accept(harness: Harness, id: string, options = nil) -> dict {
+pub fn pattern_learning_accept(harness: Harness, id: string, options: any = nil) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const proposal = pl_find_pending(harness, pl_text(id), options)
   if proposal?.id == nil {
@@ -1285,7 +1290,7 @@ fn pl_add_days_iso(now: string, days: int) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_reject(harness: Harness, id: string, options = nil) -> dict {
+pub fn pattern_learning_reject(harness: Harness, id: string, options: any = nil) -> dict {
   pattern_learning_ensure_migrated(harness, options)
   const clean = pl_text(id)
   const proposal = pl_find_pending(harness, clean, options)
@@ -1317,7 +1322,7 @@ pub fn pattern_learning_reject(harness: Harness, id: string, options = nil) -> d
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_status(harness: Harness, options = nil) -> dict {
+pub fn pattern_learning_status(harness: Harness, options: any = nil) -> dict {
   const state = pattern_learning_state(harness, options)
   const pending = pattern_learning_pending(harness, options)
   const observations = pattern_learning_observations(harness, options)
@@ -1332,7 +1337,7 @@ pub fn pattern_learning_status(harness: Harness, options = nil) -> dict {
   }
 }
 
-fn pl_migrate_observations(harness: Harness, options = nil) -> nil {
+fn pl_migrate_observations(harness: Harness, options: any = nil) -> nil {
   for legacy in pl_project_collection(
     pl_read_jsonl_payloads(harness.fs, pl_observation_file(harness.fs, options)),
   ) {
@@ -1345,7 +1350,7 @@ fn pl_migrate_observations(harness: Harness, options = nil) -> nil {
   }
 }
 
-fn pl_migrate_pending(harness: Harness, options = nil) -> nil {
+fn pl_migrate_pending(harness: Harness, options: any = nil) -> nil {
   const pending = pl_project_value(
     pl_read_jsonl_payloads(harness.fs, pl_pending_file(harness.fs, options)),
     {generatedAt: "", proposals: []},
@@ -1390,7 +1395,7 @@ fn pl_migrate_pending(harness: Harness, options = nil) -> nil {
   }
 }
 
-fn pl_migrate_state(harness: Harness, options = nil) -> nil {
+fn pl_migrate_state(harness: Harness, options: any = nil) -> nil {
   const state = pl_project_value(
     pl_read_jsonl_payloads(harness.fs, pl_state_file(harness.fs, options)),
     {enabled: true, suppressedUntil: {}},
@@ -1414,7 +1419,7 @@ fn pl_migrate_state(harness: Harness, options = nil) -> nil {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_ensure_migrated(harness: Harness, options = nil) -> dict {
+pub fn pattern_learning_ensure_migrated(harness: Harness, options: any = nil) -> dict {
   if options?.skip_migration ?? false {
     return {migrated: false, skipped: true}
   }

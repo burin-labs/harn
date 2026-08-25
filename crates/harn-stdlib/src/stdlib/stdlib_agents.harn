@@ -13,7 +13,7 @@ import { workflow_execute } from "std/workflow/execute"
  * @effects: []
  * @errors: []
  */
-pub fn workflow_model_spec(llm: HarnessLlm, config) {
+pub fn workflow_model_spec(llm: HarnessLlm, config: dict?) {
   const target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
   if target == nil || target == "" {
     return nil
@@ -27,7 +27,7 @@ pub fn workflow_model_spec(llm: HarnessLlm, config) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_options(llm: HarnessLlm, config) {
+pub fn workflow_options(llm: HarnessLlm, config: dict) {
   const spec = workflow_model_spec(llm, config)
   const option_keys = __llm_call_option_registry().keys
     + [
@@ -58,7 +58,7 @@ pub fn workflow_options(llm: HarnessLlm, config) {
  * @effects: []
  * @errors: []
  */
-pub fn stage_config(flow, overrides, stage_name) {
+pub fn stage_config(flow: dict?, overrides: dict?, stage_name: any) {
   const combined = (flow ?? {}) + (overrides ?? {})
   const stage = combined[stage_name] ?? {}
   const merged = combined + stage
@@ -71,7 +71,7 @@ pub fn stage_config(flow, overrides, stage_name) {
  * @effects: []
  * @errors: []
  */
-pub fn stage_prompt(task, config) {
+pub fn stage_prompt(task: any, config: dict) {
   const ctx = config?.context
   return prompt_compose(
     task,
@@ -94,7 +94,7 @@ pub fn stage_prompt(task, config) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn run_stage(harness: Harness, task, config) {
+pub fn run_stage(harness: Harness, task: any, config: any) {
   const prompt = stage_prompt(task, config)
   const opts = workflow_options(harness.llm, config)
   if config?.mode == "completion" {
@@ -122,7 +122,7 @@ pub fn run_stage(harness: Harness, task, config) {
  * @effects: [host]
  * @errors: []
  */
-pub fn verify_command(process: HarnessProcess, config) {
+pub fn verify_command(process: HarnessProcess, config: dict) {
   if config?.command == nil || config?.command == "" {
     return nil
   }
@@ -144,7 +144,7 @@ pub fn verify_command(process: HarnessProcess, config) {
  * @effects: []
  * @errors: []
  */
-pub fn verify_result(process: HarnessProcess, task, result, config) {
+pub fn verify_result(process: HarnessProcess, task: unknown, result: dict, config: dict) {
   if config == nil {
     return nil
   }
@@ -167,7 +167,7 @@ pub fn verify_result(process: HarnessProcess, task, result, config) {
  * @effects: []
  * @errors: []
  */
-pub fn repair_task(original_task, verification, config) {
+pub fn repair_task(original_task: any, verification: any, config: dict) {
   if config?.prompt != nil {
     return config?.prompt
   }
@@ -183,7 +183,7 @@ pub fn repair_task(original_task, verification, config) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow(config) {
+pub fn workflow(config: dict?) {
   return workflow_graph(config ?? {})
 }
 
@@ -193,7 +193,7 @@ pub fn workflow(config) {
  * @effects: []
  * @errors: []
  */
-pub fn task_run(harness: Harness, task, flow, overrides) {
+pub fn task_run(harness: Harness, task: any, flow: dict?, overrides: dict?) {
   const graph = workflow_graph(flow ?? {})
   const runtime = workflow_execute(harness, task, graph, overrides?.artifacts ?? [], overrides)
   const stages = runtime?.run?.stages ?? []
@@ -246,17 +246,17 @@ pub fn task_run(harness: Harness, task, flow, overrides) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_continue(harness: Harness, prev, task, flow, overrides) {
+pub fn workflow_continue(harness: Harness, prev: dict, task: any, flow: dict?, overrides: dict?) {
   const transcript = prev?.transcript ?? prev
   const merged = (overrides ?? {}) + {transcript: transcript}
   return task_run(harness, task, flow, merged)
 }
 
-fn __workflow_existing_transcript(result) {
+fn __workflow_existing_transcript(result: dict) {
   return result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
 }
 
-fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
+fn __workflow_build_transcript(task: any, workflow_name: any, text: string, metadata: dict?) {
   const base_metadata = metadata ?? {}
   const transcript_metadata = base_metadata + {workflow: workflow_name}
   let built = transcript(transcript_metadata)
@@ -269,7 +269,7 @@ fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
   return built
 }
 
-fn __workflow_result_artifacts(existing, text: string, workflow_name) {
+fn __workflow_result_artifacts(existing: list?, text: string, workflow_name: any) {
   let run_artifacts = existing ?? []
   let has_visible_result_artifact = false
   if text {
@@ -298,7 +298,7 @@ fn __workflow_result_artifacts(existing, text: string, workflow_name) {
   return run_artifacts
 }
 
-fn __workflow_result_metadata(base_run, options) {
+fn __workflow_result_metadata(base_run: dict, options: dict) {
   const base_metadata = base_run?.metadata ?? {}
   const option_metadata = options?.metadata ?? {}
   return base_metadata + option_metadata
@@ -310,7 +310,7 @@ fn __workflow_result_metadata(base_run, options) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
+pub fn workflow_result_transcript(task: any, workflow_name: any, result: dict, metadata: dict?) {
   const existing = __workflow_existing_transcript(result)
   if existing {
     return existing
@@ -325,7 +325,14 @@ pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_run(obs: HarnessObs, task, workflow_name, result, artifacts, options) {
+pub fn workflow_result_run(
+  obs: HarnessObs,
+  task: any,
+  workflow_name: any,
+  result: dict,
+  artifacts: any,
+  options: dict,
+) {
   const base_run = if result?._type == "run_record" {
     result
   } else {
@@ -367,11 +374,11 @@ pub fn workflow_result_run(obs: HarnessObs, task, workflow_name, result, artifac
 pub fn workflow_result_persist(
   fs: HarnessFs,
   obs: HarnessObs,
-  task,
-  workflow_name,
-  result,
-  artifacts,
-  options,
+  task: any,
+  workflow_name: any,
+  result: dict,
+  artifacts: any,
+  options: dict,
 ) {
   const base_run = if result?._type == "run_record" {
     result
@@ -421,7 +428,7 @@ pub fn workflow_result_persist(
  * @effects: []
  * @errors: []
  */
-pub fn handoff_artifact(value) {
+pub fn handoff_artifact(value: dict) {
   const item = handoff(value)
   const target = item?.target_persona_or_human ?? {}
   const label = target?.label ?? target?.id ?? "unknown"
@@ -445,7 +452,7 @@ pub fn handoff_artifact(value) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session(prev) {
+pub fn workflow_session(prev: dict) {
   const transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
   const run = prev?.run ?? prev?.result?.run
   const persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
@@ -474,7 +481,7 @@ pub fn workflow_session(prev) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_new(metadata) {
+pub fn workflow_session_new(metadata: dict?) {
   const raw = metadata ?? {}
   const workflow_id = raw?.workflow_id ?? raw?.workflow
   return workflow_session({status: "active", workflow_id: workflow_id, transcript: transcript(raw)})
@@ -486,7 +493,7 @@ pub fn workflow_session_new(metadata) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_restore(fs: HarnessFs, source) {
+pub fn workflow_session_restore(fs: HarnessFs, source: any) {
   const run = if type_of(source) == "string" {
     fs.run_record_load(source)
   } else {
@@ -509,7 +516,7 @@ pub fn workflow_session_restore(fs: HarnessFs, source) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_fork(prev) {
+pub fn workflow_session_fork(prev: dict) {
   const session = workflow_session(prev)
   return workflow_session(session + {transcript: transcript_fork(session.transcript)})
 }
@@ -520,7 +527,7 @@ pub fn workflow_session_fork(prev) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_archive(prev) {
+pub fn workflow_session_archive(prev: dict) {
   const session = workflow_session(prev)
   return workflow_session(
     session + {status: "archived", transcript: transcript_archive(session.transcript)},
@@ -533,7 +540,7 @@ pub fn workflow_session_archive(prev) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_resume(prev) {
+pub fn workflow_session_resume(prev: dict) {
   const session = workflow_session(prev)
   return workflow_session(
     session + {status: "active", transcript: transcript_resume(session.transcript)},
@@ -546,7 +553,7 @@ pub fn workflow_session_resume(prev) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_compact(agent: HarnessAgent, prev, options) {
+pub fn workflow_compact(agent: HarnessAgent, prev: dict, options: any) {
   const transcript = prev?.transcript ?? prev
   return agent.compact_transcript(transcript, options)
 }
@@ -557,7 +564,7 @@ pub fn workflow_compact(agent: HarnessAgent, prev, options) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_compact(agent: HarnessAgent, prev, options) {
+pub fn workflow_session_compact(agent: HarnessAgent, prev: dict, options: any) {
   const session = workflow_session(prev)
   return workflow_session(
     session + {transcript: agent.compact_transcript(session.transcript, options)},
@@ -570,7 +577,7 @@ pub fn workflow_session_compact(agent: HarnessAgent, prev, options) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_reset(agent: HarnessAgent, prev, carry_summary) {
+pub fn workflow_reset(agent: HarnessAgent, prev: dict, carry_summary: any) {
   const current_transcript = prev?.transcript ?? prev
   if carry_summary && transcript_summary(current_transcript) {
     return agent.compact_transcript(current_transcript, {keep_last: 0})
@@ -584,7 +591,7 @@ pub fn workflow_reset(agent: HarnessAgent, prev, carry_summary) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_reset(agent: HarnessAgent, prev, carry_summary) {
+pub fn workflow_session_reset(agent: HarnessAgent, prev: dict, carry_summary: any) {
   const session = workflow_session(prev)
   return workflow_session(
     {
@@ -602,7 +609,12 @@ pub fn workflow_session_reset(agent: HarnessAgent, prev, carry_summary) {
  * @effects: []
  * @errors: []
  */
-pub fn continue_as_new(agent: HarnessAgent, runtime: HarnessRuntime, prev, options = nil) {
+pub fn continue_as_new(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  prev: dict,
+  options: any = nil,
+) {
   const session = workflow_session(prev)
   const carry_summary = options?.carry_summary ?? true
   const _ = runtime.workflow_continue_as_new(session)
@@ -624,7 +636,7 @@ pub fn continue_as_new(agent: HarnessAgent, runtime: HarnessRuntime, prev, optio
  * @effects: []
  * @errors: []
  */
-pub fn workflow_session_persist(fs: HarnessFs, prev, path) {
+pub fn workflow_session_persist(fs: HarnessFs, prev: dict, path: any) {
   const session = workflow_session(prev)
   if session.run == nil {
     return session
@@ -639,7 +651,7 @@ pub fn workflow_session_persist(fs: HarnessFs, prev, path) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_request(worker) {
+pub fn worker_request(worker: dict) {
   return worker?.request ?? worker?.worker?.request ?? worker?.data?.request
 }
 
@@ -649,7 +661,7 @@ pub fn worker_request(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_result(worker) {
+pub fn worker_result(worker: dict) {
   return worker?.result ?? worker?.data?.payload ?? worker?.worker?.result
 }
 
@@ -659,7 +671,7 @@ pub fn worker_result(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_provenance(worker) {
+pub fn worker_provenance(worker: dict) {
   return worker?.provenance ?? worker?.worker?.provenance ?? worker?.data?.provenance
 }
 
@@ -669,7 +681,7 @@ pub fn worker_provenance(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_research_questions(worker) {
+pub fn worker_research_questions(worker: dict) {
   return worker_request(worker)?.research_questions ?? []
 }
 
@@ -679,7 +691,7 @@ pub fn worker_research_questions(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_action_items(worker) {
+pub fn worker_action_items(worker: dict) {
   return worker_request(worker)?.action_items ?? []
 }
 
@@ -689,7 +701,7 @@ pub fn worker_action_items(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_workflow_stages(worker) {
+pub fn worker_workflow_stages(worker: dict) {
   return worker_request(worker)?.workflow_stages ?? []
 }
 
@@ -699,6 +711,6 @@ pub fn worker_workflow_stages(worker) {
  * @effects: []
  * @errors: []
  */
-pub fn worker_verification_steps(worker) {
+pub fn worker_verification_steps(worker: dict) {
   return worker_request(worker)?.verification_steps ?? []
 }

@@ -35,7 +35,7 @@ const APPROVAL =
 // The substantive answer, repeated verbatim. It never carries a marker.
 const FINAL_TEXT = "Added the eviction path in src/cache.rs; the focused test passes."
 
-fn _completion_feedback(captured) -> list<string> {
+fn _completion_feedback(captured: dict) -> list<string> {
   let out = []
   for event in captured.events {
     if event.type == "feedback_injected" && to_string(event?.kind ?? "") == "verify_completion" {
@@ -45,7 +45,10 @@ fn _completion_feedback(captured) -> list<string> {
   return out
 }
 
-pipeline test_loop_finishes_without_the_model_parroting_the_marker(harness: Harness, task) {
+pipeline test_loop_finishes_without_the_model_parroting_the_marker(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [
@@ -74,7 +77,10 @@ pipeline test_loop_finishes_without_the_model_parroting_the_marker(harness: Harn
   )
 }
 
-pipeline test_unrelenting_formatting_veto_stops_and_names_the_judge(harness: Harness, task) {
+pipeline test_unrelenting_formatting_veto_stops_and_names_the_judge(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [
@@ -102,7 +108,7 @@ pipeline test_unrelenting_formatting_veto_stops_and_names_the_judge(harness: Har
   )
 }
 
-pipeline test_injected_feedback_is_the_judges_own_detail(harness: Harness, task) {
+pipeline test_injected_feedback_is_the_judges_own_detail(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text(FINAL_TEXT), llm_text(FORMATTING_VETO), llm_text(FINAL_TEXT), llm_text(APPROVAL)],

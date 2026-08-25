@@ -8,7 +8,7 @@ import {
   with_defaults,
 } from "../lib/policy"
 
-pipeline test_defaults_shape(harness: Harness, task) {
+pipeline test_defaults_shape(harness: Harness, task: unknown) {
   const d = defaults()
   assert_eq(d.merge_method, "squash")
   assert_eq(d.merge_queue_enabled, false)
@@ -16,7 +16,7 @@ pipeline test_defaults_shape(harness: Harness, task) {
   assert(d.blocking_labels.contains("do-not-merge"))
 }
 
-pipeline test_with_defaults_fills_missing_fields(harness: Harness, task) {
+pipeline test_with_defaults_fills_missing_fields(harness: Harness, task: unknown) {
   const raw = {repo: "x/y", merge_queue_enabled: true}
   const merged = with_defaults(raw)
   assert_eq(merged.repo, "x/y")
@@ -25,14 +25,14 @@ pipeline test_with_defaults_fills_missing_fields(harness: Harness, task) {
   assert_eq(merged.default_branch, "main")
 }
 
-pipeline test_validation_rejects_bad_method(harness: Harness, task) {
+pipeline test_validation_rejects_bad_method(harness: Harness, task: unknown) {
   const raw = with_defaults({repo: "x/y", merge_method: "weird"})
   const err = validate(raw)
   assert(err != nil)
   assert(err.contains("merge_method"))
 }
 
-pipeline test_load_round_trip(harness: Harness, task) {
+pipeline test_load_round_trip(harness: Harness, task: unknown) {
   const json =
     "{\"repo\": \"burin-labs/harn\", \"merge_queue_enabled\": true, \"required_checks\": [\"a\", \"b\"]}"
   const res = load_policy(json)
@@ -41,13 +41,13 @@ pipeline test_load_round_trip(harness: Harness, task) {
   assert_eq(len(res.policy.required_checks), 2)
 }
 
-pipeline test_load_rejects_bad_json(harness: Harness, task) {
+pipeline test_load_rejects_bad_json(harness: Harness, task: unknown) {
   const res = load_policy("{not json")
   assert(!res.ok)
   assert(res.error.contains("policy json parse failed"))
 }
 
-pipeline test_autopilot_helpers(harness: Harness, task) {
+pipeline test_autopilot_helpers(harness: Harness, task: unknown) {
   const p = with_defaults(
     {repo: "a/b", autopilot_states: ["queued"], require_human_for: ["blocked"]},
   )

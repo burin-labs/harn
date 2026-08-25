@@ -7,7 +7,7 @@ import {
   agent_verify_completion_judge_cap,
 } from "std/agent/judge"
 
-pipeline test_light_scrutiny_skips_only_on_green_sentinel(harness: Harness, task) {
+pipeline test_light_scrutiny_skips_only_on_green_sentinel(harness: Harness, task: unknown) {
   const review = {scrutiny: "light", evidence: "tests/agent/completion_review_light_skip_test.harn"}
   const green = {
     invoked: {deterministic: true, verify_completion_judge: false, done_judge: false},
@@ -33,7 +33,7 @@ pipeline test_light_scrutiny_skips_only_on_green_sentinel(harness: Harness, task
   )
 }
 
-pipeline test_catalog_max_judge_calls_lower_the_default_cap(harness: Harness, task) {
+pipeline test_catalog_max_judge_calls_lower_the_default_cap(harness: Harness, task: unknown) {
   assert_eq(agent_verify_completion_judge_cap(true), 5)
   assert_eq(agent_verify_completion_judge_cap(true, {max_judge_calls: 2}), 2)
   assert_eq(agent_verify_completion_judge_cap({max_invocations: 4}, {max_judge_calls: 2}), 4)

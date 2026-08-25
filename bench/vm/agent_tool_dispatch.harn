@@ -25,7 +25,7 @@ fn bench_tools() {
   return tools
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const tools = bench_tools()
   const calls = [
     {id: "read-001", name: "read", arguments: {path: "src/a.harn", line: 1}},

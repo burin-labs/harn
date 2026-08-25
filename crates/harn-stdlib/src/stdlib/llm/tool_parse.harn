@@ -46,7 +46,12 @@ fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
   return []
 }
 
-fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) -> dict {
+fn __tool_parse_consume_stray(
+  unit: dict,
+  tools: any,
+  state: dict,
+  bare_candidate: any = nil,
+) -> dict {
   const text = trim(to_string(unit?.text ?? ""))
   if text == "" {
     return state
@@ -143,7 +148,7 @@ fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) ->
     }
 }
 
-fn __tool_parse_pending_unit(unit, state: dict) -> dict {
+fn __tool_parse_pending_unit(unit: dict, state: dict) -> dict {
   if state.pending_response == nil {
     return {state: state, consumed: false}
   }
@@ -184,7 +189,12 @@ fn __tool_parse_pending_unit(unit, state: dict) -> dict {
   }
 }
 
-fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> dict {
+fn __tool_parse_block_unit(
+  unit: dict,
+  tools: unknown,
+  state: dict,
+  direct_candidate: any = nil,
+) -> dict {
   const kind = to_string(unit?.kind ?? "")
   const tag = to_string(unit?.tag ?? "")
   if __tool_parse_tag_spellings("assistant_prose").contains(tag) {
@@ -282,7 +292,7 @@ fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> 
   return state + {errors: state.errors.appending(message)}
 }
 
-fn __tool_parse_tag_unit(unit, state: dict) -> dict {
+fn __tool_parse_tag_unit(unit: dict, state: dict) -> dict {
   const raw = trim(to_string(unit?.raw ?? unit?.text ?? ""))
   const name = to_string(unit?.name ?? "")
   if __tool_parse_tag_spellings("assistant_prose").contains(name)
@@ -324,7 +334,7 @@ fn __tool_parse_tag_unit(unit, state: dict) -> dict {
     }
 }
 
-fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
+fn __tool_parse_markup_unit(unit: dict, tools: any, state: dict) -> dict {
   const parsed = __tool_parse_markup(to_string(unit?.text ?? ""), tools)
   if parsed?.ok ?? false {
     const name = to_string(parsed.call?.name ?? "")
@@ -352,7 +362,7 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
   return __tool_parse_consume_stray(unit, tools, state)
 }
 
-fn __tool_parse_tagged_unit(unit, tools, state: dict, candidates = nil) -> dict {
+fn __tool_parse_tagged_unit(unit: dict, tools: any, state: dict, candidates: any = nil) -> dict {
   let next = state
   if state.pending_response != nil {
     const pending = __tool_parse_pending_unit(unit, state)
@@ -482,7 +492,7 @@ fn __tool_parse_has_canonical_tool_fence(text: string) -> bool {
  * depends on what the rest of the turn produced, which is not known until the
  * unit loop ends.
  */
-fn __tool_parse_stray_fast(unit, candidates, state: dict) -> dict {
+fn __tool_parse_stray_fast(unit: dict, candidates: any, state: dict) -> dict {
   const kind = to_string(unit?.kind ?? "")
   const stray_text = trim(to_string(unit?.text ?? ""))
   if stray_text == "" || stray_text == "<tool_call>" {
@@ -563,7 +573,7 @@ fn __tool_parse_stray_fast(unit, candidates, state: dict) -> dict {
  * quiet: a silent drop is the defect this exists to remove,
  * and a conservative gate that reintroduced one would be worse than no gate.
  */
-fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -> dict {
+fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools: dict?, state: dict) -> dict {
   const fenced_text = blocks.join("\n")
   const already_called = len(state.calls) > 0
   const fenced_calls = if already_called {
@@ -612,7 +622,7 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -
     }
 }
 
-fn __tool_parse_tagged(text: string, tools, tool_format = "") -> dict {
+fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> dict {
   const provider_dialect = parse_provider_dialect(text, tools)
   if provider_dialect != nil {
     return provider_dialect
@@ -880,7 +890,7 @@ fn __tool_parse_join(head: dict, tail: dict) -> dict {
     }
 }
 
-fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder) -> dict {
+fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder: unknown) -> dict {
   const result = envelope.result
   const leading = to_string(envelope?.prose ?? "")
   const trailing = to_string(envelope?.trailing ?? "")
@@ -928,7 +938,7 @@ fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder) -> dict {
     }
 }
 
-fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict {
+fn __tool_parse_json(text: string, tools: dict? = nil, recover_heredoc: bool = true) -> dict {
   const envelope = tool_parse_envelope(
     text,
     fn(body) { return __tool_parse_call_from_body(body, tools, "", "") },
@@ -1115,7 +1125,7 @@ fn __tool_parse_json_error(detail: string) -> string {
  * accepting the wrong grammar silently would teach the model that the pin does
  * not mean anything.
  */
-fn __tool_parse_sibling_recovery(text: string, tools, format: string, pinned: dict) -> dict {
+fn __tool_parse_sibling_recovery(text: string, tools: dict?, format: string, pinned: dict) -> dict {
   if len(pinned?.calls ?? []) > 0 {
     return pinned
   }

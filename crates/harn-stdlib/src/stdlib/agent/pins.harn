@@ -70,7 +70,7 @@ const __PIN_ROLE_HINTS = {
   no_compact: "system",
 }
 
-fn __pin_role_hint(kind) {
+fn __pin_role_hint(kind: string) {
   return __PIN_ROLE_HINTS[kind] ?? "system"
 }
 
@@ -81,7 +81,7 @@ fn __pin_role_hint(kind) {
 // instead of `pin(harness)` throwing on its domain kinds. When `register_kinds` is
 // unset the accepted set is EXACTLY `__PIN_KINDS`, so validation — and its
 // throw message — is byte-identical to the pre-seam behavior.
-fn __pin_allowed_kinds(options) {
+fn __pin_allowed_kinds(options: dict) {
   const extra = options?.register_kinds ?? []
   if type_of(extra) != "list" {
     throw "pin: `register_kinds` must be a list of kind strings"
@@ -114,7 +114,7 @@ fn __pin_allowed_kinds(options) {
  * @api_stability: stable
  * @example: pin(harness, "goal", "Ship the migration", {dedupe_key: "pin/goal"})
  */
-pub fn pin(random: HarnessRandom, kind, content, opts = nil) {
+pub fn pin(random: HarnessRandom, kind: string, content: string, opts: any = nil) {
   const options = if type_of(opts) == "dict" {
     opts
   } else {
@@ -148,7 +148,7 @@ pub fn pin(random: HarnessRandom, kind, content, opts = nil) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn unpin(pins, pin_id) {
+pub fn unpin(pins: list?, pin_id: any) {
   let out = []
   for p in pins ?? [] {
     if p?.id != pin_id {
@@ -169,7 +169,7 @@ pub fn unpin(pins, pin_id) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn pin_reachability_roots(pins) {
+pub fn pin_reachability_roots(pins: list?) {
   let roots = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
@@ -189,7 +189,7 @@ pub fn pin_reachability_roots(pins) {
  * @api_stability: stable
  * @example: transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
  */
-pub fn with_pin_roots(project_options, pins) {
+pub fn with_pin_roots(project_options: any, pins: list?) {
   const opts = if type_of(project_options) == "dict" {
     project_options
   } else {
@@ -204,7 +204,7 @@ pub fn with_pin_roots(project_options, pins) {
   return opts + {roots: existing + pin_reachability_roots(pins)}
 }
 
-fn __pin_policy_merge_lists(existing, additions) {
+fn __pin_policy_merge_lists(existing: list?, additions: list?) {
   let out = []
   for v in existing ?? [] {
     const s = to_string(v ?? "")
@@ -221,7 +221,7 @@ fn __pin_policy_merge_lists(existing, additions) {
   return out
 }
 
-fn __pin_policy_join_instructions(existing, own) {
+fn __pin_policy_join_instructions(existing: string?, own: string?) {
   const a = to_string(existing ?? "").trim()
   const b = to_string(own ?? "").trim()
   if a == "" {
@@ -256,7 +256,7 @@ fn __pin_policy_join_instructions(existing, own) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn pin_compaction_policy(pins, opts = nil) {
+pub fn pin_compaction_policy(pins: list?, opts: any = nil) {
   const raw = if type_of(opts) == "dict" {
     opts
   } else {
@@ -311,7 +311,7 @@ pub fn pin_compaction_policy(pins, opts = nil) {
   return compaction_policy(instructions, merged)
 }
 
-fn __pin_reminder_validate(options) {
+fn __pin_reminder_validate(options: dict) {
   const propagate = options?.propagate
   if propagate != nil && type_of(propagate) != "string" {
     throw "pin_reminder: `propagate` must be a string (e.g. \"session\")"
@@ -327,7 +327,7 @@ fn __pin_reminder_validate(options) {
   return options
 }
 
-fn __pin_reminder_body(agent: HarnessAgent, content, options) {
+fn __pin_reminder_body(agent: HarnessAgent, content: string?, options: dict) {
   const limit = options?.max_body
   const text = to_string(content ?? "")
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
@@ -343,7 +343,7 @@ fn __pin_reminder_body(agent: HarnessAgent, content, options) {
   return retained + "\n[pin reminder truncated]"
 }
 
-fn __pin_reminder_tags(base_tags, options) {
+fn __pin_reminder_tags(base_tags: list, options: dict) {
   const ns = options?.tag_namespace
   if type_of(ns) != "string" || ns == "" {
     return base_tags
@@ -376,7 +376,7 @@ fn __pin_reminder_tags(base_tags, options) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn pin_reminder(agent: HarnessAgent, pin, opts = nil) {
+pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
   const raw = if type_of(opts) == "dict" {
     opts
   } else {
@@ -407,7 +407,7 @@ pub fn pin_reminder(agent: HarnessAgent, pin, opts = nil) {
  * @errors: [runtime]
  * @api_stability: stable
  */
-pub fn agent_pin(agent: HarnessAgent, session_id, pin) {
+pub fn agent_pin(agent: HarnessAgent, session_id: any, pin: dict) {
   return agent_session_inject_reminder(agent, session_id, pin_reminder(agent, pin))
 }
 
@@ -420,7 +420,7 @@ pub fn agent_pin(agent: HarnessAgent, session_id, pin) {
  * @errors: []
  * @api_stability: stable
  */
-pub fn strip_no_compact(text) {
+pub fn strip_no_compact(text: any) {
   return to_string(text).replace(__NO_COMPACT_MARKER, "").replace("  \n", "\n")
 }
 
@@ -435,7 +435,7 @@ pub fn strip_no_compact(text) {
  * @api_stability: stable
  * @example: recognize_no_compact(harness, "## Session goal [no-compact]\nObjective: X")
  */
-pub fn recognize_no_compact(random: HarnessRandom, text, opts = nil) {
+pub fn recognize_no_compact(random: HarnessRandom, text: any, opts: any = nil) {
   if type_of(text) != "string" || !text.contains(__NO_COMPACT_MARKER) {
     return nil
   }

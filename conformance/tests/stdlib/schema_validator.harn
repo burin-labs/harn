@@ -2,7 +2,7 @@ import "std/schema"
 
 type User = {name: string, role?: string}
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const user_schema = schema_object(
     {
       name: schema_field(schema_string() + {min_length: 2}),

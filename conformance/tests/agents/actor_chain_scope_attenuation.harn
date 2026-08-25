@@ -1,4 +1,4 @@
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const narrower = actor_chain_validate_scope_attenuation(
     {
       sub: "user:owner",

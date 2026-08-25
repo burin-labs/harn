@@ -1,23 +1,6 @@
 use super::*;
 
 #[test]
-fn test_parses_public_api_type_lint_override() {
-    let cli = Cli::parse_from([
-        "harn",
-        "lint",
-        "--require-public-api-types",
-        "--json",
-        "api.harn",
-    ]);
-    let Command::Lint(args) = cli.command.unwrap() else {
-        panic!("expected lint command");
-    };
-    assert!(args.require_public_api_types);
-    assert!(args.json);
-    assert_eq!(args.targets, ["api.harn"]);
-}
-
-#[test]
 fn lint_parses_trusted_host_dispatch() {
     // Spelled the same as `harn check --trusted-host-dispatch`, so a host
     // linting the corpus it serves does not have to learn a second name.

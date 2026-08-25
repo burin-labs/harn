@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Basic dict merge
   const a = {x: 1}
   const b = {y: 2}

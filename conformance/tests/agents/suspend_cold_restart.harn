@@ -21,7 +21,7 @@
  */
 import "../_common"
 
-fn first_snapshot_line(text) {
+fn first_snapshot_line(text: string?) {
   const matches = regex_captures("snapshot=(.+)", text)
   if len(matches) == 0 {
     return nil

@@ -679,7 +679,7 @@ mod tests {
                 let source = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = wait_for(harness.runtime, {
     wait_id: "poll-demo",
     timeout: 500ms,
@@ -721,7 +721,7 @@ pipeline test(harness: Harness, task) {
                 let live = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = wait_for(harness.runtime, {
     wait_id: "replay-demo",
     timeout: 500ms,
@@ -740,7 +740,7 @@ pipeline test(harness: Harness, task) {
                 let replay = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = wait_for(harness.runtime, {
     wait_id: "replay-demo",
     timeout: 1ms,
@@ -792,7 +792,7 @@ pipeline test(harness: Harness, task) {
                 let source = r#"
 import { wait_for } from "std/monitors"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = wait_for(harness.runtime, {
     wait_id: "push-demo",
     timeout: 500ms,

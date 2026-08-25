@@ -42,7 +42,7 @@ fn fire_tier(runtime: HarnessRuntime, handle: TriggerHandle, unique: string) -> 
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.clear()
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))

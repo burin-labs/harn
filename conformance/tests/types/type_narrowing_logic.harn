@@ -1,5 +1,5 @@
 /** Test logical operator narrowing (&&, ||, !) */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   fn and_check(x: string | int | nil) -> string {
     if x != nil && type_of(x) == "string" {
       return "string: ${x}"

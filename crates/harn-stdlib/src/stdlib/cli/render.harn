@@ -145,7 +145,7 @@ pub fn write_envelope(stdio: HarnessStdio, term: HarnessTerm, env: dict) {
  * @effects: []
  * @errors: []
  */
-pub fn safe_string(value, fallback: string) -> string {
+pub fn safe_string(value: any, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
@@ -158,7 +158,7 @@ pub fn safe_string(value, fallback: string) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn nonempty_string(value, fallback: string) -> string {
+pub fn nonempty_string(value: string, fallback: string) -> string {
   const text = safe_string(value, "")
   if text == "" {
     return fallback
@@ -172,7 +172,7 @@ pub fn nonempty_string(value, fallback: string) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn safe_dict(value) -> dict {
+pub fn safe_dict(value: any) -> dict {
   if type_of(value) == "dict" {
     return value
   }
@@ -185,7 +185,7 @@ pub fn safe_dict(value) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn safe_list(value) -> list {
+pub fn safe_list(value: any) -> list {
   if type_of(value) == "list" {
     return value
   }
@@ -198,7 +198,7 @@ pub fn safe_list(value) -> list {
  * @effects: []
  * @errors: []
  */
-pub fn safe_bool(value, fallback: bool) -> bool {
+pub fn safe_bool(value: unknown, fallback: bool) -> bool {
   if type_of(value) == "bool" {
     return value
   }
@@ -211,7 +211,7 @@ pub fn safe_bool(value, fallback: bool) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn safe_int_string(value, fallback: string) -> string {
+pub fn safe_int_string(value: any, fallback: string) -> string {
   if type_of(value) == "int" {
     return to_string(value)
   }
@@ -224,7 +224,7 @@ pub fn safe_int_string(value, fallback: string) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn safe_number_string(value, fallback: string) -> string {
+pub fn safe_number_string(value: any, fallback: string) -> string {
   const kind = type_of(value)
   if kind == "int" || kind == "float" {
     return to_string(value)

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Start clean
   harness.runtime.checkpoint_clear()
   // Set up multiple checkpoints

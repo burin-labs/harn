@@ -30,7 +30,7 @@ type XmlOptions = {root?: string, item_tag?: string, pretty?: bool, declaration?
  * @errors: []
  * @example: to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
  */
-pub fn to_xml(value, options: XmlOptions = {}) -> string {
+pub fn to_xml(value: any, options: XmlOptions = {}) -> string {
   return __to_xml(value, options ?? {})
 }
 

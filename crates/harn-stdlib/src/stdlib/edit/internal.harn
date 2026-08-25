@@ -1,4 +1,4 @@
-fn __edit_content_hash(text) {
+fn __edit_content_hash(text: string?) {
   return "sha256:" + sha256(text ?? "")
 }
 
@@ -8,7 +8,7 @@ fn __edit_content_hash(text) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_refactor_content_hash(text) {
+pub fn edit_refactor_content_hash(text: string?) {
   return __edit_content_hash(text)
 }
 
@@ -18,7 +18,7 @@ pub fn edit_refactor_content_hash(text) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_patch_content_hash(text) {
+pub fn edit_patch_content_hash(text: string?) {
   return __edit_content_hash(text)
 }
 
@@ -28,7 +28,7 @@ pub fn edit_patch_content_hash(text) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_safe_patch_content_hash(text) {
+pub fn edit_safe_patch_content_hash(text: string?) {
   return __edit_content_hash(text)
 }
 
@@ -38,6 +38,6 @@ pub fn edit_safe_patch_content_hash(text) {
  * @effects: []
  * @errors: []
  */
-pub fn edit_fast_apply_content_hash(text) {
+pub fn edit_fast_apply_content_hash(text: string?) {
   return __edit_content_hash(text)
 }

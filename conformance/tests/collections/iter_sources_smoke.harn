@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const it = iter([1, 2, 3])
   for x in it {
     harness.stdio.log(x)

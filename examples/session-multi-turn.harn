@@ -10,7 +10,7 @@
  *
  * Run with: cargo run --bin harn -- run examples/session-multi-turn.harn
  */
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const sid = harness.agent.open()
   harness.stdio.log("opened session ${sid}")
   const first = agent_loop(

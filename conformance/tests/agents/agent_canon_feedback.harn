@@ -34,7 +34,7 @@ pub fn no_bad(slice, _ctx, _repo_at_base) {
 }
 """
 
-fn test_packages_dir(fs: HarnessFs, dir, package_name: string) -> string {
+fn test_packages_dir(fs: HarnessFs, dir: any, package_name: string) -> string {
   const generation = "generation-test"
   const generation_root = path_join(dir, ".harn", "package-generations", generation)
   const packages = path_join(generation_root, "packages")
@@ -54,7 +54,7 @@ fn test_packages_dir(fs: HarnessFs, dir, package_name: string) -> string {
   return packages
 }
 
-fn write_latex_canon_package(fs: HarnessFs, dir) {
+fn write_latex_canon_package(fs: HarnessFs, dir: any) {
   const packages = test_packages_dir(fs, dir, "latex-canon")
   fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
   fs.write_text(
@@ -64,7 +64,7 @@ fn write_latex_canon_package(fs: HarnessFs, dir) {
   fs.write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
 }
 
-fn write_manifest_canon_package(fs: HarnessFs, dir) {
+fn write_manifest_canon_package(fs: HarnessFs, dir: any) {
   const packages = test_packages_dir(fs, dir, "canon-manifest")
   fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
   fs.write_text(
@@ -82,7 +82,7 @@ fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
   return "harn.canon_feedback.${session_id}.${suffix}"
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const manifest = {
     schema_version: 1,
     packs: [

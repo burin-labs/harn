@@ -47,7 +47,7 @@ pub import { edit_dry_run, edit_rename_symbol, edit_safe_text_patch } from "std/
  * `insert_at_anchor`, `read_text`, `safe_text_patch`), so callers must
  * hold the `tools:deterministic` capability.
  */
-fn __refactor_normalize_lang(name) {
+fn __refactor_normalize_lang(name: string?) {
   const n = lowercase(trim(name ?? ""))
   const alias = {
     golang: "go",
@@ -60,7 +60,7 @@ fn __refactor_normalize_lang(name) {
   return alias.get(n, n)
 }
 
-fn __refactor_detect_language(params) {
+fn __refactor_detect_language(params: dict) {
   const hint = params?.language
   if hint != nil && hint != "" {
     return __refactor_normalize_lang(hint)
@@ -79,13 +79,13 @@ fn __refactor_detect_language(params) {
   return __refactor_normalize_lang(dotted[-1])
 }
 
-fn __refactor_leading_ws(line) {
+fn __refactor_leading_ws(line: string?) {
   const raw = line ?? ""
   const body = regex_replace("^[ \\t]+", "", raw)
   return raw.substring(0, len(raw) - len(body))
 }
 
-fn __refactor_var_decl_syntax(language) {
+fn __refactor_var_decl_syntax(language: any) {
   const table = {
     go: {kw: "", assign: " := ", term: ""},
     javascript: {kw: "const ", assign: " = ", term: ";"},
@@ -123,7 +123,7 @@ fn __refactor_var_decl_syntax(language) {
  * @api_stability: experimental
  * @example: edit_extract_variable({path: "src/lib.rs", range: {start_line: 4, start_col: 13, end_line: 4, end_col: 24}, new_name: "total"})
  */
-pub fn edit_extract_variable(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_extract_variable(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const syntax = __refactor_var_decl_syntax(language)
@@ -203,7 +203,7 @@ pub fn edit_extract_variable(fs: HarnessFs, random: HarnessRandom, ast: HarnessA
  * parens too, so replacements re-add them. TS return-type nodes include the
  * leading `: `, so `ret_prefix` re-adds it.
  */
-fn __refactor_lang_spec(language) {
+fn __refactor_lang_spec(language: any) {
   const table = {
     go: {
       fn_node: "function_declaration",
@@ -272,7 +272,7 @@ fn __refactor_lang_spec(language) {
   return table.get(language, nil)
 }
 
-fn __refactor_symbol_name(p) {
+fn __refactor_symbol_name(p: dict) {
   const s = p?.symbol
   if type_of(s) == "dict" {
     return s?.name ?? ""
@@ -283,7 +283,7 @@ fn __refactor_symbol_name(p) {
   return p?.name ?? ""
 }
 
-fn __refactor_paren_inner(s) {
+fn __refactor_paren_inner(s: string?) {
   const raw = s ?? ""
   if len(raw) < 2 {
     return ""
@@ -291,7 +291,7 @@ fn __refactor_paren_inner(s) {
   return raw.substring(1, len(raw) - 1)
 }
 
-fn __refactor_split_top_level(text) {
+fn __refactor_split_top_level(text: string?) {
   let segs = []
   let depth = 0
   let quote = ""
@@ -326,7 +326,11 @@ fn __refactor_split_top_level(text) {
   return segs
 }
 
-fn __refactor_insert_at(list, index, item) {
+fn __refactor_insert_at(
+  list: string | bytes | list | dict | set | range | nil,
+  index: any,
+  item: any,
+) {
   const n = len(list)
   const idx = max(0, min(index, n))
   const head = if idx > 0 {
@@ -342,21 +346,21 @@ fn __refactor_insert_at(list, index, item) {
   return head + [item] + tail
 }
 
-fn __refactor_def_query(spec, fn_name) {
+fn __refactor_def_query(spec: dict, fn_name: any) {
   return "(" + spec.fn_node + " name: (identifier) @__n parameters: (" + spec.params_node
     + ") @target (#eq? @__n \""
     + fn_name
     + "\"))"
 }
 
-fn __refactor_call_query(spec, fn_name) {
+fn __refactor_call_query(spec: dict, fn_name: any) {
   return "(" + spec.call_node + " function: (identifier) @__f arguments: (" + spec.args_node
     + ") @target (#eq? @__f \""
     + fn_name
     + "\"))"
 }
 
-fn __refactor_probe(ast: HarnessAst, query, path, session_id) {
+fn __refactor_probe(ast: HarnessAst, query: any, path: any, session_id: any) {
   return edit_apply_node(
     ast,
     {
@@ -371,7 +375,13 @@ fn __refactor_probe(ast: HarnessAst, query, path, session_id) {
   )
 }
 
-fn __refactor_read_def_params(ast: HarnessAst, spec, path, fn_name, session_id) {
+fn __refactor_read_def_params(
+  ast: HarnessAst,
+  spec: dict,
+  path: any,
+  fn_name: any,
+  session_id: any,
+) {
   const r = edit_apply_node(
     ast,
     {
@@ -396,7 +406,7 @@ fn __refactor_read_def_params(ast: HarnessAst, spec, path, fn_name, session_id) 
   return {ok: true, result: "applied", inner: inner, params: __refactor_split_top_level(inner)}
 }
 
-fn __refactor_call_sites(ast: HarnessAst, spec, path, fn_name, session_id) {
+fn __refactor_call_sites(ast: HarnessAst, spec: dict, path: any, fn_name: any, session_id: any) {
   const r = __refactor_probe(ast, __refactor_call_query(spec, fn_name), path, session_id)
   if r.result == "applied" {
     return {count: r.match_count, originals: r.edits.map({ e -> e.original })}
@@ -404,7 +414,7 @@ fn __refactor_call_sites(ast: HarnessAst, spec, path, fn_name, session_id) {
   return {count: 0, originals: []}
 }
 
-fn __refactor_call_op(spec, path, fn_name, nth, new_args) {
+fn __refactor_call_op(spec: dict, path: any, fn_name: any, nth: any, new_args: string) {
   return {
     kind: "node_apply",
     path: path,
@@ -418,7 +428,7 @@ fn __refactor_call_op(spec, path, fn_name, nth, new_args) {
   }
 }
 
-fn __refactor_def_op(spec, path, fn_name, new_inner) {
+fn __refactor_def_op(spec: dict, path: any, fn_name: any, new_inner: string) {
   return {
     kind: "node_apply",
     path: path,
@@ -451,7 +461,7 @@ fn __refactor_def_op(spec, path, fn_name, new_inner) {
  * @api_stability: experimental
  * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
  */
-pub fn edit_change_signature(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_change_signature(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -557,7 +567,7 @@ pub fn edit_change_signature(fs: HarnessFs, random: HarnessRandom, ast: HarnessA
  * @api_stability: experimental
  * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
  */
-pub fn edit_add_parameter(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_add_parameter(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -647,7 +657,12 @@ pub fn edit_add_parameter(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst,
  * @api_stability: experimental
  * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
  */
-pub fn edit_reorder_parameters(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_reorder_parameters(
+  fs: HarnessFs,
+  random: HarnessRandom,
+  ast: HarnessAst,
+  params: dict?,
+) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -743,7 +758,12 @@ pub fn edit_reorder_parameters(fs: HarnessFs, random: HarnessRandom, ast: Harnes
  * @api_stability: experimental
  * @example: edit_change_return_type({path: "src/lib.rs", symbol: {name: "add"}, new_type: "i32"})
  */
-pub fn edit_change_return_type(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_change_return_type(
+  fs: HarnessFs,
+  random: HarnessRandom,
+  ast: HarnessAst,
+  params: dict?,
+) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -795,7 +815,7 @@ pub fn edit_change_return_type(fs: HarnessFs, random: HarnessRandom, ast: Harnes
 }
 
 /** --- extract_function ------------------------------------------------------- */
-fn __refactor_fn_synth_kind(language) {
+fn __refactor_fn_synth_kind(language: any) {
   const table = {
     javascript: "brace",
     jsx: "brace",
@@ -807,7 +827,7 @@ fn __refactor_fn_synth_kind(language) {
   return table.get(language, nil)
 }
 
-fn __refactor_min_indent(lines) {
+fn __refactor_min_indent(lines: list) {
   let smallest = -1
   for line in lines {
     if trim(line ?? "") == "" {
@@ -825,7 +845,7 @@ fn __refactor_min_indent(lines) {
   return smallest
 }
 
-fn __refactor_strip_n(line, n) {
+fn __refactor_strip_n(line: string?, n: int) {
   const raw = line ?? ""
   if len(raw) >= n {
     return raw.substring(n)
@@ -833,7 +853,7 @@ fn __refactor_strip_n(line, n) {
   return ""
 }
 
-fn __refactor_indent_lines(lines, prefix) {
+fn __refactor_indent_lines(lines: any, prefix: string) {
   return lines.map(
     { l ->
       if trim(l) == "" {
@@ -855,7 +875,7 @@ fn __refactor_indent_lines(lines, prefix) {
  * expected not to parse standalone and expected to reference names bound by its
  * surrounding scope. Those free names are exactly what we want as parameters.
  */
-fn __refactor_undef_names(ast: HarnessAst, src, language) {
+fn __refactor_undef_names(ast: HarnessAst, src: any, language: any) {
   const r = ast.undefined_names({content: src, language: language})
   if !(r?.supported ?? false) {
     return []
@@ -869,7 +889,7 @@ fn __refactor_undef_names(ast: HarnessAst, src, language) {
   return names
 }
 
-fn __refactor_enclosing_fn(symbols, start_line, end_line) {
+fn __refactor_enclosing_fn(symbols: list?, start_line: any, end_line: any) {
   let best = nil
   for sym in symbols ?? [] {
     if sym.kind != "function" || sym.container != nil {
@@ -884,7 +904,7 @@ fn __refactor_enclosing_fn(symbols, start_line, end_line) {
   return best
 }
 
-fn __refactor_synth_fn(kind, name, params, body_lines) {
+fn __refactor_synth_fn(kind: string, name: string, params: list, body_lines: any) {
   const signature = name + "(" + join(params, ", ") + ")"
   if kind == "python" {
     return ["def " + signature + ":"] + __refactor_indent_lines(body_lines, "    ")
@@ -895,7 +915,7 @@ fn __refactor_synth_fn(kind, name, params, body_lines) {
   return ["function " + signature + " {"] + __refactor_indent_lines(body_lines, "  ") + ["}"]
 }
 
-fn __refactor_wrap_probe(kind, body_lines) {
+fn __refactor_wrap_probe(kind: string, body_lines: any) {
   if kind == "python" {
     return join(["def __harn_probe__():"] + __refactor_indent_lines(body_lines, "    "), "\n")
   }
@@ -935,7 +955,7 @@ fn __refactor_wrap_probe(kind, body_lines) {
  * @api_stability: experimental
  * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
  */
-pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const kind = __refactor_fn_synth_kind(language)
@@ -1051,14 +1071,14 @@ pub fn edit_extract_function(fs: HarnessFs, random: HarnessRandom, ast: HarnessA
 }
 
 /** --- inline + move_decl ----------------------------------------------------- */
-fn __refactor_inline_kind(language) {
+fn __refactor_inline_kind(language: string) {
   if language == "python" {
     return "python"
   }
   return "brace"
 }
 
-fn __refactor_inline_expr(body_text, kind) {
+fn __refactor_inline_expr(body_text: string?, kind: string) {
   const lines = split(body_text ?? "", "\n")
   // `ast.function_body` returns the indented body only for Python,
   // but the whole `fn …{ … }` text for brace languages — so brace bodies
@@ -1109,7 +1129,7 @@ fn __refactor_inline_expr(body_text, kind) {
  * @api_stability: experimental
  * @example: edit_inline({path: "src/lib.rs", symbol: {name: "answer"}})
  */
-pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
@@ -1217,7 +1237,7 @@ pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params
  * @api_stability: experimental
  * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})
  */
-pub fn edit_move_decl(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params) {
+pub fn edit_move_decl(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params: dict?) {
   const p = params ?? {}
   const language = __refactor_detect_language(p)
   const path = p?.path ?? ""

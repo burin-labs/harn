@@ -352,7 +352,7 @@ mod tests {
         let input = dir.join("event.json");
         fs::write(
             &source,
-            "fn reduce(input) { return {count: input.count + 1} }",
+            "fn reduce(input: dict) { return {count: input.count + 1} }",
         )
         .unwrap();
         fs::write(&input, r#"{"count": 41}"#).unwrap();

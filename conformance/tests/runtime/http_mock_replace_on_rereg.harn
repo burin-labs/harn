@@ -3,7 +3,7 @@
  * the prior mock. Lets tests override per-case responses without first
  * calling harness.testing.http_mock_clear().
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   harness.testing.http_mock("GET", "https://api.example.com/x", {status: 200, body: "first"})
   harness.testing.http_mock("GET", "https://api.example.com/x", {status: 429, body: "second"})
   const r = harness.net.get("https://api.example.com/x")

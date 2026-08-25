@@ -4,21 +4,21 @@
  * std/agent/stream — small streaming helpers for app-facing chat surfaces.
  * Harn owns transcript and stream semantics; hosts/apps own terminal rendering.
  */
-fn __stream_dict(value) {
+fn __stream_dict(value: any) {
   if type_of(value) == "dict" {
     return value
   }
   return {}
 }
 
-fn __stream_string(value) -> string {
+fn __stream_string(value: any) -> string {
   if value == nil {
     return ""
   }
   return to_string(value)
 }
 
-fn __stream_non_empty(value, fallback) -> string {
+fn __stream_non_empty(value: any, fallback: string) -> string {
   const text = trim(__stream_string(value))
   if text == "" {
     return fallback
@@ -26,16 +26,16 @@ fn __stream_non_empty(value, fallback) -> string {
   return text
 }
 
-fn __stream_is_callable(value) -> bool {
+fn __stream_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
-fn __stream_has_key(d, key) -> bool {
+fn __stream_has_key(d: dict, key: any) -> bool {
   return type_of(d) == "dict" && contains(d.keys(), key)
 }
 
-fn __stream_drop_keys(d, keys) {
+fn __stream_drop_keys(d: any, keys: list) {
   let out = __stream_dict(d)
   for key in keys {
     if __stream_has_key(out, key) {
@@ -45,7 +45,7 @@ fn __stream_drop_keys(d, keys) {
   return out
 }
 
-fn __stream_private_config(config) {
+fn __stream_private_config(config: any) {
   const cfg = __stream_dict(config)
   const nested = __stream_dict(cfg?.private)
   const merged = cfg + nested
@@ -85,7 +85,7 @@ fn __stream_open_prefix_suffix_len(text: string, open_tag: string) -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_private_text_filter(text, config = nil) -> string {
+pub fn agent_private_text_filter(text: any, config: any = nil) -> string {
   const cfg = __stream_private_config(config)
   const open_tag = cfg.open_tag
   const close_tag = cfg.close_tag
@@ -118,7 +118,7 @@ pub fn agent_private_text_filter(text, config = nil) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_private_stream_state(config = nil) {
+pub fn agent_private_stream_state(config: any = nil) {
   const cfg = __stream_private_config(config)
   return {
     config: cfg,
@@ -143,7 +143,7 @@ pub fn agent_private_stream_state(config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
+pub fn agent_private_stream_delta(state: any = nil, delta: string = "", config: any = nil) {
   const existing = __stream_dict(state)
   const cfg = __stream_private_config(config ?? existing?.config)
   const open_tag = cfg.open_tag
@@ -210,7 +210,7 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_private_stream_finish(state = nil, config = nil) {
+pub fn agent_private_stream_finish(state: any = nil, config: any = nil) {
   const existing = __stream_dict(state)
   const cfg = __stream_private_config(config ?? existing?.config)
   const open_tag = cfg.open_tag
@@ -242,7 +242,7 @@ pub fn agent_private_stream_finish(state = nil, config = nil) {
   }
 }
 
-fn __stream_llm_options(options) {
+fn __stream_llm_options(options: any) {
   return __stream_drop_keys(
     options,
     ["private", "open_tag", "close_tag", "on_delta", "on_chunk", "on_error", "on_done"],
@@ -266,7 +266,7 @@ fn __stream_llm_options(options) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stream_call(llm: HarnessLlm, prompt, system = nil, options = nil) {
+pub fn agent_stream_call(llm: HarnessLlm, prompt: any, system: any = nil, options: any = nil) {
   const cfg = __stream_dict(options)
   const llm_options = __stream_llm_options(cfg)
   let state = agent_private_stream_state(cfg)

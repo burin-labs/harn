@@ -1,6 +1,6 @@
 import { llm_text, with_llm_script } from "std/testing"
 
-fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_iterations) {
+fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle: any, min_iterations: any) {
   let attempts = 0
   let snap = agent.managed_daemon_snapshot(handle)
   while attempts < 200 && (snap?.total_iterations ?? 0) < min_iterations {
@@ -11,7 +11,7 @@ fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_ite
   return snap
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-stdlib-" + unique)

@@ -30,7 +30,7 @@ const META = {
   ],
 }
 
-fn assert_throws_contains(body, fragment: string) -> nil {
+fn assert_throws_contains(body: unknown, fragment: string) -> nil {
   let error_text = ""
   try {
     body()
@@ -47,7 +47,7 @@ fn assert_throws_contains(body, fragment: string) -> nil {
 @test
 pipeline test_publish_plan_filters_private_packages_and_orders_dependencies(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const packages = publish_plan_packages_from_metadata(META)
   assert_eq(publish_plan_version(packages), "1.2.3")
@@ -55,7 +55,7 @@ pipeline test_publish_plan_filters_private_packages_and_orders_dependencies(
 }
 
 @test
-pipeline test_publish_plan_fails_closed_for_version_drift(harness: Harness, task) {
+pipeline test_publish_plan_fails_closed_for_version_drift(harness: Harness, task: unknown) {
   const packages = publish_plan_packages_from_metadata(
     META
       + {
@@ -70,7 +70,7 @@ pipeline test_publish_plan_fails_closed_for_version_drift(harness: Harness, task
 }
 
 @test
-pipeline test_publish_plan_fails_closed_for_dependency_cycle(harness: Harness, task) {
+pipeline test_publish_plan_fails_closed_for_dependency_cycle(harness: Harness, task: unknown) {
   const packages = [
     {deps: ["beta"], name: "alpha", version: "1.2.3"},
     {deps: ["alpha"], name: "beta", version: "1.2.3"},

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // The propagated error is deterministic: branch 0 fails immediately while
   // branch 1 is still yielding, so branch 0's error is the one reported —
   // the first failure in source order among branches that actually failed.

@@ -12,7 +12,7 @@ fn pick_keys<V>(
   return d
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const counts = {a: 1, b: 2}
   const bad = pick_keys(counts, ["a"], {drop_nil: "yes"})
   harness.stdio.println(bad.a)

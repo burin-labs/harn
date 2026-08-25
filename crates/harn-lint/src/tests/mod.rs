@@ -161,7 +161,6 @@ mod nil_coalesce;
 mod non_source_callable_builtins;
 mod optional_shorthand;
 mod persona_steps;
-mod public_api_types;
 mod redundant_nil_ternary;
 mod secret_scan_rules;
 mod shadowing;

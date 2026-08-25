@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const data = json_parse("{\"val\": true}")
   const x = data.val + 1
   harness.stdio.log(x)

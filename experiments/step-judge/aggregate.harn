@@ -27,7 +27,7 @@ fn __cell_from_label(label: string) {
   return label
 }
 
-fn __cell_stats(cell_summaries) {
+fn __cell_stats(cell_summaries: list) {
   let total_runs = 0
   let passed_runs = 0
   let total_cost = 0.0
@@ -59,7 +59,7 @@ fn __cell_stats(cell_summaries) {
   }
 }
 
-fn __group_by_cell(summaries) {
+fn __group_by_cell(summaries: list) {
   let groups = {}
   for entry in summaries {
     const cell = __cell_from_label(entry.label)
@@ -69,7 +69,7 @@ fn __group_by_cell(summaries) {
   return groups
 }
 
-fn __format_md(groups, results_dir: string) {
+fn __format_md(groups: dict, results_dir: string) {
   let lines = []
   lines = lines.appending("# Step-Judge Experiment Report")
   lines = lines.appending("")

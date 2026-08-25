@@ -32,11 +32,11 @@ fn __comfy_endpoint(endpoint: string) -> string {
   return clean
 }
 
-fn __comfy_http_error(backend: string, message: string, detail = nil) -> ModelJobError {
+fn __comfy_http_error(backend: string, message: string, detail: any = nil) -> ModelJobError {
   return model_job_error("backend", message, {backend: backend, retryable: true, detail: detail})
 }
 
-fn __comfy_json(response, backend: string, action: string) -> Result<unknown, ModelJobError> {
+fn __comfy_json(response: dict, backend: string, action: string) -> Result<unknown, ModelJobError> {
   if response?.status < 200 || response?.status >= 300 {
     return Err(
       __comfy_http_error(
@@ -133,7 +133,7 @@ fn __comfy_upload_inputs_result(
   return Ok(prepared)
 }
 
-fn __comfy_output_url(endpoint: string, image) -> string {
+fn __comfy_output_url(endpoint: string, image: dict) -> string {
   return endpoint
     + "/view?filename="
     + url_encode(to_string(image?.filename ?? ""))
@@ -143,7 +143,7 @@ fn __comfy_output_url(endpoint: string, image) -> string {
     + url_encode(to_string(image?.type ?? "output"))
 }
 
-fn __comfy_outputs(endpoint: string, history) -> list<ModelJobOutput> {
+fn __comfy_outputs(endpoint: string, history: dict) -> list<ModelJobOutput> {
   let outputs: list<ModelJobOutput> = []
   for node in values(history?.outputs ?? {}) {
     for image in node?.images ?? [] {
@@ -161,7 +161,7 @@ fn __comfy_outputs(endpoint: string, history) -> list<ModelJobOutput> {
   return outputs
 }
 
-fn __comfy_queue_contains(queue, job_id: string) -> bool {
+fn __comfy_queue_contains(queue: list?, job_id: string) -> bool {
   for entry in queue ?? [] {
     if to_string(entry?.[1] ?? "") == job_id {
       return true
@@ -174,7 +174,7 @@ fn __comfy_history_observation(
   endpoint: string,
   backend: string,
   job: ModelJob,
-  body,
+  body: any,
 ) -> Result<ModelJobObservation, ModelJobError> {
   const history = body?.[job.id]
   if history == nil {

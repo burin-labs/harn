@@ -319,7 +319,6 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     commands::check::LintJsonOptions {
                         strict: args.strict,
                         require_file_header: args.require_file_header,
-                        require_public_api_types: args.require_public_api_types,
                         trusted_host_dispatch: args.trusted_host_dispatch,
                     },
                 )
@@ -346,7 +345,6 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     let mut config = package::load_check_config(Some(file));
                     let mut lint_config = commands::check::load_harn_lint_config(file);
                     lint_config.require_file_header |= args.require_file_header;
-                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
                     config.trusted_host_dispatch |= args.trusted_host_dispatch;
                     let outcome = commands::check::lint_fix_file(
@@ -385,7 +383,6 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     let mut config = package::load_check_config(Some(file));
                     let mut lint_config = commands::check::load_harn_lint_config(file);
                     lint_config.require_file_header |= args.require_file_header;
-                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
                     config.trusted_host_dispatch |= args.trusted_host_dispatch;
                     let outcome = commands::check::lint_file_inner(

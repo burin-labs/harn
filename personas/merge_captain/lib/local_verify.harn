@@ -6,7 +6,7 @@
 import { process_shell } from "std/runtime"
 
 /** Run all local verification commands for a repo. */
-pub fn run_local_verify(clock: HarnessClock, process: HarnessProcess, commands, dry_run) {
+pub fn run_local_verify(clock: HarnessClock, process: HarnessProcess, commands: any, dry_run: any) {
   const timeout_ms = 600000
   return commands.map(
     { cmd ->
@@ -58,7 +58,7 @@ pub fn run_local_verify(clock: HarnessClock, process: HarnessProcess, commands, 
 }
 
 /** True when every command in the verification result succeeded. */
-pub fn all_ok(results) {
+pub fn all_ok(results: list) {
   for r in results {
     if r.status != "ok" && r.status != "skipped_dry_run" {
       return false

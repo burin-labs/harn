@@ -1,6 +1,6 @@
 import { assert_contains, assert_false, assert_nil, assert_not_nil, assert_true } from "std/testing"
 
-pipeline test_testing_matchers(harness: Harness, task) {
+pipeline test_testing_matchers(harness: Harness, task: unknown) {
   // === assert_nil: passes on nil, fails (with value) otherwise ===
   assert_eq(assert_nil(nil), nil)
   const not_nil_caught = try {

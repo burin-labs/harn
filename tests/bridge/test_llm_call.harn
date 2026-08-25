@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const response = harness.llm.call("What is 2+2?", "Be concise")
   harness.stdio.log(response)
 }

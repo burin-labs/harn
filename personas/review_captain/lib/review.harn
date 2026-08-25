@@ -13,7 +13,7 @@ import { classify_risky_paths, infer_missing_tests } from "risk"
  * the persona dispatches to. `opts` lets callers (and tests) override
  * the LLM hook so smoke runs and unit tests stay hermetic.
  */
-pub fn review_pr(agent: HarnessAgent, request, policy, opts) {
+pub fn review_pr(agent: HarnessAgent, request: dict?, policy: dict?, opts: dict?) {
   const normalized = _normalize_request(request)
   const active_policy = _active_policy(policy)
   const resolved_opts = opts ?? {}
@@ -39,7 +39,7 @@ pub fn review_pr(agent: HarnessAgent, request, policy, opts) {
   )
 }
 
-fn _normalize_request(raw) {
+fn _normalize_request(raw: dict?) {
   const request = raw ?? {}
   return {
     repo: request.repo ?? "",
@@ -54,7 +54,7 @@ fn _normalize_request(raw) {
   }
 }
 
-fn _active_policy(policy) {
+fn _active_policy(policy: dict?) {
   const policy_or_default = policy ?? {}
   return {
     risky_paths: policy_or_default.risky_paths ?? [],
@@ -62,14 +62,14 @@ fn _active_policy(policy) {
   }
 }
 
-fn _scan_secrets(diff) {
+fn _scan_secrets(diff: string) {
   if diff == "" {
     return []
   }
   return secret_scan(diff)
 }
 
-fn _run_llm(agent: HarnessAgent, hook, request) {
+fn _run_llm(agent: HarnessAgent, hook: any, request: dict) {
   if hook != nil {
     return hook(request)
   }

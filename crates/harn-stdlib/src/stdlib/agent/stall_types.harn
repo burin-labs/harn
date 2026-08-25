@@ -33,10 +33,10 @@ pub type AgentStallConfig = {
   verify_state_recurrence_hard: int,
   no_verifier_progress_limit: int,
   monologue_actuation: MonologueActuationConfig,
-  progress_signal?: any,
-  remediation_delivered?: any,
-  action_signal?: any,
-  turns_since_clean_verify?: int,
+  progress_signal: any?,
+  remediation_delivered: any?,
+  action_signal: any?,
+  turns_since_clean_verify: int?,
   no_net_progress_predicates: dict,
 }
 

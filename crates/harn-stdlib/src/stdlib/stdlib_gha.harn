@@ -8,23 +8,23 @@ type GhaAnnotationOptions = {
   title?: string,
 }
 
-fn __gha_escape_data(value) -> string {
+fn __gha_escape_data(value: unknown) -> string {
   const text = to_string(value ?? "")
   return replace(replace(replace(text, "%", "%25"), "\r", "%0D"), "\n", "%0A")
 }
 
-fn __gha_escape_property(value) -> string {
+fn __gha_escape_property(value: unknown) -> string {
   return replace(replace(__gha_escape_data(value), ":", "%3A"), ",", "%2C")
 }
 
-fn __gha_kv(key, value) {
+fn __gha_kv(key: string, value: any) {
   if value == nil {
     return nil
   }
   return key + "=" + __gha_escape_property(value)
 }
 
-fn __gha_file_path(path, fallback) {
+fn __gha_file_path(path: string?, fallback: any) {
   const explicit = path ?? fallback
   if explicit != nil && explicit != "" {
     return explicit
@@ -38,7 +38,7 @@ fn __gha_file_path(path, fallback) {
  * @effects: []
  * @errors: []
  */
-pub fn gha_escape_data(value) -> string {
+pub fn gha_escape_data(value: unknown) -> string {
   return __gha_escape_data(value)
 }
 
@@ -48,7 +48,7 @@ pub fn gha_escape_data(value) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn gha_escape_property(value) -> string {
+pub fn gha_escape_property(value: unknown) -> string {
   return __gha_escape_property(value)
 }
 
@@ -121,7 +121,7 @@ pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOpt
 pub fn gha_env_block(
   random: HarnessRandom,
   name: string,
-  value,
+  value: string?,
   delimiter: string? = nil,
 ) -> string {
   const delim = delimiter ?? ("harn_" + random.uuid_v7())
@@ -134,7 +134,12 @@ pub fn gha_env_block(
  * @effects: []
  * @errors: []
  */
-pub fn gha_write_output(harness: Harness, name: string, value, path: string? = nil) -> bool {
+pub fn gha_write_output(
+  harness: Harness,
+  name: string,
+  value: string?,
+  path: string? = nil,
+) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
   if target == nil {
     return false
@@ -149,7 +154,7 @@ pub fn gha_write_output(harness: Harness, name: string, value, path: string? = n
  * @effects: []
  * @errors: []
  */
-pub fn gha_write_env(harness: Harness, name: string, value, path: string? = nil) -> bool {
+pub fn gha_write_env(harness: Harness, name: string, value: string?, path: string? = nil) -> bool {
   const target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
   if target == nil {
     return false

@@ -7,7 +7,7 @@ fn legacy_line(stdio: HarnessStdio) {
   return nil
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // mock stdin with three lines and read them back individually
   harness.testing.stdin_set("alpha\nbeta\ngamma\n")
   harness.stdio.println(legacy_line(harness.stdio))

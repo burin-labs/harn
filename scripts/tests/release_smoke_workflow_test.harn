@@ -1,7 +1,7 @@
 import { read_yaml } from "std/fs"
 
 @complexity(allow)
-fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
+fn release_smoke_workflow_errors(workflow: dict, text: string) -> list<string> {
   let errors: list<string> = []
   const triggers = workflow?.on ?? {}
   const push = triggers?.push
@@ -19,7 +19,7 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
       errors = errors + ["workflow_run must trigger only on completed runs"]
     }
   }
-  if !to_string(workflow?.get("run-name") ?? "").contains("github.event.workflow_run.head_branch") {
+  if !to_string(workflow.get("run-name") ?? "").contains("github.event.workflow_run.head_branch") {
     errors = errors + ["run-name must surface the triggering release ref for the Actions run list"]
   }
   for forbidden in [
@@ -125,7 +125,7 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
 }
 
 @test
-pipeline test_release_smoke_waits_for_finalized_build_output(harness: Harness, task) {
+pipeline test_release_smoke_waits_for_finalized_build_output(harness: Harness, task: unknown) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/release-smoke.yml")
   const text = harness.fs.read_text(path)
   const workflow = read_yaml(harness.fs, path)

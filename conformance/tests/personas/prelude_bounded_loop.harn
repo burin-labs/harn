@@ -1,6 +1,6 @@
 import { bounded_loop } from "std/personas/prelude"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const opts = {
     persona: "loop_captain",
     step: "drain_queue",

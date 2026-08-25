@@ -32,7 +32,7 @@ const META = {
   ],
 }
 
-fn assert_throws_contains(body, fragment: string) -> nil {
+fn assert_throws_contains(body: unknown, fragment: string) -> nil {
   let error_text = ""
   try {
     body()
@@ -47,7 +47,7 @@ fn assert_throws_contains(body, fragment: string) -> nil {
 }
 
 @test
-pipeline test_publishable_workspace_packages_filter_and_sort(harness: Harness, task) {
+pipeline test_publishable_workspace_packages_filter_and_sort(harness: Harness, task: unknown) {
   assert_eq(
     publishable_workspace_packages_from_metadata(META, "/repo"),
     [
@@ -68,7 +68,7 @@ pipeline test_publishable_workspace_packages_filter_and_sort(harness: Harness, t
 }
 
 @test
-pipeline test_plan_rows_are_shell_readable(harness: Harness, task) {
+pipeline test_plan_rows_are_shell_readable(harness: Harness, task: unknown) {
   assert_eq(
     verify_crate_packages_plan_rows(META, "/repo"),
     [
@@ -80,7 +80,7 @@ pipeline test_plan_rows_are_shell_readable(harness: Harness, task) {
 }
 
 @test
-pipeline test_plan_fails_closed_for_duplicate_package_names(harness: Harness, task) {
+pipeline test_plan_fails_closed_for_duplicate_package_names(harness: Harness, task: unknown) {
   const meta = META
     + {
       workspace_members: ["id-cli", "id-duplicate"],
@@ -106,6 +106,6 @@ pipeline test_plan_fails_closed_for_duplicate_package_names(harness: Harness, ta
 }
 
 @test
-pipeline test_plan_fails_closed_for_missing_target_directory(harness: Harness, task) {
+pipeline test_plan_fails_closed_for_missing_target_directory(harness: Harness, task: unknown) {
   assert_throws_contains({ -> target_directory_from_metadata({}) }, "target_directory")
 }

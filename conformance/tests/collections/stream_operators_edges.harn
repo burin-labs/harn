@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(stream.collect(stream.map([], { x -> x })))
   harness.stdio.log(stream.collect(stream.filter([1], { x -> x == 1 })))
   harness.stdio.log(

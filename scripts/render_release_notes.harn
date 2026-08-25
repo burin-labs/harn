@@ -137,7 +137,7 @@ pub fn flag_value(args: list<string>, name: string) -> string? {
   return nil
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const raw_version = flag_value(argv, "--version")
   if raw_version == nil {
     harness.stdio.eprintln(

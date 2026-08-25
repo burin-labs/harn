@@ -39,7 +39,7 @@ fn finding_kinds(findings: list<SourceLengthFinding>) -> list<string> {
 }
 
 @test
-pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, task) {
+pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, task: unknown) {
   assert_eq(logical_line_count(""), 0)
   assert_eq(logical_line_count("one"), 1)
   assert_eq(logical_line_count("one\n"), 1)
@@ -49,7 +49,7 @@ pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, 
 }
 
 @test
-pipeline test_cap_and_new_oversized_source_rules(harness: Harness, task) {
+pipeline test_cap_and_new_oversized_source_rules(harness: Harness, task: unknown) {
   const at_cap = [{path: "crates/example/src/cap.rs", lines: 1500}]
   assert_eq(evaluate_inventory(at_cap, []).count, 0)
   const findings = evaluate_inventory([{path: "crates/example/src/large.rs", lines: 1501}], [])
@@ -59,7 +59,7 @@ pipeline test_cap_and_new_oversized_source_rules(harness: Harness, task) {
 }
 
 @test
-pipeline test_exact_existing_count_passes_and_growth_fails(harness: Harness, task) {
+pipeline test_exact_existing_count_passes_and_growth_fails(harness: Harness, task: unknown) {
   const baseline = [
     {
       kind: "valid",
@@ -79,7 +79,7 @@ pipeline test_exact_existing_count_passes_and_growth_fails(harness: Harness, tas
 }
 
 @test
-pipeline test_shrink_requires_tightening_or_shard_deletion(harness: Harness, task) {
+pipeline test_shrink_requires_tightening_or_shard_deletion(harness: Harness, task: unknown) {
   const baseline = [
     {
       kind: "valid",
@@ -95,7 +95,7 @@ pipeline test_shrink_requires_tightening_or_shard_deletion(harness: Harness, tas
 }
 
 @test
-pipeline test_invalid_and_orphan_baselines_fail_closed(harness: Harness, task) {
+pipeline test_invalid_and_orphan_baselines_fail_closed(harness: Harness, task: unknown) {
   const malformed = parse_baseline(
     baseline_path_for("crates/example/src/malformed.rs"),
     "not-a-number\n",
@@ -124,7 +124,7 @@ pipeline test_invalid_and_orphan_baselines_fail_closed(harness: Harness, task) {
 }
 
 @test
-pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harness, task) {
+pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harness, task: unknown) {
   const path = baseline_path_for("crates/example/src/lib.rs")
   assert_eq(
     baseline_path_for("tools\\new.rs"),
@@ -149,7 +149,7 @@ pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harne
 }
 
 @test
-pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harness, task) {
+pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -204,7 +204,10 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harne
 // reconciles the inventory against git to close it; these pin that reconciliation
 // without walking the repo, so the suite stays hermetic and fast.
 @test
-pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(harness: Harness, task) {
+pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(
+  harness: Harness,
+  task: unknown,
+) {
   // `build` is one of the directory names `walk_dir` refuses to descend into,
   // so a source tree under it is tracked by git and invisible to the ratchet.
   assert_eq(
@@ -217,7 +220,10 @@ pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(harness: H
 }
 
 @test
-pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(harness: Harness, task) {
+pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(unscanned_sources(["a.rs", "b.rs"], ["b.rs", "a.rs"]), [])
   // Nothing is tracked under a synthetic root, so a fixture run reports nothing
   // rather than flagging every file the fixture never committed.
@@ -225,7 +231,7 @@ pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(harness: Harn
 }
 
 @test
-pipeline test_unscanned_sources_excludes_generated_and_sorts(harness: Harness, task) {
+pipeline test_unscanned_sources_excludes_generated_and_sorts(harness: Harness, task: unknown) {
   // Generated protocol artifacts are deliberately outside the ratchet, so their
   // absence from the inventory is not a coverage hole.
   assert_eq(unscanned_sources([], ["spec/protocol-artifacts/harn-protocol.rs"]), [])
@@ -233,7 +239,10 @@ pipeline test_unscanned_sources_excludes_generated_and_sorts(harness: Harness, t
 }
 
 @test
-pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(harness: Harness, task) {
+pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(
+  harness: Harness,
+  task: unknown,
+) {
   const sources = [
     {path: "crates/z/src/lib.rs", lines: 1700},
     {path: "crates/a/src/lib.rs", lines: 1600},
@@ -285,7 +294,7 @@ pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(harness: Har
 }
 
 @test
-pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task) {
+pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -321,7 +330,7 @@ pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task) {
 }
 
 @test
-pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, task) {
+pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -344,7 +353,7 @@ pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, ta
 }
 
 @test
-pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, task) {
+pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
@@ -365,7 +374,7 @@ pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, t
 }
 
 @test
-pipeline test_an_unusable_git_is_reported_not_silently_skipped(harness: Harness, task) {
+pipeline test_an_unusable_git_is_reported_not_silently_skipped(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->

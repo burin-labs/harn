@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const result = harness.runtime.trigger_test_harness("dispatcher_retries_with_exponential_backoff")
   harness.stdio.println(result.ok)
   harness.stdio.println(len(result.attempts) == 3)

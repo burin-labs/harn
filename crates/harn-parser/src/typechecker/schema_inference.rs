@@ -88,6 +88,7 @@ pub(super) fn schema_type_expr_from_dict(
     let mut union: Option<&SNode> = None;
     let mut nullable = false;
     let mut additional_properties: Option<&SNode> = None;
+    let mut constant: Option<&SNode> = None;
 
     for entry in entries {
         let key = schema_entry_key(&entry.key)?;
@@ -124,11 +125,20 @@ pub(super) fn schema_type_expr_from_dict(
             "additional_properties" | "additionalProperties" => {
                 additional_properties = Some(&entry.value);
             }
+            "const" => constant = Some(&entry.value),
             _ => {}
         }
     }
 
-    let mut schema_type = if let Some(union_node) = union {
+    let mut schema_type = if let Some(constant) = constant {
+        match &constant.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+                TypeExpr::LitString(value.clone())
+            }
+            Node::IntLiteral(value) => TypeExpr::LitInt(*value),
+            _ => return None,
+        }
+    } else if let Some(union_node) = union {
         schema_union_type_expr(union_node, scope)?
     } else if let Some(properties_node) = properties {
         let property_entries = match &properties_node.node {
@@ -233,6 +243,7 @@ pub(super) fn schema_entry_key(node: &SNode) -> Option<String> {
 
 pub(super) fn normalize_schema_type_name(text: &str) -> String {
     match text {
+        "any" => "unknown".into(),
         "object" => "dict".into(),
         "array" => "list".into(),
         "integer" => "int".into(),

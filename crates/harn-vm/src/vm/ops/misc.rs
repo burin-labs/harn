@@ -3,13 +3,18 @@ use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
     pub(super) fn execute_check_type(&mut self) -> Result<(), VmError> {
-        let (chunk, var_idx, type_idx) = {
+        let (chunk, function_name, var_idx, type_idx) = {
             let frame = self.frames.last_mut().unwrap();
             let var_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
             let type_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (std::sync::Arc::clone(&frame.chunk), var_idx, type_idx)
+            (
+                std::sync::Arc::clone(&frame.chunk),
+                frame.fn_name.clone(),
+                var_idx,
+                type_idx,
+            )
         };
         let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let expected_type = Self::const_str(&chunk.constants[type_idx])?;
@@ -20,7 +25,8 @@ impl super::super::Vm {
                 || (expected_type == "int" && actual_type == "float");
             if !compatible {
                 return Err(VmError::Runtime(format!(
-                    "TypeError: parameter '{}' expected {}, got {} ({})",
+                    "TypeError: function '{}' parameter '{}' expected {}, got {} ({})",
+                    function_name,
                     var_name,
                     expected_type,
                     actual_type,

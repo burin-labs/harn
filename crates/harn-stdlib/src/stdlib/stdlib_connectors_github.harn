@@ -714,7 +714,7 @@ fn __actions_proof_report(reason: string) -> GitHubActionsExactProofReport {
   return {ok: false, reason: reason, proof: nil}
 }
 
-fn __actions_positive_id(value) -> bool {
+fn __actions_positive_id(value: any) -> bool {
   return value != nil && to_int(value) > 0 && to_string(to_int(value)) == to_string(value)
 }
 
@@ -729,7 +729,7 @@ fn __actions_unique_strings(values: list<string>) -> bool {
   return true
 }
 
-fn __actions_run_well_formed(run) -> bool {
+fn __actions_run_well_formed(run: dict) -> bool {
   return __actions_positive_id(run?.id)
     && trim(to_string(run?.workflow_path ?? "")) != ""
     && trim(to_string(run?.event ?? "")) != ""
@@ -738,7 +738,7 @@ fn __actions_run_well_formed(run) -> bool {
     && trim(to_string(run?.url ?? "")) != ""
 }
 
-fn __actions_job_well_formed(job, run_id: int) -> bool {
+fn __actions_job_well_formed(job: dict, run_id: int) -> bool {
   return __actions_positive_id(job?.id)
     && job?.run_id == run_id
     && trim(to_string(job?.name ?? "")) != ""
@@ -746,7 +746,7 @@ fn __actions_job_well_formed(job, run_id: int) -> bool {
     && trim(to_string(job?.url ?? "")) != ""
 }
 
-fn __actions_exact_runs(request: GitHubActionsExactProofRequest, runs, expected_sha: string) {
+fn __actions_exact_runs(request: GitHubActionsExactProofRequest, runs: any, expected_sha: string) {
   return runs.filter(
     { run ->
       run.workflow_path == request.workflow_path && run.event == request.event
@@ -758,7 +758,7 @@ fn __actions_exact_runs(request: GitHubActionsExactProofRequest, runs, expected_
     .to_list()
 }
 
-fn __actions_run_rejection(run, expected_url: string) -> string {
+fn __actions_run_rejection(run: dict, expected_url: string) -> string {
   if run.url != expected_url {
     return "run_url_identity_mismatch"
   }
@@ -771,7 +771,7 @@ fn __actions_run_rejection(run, expected_url: string) -> string {
   return ""
 }
 
-fn __actions_jobs_check(jobs_page, repo: string, run_id: int, required_name: string) {
+fn __actions_jobs_check(jobs_page: dict, repo: string, run_id: int, required_name: string) {
   if jobs_page == nil || jobs_page?.run_id != run_id || jobs_page?.repo != repo
     || jobs_page?.total_count
       == nil
@@ -813,8 +813,8 @@ fn __actions_jobs_check(jobs_page, repo: string, run_id: int, required_name: str
  */
 pub fn github_actions_exact_proof(
   request: GitHubActionsExactProofRequest,
-  runs,
-  jobs_page,
+  runs: string | bytes | list | dict | set | range | nil,
+  jobs_page: dict,
 ) -> GitHubActionsExactProofReport {
   const expected_sha = lowercase(trim(request.head_sha))
   if len(regex_captures("^[0-9a-f]{40}$", expected_sha)) == 0
@@ -1143,7 +1143,7 @@ pub fn github_close_pr(
  * @effects: []
  * @errors: []
  */
-pub fn forge_pull_request_event(payload, options: GitHubCallOptions = {}) {
+pub fn forge_pull_request_event(payload: any, options: GitHubCallOptions = {}) {
   return git_forge_pull_request_event("github", payload, options)
 }
 
@@ -1154,7 +1154,7 @@ pub fn forge_pull_request_event(payload, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn forge_writeback_request(event, body: string, options: GitHubCallOptions = {}) {
+pub fn forge_writeback_request(event: any, body: string, options: GitHubCallOptions = {}) {
   return git_forge_writeback_request(event, body, options)
 }
 
@@ -1167,7 +1167,7 @@ pub fn forge_writeback_request(event, body: string, options: GitHubCallOptions =
  */
 pub fn forge_writeback_comment(
   net: HarnessNet,
-  event,
+  event: any,
   body: string,
   options: GitHubCallOptions = {},
 ) {
@@ -1175,9 +1175,9 @@ pub fn forge_writeback_comment(
 }
 
 fn __github_auto_merge_failed(
-  requested_method,
+  requested_method: string,
   pull_number: int | string,
-  error,
+  error: any,
 ) -> GitHubAutoMergeResult {
   return {
     ok: false,
@@ -1193,8 +1193,8 @@ fn __github_auto_merge_failed(
 }
 
 fn __github_auto_merge_success(
-  result,
-  requested_method,
+  result: dict,
+  requested_method: string,
   pull_number: int | string,
 ) -> GitHubAutoMergeResult {
   const state = result?.state ?? "enabled"
@@ -1215,11 +1215,11 @@ fn __github_auto_merge_success(
 }
 
 fn __github_close_pr_envelope(
-  ok,
+  ok: bool,
   pull_number: int | string,
-  comment_posted,
-  pull_request,
-  error,
+  comment_posted: bool,
+  pull_request: any,
+  error: any,
 ) -> GitHubClosePrResult {
   return {
     ok: ok,
@@ -1235,15 +1235,15 @@ fn __github_close_pr_envelope(
   }
 }
 
-fn __github_event(log_event) {
+fn __github_event(log_event: dict) {
   return log_event?.payload?.event
 }
 
-fn __github_payload(log_event) {
+fn __github_payload(log_event: dict) {
   return __github_event(log_event)?.provider_payload
 }
 
-fn __github_repo_matches(payload, repo) {
+fn __github_repo_matches(payload: dict, repo: string) {
   const full_name = payload?.raw?.repository?.full_name
   return full_name == nil || full_name == repo
 }
@@ -1382,7 +1382,7 @@ const GITHUB_DEFAULT_WAIT_MS = 300000
  * and `poll_interval_ms` becomes the `poll_interval` duration so the caller's
  * cadence is actually honored by the monitor.
  */
-fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
+fn __github_wait_options(options: GitHubWaitOptions, source: any, condition: any) {
   const timeout_ms = options.max_wait_ms ?? options.timeout_ms ?? GITHUB_DEFAULT_WAIT_MS
   const base = {source: source, condition: condition, timeout: duration_ms(timeout_ms)}
   const poll_interval_ms = options.poll_interval_ms

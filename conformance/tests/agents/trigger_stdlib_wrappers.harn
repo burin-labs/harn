@@ -12,7 +12,7 @@ fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
   throw "dlq:" + event.kind
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const ok_id = "ok-trigger-" + unique

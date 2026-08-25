@@ -6,7 +6,7 @@
  * visible on the pre-populated `skills` global (same shape as the
  * `skill_registry()` builtin).
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Two fixtures land in the registry: `deploy` (with a rich
   // frontmatter) and `review` (minimal).
   assert(skill_count(skills) == 2, "two bundled skills should load")

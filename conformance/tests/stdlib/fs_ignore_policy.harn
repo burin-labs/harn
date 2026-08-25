@@ -5,7 +5,7 @@
  * `dist/`, which the built-in layer would otherwise skip. That negation is the
  * point: the built-in defaults are the lowest layer, not a hard filter.
  */
-fn counts(fs: HarnessFs, root: string, policy) {
+fn counts(fs: HarnessFs, root: string, policy: string) {
   return [
     len(fs.glob("src/*.txt", root, {ignore_policy: policy})),
     len(fs.glob("logs/*.txt", root, {ignore_policy: policy})),

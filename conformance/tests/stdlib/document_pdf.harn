@@ -1,6 +1,6 @@
 import { extract_text, pdf_bytes, pdf_capabilities, write_pdf } from "std/document"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let capabilities = pdf_capabilities()
   harness.stdio.println(capabilities.default_renderer)
   harness.stdio.println(len(capabilities.renderers))

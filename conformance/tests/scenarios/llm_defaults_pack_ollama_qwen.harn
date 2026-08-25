@@ -2,7 +2,7 @@
 // thinking; the Ollama adapter owns its eventual /no_think representation.
 import { pack_for } from "std/llm/defaults"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const r = pack_for(harness.agent, harness.llm, {model: "qwen3:8b", reasoning_policy: "off"})
   assert_eq(r.provider, "ollama")
   assert_eq(r.thinking.mode, "disabled")

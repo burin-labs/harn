@@ -27,7 +27,7 @@ const CORPUS_ROOT = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpu
 // root). Run via `npm run eval:librarian-nl` so the cwd is fixed.
 const FIXTURE_PATH = "crates/harn-hostlib/tests/fixtures/code_index_queries/queries_nl.json"
 
-fn _row_value(row, key) {
+fn _row_value(row: any, key: any) {
   if type_of(row) != "dict" {
     return ""
   }
@@ -38,7 +38,7 @@ fn _row_value(row, key) {
   return to_string(v)
 }
 
-fn _hits(rows, expected, match_key) {
+fn _hits(rows: list, expected: list, match_key: any) {
   let n = 0
   for want in expected {
     let hit = false
@@ -56,7 +56,7 @@ fn _hits(rows, expected, match_key) {
   return n
 }
 
-fn _percentile(sorted_ms, p) {
+fn _percentile(sorted_ms: any, p: float) {
   const n = len(sorted_ms)
   if n == 0 {
     return 0
@@ -65,7 +65,7 @@ fn _percentile(sorted_ms, p) {
   return sorted_ms[idx]
 }
 
-pipeline run(harness: Harness, task) {
+pipeline run(harness: Harness, task: unknown) {
   const _ = harness.code_index.rebuild({root: CORPUS_ROOT})
   const fixture = json_parse(harness.fs.read_text(FIXTURE_PATH))
   const questions = fixture.questions

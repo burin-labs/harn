@@ -1,7 +1,7 @@
 // Run: harn test personas/fixer/tests/remediation_plan_test.harn
 import { plan_for_atoms } from "../lib/remediation_plan"
 
-pipeline test_rewrite_node_atom_picks_apply_node(harness: Harness, task) {
+pipeline test_rewrite_node_atom_picks_apply_node(harness: Harness, task: unknown) {
   const atoms = [
     {
       kind: "rewrite_node",
@@ -18,7 +18,7 @@ pipeline test_rewrite_node_atom_picks_apply_node(harness: Harness, task) {
   assert_eq(len(result.fallbacks), 0)
 }
 
-pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(harness: Harness, task) {
+pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(harness: Harness, task: unknown) {
   const atoms = [
     {
       kind: "insert_at_anchor",
@@ -35,7 +35,10 @@ pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(harness: Harness, tas
   assert_eq(result.plan[0].position, "last_child")
 }
 
-pipeline test_rename_symbol_atom_falls_back_to_standalone_primitive(harness: Harness, task) {
+pipeline test_rename_symbol_atom_falls_back_to_standalone_primitive(
+  harness: Harness,
+  task: unknown,
+) {
   const atoms = [
     {
       kind: "rename_symbol",
@@ -50,7 +53,7 @@ pipeline test_rename_symbol_atom_falls_back_to_standalone_primitive(harness: Har
   assert_eq(result.fallbacks[0].reason, "rename_symbol_uses_standalone_primitive")
 }
 
-pipeline test_text_atom_drops_to_safe_text_patch(harness: Harness, task) {
+pipeline test_text_atom_drops_to_safe_text_patch(harness: Harness, task: unknown) {
   const atoms = [
     {
       kind: "text",
@@ -64,7 +67,7 @@ pipeline test_text_atom_drops_to_safe_text_patch(harness: Harness, task) {
   assert_eq(result.plan[0].op, "safe_text_patch")
 }
 
-pipeline test_unsupported_language_drops_to_safe_text_patch(harness: Harness, task) {
+pipeline test_unsupported_language_drops_to_safe_text_patch(harness: Harness, task: unknown) {
   const atoms = [
     {
       kind: "rewrite_node",
@@ -79,7 +82,7 @@ pipeline test_unsupported_language_drops_to_safe_text_patch(harness: Harness, ta
   assert_eq(result.plan[0].op, "safe_text_patch")
 }
 
-pipeline test_unknown_kind_reports_fallback(harness: Harness, task) {
+pipeline test_unknown_kind_reports_fallback(harness: Harness, task: unknown) {
   const atoms = [{kind: "mystery", path: "x"}]
   const result = plan_for_atoms(atoms)
   assert_eq(len(result.plan), 0)
@@ -87,7 +90,7 @@ pipeline test_unknown_kind_reports_fallback(harness: Harness, task) {
   assert_eq(result.fallbacks[0].reason, "unknown_remediation_atom_kind")
 }
 
-pipeline test_empty_input_yields_empty_plan(harness: Harness, task) {
+pipeline test_empty_input_yields_empty_plan(harness: Harness, task: unknown) {
   const result = plan_for_atoms([])
   assert_eq(len(result.plan), 0)
   assert_eq(len(result.fallbacks), 0)

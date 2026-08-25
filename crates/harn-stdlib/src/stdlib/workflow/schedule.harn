@@ -1,29 +1,29 @@
-fn __schedule_list(value) {
+fn __schedule_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __schedule_string(value, fallback = "") {
+fn __schedule_string(value: any, fallback: string = "") {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __schedule_int(value, fallback = nil) {
+fn __schedule_int(value: any, fallback: any = nil) {
   if type_of(value) == "int" {
     return value
   }
   return fallback
 }
 
-fn __schedule_contains(values, value) {
+fn __schedule_contains(values: any, value: any) {
   return contains(__schedule_list(values), value)
 }
 
-fn __schedule_incoming_edges(graph, node_id) {
+fn __schedule_incoming_edges(graph: dict, node_id: any) {
   let incoming = []
   for edge in __schedule_list(graph?.edges) {
     if edge?.to == node_id {
@@ -33,7 +33,7 @@ fn __schedule_incoming_edges(graph, node_id) {
   return incoming
 }
 
-fn __schedule_required_inputs(node, incoming_count) {
+fn __schedule_required_inputs(node: dict, incoming_count: int) {
   const explicit = __schedule_int(node?.join_policy?.min_completed)
   if explicit != nil {
     return explicit
@@ -52,7 +52,7 @@ fn __schedule_required_inputs(node, incoming_count) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_join_readiness(config = nil) {
+pub fn workflow_join_readiness(config: dict? = nil) {
   const node_id = __schedule_string(config?.node_id, "")
   const {node = {}, graph = {}} = config ?? {}
   const completed_nodes = __schedule_list(config?.completed_nodes)
@@ -71,7 +71,7 @@ pub fn workflow_join_readiness(config = nil) {
   }
 }
 
-fn __schedule_branch_matches(left, right) {
+fn __schedule_branch_matches(left: any, right: any) {
   if left == nil && right == nil {
     return true
   }
@@ -85,7 +85,7 @@ fn __schedule_branch_matches(left, right) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_next_edges(config = nil) {
+pub fn workflow_next_edges(config: any = nil) {
   const graph = config?.graph ?? {}
   const current = __schedule_string(config?.current, "")
   const branch = config?.branch

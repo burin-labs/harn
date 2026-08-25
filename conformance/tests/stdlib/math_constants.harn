@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // pi and e are now values, not functions
   harness.stdio.println(pi > 3.14)
   harness.stdio.println(pi < 3.15)

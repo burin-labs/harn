@@ -231,7 +231,18 @@ pub(crate) fn collect_type_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
 pub(crate) fn collect_callable_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
     match &snode.node {
         Node::FnDecl { .. } | Node::Pipeline { .. } | Node::ToolDecl { .. } => {
-            decls.push(snode.clone());
+            // The graph is a static-link surface, not an executable-program
+            // owner. Retain the parser's mechanically checked declaration
+            // shape so generic/where/default metadata cannot drift, but drop
+            // the body before it can be copied into every importer's config.
+            let mut signature = snode.clone();
+            match &mut signature.node {
+                Node::FnDecl { body, .. }
+                | Node::Pipeline { body, .. }
+                | Node::ToolDecl { body, .. } => body.clear(),
+                _ => unreachable!("matched callable declaration"),
+            }
+            decls.push(signature);
         }
         Node::AttributedDecl { inner, .. } => collect_callable_declarations(inner, decls),
         _ => {}

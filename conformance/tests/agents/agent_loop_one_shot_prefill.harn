@@ -17,7 +17,7 @@ fn lookup_tools() {
   return tools
 }
 
-fn lookup_call(id = "lookup") {
+fn lookup_call(id: string = "lookup") {
   return llm_tool_call("lookup", {path: id}, id)
 }
 
@@ -35,7 +35,7 @@ fn truncated_turn() {
   return {text: "<tool_call>lookup({ path: \"app.txt\"", stop_reason: "length"}
 }
 
-fn options(session, extra = nil) {
+fn options(session: any, extra: dict? = nil) {
   return {
     provider: "mock",
     model: "one-shot-prefill-fixture",

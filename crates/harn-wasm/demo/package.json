@@ -14,7 +14,7 @@
   "modules": [
     {
       "id": "module/0",
-      "source": "pub fn increment(amount) {\n  return amount\n}\n",
+      "source": "pub fn increment(amount: any) {\n  return amount\n}\n",
       "imports": [],
       "exports": {
         "increment": "function"

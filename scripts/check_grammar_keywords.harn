@@ -57,7 +57,7 @@ pub fn single_quoted_words(text: string) -> list<string> {
   return dedup(out)
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if !harness.fs.exists(SPEC) {
     harness.stdio.eprintln("error: missing ${SPEC}")
     return 1

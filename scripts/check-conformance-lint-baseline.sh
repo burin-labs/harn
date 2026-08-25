@@ -106,7 +106,7 @@ run_check_batch() {
 }
 
 run_check_batch "${files[@]}"
-run_check_batch "${hidden_files[@]}"
+run_check_batch "${hidden_files[@]+"${hidden_files[@]}"}"
 
 LC_ALL=C sort "$tmp/raw.tsv" | uniq -c |
   sed -E 's/^ *([0-9]+) /\1\t/' > "$tmp/actual.tsv"

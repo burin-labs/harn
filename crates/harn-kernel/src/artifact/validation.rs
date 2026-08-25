@@ -332,6 +332,7 @@ fn hash_contract(hash: &mut AbiHasher, contract: &harn_builtin_meta::BuiltinCont
         }
         BuiltinExposure::PrivilegedWire => hash.byte(4),
         BuiltinExposure::RuntimeInternal => hash.byte(5),
+        BuiltinExposure::StdlibInternal => hash.byte(6),
     }
     hash.len(contract.effects.len());
     for effect in contract.effects {

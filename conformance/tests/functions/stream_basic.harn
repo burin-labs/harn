@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   gen fn numbers(start: int, end: int) -> Stream<int> {
     let n = start
     while n < end {

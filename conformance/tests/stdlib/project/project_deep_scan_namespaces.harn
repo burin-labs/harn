@@ -1,7 +1,7 @@
 import "std/project"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const suffix = harness.random.uuid()
   const alpha_namespace = "alpha-${suffix}"
   const beta_namespace = "beta-${suffix}"

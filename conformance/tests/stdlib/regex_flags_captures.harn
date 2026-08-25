@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const text = "before\n<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>\nafter"
   const inline = regex_captures("(?is)<tool_result\\b([^>]*)>(.*?)</tool_result>", text)
   assert_eq(len(inline), 1)

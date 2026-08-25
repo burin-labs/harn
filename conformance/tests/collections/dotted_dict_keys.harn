@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let d = {}
   d["a.b.c"] = "x"
   d.k = "y"

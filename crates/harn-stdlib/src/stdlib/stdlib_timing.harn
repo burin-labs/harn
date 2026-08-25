@@ -36,7 +36,7 @@ type TimingHandle = dict
  * @api_stability: experimental
  * @example: let r = timed("benchmark.agent_loop", {case_id: case_id}, { -> work() })
  */
-pub fn timed(clock: HarnessClock, name: string, attrs: dict = {}, callback = nil) -> dict {
+pub fn timed(clock: HarnessClock, name: string, attrs: dict = {}, callback: any = nil) -> dict {
   if callback == nil {
     throw "timed: missing callback (use start_timing for imperative flows)"
   }

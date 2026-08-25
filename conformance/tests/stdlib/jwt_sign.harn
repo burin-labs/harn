@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = harness.fs.workspace_root()
   const helper_dir = path_join(root, "conformance/helpers")
   const claims = {iss: "12345", iat: 1700000000, exp: 1700000600}

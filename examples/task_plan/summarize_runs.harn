@@ -11,7 +11,7 @@
  *     --in=examples/task_plan/results/runs.jsonl \
  *     --out=examples/task_plan/results/summary.md
  */
-fn __parse_arg(args, prefix) {
+fn __parse_arg(args: list?, prefix: any) {
   for arg in args ?? [] {
     if starts_with(arg, prefix) {
       return substring(arg, len(prefix), len(arg))
@@ -20,7 +20,7 @@ fn __parse_arg(args, prefix) {
   return nil
 }
 
-fn __read_records(harness, path) {
+fn __read_records(harness: Harness, path: string) {
   const body = harness.fs.read_text(path)
   const lines = split(body, "\n")
   let records = []
@@ -33,7 +33,7 @@ fn __read_records(harness, path) {
   return records
 }
 
-fn __filter(records, strategy, task_id) {
+fn __filter(records: list, strategy: string, task_id: any) {
   let out = []
   for r in records {
     if r.strategy == strategy && r.task_id == task_id {
@@ -43,7 +43,7 @@ fn __filter(records, strategy, task_id) {
   return out
 }
 
-fn __mean_int(records, key) {
+fn __mean_int(records: string | bytes | list | dict | set | range | nil, key: string) {
   if len(records) == 0 {
     return 0
   }
@@ -54,7 +54,7 @@ fn __mean_int(records, key) {
   return total / len(records)
 }
 
-fn __ratio(records, predicate_key) {
+fn __ratio(records: string | bytes | list | dict | set | range | nil, predicate_key: string) {
   if len(records) == 0 {
     return 0.0
   }
@@ -67,7 +67,7 @@ fn __ratio(records, predicate_key) {
   return to_float(hits) / to_float(len(records))
 }
 
-fn __distinct(records, key) {
+fn __distinct(records: list, key: string) {
   let seen = []
   for r in records {
     const v = r[key]
@@ -84,14 +84,14 @@ fn __distinct(records, key) {
   return seen
 }
 
-fn __pct(value) {
+fn __pct(value: float) {
   const scaled = to_int(value * 1000.0)
   const whole = scaled / 10
   const frac = scaled - whole * 10
   return to_string(whole) + "." + to_string(frac) + "%"
 }
 
-fn __format_strategy_label(strategy) {
+fn __format_strategy_label(strategy: string) {
   if strategy == "baseline" {
     return "baseline"
   }
@@ -101,7 +101,7 @@ fn __format_strategy_label(strategy) {
   return "typed_ir"
 }
 
-fn __strategy_summary(records, strategy) {
+fn __strategy_summary(records: list, strategy: string) {
   const tasks_seen = __distinct(records, "task_id")
   let rows = []
   let pass_total = 0.0
@@ -216,7 +216,7 @@ fn __strategy_summary(records, strategy) {
  * `main` never has to interleave its own blanks (which is what produced
  * double-blank-line markdownlint violations).
  */
-fn __render_per_task_table(summary) {
+fn __render_per_task_table(summary: dict) {
   let lines = [
     "### " + summary.strategy,
     "",
@@ -249,7 +249,7 @@ fn __render_per_task_table(summary) {
   return lines
 }
 
-fn __render_overall_table(summaries) {
+fn __render_overall_table(summaries: list) {
   let lines = [
     "## Overall (mean across tasks)",
     "",
@@ -281,7 +281,7 @@ fn __render_overall_table(summaries) {
   return lines
 }
 
-fn __filter_by_model(records, model) {
+fn __filter_by_model(records: list, model: any) {
   let out = []
   for r in records {
     if r.model == model {
@@ -291,7 +291,7 @@ fn __filter_by_model(records, model) {
   return out
 }
 
-fn __render_per_model_table(model, label, summaries) {
+fn __render_per_model_table(model: any, label: string, summaries: list) {
   let lines = [
     "### " + label + " — `" + model + "`",
     "",

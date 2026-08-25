@@ -254,7 +254,7 @@ fn harn_command_argv(harness: Harness, subcommand: string) -> list<string> {
   return ["cargo", "run", "--quiet", "--bin", "harn", "--", subcommand]
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if !harness.fs.exists(SPEC_PATH) {
     harness.stdio.eprintln("error: missing ${SPEC_PATH}")
     return 1

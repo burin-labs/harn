@@ -50,12 +50,14 @@ fn __external_action_next_action(value: string) -> ExternalActionNextAction {
   return schema_expect(value, schema_of(ExternalActionNextAction))
 }
 
-fn __external_action_is_callable(value) -> bool {
+fn __external_action_is_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "closure" || kind == "function"
 }
 
-fn __external_action_evidence_result(raw) -> Result<list<string>, ExternalActionError> {
+fn __external_action_evidence_result(
+  raw: string | bytes | list | dict | set | range | nil,
+) -> Result<list<string>, ExternalActionError> {
   if raw == nil {
     return Ok([])
   }
@@ -219,7 +221,7 @@ fn __external_action_receipt_fields(
   provider_action_id: string?,
   evidence_refs: list<string>,
   error: ExternalActionError?,
-  reconciliation,
+  reconciliation: any,
   disclosure: ExternalActionDisclosureReceipt? = nil,
 ) -> ExternalActionReceipt {
   let receipt = {
@@ -280,7 +282,7 @@ fn __external_action_receipt(
   adapter_id: string,
   result: ExternalActionAdapterResult,
   recorded_at_ms: int,
-  options = {},
+  options: dict? = {},
 ) -> ExternalActionReceipt {
   const opts = options ?? {}
   const outcome = result.outcome

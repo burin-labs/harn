@@ -5,7 +5,7 @@
  * wrong, wrapped magnitude. In-range arithmetic stays int. Operands are `let`
  * bindings so the runtime arithmetic path is exercised, not just folding.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const big = 9223372036854775807
   const one = 1
   harness.stdio.log(type_of(big + one))

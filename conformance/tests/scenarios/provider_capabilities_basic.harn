@@ -6,7 +6,7 @@
  * (provider, model) pair. Scripts branch on the result without
  * carrying vendor-specific knowledge.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Anthropic Opus 4.7 — full tool-search support.
   const opus = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
   assert(opus.native_tools, "Opus 4.7 supports native tools")

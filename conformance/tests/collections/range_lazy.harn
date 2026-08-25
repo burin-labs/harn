@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // A million-element range must cost O(1) memory (no list allocation).
   // If this were eager the test would OOM or be extremely slow.
   const r = 1 to 1000000

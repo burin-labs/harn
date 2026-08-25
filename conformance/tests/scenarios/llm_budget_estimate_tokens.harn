@@ -3,7 +3,7 @@
 // the expected value.
 import { estimate_text_tokens } from "std/llm/budget"
 
-fn in_range(stdio: HarnessStdio, name, actual, low, high) {
+fn in_range(stdio: HarnessStdio, name: string, actual: int, low: int, high: int) {
   if actual < low || actual > high {
     stdio.println(
       name + " out of range: " + to_string(actual) + " not in [" + to_string(low) + ", "

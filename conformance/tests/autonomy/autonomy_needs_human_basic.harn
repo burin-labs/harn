@@ -19,7 +19,7 @@ fn attempt_write(fs: HarnessFs, target: string) -> dict {
   }
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.range(100000, 999999))
   const agent = "needs-human-" + unique

@@ -1,5 +1,5 @@
 /** Test path/directory introspection builtins */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // source_dir should return a non-empty path
   const sd = harness.fs.source_dir()
   harness.stdio.println(len(sd) > 0)

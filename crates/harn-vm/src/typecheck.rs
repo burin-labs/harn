@@ -294,14 +294,29 @@ fn validate_with_runtime_guard(
     match guard {
         RuntimeParamGuard::CanonicalSchema(schema) => {
             crate::schema::schema_assert_canonical_param(value, &slot.name, schema)
+                .map_err(|error| parameter_error_with_function(error, &func.name))
         }
         RuntimeParamGuard::InvalidSchema(error) => Err(VmError::TypeError(format!(
-            "parameter '{}': {}",
-            slot.name, error
+            "function '{}' parameter '{}': {}",
+            func.name, slot.name, error
         ))),
         RuntimeParamGuard::TypeExpr(expected) => {
             validate_type_expr_without_schema(value, expected, func, slot, span)
         }
+    }
+}
+
+fn parameter_error_with_function(error: VmError, function_name: &str) -> VmError {
+    match error {
+        VmError::TypeError(message) => {
+            VmError::TypeError(format!("function '{function_name}' {message}"))
+        }
+        VmError::Runtime(message) => VmError::Runtime(message.replacen(
+            "TypeError: ",
+            &format!("TypeError: function '{function_name}' "),
+            1,
+        )),
+        other => other,
     }
 }
 

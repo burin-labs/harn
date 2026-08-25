@@ -325,7 +325,7 @@ fn test_fail_closed_boundaries() {
     "malformed placement is machine-readable"
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness, _task: unknown) {
   test_versioned_intent_normalization()
   test_quasi_experiment_contract()
   test_explicit_capability_policy()

@@ -3,7 +3,7 @@
 import "../sync_protocol_fixture_runtime_versions.harn"
 
 @test
-pipeline test_is_semver(harness: Harness, task) {
+pipeline test_is_semver(harness: Harness, task: unknown) {
   assert_eq(is_semver("0.8.71"), true)
   assert_eq(is_semver("10.20.30"), true)
   assert_eq(is_semver("10.20.31-dev"), true)
@@ -14,25 +14,25 @@ pipeline test_is_semver(harness: Harness, task) {
 }
 
 @test
-pipeline test_py_repr(harness: Harness, task) {
+pipeline test_py_repr(harness: Harness, task: unknown) {
   assert_eq(py_repr("0.8"), "'0.8'")
   assert_eq(py_repr(""), "''")
 }
 
 @test
-pipeline test_json_literal(harness: Harness, task) {
+pipeline test_json_literal(harness: Harness, task: unknown) {
   assert_eq(json_literal("0.8.71"), "\"0.8.71\"")
 }
 
 @test
-pipeline test_count_old_values_string_leaf(harness: Harness, task) {
+pipeline test_count_old_values_string_leaf(harness: Harness, task: unknown) {
   const data = json_parse(r#"{"version":"0.8.71"}"#)
   assert_eq(count_old_values(data, "0.8.71"), 1)
   assert_eq(count_old_values(data, "0.8.72"), 0)
 }
 
 @test
-pipeline test_count_old_values_nested(harness: Harness, task) {
+pipeline test_count_old_values_nested(harness: Harness, task: unknown) {
   // Two matching string leaves (a list element and a nested dict value); the
   // dict key "k0.8.71" and the integer must NOT count.
   const data = json_parse(r#"{"a":"0.8.71","b":["0.8.71",1,{"c":"x"}],"k0.8.71":"y"}"#)
@@ -40,13 +40,13 @@ pipeline test_count_old_values_nested(harness: Harness, task) {
 }
 
 @test
-pipeline test_count_old_values_no_match(harness: Harness, task) {
+pipeline test_count_old_values_no_match(harness: Harness, task: unknown) {
   const data = json_parse(r#"{"version":"0.9.0","items":[1,2,true,null]}"#)
   assert_eq(count_old_values(data, "0.8.71"), 0)
 }
 
 @test
-pipeline test_replace_literals_only_string_literals(harness: Harness, task) {
+pipeline test_replace_literals_only_string_literals(harness: Harness, task: unknown) {
   // Quoted occurrences are rewritten; a bare substring inside a longer token
   // (the key "k0.8.71") is not, because the replacement carries the quotes.
   const text = r#"{"version": "0.8.71", "k0.8.71": "z"}"#
@@ -55,7 +55,7 @@ pipeline test_replace_literals_only_string_literals(harness: Harness, task) {
 }
 
 @test
-pipeline test_replace_literals_preserves_formatting(harness: Harness, task) {
+pipeline test_replace_literals_preserves_formatting(harness: Harness, task: unknown) {
   // Newlines, indentation, and array spacing are untouched.
   const text = "{\n  \"version\": \"0.8.71\",\n  \"modes\": [\"a\", \"b\"]\n}\n"
   const out = replace_literals(text, "0.8.71", "0.8.72")
@@ -63,7 +63,7 @@ pipeline test_replace_literals_preserves_formatting(harness: Harness, task) {
 }
 
 @test
-pipeline test_replace_then_recount_is_zero(harness: Harness, task) {
+pipeline test_replace_then_recount_is_zero(harness: Harness, task: unknown) {
   // End-to-end of the write path's invariant: after replacing literals, the
   // re-parsed value has zero remaining old string leaves.
   const text = r#"{"a":"0.8.71","b":["0.8.71"]}"#

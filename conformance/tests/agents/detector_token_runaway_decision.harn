@@ -17,7 +17,7 @@ fn cap(median: float, stddev: float, sigma: float, fallback: float) {
   )
 }
 
-fn decide(config, tokens, making_progress) {
+fn decide(config: dict, tokens: float, making_progress: bool) {
   const decision = token_runaway_decision(
     config,
     {making_progress: making_progress, tokens: tokens},

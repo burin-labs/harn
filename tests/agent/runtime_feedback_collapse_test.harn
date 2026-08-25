@@ -5,7 +5,10 @@ import {
 } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test_feedback_and_reminders_share_one_provider_bound_envelope(harness: Harness, task) {
+pipeline test_feedback_and_reminders_share_one_provider_bound_envelope(
+  harness: Harness,
+  task: unknown,
+) {
   const session = harness.agent.open("feedback-envelope-" + harness.random.uuid())
   harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
   agent_session_inject_feedback(harness.agent, session, "step_judge", "same residual")
@@ -63,7 +66,10 @@ pipeline test_feedback_and_reminders_share_one_provider_bound_envelope(harness: 
   harness.agent.close(session)
 }
 
-pipeline test_feedback_dedupe_key_replaces_same_kind_before_render(harness: Harness, task) {
+pipeline test_feedback_dedupe_key_replaces_same_kind_before_render(
+  harness: Harness,
+  task: unknown,
+) {
   const session = harness.agent.open("feedback-key-dedupe-" + harness.random.uuid())
   harness.agent.inject(session, {role: "user", content: "Repair the output."})
   agent_session_inject_feedback(harness.agent, session, "parse_guidance", "first correction")

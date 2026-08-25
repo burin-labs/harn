@@ -57,14 +57,14 @@ fn _attempts_for(harness: Harness, envelope: dict) -> int {
   return harness.runtime.shared_snapshot(sent).value
 }
 
-pipeline test_request_deadline_is_not_retried(harness: Harness, task) {
+pipeline test_request_deadline_is_not_retried(harness: Harness, task: unknown) {
   const envelope = _timeout_envelope("total")
   assert_eq(agent_loop_default_retry_predicate(envelope), false)
   // The falsifier for the observed defect: one send, not three.
   assert_eq(_attempts_for(harness, envelope), 1)
 }
 
-pipeline test_stalled_provider_is_still_retried(harness: Harness, task) {
+pipeline test_stalled_provider_is_still_retried(harness: Harness, task: unknown) {
   // The other side of the pair. A provider that went quiet may answer the next
   // attempt, so the exemption must not be mistaken for "timeouts are terminal".
   for which in ["idle", "first_chunk"] {
@@ -74,7 +74,7 @@ pipeline test_stalled_provider_is_still_retried(harness: Harness, task) {
   }
 }
 
-pipeline test_untyped_timeout_keeps_its_old_verdict(harness: Harness, task) {
+pipeline test_untyped_timeout_keeps_its_old_verdict(harness: Harness, task: unknown) {
   // A timeout with no provider-stream projection (a non-streaming request, or a
   // gateway saying it gave up) is not the caller's deadline and is unchanged.
   const gateway = {

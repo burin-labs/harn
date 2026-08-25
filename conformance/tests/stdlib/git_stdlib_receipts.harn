@@ -2,7 +2,7 @@ import { agent_dispatch_tool_call } from "std/agent/primitives"
 import "std/git"
 import "std/triggers"
 
-fn run_git(process: HarnessProcess, cwd, argv) {
+fn run_git(process: HarnessProcess, cwd: string, argv: any) {
   const result = process.run({program: argv[0], args: argv[1:len(argv)], cwd: cwd})
   if !result.success {
     throw "git command failed: " + (result.stderr ?? result.stdout ?? "")

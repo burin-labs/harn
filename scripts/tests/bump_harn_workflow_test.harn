@@ -52,7 +52,7 @@ fn refresh_order_errors(
   return errors
 }
 
-fn bump_workflow_errors(workflow, text: string) -> list<string> {
+fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   let errors: list<string> = []
   const inputs = workflow?.on?.workflow_call?.inputs ?? {}
   if inputs?.get("refresh-command")?.type != "string" {
@@ -177,7 +177,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
 @test
 pipeline test_reusable_bump_workflow_preserves_refresh_and_workspace_boundaries(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
   const text = harness.fs.read_text(path)

@@ -1,4 +1,4 @@
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // Basic URL encoding
   const encoded = url_encode("hello world")
   harness.stdio.println(encoded)

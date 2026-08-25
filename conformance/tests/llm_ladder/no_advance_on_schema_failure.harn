@@ -8,7 +8,7 @@ import { with_llm_script } from "std/testing"
  * both served by the cheap rung. The frontier rung is never touched, so the
  * routing trace from the winning pass shows a single cheap attempt.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const held = harness.runtime.sync_gate_acquire("runner", 1)
   const blocked = harness.runtime.sync_gate_acquire("runner", 1, 0)
   harness.stdio.println(blocked == nil)

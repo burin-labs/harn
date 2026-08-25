@@ -98,7 +98,7 @@ pub fn collect(fs: HarnessFs) -> list<string> {
   return seen.sorted()
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const pairs = collect(harness.fs)
   if pairs.count == 0 {
     harness.stdio.eprintln(

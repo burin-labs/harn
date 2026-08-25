@@ -7,7 +7,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
  * were removed; callers read them via `result.llm.*` and `result.tools.*`.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("still working")],

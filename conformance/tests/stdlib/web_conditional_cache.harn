@@ -1,7 +1,7 @@
 import { mem_cache } from "std/cache"
 import { web_fetch } from "std/web"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",

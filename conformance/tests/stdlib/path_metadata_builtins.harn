@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Empty store: file lookup returns nil and does not error.
   assert_eq(harness.project.path_metadata_get({path: "src/foo.rs", namespace: "facts"}), nil)
   // Default kind is "file"; missing entry is nil regardless of namespace arg.

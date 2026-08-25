@@ -10,8 +10,8 @@
           {
             "source": "lint",
             "severity": "error",
-            "code": "HARN-LNT-067",
-            "message": "public function parameter is missing a type",
+            "code": "HARN-LNT-016",
+            "message": "parameter `value` is declared but never used",
             "span": { "start": 8, "end": 11 }
           }
         ],

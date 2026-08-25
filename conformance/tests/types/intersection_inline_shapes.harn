@@ -7,7 +7,7 @@ fn merge_label(env: {region: string} & {tier: string}) -> string {
   return env.region + "-" + env.tier
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const env = {region: "us-east", tier: "prod"}
   harness.stdio.println(merge_label(env))
 }

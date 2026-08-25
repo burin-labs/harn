@@ -29,7 +29,7 @@ fn pool_workers_run_on_multithread_runtime_without_localset() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "multithread-no-localset", max_concurrent: 4})
   let handles = []
   for i in 0 to 8 exclusive {
@@ -58,7 +58,7 @@ fn pool_worker_inherits_registry_for_nested_waits() {
         r#"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "worker-nested-wait", max_concurrent: 2})
   const inner = pool.submit({ -> "inner-ok" })
   const outer = pool.submit({ ->
@@ -84,7 +84,7 @@ fn host_managed_pool_scope_diagnostic_is_public() {
         r#"
 import { pool_create } from "std/lifecycle/pool"
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   pool_create(harness.agent, {name: "tenant-backed", scope: "tenant"})
 }
 "#,

@@ -24,7 +24,7 @@ import { with_llm_script } from "std/testing"
  * Revert the debug edit before committing. The brittleness here is the
  * point — every regen requires explicit review.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],

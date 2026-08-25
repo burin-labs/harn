@@ -15,7 +15,7 @@ pub fn all_kinds() {
 }
 
 /** True when the kind is one of the canonical kinds. */
-pub fn is_kind(kind) {
+pub fn is_kind(kind: any) {
   return all_kinds().contains(kind)
 }
 
@@ -25,7 +25,7 @@ pub fn all_action_kinds() {
 }
 
 /** True when action_kind is in the canonical action-kinds set. */
-pub fn is_action_kind(action_kind) {
+pub fn is_action_kind(action_kind: any) {
   return all_action_kinds().contains(action_kind)
 }
 
@@ -56,7 +56,7 @@ pub fn defaults() {
  * returned bundle plus optional `prompt`. Missing keys take values from
  * `defaults()` so the caller only has to fill in what it knows.
  */
-pub fn build(args) {
+pub fn build(args: dict) {
   const d = defaults()
   const kind = args.kind ?? "ci_failure"
   const parent = {
@@ -97,7 +97,7 @@ pub fn build(args) {
 }
 
 /** Validate a bundle. Returns nil on success or a string describing the first problem. */
-pub fn validate_bundle(bundle) {
+pub fn validate_bundle(bundle: dict) {
   if bundle._type != "merge_captain.repair_bundle" {
     return "bundle._type must be 'merge_captain.repair_bundle'"
   }
@@ -136,7 +136,7 @@ pub fn validate_bundle(bundle) {
 }
 
 /** Default prompt for each kind. Kept short so it's easy to override. */
-pub fn default_prompt(kind) {
+pub fn default_prompt(kind: string) {
   return repair_checkpoint_prompt(kind)
 }
 

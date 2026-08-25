@@ -1,6 +1,6 @@
 import "std/project"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const root = path_join(harness.fs.workspace_temp_dir(), "project_scan_single")
   harness.fs.mkdir(path_join(root, "src"))
   harness.fs.write_text(

@@ -11,7 +11,7 @@ fn terminal_checkpoint(events: list) -> dict {
   return {}
 }
 
-fn run_case(harness: Harness, session_id: string, callback) -> dict {
+fn run_case(harness: Harness, session_id: string, callback: any) -> dict {
   return agent_capture_events(
     harness.agent,
     session_id,

@@ -296,7 +296,7 @@ fn unique_strings(values: list<string>) -> bool {
   return true
 }
 
-fn contract_from_validated(value) -> ReleaseAuditContract {
+fn contract_from_validated(value: dict) -> ReleaseAuditContract {
   let lanes: list<ReleaseAuditLane> = []
   for lane in value.lanes {
     lanes = lanes
@@ -331,7 +331,7 @@ fn contract_from_validated(value) -> ReleaseAuditContract {
 }
 
 /** Validate the machine-readable lane and CI proof mapping once at its boundary. */
-pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
+pub fn release_audit_contract_parse(value: any) -> ReleaseAuditContract? {
   const report = schema_validator(contract_schema()).report(value)
   if !report.ok {
     return nil
@@ -452,7 +452,7 @@ pub fn release_audit_source_plan(
 /** Validate one closed proof receipt and return the only audit plan it may authorize. */
 pub fn release_audit_receipt_plan(
   contract: ReleaseAuditContract,
-  value,
+  value: any,
   expected_head_sha: string,
   observed_warm_binary_sha256: string = "",
 ) -> ReleaseAuditPlan {
@@ -546,7 +546,7 @@ pub fn release_audit_receipt_plan(
   return audit_plan(lanes, true, "receipt_accepted", receipt.proof_kind, expected)
 }
 
-fn ci_job(ci, job_id: string) {
+fn ci_job(ci: dict, job_id: string) {
   const jobs = ci?.jobs
   if jobs == nil {
     return nil
@@ -554,7 +554,7 @@ fn ci_job(ci, job_id: string) {
   return jobs[job_id]
 }
 
-fn ci_matrix_row(job, matrix_kind: string) {
+fn ci_matrix_row(job: dict, matrix_kind: string) {
   for entry in job?.strategy?.matrix?.include ?? [] {
     if trim(entry?.kind ?? "") == matrix_kind {
       return entry
@@ -563,7 +563,7 @@ fn ci_matrix_row(job, matrix_kind: string) {
   return nil
 }
 
-fn ci_step(job, step_id: string) {
+fn ci_step(job: dict, step_id: string) {
   for step in job?.steps ?? [] {
     if trim(step?.id ?? "") == step_id {
       return step
@@ -573,7 +573,7 @@ fn ci_step(job, step_id: string) {
 }
 
 /** Check exact CI job, matrix, condition, and canonical-command proof identities. */
-pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci) -> dict {
+pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci: dict) -> dict {
   if ci == nil {
     return {ok: false, reason: "invalid_ci_yaml", errors: ["ci document is nil"]}
   }

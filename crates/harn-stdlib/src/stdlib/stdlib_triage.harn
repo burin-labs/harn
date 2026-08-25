@@ -74,14 +74,14 @@ const TRIAGE_EVENT_KIND = "triage_event"
 
 const TRIAGE_EVENT_TOPIC = "triage.inbox.events"
 
-fn __triage_text(value) {
+fn __triage_text(value: any) {
   if value == nil {
     return ""
   }
   return trim(to_string(value))
 }
 
-fn __triage_first(values) {
+fn __triage_first(values: list) {
   for value in values {
     const text = __triage_text(value)
     if text != "" {
@@ -91,7 +91,7 @@ fn __triage_first(values) {
   return nil
 }
 
-fn __triage_compact(text, limit = 120) {
+fn __triage_compact(text: any, limit: int = 120) {
   const value = __triage_text(text)
   if len(value) <= limit {
     return value
@@ -102,12 +102,12 @@ fn __triage_compact(text, limit = 120) {
   return substring(value, 0, limit - 3) + "..."
 }
 
-fn __triage_payload(input) {
+fn __triage_payload(input: dict) {
   return input?.provider_payload ?? input?.raw_payload ?? input?.payload ?? input?.raw ?? input
     ?? {}
 }
 
-fn __triage_provider(input, payload, options) {
+fn __triage_provider(input: dict, payload: dict, options: dict) {
   const provider = __triage_first([options?.provider, input?.provider, payload?.provider])
   if provider == nil {
     throw "std/triage: provider is required"
@@ -115,7 +115,7 @@ fn __triage_provider(input, payload, options) {
   return lowercase(provider)
 }
 
-fn __triage_source_kind(input, payload, options) {
+fn __triage_source_kind(input: dict, payload: dict, options: dict) {
   return __triage_first(
     [
       options?.source_kind,
@@ -129,7 +129,7 @@ fn __triage_source_kind(input, payload, options) {
     ?? "item"
 }
 
-fn __triage_github_source_url(payload) {
+fn __triage_github_source_url(payload: dict) {
   return __triage_first(
     [
       payload?.issue?.html_url,
@@ -147,7 +147,7 @@ fn __triage_github_source_url(payload) {
   )
 }
 
-fn __triage_slack_source_url(input, payload) {
+fn __triage_slack_source_url(input: dict, payload: dict) {
   const explicit = __triage_first(
     [
       input?.source_url,
@@ -175,7 +175,7 @@ fn __triage_slack_source_url(input, payload) {
   return nil
 }
 
-fn __triage_notion_source_url(payload) {
+fn __triage_notion_source_url(payload: dict) {
   const explicit = __triage_first(
     [
       payload?.source_url,
@@ -199,7 +199,7 @@ fn __triage_notion_source_url(payload) {
   return nil
 }
 
-fn __triage_source_url(provider, input, payload, options) {
+fn __triage_source_url(provider: string, input: dict, payload: dict, options: dict) {
   const explicit = __triage_first(
     [options?.source_url, input?.source_url, input?.url, input?.deep_link],
   )
@@ -218,7 +218,13 @@ fn __triage_source_url(provider, input, payload, options) {
   return __triage_first([payload?.source_url, payload?.url, payload?.html_url])
 }
 
-fn __triage_source_id(provider, source_url, input, payload, options) {
+fn __triage_source_id(
+  provider: string,
+  source_url: any,
+  input: dict,
+  payload: dict,
+  options: dict,
+) {
   const explicit = __triage_first(
     [options?.source_id, input?.source_id, payload?.source_id, payload?.id],
   )
@@ -266,7 +272,7 @@ fn __triage_source_id(provider, source_url, input, payload, options) {
  * @effects: []
  * @errors: []
  */
-pub fn triage_dedupe_key(provider, source_kind, source_url, source_id = nil) {
+pub fn triage_dedupe_key(provider: any, source_kind: any, source_url: any, source_id: any = nil) {
   const seed = lowercase(__triage_text(provider))
     + "\n"
     + lowercase(__triage_text(source_kind))
@@ -277,11 +283,17 @@ pub fn triage_dedupe_key(provider, source_kind, source_url, source_id = nil) {
   return "triage:" + lowercase(__triage_text(provider)) + ":" + substring(sha256(seed), 0, 32)
 }
 
-fn __triage_actor(kind, id, display_name = nil, url = nil) {
+fn __triage_actor(kind: string, id: any, display_name: any = nil, url: any = nil) {
   return filter_nil({kind: kind, id: id, display_name: display_name, url: url})
 }
 
-fn __triage_push_actor(actors, kind, id, display_name = nil, url = nil) {
+fn __triage_push_actor(
+  actors: list,
+  kind: string,
+  id: any,
+  display_name: any = nil,
+  url: any = nil,
+) {
   const actor_id = __triage_text(id)
   if actor_id == "" {
     return actors
@@ -289,7 +301,7 @@ fn __triage_push_actor(actors, kind, id, display_name = nil, url = nil) {
   return actors.appending(__triage_actor(kind, actor_id, display_name ?? actor_id, url))
 }
 
-fn __triage_github_actors(payload) {
+fn __triage_github_actors(payload: dict) {
   let actors = []
   actors = __triage_push_actor(
     actors,
@@ -329,18 +341,18 @@ fn __triage_github_actors(payload) {
   return actors
 }
 
-fn __triage_slack_actors(payload) {
+fn __triage_slack_actors(payload: dict) {
   let actors = []
   actors = __triage_push_actor(actors, "user", payload?.user ?? payload?.user_id)
   actors = __triage_push_actor(actors, "user", payload?.item_user)
   return actors
 }
 
-fn __triage_notion_user_id(user) {
+fn __triage_notion_user_id(user: unknown) {
   return __triage_first([user?.id, user?.name, user?.email])
 }
 
-fn __triage_notion_actors(payload) {
+fn __triage_notion_actors(payload: dict) {
   let actors = []
   actors = __triage_push_actor(
     actors,
@@ -363,7 +375,12 @@ fn __triage_notion_actors(payload) {
   return actors
 }
 
-fn __triage_actors(provider, input, payload, options) -> list<TriageActor> {
+fn __triage_actors(
+  provider: string,
+  input: dict,
+  payload: dict,
+  options: dict,
+) -> list<TriageActor> {
   if options?.actors != nil {
     return options.actors
   }
@@ -382,7 +399,7 @@ fn __triage_actors(provider, input, payload, options) -> list<TriageActor> {
   return []
 }
 
-fn __triage_github_summary(payload, source_kind) {
+fn __triage_github_summary(payload: dict, source_kind: string) {
   const repo = __triage_first(
     [payload?.repository?.full_name, payload?.repo?.full_name, payload?.repository?.name],
   )
@@ -405,7 +422,7 @@ fn __triage_github_summary(payload, source_kind) {
   return prefix + "GitHub " + source_kind
 }
 
-fn __triage_slack_summary(payload) {
+fn __triage_slack_summary(payload: dict) {
   const channel = __triage_first([payload?.channel_name, payload?.channel, payload?.channel_id])
   const text = __triage_compact(payload?.text ?? payload?.raw?.text ?? "Slack event", 110)
   if channel != nil {
@@ -414,7 +431,7 @@ fn __triage_slack_summary(payload) {
   return "Slack: " + text
 }
 
-fn __triage_notion_title(value) {
+fn __triage_notion_title(value: unknown) {
   if value == nil {
     return nil
   }
@@ -431,7 +448,7 @@ fn __triage_notion_title(value) {
   )
 }
 
-fn __triage_notion_summary(payload, source_kind) {
+fn __triage_notion_summary(payload: dict, source_kind: string) {
   const title = __triage_notion_title(payload?.after)
     ?? __triage_notion_title(payload?.polled?.after)
     ?? __triage_notion_title(payload?.raw)
@@ -439,7 +456,13 @@ fn __triage_notion_summary(payload, source_kind) {
   return "Notion " + source_kind + ": " + __triage_compact(title, 110)
 }
 
-fn __triage_summary(provider, source_kind, input, payload, options) {
+fn __triage_summary(
+  provider: string,
+  source_kind: string,
+  input: dict,
+  payload: dict,
+  options: dict,
+) {
   const explicit = __triage_first([options?.summary, input?.summary])
   if explicit != nil {
     return explicit
@@ -456,7 +479,7 @@ fn __triage_summary(provider, source_kind, input, payload, options) {
   return provider + " " + source_kind
 }
 
-fn __triage_default_why(provider) {
+fn __triage_default_why(provider: string) {
   if provider == "github" {
     return "Repository activity may need review or follow-up."
   }
@@ -469,7 +492,7 @@ fn __triage_default_why(provider) {
   return "Connector activity may need review."
 }
 
-fn __triage_default_action(provider) {
+fn __triage_default_action(provider: string) {
   if provider == "github" {
     return "Open the GitHub item and decide whether to respond."
   }
@@ -482,7 +505,7 @@ fn __triage_default_action(provider) {
   return "Open the source item and decide the next action."
 }
 
-fn __triage_source_timestamp(input, payload, options) {
+fn __triage_source_timestamp(input: dict, payload: dict, options: dict) {
   return __triage_first(
     [
       options?.source_timestamp,
@@ -504,7 +527,12 @@ fn __triage_source_timestamp(input, payload, options) {
   )
 }
 
-fn __triage_related_refs(source_url, input, payload, options) -> list<TriageRelatedRef> {
+fn __triage_related_refs(
+  source_url: any,
+  input: dict,
+  payload: dict,
+  options: dict,
+) -> list<TriageRelatedRef> {
   if options?.related_refs != nil {
     return options.related_refs
   }
@@ -525,7 +553,7 @@ fn __triage_related_refs(source_url, input, payload, options) -> list<TriageRela
   return refs
 }
 
-fn __triage_privacy(input, options) {
+fn __triage_privacy(input: dict, options: dict) {
   const privacy = input?.privacy ?? {}
   return {
     redacted: options?.redacted ?? privacy?.redacted ?? false,
@@ -535,7 +563,7 @@ fn __triage_privacy(input, options) {
   }
 }
 
-fn __triage_default_action_intents(dedupe_key, source_url) -> list<TriageActionIntent> {
+fn __triage_default_action_intents(dedupe_key: any, source_url: any) -> list<TriageActionIntent> {
   const target = {dedupe_key: dedupe_key, source_url: source_url}
   return [
     {
@@ -601,7 +629,7 @@ pub fn triage_validate(event: TriageEvent) -> TriageEvent {
  * @effects: []
  * @errors: []
  */
-pub fn triage_normalize(input, options = nil) -> TriageEvent {
+pub fn triage_normalize(input: any, options: dict? = nil) -> TriageEvent {
   const opts = options ?? {}
   const payload = __triage_payload(input)
   const provider = __triage_provider(input, payload, opts)
@@ -670,7 +698,7 @@ pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
  * @effects: [transcript.write]
  * @errors: []
  */
-pub fn triage_emit(obs: HarnessObs, input, options = nil) -> TriageEmitReceipt {
+pub fn triage_emit(obs: HarnessObs, input: any, options: dict? = nil) -> TriageEmitReceipt {
   const opts = options ?? {}
   const event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(
     input,
@@ -699,7 +727,7 @@ pub fn triage_emit(obs: HarnessObs, input, options = nil) -> TriageEmitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn triage_start_my_day(obs: HarnessObs, inputs: list, options = nil) {
+pub fn triage_start_my_day(obs: HarnessObs, inputs: list, options: dict? = nil) {
   const opts = options ?? {}
   const events = triage_dedupe_events(inputs)
   let receipts = []

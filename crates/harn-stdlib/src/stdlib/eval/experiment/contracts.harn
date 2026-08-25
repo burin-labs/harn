@@ -21,6 +21,7 @@ import {
   schema_int,
   schema_list,
   schema_literal,
+  schema_refine,
   schema_string,
   validation_issue,
   validation_rule,
@@ -150,38 +151,41 @@ fn __case_set_schema() -> dict {
 }
 
 fn __manifest_schema() -> Schema<ExperimentManifest> {
-  return schema_closed_object(
-    {
-      schema: schema_literal("harn.experiment.v1"),
-      experiment_id: schema_string(),
-      hypothesis: schema_string(),
-      owner: schema_string(),
-      baseline: __arm_schema(),
-      candidates: schema_list(__arm_schema()),
-      decision: schema_closed_object(
-        {delta: schema_float(), epsilon: schema_float(), ladder: schema_list(schema_int())},
-      ),
-      metrics: schema_closed_object(
-        {primary: __metric_schema(), guardrails: schema_list(__guardrail_schema())},
-      ),
-      assignment: schema_closed_object(
-        {
-          mode: schema_literal("randomized_block"),
-          seed: schema_string(),
-          blocking_factors: schema_list(schema_string()),
-        },
-      ),
-      splits: schema_closed_object(
-        {
-          iterate: __case_set_schema(),
-          gate: __case_set_schema(),
-          promotion: schema_literal("explicit"),
-        },
-      ),
-      budget: schema_closed_object(
-        {max_spend_usd: schema_float(), max_trials_per_case: schema_int()},
-      ),
-    },
+  return schema_refine(
+    schema_of(ExperimentManifest),
+    schema_closed_object(
+      {
+        schema: schema_literal("harn.experiment.v1"),
+        experiment_id: schema_string(),
+        hypothesis: schema_string(),
+        owner: schema_string(),
+        baseline: __arm_schema(),
+        candidates: schema_list(__arm_schema()),
+        decision: schema_closed_object(
+          {delta: schema_float(), epsilon: schema_float(), ladder: schema_list(schema_int())},
+        ),
+        metrics: schema_closed_object(
+          {primary: __metric_schema(), guardrails: schema_list(__guardrail_schema())},
+        ),
+        assignment: schema_closed_object(
+          {
+            mode: schema_literal("randomized_block"),
+            seed: schema_string(),
+            blocking_factors: schema_list(schema_string()),
+          },
+        ),
+        splits: schema_closed_object(
+          {
+            iterate: __case_set_schema(),
+            gate: __case_set_schema(),
+            promotion: schema_literal("explicit"),
+          },
+        ),
+        budget: schema_closed_object(
+          {max_spend_usd: schema_float(), max_trials_per_case: schema_int()},
+        ),
+      },
+    ),
   )
 }
 

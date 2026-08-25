@@ -144,7 +144,7 @@ pub fn versioned_descriptor<T>(
   return artifact_descriptor(name, versioned.contract)
 }
 
-fn __version_of(value, versioned) -> int? {
+fn __version_of(value: any, versioned: VersionedContract<T>) -> int? {
   if type_of(value) != "dict" {
     return versioned.absent_version
   }

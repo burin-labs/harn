@@ -427,7 +427,7 @@ fn referenced_paths(entries: list) -> list<string> {
   return paths.unique()
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const root = repo_root(harness.fs)
   if !harness.fs.exists(path_join(root, REGISTRY_PATH)) {
     harness.stdio.eprintln("::error::missing ${REGISTRY_PATH}")

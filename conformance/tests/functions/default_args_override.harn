@@ -1,5 +1,5 @@
-pipeline test(harness: Harness, task) {
-  fn make_config(host = "localhost", port = 8080, debug = false) {
+pipeline test(harness: Harness, task: unknown) {
+  fn make_config(host: string = "localhost", port: int = 8080, debug: bool = false) {
     return "${host}:${port} debug=${debug}"
   }
   harness.stdio.log(make_config())

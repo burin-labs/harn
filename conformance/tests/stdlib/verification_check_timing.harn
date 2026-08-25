@@ -7,7 +7,7 @@ import {
   verification_start_check,
 } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.runtime.verification_profiles_set(
     {
       rows: [

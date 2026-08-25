@@ -17,7 +17,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *   4. `paths:` auto-trigger still matches when the user prompt
  *      carries no keyword overlap.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let tools = tool_registry()
   tools = tool_define(
     tools,

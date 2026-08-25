@@ -1,6 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 
-pub fn report_run_path(doc) -> string {
+pub fn report_run_path(doc: unknown) -> string {
   return type_of(doc) == "dict" ? to_string(doc?.run_path ?? "") : ""
 }
 
@@ -8,7 +8,7 @@ pub fn split_matrix_words(text: string) -> list<string> {
   return regex_split(text.trim(), r"[\s,]+").filter({ value -> value != "" }).to_list()
 }
 
-pub fn first_model_id(doc) -> string {
+pub fn first_model_id(doc: dict?) -> string {
   if type_of(doc) != "dict" || type_of(doc?.data) != "list" || doc.data.count == 0 {
     return ""
   }
@@ -16,7 +16,7 @@ pub fn first_model_id(doc) -> string {
   return type_of(first) == "dict" ? to_string(first?.id ?? "") : ""
 }
 
-fn numeric(value) -> float? {
+fn numeric(value: string | int | float | nil) -> float? {
   if type_of(value) == "int" || type_of(value) == "float" {
     return to_float(value)
   }
@@ -27,7 +27,7 @@ fn numeric(value) -> float? {
   return matched == nil || matched.count == 0 ? nil : to_float(matched[0])
 }
 
-fn price_mtok(model, keys: list<string>) -> float? {
+fn price_mtok(model: dict, keys: list<string>) -> float? {
   const pricing = model?.pricing
   if type_of(pricing) != "dict" {
     return nil
@@ -67,7 +67,7 @@ fn model_priority(model_id: string) -> int {
   return 50
 }
 
-pub fn together_model_ids(payload, limit: int) -> list<string> {
+pub fn together_model_ids(payload: dict | list, limit: int) -> list<string> {
   const models = if type_of(payload) == "dict" {
     payload?.data ?? payload
   } else {

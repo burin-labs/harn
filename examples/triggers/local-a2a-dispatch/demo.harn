@@ -20,7 +20,7 @@ fn register_local(harness: Harness) {
   )
 }
 
-fn register_remote(harness: Harness, port) {
+fn register_remote(harness: Harness, port: string) {
   return harness.runtime.trigger_register(
     {
       id: "issue-triage-a2a-demo",
@@ -34,7 +34,7 @@ fn register_remote(harness: Harness, port) {
   )
 }
 
-fn fire(harness: Harness, handle, suffix) {
+fn fire(harness: Harness, handle: any, suffix: string) {
   return harness.runtime.trigger_fire(
     handle,
     {

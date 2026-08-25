@@ -5,8 +5,20 @@
  * @effects: []
  * @errors: []
  */
-pub fn on_interrupt(handler, options = nil) {
-  return __signal_on_interrupt(handler, options)
+pub type InterruptOptions = {
+  signals?: string | list<string>,
+  once?: bool,
+  graceful_timeout_ms?: int,
+}
+
+pub type InterruptRegistration = {handle: int, signals: list<string>, once: bool}
+
+pub fn on_interrupt(
+  handler: fn() -> unknown,
+  options: InterruptOptions? = nil,
+) -> InterruptRegistration {
+  const registration = __signal_on_interrupt(handler, options)
+  return {handle: registration.handle, signals: registration.signals, once: registration.once}
 }
 
 /**
@@ -15,7 +27,7 @@ pub fn on_interrupt(handler, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn off_interrupt(handle) {
+pub fn off_interrupt(handle: int | InterruptRegistration) -> nil {
   return __signal_off_interrupt(handle)
 }
 
@@ -35,7 +47,11 @@ pub fn interrupted() -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn with_interrupt(handler, body, options = nil) {
+pub fn with_interrupt<T>(
+  handler: fn() -> unknown,
+  body: fn() -> T,
+  options: InterruptOptions? = nil,
+) -> T {
   const registration = on_interrupt(handler, options)
   try {
     const result = body()

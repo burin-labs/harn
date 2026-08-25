@@ -58,7 +58,14 @@ fn semantic_eval_system() {
     + "Return strict JSON only."
 }
 
-fn semantic_eval_prompt(harness: Harness, report, run, reference, heuristic, task_root) {
+fn semantic_eval_prompt(
+  harness: Harness,
+  report: dict,
+  run: dict,
+  reference: dict,
+  heuristic: dict,
+  task_root: string,
+) {
   return "[semantic_eval][task_id=${report?.task_id ?? ""}]\n"
     + "Task: ${report?.task ?? ""}\n\n"
     + "Ideal reference:\n${render_ideal_reference(reference)}\n\n"
@@ -77,7 +84,14 @@ fn semantic_eval_prompt(harness: Harness, report, run, reference, heuristic, tas
     + "- recommended_harness_fixes\n"
 }
 
-fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, task_root) {
+fn semantic_eval_with_llm(
+  harness: Harness,
+  report: dict,
+  run: dict,
+  reference: dict,
+  heuristic: dict,
+  task_root: string,
+) {
   const response = harness.llm.call(
     semantic_eval_prompt(harness, report, run, reference, heuristic, task_root),
     semantic_eval_system(),
@@ -104,7 +118,7 @@ fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, t
     }
 }
 
-fn load_run_record(fs: HarnessFs, report, task_root) {
+fn load_run_record(fs: HarnessFs, report: dict, task_root: string) {
   const reported = report?.run_path ?? ""
   if reported != "" {
     const loaded = try {
@@ -130,7 +144,7 @@ fn load_run_record(fs: HarnessFs, report, task_root) {
   return {}
 }
 
-fn output_path(default_report_path) {
+fn output_path(default_report_path: string) {
   if len(argv) > 1 && argv[1] != "" {
     return argv[1]
   }

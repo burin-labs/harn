@@ -9,7 +9,7 @@ import {
 } from "std/llm/tool_middleware"
 import { with_llm_script } from "std/testing"
 
-fn has_tool(tools, name) {
+fn has_tool(tools: list?, name: string) {
   for item in tools ?? [] {
     if item?.function?.name == name || item?.name == name {
       return true
@@ -18,7 +18,7 @@ fn has_tool(tools, name) {
   return false
 }
 
-fn scripted_consent(_justification, _session_id) {
+fn scripted_consent(_justification: unknown, _session_id: unknown) {
   return {consent: "none", reason: "no consent", verdict: "deny"}
 }
 

@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let escaped = nil
   const result = try {
     escaped = harness.runtime.sync_mutex_acquire("raii-throw")

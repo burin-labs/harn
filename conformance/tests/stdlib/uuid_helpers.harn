@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const v7 = harness.random.uuid_v7()
   assert_eq(len(v7), 36)
   assert_eq(substring(v7, 14, 15), "7")

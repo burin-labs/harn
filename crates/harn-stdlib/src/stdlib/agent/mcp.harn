@@ -5,7 +5,7 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_mcp_bootstrap_if_needed(tools: HarnessTools, session, opts) {
+pub fn agent_mcp_bootstrap_if_needed(tools: HarnessTools, session: dict, opts: dict) {
   const specs = opts?.mcp_servers
   if specs == nil || len(specs) == 0 {
     return opts
@@ -34,7 +34,12 @@ pub fn agent_mcp_bootstrap_if_needed(tools: HarnessTools, session, opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_mcp_mount_additional(tools: HarnessTools, session, opts, requested_specs) {
+pub fn agent_mcp_mount_additional(
+  tools: HarnessTools,
+  session: dict,
+  opts: dict,
+  requested_specs: list?,
+) {
   const delta = __mcp_delta_specs(opts, requested_specs ?? [])
   if len(delta) == 0 {
     return opts + {_mcp_delta_bootstrap: nil}
@@ -55,7 +60,7 @@ pub fn agent_mcp_mount_additional(tools: HarnessTools, session, opts, requested_
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_mcp_admit_bootstrap(opts, result) {
+pub fn agent_mcp_admit_bootstrap(opts: dict, result: dict) {
   if type_of(result) != "dict" {
     return opts
   }
@@ -63,7 +68,7 @@ pub fn agent_mcp_admit_bootstrap(opts, result) {
 }
 
 /** Bootstrap `specs` and admit their tools into `opts` (catalog + ceiling). */
-fn __mcp_bootstrap_and_admit(tools: HarnessTools, session, opts, specs) {
+fn __mcp_bootstrap_and_admit(tools: HarnessTools, session: dict, opts: dict, specs: any) {
   const result = tools.mcp_bootstrap(session.session_id, specs)
   const prior_info = opts?._mcp_server_info ?? []
   const out = opts
@@ -76,7 +81,7 @@ fn __mcp_bootstrap_and_admit(tools: HarnessTools, session, opts, specs) {
  * dispatch name) and extend the execution-policy tool ceiling so the tools
  * are visible AND callable. Idempotent: a tool already present is skipped.
  */
-fn __mcp_admit_tools(opts, result) {
+fn __mcp_admit_tools(opts: dict, result: dict) {
   const tools_added = result?.tools_added ?? []
   if len(tools_added) == 0 {
     return opts
@@ -92,7 +97,7 @@ fn __mcp_admit_tools(opts, result) {
 }
 
 /** Append `added` tools to `existing`, skipping any whose name is present. */
-fn __mcp_merge_tool_lists(existing, added) {
+fn __mcp_merge_tool_lists(existing: list, added: list) {
   let out = existing
   let names = []
   for entry in existing {
@@ -115,7 +120,7 @@ fn __mcp_merge_tool_lists(existing, added) {
 }
 
 /** Spec entries whose server name is neither already mounted nor a dup. */
-fn __mcp_delta_specs(opts, specs) {
+fn __mcp_delta_specs(opts: dict, specs: list) {
   const mounted = __mcp_mounted_server_ids(opts)
   let delta = []
   let seen = []
@@ -131,7 +136,7 @@ fn __mcp_delta_specs(opts, specs) {
 }
 
 /** Server names already mounted this run, from the running `_mcp_server_info`. */
-fn __mcp_mounted_server_ids(opts) {
+fn __mcp_mounted_server_ids(opts: dict) {
   let ids = []
   for info in opts?._mcp_server_info ?? [] {
     const name = to_string(info?.name ?? "")
@@ -159,7 +164,7 @@ fn __mcp_mounted_server_ids(opts) {
  * open policy into a closed one and silently forbid the host's own tools.
  * Idempotent: never double-adds a name already present.
  */
-fn __with_mcp_tool_ceiling(opts, tools_added) {
+fn __with_mcp_tool_ceiling(opts: dict, tools_added: list) {
   const policy = opts?.policy
   if type_of(policy) != "dict" {
     return opts
@@ -182,7 +187,7 @@ fn __with_mcp_tool_ceiling(opts, tools_added) {
 }
 
 /** Resolve a bootstrapped tool entry's dispatch name (flat or OpenAI-shape). */
-fn __mcp_tool_ceiling_name(entry) {
+fn __mcp_tool_ceiling_name(entry: dict) {
   if type_of(entry) != "dict" {
     return ""
   }

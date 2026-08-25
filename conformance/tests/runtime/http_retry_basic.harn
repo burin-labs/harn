@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.testing.http_mock(
     "GET",
     "https://api.example.com/retry-basic",

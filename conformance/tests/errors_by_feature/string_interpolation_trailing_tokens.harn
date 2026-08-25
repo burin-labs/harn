@@ -3,7 +3,7 @@
  * (here `b` after `a`) are a hard error instead of being silently dropped,
  * which previously rendered just the first expression's value.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const a = 1
   const b = 2
   harness.stdio.log("value=${a b}")

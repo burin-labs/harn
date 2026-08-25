@@ -505,7 +505,7 @@ pub fn resolve_harn_bin(harness: Harness) -> string {
   return bin
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const harn_bin = resolve_harn_bin(harness)
   let md_files: list<string> = []
   for docs_glob in DOCS_GLOBS {

@@ -4,10 +4,10 @@ fn rejected_timestamp(
   runtime: HarnessRuntime,
   channels: HarnessChannels,
   random: HarnessRandom,
-  scope,
-  room,
-  message,
-  options,
+  scope: string,
+  room: string,
+  message: dict,
+  options: any,
 ) {
   return try {
     coord_post(runtime, channels, random, scope, room, message, options)

@@ -6,7 +6,7 @@
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_entry_annotations(entry) {
+pub fn agent_tool_entry_annotations(entry: dict?) {
   if type_of(entry) != "dict" {
     return {}
   }
@@ -37,7 +37,7 @@ pub fn agent_tool_entry_annotations(entry) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_policy_annotations(policy, tool_name) {
+pub fn agent_tool_policy_annotations(policy: dict?, tool_name: any) {
   if type_of(policy) != "dict" {
     return {}
   }
@@ -60,7 +60,7 @@ pub fn agent_tool_policy_annotations(policy, tool_name) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_annotations(entry, policy, tool_name) {
+pub fn agent_tool_annotations(entry: dict?, policy: dict?, tool_name: any) {
   return agent_tool_policy_annotations(policy, tool_name) + agent_tool_entry_annotations(entry)
 }
 
@@ -87,7 +87,7 @@ fn __agent_tool_side_effect_is_observational(kind: string, level: string) -> boo
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
+pub fn agent_tool_is_read_only(entry: dict, policy: any = nil, tool_name: string = "") -> bool {
   const annotations = agent_tool_annotations(entry, policy, tool_name)
   if annotations?.destructiveHint == true {
     return false
@@ -115,7 +115,7 @@ pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   return kind != "" || level != "" || (type_of(read_only_hint) == "bool" && read_only_hint)
 }
 
-fn __agent_tool_registry_entries(registry) {
+fn __agent_tool_registry_entries(registry: dict) {
   if type_of(registry) == "dict" {
     return registry?.tools ?? []
   }
@@ -125,15 +125,15 @@ fn __agent_tool_registry_entries(registry) {
   return []
 }
 
-fn __agent_tool_entry_name(entry) {
+fn __agent_tool_entry_name(entry: dict) {
   return to_string(entry?.function?.name ?? entry?.name ?? "")
 }
 
-fn __agent_tool_call_name(call) {
+fn __agent_tool_call_name(call: dict) {
   return to_string(call?.name ?? call?.tool_name ?? call?.function?.name ?? "")
 }
 
-fn __agent_tool_find_entry(registry, name) {
+fn __agent_tool_find_entry(registry: dict, name: any) {
   for entry in __agent_tool_registry_entries(registry) {
     if __agent_tool_entry_name(entry) == name {
       return entry
@@ -142,7 +142,7 @@ fn __agent_tool_find_entry(registry, name) {
   return nil
 }
 
-fn __agent_tool_is_workspace_write(entry, policy, name) -> bool {
+fn __agent_tool_is_workspace_write(entry: dict, policy: dict?, name: any) -> bool {
   const annotations = agent_tool_annotations(entry, policy, name)
   if annotations?.destructiveHint == true || annotations?.readOnlyHint == true {
     return false
@@ -166,7 +166,7 @@ fn __agent_tool_is_workspace_write(entry, policy, name) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_calls_are_read_only(calls, registry, policy = nil) -> bool {
+pub fn agent_tool_calls_are_read_only(calls: any, registry: dict, policy: any = nil) -> bool {
   if type_of(calls) != "list" || len(calls) == 0 {
     return false
   }
@@ -189,7 +189,11 @@ pub fn agent_tool_calls_are_read_only(calls, registry, policy = nil) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_collapse_duplicate_read_calls(calls, registry, options = nil) -> list {
+pub fn agent_collapse_duplicate_read_calls(
+  calls: list,
+  registry: dict,
+  options: any = nil,
+) -> list {
   const format = lowercase(to_string(options?.tool_format ?? ""))
   if type_of(calls) != "list" {
     return []
@@ -229,7 +233,7 @@ pub fn agent_collapse_duplicate_read_calls(calls, registry, options = nil) -> li
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_single_workspace_write_name(registry, policy = nil) -> string {
+pub fn agent_tool_single_workspace_write_name(registry: dict, policy: any = nil) -> string {
   let found = ""
   for entry in __agent_tool_registry_entries(registry) {
     const name = __agent_tool_entry_name(entry)
@@ -253,7 +257,11 @@ pub fn agent_tool_single_workspace_write_name(registry, policy = nil) -> string 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_resolve_workspace_write_name(registry, policy = nil, preferred = "") -> string {
+pub fn agent_tool_resolve_workspace_write_name(
+  registry: dict,
+  policy: any = nil,
+  preferred: string? = "",
+) -> string {
   const name = trim(preferred)
   if name == "" {
     return agent_tool_single_workspace_write_name(registry, policy)

@@ -35,7 +35,7 @@ type TrustGraphQueryFilters = {
  * @effects: []
  * @errors: []
  */
-pub fn query(runtime: HarnessRuntime, filters = {}) -> list<TrustGraphRecord> {
+pub fn query(runtime: HarnessRuntime, filters: dict = {}) -> list<TrustGraphRecord> {
   return runtime.trust_query_alias(filters)
 }
 
@@ -45,7 +45,7 @@ pub fn query(runtime: HarnessRuntime, filters = {}) -> list<TrustGraphRecord> {
  * @effects: []
  * @errors: []
  */
-pub fn record(runtime: HarnessRuntime, decision) -> TrustEntryId {
+pub fn record(runtime: HarnessRuntime, decision: any) -> TrustEntryId {
   return runtime.trust_record_alias(decision)
 }
 

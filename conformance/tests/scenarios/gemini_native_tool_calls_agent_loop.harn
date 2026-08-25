@@ -8,7 +8,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * `provider: "mock"` plus a Gemini model exercises Gemini-shaped conversation
  * history while staying deterministic.
  */
-fn lookup_tools(runtime: HarnessRuntime, lookups) {
+fn lookup_tools(runtime: HarnessRuntime, lookups: any) {
   const registry = tool_registry()
   return tool_define(
     registry,
@@ -24,7 +24,7 @@ fn lookup_tools(runtime: HarnessRuntime, lookups) {
   )
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const lookups = harness.runtime.atomic(0)
   harness.runtime.atomic_set(lookups, 0)
   with_llm_script(

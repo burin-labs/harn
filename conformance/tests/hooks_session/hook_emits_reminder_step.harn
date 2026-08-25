@@ -2,12 +2,12 @@ import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 @step(name: "watched_step")
-fn watched_step(input) -> string {
+fn watched_step(input: string) -> string {
   return "step:" + input
 }
 
 @persona(name: "step_hook_persona")
-fn step_hook_persona(input) -> string {
+fn step_hook_persona(input: string) -> string {
   return watched_step(input)
 }
 

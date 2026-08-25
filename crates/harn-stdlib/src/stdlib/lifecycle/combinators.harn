@@ -21,7 +21,7 @@
  */
 import { is_empty, unsettled_state } from "std/lifecycle"
 
-fn __resolve_timeout_ms(ms) {
+fn __resolve_timeout_ms(ms: int | float | dict) {
   if type_of(ms) == "int" {
     return ms
   }
@@ -42,7 +42,7 @@ fn __resolve_timeout_ms(ms) {
   return 0
 }
 
-fn __summarize_result(value) -> string {
+fn __summarize_result(value: any) -> string {
   const kind = type_of(value)
   if value == nil {
     return "nil"
@@ -66,7 +66,7 @@ fn __summarize_result(value) -> string {
   return kind
 }
 
-fn __stringify_error(err) -> string {
+fn __stringify_error(err: string) -> string {
   if err == nil {
     return ""
   }
@@ -94,7 +94,7 @@ fn __stringify_error(err) -> string {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(compose([on_finish_drain, audit_callback]))
  */
-pub fn compose(callbacks) {
+pub fn compose(callbacks: string | bytes | list | dict | set | range | nil) {
   return { harness, return_value ->
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return return_value
@@ -121,7 +121,7 @@ pub fn compose(callbacks) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(first_available([cloud_drain, local_drain]))
  */
-pub fn first_available(callbacks) {
+pub fn first_available(callbacks: string | bytes | list | dict | set | range | nil) {
   return { harness, return_value ->
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return nil
@@ -151,7 +151,7 @@ pub fn first_available(callbacks) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(with_telemetry(on_finish_drain, "drain"))
  */
-pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
+pub fn with_telemetry(callback: unknown, span_name: string = "lifecycle_callback") {
   const label = if type_of(span_name) == "string" {
     span_name
   } else {
@@ -196,7 +196,7 @@ pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(with_timeout(on_finish_drain, 30000))
  */
-pub fn with_timeout(callback, ms) {
+pub fn with_timeout(callback: unknown, ms: int | float | dict) {
   const timeout_ms = __resolve_timeout_ms(ms)
   return { harness, return_value ->
     const start = harness.clock.now_ms()
@@ -226,7 +226,7 @@ pub fn with_timeout(callback, ms) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(if_unsettled(on_finish_drain))
  */
-pub fn if_unsettled(callback) {
+pub fn if_unsettled(callback: unknown) {
   return { harness, return_value ->
     const state = unsettled_state(harness)
     if is_empty(state) {
@@ -249,7 +249,7 @@ pub fn if_unsettled(callback) {
  * @api_stability: experimental
  * @example: harness.agent.pipeline_on_finish(when({ h, rv -> rv == nil }, fallback_cb))
  */
-pub fn when(predicate, callback) {
+pub fn when(predicate: unknown, callback: unknown) {
   return { harness, return_value ->
     if predicate(harness, return_value) {
       return callback(harness, return_value)

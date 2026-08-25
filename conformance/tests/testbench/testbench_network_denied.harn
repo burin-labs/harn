@@ -6,7 +6,7 @@
  * can install the policy themselves, so the testbench network mode is
  * scriptable without requiring a CLI flag.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.net.egress_policy({default: "deny"})
   const _result = harness.net.get("https://example.com/api")
 }

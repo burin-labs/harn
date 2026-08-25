@@ -29,7 +29,7 @@ pub type AgentFeedbackMessage = {
   next_step?: string,
 }
 
-fn __feedback_action(value) -> string {
+fn __feedback_action(value: string) -> string {
   if value == "stop" || value == "continue" {
     return value
   }
@@ -56,7 +56,7 @@ fn __feedback_unique(values: list<string>) -> list<string> {
   return out
 }
 
-fn __feedback_candidate(candidate) -> dict {
+fn __feedback_candidate(candidate: dict) -> dict {
   const action = __feedback_action(candidate?.action)
   const source = to_string(candidate?.source ?? "unknown")
   const reason = to_string(candidate?.reason ?? "unspecified")
@@ -71,7 +71,7 @@ fn __feedback_candidate(candidate) -> dict {
   }
 }
 
-fn __feedback_merge(left, right) -> dict {
+fn __feedback_merge(left: dict, right: dict) -> dict {
   const right_wins = right.priority > left.priority
   const winner = if right_wins {
     right
@@ -92,7 +92,7 @@ fn __feedback_merge(left, right) -> dict {
     }
 }
 
-fn __feedback_has_stop(messages) -> bool {
+fn __feedback_has_stop(messages: list) -> bool {
   for message in messages {
     if message.action == "stop" {
       return true
@@ -118,7 +118,7 @@ fn __feedback_has_stop(messages) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_feedback_compose(candidates, context = nil) -> dict {
+pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
   const ctx = context ?? {}
   const history = ctx?.history ?? {}
   const knowledge_state = to_string(ctx?.knowledge_state ?? "")
@@ -209,8 +209,8 @@ pub fn agent_feedback_compose(candidates, context = nil) -> dict {
 pub fn agent_feedback_emit(
   agent: HarnessAgent,
   session_id: string,
-  candidates,
-  context = nil,
+  candidates: list?,
+  context: dict? = nil,
 ) -> dict {
   const composed = agent_feedback_compose(candidates, context)
   agent_emit_event(
@@ -241,8 +241,8 @@ pub fn agent_feedback_emit(
 pub fn agent_feedback_tool_example(
   llm: HarnessLlm,
   tool_name: string,
-  args = [],
-  options = nil,
+  args: list? = [],
+  options: any = nil,
 ) -> string {
   return agent_render_tool_call_exemplar(llm, tool_name, args, options)
 }

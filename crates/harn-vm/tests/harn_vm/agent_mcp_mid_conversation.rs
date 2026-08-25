@@ -107,7 +107,7 @@ fn all_fields<'a>(lines: &'a [String], key: &str) -> Vec<&'a str> {
 fn mid_conversation_mount_bootstraps_only_the_delta() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = {session_id: "sess-midconv"}
   // Initial loop-entry bootstrap of the pre-configured server `alpha`.
   const opts = {
@@ -164,7 +164,7 @@ pipeline main(harness: Harness, task) {
 fn mounting_already_active_server_is_a_noop() {
     let source = r#"
 import { agent_mcp_bootstrap_if_needed, agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = {session_id: "sess-noop"}
   const opts = {
     mcp_servers: [{name: "alpha", command: "true"}],
@@ -214,7 +214,7 @@ pipeline main(harness: Harness, task) {
 fn mid_conversation_mount_keeps_open_ceiling_open() {
     let source = r#"
 import { agent_mcp_mount_additional } from "std/agent/mcp"
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const session = {session_id: "sess-open"}
   const opts = {tools: {_type: "tool_registry", tools: [{name: "look"}]}, policy: {tools: []}}
   const out = agent_mcp_mount_additional(

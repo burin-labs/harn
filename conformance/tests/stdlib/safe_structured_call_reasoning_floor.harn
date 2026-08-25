@@ -9,7 +9,7 @@
 // with the route's resolved reasoning budget, not a fixed per-model constant.
 import { structured_min_max_tokens } from "std/llm/safe"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Non-reasoning route (mock model): flat floor, unchanged behavior.
   const non_reasoning = structured_min_max_tokens(
     harness.llm,

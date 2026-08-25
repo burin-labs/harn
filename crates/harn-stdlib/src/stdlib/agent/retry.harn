@@ -81,11 +81,11 @@ const __AGENT_RETRYABLE_KINDS = ["timeout", "network"]
 
 const __AGENT_RETRYABLE_HTTP_STATUS = [408, 429, 500, 502, 503, 504, 522, 524, 529]
 
-fn __agent_retry_text(value) -> string {
+fn __agent_retry_text(value: string?) -> string {
   return lowercase(trim(to_string(value ?? "")))
 }
 
-fn __agent_retry_contains(values, value) -> bool {
+fn __agent_retry_contains(values: string | list, value: any) -> bool {
   return contains(values, value)
 }
 
@@ -133,7 +133,7 @@ fn __agent_loop_retry_config(opts: AgentRetryOptionBag) -> AgentLoopRetryOptions
   return {max_attempts: 3}
 }
 
-pub fn agent_loop_default_retry_predicate(envelope) -> bool {
+pub fn agent_loop_default_retry_predicate(envelope: dict) -> bool {
   if type_of(envelope) != "dict" || (envelope?.ok ?? false) {
     return false
   }
@@ -196,7 +196,7 @@ fn __agent_loop_retry_with_default_predicate(
  */
 pub fn agent_apply_default_retry(
   harness: Harness,
-  options = nil,
+  options: dict? = nil,
   apply_options: AgentDefaultRetryApplyOptions = {},
 ) {
   const opts: AgentRetryOptionBag = options ?? {}

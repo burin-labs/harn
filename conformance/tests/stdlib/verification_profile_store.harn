@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Empty store: reads and resolution return nil without erroring.
   assert_eq(harness.runtime.verification_profiles_get(), nil)
   assert_eq(harness.runtime.verification_profile_resolve({path: "src/a.tx"}), nil)

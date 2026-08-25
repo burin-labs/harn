@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(2 + 3 * 4)
   harness.stdio.println("ha" * 2)
   harness.stdio.println(([1] + [2, 3])[2])

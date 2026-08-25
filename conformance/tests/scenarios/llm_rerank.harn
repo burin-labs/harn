@@ -5,7 +5,7 @@ fn run_mock_self_certainty(llm: HarnessLlm) {
   return self_certainty(llm, "calibrated", {provider: "mock"})
 }
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   const judged = with_llm_mocks(
     harness.llm,
     [
@@ -53,5 +53,7 @@ pipeline default(harness: Harness, task) {
     [{text: "visible", logprobs: [{token: "visible", logprob: 0.0}]}],
     fn() { return harness.llm.call("return visible", nil, {provider: "mock", logprobs: true}) },
   )
+  require mocked_result.logprobs != nil && len(mocked_result.logprobs) == 1,
+    "mock response must preserve its single logprob"
   harness.stdio.println(mocked_result.logprobs[0].token == "visible")
 }

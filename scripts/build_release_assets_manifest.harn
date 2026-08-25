@@ -285,7 +285,7 @@ pub fn parse_args(args: list<string>) -> any {
   return {help: false, error: nil, artifacts_dir: artifacts_dir, tag: tag, output: output}
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const parsed = parse_args(argv)
   if parsed.help {
     harness.stdio.println(help_text())

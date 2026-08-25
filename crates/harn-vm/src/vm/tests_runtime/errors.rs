@@ -43,7 +43,7 @@ fn runtime_error_renderer_normalizes_frame_paths() {
 #[test]
 fn test_try_catch_basic() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) { try { throw "oops" } catch(e) { harness.stdio.log("caught: " + e) } }"#,
+        r#"pipeline t(harness: Harness, task: unknown) { try { throw "oops" } catch(e) { harness.stdio.log("caught: " + e) } }"#,
     );
     assert_eq!(out, "[harn] caught: oops");
 }
@@ -51,7 +51,7 @@ fn test_try_catch_basic() {
 #[test]
 fn test_try_no_error() {
     let out = run_output(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 let result = 0
 try { result = 42 } catch(e) { result = 0 }
 harness.stdio.log(result)
@@ -62,14 +62,14 @@ harness.stdio.log(result)
 
 #[test]
 fn test_throw_uncaught() {
-    let result = run_harn_result(r#"pipeline t(harness: Harness, task) { throw "boom" }"#);
+    let result = run_harn_result(r#"pipeline t(harness: Harness, task: unknown) { throw "boom" }"#);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_runtime_user_call_arg_type_mismatch() {
     let result = run_harn_result(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 fn add_one(value: int) -> int { return value + 1 }
 add_one("bad")
 }"#,
@@ -82,7 +82,7 @@ add_one("bad")
 #[test]
 fn test_runtime_user_call_rest_arg_type_mismatch() {
     let result = run_harn_result(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 fn collect(...values: int) -> int { return values.count() }
 collect(1, "bad")
 }"#,
@@ -95,7 +95,7 @@ collect(1, "bad")
 #[test]
 fn test_runtime_user_call_named_struct_type_mismatch() {
     let result = run_harn_result(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 struct Point { x: int }
 struct User { name: string }
 fn x_of(point: Point) -> int { return point.x }
@@ -110,7 +110,7 @@ x_of(User({name: "Ada"}))
 #[test]
 fn test_runtime_user_call_generic_param_is_static_only() {
     let (_, result) = run_harn_result(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 fn first<T>(xs: list<T>) -> T { return xs[0] }
 return first(["ok"])
 }"#,
@@ -122,7 +122,7 @@ return first(["ok"])
 #[test]
 fn test_runtime_user_call_missing_required_arg_rejected() {
     let result = run_harn_result(
-        r"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task: unknown) {
 fn echo(value) { return value }
 echo()
 }",
@@ -134,7 +134,7 @@ echo()
 
 #[test]
 fn test_runtime_builtin_call_arg_type_mismatch() {
-    let result = run_harn_result(r"pipeline t(harness: Harness, task) { lowercase(42) }");
+    let result = run_harn_result(r"pipeline t(harness: Harness, task: unknown) { lowercase(42) }");
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("'lowercase' parameter `text` expects string"),
@@ -147,7 +147,8 @@ fn test_runtime_builtin_call_arg_type_mismatch() {
 
 #[test]
 fn test_stack_overflow() {
-    let err = run_vm_err("pipeline default(harness: Harness, task) { fn f() { f() }\nf() }");
+    let err =
+        run_vm_err("pipeline default(harness: Harness, task: unknown) { fn f() { f() }\nf() }");
     assert!(
         err.contains("stack") || err.contains("overflow") || err.contains("recursion"),
         "Expected stack overflow error, got: {err}"
@@ -156,7 +157,9 @@ fn test_stack_overflow() {
 
 #[test]
 fn test_division_by_zero() {
-    let err = run_vm_err("pipeline default(harness: Harness, task) { harness.stdio.log(1 / 0) }");
+    let err = run_vm_err(
+        "pipeline default(harness: Harness, task: unknown) { harness.stdio.log(1 / 0) }",
+    );
     assert!(
         err.contains("Division by zero") || err.contains("division"),
         "Expected division by zero error, got: {err}"
@@ -166,7 +169,7 @@ fn test_division_by_zero() {
 #[test]
 fn test_int_division_overflow_promotes_instead_of_wrapping() {
     let out = run_output(
-        r"pipeline default(harness: Harness, task) {
+        r"pipeline default(harness: Harness, task: unknown) {
   const min = -9223372036854775807 - 1
   harness.stdio.log(min / -1)
   harness.stdio.log(min % -1)
@@ -181,7 +184,7 @@ fn test_int_division_overflow_promotes_instead_of_wrapping() {
 #[test]
 fn test_float_division_by_zero_uses_ieee_values() {
     let out = run_vm(
-        "pipeline default(harness: Harness, task) { harness.stdio.log(is_nan(0.0 / 0.0))\nharness.stdio.log(is_infinite(1.0 / 0.0))\nharness.stdio.log(is_infinite(-1.0 / 0.0)) }",
+        "pipeline default(harness: Harness, task: unknown) { harness.stdio.log(is_nan(0.0 / 0.0))\nharness.stdio.log(is_infinite(1.0 / 0.0))\nharness.stdio.log(is_infinite(-1.0 / 0.0)) }",
     );
     assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n");
 }
@@ -189,7 +192,7 @@ fn test_float_division_by_zero_uses_ieee_values() {
 #[test]
 fn test_reusing_catch_binding_name_in_same_block() {
     let out = run_vm(
-        r#"pipeline default(harness: Harness, task) {
+        r#"pipeline default(harness: Harness, task: unknown) {
 try {
     throw "a"
 } catch e {
@@ -208,7 +211,7 @@ try {
 #[test]
 fn test_try_catch_nested() {
     let out = run_output(
-        r#"pipeline t(harness: Harness, task) {
+        r#"pipeline t(harness: Harness, task: unknown) {
 try {
     try {
         throw "inner"

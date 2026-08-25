@@ -3,11 +3,11 @@ import { agent_loop } from "std/agent/loop"
 import { agent_session_messages, agent_session_visible_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn events_of(events, kind) {
+fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
-fn tool_message_count(agent: HarnessAgent, session_id) {
+fn tool_message_count(agent: HarnessAgent, session_id: any) {
   let count = 0
   for message in agent_session_messages(agent, session_id) {
     if message?.role == "tool_result" && message?.name == "noop" {

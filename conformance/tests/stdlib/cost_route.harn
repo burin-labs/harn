@@ -1,6 +1,6 @@
 import { llm_call_count } from "std/testing"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const routed = cost_route {
     budget: {max_cost_usd: 1.0}
     route_policy: {mode: "preference_list", targets: ["mock:mock"], strategy: "cheapest_first"}

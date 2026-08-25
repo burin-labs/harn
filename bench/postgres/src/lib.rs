@@ -419,7 +419,7 @@ fn worker_script(pool_expr: &str, query: &str) -> String {
     // registered in thread-local state for the closure's lifetime.
     format!(
         r#"import "std/postgres"
-pipeline main(harness: Harness, task) {{
+pipeline main(harness: Harness, _task: unknown) {{
   let db = {pool_expr}
   return {{ id -> pg_query_one(db, {query}, [id]) }}
 }}

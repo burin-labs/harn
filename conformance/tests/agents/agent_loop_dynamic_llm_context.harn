@@ -1,11 +1,11 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 
-fn iteration_events(events) {
+fn iteration_events(events: any) {
   return events.filter({ event -> event.type == "iteration_start" })
 }
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const call_count = harness.runtime.atomic(0)
   const first_context_ok = harness.runtime.atomic(0)
   const second_context_ok = harness.runtime.atomic(0)

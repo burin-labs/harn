@@ -122,8 +122,8 @@ struct ModuleInfo {
     /// Top-level type-like declarations that can be imported into a caller's
     /// static type environment.
     type_declarations: Vec<SNode>,
-    /// Top-level callable declarations whose signatures can be imported into
-    /// a caller's static type environment.
+    /// Top-level callable signature projections imported into a caller's
+    /// static type environment. Function bodies are discarded at graph ingress.
     callable_declarations: Vec<SNode>,
     /// Set when this module's own source failed to lex or parse. The module is
     /// still recorded in the graph (with an otherwise-empty surface) so that
@@ -193,7 +193,7 @@ pub struct ModuleImport {
 /// the embedded stdlib source table, so callers can parse resolved stdlib
 /// modules without knowing about the stdlib mirror layout.
 pub fn read_module_source(path: &Path) -> Option<String> {
-    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+    if let Some(stdlib_module) = stdlib_module_name(path) {
         return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
     }
     std::fs::read_to_string(path).ok()
@@ -205,7 +205,7 @@ pub fn read_module_source(path: &Path) -> Option<String> {
 /// graph contains every module reachable from the seed set. Cycles and
 /// already-loaded files are skipped via a visited set.
 pub fn build(files: &[PathBuf]) -> ModuleGraph {
-    build_inner(files, None, false, None).graph
+    build_inner(files, ParsedSourceRetention::None, None).graph
 }
 
 /// Build a module graph using caller-owned source for one root file.
@@ -216,7 +216,12 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
 pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
     let file = normalize_path(file);
     let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
-    build_inner(&[file], None, false, Some(&source_overrides)).graph
+    build_inner(
+        &[file],
+        ParsedSourceRetention::None,
+        Some(&source_overrides),
+    )
+    .graph
 }
 
 /// Build a module graph while retaining parsed sources for the seed files.
@@ -226,7 +231,11 @@ pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
 /// parsed sources they will not reuse.
 pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
     let parsed_source_targets = files.iter().map(|file| normalize_path(file)).collect();
-    build_inner(files, Some(&parsed_source_targets), false, None)
+    build_inner(
+        files,
+        ParsedSourceRetention::Seeds(&parsed_source_targets),
+        None,
+    )
 }
 
 /// Build a closed module graph while retaining every reachable parsed source.
@@ -235,13 +244,29 @@ pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
 /// package linking consumes every module AST, while ordinary diagnostics should
 /// not retain an entire dependency graph after extracting its public surface.
 pub fn build_closed_program(files: &[PathBuf]) -> ModuleGraphBuild {
-    build_inner(files, None, true, None)
+    build_inner(files, ParsedSourceRetention::All, None)
+}
+
+#[derive(Clone, Copy)]
+enum ParsedSourceRetention<'a> {
+    None,
+    Seeds(&'a HashSet<PathBuf>),
+    All,
+}
+
+impl ParsedSourceRetention<'_> {
+    fn retains(self, path: &Path) -> bool {
+        match self {
+            Self::None => false,
+            Self::Seeds(targets) => targets.contains(path),
+            Self::All => true,
+        }
+    }
 }
 
 fn build_inner(
     files: &[PathBuf],
-    parsed_source_targets: Option<&HashSet<PathBuf>>,
-    retain_all_parsed_sources: bool,
+    parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> ModuleGraphBuild {
     let package_snapshots = acquire_package_snapshots(files);
@@ -263,12 +288,15 @@ fn build_inner(
     // nearly all the parse work is, so the serial-BFS tail on deep import
     // chains does not matter in practice.
     while !wave.is_empty() {
-        let loaded = load_wave(&wave, &package_snapshots, source_overrides);
+        let loaded = load_wave(
+            &wave,
+            &package_snapshots,
+            parsed_source_retention,
+            source_overrides,
+        );
         let mut next_wave: Vec<PathBuf> = Vec::new();
         for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
-            let retain_parsed_source = retain_all_parsed_sources
-                || parsed_source_targets.is_some_and(|targets| targets.contains(&path));
-            if retain_parsed_source {
+            if parsed_source_retention.retains(&path) {
                 if let Some(parsed) = parsed {
                     parsed_sources.insert(path.clone(), parsed);
                 }
@@ -320,6 +348,7 @@ pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
 fn load_wave(
     paths: &[PathBuf],
     package_snapshots: &[PackageSnapshot],
+    parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
     const MIN_PARALLEL_WAVE: usize = 8;
@@ -337,7 +366,14 @@ fn load_wave(
     if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
         return paths
             .iter()
-            .map(|path| load_module(path, package_snapshots, source_overrides))
+            .map(|path| {
+                load_module(
+                    path,
+                    package_snapshots,
+                    source_overrides,
+                    parsed_source_retention.retains(path),
+                )
+            })
             .collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -354,7 +390,12 @@ fn load_wave(
                             };
                             local.push((
                                 index,
-                                load_module(path, package_snapshots, source_overrides),
+                                load_module(
+                                    path,
+                                    package_snapshots,
+                                    source_overrides,
+                                    parsed_source_retention.retains(path),
+                                ),
                             ));
                         }
                         local
@@ -1206,7 +1247,7 @@ impl ModuleGraph {
                     .get(name)
                     .map(|definition| definition.kind)
                     .or_else(|| {
-                        stdlib_module_from_path(&file).and_then(|stdlib_module| {
+                        stdlib_module_name(&file).and_then(|stdlib_module| {
                             stdlib::builtin_reexports(stdlib_module)
                                 .contains(&name)
                                 .then_some(DefKind::Function)
@@ -1300,6 +1341,7 @@ fn load_module(
     path: &Path,
     package_snapshots: &[PackageSnapshot],
     source_overrides: Option<&HashMap<PathBuf, String>>,
+    retain_parsed_source: bool,
 ) -> (ModuleInfo, Option<ParsedModuleSource>) {
     let source = source_overrides
         .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
@@ -1342,7 +1384,7 @@ fn load_module(
         collect_type_declarations(node, &mut module.type_declarations);
         collect_callable_declarations(node, &mut module.callable_declarations);
     }
-    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+    if let Some(stdlib_module) = stdlib_module_name(path) {
         module.own_exports.extend(
             stdlib::builtin_reexports(stdlib_module)
                 .iter()
@@ -1356,13 +1398,13 @@ fn load_module(
     module
         .exports
         .extend(module.selective_re_exports.keys().cloned());
-    let parsed = ParsedModuleSource { source, program };
-    (module, Some(parsed))
+    let parsed = retain_parsed_source.then_some(ParsedModuleSource { source, program });
+    (module, parsed)
 }
 
 /// Extract the stdlib module name when `path` is a `<std>/<name>`
 /// virtual path, otherwise `None`.
-fn stdlib_module_from_path(path: &Path) -> Option<&str> {
+pub fn stdlib_module_name(path: &Path) -> Option<&str> {
     let s = path.to_str()?;
     s.strip_prefix("<std>/")
 }
@@ -1385,7 +1427,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 /// `<std>/` virtual paths pass through untouched.
 pub fn canonical_path(path: &Path) -> PathBuf {
     use std::sync::OnceLock;
-    if stdlib_module_from_path(path).is_some() {
+    if stdlib_module_name(path).is_some() {
         return path.to_path_buf();
     }
     static MEMO: OnceLock<std::sync::Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();

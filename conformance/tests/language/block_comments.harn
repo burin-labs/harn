@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   /* this is a comment */
   const x = 42
   harness.stdio.log(x)

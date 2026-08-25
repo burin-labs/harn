@@ -36,7 +36,7 @@ const EXPECTED_MIN_DIGEST =
  * `valid`, `connectors[0].id`). Throws on a missing key/index so the
  * caller can surface the failure. Pure for tests.
  */
-pub fn json_path_get(doc, path: string) {
+pub fn json_path_get(doc: any, path: string) {
   let node = doc
   if path == "" {
     return node
@@ -62,7 +62,7 @@ pub fn json_path_get(doc, path: string) {
  * expected JSON literal, returning `{ok, actual}` — `actual` is the JSON
  * encoding (or an error note when the path is missing).
  */
-pub fn json_path_check(doc, path: string, expected: string) {
+pub fn json_path_check(doc: any, path: string, expected: string) {
   const value = try {
     json_path_get(doc, path)
   } catch (err) {
@@ -77,7 +77,7 @@ fn expect_json_path(
   runtime: HarnessRuntime,
   stdio: HarnessStdio,
   label: string,
-  doc,
+  doc: any,
   path: string,
   expected: string,
 ) {
@@ -157,7 +157,7 @@ fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string
   return parsed
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   const harn_bin = resolve_harn_bin(harness)
   harness.stdio.println("=== Checking workflow quickstart fixtures ===")
   // --- 1. Minimal bundle ---

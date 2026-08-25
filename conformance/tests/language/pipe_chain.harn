@@ -1,8 +1,8 @@
-pipeline test(harness: Harness, task) {
-  fn add1(x) {
+pipeline test(harness: Harness, task: unknown) {
+  fn add1(x: int) {
     return x + 1
   }
-  fn double(x) {
+  fn double(x: int) {
     return x * 2
   }
   const result = 3 |> add1 |> double

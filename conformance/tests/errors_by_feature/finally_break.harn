@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let cleanup_count = 0
   for i in 0 to 5 exclusive {
     try {

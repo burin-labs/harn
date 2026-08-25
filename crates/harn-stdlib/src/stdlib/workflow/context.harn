@@ -1,22 +1,22 @@
-fn __workflow_list(value) {
+fn __workflow_list(value: any) {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __workflow_contains(values, value) {
+fn __workflow_contains(values: any, value: any) {
   return contains(__workflow_list(values), value)
 }
 
-fn __workflow_num(value, fallback = 0) {
+fn __workflow_num(value: any, fallback: int = 0) {
   if type_of(value) == "int" || type_of(value) == "float" {
     return value
   }
   return fallback
 }
 
-fn __workflow_freshness_rank(value) {
+fn __workflow_freshness_rank(value: string?) {
   if value == "stale" {
     return 0
   }
@@ -32,7 +32,7 @@ fn __workflow_freshness_rank(value) {
   return 1
 }
 
-fn __workflow_metadata_string_list(artifact, key) {
+fn __workflow_metadata_string_list(artifact: dict, key: string) {
   const metadata = artifact?.metadata ?? {}
   const raw = metadata[key]
   let out = []
@@ -44,14 +44,14 @@ fn __workflow_metadata_string_list(artifact, key) {
   return out
 }
 
-fn __workflow_push_unique(values, value) {
+fn __workflow_push_unique(values: list, value: any) {
   if __workflow_contains(values, value) {
     return values
   }
   return values.appending(value)
 }
 
-fn __workflow_fresh_changed_paths(artifacts) {
+fn __workflow_fresh_changed_paths(artifacts: list) {
   let paths = []
   for artifact in artifacts {
     if __workflow_freshness_rank(artifact?.freshness) >= 2 {
@@ -63,7 +63,7 @@ fn __workflow_fresh_changed_paths(artifacts) {
   return paths
 }
 
-fn __workflow_artifact_has_stale_evidence(artifact, fresh_changed_paths) {
+fn __workflow_artifact_has_stale_evidence(artifact: dict, fresh_changed_paths: any) {
   const evidence_paths = __workflow_metadata_string_list(artifact, "evidence_paths")
   if len(evidence_paths) == 0 {
     return false
@@ -79,7 +79,7 @@ fn __workflow_artifact_has_stale_evidence(artifact, fresh_changed_paths) {
   return false
 }
 
-fn __workflow_drop_stale_evidence_artifacts(artifacts) {
+fn __workflow_drop_stale_evidence_artifacts(artifacts: list) {
   const fresh_changed_paths = __workflow_fresh_changed_paths(artifacts)
   if len(fresh_changed_paths) == 0 {
     return artifacts
@@ -93,18 +93,18 @@ fn __workflow_drop_stale_evidence_artifacts(artifacts) {
   return out
 }
 
-fn __workflow_artifact_text(artifact) {
+fn __workflow_artifact_text(artifact: dict) {
   if artifact?.text == nil {
     return ""
   }
   return artifact.text
 }
 
-fn __workflow_artifact_priority(artifact) {
+fn __workflow_artifact_priority(artifact: dict) {
   return __workflow_num(artifact?.priority, 0)
 }
 
-fn __workflow_dedup_artifacts(artifacts) {
+fn __workflow_dedup_artifacts(artifacts: list) {
   let out = []
   for artifact in artifacts {
     const text = __workflow_artifact_text(artifact)
@@ -134,7 +134,7 @@ fn __workflow_dedup_artifacts(artifacts) {
   return out
 }
 
-fn __workflow_microcompact_text(text, max_chars) {
+fn __workflow_microcompact_text(text: any, max_chars: int) {
   if len(text) <= max_chars || max_chars < 200 {
     return text
   }
@@ -146,7 +146,7 @@ fn __workflow_microcompact_text(text, max_chars) {
   return head + "\n\n[... " + to_string(snipped) + " characters snipped ...]\n\n" + tail
 }
 
-fn __workflow_microcompact_artifact(artifact, cap_tokens) {
+fn __workflow_microcompact_artifact(artifact: dict, cap_tokens: int) {
   const estimated = __workflow_num(artifact?.estimated_tokens, 0)
   const max_chars = cap_tokens * 4
   if estimated <= cap_tokens * 2 || max_chars < 200 || artifact?.text == nil {
@@ -159,7 +159,10 @@ fn __workflow_microcompact_artifact(artifact, cap_tokens) {
     + {text: __workflow_microcompact_text(artifact.text, max_chars), estimated_tokens: cap_tokens}
 }
 
-fn __workflow_microcompact_artifacts(artifacts, policy) {
+fn __workflow_microcompact_artifacts(
+  artifacts: string | bytes | list | dict | set | range | nil,
+  policy: dict,
+) {
   if policy?.max_tokens == nil || len(artifacts) == 0 {
     return artifacts
   }
@@ -174,7 +177,7 @@ fn __workflow_microcompact_artifacts(artifacts, policy) {
   return out
 }
 
-fn __workflow_artifact_matches_policy(artifact, policy) {
+fn __workflow_artifact_matches_policy(artifact: dict, policy: dict) {
   const include_kinds = __workflow_list(policy?.include_kinds)
   const exclude_kinds = __workflow_list(policy?.exclude_kinds)
   const include_stages = __workflow_list(policy?.include_stages)
@@ -190,7 +193,7 @@ fn __workflow_artifact_matches_policy(artifact, policy) {
   return true
 }
 
-fn __workflow_artifact_precedes(left, right, policy) {
+fn __workflow_artifact_precedes(left: dict, right: dict, policy: dict) {
   const pinned_ids = __workflow_list(policy?.pinned_ids)
   const left_pinned = __workflow_contains(pinned_ids, left?.id)
   const right_pinned = __workflow_contains(pinned_ids, right?.id)
@@ -235,7 +238,7 @@ fn __workflow_artifact_precedes(left, right, policy) {
   return false
 }
 
-fn __workflow_insert_artifact_sorted(sorted, artifact, policy) {
+fn __workflow_insert_artifact_sorted(sorted: list, artifact: dict, policy: dict) {
   let out = []
   let inserted = false
   for existing in sorted {
@@ -251,7 +254,7 @@ fn __workflow_insert_artifact_sorted(sorted, artifact, policy) {
   return out
 }
 
-fn __workflow_sort_artifacts(artifacts, policy) {
+fn __workflow_sort_artifacts(artifacts: list, policy: dict) {
   let sorted = []
   for artifact in artifacts {
     sorted = __workflow_insert_artifact_sorted(sorted, artifact, policy)
@@ -266,7 +269,7 @@ fn __workflow_sort_artifacts(artifacts, policy) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil) {
+pub fn workflow_stage_context_policy(context_policy: dict? = nil, input_contract: any = nil) {
   const policy = context_policy ?? {}
   if len(__workflow_list(policy?.include_kinds)) > 0 {
     return policy
@@ -285,7 +288,7 @@ pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
+pub fn workflow_select_artifacts(artifacts: any = nil, policy: dict? = nil) {
   const opts = policy ?? {}
   let candidates = []
   for artifact in __workflow_list(artifacts) {
@@ -323,7 +326,7 @@ pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
+pub fn workflow_select_artifacts_adaptive(artifacts: any = nil, policy: dict? = nil) {
   const opts = policy ?? {}
   const fresh = __workflow_drop_stale_evidence_artifacts(__workflow_list(artifacts))
   const deduped = __workflow_dedup_artifacts(fresh)
@@ -338,7 +341,7 @@ pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_select_stage_artifacts(config = nil) {
+pub fn workflow_select_stage_artifacts(config: dict? = nil) {
   const opts = config ?? {}
   const policy = workflow_stage_context_policy(
     opts?.context_policy ?? {},

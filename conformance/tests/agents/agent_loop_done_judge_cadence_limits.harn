@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn judge_events(events) {
+fn judge_events(events: any) {
   return events.filter({ event -> event.type == "judge_decision" })
 }
 

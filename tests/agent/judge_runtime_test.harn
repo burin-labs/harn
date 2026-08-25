@@ -11,7 +11,7 @@ import { __agent_loop_deadline_contract } from "std/agent/loop_foundation"
 import { AgentSpec } from "std/agent/options"
 import { llm_done, llm_text, with_llm_script } from "std/testing"
 
-fn __feedback_contents(captured, kind: string) -> list<string> {
+fn __feedback_contents(captured: dict, kind: string) -> list<string> {
   let contents: list<string> = []
   for event in captured.events {
     if event.type == "feedback_injected" && event.kind == kind {
@@ -29,13 +29,13 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
  * without its start, or a start with no decision, is a stuck progress claim on
  * a real user's screen.
  */
-fn __judge_window(events) -> list<string> {
+fn __judge_window(events: list) -> list<string> {
   return events.filter({ event -> event.type == "judge_started" || event.type == "judge_decision" })
     .map({ event -> to_string(event.type) })
     .to_list()
 }
 
-fn __completion_receipts(events) {
+fn __completion_receipts(events: list) {
   return events.filter(
     { event ->
       event.type == "typed_checkpoint"
@@ -73,7 +73,10 @@ fn __result_facts(
   }
 }
 
-pipeline test_completion_judge_admission_has_exact_budget_boundary(harness: Harness, task) {
+pipeline test_completion_judge_admission_has_exact_budget_boundary(
+  harness: Harness,
+  task: unknown,
+) {
   const refused = __judge_completion_admission(1000, 65999, 60000, 5000)
   const admitted = __judge_completion_admission(1000, 66000, 60000, 5000)
   assert(!refused.admitted)
@@ -84,7 +87,7 @@ pipeline test_completion_judge_admission_has_exact_budget_boundary(harness: Harn
 
 pipeline test_agent_loop_deadline_uses_earliest_duration_in_one_clock_domain(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const configured = __agent_loop_deadline_contract(9000, 70000, nil)
   const budget = __agent_loop_deadline_contract(9000, 70000, 45000)
@@ -96,7 +99,10 @@ pipeline test_agent_loop_deadline_uses_earliest_duration_in_one_clock_domain(
   assert_eq(__agent_loop_deadline_contract(9000, nil, nil), nil)
 }
 
-pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Harness, task) {
+pipeline test_completion_judge_projects_bounded_structural_evidence(
+  harness: Harness,
+  task: unknown,
+) {
   const huge_read = "READ_ONLY_TRANSCRIPT_BULK".repeat(1000)
   const huge_edit = "EDIT_HEAD\n" + "implementation body\n".repeat(700)
     + "assert not hasattr(service, 'delete_experiment')\nEDIT_TAIL"
@@ -160,7 +166,7 @@ pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Har
 
 pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const calls = [
     {id: "edit-1", name: "edit", arguments: {path: "src/lib.rs"}},
@@ -197,7 +203,10 @@ pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
   assert(text_projection.packet.actions[1].has_error_result)
 }
 
-pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(harness: Harness, task) {
+pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(
+  harness: Harness,
+  task: unknown,
+) {
   const projected = __judge_evidence_projection(
     [
       __assistant_facts(
@@ -215,7 +224,7 @@ pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(harnes
 
 pipeline test_completion_judge_keeps_declared_execute_observation_without_guessing(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   const projected = __judge_evidence_projection(
     [
@@ -240,7 +249,10 @@ pipeline test_completion_judge_keeps_declared_execute_observation_without_guessi
   assert(contains(projected.serialized, "artifact evidence"))
 }
 
-pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harness: Harness, task) {
+pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(
+  harness: Harness,
+  task: unknown,
+) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -323,7 +335,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
 
 pipeline test_completion_judge_keeps_mutation_and_lifecycle_anomaly_after_many_verifiers(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   let messages = [
     __assistant_facts(
@@ -378,7 +390,10 @@ pipeline test_completion_judge_keeps_mutation_and_lifecycle_anomaly_after_many_v
   )
 }
 
-pipeline test_completion_judge_preserves_ambiguous_result_evidence(harness: Harness, task) {
+pipeline test_completion_judge_preserves_ambiguous_result_evidence(
+  harness: Harness,
+  task: unknown,
+) {
   const projected = __judge_evidence_projection(
     [
       __assistant_facts("", [{id: "edit-1", name: "edit", arguments: {content: "MUTATION_BODY"}}]),
@@ -396,7 +411,7 @@ pipeline test_completion_judge_preserves_ambiguous_result_evidence(harness: Harn
 
 pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   let tools = tool_registry()
   tools = tool_define(
@@ -484,7 +499,7 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
 
 pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline(
   harness: Harness,
-  task,
+  task: unknown,
 ) {
   with_llm_script(
     harness.llm,
@@ -556,7 +571,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
   )
 }
 
-pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task) {
+pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task: unknown) {
   const judge_response = {
     text:
       "```json\n{\"verdict\":\"continue\",\"detail\":\"Run `harn test tests/agent/judge_runtime_test.harn` now because verification is missing.\"}\n```",
@@ -592,7 +607,10 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
   )
 }
 
-pipeline test_invalid_deterministic_completion_result_stops_unverified(harness: Harness, task) {
+pipeline test_invalid_deterministic_completion_result_stops_unverified(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [llm_done()],
@@ -625,7 +643,7 @@ pipeline test_invalid_deterministic_completion_result_stops_unverified(harness: 
   )
 }
 
-pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, task) {
+pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_done()],

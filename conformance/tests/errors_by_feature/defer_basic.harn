@@ -1,4 +1,4 @@
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   // Defer runs on explicit return
   fn with_cleanup() {
     defer {

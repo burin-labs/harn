@@ -20,7 +20,9 @@ pipeline default(harness: Harness) {
   const pid = start.stdout.trim()
   require start.success, "failed to start harn run child"
   require pid != "", "missing child pid"
-  require wait_for_log_contains(harness, log_path, "ready"), "child did not become ready"
+  const ready = wait_for_log_contains(harness, log_path, "ready")
+  const startup_log = harness.fs.exists(log_path) ? harness.fs.read_text(log_path) : "<missing>"
+  require ready, "child did not become ready; log: " + startup_log
   const _ = harness.process.shell("kill -TERM " + pid)
   const exited = wait_for_exit(harness.clock, harness.process, pid)
   const _ = harness.process.shell("kill -TERM " + pid + " >/dev/null 2>&1 || true")

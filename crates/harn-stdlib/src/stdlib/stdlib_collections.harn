@@ -88,7 +88,7 @@ pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
  * @errors: [TypeError]
  * @example: index_by(records, { r -> r.id })
  */
-pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
+pub fn index_by<V>(items: list<V>, key_fn: unknown) -> dict<string, V> {
   let pairs = []
   for item in items ?? [] {
     pairs = pairs + [[to_string(key_fn(item)), item]]
@@ -106,7 +106,7 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
  * @errors: [TypeError]
  * @example: sum_by(rows, { row -> row?.input_tokens })
  */
-pub fn sum_by<T>(items: list<T>, project) -> int | float {
+pub fn sum_by<T>(items: list<T>, project: unknown) -> int | float {
   let total = 0
   for item in items ?? [] {
     const value = project(item)
@@ -125,7 +125,7 @@ pub fn sum_by<T>(items: list<T>, project) -> int | float {
  * @errors: []
  * @example: count_where(rows, { row -> row.status == "pass" })
  */
-pub fn count_where<T>(items: list<T>, predicate) -> int {
+pub fn count_where<T>(items: list<T>, predicate: unknown) -> int {
   let count = 0
   for item in items ?? [] {
     if predicate(item) {

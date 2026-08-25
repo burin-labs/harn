@@ -7,7 +7,7 @@ import { with_llm_script } from "std/testing"
  * `error_category(e)` and `is_rate_limited(e)` still work (they accept
  * dict or string); scripts can dispatch directly on `e.kind`/`e.reason`.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness, task: unknown) {
   // llm_call is fail-fast on transient errors, so a single injected error
   // surfaces as a throw on the first attempt.
   with_llm_script(

@@ -31,7 +31,7 @@ internal struct NotPublished {}
 """
 
 @test
-pipeline test_ts_exports_are_collected(harness: Harness, task) {
+pipeline test_ts_exports_are_collected(harness: Harness, task: unknown) {
   const symbols = exported_symbols(TS_SAMPLE, "ts")
   assert_eq(symbols.contains("MCP_PROTOCOL_VERSION"), true)
   assert_eq(symbols.contains("MCP_DRAFT_PROTOCOL_VERSION"), true)
@@ -40,7 +40,7 @@ pipeline test_ts_exports_are_collected(harness: Harness, task) {
 }
 
 @test
-pipeline test_ts_non_exports_are_ignored(harness: Harness, task) {
+pipeline test_ts_non_exports_are_ignored(harness: Harness, task: unknown) {
   const symbols = exported_symbols(TS_SAMPLE, "ts")
   // A commented-out export is not a contract, and neither is a module-local
   // const; treating either as published would make the guard fire on edits
@@ -50,7 +50,7 @@ pipeline test_ts_non_exports_are_ignored(harness: Harness, task) {
 }
 
 @test
-pipeline test_swift_public_members_are_collected(harness: Harness, task) {
+pipeline test_swift_public_members_are_collected(harness: Harness, task: unknown) {
   const symbols = exported_symbols(SWIFT_SAMPLE, "swift")
   assert_eq(symbols.contains("mcpProtocolVersion"), true)
   assert_eq(symbols.contains("mcpDraftProtocolVersion"), true)
@@ -60,7 +60,7 @@ pipeline test_swift_public_members_are_collected(harness: Harness, task) {
 }
 
 @test
-pipeline test_symbols_are_sorted_and_deduplicated(harness: Harness, task) {
+pipeline test_symbols_are_sorted_and_deduplicated(harness: Harness, task: unknown) {
   const symbols = exported_symbols(
     "export const B = 1\nexport const A = 2\nexport const A = 3\n",
     "ts",
@@ -69,18 +69,18 @@ pipeline test_symbols_are_sorted_and_deduplicated(harness: Harness, task) {
 }
 
 @test
-pipeline test_removed_symbols_are_the_ones_that_disappeared(harness: Harness, task) {
+pipeline test_removed_symbols_are_the_ones_that_disappeared(harness: Harness, task: unknown) {
   const gone = removed_symbols(["A", "B", "C"], ["A", "C", "D"])
   assert_eq(gone, ["B"])
 }
 
 @test
-pipeline test_adding_a_symbol_is_never_a_removal(harness: Harness, task) {
+pipeline test_adding_a_symbol_is_never_a_removal(harness: Harness, task: unknown) {
   assert_eq(removed_symbols(["A"], ["A", "B", "C"]), [])
 }
 
 @test
-pipeline test_undeclared_removals_exclude_declared_names(harness: Harness, task) {
+pipeline test_undeclared_removals_exclude_declared_names(harness: Harness, task: unknown) {
   const missing = undeclared_removals(
     ["MCP_DRAFT_PROTOCOL_VERSION", "MCP_STABLE_PROTOCOL_VERSION"],
     ["MCP_DRAFT_PROTOCOL_VERSION"],
@@ -89,18 +89,18 @@ pipeline test_undeclared_removals_exclude_declared_names(harness: Harness, task)
 }
 
 @test
-pipeline test_a_fully_declared_removal_leaves_nothing(harness: Harness, task) {
+pipeline test_a_fully_declared_removal_leaves_nothing(harness: Harness, task: unknown) {
   assert_eq(undeclared_removals(["A", "B"], ["B", "A"]), [])
 }
 
 @test
-pipeline test_trailer_values_split_on_whitespace(harness: Harness, task) {
+pipeline test_trailer_values_split_on_whitespace(harness: Harness, task: unknown) {
   const messages = "subject\n\nAllow-Protocol-Removal: A B\nAllow-Protocol-Removal: C\n"
   assert_eq(trailer_values(messages, "Allow-Protocol-Removal:"), ["A", "B", "C"])
 }
 
 @test
-pipeline test_trailer_must_start_the_line(harness: Harness, task) {
+pipeline test_trailer_must_start_the_line(harness: Harness, task: unknown) {
   // Prose that merely mentions the trailer is not a declaration.
   const messages = "see Allow-Protocol-Removal: A\n  Allow-Protocol-Removal: B\n"
   assert_eq(trailer_values(messages, "Allow-Protocol-Removal:"), [])
@@ -108,12 +108,12 @@ pipeline test_trailer_must_start_the_line(harness: Harness, task) {
 }
 
 @test
-pipeline test_empty_trailer_declares_nothing(harness: Harness, task) {
+pipeline test_empty_trailer_declares_nothing(harness: Harness, task: unknown) {
   assert_eq(trailer_values("Allow-Protocol-Removal:   \n", "Allow-Protocol-Removal:"), [])
 }
 
 @test
-pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness, task) {
+pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness, task: unknown) {
   const report = failure_report(
     "abc123",
     [
@@ -132,7 +132,7 @@ pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness
 }
 
 @test
-pipeline test_probe_failure_report_names_the_path_and_the_remedy(harness: Harness, task) {
+pipeline test_probe_failure_report_names_the_path_and_the_remedy(harness: Harness, task: unknown) {
   const report = probe_failure_report(
     "HEAD^1",
     [{path: "(base ref)", error: "not a commit in this clone"}],
@@ -147,7 +147,7 @@ pipeline test_probe_failure_report_names_the_path_and_the_remedy(harness: Harnes
 }
 
 @test
-pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness, task) {
+pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness, task: unknown) {
   // The regression that motivated this: `git show <unfetched-sha>:<path>` says
   // the path "exists on disk, but not in <sha>" — the same wording it uses for
   // a path that genuinely was not in the tree. Read as absence, an unfetched
@@ -161,7 +161,7 @@ pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness
 }
 
 @test
-pipeline test_git_show_at_separates_absence_from_failure(harness: Harness, task) {
+pipeline test_git_show_at_separates_absence_from_failure(harness: Harness, task: unknown) {
   const head = resolve_commit(harness.process, "HEAD").sha
   const found = git_show_at(harness.process, head, "scripts/git_base.harn")
   assert_eq(found.found, true)

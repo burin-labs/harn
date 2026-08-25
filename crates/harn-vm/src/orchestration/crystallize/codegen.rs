@@ -8,12 +8,16 @@ use super::util::escape_harn_string;
 pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
     let mut out = String::new();
     let workflow_params = if candidate.parameters.is_empty() {
-        "task".to_string()
+        "task: unknown".to_string()
     } else {
         candidate
             .parameters
             .iter()
-            .map(|parameter| parameter.name.as_str())
+            // Crystallization preserves representative values for review, but
+            // it does not yet own a proven source-language type for them. Keep
+            // that uncertainty structural instead of generating an unchecked
+            // parameter or guessing from a stringified example.
+            .map(|parameter| format!("{}: unknown", parameter.name))
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -57,7 +61,16 @@ pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
         candidate.name, workflow_params
     )
     .unwrap();
-    writeln!(out, "  let review_warnings = []").unwrap();
+    let has_fuzzy_step = candidate
+        .steps
+        .iter()
+        .any(|step| step.segment == SegmentKind::Fuzzy);
+    writeln!(
+        out,
+        "  {} review_warnings = []",
+        if has_fuzzy_step { "let" } else { "const" }
+    )
+    .unwrap();
     for step in &candidate.steps {
         writeln!(out, "  // Step {}: {} {}", step.index, step.kind, step.name).unwrap();
         for side_effect in &step.side_effects {
@@ -121,7 +134,7 @@ pub(super) fn rejected_workflow_stub(rejected: &[WorkflowCandidate]) -> String {
     .unwrap();
     writeln!(
         out,
-        "pipeline crystallized_workflow(harness: Harness, task) {{"
+        "pipeline crystallized_workflow(harness: Harness, task: unknown) {{"
     )
     .unwrap();
     writeln!(
@@ -185,4 +198,45 @@ pub fn generate_eval_pack(candidate: &WorkflowCandidate) -> String {
     writeln!(out, "rubrics = [\"shadow-determinism\"]").unwrap();
     writeln!(out, "severity = \"blocking\"").unwrap();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::crystallize::types::{
+        WorkflowCandidateParameter, WorkflowCandidateStep,
+    };
+
+    #[test]
+    fn generated_workflow_makes_unproven_parameter_types_explicit() {
+        let candidate = WorkflowCandidate {
+            name: "typed_boundary".to_string(),
+            parameters: vec![WorkflowCandidateParameter {
+                name: "payload".to_string(),
+                ..WorkflowCandidateParameter::default()
+            }],
+            ..WorkflowCandidate::default()
+        };
+
+        let generated = generate_harn_code(&candidate);
+
+        assert!(generated.contains("pipeline typed_boundary(harness: Harness, payload: unknown)"));
+        assert!(generated.contains("  const review_warnings = []"));
+    }
+
+    #[test]
+    fn generated_fuzzy_workflow_keeps_review_warnings_mutable() {
+        let candidate = WorkflowCandidate {
+            steps: vec![WorkflowCandidateStep {
+                segment: SegmentKind::Fuzzy,
+                ..WorkflowCandidateStep::default()
+            }],
+            ..WorkflowCandidate::default()
+        };
+
+        let generated = generate_harn_code(&candidate);
+
+        assert!(generated.contains("  let review_warnings = []"));
+        assert!(generated.contains("review_warnings = review_warnings.appending"));
+    }
 }

@@ -8,7 +8,7 @@
  */
 import { command_run } from "std/command"
 
-fn echo_argv(system: HarnessSystem, text) {
+fn echo_argv(system: HarnessSystem, text: string) {
   if system.platform().os == "windows" {
     return ["cmd", "/C", "echo " + text]
   }

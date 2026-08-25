@@ -1,7 +1,7 @@
 // Tenant-admin trial sandbox telemetry route. This lives in its own normal-class
 // script so it keeps the gateway API-key middleware, unlike public `/try/*`
 // routes in `api/try_logic.harn`.
-fn admin_trial_telemetry_api(req, operation) {
+fn admin_trial_telemetry_api(req: dict, operation: string) {
   const result = host_call("harn_cloud.agent_api", {operation: operation, request: req})
   return http_reply_from(result)
 }

@@ -16,14 +16,21 @@ fn embedded_stdlib_identity_separates_bytes_and_never_aliases_a_user_module() {
     // not become reachable as some user module's artifact.
     let first = ModuleSource::from_text("pub fn value() { return 1 }");
     let second = ModuleSource::from_text("pub fn value() { return 2 }");
-    let stdlib_first =
-        CacheKey::from_embedded_stdlib_module_content_hash(first.sha256(), ModuleProvenance::User);
-    let stdlib_second =
-        CacheKey::from_embedded_stdlib_module_content_hash(second.sha256(), ModuleProvenance::User);
+    let stdlib_first = CacheKey::from_embedded_stdlib_module_content_hash(
+        first.sha256(),
+        ModuleProvenance::EmbeddedStdlib,
+    );
+    let stdlib_second = CacheKey::from_embedded_stdlib_module_content_hash(
+        second.sha256(),
+        ModuleProvenance::EmbeddedStdlib,
+    );
     assert_eq!(
         stdlib_first.module_filename(),
-        CacheKey::from_embedded_stdlib_module_content_hash(first.sha256(), ModuleProvenance::User)
-            .module_filename(),
+        CacheKey::from_embedded_stdlib_module_content_hash(
+            first.sha256(),
+            ModuleProvenance::EmbeddedStdlib,
+        )
+        .module_filename(),
         "the same embedded bytes must resolve to one artifact"
     );
     assert_ne!(

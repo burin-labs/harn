@@ -9,7 +9,7 @@
  * (provider, model) pair that exposes no native path still errors,
  * pointing at the client fallback as the fix.
  */
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   let registry = tool_registry()
   registry = tool_define(
     registry,

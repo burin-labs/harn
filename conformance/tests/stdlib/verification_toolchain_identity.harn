@@ -1,6 +1,6 @@
 import { verification_toolchain_facts } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const facts = verification_toolchain_facts(
     harness.tools,
     [

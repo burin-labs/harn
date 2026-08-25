@@ -1,6 +1,6 @@
 import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
 
-pipeline test(harness: Harness, task) {
+pipeline test(harness: Harness, task: unknown) {
   const facts = verification_warm_state_facts(
     harness.tools,
     [

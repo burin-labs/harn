@@ -122,7 +122,7 @@ fn arg_spec() {
   )
 }
 
-fn timestamp_ms(raw) -> int? {
+fn timestamp_ms(raw: any) -> int? {
   if type_of(raw) != "string" || raw == "" {
     return nil
   }
@@ -139,7 +139,7 @@ fn timestamp_ms(raw) -> int? {
   return to_int(round(seconds * 1000.0))
 }
 
-fn elapsed_ms(started_at, completed_at) -> int? {
+fn elapsed_ms(started_at: any, completed_at: any) -> int? {
   const started_ms = timestamp_ms(started_at)
   const completed_ms = timestamp_ms(completed_at)
   if started_ms == nil || completed_ms == nil || completed_ms < started_ms {
@@ -170,7 +170,7 @@ pub fn duration_stats(values: list<int>) -> DurationStats {
 }
 
 /** Legacy normalization remains stable for the in-workflow rolling artifact. */
-pub fn run_samples_from_api(data) -> list<CiRunSample> {
+pub fn run_samples_from_api(data: any) -> list<CiRunSample> {
   let samples: list<CiRunSample> = []
   for raw in data?.workflow_runs ?? [] {
     const id = to_int(raw?.id)
@@ -184,7 +184,7 @@ pub fn run_samples_from_api(data) -> list<CiRunSample> {
   return samples
 }
 
-pub fn job_samples_from_api(run_id: int, data) -> list<CiJobSample> {
+pub fn job_samples_from_api(run_id: int, data: any) -> list<CiJobSample> {
   let samples: list<CiJobSample> = []
   for raw in data?.jobs ?? [] {
     const name = to_string(raw?.name ?? "")
@@ -228,7 +228,7 @@ pub fn build_report(
   }
 }
 
-fn positive_int(raw, field: string) -> int {
+fn positive_int(raw: any, field: string) -> int {
   const value = to_int(raw)
   if value == nil || value <= 0 {
     throw "CI latency policy ${field} must be a positive integer"
@@ -284,7 +284,7 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
   }
 }
 
-fn detailed_run_samples_from_api(data, topology_epoch: string) -> list<CiDetailedRunSample> {
+fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDetailedRunSample> {
   const epoch_ms = timestamp_ms(topology_epoch) ?? 0
   let samples: list<CiDetailedRunSample> = []
   for raw in data?.workflow_runs ?? [] {
@@ -311,7 +311,7 @@ fn detailed_run_samples_from_api(data, topology_epoch: string) -> list<CiDetaile
 fn detailed_job_samples_from_api(
   run_id: int,
   run_created_at: string,
-  data,
+  data: any,
 ) -> list<CiDetailedJobSample> {
   let samples: list<CiDetailedJobSample> = []
   for raw in data?.jobs ?? [] {
@@ -379,7 +379,7 @@ pub fn run_has_full_coverage(
   return sentinels.all({ sentinel -> run_jobs.any({ job -> sentinel_matches_job(sentinel, job) }) })
 }
 
-fn group_metrics(samples) -> list<CiMetricGroup> {
+fn group_metrics(samples: list) -> list<CiMetricGroup> {
   let durations_by_name: dict<string, list<int>> = {}
   for sample in samples {
     const previous = durations_by_name[sample.name] ?? []
@@ -478,7 +478,7 @@ fn format_seconds(duration_ms: int) -> string {
   return "${tenths / 10}.${tenths % 10}s"
 }
 
-fn render_groups(groups, empty: string) -> string {
+fn render_groups(groups: any, empty: string) -> string {
   const rows = groups[0:min(groups.count, 12)].map(
     { group ->
       {
@@ -527,7 +527,7 @@ fn render_latency_report(report: CiLatencyReport) -> string {
     + render_groups(report.steps, "No step observations found.")
 }
 
-pipeline main(harness: Harness, task) {
+pipeline main(harness: Harness, task: unknown) {
   if help_requested(argv) {
     harness.stdio.println(usage())
     return 0
