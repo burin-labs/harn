@@ -61,6 +61,8 @@ fn models_lora_preflight_legacy_policy_reports_unclassified_without_coverage() {
         "4096",
         "--min-tool-call-share",
         "1",
+        "--min-records",
+        "1",
         "--behavior-strata-policy",
         "legacy-unclassified",
         "--check",

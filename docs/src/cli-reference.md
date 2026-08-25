@@ -2445,22 +2445,24 @@ harn models lora preflight --base google/gemma-4-e4b-it \
 ```
 
 The preflight is CPU-only. It resolves the target model route, reads
-`max_seq_length` and `min_fit_ratio` from a lightweight config file when
-provided, then checks record count, approximate sequence-budget fit, hard token
-outliers, source tool-call body format, malformed tool-call blocks, undeclared
-tool names, typed behavior-strata coverage, and an optional caller-supplied
-done marker. Behavior-strata policy defaults to
+`max_seq_length`, `min_fit_ratio`, and `min_records` from a lightweight config
+file when provided, then checks record count, approximate sequence-budget fit,
+hard token outliers, source tool-call body format, malformed tool-call blocks,
+undeclared tool names, typed behavior-strata coverage, and an optional
+caller-supplied done marker. Behavior-strata policy defaults to
 `--behavior-strata-policy strict`. The explicit
 `legacy-unclassified` policy lets an old corpus with no declared behavior
 metadata pass preflight for migration review, but its typed report remains
 `status: "legacy_unclassified"`, retains all five missing classes, lists the
-stable record ids that need review, and prints a warning. If even one trainable
-record declares a behavior class, missing coverage is `incomplete` and remains
-an error under both policies. Export has no migration policy and always
-requires real emitted coverage. Use `--check` to make readiness failures exit
-non-zero. The command intentionally owns reusable LoRA corpus readiness in
-Harn; product-specific markers or thresholds should be passed as flags rather
-than hard-coded into hosts.
+stable record ids that need review, and prints a warning. A command-line
+threshold overrides the matching config value. `--check` requires a record
+floor from `--min-records` or `min_records` in the config, so an unset gate
+cannot report success. If even one trainable record declares a behavior class,
+missing coverage is `incomplete` and remains an error under both policies.
+Export has no migration policy and always requires real emitted coverage. Use
+`--check` to make readiness failures exit non-zero. The command intentionally
+owns reusable LoRA corpus readiness in Harn; product-specific markers or
+thresholds should be passed as flags rather than hard-coded into hosts.
 
 ## harn models lora inspect
 

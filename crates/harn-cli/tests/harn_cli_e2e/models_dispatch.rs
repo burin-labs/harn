@@ -22,6 +22,8 @@ mod lora_fixtures;
 mod lora_inspect_plan;
 #[path = "models_dispatch/lora_migration.rs"]
 mod lora_migration;
+#[path = "models_dispatch/lora_preflight.rs"]
+mod lora_preflight;
 #[path = "models_dispatch/lora_projected_corpus.rs"]
 mod lora_projected_corpus;
 #[path = "models_dispatch/lora_workflows.rs"]
