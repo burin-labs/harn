@@ -49,6 +49,8 @@ mod released_row_kind_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
+mod supersession_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_parity_provenance;

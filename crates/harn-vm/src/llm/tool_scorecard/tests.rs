@@ -714,9 +714,59 @@ fn scorecard_plan_consumes_dynamic_local_model_overlays() {
     );
 }
 
+/// A route that declares no tool surface at all — neither native tools nor the
+/// text-tool wire format — must plan its tool cases as `not_applicable` rather
+/// than as work someone has to run.
+///
+/// The fixture is built here rather than borrowed from the shipped catalog on
+/// purpose. This test used to select `groq:groq/compound`, the only catalog
+/// row that declared neither tool channel; when Groq's Compound systems were
+/// deprecated ahead of their 2026-09-21 decommission they left the routing
+/// surface, and the test broke on a missing route rather than on the behavior
+/// it exists to pin. Owning the fixture keeps the assertion about the planner
+/// instead of about which vendor currently ships a tool-free model.
 #[test]
 fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
-    let plan = tool_scorecard_plan_from_catalog(&[String::from("groq:groq/compound")], false)
+    struct NoToolRouteGuard;
+
+    impl Drop for NoToolRouteGuard {
+        fn drop(&mut self) {
+            crate::llm_config::clear_user_overrides();
+            crate::llm::capabilities::clear_user_overrides();
+        }
+    }
+
+    let overlay = crate::llm_config::parse_config_toml(concat!(
+        "[models.\"groq/no-tool-route\"]\n",
+        "name = \"No Tool Route (test fixture)\"\n",
+        "provider = \"groq\"\n",
+        "wire_model = \"groq/no-tool-route\"\n",
+        "context_window = 131072\n",
+        "capabilities = [\"streaming\"]\n",
+    ))
+    .expect("no-tool model overlay parses");
+    crate::llm_config::set_user_overrides(Some(overlay));
+    crate::llm::capabilities::set_user_overrides_toml(
+        &[
+            "[[provider.groq]]",
+            "model_match = \"groq/no-tool-route\"",
+            "native_tools = false",
+            "preferred_tool_format = \"none\"",
+            "text_tool_wire_format_supported = false",
+            "structured_output = \"none\"",
+            "structured_output_mode = \"none\"",
+            "prefers_xml_scaffolding = false",
+            "prefers_markdown_scaffolding = true",
+            "supports_assistant_prefill = false",
+            "prefers_role_developer = false",
+            "prefers_xml_tools = false",
+        ]
+        .join("\n"),
+    )
+    .expect("no-tool capability overlay parses");
+    let _guard = NoToolRouteGuard;
+
+    let plan = tool_scorecard_plan_from_catalog(&[String::from("groq:groq/no-tool-route")], false)
         .expect("plan from catalog");
     let cases = &plan.routes[0].cases;
     assert_eq!(plan.case_count, 9);
@@ -782,7 +832,7 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
             "tool-probe".to_string(),
             "groq".to_string(),
             "--model".to_string(),
-            "groq/compound".to_string(),
+            "groq/no-tool-route".to_string(),
             "--mode".to_string(),
             "both".to_string(),
             "--case".to_string(),

@@ -9133,7 +9133,7 @@
         "tpm": 200000,
         "tier": "developer",
         "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-07-09",
+        "last_verified": "2026-08-25",
         "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
       },
       "modalities": {
@@ -9181,7 +9181,9 @@
         "turnaround_hours": 24
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-25 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-120b, the Groq route that keeps built-in web search and code execution.",
+        "superseded_by": "groq/openai/gpt-oss-120b"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9211,7 +9213,7 @@
         "tpm": 200000,
         "tier": "developer",
         "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-07-09",
+        "last_verified": "2026-08-25",
         "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
       },
       "modalities": {
@@ -9259,7 +9261,9 @@
         "turnaround_hours": 24
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-24 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-20b, Groq's recommended replacement for its retired small routes.",
+        "superseded_by": "groq/openai/gpt-oss-20b"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -27204,34 +27208,6 @@
         "thinking",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "groq",
-      "model": "groq/compound",
-      "base_url": "https://api.groq.com/openai/v1",
-      "secret_env": "GROQ_API_KEY",
-      "label": "Groq Compound",
-      "family": "groq",
-      "capabilities": [
-        "batch",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output_mode:none"
-      ]
-    },
-    {
-      "provider": "groq",
-      "model": "groq/compound-mini",
-      "base_url": "https://api.groq.com/openai/v1",
-      "secret_env": "GROQ_API_KEY",
-      "label": "Groq Compound Mini",
-      "family": "groq",
-      "capabilities": [
-        "batch",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output_mode:none"
       ]
     },
     {
