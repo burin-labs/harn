@@ -69,6 +69,10 @@ fn command_specs(candidate: string) -> list {
       name: "harn check tests/smoke/hello.harn",
       argv: [candidate, "check", "tests/smoke/hello.harn"],
     },
+    {
+      name: "harn check scripts/bump-driver/bump_harn_runtime.harn",
+      argv: [candidate, "check", "scripts/bump-driver/bump_harn_runtime.harn"],
+    },
     {name: "harn fmt --check tests/smoke", argv: [candidate, "fmt", "--check", "tests/smoke"]},
     {name: "harn package check tests/smoke", argv: [candidate, "package", "check", "tests/smoke"]},
     {

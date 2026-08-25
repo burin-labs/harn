@@ -1,0 +1,13 @@
+/**
+ * Compatibility for the immutable v0.10.116 runtime's inferred string-only
+ * std/gha boundary. Remove after the oldest fleet bump runtime is newer than
+ * v0.10.116; current std/gha accepts typed wire values directly.
+ */
+pub fn gha_bool_output(value: bool) -> string {
+  return to_string(value)
+}
+
+/** See gha_bool_output for the v0.10.116 removal trigger. */
+pub fn gha_int_output(value: int) -> string {
+  return to_string(value)
+}

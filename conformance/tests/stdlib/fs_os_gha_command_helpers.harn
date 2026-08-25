@@ -7,7 +7,7 @@ import {
 import { command_output_text_impl } from "std/command/output"
 import { argv_label_impl } from "std/command/shell"
 import { append_line, read_json, relative_path, write_json } from "std/fs"
-import { gha_annotation, gha_env_block, gha_write_output } from "std/gha"
+import { gha_annotation, gha_env_block, gha_write_env, gha_write_output } from "std/gha"
 import { env_bool } from "std/os"
 import { prefix_lines, single_line_or, truncate_middle, truncate_text } from "std/text"
 
@@ -28,9 +28,15 @@ pipeline test(harness: Harness, task: unknown) {
   const output_path = path_join(root, "github-output.txt")
   harness.stdio.println(gha_env_block(harness.random, "answer", "42", "EOF"))
   harness.stdio.println(gha_write_output(harness, "name", "harn", output_path))
+  assert_eq(gha_write_output(harness, "ready", true, output_path), true)
+  assert_eq(gha_write_output(harness, "pr_number", 7272, output_path), true)
+  assert_eq(gha_write_env(harness, "READY", false, output_path), true)
   const output_file = harness.fs.read_text(output_path)
   harness.stdio.println(contains(output_file, "name<<harn_"))
   harness.stdio.println(contains(output_file, "\nharn\n"))
+  assert_eq(contains(output_file, "\ntrue\n"), true)
+  assert_eq(contains(output_file, "\n7272\n"), true)
+  assert_eq(contains(output_file, "\nfalse\n"), true)
   harness.stdio.println(
     gha_annotation("warning", "line1\nline2", {file: "src/main.rs", line: 7, title: "Heads, up"}),
   )
