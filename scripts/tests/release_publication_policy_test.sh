@@ -77,6 +77,23 @@ grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$publish_workflow" \
   || fail "post-release bump skip does not report its typed reason"
 grep -Fq 'HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh' "$publish_workflow" \
   || fail "post-release workflow bypasses the tested development preparation seam"
+grep -Fq 'echo "harn_bin=$harn_bin" >> "$GITHUB_OUTPUT"' "$publish_workflow" \
+  || fail "post-release workflow does not retain its pre-mutation Harn binary proof"
+grep -Fq 'HARN_BIN: ${{ steps.prepare.outputs.harn_bin }}' "$publish_workflow" \
+  || fail "signed publication re-resolves Harn after mutating version manifests"
+grep -Fq 'scripts/bump-driver/publish_development_bump.harn' "$publish_workflow" \
+  || fail "post-release development bump bypasses signed GitHub publication"
+grep -Fq 'HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN"' "$publish_workflow" \
+  || fail "signed development-bump publication does not receive the automation identity"
+if grep -Fq 'git commit -m "Start $DEVELOPMENT_VERSION development"' "$publish_workflow" \
+  || grep -Fq 'git push -u origin "$branch"' "$publish_workflow"; then
+  fail "post-release development bump can still create an unsigned local commit"
+fi
+development_publisher="$root/scripts/bump-driver/publish_development_bump.harn"
+grep -Fq 'import { github_bump_remote } from "./github_remote"' "$development_publisher" \
+  || fail "development bump does not use the signed GitHub connector seam"
+grep -Fq 'remote.publish_commit(' "$development_publisher" \
+  || fail "development bump does not publish through the signed commit operation"
 grep -Fq 'gh pr merge "$pr_url" --auto --squash' "$publish_workflow" \
   || fail "post-release development bump does not enter the merge queue"
 
