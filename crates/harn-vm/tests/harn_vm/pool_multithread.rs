@@ -8,8 +8,8 @@ fn run_with_worker_placement(source: &str) -> Result<Vec<String>, String> {
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    let output = rt.block_on(harn_vm::vm::subtask::scope_placement(
-        harn_vm::vm::subtask::SubtaskPlacement::Worker,
+    let output = rt.block_on(harn_vm::subtask::scope_placement(
+        harn_vm::subtask::SubtaskPlacement::Worker,
         async {
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
