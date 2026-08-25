@@ -17,7 +17,23 @@ fn cli_rejects_unknown_harn_environment_name_before_dispatch() {
         "{}",
         output.stderr
     );
+    assert!(
+        output
+            .stderr
+            .contains("Use `HARN_EXT_<NAME>` for settings owned by a calling tool"),
+        "{}",
+        output.stderr
+    );
     assert!(!output.stderr.contains("=30"), "{}", output.stderr);
+}
+
+#[test]
+fn cli_accepts_caller_owned_environment_name_in_extension_namespace() {
+    let output = run_harn_e2e(&["--version"], &[("HARN_EXT_RELEASE_REPO", "/tmp/repo")]);
+
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    assert!(output.stdout.starts_with("harn "), "{}", output.stdout);
+    assert!(output.stderr.is_empty(), "{}", output.stderr);
 }
 
 #[test]
