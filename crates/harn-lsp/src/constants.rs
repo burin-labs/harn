@@ -26,26 +26,37 @@ fn canonical_builtin_docs() -> &'static BTreeMap<&'static str, Option<&'static s
     })
 }
 
+/// Metadata for legacy registrations that have not moved to
+/// `#[harn_builtin]`. Building the probe VM is intentionally deferred until a
+/// client resolves documentation; ordinary completion only needs the manifest
+/// and must not pay VM startup cost on the editor's response path.
+fn legacy_runtime_docs() -> &'static BTreeMap<String, Option<String>> {
+    static DOCS: OnceLock<BTreeMap<String, Option<String>>> = OnceLock::new();
+    DOCS.get_or_init(|| {
+        harn_vm::stdlib::stdlib_builtin_metadata()
+            .into_iter()
+            .map(|metadata| {
+                (
+                    metadata.name().to_string(),
+                    metadata.doc().map(str::to_string),
+                )
+            })
+            .collect()
+    })
+}
+
 pub(crate) fn builtin_details() -> &'static [BuiltinDetail] {
     static DETAILS: OnceLock<Vec<BuiltinDetail>> = OnceLock::new();
     DETAILS.get_or_init(|| {
-        // The metadata probe installs the complete immutable manifest before
-        // the parser answers which globals are source-callable.
-        let runtime_metadata = harn_vm::stdlib::stdlib_builtin_metadata();
+        // Installing the immutable manifest is sufficient for the parser to
+        // answer which globals are source-callable. Do not construct a probe
+        // VM on the latency-sensitive completion path.
+        harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
         let canonical = canonical_builtin_docs();
         let mut details: Vec<BuiltinDetail> = harn_parser::builtin_signatures::iter_builtin_names()
             .filter_map(|name| {
                 let signature = harn_parser::builtin_signatures::lookup(name)?;
-                let doc = canonical
-                    .get(name)
-                    .and_then(|doc| *doc)
-                    .or_else(|| {
-                        runtime_metadata
-                            .iter()
-                            .find(|metadata| metadata.name() == name)
-                            .and_then(|metadata| metadata.doc())
-                    })
-                    .map(str::to_string);
+                let doc = canonical.get(name).and_then(|doc| *doc).map(str::to_string);
                 Some(BuiltinDetail {
                     name: name.to_string(),
                     signature: format_builtin_signature(name, signature),
@@ -135,10 +146,14 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         .iter()
         .find(|detail| detail.name == name)
         .map(|detail| {
-            detail.doc.as_ref().map_or_else(
-                || format!("**{}**", detail.signature),
-                |doc| format!("**{}** — {doc}", detail.signature),
-            )
+            detail
+                .doc
+                .as_ref()
+                .or_else(|| legacy_runtime_docs().get(name).and_then(Option::as_ref))
+                .map_or_else(
+                    || format!("**{}**", detail.signature),
+                    |doc| format!("**{}** — {doc}", detail.signature),
+                )
         })
 }
 
