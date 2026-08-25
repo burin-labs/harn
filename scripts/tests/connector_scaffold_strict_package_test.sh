@@ -2,6 +2,7 @@
 set -euo pipefail
 
 : "${HARN_BIN:?set HARN_BIN to the warmed Harn executable}"
+harn_bin="$(cd "$(dirname "$HARN_BIN")" && pwd -P)/$(basename "$HARN_BIN")"
 
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-connector-scaffold.XXXXXX")"
 trap 'rm -rf "$tmp_root"' EXIT
@@ -10,10 +11,10 @@ receipt="$tmp_root/package-verify.json"
 (
   cd "$tmp_root"
   HARN_LLM_PROVIDER=mock HARN_LLM_CALLS_DISABLED=1 \
-    "$HARN_BIN" new connector example-connector >/dev/null
+    "$harn_bin" new connector example-connector >/dev/null
   cd example-connector
   HARN_LLM_PROVIDER=mock HARN_LLM_CALLS_DISABLED=1 \
-    "$HARN_BIN" package verify . --strict --json >"$receipt"
+    "$harn_bin" package verify . --strict --json >"$receipt"
 )
 
 jq -e '
