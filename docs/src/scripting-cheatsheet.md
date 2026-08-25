@@ -170,7 +170,8 @@ pub fn grade(path) {
 
 (Module-level mutable `let` cross-function mutation is not fully
 supported yet. If you need shared mutable state across functions, use
-atomics: `atomic(0)`, `atomic_add(a, 1)`, `atomic_get(a)`.)
+atomics: `harness.runtime.atomic(0)`, `harness.runtime.atomic_add(a, 1)`,
+`harness.runtime.atomic_get(a)`.)
 
 ## Results and error handling
 

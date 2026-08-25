@@ -33,7 +33,7 @@ control flow.
 
 ### `Pipeline.on_finish` semantic
 
-`pipeline_on_finish(callback)` is a stdlib builtin that registers a
+`harness.agent.pipeline_on_finish(callback)` registers a
 `fn(harness, return_value)` closure into a thread-local one-shot slot
 (`PIPELINE_ON_FINISH`). The slot is last-write-wins inside one run.
 `Vm::execute` consumes the registered callback via
@@ -242,8 +242,8 @@ Every lifecycle decision is reproducible on a replay:
    harness clock. Tests control only their own harness through
    `harness.testing.clock_set(...)`, `clock_advance(...)`, and
    `clock_reset()`.
-4. **One-shot registration.** `pipeline_on_finish(callback)` is
-   last-write-wins; the slot is consumed exactly once per run via
+4. **One-shot registration.** `harness.agent.pipeline_on_finish(callback)`
+   is last-write-wins; the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. The error exit path clears the slot
    alongside the audit log, partial-handoff registry, disposition
    slot, and seq counter, so a failed run cannot leak in-progress

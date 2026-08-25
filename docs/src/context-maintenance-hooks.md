@@ -65,8 +65,8 @@ watch ordering.
 
 ### Compaction hook payload
 
-Every `transcript_compact()`, `harness.agent.compact()`, `transcript_auto_compact()`,
-worker-transcript compaction, and resume digest extraction funnels through the
+Every `transcript_compact()`, `harness.agent.compact()`,
+`harness.agent.transcript_auto_compact()`, worker-transcript compaction, and resume digest extraction funnels through the
 shared `run_compaction_lifecycle` helper, so `PreCompact` and `PostCompact`
 handlers receive the same payload shape regardless of entry point:
 

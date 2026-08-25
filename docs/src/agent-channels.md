@@ -30,8 +30,9 @@ Two anti-patterns worth calling out:
 
 - **Channels are not in-process queues.** They write to the durable
   EventLog and fire the trigger dispatcher. If you want a fast
-  intra-pipeline mailbox, use `channel(...)` / `send` / `receive` (the
-  concurrency channel primitive — see `docs/src/concurrency.md`).
+  intra-pipeline mailbox, use `harness.runtime.channel(...)` with
+  `harness.runtime.send` / `harness.runtime.receive` (the concurrency
+  channel primitive — see `docs/src/concurrency.md`).
 - **Channels are not RPC.** There is no return value beyond the emit
   receipt. If you need an answer back, the consumer emits a second
   channel and the original producer subscribes to it (recipe 3 below).
@@ -219,19 +220,19 @@ A `channel.emit` trigger reacts to one or more channel names. Inside
 the trigger, `match.events` lists the channel selectors:
 
 ```harn,ignore
-import { trigger_register } from "std/triggers"
-
-trigger_register({
-  id: "release-on-pr-merge",
-  kind: "channel.emit",
-  provider: "channel",
-  handler: { harness, event ->
-    harness.stdio.log(
-      "PR merged: " + to_string(event.provider_payload.payload.number)
-    )
-  },
-  match: {events: ["channel:pr.merged"]},
-})
+fn subscribe_release(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "release-on-pr-merge",
+    kind: "channel.emit",
+    provider: "channel",
+    handler: { harness, event ->
+      harness.stdio.log(
+        "PR merged: " + to_string(event.provider_payload.payload.number)
+      )
+    },
+    match: {events: ["channel:pr.merged"]},
+  })
+}
 ```
 
 Selector forms:
@@ -256,16 +257,18 @@ See `docs/src/triggers.md` for the full trigger surface; see
 A `when` predicate runs before dispatch:
 
 ```harn,ignore
-trigger_register({
-  id: "release-on-prod-merge",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:pr.merged"]},
-  when: { _harness, event ->
-    event.provider_payload.payload.target_branch == "main"
-  },
-  handler: { harness, event -> kick_release(event) },
-})
+fn subscribe_filtered(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "release-on-prod-merge",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:pr.merged"]},
+    when: { _harness, event ->
+      event.provider_payload.payload.target_branch == "main"
+    },
+    handler: { harness, event -> kick_release(event) },
+  })
+}
 ```
 
 The trigger event's `provider_payload.payload` is the channel emit's
@@ -279,21 +282,23 @@ fire-after-N-events aggregator. The trigger only dispatches once
 `expire_action`).
 
 ```harn,ignore
-trigger_register({
-  id: "release-on-3-merges",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:pr.merged"]},
-  batch: {
-    count: 3, window: "1h", key: "repo", expire_action: "fire_partial",
-  },
-  handler: { harness, event ->
-    const merged = event.batch
-    harness.stdio.log(
-      "Cutting release with " + to_string(len(merged)) + " merged PRs"
-    )
-  },
-})
+fn subscribe_batched(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "release-on-3-merges",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:pr.merged"]},
+    batch: {
+      count: 3, window: "1h", key: "repo", expire_action: "fire_partial",
+    },
+    handler: { harness, event ->
+      const merged = event.batch
+      harness.stdio.log(
+        "Cutting release with " + to_string(len(merged)) + " merged PRs"
+      )
+    },
+  })
+}
 ```
 
 Batch options:
@@ -342,21 +347,23 @@ to step back."
 ```harn,ignore
 import { ReminderInject } from "std/triggers"
 
-trigger_register({
-  id: "reflect-after-30-tools",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:tool_call.completed"]},
-  batch: {count: 30, window: "1h"},
-  handler: ReminderInject({
-    target: "current",
-    body: "You've used 30 tools without a checkpoint. Take a turn to"
-      + " reflect on progress and adjust the plan.",
-    tags: ["reflection_nudge"],
-    ttl_turns: 1,
-    dedupe_key: "reflection_nudge",
-  }),
-})
+fn subscribe_reflection(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "reflect-after-30-tools",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:tool_call.completed"]},
+    batch: {count: 30, window: "1h"},
+    handler: ReminderInject({
+      target: "current",
+      body: "You've used 30 tools without a checkpoint. Take a turn to"
+        + " reflect on progress and adjust the plan.",
+      tags: ["reflection_nudge"],
+      ttl_turns: 1,
+      dedupe_key: "reflection_nudge",
+    }),
+  })
+}
 ```
 
 `ReminderInject` options:
@@ -387,7 +394,7 @@ the durable journal append (CH-11). Each guardrail returns one of:
 
 Worst verdict wins; a `block` short-circuits remaining guardrails.
 
-Register guardrails with `channel_guardrail_register(config)`:
+Register guardrails with `harness.channels.guardrail_register(config)`:
 
 ```harn,ignore
 import {

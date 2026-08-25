@@ -6,7 +6,7 @@
  * model asset, no network, and no provider config; it still gives the rest of
  * the stack one cross-platform `similarity` / `top_k` contract to call.
  */
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   const info = harness.embed.info({})
   const query = "authentication token validation"
   const corpus = [

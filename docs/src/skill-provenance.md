@@ -1,7 +1,8 @@
 # Skill provenance
 
 Harn can require cryptographic provenance for filesystem-backed skills
-before `load_skill(...)` promotes their bodies into an agent session.
+before `harness.agent.load_skill(...)` promotes their bodies into an agent
+session.
 The design is intentionally small:
 
 - Ed25519 keys, generated locally.
@@ -183,7 +184,7 @@ When enforcement is active:
 
 - missing signatures, invalid signatures, unknown signers, disallowed
   signers, or missing endorsements keep the skill out of the startup
-  registry or block a direct `load_skill(...)` call with
+  registry or block a direct `harness.agent.load_skill(...)` call with
   `UnsignedSkillError`
 - the attached provenance metadata carries the precise status, such as
   `missing_signature`, `invalid_signature`, `missing_signer`,
@@ -199,7 +200,8 @@ verifies as trusted. Untrusted, unsigned, or tampered skills omit
 
 ## Trust records and OpenTrustGraph
 
-Every runtime `load_skill(...)` attempt emits a transcript trust record
+Every runtime `harness.agent.load_skill(...)` attempt emits a transcript trust
+record
 with `kind == "skill.loaded"` and metadata:
 
 ```json

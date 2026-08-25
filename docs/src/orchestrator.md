@@ -160,7 +160,8 @@ harn orchestrator recover \
   --yes
 ```
 
-Recovery reuses the normal `trigger_replay(...)` path, so replayed
+Recovery reuses the normal `harness.runtime.trigger_replay(...)` path, so
+replayed
 envelopes still flow through the dispatcher's retry policy and DLQ
 handling instead of using a special bypass path.
 
