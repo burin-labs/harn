@@ -56,6 +56,7 @@ impl TypeChecker {
                             });
                     }
                     scope.define_var(name, ty);
+                    scope.define_flow_alias(name, value.as_ref().clone());
                     if type_ann.is_some() {
                         scope.mark_annotated(name);
                     }
@@ -166,6 +167,7 @@ impl TypeChecker {
                 type_params,
                 params,
                 return_type,
+                type_predicate,
                 throws,
                 where_clauses,
                 body,
@@ -178,6 +180,7 @@ impl TypeChecker {
                 let sig = Self::fn_signature_from_parts(
                     params,
                     callable_return_type,
+                    type_predicate.clone(),
                     Some(span),
                     type_params,
                     where_clauses,
@@ -185,11 +188,19 @@ impl TypeChecker {
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
-                self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
+                self.check_fn_decl_variance(
+                    type_params,
+                    params,
+                    return_type.as_ref(),
+                    type_predicate.as_ref(),
+                    name,
+                    span,
+                );
                 self.check_fn_body(
                     type_params,
                     params,
                     return_type,
+                    type_predicate.as_ref(),
                     body,
                     where_clauses,
                     *is_stream,

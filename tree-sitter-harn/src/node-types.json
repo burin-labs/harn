@@ -3614,6 +3614,10 @@
           "named": true
         },
         {
+          "type": "type_predicate",
+          "named": true
+        },
+        {
           "type": "where_clause",
           "named": true
         }
@@ -12692,6 +12696,32 @@
     }
   },
   {
+    "type": "type_predicate",
+    "named": true,
+    "fields": {
+      "parameter": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "typed_parameter",
     "named": true,
     "fields": {
@@ -13936,6 +13966,10 @@
     "named": false
   },
   {
+    "type": "implies",
+    "named": false
+  },
+  {
     "type": "import",
     "named": false
   },
@@ -13949,6 +13983,10 @@
   },
   {
     "type": "interface",
+    "named": false
+  },
+  {
+    "type": "is",
     "named": false
   },
   {

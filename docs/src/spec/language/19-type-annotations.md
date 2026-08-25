@@ -935,6 +935,64 @@ fn describe(x: string | int) {
 }
 ```
 
+#### Const condition aliases
+
+A `const` can name a narrowing condition. The checker keeps the same facts
+when code branches on that name.
+
+```harn
+fn describe(x: string | int) -> string {
+  const kind = type_of(x)
+  const is_text = kind == "string"
+  if is_text {
+    return x.upper() // x is `string`
+  }
+  return to_string(x + 1) // x is `int`
+}
+```
+
+Aliases can refer to earlier `const` aliases. They also work with nil checks,
+schema checks, discriminants, logical operators, and declared type predicates.
+The checker does not carry alias facts from a mutable `let` binding. A later
+assignment could make those facts stale.
+
+#### Type predicates
+
+A function can declare that its boolean result narrows one parameter:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+```
+
+When `is_text(value)` is true, `value` narrows to `string`. When it is false,
+`string` is removed from a closed union. The predicate type must be a subtype
+of the parameter type.
+
+Use `implies` when only the true result proves the type:
+
+```harn
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+```
+
+A false result from this helper does not rule out `string`; the string may be
+empty. The checker verifies both branches of a two-sided predicate and only the
+true branch of an `implies` predicate. An invalid contract reports
+`HARN-TYP-029`.
+
+The body may contain plain `const` aliases followed by one `return` condition.
+The named parameter must have an explicit type and cannot be a rest parameter.
+The narrower type cannot contain a generic type parameter. A type argument can
+mean a different type at each call, so Harn cannot prove one body for every
+substitution.
+Predicate calls narrow plain variables and stable reference paths. The contract
+also follows named and namespace imports. Calling the same function through an
+ordinary `fn(...)` value keeps its boolean result but does not carry narrowing
+facts.
+
 #### Reference paths
 
 Narrowing applies to *reference paths* — an identifier followed by a

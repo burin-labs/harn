@@ -309,6 +309,7 @@ fn collect_symbols(
             name,
             params,
             return_type,
+            type_predicate,
             body,
             ..
         } => {
@@ -317,10 +318,22 @@ fn collect_symbols(
                 .map(format_param)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let ret_str = match return_type {
-                Some(t) => format!(" -> {}", format_type(t)),
-                None => String::new(),
-            };
+            let ret_str = type_predicate
+                .as_ref()
+                .map(|predicate| {
+                    let implies = if predicate.one_sided { "implies " } else { "" };
+                    format!(
+                        " -> {implies}{} is {}",
+                        predicate.parameter,
+                        format_type(&predicate.type_expr)
+                    )
+                })
+                .or_else(|| {
+                    return_type
+                        .as_ref()
+                        .map(|t| format!(" -> {}", format_type(t)))
+                })
+                .unwrap_or_default();
             let sig = format!("fn {name}({params_str}){ret_str}");
             symbols.push(SymbolInfo {
                 name: name.clone(),

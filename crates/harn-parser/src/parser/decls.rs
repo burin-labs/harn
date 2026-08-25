@@ -52,6 +52,46 @@ impl Parser {
         }
     }
 
+    /// Parse a named function's ordinary return type or flow predicate.
+    /// Predicate functions return `bool` at runtime; the separate AST field
+    /// keeps the flow contract out of ordinary type positions.
+    fn parse_fn_return_contract(
+        &mut self,
+    ) -> Result<(Option<TypeExpr>, Option<TypePredicate>), ParserError> {
+        if !self.check(&TokenKind::Arrow) {
+            return Ok((None, None));
+        }
+        self.advance();
+
+        let start = self.current_span();
+        let one_sided = self.check_identifier("implies")
+            && matches!(self.peek_kind_at(1), Some(TokenKind::Identifier(_)))
+            && matches!(self.peek_kind_at(2), Some(TokenKind::Identifier(keyword)) if keyword == "is");
+        if one_sided {
+            self.advance();
+        }
+        let is_predicate = matches!(
+            (self.peek_kind_at(0), self.peek_kind_at(1)),
+            (
+                Some(TokenKind::Identifier(_)),
+                Some(TokenKind::Identifier(keyword))
+            ) if keyword == "is"
+        );
+        if is_predicate {
+            let parameter = self.consume_identifier("type predicate parameter")?;
+            self.consume_contextual_keyword("is", "is")?;
+            let type_expr = self.parse_type_expr()?;
+            let predicate = TypePredicate {
+                parameter,
+                type_expr,
+                one_sided,
+                span: Span::merge(start, self.prev_span()),
+            };
+            return Ok((Some(TypeExpr::Named("bool".into())), Some(predicate)));
+        }
+        Ok((Some(self.parse_type_expr()?), None))
+    }
+
     pub(super) fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Pipeline, "pipeline")?;
@@ -537,12 +577,7 @@ impl Parser {
         self.consume(&TokenKind::LParen, "(")?;
         let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
-        let return_type = if self.check(&TokenKind::Arrow) {
-            self.advance();
-            Some(self.parse_type_expr()?)
-        } else {
-            None
-        };
+        let (return_type, type_predicate) = self.parse_fn_return_contract()?;
 
         let throws = self.parse_optional_throws()?;
 
@@ -556,6 +591,7 @@ impl Parser {
                 name,
                 type_params,
                 params,
+                type_predicate,
                 return_type,
                 throws,
                 where_clauses,

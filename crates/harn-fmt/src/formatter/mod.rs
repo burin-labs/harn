@@ -566,15 +566,28 @@ impl<'a> Formatter<'a> {
         type_params: &[harn_parser::TypeParam],
         params: &[TypedParam],
         return_type: &Option<harn_parser::TypeExpr>,
+        type_predicate: &Option<harn_parser::TypePredicate>,
         throws: &Option<harn_parser::TypeExpr>,
         where_clauses: &[harn_parser::WhereClause],
         column: usize,
         indent_level: usize,
     ) -> String {
         let generics = format_type_params(type_params);
-        let ret_inline = return_type
+        let ret_inline = type_predicate
             .as_ref()
-            .map(|rt| format!(" -> {}", format_type_expr(rt)))
+            .map(|predicate| {
+                let implies = if predicate.one_sided { "implies " } else { "" };
+                format!(
+                    " -> {implies}{} is {}",
+                    predicate.parameter,
+                    format_type_expr(&predicate.type_expr)
+                )
+            })
+            .or_else(|| {
+                return_type
+                    .as_ref()
+                    .map(|rt| format!(" -> {}", format_type_expr(rt)))
+            })
             .unwrap_or_default();
         let throws_str = format_throws_clause(throws);
         let where_str = format_where_clauses(where_clauses);
@@ -593,13 +606,17 @@ impl<'a> Formatter<'a> {
             column + text_width(pub_prefix) + 3 + text_width(name) + text_width(&generics) + 1;
         let prefix_col = params_col + suffix_len;
         let params_str = self.format_typed_params_wrapped(params, prefix_col, indent_level);
-        let ret = self.format_return_type(
-            return_type,
-            params_col,
-            &params_str,
-            indent_level,
-            text_width(&throws_str) + text_width(&where_str) + SIGNATURE_BODY_BRACE_WIDTH,
-        );
+        let ret = if type_predicate.is_some() {
+            ret_inline
+        } else {
+            self.format_return_type(
+                return_type,
+                params_col,
+                &params_str,
+                indent_level,
+                text_width(&throws_str) + text_width(&where_str) + SIGNATURE_BODY_BRACE_WIDTH,
+            )
+        };
         format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{throws_str}{where_str}")
     }
 

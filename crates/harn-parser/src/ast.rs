@@ -263,6 +263,9 @@ pub enum Node {
         name: String,
         type_params: Vec<TypeParam>,
         params: Vec<TypedParam>,
+        /// Optional flow contract declared in place of the ordinary return
+        /// type. Predicate functions still return `bool` at runtime.
+        type_predicate: Option<TypePredicate>,
         return_type: Option<TypeExpr>,
         /// Declared exception channel `throws E` / `throws (E1 | E2)`; see the
         /// [`Node::Pipeline`] `throws` field. `None` = unconstrained.
@@ -661,6 +664,18 @@ pub struct InterfaceMethod {
     pub params: Vec<TypedParam>,
     pub return_type: Option<TypeExpr>,
     /// Source extent of the method signature. See `StructField::span`.
+    pub span: Span,
+}
+
+/// A function return contract that narrows one parameter at call sites.
+///
+/// `value is T` narrows both branches. `implies value is T` narrows only the
+/// truthy branch.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct TypePredicate {
+    pub parameter: String,
+    pub type_expr: TypeExpr,
+    pub one_sided: bool,
     pub span: Span,
 }
 

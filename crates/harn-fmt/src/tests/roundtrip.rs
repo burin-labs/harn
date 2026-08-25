@@ -7,6 +7,8 @@ fn basic_constructs_round_trip() {
         "pipeline default(task) { let x = 42\nlog(x) }",
         "pipeline default(task) { fn add(a, b) { return a + b }\nlog(add(1, 2)) }",
         "pipeline default(task) { fn id<T>(x: T) -> T { return x }\nlet x = id<int>(1) }",
+        r#"fn is_text(value: unknown) -> value is string { return type_of(value) == "string" }"#,
+        r#"fn has_name(value: unknown) -> implies value is {name: string} { return value.has("name") }"#,
         "pipeline default(task) { let f = { x -> x * 2 }\nlog(f(3)) }",
         "pipeline default(task) { if true { log(1) } else { log(2) } }",
         r#"pipeline default(task) { try { throw "e" } catch (e) { log(e) } }"#,

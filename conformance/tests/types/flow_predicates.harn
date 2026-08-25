@@ -1,0 +1,32 @@
+import * as guards from "flow_predicates_lib"
+import { is_text } from "flow_predicates_lib"
+
+fn label(value: string | int) -> string {
+  const text = is_text(value)
+  if text {
+    return value.upper()
+  }
+  return to_string(value + 1)
+}
+
+fn describe(value: string | int) -> string {
+  const kind = type_of(value)
+  if kind == "string" {
+    return value.upper()
+  }
+  return to_string(value + 1)
+}
+
+fn nonempty(value: string | int) -> string {
+  if guards.is_nonempty_text(value) {
+    return value.upper()
+  }
+  return "empty or number"
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(label("ready"))
+  harness.stdio.println(label(4))
+  harness.stdio.println(describe("set"))
+  harness.stdio.println(nonempty("go"))
+}

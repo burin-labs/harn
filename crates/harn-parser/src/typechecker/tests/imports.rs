@@ -399,6 +399,7 @@ pipeline t(task: any) {
                 member_types: Default::default(),
                 member_param_names: Default::default(),
                 member_required_params: Default::default(),
+                member_type_predicates: Default::default(),
             },
         )])
         .check(&program);
@@ -461,6 +462,7 @@ pipeline t(task: any) {
                 member_types: Default::default(),
                 member_param_names: Default::default(),
                 member_required_params: Default::default(),
+                member_type_predicates: Default::default(),
             },
         )])
         .check(&program);
@@ -524,6 +526,7 @@ pipeline t(task: any) {
                 member_types,
                 member_param_names,
                 member_required_params,
+                member_type_predicates: Default::default(),
             },
         )])
         .check(&program);
@@ -568,6 +571,7 @@ pipeline t(task: any) {
                 member_types: Default::default(),
                 member_param_names: Default::default(),
                 member_required_params: Default::default(),
+                member_type_predicates: Default::default(),
             },
         )])
         .check(&program);

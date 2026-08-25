@@ -544,6 +544,7 @@ fn collect_public_symbol(
             type_params,
             params,
             return_type,
+            type_predicate,
             where_clauses,
             is_stream,
             ..
@@ -556,6 +557,7 @@ fn collect_public_symbol(
                 type_params,
                 params,
                 return_type.as_ref(),
+                type_predicate.as_ref(),
                 where_clauses,
             ),
             metadata: parse_stdlib_metadata(source, &node.span).filter(|meta| !meta.is_empty()),
@@ -646,8 +648,27 @@ fn fn_signature(
     type_params: &[TypeParam],
     params: &[TypedParam],
     return_type: Option<&harn_parser::TypeExpr>,
+    type_predicate: Option<&harn_parser::TypePredicate>,
     where_clauses: &[WhereClause],
 ) -> String {
+    if let Some(predicate) = type_predicate {
+        let params = params
+            .iter()
+            .map(format_param)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let implies = if predicate.one_sided { "implies " } else { "" };
+        return format!(
+            "{} {}{}({}) -> {implies}{} is {}{}",
+            keyword,
+            name,
+            format_type_params(type_params),
+            params,
+            predicate.parameter,
+            format_type(&predicate.type_expr),
+            format_where_clauses(where_clauses)
+        );
+    }
     callable_signature(
         keyword,
         name,

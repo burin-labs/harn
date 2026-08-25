@@ -566,7 +566,10 @@ module.exports = grammar({
         "(",
         parameterList($),
         ")",
-        optional(seq("->", $.type_annotation)),
+        optional(choice(
+          prec(2, seq("->", $.type_predicate)),
+          prec(1, seq("->", $.type_annotation))
+        )),
         optional(seq("throws", field("throws", $.type_annotation))),
         optional($.where_clause),
         field("body", $.block)
@@ -1219,6 +1222,14 @@ module.exports = grammar({
         optional(commaSep1($.type_annotation)),
         ")",
         optional(seq("->", $.type_annotation))
+      )),
+
+    type_predicate: ($) =>
+      prec(1, seq(
+        optional("implies"),
+        field("parameter", $.identifier),
+        "is",
+        field("type", $.type_annotation)
       )),
 
     // Row-polymorphic shape type. After the regular named fields, a shape

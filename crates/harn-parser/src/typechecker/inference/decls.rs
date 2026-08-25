@@ -9,10 +9,12 @@
 use crate::ast::*;
 use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
+use std::collections::BTreeSet;
 
 use super::super::format::format_type;
+use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{FnSignature, InferredType, TypeScope};
-use super::super::union::simplify_union;
+use super::super::union::{intersect_types, narrow_to_single, simplify_union};
 use super::super::TypeChecker;
 
 #[derive(Clone, Copy)]
@@ -79,6 +81,7 @@ impl TypeChecker {
     pub(in crate::typechecker) fn fn_signature_from_parts(
         params: &[TypedParam],
         return_type: InferredType,
+        type_predicate: Option<TypePredicate>,
         definition_span: Option<Span>,
         type_params: &[TypeParam],
         where_clauses: &[WhereClause],
@@ -103,6 +106,7 @@ impl TypeChecker {
                 .map(|where_clause| (where_clause.type_name.clone(), where_clause.bound.clone()))
                 .collect(),
             has_rest: params.last().is_some_and(|param| param.rest),
+            type_predicate,
         }
     }
 
@@ -118,6 +122,7 @@ impl TypeChecker {
             type_params,
             params,
             return_type,
+            type_predicate,
             where_clauses,
             body,
             is_stream,
@@ -131,6 +136,7 @@ impl TypeChecker {
         Some(Self::fn_signature_from_parts(
             params,
             return_type,
+            type_predicate.clone(),
             definition_span,
             type_params,
             where_clauses,
@@ -142,7 +148,7 @@ impl TypeChecker {
         return_type: InferredType,
         definition_span: Option<Span>,
     ) -> FnSignature {
-        Self::fn_signature_from_parts(params, return_type, definition_span, &[], &[])
+        Self::fn_signature_from_parts(params, return_type, None, definition_span, &[], &[])
     }
 
     pub(in crate::typechecker) fn empty_callable_signature(
@@ -156,6 +162,7 @@ impl TypeChecker {
             required_params: 0,
             where_clauses: Vec::new(),
             has_rest: false,
+            type_predicate: None,
         }
     }
 
@@ -266,6 +273,7 @@ impl TypeChecker {
                 BindingPattern::Identifier(name) => {
                     let ty = type_ann.clone().or_else(|| self.infer_type(value, scope));
                     scope.define_var(name, ty);
+                    scope.define_flow_alias(name, value.as_ref().clone());
                 }
                 other => Self::shadow_pattern_names(other, scope),
             },
@@ -466,6 +474,7 @@ impl TypeChecker {
         type_params: &[TypeParam],
         params: &[TypedParam],
         return_type: &Option<TypeExpr>,
+        type_predicate: Option<&TypePredicate>,
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
@@ -486,6 +495,7 @@ impl TypeChecker {
             type_params,
             params,
             return_type,
+            type_predicate,
             body,
             where_clauses,
             is_stream,
@@ -575,6 +585,7 @@ impl TypeChecker {
         type_params: &[TypeParam],
         params: &[TypedParam],
         return_type: &Option<TypeExpr>,
+        type_predicate: Option<&TypePredicate>,
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
@@ -620,6 +631,20 @@ impl TypeChecker {
         self.check_block_with_expected_tail(body, return_type.as_ref(), &mut fn_scope);
         self.expected_return_types.pop();
 
+        if let Some(predicate) = type_predicate {
+            if self.validate_type_predicate(
+                predicate,
+                type_params,
+                params,
+                body,
+                &fn_scope,
+                is_stream,
+            ) {
+                self.validated_type_predicates
+                    .insert((declaration.span.start, declaration.span.end));
+            }
+        }
+
         if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
             if let Some(actual) = return_type {
                 self.error_at(
@@ -659,6 +684,304 @@ impl TypeChecker {
                 );
             }
         }
+    }
+
+    fn validate_type_predicate(
+        &mut self,
+        predicate: &TypePredicate,
+        type_params: &[TypeParam],
+        params: &[TypedParam],
+        body: &[SNode],
+        scope: &TypeScope,
+        is_stream: bool,
+    ) -> bool {
+        let Some(parameter) = params
+            .iter()
+            .find(|parameter| parameter.name == predicate.parameter)
+        else {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                format!(
+                    "type predicate names `{}`, but the function has no parameter with that name",
+                    predicate.parameter
+                ),
+                predicate.span,
+            );
+            return false;
+        };
+        if is_stream || parameter.rest {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                "a type predicate must name a regular parameter on a non-stream function"
+                    .to_string(),
+                predicate.span,
+            );
+            return false;
+        }
+        let Some(parameter_type) = &parameter.type_expr else {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                format!(
+                    "type predicate parameter `{}` needs an explicit input type",
+                    predicate.parameter
+                ),
+                predicate.span,
+            );
+            return false;
+        };
+        let generic_names = type_params
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect::<BTreeSet<_>>();
+        if Self::contains_type_param(&predicate.type_expr, &generic_names) {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                "a type predicate cannot target a generic type parameter because Harn cannot prove every call substitution".to_string(),
+                predicate.span,
+            );
+            return false;
+        }
+        if !self.types_compatible(parameter_type, &predicate.type_expr, scope) {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                format!(
+                    "predicate type `{}` is not a subtype of parameter `{}` type `{}`",
+                    format_type(&predicate.type_expr),
+                    predicate.parameter,
+                    format_type(parameter_type)
+                ),
+                predicate.span,
+            );
+            return false;
+        }
+        let Some((last, prefix)) = body.split_last() else {
+            self.invalid_predicate_body(predicate, None);
+            return false;
+        };
+        if !prefix.iter().all(|statement| {
+            matches!(
+                statement.node,
+                Node::ConstBinding {
+                    pattern: BindingPattern::Identifier(_),
+                    ..
+                }
+            )
+        }) {
+            self.invalid_predicate_body(predicate, Some(last.span));
+            return false;
+        }
+        let Node::ReturnStmt { value: Some(value) } = &last.node else {
+            self.invalid_predicate_body(predicate, Some(last.span));
+            return false;
+        };
+
+        if self.predicate_uses_unvalidated_local_contract(value, scope) {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                "the return condition uses a local type predicate that has not been validated yet"
+                    .to_string(),
+                value.span,
+            );
+            return false;
+        }
+
+        let refinements = self.extract_refinements(value, scope);
+        let truthy_type = refinements
+            .truthy
+            .iter()
+            .find(|(name, _)| name == &predicate.parameter)
+            .and_then(|(_, ty)| ty.as_ref());
+        let positive_is_proved = truthy_type
+            .is_some_and(|actual| self.types_compatible(&predicate.type_expr, actual, scope));
+        if !positive_is_proved {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                format!(
+                    "the return condition does not prove `{}` is `{}` when it is true",
+                    predicate.parameter,
+                    format_type(&predicate.type_expr)
+                ),
+                value.span,
+            );
+            return false;
+        }
+        if predicate.one_sided {
+            return true;
+        }
+
+        let target = self.resolve_alias(&predicate.type_expr, scope);
+        let falsy_excludes_target = refinements
+            .falsy
+            .iter()
+            .find(|(name, _)| name == &predicate.parameter)
+            .and_then(|(_, ty)| ty.as_ref())
+            .is_some_and(|actual| intersect_types(actual, &target).is_none())
+            || refinements.falsy_ruled_out.iter().any(|(name, tag)| {
+                name == &predicate.parameter
+                    && narrow_to_single(std::slice::from_ref(&target), tag)
+                        .is_some_and(|narrowed| narrowed == target)
+            })
+            || self.predicate_false_exclusion_is_proved(
+                value,
+                &predicate.parameter,
+                &target,
+                scope,
+            );
+        if !falsy_excludes_target {
+            self.error_at(
+                Code::InvalidTypePredicate,
+                format!(
+                    "the return condition does not exclude `{}` from `{}` when it is false; use `implies {} is {}` for a one-sided predicate",
+                    format_type(&predicate.type_expr),
+                    predicate.parameter,
+                    predicate.parameter,
+                    format_type(&predicate.type_expr)
+                ),
+                value.span,
+            );
+            return false;
+        }
+        true
+    }
+
+    fn predicate_uses_unvalidated_local_contract(
+        &self,
+        condition: &SNode,
+        scope: &TypeScope,
+    ) -> bool {
+        let (condition, _) = self.resolve_flow_alias_node(condition, scope);
+        match &condition.node {
+            Node::FunctionCall { name, args, .. } => {
+                let unvalidated = scope.get_fn(name).is_some_and(|signature| {
+                    signature.type_predicate.is_some()
+                        && signature.definition_span.is_some_and(|span| {
+                            !self
+                                .validated_type_predicates
+                                .contains(&(span.start, span.end))
+                        })
+                });
+                unvalidated
+                    || args
+                        .iter()
+                        .any(|arg| self.predicate_uses_unvalidated_local_contract(arg, scope))
+            }
+            Node::MethodCall { object, args, .. } => {
+                self.predicate_uses_unvalidated_local_contract(object, scope)
+                    || args
+                        .iter()
+                        .any(|arg| self.predicate_uses_unvalidated_local_contract(arg, scope))
+            }
+            Node::BinaryOp { left, right, .. } => {
+                self.predicate_uses_unvalidated_local_contract(left, scope)
+                    || self.predicate_uses_unvalidated_local_contract(right, scope)
+            }
+            Node::UnaryOp { operand, .. } => {
+                self.predicate_uses_unvalidated_local_contract(operand, scope)
+            }
+            _ => false,
+        }
+    }
+
+    fn predicate_false_exclusion_is_proved(
+        &self,
+        condition: &SNode,
+        parameter: &str,
+        target: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        let (condition, _) = self.resolve_flow_alias_node(condition, scope);
+        let same_target = |candidate: &TypeExpr| {
+            self.types_compatible(target, candidate, scope)
+                && self.types_compatible(candidate, target, scope)
+        };
+        match &condition.node {
+            Node::FunctionCall { name, args, .. }
+                if (name == "schema_is" || name == "is_type") && args.len() == 2 =>
+            {
+                matches!(&args[0].node, Node::Identifier(name) if name == parameter)
+                    && schema_type_expr_from_node(&args[1], scope)
+                        .is_some_and(|ty| same_target(&ty))
+            }
+            Node::FunctionCall {
+                name,
+                args,
+                type_args,
+                ..
+            } => {
+                let Some(signature) = scope.get_fn(name) else {
+                    return false;
+                };
+                let Some(predicate) = &signature.type_predicate else {
+                    return false;
+                };
+                if predicate.one_sided {
+                    return false;
+                }
+                let Some(index) = signature
+                    .params
+                    .iter()
+                    .position(|(name, _)| name == &predicate.parameter)
+                else {
+                    return false;
+                };
+                let Some(subject) = args.get(index) else {
+                    return false;
+                };
+                if !matches!(&subject.node, Node::Identifier(name) if name == parameter) {
+                    return false;
+                }
+                let bindings =
+                    self.infer_function_call_type_bindings(signature, type_args, args, scope);
+                let candidate = super::super::substitute_type_expr(&predicate.type_expr, &bindings);
+                same_target(&self.resolve_alias(&candidate, scope))
+            }
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } => {
+                let Node::Identifier(alias) = &object.node else {
+                    return false;
+                };
+                let Some(binding) = self.namespace_imports.get(alias) else {
+                    return false;
+                };
+                let Some(predicate) = binding.member_type_predicates.get(method) else {
+                    return false;
+                };
+                if predicate.one_sided {
+                    return false;
+                }
+                let Some(index) = binding
+                    .member_param_names
+                    .get(method)
+                    .and_then(|names| names.iter().position(|name| name == &predicate.parameter))
+                else {
+                    return false;
+                };
+                args.get(index).is_some_and(
+                    |subject| matches!(&subject.node, Node::Identifier(name) if name == parameter),
+                ) && same_target(&predicate.type_expr)
+            }
+            Node::BinaryOp { op, left, right } if op == "||" => {
+                self.predicate_false_exclusion_is_proved(left, parameter, target, scope)
+                    || self.predicate_false_exclusion_is_proved(right, parameter, target, scope)
+            }
+            Node::BinaryOp { op, left, right } if op == "&&" => {
+                self.predicate_false_exclusion_is_proved(left, parameter, target, scope)
+                    && self.predicate_false_exclusion_is_proved(right, parameter, target, scope)
+            }
+            _ => false,
+        }
+    }
+
+    fn invalid_predicate_body(&mut self, predicate: &TypePredicate, span: Option<Span>) {
+        self.error_at(
+            Code::InvalidTypePredicate,
+            "a type predicate body must contain only const aliases followed by one return condition"
+                .to_string(),
+            span.unwrap_or(predicate.span),
+        );
     }
 
     fn return_type_allows_implicit_nil(&self, expected: &TypeExpr, scope: &TypeScope) -> bool {

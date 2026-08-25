@@ -975,6 +975,7 @@ mod tests {
                 name: name.to_string(),
                 type_params: Vec::new(),
                 params: Vec::new(),
+                type_predicate: None,
                 return_type: None,
                 throws: None,
                 where_clauses: Vec::new(),

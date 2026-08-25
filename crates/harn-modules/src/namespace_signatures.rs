@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use harn_parser::{Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{Node, SNode, TypeExpr, TypePredicate, TypedParam};
 
 use crate::{normalize_path, ModuleGraph};
 
@@ -42,6 +42,8 @@ pub struct NamespaceMemberSignature {
     /// legitimate call that omits a defaulted tail.
     pub required_params: usize,
     pub fn_type: TypeExpr,
+    /// Caller-side narrowing contract with module-local types inlined.
+    pub type_predicate: Option<TypePredicate>,
 }
 
 /// Names the checker resolves on its own. Inlining must not rewrite these.
@@ -65,6 +67,38 @@ fn is_builtin_type_name(name: &str) -> bool {
             | "Harness"
             | "_"
     )
+}
+
+fn contains_gradual_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Named(name) => matches!(name.as_str(), "any" | "unknown" | "_"),
+        TypeExpr::Union(items) | TypeExpr::Intersection(items) | TypeExpr::Tuple(items) => {
+            items.iter().any(contains_gradual_type)
+        }
+        TypeExpr::Shape(fields) => fields
+            .iter()
+            .any(|field| contains_gradual_type(&field.type_expr)),
+        TypeExpr::OpenShape { fields, rests } => {
+            fields
+                .iter()
+                .any(|field| contains_gradual_type(&field.type_expr))
+                || rests.iter().any(contains_gradual_type)
+        }
+        TypeExpr::List(inner)
+        | TypeExpr::Iter(inner)
+        | TypeExpr::Generator(inner)
+        | TypeExpr::Stream(inner)
+        | TypeExpr::Owned(inner) => contains_gradual_type(inner),
+        TypeExpr::DictType(key, value) => {
+            contains_gradual_type(key) || contains_gradual_type(value)
+        }
+        TypeExpr::Applied { args, .. } => args.iter().any(contains_gradual_type),
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => params.iter().any(contains_gradual_type) || contains_gradual_type(return_type),
+        TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+    }
 }
 
 impl ModuleGraph {
@@ -109,10 +143,11 @@ impl ModuleGraph {
             Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => decl,
         };
-        let (params, return_type) = match &inner.node {
+        let (params, return_type, type_predicate) = match &inner.node {
             Node::FnDecl {
                 params,
                 return_type,
+                type_predicate,
                 type_params,
                 ..
             } => {
@@ -123,13 +158,13 @@ impl ModuleGraph {
                 if !type_params.is_empty() {
                     return None;
                 }
-                (params, return_type)
+                (params, return_type, type_predicate.as_ref())
             }
             Node::Pipeline {
                 params,
                 return_type,
                 ..
-            } => (params, return_type),
+            } => (params, return_type, None),
             _ => return None,
         };
         // A rest parameter accepts any tail, so a fixed positional `FnType`
@@ -145,6 +180,16 @@ impl ModuleGraph {
             .as_ref()
             .map(|ty| self.inline_named_types(origin, ty, &mut HashSet::new(), 0))
             .unwrap_or(TypeExpr::Named("any".into()));
+        let type_predicate = type_predicate.and_then(|predicate| {
+            let type_expr =
+                self.inline_named_types(origin, &predicate.type_expr, &mut HashSet::new(), 0);
+            (!contains_gradual_type(&type_expr)).then(|| TypePredicate {
+                parameter: predicate.parameter.clone(),
+                type_expr,
+                one_sided: predicate.one_sided,
+                span: predicate.span,
+            })
+        });
         Some(NamespaceMemberSignature {
             param_names: params.iter().map(|param| param.name.clone()).collect(),
             required_params: params
@@ -155,6 +200,7 @@ impl ModuleGraph {
                 params: lowered,
                 return_type: Box::new(ret),
             },
+            type_predicate,
         })
     }
 
