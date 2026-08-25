@@ -199,6 +199,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/replay_session_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/persona_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs",
+  // Prefix stability is a command and exit-status contract over captured
+  // provider requests, so the proof must cross the real CLI boundary.
+  "crates/harn-cli/tests/harn_cli_e2e/trace_prefix_stability_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/run_eval_imports.rs",
   "crates/harn-cli/tests/harn_cli_e2e/run_exit_codes.rs",
