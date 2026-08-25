@@ -7,7 +7,8 @@
 //! that data: it reads the same `agent.transcript.llm` topic that
 //! `harn portal` reads through the shared event-log reader, filters to
 //! `provider_call_response` records, and rolls them up by provider,
-//! model, or a day/week/month time series.
+//! model, agent-loop stage, or a day/week/month time series. Calls without a
+//! meaningful stage are grouped as `unattributed`.
 //!
 //! It does NOT recompute pricing — `cost_usd` is summed straight from
 //! the event payload. `mock`-provider rows are excluded by default.
@@ -43,6 +44,7 @@ const MOCK_PROVIDER: &str = "mock";
 struct UsageCall {
     provider: String,
     model: String,
+    stage: Option<String>,
     occurred_at_ms: i64,
     input_tokens: i64,
     output_tokens: i64,
@@ -80,7 +82,7 @@ pub struct UsageGroup {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UsageReport {
-    /// `provider` | `model` | `day` | `week` | `month`.
+    /// `provider` | `model` | `stage` | `day` | `week` | `month`.
     pub group_by: String,
     /// Absolute paths of the event logs that contributed rows.
     pub sources: Vec<String>,
@@ -276,6 +278,12 @@ fn normalize_call(event: &LogEvent) -> Option<UsageCall> {
     Some(UsageCall {
         provider,
         model,
+        stage: payload
+            .get("stage")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|stage| !stage.is_empty())
+            .map(str::to_string),
         occurred_at_ms: event.occurred_at_ms,
         input_tokens: int_field(payload, "input_tokens"),
         output_tokens: int_field(payload, "output_tokens"),
@@ -390,6 +398,10 @@ fn group_key(call: &UsageCall, group_by: UsageGroupBy) -> String {
     match group_by {
         UsageGroupBy::Provider => call.provider.clone(),
         UsageGroupBy::Model => format!("{}/{}", call.provider, call.model),
+        UsageGroupBy::Stage => call
+            .stage
+            .clone()
+            .unwrap_or_else(|| "unattributed".to_string()),
         UsageGroupBy::Day => day_bucket(call.occurred_at_ms),
         UsageGroupBy::Week => week_bucket(call.occurred_at_ms),
         UsageGroupBy::Month => month_bucket(call.occurred_at_ms),
@@ -465,6 +477,7 @@ fn group_by_label(group_by: UsageGroupBy) -> &'static str {
     match group_by {
         UsageGroupBy::Provider => "provider",
         UsageGroupBy::Model => "model",
+        UsageGroupBy::Stage => "stage",
         UsageGroupBy::Day => "day",
         UsageGroupBy::Week => "week",
         UsageGroupBy::Month => "month",
@@ -620,6 +633,7 @@ mod tests {
         cost: f64,
     ) -> UsageCall {
         UsageCall {
+            stage: None,
             provider: provider.to_string(),
             model: model.to_string(),
             occurred_at_ms,

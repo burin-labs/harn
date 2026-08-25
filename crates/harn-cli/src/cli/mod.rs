@@ -438,7 +438,7 @@ SCRIPTING
     Routes(RoutesArgs),
     /// Aggregate LLM spend/usage analytics from the local event log's
     /// `provider_call_response` records: cost, tokens, and prompt-cache
-    /// efficiency rolled up by provider, model, or a day/week/month
+    /// efficiency rolled up by provider, model, stage, or a day/week/month
     /// time series. Reuses the runtime-computed `cost_usd` — no pricing
     /// is recomputed. Pair with `--json` for an agent-readable envelope.
     Usage(UsageArgs),

@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use clap::{Args, ValueEnum};
 
 /// `harn usage` — aggregate LLM spend/usage analytics from the local
-/// event log's `provider_call_response` records.
+/// event log's `provider_call_response` records, including agent-loop stage
+/// attribution when the loop owns one.
 #[derive(Debug, Args)]
 pub(crate) struct UsageArgs {
     /// Project root whose `.harn/events.sqlite` to read. Defaults to the
@@ -59,6 +60,9 @@ pub(crate) enum UsageGroupBy {
     Provider,
     /// One row per `provider/model`.
     Model,
+    /// One row per orchestration stage. Calls without a stage are grouped as
+    /// `unattributed`.
+    Stage,
     /// One row per calendar day (UTC), as a cumulative time series.
     Day,
     /// One row per ISO week (UTC), as a cumulative time series.

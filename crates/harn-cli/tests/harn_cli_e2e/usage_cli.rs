@@ -63,6 +63,11 @@ fn call_event(
     })
 }
 
+fn at_stage(mut event: Value, stage: &str) -> Value {
+    event["stage"] = json!(stage);
+    event
+}
+
 /// Seed a project event log with a fixed set of rows: two openrouter
 /// calls, one anthropic call, and one `mock` row that must be excluded.
 fn seed_events(root: &Path) {
@@ -71,11 +76,20 @@ fn seed_events(root: &Path) {
         let log = install_default_for_base_dir(&root).expect("install event log");
         let topic = Topic::new("agent.transcript.llm").expect("transcript topic");
         let rows = vec![
-            call_event("openrouter", "qwen", 100, 10, 0, 0.02, 0.0, 120.0),
-            call_event("openrouter", "qwen", 200, 20, 50, 0.03, 0.01, 80.0),
+            at_stage(
+                call_event("openrouter", "qwen", 100, 10, 0, 0.02, 0.0, 120.0),
+                "work",
+            ),
+            at_stage(
+                call_event("openrouter", "qwen", 200, 20, 50, 0.03, 0.01, 80.0),
+                "verify",
+            ),
             call_event("anthropic", "sonnet", 300, 30, 0, 0.10, 0.0, 200.0),
             // Mock row: excluded from spend rollups by default.
-            call_event("mock", "fixture", 999, 999, 0, 9.99, 0.0, 1.0),
+            at_stage(
+                call_event("mock", "fixture", 999, 999, 0, 9.99, 0.0, 1.0),
+                "work",
+            ),
         ];
         for row in rows {
             log.append(&topic, LogEvent::new("provider_call_response", row))
@@ -156,6 +170,33 @@ fn usage_by_model_splits_provider_and_model() {
     assert!(keys.contains(&"openrouter/qwen".to_string()));
     assert!(keys.contains(&"anthropic/sonnet".to_string()));
     assert!(!keys.iter().any(|k| k.starts_with("mock/")));
+}
+
+#[test]
+fn usage_by_stage_counts_attributed_and_unattributed_calls() {
+    let dir = TempDir::new().unwrap();
+    seed_events(dir.path());
+
+    let output = run_usage(dir.path(), &["--json", "--group-by", "stage"]);
+    assert!(output.status.success());
+    let data = stdout_json(&output)["data"].clone();
+    assert_eq!(data["group_by"], json!("stage"));
+    assert_eq!(data["calls"], json!(3));
+    let groups = data["groups"].as_array().unwrap();
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group["calls"].as_u64().unwrap())
+            .sum::<u64>(),
+        3,
+    );
+    let keys: Vec<&str> = groups
+        .iter()
+        .map(|group| group["key"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"work"));
+    assert!(keys.contains(&"verify"));
+    assert!(keys.contains(&"unattributed"));
 }
 
 #[test]

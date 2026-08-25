@@ -312,6 +312,7 @@ pub type ProviderCallRequestEvent = {
   model: string,
   provider: string,
   call_role?: string,
+  stage?: string,
   actor_chain?: unknown,
   message_count: int,
   tool_format: string,
@@ -344,6 +345,7 @@ pub type ProviderCallResponseEvent = {
   model: string,
   input_tokens: int,
   output_tokens: int,
+  stage?: string,
   // OPTIONAL deterministic facts.
   span_id?: int?,
   cost_usd?: int | float | nil,

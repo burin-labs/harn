@@ -37,7 +37,7 @@
 //!   emitted once before `provider_call_request` whenever a routing
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
-//! - `provider_call_request` core `{call_id, iteration, model, provider, call_role,
+//! - `provider_call_request` core `{call_id, iteration, model, provider, call_role, stage?,
 //!   max_tokens, temperature, tool_choice, tool_format, context_token_breakdown}` —
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
@@ -50,7 +50,7 @@
 //!   Set `HARN_LLM_TRANSCRIPT_RAW=1` to persist redacted, exact provider
 //!   request/response sidecars under `raw-provider/` and emit
 //!   `provider_raw_capture` pointer events for extraction-drop debugging.
-//! - `provider_call_response` core `{call_id, iteration, model, provider,
+//! - `provider_call_response` core `{call_id, iteration, model, provider, stage?,
 //!   text, tool_calls, parsed_tool_calls?, parsed_tool_calls_ref?, input_tokens, output_tokens,
 //!   response_ms}`. `tool_calls` is the provider-native tool-call array
 //!   (empty for text-format local models). The canonical parsed view is either
@@ -946,6 +946,7 @@ pub(crate) async fn observed_llm_call(
                         &result,
                         duration_ms,
                         opts.applied_structural_experiment.as_ref(),
+                        opts.call_stage.as_deref(),
                     );
                     append_provider_call_error_observability(ProviderCallErrorObservation {
                         iteration: iteration.unwrap_or(0),
@@ -999,6 +1000,7 @@ pub(crate) async fn observed_llm_call(
                     &result,
                     duration_ms,
                     opts.applied_structural_experiment.as_ref(),
+                    opts.call_stage.as_deref(),
                 );
                 dump_resolved_dispatch(
                     iteration.unwrap_or(0),

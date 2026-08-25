@@ -27,7 +27,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-raw", &result, 42, None);
+        dump_llm_response(0, "call-raw", &result, 42, None, None);
         pop_llm_transcript_dir();
 
         let event = response_event(&dir);
@@ -52,7 +52,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-no-raw", &result, 42, None);
+        dump_llm_response(0, "call-no-raw", &result, 42, None, None);
         pop_llm_transcript_dir();
 
         let event = response_event(&dir);

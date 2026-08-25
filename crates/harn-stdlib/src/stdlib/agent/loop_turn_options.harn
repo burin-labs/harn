@@ -1134,6 +1134,7 @@ pub fn agent_direct_llm_options(
       tool_format: turn_llm_opts.tool_format,
       _directives_rendered: true,
       _iteration: iteration,
+      _call_stage: "work",
       _system_fragments: turn_prompt.fragments,
     }
 }

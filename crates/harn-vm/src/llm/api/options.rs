@@ -376,6 +376,10 @@ pub(crate) struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `harness.llm.call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Semantic stage owned by an orchestration loop for this call. Raw LLM
+    /// calls leave this unset so telemetry can distinguish unavailable
+    /// attribution from a stage that made no calls.
+    pub call_stage: Option<String>,
     /// Stable fairness identity for shared provider rate-limit admission.
     /// Defaults to `session_id`; embedding hosts may set it explicitly to
     /// group several independent sessions under one consumer budget.
@@ -561,6 +565,7 @@ impl Default for LlmCallOptions {
             routing_policy: None,
             region: None,
             session_id: None,
+            call_stage: None,
             rate_limit_consumer_id: None,
             rate_limit_reroute_on_timeout: false,
             mock_scope: None,
@@ -655,6 +660,19 @@ impl LlmCallOptions {
         let call_role = call_role.into();
         self.context_manifest.set_call_role(call_role.clone());
         self.mock_scope = Some(call_role);
+    }
+
+    pub(crate) fn set_call_stage(&mut self, call_stage: impl Into<String>) {
+        self.call_stage = Some(call_stage.into());
+    }
+
+    pub(crate) fn set_call_attribution(
+        &mut self,
+        call_role: impl Into<String>,
+        call_stage: impl Into<String>,
+    ) {
+        self.set_call_role(call_role);
+        self.set_call_stage(call_stage);
     }
 
     pub(crate) fn resolve_timeout(&self) -> u64 {
