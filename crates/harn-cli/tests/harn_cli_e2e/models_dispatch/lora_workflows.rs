@@ -168,7 +168,11 @@ fn models_lora_export_check_reports_native_shape() {
 fn models_lora_preflight_human_text_reports_readiness() {
     let corpus = write_lora_corpus_fixture();
     let config = corpus.path().join("config.yaml");
-    fs::write(&config, "max_seq_length: 4096\nmin_fit_ratio: 1.0\n").expect("write config");
+    fs::write(
+        &config,
+        "max_seq_length: 4096\nmin_fit_ratio: 1.0\nmin_records: 500\n",
+    )
+    .expect("write config");
     let harn = run(
         &[
             "models",
