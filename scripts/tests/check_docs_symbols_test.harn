@@ -1,0 +1,347 @@
+// Tests for scripts/check_docs_symbols.harn — drive the surface state
+// machine, the call extractor, the compiler-answer classifier and the
+// allowlist parser on synthetic input. Nothing here runs `harn check`;
+// the diagnostic lists below are the shapes the real one emits.
+import "../check_docs_symbols.harn"
+
+// --- advance_surface / scan_mentions ----------------------------------------
+@test
+pipeline test_prose_needs_a_backtick(harness: Harness, task) {
+  // A backticked call span is a reference to an API. The same word
+  // followed by a parenthesis in ordinary English is not.
+  const found = scan_mentions("call `llm_call(x)` to do it\n")
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "llm_call")
+  assert_eq(found[0].line, 1)
+  assert_eq(scan_mentions("we handoff (see below) later\n"), [])
+}
+
+@test
+pipeline test_prose_ignores_receiver_methods(harness: Harness, task) {
+  // `harness.llm.call(...)` is the *correct* spelling. Reading `call`
+  // out of it would make the gate flag every fixed reference.
+  assert_eq(scan_mentions("use `harness.llm.call(req)` now\n"), [])
+}
+
+@test
+pipeline test_ignore_block_body_is_scanned_bare(harness: Harness, task) {
+  // The whole point: a ```harn,ignore body is exempt from type checking,
+  // so nothing else notices the call target no longer exists.
+  const md = "```harn,ignore\ntrigger_register({})\n```\n"
+  const found = scan_mentions(md)
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "trigger_register")
+  assert_eq(found[0].line, 2)
+}
+
+@test
+pipeline test_ignore_block_still_skips_method_calls(harness: Harness, task) {
+  const md = "```harn,ignore\nharness.runtime.trigger_register({})\n```\n"
+  assert_eq(scan_mentions(md), [])
+}
+
+@test
+pipeline test_checked_harn_block_is_not_scanned(harness: Harness, task) {
+  // A ```harn block is already type-checked by check-docs-snippets, so
+  // reporting it here would be a second failure for one defect.
+  assert_eq(scan_mentions("```harn\nllm_call(x)\n```\n"), [])
+  assert_eq(scan_mentions("```bash\nllm_call(x)\n```\n"), [])
+}
+
+@test
+pipeline test_nested_call_is_not_lost(harness: Harness, task) {
+  // The preceding-character test is applied per match rather than being
+  // consumed by the pattern, so the inner callee survives.
+  const md = "```harn,ignore\nouter(daemon_spawn(cfg))\n```\n"
+  const found = scan_mentions(md)
+  assert_eq(found.count, 2)
+  assert_eq(found[0].symbol, "outer")
+  assert_eq(found[1].symbol, "daemon_spawn")
+}
+
+@test
+pipeline test_prose_resumes_after_a_block_closes(harness: Harness, task) {
+  const md = "```harn\nx()\n```\nthen `send(ch)` again\n"
+  const found = scan_mentions(md)
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "send")
+  assert_eq(found[0].line, 4)
+}
+
+@test
+pipeline test_longer_fence_may_contain_three_backticks(harness: Harness, task) {
+  // ````harn,ignore closes only on a fence at least as long, so the ```
+  // line inside stays body.
+  const md = "````harn,ignore\n```\nsend(ch)\n````\nafter `recv(ch)`\n"
+  const found = scan_mentions(md)
+  assert_eq(found.count, 2)
+  assert_eq(found[0].symbol, "send")
+  assert_eq(found[0].line, 3)
+  assert_eq(found[1].symbol, "recv")
+  assert_eq(found[1].line, 5)
+}
+
+@test
+pipeline test_indented_ignore_fence_is_a_block(harness: Harness, task) {
+  const md = "- item:\n\n  ```harn,ignore\n  send(ch)\n  ```\n"
+  const found = scan_mentions(md)
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "send")
+}
+
+@test
+pipeline test_advance_surface_reports_fence_lines_unscanned(harness: Harness, task) {
+  const opened = advance_surface(FENCE_START, "```harn,ignore")
+  assert_eq(opened.in_block, true)
+  assert_eq(opened.surface, "ignore")
+  assert_eq(opened.scan, "")
+  const body = advance_surface(opened, "send(ch)")
+  assert_eq(body.scan, "ignore")
+  const closed = advance_surface(body, "```")
+  assert_eq(closed.in_block, false)
+  assert_eq(closed.scan, "")
+  assert_eq(advance_surface(closed, "plain text").scan, "prose")
+}
+
+@test
+pipeline test_a_bare_backticked_name_in_a_table_row_is_not_a_call(harness: Harness, task) {
+  // `llm_call` is a removed builtin AND a live serialized name: the
+  // `AgentTraceEvent::LlmCall` variant and the `llm_call` tape-event
+  // kind. docs/src/dev/tape-format.md documents that row correctly.
+  // Flagging the bare spelling would order a factually wrong edit, so
+  // the call shape is the whole discriminator.
+  const row = "| `llm_call` | `request_digest`, `response` | interception |\n"
+  assert_eq(scan_mentions(row), [])
+}
+
+@test
+pipeline test_a_method_call_on_a_removed_name_is_not_a_call(harness: Harness, task) {
+  // docs/src/llm/agent_loop.md has `receipts.llm_call(record)` — a
+  // method on a user value that happens to share the name.
+  assert_eq(scan_mentions("`receipts.llm_call(record)` records it\n"), [])
+}
+
+@test
+pipeline test_a_longer_identifier_ending_in_a_removed_name_is_not_it(harness: Harness, task) {
+  // docs/src/cookbook.md defines `safe_llm_call(prompt, system)`.
+  const found = scan_mentions("`safe_llm_call(p, s)` wraps it\n")
+  assert_eq(found.count, 1)
+  assert_eq(found[0].symbol, "safe_llm_call")
+}
+
+// --- the gate's own non-vacuity self-check ----------------------------------
+@test
+pipeline test_self_test_passes_when_the_scanner_works(harness: Harness, task) {
+  assert_eq(self_test_failures({llm_call: "harness.llm.call"}), [])
+}
+
+@test
+pipeline test_self_test_fails_when_nothing_is_found(harness: Harness, task) {
+  // The exact regression this guards: a probe that stopped parsing, or a
+  // scanner that stopped reading prose, answers "clean tree" for every
+  // page. The fixture has a known answer, so it cannot.
+  const failures = self_test_failures({})
+  assert_eq(failures.count, 1)
+  assert_eq(failures[0]?.contains("expected 1"), true)
+  assert_eq(failures[0]?.contains("never actually inspected"), true)
+}
+
+// --- line_call_targets ------------------------------------------------------
+@test
+pipeline test_line_call_targets_dedupes(harness: Harness, task) {
+  const line = "`send(a)` and `send(b)` and `recv(c)`"
+  assert_eq(line_call_targets(line, "prose"), ["send", "recv"])
+}
+
+@test
+pipeline test_line_call_targets_needs_an_immediate_paren(harness: Harness, task) {
+  // `foo` on its own is a noun in prose far more often than a call, so
+  // the gate only reads call shapes.
+  assert_eq(line_call_targets("the `send` helper", "prose"), [])
+  assert_eq(line_call_targets("the `send ()` helper", "prose"), [])
+}
+
+// --- migrated_targets: the compiler is the oracle ---------------------------
+@test
+pipeline test_migrated_targets_reads_the_harness_suggestion(harness: Harness, task) {
+  const diagnostics = [
+    {
+      code: "HARN-NAM-002",
+      message: "call target `llm_call` is not defined or imported — "
+        + "did you mean `harness.llm.call`?",
+      help: "did you mean `harness.llm.call`?",
+    },
+  ]
+  assert_eq(migrated_targets(diagnostics), {llm_call: "harness.llm.call"})
+}
+
+@test
+pipeline test_migrated_targets_rejects_edit_distance_noise(harness: Harness, task) {
+  // HARN-NAM-002 also guesses at names that are merely undefined. On the
+  // documentation corpus those guesses are `add -> abs`, `run -> len`,
+  // `_close -> clone`. Accepting a bare suggestion as a rename would
+  // turn 57 non-issues into build failures.
+  const diagnostics = [
+    {
+      code: "HARN-NAM-002",
+      message: "call target `run` is not defined or imported — "
+        + "did you mean `len`?",
+      help: "did you mean `len`?",
+    },
+    {
+      code: "HARN-NAM-002",
+      message: "call target `pool_create` is not defined or imported — "
+        + "did you mean `__pool_create`?",
+      help: "did you mean `__pool_create`?",
+    },
+    {code: "HARN-NAM-002", message: "call target `nope` is not defined or imported"},
+  ]
+  assert_eq(migrated_targets(diagnostics), {})
+}
+
+@test
+pipeline test_migrated_targets_ignores_other_codes(harness: Harness, task) {
+  const diagnostics = [
+    {
+      code: "HARN-STD-003",
+      message: "Builtin function '__dict_merge' expects 2 arguments, got 0",
+      help: "did you mean `harness.llm.call`?",
+    },
+  ]
+  assert_eq(migrated_targets(diagnostics), {})
+}
+
+// --- probe_parse_error: the gate's own silent-failure mode -------------------
+@test
+pipeline test_probe_parse_error_catches_a_reserved_word(harness: Harness, task) {
+  // Emitting `fn()` into the probe makes the whole file a syntax error.
+  // Name resolution then never runs, every lookup answers "not removed"
+  // and a broken gate reports a clean tree. This is the guard that turns
+  // that into a loud failure, so it is pinned deliberately.
+  const diagnostics = [
+    {code: "HARN-PAR-001", message: "expected identifier, found `fn`"},
+    {code: "HARN-NAM-002", message: "call target `x` is not defined"},
+  ]
+  assert_eq(probe_parse_error(diagnostics), "HARN-PAR-001: expected identifier, found `fn`")
+  assert_eq(probe_parse_error([{code: "HARN-NAM-002", message: "m"}]), "")
+}
+
+@test
+pipeline test_probe_source_carries_the_sentinel(harness: Harness, task) {
+  const source = probe_source(["alpha", "beta"])
+  assert_eq(source.contains("\n  alpha()\n"), true)
+  assert_eq(source.contains("\n  beta()\n"), true)
+  // Without a known-removed name in the probe, an oracle that stopped
+  // answering would look exactly like a clean tree.
+  assert_eq(source.contains("\n  llm_call()\n"), true)
+  assert_eq(source.starts_with("fn main(harness: Harness) {\n"), true)
+}
+
+@test
+pipeline test_first_backtick(harness: Harness, task) {
+  assert_eq(first_backtick("did you mean `harness.llm.call`?"), "harness.llm.call")
+  assert_eq(first_backtick("no ticks here"), "")
+  assert_eq(first_backtick("unclosed `tick"), "")
+}
+
+// --- allowlist parsing ------------------------------------------------------
+@test
+pipeline test_parse_allowlist_reads_both_forms(harness: Harness, task) {
+  const text = "# header\n\npage docs/src/migrations/v0.10.md  # guide\n"
+    + "docs/src/builtins.md  channel   # baseline\n"
+  const parsed = parse_allowlist(text)
+  assert_eq(parsed.errors, [])
+  assert_eq(parsed.pages, ["docs/src/migrations/v0.10.md"])
+  assert_eq(parsed.pairs.count, 1)
+  assert_eq(parsed.pairs[0].path, "docs/src/builtins.md")
+  assert_eq(parsed.pairs[0].symbol, "channel")
+}
+
+@test
+pipeline test_parse_allowlist_rejects_a_malformed_line(harness: Harness, task) {
+  const parsed = parse_allowlist("docs/src/builtins.md\n")
+  assert_eq(parsed.pairs, [])
+  assert_eq(parsed.errors.count, 1)
+  assert_eq(parsed.errors[0].contains("expected `page <path>`"), true)
+}
+
+// --- allowlist staleness ----------------------------------------------------
+@test
+pipeline test_allowlist_entry_that_still_applies_is_quiet(harness: Harness, task) {
+  const stale = allowlist_stale(
+    {
+      allow: {pages: ["docs/src/migrations/v0.10.md"], pairs: [{path: "d.md", symbol: "send"}]},
+      hits: {"d.md\tsend": 2},
+      page_hits: {"docs/src/migrations/v0.10.md": 3},
+      removed: {send: "harness.runtime.send"},
+    },
+  )
+  assert_eq(stale, [])
+}
+
+@test
+pipeline test_allowlist_entry_for_a_fixed_page_must_be_pruned(harness: Harness, task) {
+  const stale = allowlist_stale(
+    {
+      allow: {pages: [], pairs: [{path: "d.md", symbol: "send"}]},
+      hits: {},
+      page_hits: {},
+      removed: {send: "harness.runtime.send"},
+    },
+  )
+  assert_eq(stale.count, 1)
+  assert_eq(stale[0]?.contains("d.md no longer mentions `send`"), true)
+}
+
+@test
+pipeline test_allowlist_entry_for_a_live_symbol_must_be_pruned(harness: Harness, task) {
+  // The symbol resolves again, so the exemption is excusing nothing.
+  const stale = allowlist_stale(
+    {
+      allow: {pages: [], pairs: [{path: "d.md", symbol: "send"}]},
+      hits: {},
+      page_hits: {},
+      removed: {},
+    },
+  )
+  assert_eq(stale.count, 1)
+  assert_eq(stale[0]?.contains("is not a removed symbol any more"), true)
+}
+
+@test
+pipeline test_allowlist_page_with_no_findings_must_be_pruned(harness: Harness, task) {
+  const stale = allowlist_stale(
+    {
+      allow: {pages: ["clean.md"], pairs: []},
+      hits: {},
+      page_hits: {},
+      removed: {send: "harness.runtime.send"},
+    },
+  )
+  assert_eq(stale.count, 1)
+  assert_eq(stale[0]?.contains("no longer mentions any removed symbol"), true)
+}
+
+// --- generated pages --------------------------------------------------------
+@test
+pipeline test_generated_paths_come_from_the_registry(harness: Harness, task) {
+  const registry = {
+    artifact: [
+      {outputs: ["docs/src/diagnostics.md", "docs/src/spec/language"]},
+      {outputs: ["docs/src/diagnostics.md"]},
+    ],
+  }
+  const generated = generated_paths(registry)
+  assert_eq(generated, ["docs/src/diagnostics.md", "docs/src/spec/language"])
+  assert_eq(is_generated("docs/src/diagnostics.md", generated), true)
+  assert_eq(is_generated("docs/src/spec/language/10-concurrency.md", generated), true)
+  // The hand-edited source those pages mirror is still scanned.
+  assert_eq(is_generated("spec/chapters/10-concurrency.md", generated), false)
+  assert_eq(is_generated("docs/src/builtins.md", generated), false)
+}
+
+@test
+pipeline test_generated_paths_tolerates_a_registry_without_outputs(harness: Harness, task) {
+  assert_eq(generated_paths({}), [])
+  assert_eq(generated_paths({artifact: [{}]}), [])
+}

@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
+.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: sync-docs-diagnostics
@@ -940,7 +940,7 @@ check-docs-model-refs:
 check-docs-portable:
 	+@$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
-	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-language-spec check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-links check-docs-cookbook-entrypoints check-site-snippets check-docs-workflow-quickstart check-generated-registry
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-language-spec check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-links check-docs-cookbook-entrypoints check-site-snippets check-docs-workflow-quickstart check-generated-registry
 
 # Judgeable only by the commit's own binary. Each of these regenerates an
 # artifact from data linked into the binary — the provider catalog, the trigger
@@ -1009,6 +1009,26 @@ sync-docs-diagnostics:
 check-docs-snippets:
 	@echo "=== Checking docs snippets parse under harn parse ==="
 	@$(HARN_CMD) run scripts/check_docs_snippets.harn
+
+# CI guard: no documentation prose or ```harn,ignore body may still name a
+# runtime API the compiler has removed. The old->new mapping is read out of
+# the compiler's own migration table, never from a list in this repository.
+# scripts/docs-removed-symbols-allowlist.txt is a shrinking baseline; the
+# gate fails when one of its entries goes stale.
+#
+# This sits in the portable half even though its verdict comes out of the
+# binary's linked migration table, which is why check-drift classifies it
+# `binary`. The reason is coverage: a docs-only change skips the heavy Rust
+# lanes at PR time and can skip them again as a merge-queue docs-only tail,
+# so the exact half never sees it — and a docs-only change is exactly how a
+# stale API name gets written. The migration table moves far more slowly
+# than the pages do. The residual window is a migration that lands between
+# releases *and* gets a new allowlist line; that line would read as stale
+# here until the next tag, which is visible to the reviewer rather than
+# silent, and adding allowlist lines is already a reviewed act.
+check-docs-symbols:
+	@echo "=== Checking docs for removed runtime API names ==="
+	@$(HARN_CMD) run scripts/check_docs_symbols.harn
 
 # CI guard: every harn long flag in docs/src bash/sh blocks must exist in
 # the corresponding `harn ... --help` output.
