@@ -255,6 +255,14 @@ fn spawn_openai_empty_stub_many(
 fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let cache_usage_accounting = crate::llm_config::provider_config(provider)
         .and_then(|provider| provider.cache_usage_accounting);
+    install_openai_stub_provider_with_cache_accounting(provider, addr, cache_usage_accounting);
+}
+
+fn install_openai_stub_provider_with_cache_accounting(
+    provider: &str,
+    addr: std::net::SocketAddr,
+    cache_usage_accounting: Option<bool>,
+) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
     overlay.providers.insert(
         provider.to_string(),
@@ -544,7 +552,7 @@ fn offthread_streaming_completes_inside_localset() {
 }
 
 #[test]
-fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
+fn llamacpp_openai_transport_reports_route_and_supported_cache_accounting() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -567,7 +575,7 @@ fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
         assert_eq!(
             crate::llm_config::provider_config("llamacpp")
                 .and_then(|provider| provider.cache_usage_accounting),
-            Some(false)
+            Some(true)
         );
 
         let mut opts = base_opts("llamacpp");
@@ -582,7 +590,7 @@ fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
         assert!(result.output_tokens > 0);
         assert_eq!(result.cache_read_tokens, 0);
         assert_eq!(result.cache_write_tokens, 0);
-        assert!(!result.cache_supported);
+        assert!(result.cache_supported);
         assert_eq!(
             result.telemetry.serving_base_url.as_deref(),
             Some(format!("http://{addr}/v1").as_str())
