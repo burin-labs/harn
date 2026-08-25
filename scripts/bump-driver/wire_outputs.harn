@@ -1,0 +1,9 @@
+/** Normalize a typed boolean at GitHub Actions' string-only wire boundary. */
+pub fn gha_bool_output(value: bool) -> string {
+  return to_string(value)
+}
+
+/** Normalize a typed integer at GitHub Actions' string-only wire boundary. */
+pub fn gha_int_output(value: int) -> string {
+  return to_string(value)
+}

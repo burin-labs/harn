@@ -4,6 +4,7 @@ import { bump_options, run_bump } from "std/bump/runtime"
 import { gha_append_summary, gha_write_output } from "std/gha"
 /** Thin GitHub Actions entry point for the package-backed Harn bump driver. */
 import { github_bump_remote } from "./github_remote"
+import { gha_bool_output, gha_int_output } from "./wire_outputs"
 
 fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
   const value = trim(env.get_or(name, ""))
@@ -72,11 +73,11 @@ pipeline main(harness: Harness) {
   )
   harness.stdio.println(json_stringify_pretty(receipt))
   gha_write_output(harness, "outcome", receipt.outcome)
-  gha_write_output(harness, "ok", receipt.ok)
+  gha_write_output(harness, "ok", gha_bool_output(receipt.ok))
   gha_write_output(harness, "target_tag", receipt.target_tag)
-  gha_write_output(harness, "ready", receipt.ready)
+  gha_write_output(harness, "ready", gha_bool_output(receipt.ready))
   if receipt.pr_number != nil {
-    gha_write_output(harness, "pr_number", receipt.pr_number)
+    gha_write_output(harness, "pr_number", gha_int_output(receipt.pr_number))
     gha_write_output(harness, "pr_url", receipt.pr_url ?? "")
   }
   gha_append_summary(
