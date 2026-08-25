@@ -198,11 +198,11 @@ pipeline main(harness: Harness) {
     );
     std::fs::write(
         project.path().join("trigger_handlers.harn"),
-        r#"
+        r"
 pub fn on_tick(_event) -> dict {
   return {handled: true}
 }
-"#,
+",
     )
     .expect("write working trigger handler");
 
