@@ -45,6 +45,11 @@
 #                            (default: 60000 under this parallel fanout)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/source_gate_receipt.sh
+source "$SCRIPT_DIR/lib/source_gate_receipt.sh"
+
+gate_command=("$0" "$@")
+gate_receipt="${HARN_EXT_GATE_RECEIPT:-$SCRIPT_DIR/../.harn/receipts/source-gate.json}"
 
 phase="all"
 tree_sitter_parser_preflighted="false"
@@ -80,6 +85,7 @@ case "$phase" in
     exit 2
     ;;
 esac
+harn_source_gate_begin "$gate_receipt" "${HARN_EXT_GATE_PR_NUMBER:-}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -191,6 +197,7 @@ if [ ! -x "$HARN_BIN" ]; then
   exit 1
 fi
 export HARN_BIN
+harn_source_gate_bind_binary "$HARN_BIN"
 # Performance checks must use the already-authoritative binary too. Without
 # this alias the RSS soak asks Cargo for a target path and can sit behind an
 # unrelated parallel Cargo lock for minutes before running a 250 ms benchmark.
@@ -446,7 +453,16 @@ if [ "$performance_status" -ne 0 ]; then
   exit "$performance_status"
 fi
 case "$phase" in
-  all) echo "=== conformance and audit gates passed ===" ;;
-  conformance) echo "=== conformance and performance gates passed ===" ;;
-  audit) echo "=== audit gates passed ===" ;;
+  all) summary="conformance and audit gates passed" ;;
+  conformance) summary="conformance and performance gates passed" ;;
+  audit) summary="audit gates passed" ;;
 esac
+echo "=== $summary ==="
+subtask_placement="${HARN_VM_SUBTASK_PLACEMENT:-worker}"
+receipt_audit_jobs="$concurrency"
+receipt_conformance_jobs="$conformance_jobs"
+[[ "$phase" = "conformance" ]] && receipt_audit_jobs="-"
+[[ "$phase" = "audit" ]] && receipt_conformance_jobs="-"
+harn_source_gate_finish "$gate_receipt" full_io "$subtask_placement" \
+  "$receipt_audit_jobs" "$receipt_conformance_jobs" "$summary" "${gate_command[@]}"
+echo "ok: source gate receipt ($gate_receipt)"

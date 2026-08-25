@@ -121,6 +121,7 @@ write_rust_manifest() {
   local destination=$1
   local commit=$2
   local rustc_digest=$3
+  local build_freshness=$4
   cat > "$destination/manifest" <<EOF
 schema=harn.rust_artifact.v1
 commit=${commit}
@@ -132,6 +133,7 @@ dev_debug_sha256=$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f
 neutral_filter_sha256=$(printf '%s' "$NEUTRAL_FILTER" | sha256sum | cut -d ' ' -f 1)
 security_filter_sha256=$(printf '%s' "$SECURITY_FILTER" | sha256sum | cut -d ' ' -f 1)
 harn_sha256=$(sha256 "$destination/harn")
+build_freshness=${build_freshness}
 EOF
 }
 
@@ -176,6 +178,7 @@ verify_test_manifest() {
   require_manifest_value "$destination/manifest" neutral_filter_sha256 "$(printf '%s' "$NEUTRAL_FILTER" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" security_filter_sha256 "$(printf '%s' "$SECURITY_FILTER" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
+  require_manifest_object_id "$destination/manifest" build_freshness
   require_manifest_value "$destination/manifest" tests_archive_sha256 "$(sha256 "$destination/harn-tests.tar.zst")"
 
   if [[ "${HARN_VERIFY_RUST_RUNTIME:-0}" == "1" ]]; then
@@ -213,6 +216,18 @@ verify_cli_manifest() {
   require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
+  require_manifest_object_id "$destination/manifest" build_freshness
+}
+
+require_manifest_object_id() {
+  local manifest=$1
+  local key=$2
+  local value
+  value="$(sed -n "s/^${key}=//p" "$manifest")"
+  if [[ ! "$value" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "error: Rust artifact manifest ${key} is not a full object ID" >&2
+    exit 1
+  fi
 }
 
 report_timing() {
@@ -236,13 +251,19 @@ prepare_harn_cli() {
   local commit=$2
   local target_dir=$3
 
+  # CI builds from an exact clean commit and the artifact manifest binds the
+  # resulting bytes, toolchain, and flags. Embed that commit as the hosted
+  # build identity so downstream source-gate receipts use the same field as
+  # local content receipts without pretending the producer's absolute Cargo
+  # dep-info paths can survive artifact transfer.
+  export HARN_BUILD_FRESHNESS_ID="$commit"
   cargo build --locked --bin harn
   if [[ ! -x "$target_dir/debug/harn" ]]; then
     echo "error: build did not produce the required harn CLI at $target_dir/debug/harn" >&2
     exit 1
   fi
   install -m 0755 "$target_dir/debug/harn" "$staging/harn"
-  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
+  write_rust_manifest "$staging" "$commit" "$(rustc_identity_sha256)" "$commit"
 }
 
 pack_cli_bundle() {
@@ -324,6 +345,10 @@ restore_cli_bundle() {
   fi
   if [[ -n "$github_env" ]]; then
     printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$destination/harn")" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' \
+      "$(sed -n 's/^build_freshness=//p' "$destination/manifest")" >> "$github_env"
   fi
 }
 
@@ -364,6 +389,10 @@ restore_test_bundle() {
 
   if [[ -n "$github_env" ]]; then
     printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_COMMIT=%s\n' "$commit" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_SHA256=%s\n' "$(sha256 "$destination/harn")" >> "$github_env"
+    printf 'SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID=%s\n' \
+      "$(sed -n 's/^build_freshness=//p' "$destination/manifest")" >> "$github_env"
   fi
   bytes="$(wc -c < "$bundle" | tr -d ' ')"
   report_timing restore "$((SECONDS - started))" "$bytes"
