@@ -78,9 +78,7 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
 }
 
 /**
- * Project the session through the provider-visible directive slot. Set
- * `append_only` only after committing directives at the owning turn boundary;
- * the default preserves legacy fold-first placement.
+ * Project the session through the provider-visible directive slot.
  *
  * @effects: [host]
  * @errors: []
@@ -90,9 +88,8 @@ pub fn agent_session_visible_messages(
   agent: HarnessAgent,
   session_id: any,
   messages: any = nil,
-  append_only: bool = false,
 ) -> list {
-  return agent.session_visible_messages(session_id, messages, append_only)
+  return agent.session_visible_messages(session_id, messages)
 }
 
 /**

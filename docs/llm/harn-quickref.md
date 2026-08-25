@@ -2346,18 +2346,14 @@ or a session-hook effect list. Hosts inject ambient context with the
 bridge `session/remind` notification; `session/inject` remains user-role
 input.
 
-Append-only placement is experimental and off by default. Enable it with
-`reminders: {append_only: true}` or `HARN_REMINDERS_APPEND_ONLY=1`; an explicit
-`false` overrides the environment fallback. The runtime then commits each
-emitted envelope as one durable trailing user turn, and later requests retain
-those exact bytes at the same message index. This preserves provider prompt
-prefixes; compaction remains the deliberate prefix break.
+The runtime commits each reminder envelope as one durable trailing user turn.
+Later requests retain those exact bytes at the same message index. This
+preserves provider prompt prefixes; compaction remains the deliberate prefix
+break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives>` envelope, folded into the trailing user message by
-default or emitted as its own trailing user message in append-only mode. Its
-directives are ordered by authority (`contract`, `corrective`, `advisory`) and
-then lifecycle
+`<context-directives>` envelope in its own trailing user message. Its directives
+are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
 order; internal tags, dedupe keys, and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
 `role_hint` values remain accepted for replay compatibility but do not control
