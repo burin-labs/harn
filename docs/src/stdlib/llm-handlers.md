@@ -261,7 +261,7 @@ const policy = routing_policy({
   ],
   failover: {
     on_status: [429, 500, 502, 503, 504],
-    on_timeout_ms: 30_000,
+    on_timeout_ms: 30000,
     on_error_kinds: ["rate_limit", "schema_validation"],
     max_attempts: 3,
   },

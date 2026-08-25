@@ -1190,7 +1190,7 @@ no materialization. Calling any lazy combinator on a Range
 returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
 drain through the iter. In short: Range handles integer ranges
 with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
-`(1 to 10_000_000).map(...).take(5).to_list()` finishes instantly
+`(1 to 10000000).map(...).take(5).to_list()` finishes instantly
 because only 5 elements flow through the pipeline.
 
 ## Regex

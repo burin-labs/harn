@@ -4401,7 +4401,7 @@ hostile or accidental quadratic expression cannot stall the compiler.
 
 ```harn,ignore
 // Rejected (would expand far beyond the step budget):
-const HUGE = sum_to(1_000_000)
+const HUGE = sum_to(1000000)
 ```
 
 #### How to fix
