@@ -25,7 +25,7 @@
  *
  * Fully offline — the custom strategy short-circuits any LLM call.
  */
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   const session = harness.agent.open("compaction-policy-demo")
   harness.agent.inject(
     session,

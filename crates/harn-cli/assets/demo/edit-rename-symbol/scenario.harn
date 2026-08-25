@@ -26,7 +26,7 @@
  */
 import { edit_rename_symbol } from "std/edit"
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   // `harness.fs.runtime_paths().asset_root` resolves to the directory holding this script,
   // which is also where the seed workspaces ship. That gives us a
   // sandbox-safe absolute path for the code-index rebuild without
