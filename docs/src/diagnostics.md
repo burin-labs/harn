@@ -39,7 +39,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 8 |
-| [`LLM`](#llm--llm-calls) | LLM calls | 5 |
+| [`LLM`](#llm--llm-calls) | LLM calls | 4 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
@@ -145,7 +145,6 @@ A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-v
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
-| [`HARN-LLM-002`](#harn-llm-002) | LLM option key is deprecated | `llm/migrate-removed-option` | `scope-local` |
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
@@ -1250,22 +1249,6 @@ Both shapes are marked `safety: surface-changing`, so `harn fix --apply
 The matched `EffectInheritanceViolation` runtime payload's `_type`
 discriminator (`effect_inheritance_violation`) is part of the stable
 contract.
-
-### `HARN-LLM-002`
-
-**Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
-
-LLM option key is deprecated
-
-- **Repair:** `llm/migrate-removed-option` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the removed option with its supported equivalent
-- **See also:** [`HARN-LNT-050`](#harn-lnt-050)
-
-#### How to fix
-
-- Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
-- Drop or rename deprecated options to the names listed in the LLM call quickref.
-- Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
 
 ### `HARN-LLM-003`
 
@@ -3110,7 +3093,6 @@ removed LLM options lint
 
 - **Repair:** `llm/migrate-removed-option` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the removed option with its supported equivalent
-- **See also:** [`HARN-LLM-002`](#harn-llm-002)
 
 #### How to fix
 

@@ -24,7 +24,7 @@
     {
       "id": "LLM",
       "title": "LLM calls",
-      "count": 5
+      "count": 4
     },
     {
       "id": "ORC",
@@ -804,23 +804,6 @@
       "related": [
         "HARN-CAP-001",
         "HARN-CAP-007"
-      ],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
-      "code": "HARN-LLM-002",
-      "category": "LLM",
-      "summary": "LLM option key is deprecated",
-      "repairs": [
-        {
-          "id": "llm/migrate-removed-option",
-          "safety": "scope-local",
-          "summary": "Replace the removed option with its supported equivalent"
-        }
-      ],
-      "related": [
-        "HARN-LNT-050"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -2157,9 +2140,7 @@
           "summary": "Replace the removed option with its supported equivalent"
         }
       ],
-      "related": [
-        "HARN-LLM-002"
-      ],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },

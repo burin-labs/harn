@@ -225,7 +225,6 @@ impl Code {
             }
 
             // --- LLM / PRM: model + prompt contract -----------------------
-            Code::DeprecatedLlmOption => Some(&REPAIR_LLM_MIGRATE_REMOVED_OPTION),
             Code::LlmSchemaMissing => Some(&REPAIR_LLM_ADD_SCHEMA),
             Code::LlmProviderIdentityBranch | Code::PromptProviderIdentityBranch => {
                 Some(&REPAIR_LLM_USE_CAPABILITY_FLAG)
