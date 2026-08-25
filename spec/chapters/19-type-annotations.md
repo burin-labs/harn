@@ -663,13 +663,15 @@ builtin keeps existing schema dicts working.
 Schema-driven builtins are typed with proper generics so user-defined
 wrappers pick up the same narrowing.
 
-- `llm_call<T>(prompt, system, options: {output: Schema<T>, ...})
-  -> {data: T, text: string, ...}`
-- `llm_completion<T>` has the same signature.
-- `llm_call_structured<T>(prompt, schema: Schema<T>, options?) -> T`
-- `llm_call_structured_safe<T>(prompt, schema: Schema<T>, options?) ->
-  {ok: bool, data: T | nil, error: dict | nil}`
-- `llm_call_structured_result<T>(prompt, schema: Schema<T>, options?) ->
+- `harness.llm.call<T>(prompt, system,
+  options: {output: Schema<T>, ...}) -> {data: T, text: string, ...}`
+- `harness.llm.completion<T>` has the same signature.
+- `harness.llm.call_structured<T>(prompt, schema: Schema<T>, options?)
+  -> T`
+- `harness.llm.call_structured_safe<T>(prompt, schema: Schema<T>,
+  options?) -> {ok: bool, data: T | nil, error: dict | nil}`
+- `harness.llm.call_structured_result<T>(prompt, schema: Schema<T>,
+  options?) ->
   {ok: bool, data: T | nil, raw_text: string, error: string,
   error_category: string | nil, attempts: int, repaired: bool,
   repair_tier: string | nil,
@@ -690,7 +692,7 @@ wrappers pick up the same narrowing.
   `transient_network`, ...); JSON / schema failures surface as
   `missing_json`, `schema_validation`, or `repair_failed` when an
   optional repair pass was attempted and also failed. Options accept a
-  `repair: {enabled: bool, ...llm_call_overrides}` block. The ladder is
+  `repair: {enabled: bool, ...call_option_overrides}` block. The ladder is
   local mechanical salvage first (trailing commas, unquoted keys, prose
   preambles, truncated closers), then a single LLM reissue. `repaired`
   is true for either success; `repair_tier` is `"local"` or `"llm"`
@@ -701,7 +703,7 @@ wrappers pick up the same narrowing.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
-  ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
+  ...call_option_overrides}) -> {ok: bool, data: T | nil, raw_text:
   string, error: string, error_category: string | nil, attempts: int,
   stage: string, repaired: bool}`. Best-effort recovery of malformed
   LLM output against a target schema. Three deterministic stages
