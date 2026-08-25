@@ -34,14 +34,11 @@ const DEMO_SCENARIO_GLOB = "crates/harn-cli/assets/demo/*/*.harn"
 
 /**
  * The argv tail of every command a snippet must survive, in order; the
- * snippet's path is appended to each. `--strict` makes warnings fatal and
- * `--require-public-api-types` demands annotations on exported callables, so
- * showcase code is held to the bar its readers will be held to.
+ * snippet's path is appended to each. `--strict` makes warnings fatal.
+ * Ordinary typechecking enforces parameter annotations, so showcase code is
+ * held to the same bar as every Harn source.
  */
-const SNIPPET_CHECKS: list<list<string>> = [
-  ["check"],
-  ["lint", "--strict", "--require-public-api-types"],
-]
+const SNIPPET_CHECKS: list<list<string>> = [["check"], ["lint", "--strict"]]
 
 /** Repo-relative form of a glob result (strip the `/./` marker). */
 pub fn rel_path(path: string) -> string {
