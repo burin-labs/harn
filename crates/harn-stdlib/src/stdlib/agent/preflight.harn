@@ -535,8 +535,7 @@ fn __agent_system_prompt_option_present(value: string | bytes | list | dict | se
 
 fn __agent_has_system_prompt_options(opts: dict) {
   return __agent_system_prompt_option_present(opts?._primary_system)
-    || type_of(opts?.system)
-      == "string"
+    || __agent_system_prompt_option_present(opts?.system)
 }
 
 fn __agent_push_system_fragment(fragments: list, id: string, body: string?) {
