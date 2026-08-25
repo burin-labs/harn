@@ -37,7 +37,14 @@ pub struct CatalogProvider {
     pub extra_headers: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub healthcheck: Option<CatalogProviderHealthcheck>,
-    pub cache_usage_accounting: bool,
+    /// Whether zero-valued cache usage fields from this provider represent a
+    /// real cache miss. `None` means nobody has declared either way, which is
+    /// not the same claim as `Some(false)`: that one asserts the route reports
+    /// nothing, and consumers surface it as an audited zero rather than an
+    /// unmeasured field. Publishing `None` as `false` would put that assertion
+    /// in the mouths of routes nobody has looked at.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_usage_accounting: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_usage_accounting: Option<bool>,
     pub protocols: Vec<String>,
