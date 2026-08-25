@@ -39,10 +39,11 @@ use futures::StreamExt;
 use harn_vm::event_log::{install_default_for_base_dir, AnyEventLog, EventLog, Topic};
 use harn_vm::triggers::event::{GenericWebhookPayload, KnownProviderPayload};
 use harn_vm::{
-    dynamic_register, resolve_live_trigger_binding, DispatchOutcome, DispatchStatus, Dispatcher,
-    MetricsRegistry, ProviderId, ProviderPayload, RateLimitConfig, RateLimiterFactory, RetryPolicy,
-    SignatureStatus, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerHandlerSpec,
-    TriggerRetryConfig, Vm, WorkerQueue, WorkerQueuePriority, WorkerQueueResponseRecord,
+    dynamic_register, resolve_live_trigger_binding, ConnectorRegistry, DispatchOutcome,
+    DispatchStatus, Dispatcher, MetricsRegistry, ProviderId, ProviderPayload, RateLimitConfig,
+    RateLimiterFactory, RetryPolicy, SignatureStatus, TriggerBindingSource, TriggerBindingSpec,
+    TriggerEvent, TriggerHandlerSpec, TriggerRetryConfig, Vm, WorkerQueue, WorkerQueuePriority,
+    WorkerQueueResponseRecord,
 };
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -52,6 +53,8 @@ use crate::{
     DispatchError, ExportCatalog, ExportedFunction, JobSpec, RetryBackoff, RetrySpec, ScheduleSpec,
 };
 
+mod connectors;
+mod options;
 /// Provider id stamped on synthetic job events. Reuses the generic
 /// `webhook` payload variant so the request JSON rides in
 /// `provider_payload.raw`, the idiomatic place `.harn` handlers read a
@@ -62,6 +65,8 @@ mod secrets_tests;
 #[cfg(test)]
 mod test_support;
 
+use connectors::install_worker_connector_clients;
+pub use options::{JobRunOptions, WorkerServeOptions};
 use secrets::{worker_job_harness, worker_secret_provider};
 
 const JOB_PROVIDER: &str = "webhook";
@@ -70,23 +75,6 @@ const CRON_KIND: &str = "cron";
 
 const DEFAULT_CLAIM_TTL: StdDuration = StdDuration::from_mins(5);
 const DEFAULT_SHUTDOWN_DRAIN: StdDuration = StdDuration::from_secs(30);
-
-#[derive(Clone, Debug)]
-pub struct WorkerServeOptions {
-    pub consumer_id: Option<String>,
-    pub claim_ttl: StdDuration,
-    pub drain_timeout: StdDuration,
-}
-
-impl Default for WorkerServeOptions {
-    fn default() -> Self {
-        Self {
-            consumer_id: None,
-            claim_ttl: DEFAULT_CLAIM_TTL,
-            drain_timeout: DEFAULT_SHUTDOWN_DRAIN,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerJobRegistration {
@@ -118,6 +106,7 @@ pub struct WorkerServer {
     jobs: Vec<WorkerJobRegistration>,
     queues: BTreeSet<String>,
     drain_timeout: StdDuration,
+    _connector_clients: Option<harn_vm::ActiveConnectorClientsGuard>,
 }
 
 impl WorkerServer {
@@ -211,6 +200,7 @@ struct PreparedJobRuntime {
     event_log: Arc<AnyEventLog>,
     vm: Vm,
     jobs: Vec<PreparedJob>,
+    connector_clients: Option<harn_vm::ActiveConnectorClientsGuard>,
 }
 
 struct PreparedJob {
@@ -228,7 +218,13 @@ pub async fn start_worker_server(
     script_path: &Path,
     options: WorkerServeOptions,
 ) -> Result<WorkerServer, DispatchError> {
-    let prepared = prepare_job_runtime(script_path, |_vm| {}, None).await?;
+    let WorkerServeOptions {
+        consumer_id,
+        claim_ttl,
+        drain_timeout,
+        connector_registry,
+    } = options;
+    let prepared = prepare_job_runtime(script_path, |_vm| {}, None, connector_registry).await?;
     if prepared.jobs.is_empty() {
         return Err(DispatchError::Validation(format!(
             "{} does not export any `@job` functions",
@@ -266,14 +262,14 @@ pub async fn start_worker_server(
         )?);
     }
 
-    let consumer_id = options.consumer_id.unwrap_or_else(default_consumer_id);
+    let consumer_id = consumer_id.unwrap_or_else(default_consumer_id);
     for queue_name in &queues {
         tasks.push(spawn_queue_consumer(
             prepared.event_log.clone(),
             dispatcher.clone(),
             queue_name.clone(),
             consumer_id.clone(),
-            options.claim_ttl,
+            claim_ttl,
             budgets_by_binding.clone(),
             shutdown_tx.subscribe(),
         )?);
@@ -316,7 +312,8 @@ pub async fn start_worker_server(
         tasks,
         jobs,
         queues,
-        drain_timeout: options.drain_timeout,
+        drain_timeout,
+        _connector_clients: prepared.connector_clients,
     })
 }
 
@@ -324,6 +321,7 @@ async fn prepare_job_runtime(
     script_path: &Path,
     configure: impl FnOnce(&mut Vm),
     retry_override: Option<&TriggerRetryConfig>,
+    connector_registry: Option<ConnectorRegistry>,
 ) -> Result<PreparedJobRuntime, DispatchError> {
     harn_vm::reset_thread_local_state();
     harn_vm::clear_trigger_registry();
@@ -357,8 +355,16 @@ async fn prepare_job_runtime(
     harn_vm::register_store_builtins(&mut vm, &base_dir);
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);
     vm.set_source_dir(&base_dir);
-    vm.set_harness(worker_job_harness()?);
+    let secret_provider = worker_secret_provider()?;
+    vm.set_harness(worker_job_harness(secret_provider.clone()));
     configure(&mut vm);
+
+    let connector_clients = match connector_registry {
+        Some(registry) => Some(
+            install_worker_connector_clients(registry, event_log.clone(), secret_provider).await?,
+        ),
+        None => None,
+    };
 
     let exports = vm
         .load_module_exports(script_path)
@@ -401,6 +407,7 @@ async fn prepare_job_runtime(
         event_log,
         vm,
         jobs,
+        connector_clients,
     })
 }
 
@@ -796,46 +803,6 @@ fn now_ms() -> i64 {
     harn_vm::clock_mock::now_ms()
 }
 
-/// Driver-level knobs for a one-shot `@job` run.
-///
-/// The default is **exactly** the production behaviour: no override, so the
-/// dispatcher uses the `@job`'s declared `@retry`/`retry:` policy (or its
-/// own default). Overrides are opt-in — they let a one-shot or failure-path
-/// test runner cap or disable retry without editing the `@job` source, so an
-/// erroring job fails fast instead of sleeping through a multi-hour backoff.
-#[derive(Clone, Debug, Default)]
-pub struct JobRunOptions {
-    /// When set, this retry config replaces the `@job`'s declared policy for
-    /// this run only. `None` (the default) preserves production behaviour.
-    pub retry_override: Option<TriggerRetryConfig>,
-}
-
-impl JobRunOptions {
-    /// Override the retry policy for this run, replacing the `@job`'s
-    /// declared policy. The dispatcher's binding is otherwise unchanged.
-    pub fn with_retry(mut self, retry: TriggerRetryConfig) -> Self {
-        self.retry_override = Some(retry);
-        self
-    }
-
-    /// Run the `@job` at most once: a single attempt with no retry and no
-    /// backoff sleep. The natural choice for one-shot CLI / failure-path
-    /// test drivers that must fail fast rather than inherit a long backoff.
-    ///
-    /// `max_attempts: 1` makes `TriggerRetryConfig::next_retry_delay` return
-    /// `None` after the first attempt, so the dispatcher never sleeps. The
-    /// `Linear { delay_ms: 0 }` policy is belt-and-suspenders: even the
-    /// first-attempt delay is zero.
-    pub fn fail_fast() -> Self {
-        Self {
-            retry_override: Some(TriggerRetryConfig::new(
-                1,
-                RetryPolicy::Linear { delay_ms: 0 },
-            )),
-        }
-    }
-}
-
 /// Run one `@job` function against a single JSON request and return its
 /// outcome. This is the one-shot driver behind `harn run --as-job`.
 ///
@@ -901,8 +868,17 @@ pub async fn run_job_once_with_options(
     options: JobRunOptions,
     configure: impl FnOnce(&mut Vm),
 ) -> Result<JobRunOutcome, DispatchError> {
-    let prepared =
-        prepare_job_runtime(script_path, configure, options.retry_override.as_ref()).await?;
+    let JobRunOptions {
+        retry_override,
+        connector_registry,
+    } = options;
+    let prepared = prepare_job_runtime(
+        script_path,
+        configure,
+        retry_override.as_ref(),
+        connector_registry,
+    )
+    .await?;
     let job = prepared
         .jobs
         .iter()
@@ -1047,6 +1023,25 @@ pub async fn run_job_from_files(
     result_out: Option<&Path>,
     pretty: bool,
 ) -> Result<(JobRunOutcome, String), DispatchError> {
+    run_job_from_files_with_options(
+        script_path,
+        job_name,
+        request_path,
+        result_out,
+        pretty,
+        JobRunOptions::default(),
+    )
+    .await
+}
+
+pub async fn run_job_from_files_with_options(
+    script_path: &Path,
+    job_name: &str,
+    request_path: &Path,
+    result_out: Option<&Path>,
+    pretty: bool,
+    options: JobRunOptions,
+) -> Result<(JobRunOutcome, String), DispatchError> {
     let raw = std::fs::read_to_string(request_path).map_err(|error| {
         DispatchError::Io(format!(
             "failed to read request {}: {error}",
@@ -1060,7 +1055,8 @@ pub async fn run_job_from_files(
         ))
     })?;
 
-    let outcome = run_job_once(script_path, job_name, request).await?;
+    let outcome =
+        run_job_once_with_options(script_path, job_name, request, options, |_vm| {}).await?;
     let report = outcome.report_json();
     let rendered = if pretty {
         serde_json::to_string_pretty(&report)
@@ -1517,6 +1513,7 @@ pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
                         consumer_id: Some("test-worker".to_string()),
                         claim_ttl: StdDuration::from_secs(30),
                         drain_timeout: StdDuration::from_secs(5),
+                        ..WorkerServeOptions::default()
                     },
                 )
                 .await

@@ -140,7 +140,7 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/connectors/mod.rs"
+path = "src/connectors/active_clients.rs"
 statics = ["ACTIVE_CONNECTOR_CLIENTS"]
 category = "runtime_registry"
 plan = "arc_registry_scope"

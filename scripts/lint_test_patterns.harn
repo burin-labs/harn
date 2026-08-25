@@ -176,6 +176,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // an in-process server would not prove the `serve api` runtime projection.
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_api_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
+  // Package discovery, connector loading, secret injection, and job dispatch
+  // meet only at the real worker CLI boundary.
+  "crates/harn-cli/tests/harn_cli_e2e/hosted_worker_connectors_e2e.rs",
   "crates/harn-cli/tests/harn_cli_fast/llm_mock_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/mcp_server_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli.rs",
