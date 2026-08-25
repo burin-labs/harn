@@ -433,7 +433,8 @@ absence.
   deterministic and fast. The same mock is observed by `now_ms`,
   `monotonic_ms`, `timestamp`, `elapsed`, the trigger dispatcher, and
   the cron scheduler.
-- `yield_now()` — cooperative scheduling primitive. Lets sibling
+- `harness.runtime.yield_now()` — cooperative scheduling primitive. Lets
+  sibling
   `parallel each` / spawned tasks make progress without advancing time.
   Useful inside `harness.testing.clock_set(...)` blocks where you want one more poll
   cycle but no clock movement.
@@ -675,8 +676,8 @@ pub fn grade_file(harness: Harness, path: string) {
 
 Top-level mutable `let` bindings are shared across functions: a mutation
 in one function is visible to the others. For state mutated from
-`parallel`/`spawn` bodies, prefer atomics (`atomic(0)`, `atomic_add`,
-`atomic_get`) or a channel — concurrent branches share one cell and a
+`parallel`/`spawn` bodies, prefer atomics (`harness.runtime.atomic(0)`,
+`harness.runtime.atomic_add`, `harness.runtime.atomic_get`) or a channel — concurrent branches share one cell and a
 plain read-modify-write races (see HARN-LNT-064).
 
 ## Attributes (`@name(...)`)
@@ -1085,7 +1086,8 @@ no `catch` clause), channels, `select`, and `deadline` in
 `docs/src/concurrency.md`.
 
 For quotas shared across Harn processes, use
-`durable_rate_limit_acquire(options)`. It writes a SQLite reservation log under
+`harness.runtime.durable_rate_limit_acquire(options)`. It writes a SQLite
+reservation log under
 `.harn/rate-limits.sqlite` by default, supports atomic multi-bucket admission,
 and returns `{ok, timed_out, waited_ms, retry_after_ms, buckets}`:
 
@@ -1108,8 +1110,9 @@ guard admitted.ok else { throw "quota admission timed out" }
 
 Channel waits are guarded: if every active task is blocked on sends/receives
 that cannot match another task, the runtime raises `HARN-ORC-012` instead of
-hanging. Use `deadline { ... }`, `select timeout`, or `channel_select(...,
-timeout_ms)` when a channel wait is intentionally bounded by time.
+hanging. Use `deadline { ... }`, `select timeout`, or
+`harness.runtime.channel_select(..., timeout_ms)` when a channel wait is
+intentionally bounded by time.
 
 ## Iteration & lazy iterators
 
@@ -2334,9 +2337,9 @@ agent_loop(harness, task, system, reminder_opts)
 Configure providers under `reminders.config`, e.g.
 `{reminders: {config: {token_pressure: {context_window: 128000},
 idle_nudge: {idle_seconds: 120}}}}`. Register Harn-defined providers
-with `register_reminder_provider({id, subscribes_to, evaluate})`; the
-closure receives `{event, session, session_id, payload, options,
-config}` and returns a reminder effect, bare spec, effect list, or `nil`.
+with `harness.agent.register_reminder_provider({id, subscribes_to, evaluate})`;
+the closure receives `{event, session, session_id, payload, options, config}`
+and returns a reminder effect, bare spec, effect list, or `nil`.
 
 Hooks can return `{reminder: {...}, then?: ...}`, a bare reminder spec,
 or a session-hook effect list. Hosts inject ambient context with the
@@ -2722,8 +2725,8 @@ the `daemon_*` stdlib wrappers (see `docs/src/llm/agent_loop.md#daemon-stdlib-wr
 internally call `agent_await_resumption(...)` when no wake source is
 queued. The snapshot carries daemon-specific fields
 (`pending_event_count`, `wake_interval_ms`, `watch_paths`) alongside the
-standard suspend metadata, so `daemon_resume(path)` cold-restores the
-loop identically.
+standard suspend metadata, so `harness.agent.daemon_resume(path)`
+cold-restores the loop identically.
 
 Common gotchas:
 
@@ -2862,17 +2865,17 @@ Subscribe to channel emits with a `channel.emit` trigger (provider
 `channel`). `match.events` accepts `"channel:<name>"` selectors:
 
 ```harn,ignore
-import { trigger_register } from "std/triggers"
-
-trigger_register({
-  id: "release-on-pr-merge",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:pr.merged"]},
-  handler: { harness, event ->
-    kick_release(event.provider_payload.payload)
-  },
-})
+fn main(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "release-on-pr-merge",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:pr.merged"]},
+    handler: { harness, event ->
+      kick_release(event.provider_payload.payload)
+    },
+  })
+}
 ```
 
 Add `batch: {count, window, key?, expire_action?}` to fire after N
@@ -2885,14 +2888,16 @@ partition, and replay reconstructs the batch from the recorded
 `constituent_event_ids`.
 
 ```harn,ignore
-trigger_register({
-  id: "release-on-3-merges",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:pr.merged"]},
-  batch: {count: 3, window: "1h", key: "repo"},
-  handler: { harness, event -> cut_release(event.batch) },
-})
+fn main(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "release-on-3-merges",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:pr.merged"]},
+    batch: {count: 3, window: "1h", key: "repo"},
+    handler: { harness, event -> cut_release(event.batch) },
+  })
+}
 ```
 
 Pair `batch` with `ReminderInject({target, body, tags?, ttl_turns?,
@@ -2921,7 +2926,7 @@ Diagnostic codes: `HARN-CHN-001` (`pipeline:` outside a pipeline),
 `HARN-CHN-005` (malformed `batch` config). Replay-oracle codes are
 `HARN-REP-CHN-001..003` — see `docs/src/observability/replay-benchmarks.md`.
 
-Channel guardrails (`channel_guardrail_register(config)` and
+Channel guardrails (`harness.channels.guardrail_register(config)` and
 `std/channel_guardrails` presets) run before the durable journal
 append. Each guardrail returns `allow` / `warn` / `block`; worst
 verdict wins; blocked emits never persist but the block decision does
@@ -3229,8 +3234,9 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
   `AnchorChanged` transcript event and `AgentEvent::AnchorChanged`.
 - `sub_agent_run` accepts an `anchor` option. The runtime rejects a child
   anchor that escapes the parent's anchor + mounted roots.
-- `register_path_scope_guard(opts?)` / `clear_path_scope_guard()` install a
-  singleton PreToolUse hook that denies (or emits a `<scope-alert>` reminder
+- `harness.runtime.register_path_scope_guard(opts?)` /
+  `harness.runtime.clear_path_scope_guard()` install a singleton PreToolUse
+  hook that denies (or emits a `<scope-alert>` reminder
   for) tool calls whose path args escape the session anchor.
 - `harness.agent.reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `harness.agent.inject(id, {role, content, …})` — missing `role` errors.
@@ -3243,8 +3249,8 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
   compaction, accepts the same compaction policy fields as
   `transcript_auto_compact`, and errors on unknown option keys.
 - `harness.agent.length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
-- `cancel_in_flight_tool_call(session_id, call_id, opts?)` — abort one
-  in-flight tool call without closing the session. `opts.reason` is
+- `harness.agent.cancel_in_flight_tool_call(session_id, call_id, opts?)` —
+  abort one in-flight tool call without closing the session. `opts.reason` is
   surfaced to the model, `opts.inject_reminder` (default `true`) queues
   a system reminder so the model knows it was stopped, and
   `opts.timeout_ms` (default `5000`) bounds how long to wait for the
@@ -3264,15 +3270,18 @@ compacted the transcript, along with before/after message and event counts.
 Use the daemon stdlib wrappers when you want a first-class handle around
 `agent_loop(harness, ..., {daemon: true})`:
 
-- `daemon_spawn(config)` starts a persistent daemon and returns `{id, status, persist_path, ...}`.
-- `daemon_trigger(handle, event)` appends a durable FIFO trigger event.
-- `daemon_snapshot(handle)` returns the persisted daemon snapshot plus queue
-  fields such as `pending_event_count`, `queued_event_count`,
-  `inflight_event`, and `event_queue_capacity`.
-- `daemon_stop(handle)` preserves state and re-queues any in-flight trigger.
-- `daemon_resume(path)` resumes from the daemon state directory.
+- `harness.agent.daemon_spawn(config)` starts a persistent daemon and returns
+  `{id, status, persist_path, ...}`.
+- `harness.agent.daemon_trigger(handle, event)` appends a durable FIFO trigger
+  event.
+- `harness.agent.managed_daemon_snapshot(handle)` returns the persisted daemon
+  snapshot plus queue fields such as `pending_event_count`,
+  `queued_event_count`, `inflight_event`, and `event_queue_capacity`.
+- `harness.agent.daemon_stop(handle)` preserves state and re-queues any
+  in-flight trigger.
+- `harness.agent.daemon_resume(path)` resumes from the daemon state directory.
 
-`daemon_spawn` accepts daemon-loop options like `wake_interval_ms`,
+`harness.agent.daemon_spawn` accepts daemon-loop options like `wake_interval_ms`,
 `watch_paths`, and `idle_watchdog_attempts`, plus
 `event_queue_capacity` (default `1024`).
 
@@ -3402,10 +3411,11 @@ query_stringify([{key: "name", value: "ali ce"}])
 - Harness-scoped content addressing: `harness.crypto.sha256(value) ->
   string` accepts strings or bytes and returns lowercase SHA-256 hex.
   `sha256_hex(value)` remains as a compatibility alias.
-- Ed25519 signatures: `ed25519_keypair() -> {private, public}` (hex),
+- Ed25519 signatures: `harness.random.ed25519_keypair() -> {private, public}`
+  (hex),
   `ed25519_sign(priv, msg) -> string` (hex sig),
   `ed25519_verify(pub, msg, sig) -> bool`.
-- X25519 key agreement: `x25519_keypair() -> {private, public}`,
+- X25519 key agreement: `harness.random.x25519_keypair() -> {private, public}`,
   `x25519_agree(priv, peer_pub) -> string` (hex shared secret).
 - JWT verification: `jwt_verify(alg, token, key)` (HS256 / RS256 /
   ES256). Pairs with the existing `jwt_sign`.
@@ -3596,18 +3606,21 @@ Host contract:
 Use the trigger stdlib wrappers when a script needs to inspect or manually
 exercise the live trigger registry:
 
-- `trigger_list()` returns `list<TriggerBinding>`.
-- `trigger_register(config)` hot-installs a dynamic trigger and returns a
-  `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
+- `harness.runtime.trigger_list()` returns `list<TriggerBinding>`.
+- `harness.runtime.trigger_register(config)` hot-installs a dynamic trigger and
+  returns a `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
   `backoff: "svix" | "immediate"`. `config.when_budget` accepts
   `{max_cost_usd, tokens_max, timeout}` when `config.when` calls `harness.llm.call(...)`.
-- `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
-  `DispatchHandle`.
-- `trigger_replay(event_id)` fetches an event from `triggers.events` and
+- `harness.runtime.trigger_fire(handle, event)` injects a synthetic
+  `TriggerEvent` and returns a `DispatchHandle`.
+- `harness.runtime.trigger_replay(event_id)` fetches an event from
+  `triggers.events` and
   re-dispatches it through the trigger dispatcher, preserving
   `replay_of_event_id`.
-- `trigger_inspect_dlq()` returns `list<DlqEntry>` with retry history.
-- `trigger_inspect_lifecycle(kind?)` returns lifecycle records including
+- `harness.runtime.trigger_inspect_dlq()` returns `list<DlqEntry>` with retry
+  history.
+- `harness.runtime.trigger_inspect_lifecycle(kind?)` returns lifecycle records
+  including
   `predicate.evaluated`, `predicate.budget_exceeded`, and
   `predicate.daily_budget_exceeded`.
 
@@ -3618,10 +3631,10 @@ Trust-graph helpers also live in `std/triggers`:
 
 - `harness.runtime.handler_context()` returns the active trigger dispatch
   context or `nil`.
-- `trust_record(agent, action, approver, outcome, tier)` appends a manual
-  trust record.
-- `trust_query(filters)` queries historical trust records, including
-  `limit` and `grouped_by_trace`.
+- `harness.runtime.trust_record(agent, action, approver, outcome, tier)`
+  appends a manual trust record.
+- `harness.runtime.trust_query(filters)` queries historical trust records,
+  including `limit` and `grouped_by_trace`.
 - `TriggerConfig.autonomy_tier` and manifest `[[triggers]].autonomy_tier`
   accept `shadow | suggest | act_with_approval | act_auto`.
 - `harn trust query`, `harn trust promote`, and `harn trust demote` expose the
@@ -3917,17 +3930,19 @@ removed — call the lifecycle verbs explicitly.
 
 Three concentric surfaces:
 
-- `register_tool_hook({pattern, deny?, max_output?, pre?, post?})` — tool-level
-  `PreToolUse` / `PostToolUse`. `pre` and `post` are closures that
+- `harness.tools.register_hook({pattern, deny?, max_output?, pre?, post?})` —
+  tool-level `PreToolUse` / `PostToolUse`. `pre` and `post` are closures that
   receive `{event, tool, result?}` payloads; `pre` can return `{deny}`
   or `{args}`, and `post` can return a string, `{result}`, or
   `{result, truncated: true, dropped_bytes: N}`. Use the typed truncation
   shape whenever source bytes were dropped so later hooks and runtime
   observers retain exact loss metadata even if another hook appends text.
-- `register_persona_hook(persona_pattern, event, handler)` — persona
+- `harness.agent.register_persona_hook(persona_pattern, event, handler)` —
+  persona
   `PreStep` / `PostStep` / `OnApprovalRequested` / `OnHandoffEmitted` /
   `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.
-- `register_session_hook(event, handler)` — whole-session lifecycle:
+- `harness.agent.register_session_hook(event, handler)` — whole-session
+  lifecycle:
   `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
   `post_compact`, `post_turn`, `permission_asked`, `permission_replied`,
   `file_edited`, `session_error`, `session_idle`, `pre_finish`,
@@ -3967,12 +3982,12 @@ Three concentric surfaces:
   then?}` to combine the reminder with an existing action, return a bare
   reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
   or return a session-hook effect list like `[{reminder: {...}}]`.
-- `register_reminder_provider({id, subscribes_to, evaluate})` registers a
-  Harn-defined provider for `post_tool_use`, `on_budget_threshold`,
-  `post_compact`, or `session_idle`; `clear_reminder_providers()` clears
-  user-defined providers.
-- `pipeline_on_finish(callback)` — register a `fn(harness, return_value)`
-  callback that runs between `pre_finish` and `post_finish` on the main
+- `harness.agent.register_reminder_provider({id, subscribes_to, evaluate})`
+  registers a Harn-defined provider for `post_tool_use`,
+  `on_budget_threshold`, `post_compact`, or `session_idle`;
+  `harness.agent.clear_reminder_providers()` clears user-defined providers.
+- `harness.agent.pipeline_on_finish(callback)` — register a
+  `fn(harness, return_value)` callback that runs between `pre_finish` and `post_finish` on the main
   VM (its stdout reaches the host capture buffer). The callback's
   return value replaces the pipeline's return value, so a custom
   `on_finish` can wrap, redact, or audit the result. Four canonical
@@ -4030,7 +4045,8 @@ Three concentric surfaces:
   `end_timing` for flows that cross callbacks, branches, or async-ish
   lifecycle boundaries. Duplicate `end_timing` is idempotent. Timing
   spans are emitted under `SpanKind::UserTiming` (`kind: "user_timing"`),
-  so `trace_spans()` and `harn run --profile-json` surface them as their
+  so `harness.obs.trace_spans()` and `harn run --profile-json` surface them as
+  their
   own bucket without colliding with LLM/tool spans.
 - `std/lifecycle/on_budget` exports three named callback strategies for
   the `OnBudgetThreshold` event. Each takes `(harness, budget_state)`
@@ -4074,8 +4090,8 @@ Three concentric surfaces:
   registries. `spawn_settlement_agent` remains the P-03 handoff point and
   returns a typed `{status: "unsupported", method, reason}` receipt until
   harn#1856 lands.
-- `pipeline_lifecycle_audit_log_take()` and
-  `pipeline_lifecycle_audit_log_snapshot()` drain or peek at the
+- `harness.obs.pipeline_lifecycle_audit_log_take()` and
+  `harness.obs.pipeline_lifecycle_audit_log_snapshot()` drain or peek at the
   per-pipeline-run audit log that `harness.emit_audit` writes. Each
   entry is `{seq, kind, payload, pipeline_id}`. `std/lifecycle`
   re-exports them as `lifecycle_audit_log_take` /
@@ -4091,8 +4107,8 @@ for custom drain logic. Full prose: `docs/src/pipeline-lifecycle.md`.
 Cookbook recipes: `docs/src/cookbooks/lifecycle.md`. Per-preset stdlib
 reference: `docs/src/stdlib/lifecycle.md`.
 
-`pipeline_on_finish(callback)` registers a `fn(harness, return_value)`
-that runs between `pre_finish` and `post_finish` on the main VM. The
+`harness.agent.pipeline_on_finish(callback)` registers a
+`fn(harness, return_value)` that runs between `pre_finish` and `post_finish` on the main VM. The
 return value replaces the pipeline's return value. Registration is
 last-write-wins and one-shot per run — a stale registration cannot
 leak.
@@ -4111,9 +4127,13 @@ import {
   on_finish_drain, on_finish_handoff_to, on_finish_block_until_settled,
 } from "std/lifecycle"
 
-pipeline_on_finish(on_finish_drain)
-pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
-pipeline_on_finish(on_finish_block_until_settled(30s, on_finish_drain))
+fn main(harness: Harness) {
+  harness.agent.pipeline_on_finish(on_finish_drain)
+  harness.agent.pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+  harness.agent.pipeline_on_finish(
+    on_finish_block_until_settled(30s, on_finish_drain),
+  )
+}
 ```
 
 `Combinator.*` factories (`std/lifecycle/combinators`) wrap any
@@ -4135,11 +4155,13 @@ import {
   compose, if_unsettled, with_telemetry, with_timeout,
 } from "std/lifecycle/combinators"
 
-pipeline_on_finish(
-  if_unsettled(
-    with_telemetry(with_timeout(on_finish_drain, 30000), "drain")
-  ),
-)
+fn main(harness: Harness) {
+  harness.agent.pipeline_on_finish(
+    if_unsettled(
+      with_telemetry(with_timeout(on_finish_drain, 30000), "drain")
+    ),
+  )
+}
 ```
 
 The drain step is the per-item disposition loop behind
@@ -4181,28 +4203,33 @@ Hook-event table for lifecycle gates (`register_session_hook`):
 Common patterns:
 
 ```harn,ignore
-// Hand unsettled to a nightly settlement pipeline.
-import { on_finish_handoff_to } from "std/lifecycle"
-pipeline_on_finish(on_finish_handoff_to("nightly-settle"))
+import {
+  on_finish_block_until_settled, on_finish_drain, on_finish_handoff_to,
+} from "std/lifecycle"
 
-// Drain with custom audit per disposition.
-import { on_finish_drain } from "std/lifecycle"
-register_session_hook("on_drain_decision", { event ->
-  external_audit_push(event)
-  return nil
-})
-pipeline_on_finish(on_finish_drain)
+fn main(harness: Harness) {
+  // Hand unsettled to a nightly settlement pipeline.
+  harness.agent.pipeline_on_finish(
+    on_finish_handoff_to("nightly-settle"),
+  )
 
-// Abort cleanly on unsettled state (no silent loss).
-import { on_finish_block_until_settled } from "std/lifecycle"
-pipeline_on_finish(
-  on_finish_block_until_settled(60s, { harness, rv ->
-    harness.emit_audit(
-      "aborted_with_unsettled", {state: harness.unsettled_state()},
-    )
-    throw {category: "unsettled_at_finish", reason: "timeout"}
-  }),
-)
+  // Drain with custom audit per disposition.
+  harness.agent.register_session_hook("on_drain_decision", { event ->
+    external_audit_push(event)
+    return nil
+  })
+  harness.agent.pipeline_on_finish(on_finish_drain)
+
+  // Abort cleanly on unsettled state (no silent loss).
+  harness.agent.pipeline_on_finish(
+    on_finish_block_until_settled(60s, { harness, rv ->
+      harness.emit_audit(
+        "aborted_with_unsettled", {state: harness.unsettled_state()},
+      )
+      throw {category: "unsettled_at_finish", reason: "timeout"}
+    }),
+  )
+}
 ```
 
 Cross-ref: the suspend/resume primitive that drives
@@ -4293,20 +4320,22 @@ Route trigger events through a pool with the `SpawnToPool` handler
 variant from `std/triggers` (one trigger, one drain rate):
 
 ```harn,ignore
-import { trigger_register, SpawnToPool } from "std/triggers"
+import { SpawnToPool } from "std/triggers"
 
-trigger_register({
-  id: "webhook-router",
-  kind: "channel.emit",
-  provider: "channel",
-  match: {events: ["channel:webhook.received"]},
-  handler: SpawnToPool({
-    pool: "webhook-work",
-    key_from: "provider_payload.payload.source",
-    priority_from: "provider_payload.payload.urgency",
-    task_factory: { event -> { -> handle_webhook(event) } },
-  }),
-})
+fn main(harness: Harness) {
+  harness.runtime.trigger_register({
+    id: "webhook-router",
+    kind: "channel.emit",
+    provider: "channel",
+    match: {events: ["channel:webhook.received"]},
+    handler: SpawnToPool({
+      pool: "webhook-work",
+      key_from: "provider_payload.payload.source",
+      priority_from: "provider_payload.payload.urgency",
+      task_factory: { event -> { -> handle_webhook(event) } },
+    }),
+  })
+}
 ```
 
 `key_from` / `priority_from` are dotted JSON paths into the trigger
@@ -4335,7 +4364,7 @@ register_session_hook("file_edited", { event ->
 
 Successful standard filesystem mutations queue automatically;
 hooks fire at the next agent-loop turn boundary. Call
-`notify_file_edited(path, metadata?)` to explicitly emit one.
+`harness.agent.notify_file_edited(path, metadata?)` to explicitly emit one.
 For background context refresh/librarian jobs, import
 `std/context/maintenance` and return `context_maintenance_queue_receipt(...)`
 from the hook instead of doing slow work inline.
@@ -4598,64 +4627,68 @@ Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/
 
 ## First-class routing policy
 
-`routing_policy({...})` builds a reusable handle that drives a chain of
+`harness.llm.routing_policy({...})` builds a reusable handle that drives a
+chain of
 providers with failover, latency-aware racing, and per-call / session
 budget caps. Pipe it through `harness.llm.call(... routing: policy ...)` to
 replace ad-hoc `with_routing` + `with_retry` + `with_fallback`
 compositions with a single typed primitive.
 
 ```harn,ignore
-const policy = routing_policy({
-  chain: [
-    {provider: "anthropic", model: "claude-opus-4-20250514"},
-    {provider: "openai",    model: "gpt-5.4-mini"},
-    {provider: "ollama",    model: "llama4:70b"},      // local fallback
-  ],
-  failover: {
-    on_status: [429, 500, 502, 503, 504],
-    on_timeout_ms: 30_000,
-    on_error_kinds: ["rate_limit", "schema_validation"],
-    max_attempts: 3,
-  },
-  latency: {
-    target_p95_ms: 8000,
-    // race backup after 5s
-    race_after_ms: 5000,
-  },
-  budget: {
-    // hard ceiling per call
-    per_call_usd: 0.50,
-    session_usd: 5.00,                                // session-wide cap
-    // or "skip" | "warn"
-    on_exceed: "abort",
-  },
-  // optional dispatch label
-  observe: {emit_event: "billing.routing_decision"},
-  // optional verifier chain
-  escalate_on: [
-    // parse the candidate as Harn
-    {kind: "typecheck"},
-    {
-      kind: "lint",
-      forbidden_patterns: ["TODO", "unwrap\\("],
-      on_fail: "refine",
+fn main(harness: Harness) {
+  const policy = harness.llm.routing_policy({
+    chain: [
+      {provider: "anthropic", model: "claude-opus-4-20250514"},
+      {provider: "openai",    model: "gpt-5.4-mini"},
+      {provider: "ollama",    model: "llama4:70b"},      // local fallback
+    ],
+    failover: {
+      on_status: [429, 500, 502, 503, 504],
+      on_timeout_ms: 30000,
+      on_error_kinds: ["rate_limit", "schema_validation"],
+      max_attempts: 3,
     },
-    {
-      kind: "test_run",
-      command: ["cargo", "test", "--quiet"],
-      timeout_secs: 60,
+    latency: {
+      target_p95_ms: 8000,
+      // race backup after 5s
+      race_after_ms: 5000,
     },
-  ],
-  // optional, default 1
-  max_refines_per_link: 1,
-})
+    budget: {
+      // hard ceiling per call
+      per_call_usd: 0.50,
+      // session-wide cap
+      session_usd: 5.00,
+      // or "skip" | "warn"
+      on_exceed: "abort",
+    },
+    // optional dispatch label
+    observe: {emit_event: "billing.routing_decision"},
+    // optional verifier chain
+    escalate_on: [
+      // parse the candidate as Harn
+      {kind: "typecheck"},
+      {
+        kind: "lint",
+        forbidden_patterns: ["TODO", "unwrap\\("],
+        on_fail: "refine",
+      },
+      {
+        kind: "test_run",
+        command: ["cargo", "test", "--quiet"],
+        timeout_secs: 60,
+      },
+    ],
+    // optional, default 1
+    max_refines_per_link: 1,
+  })
 
-const result = harness.llm.call(
-  "Summarize this PR.", nil, {routing: policy},
-)
-// result.routing = {policy, selected, session_cost_usd,
-//   attempts: [{provider, model, status, duration_ms, cost_usd,
-//               error?, verifier_outcome?, verifier_signals?}]}
+  const result = harness.llm.call(
+    "Summarize this PR.", nil, {routing: policy},
+  )
+  // result.routing = {policy, selected, session_cost_usd,
+  //   attempts: [{provider, model, status, duration_ms, cost_usd,
+  //               error?, verifier_outcome?, verifier_signals?}]}
+}
 ```
 
 Semantics:
