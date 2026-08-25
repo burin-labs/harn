@@ -218,7 +218,7 @@ fn analyze_pair(previous: &CapturedRequest, next: &CapturedRequest) -> Result<Pa
         let index = match (&previous_tools, &next_tools) {
             (Some(left), Some(right)) => left
                 .iter()
-                .zip(right)
+                .zip(right.iter())
                 .position(|(before, after)| before != after)
                 .or_else(|| (left.len() != right.len()).then_some(left.len().min(right.len()))),
             _ => None,
