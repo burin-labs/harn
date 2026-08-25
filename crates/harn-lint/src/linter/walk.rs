@@ -331,14 +331,7 @@ impl<'a> Linter<'a> {
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
-                if name == "mcp_tools" {
-                    if let Some(registry) = args.first() {
-                        self.warn_mcp_tools_missing_annotations(registry);
-                    }
-                }
-                if name == "register_step_hook" {
-                    self.validate_step_hook_target(args, snode.span);
-                }
+                self.check_builtin_call_rules(snode);
                 if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintAssertOutsideTest,
@@ -350,22 +343,6 @@ impl<'a> Linter<'a> {
                         severity: LintSeverity::Warning,
                         suggestion: Some(
                             "use `require` for invariants in non-test code".to_string(),
-                        ),
-                        fix: None,
-                    });
-                }
-                if name == "llm_call" && args.get(1).is_some_and(Self::has_interpolation) {
-                    self.diagnostics.push(LintDiagnostic {
-                        code: Code::LintPromptInjectionRisk,
-                        rule: "prompt-injection-risk".into(),
-                        message:
-                            "interpolated data in the `llm_call` system prompt can smuggle untrusted instructions"
-                                .to_string(),
-                        span: snode.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(
-                            "keep the system prompt static and pass dynamic data in the user prompt or options"
-                                .to_string(),
                         ),
                         fix: None,
                     });
@@ -442,6 +419,7 @@ impl<'a> Linter<'a> {
                 if self.harness_call_uses_background_flag(object, method, args) {
                     self.warn_unmanaged_long_running_call(method, snode.span);
                 }
+                self.check_builtin_call_rules(snode);
                 self.lint_node(object);
                 for arg in args {
                     self.lint_node(arg);
@@ -1358,6 +1336,45 @@ impl<'a> Linter<'a> {
                     self.lint_node(alt);
                 }
             }
+        }
+    }
+
+    /// Rules that identify a call by which builtin it names rather than by the
+    /// syntax that reaches it.
+    ///
+    /// Both the ambient global and the typed `harness.*` method that replaced
+    /// it route here, so migrating a call site cannot silence a rule. Anything
+    /// added here is spelling-independent for free; anything left matching
+    /// `Node::FunctionCall` on a name is not.
+    fn check_builtin_call_rules(&mut self, node: &SNode) {
+        if let Some(registry) = self
+            .call_names_builtin(node, "mcp_tools")
+            .and_then(|args| args.first())
+        {
+            self.warn_mcp_tools_missing_annotations(registry);
+        }
+        if let Some(args) = self.call_names_builtin(node, "register_step_hook") {
+            self.validate_step_hook_target(args, node.span);
+        }
+        if self
+            .call_names_builtin(node, "llm_call")
+            .and_then(|args| args.get(1))
+            .is_some_and(Self::has_interpolation)
+        {
+            self.diagnostics.push(LintDiagnostic {
+                code: Code::LintPromptInjectionRisk,
+                rule: "prompt-injection-risk".into(),
+                message:
+                    "interpolated data in the `llm_call` system prompt can smuggle untrusted instructions"
+                        .to_string(),
+                span: node.span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(
+                    "keep the system prompt static and pass dynamic data in the user prompt or options"
+                        .to_string(),
+                ),
+                fix: None,
+            });
         }
     }
 
