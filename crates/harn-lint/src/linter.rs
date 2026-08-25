@@ -696,21 +696,6 @@ impl<'a> Linter<'a> {
         });
     }
 
-    fn warn_missing_secret_scan(&mut self, span: Span) {
-        self.diagnostics.push(LintDiagnostic {
-            code: Code::LintPrOpenWithoutSecretScan,
-            rule: "pr-open-without-secret-scan".into(),
-            message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
-            span,
-            severity: LintSeverity::Warning,
-            suggestion: Some(
-                "run `secret_scan(content)` first and gate the PR-open call on an empty findings list"
-                    .to_string(),
-            ),
-            fix: None,
-        });
-    }
-
     fn analyze_secret_scan_expr(&mut self, node: &SNode, scanned: bool) -> bool {
         match &node.node {
             Node::FunctionCall { name, args, .. } => {
@@ -733,11 +718,24 @@ impl<'a> Linter<'a> {
                 }
                 state
             }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
                 let mut state = self.analyze_secret_scan_expr(object, scanned);
                 for arg in args {
                     state = self.analyze_secret_scan_expr(arg, state);
+                }
+                if let Some(state) =
+                    self.harness_mcp_secret_scan_state(object, method, args, state, node.span)
+                {
+                    return state;
                 }
                 state
             }

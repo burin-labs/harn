@@ -439,6 +439,9 @@ impl<'a> Linter<'a> {
                 args,
             } => {
                 self.check_harness_method_effect_policy(object, method, args, snode.span);
+                if self.harness_call_uses_background_flag(object, method, args) {
+                    self.warn_unmanaged_long_running_call(method, snode.span);
+                }
                 self.lint_node(object);
                 for arg in args {
                     self.lint_node(arg);

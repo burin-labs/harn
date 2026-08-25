@@ -55,31 +55,77 @@ impl Linter<'_> {
         name == "secret_scan"
             || matches!(
                 (name, args.get(1).and_then(Self::string_literal_value)),
-                ("mcp_call", Some("harn.secret_scan" | "harn::secret_scan"))
+                ("mcp_call", Some(operation)) if Self::is_secret_scan_operation(operation)
             )
             || matches!(
                 (name, args.first().and_then(Self::string_literal_value)),
-                (
-                    "host_tool_call",
-                    Some("harn.secret_scan" | "harn::secret_scan")
-                )
+                ("host_tool_call", Some(operation)) if Self::is_secret_scan_operation(operation)
             )
     }
 
     pub(super) fn is_pr_open_call(name: &str, args: &[SNode]) -> bool {
         matches!(
             (name, args.get(1).and_then(Self::string_literal_value)),
-            (
-                "mcp_call",
-                Some("git::push_pr" | "git.push_pr" | "create_pr")
-            )
+            ("mcp_call", Some(operation)) if Self::is_pr_open_operation(operation)
         ) || matches!(
             (name, args.first().and_then(Self::string_literal_value)),
-            (
-                "host_tool_call",
-                Some("git::push_pr" | "git.push_pr" | "create_pr")
-            )
+            ("host_tool_call", Some(operation)) if Self::is_pr_open_operation(operation)
         )
+    }
+
+    pub(super) fn is_secret_scan_operation(operation: &str) -> bool {
+        matches!(operation, "harn.secret_scan" | "harn::secret_scan")
+    }
+
+    pub(super) fn is_pr_open_operation(operation: &str) -> bool {
+        matches!(operation, "git::push_pr" | "git.push_pr" | "create_pr")
+    }
+
+    pub(super) fn harness_mcp_operation<'a>(
+        &self,
+        object: &SNode,
+        method: &str,
+        args: &'a [SNode],
+    ) -> Option<&'a str> {
+        (self.harness_capability_of(object) == Some("tools") && method == "mcp_call")
+            .then(|| args.get(1).and_then(Self::string_literal_value))
+            .flatten()
+    }
+
+    pub(super) fn harness_mcp_secret_scan_state(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+        scanned: bool,
+        span: Span,
+    ) -> Option<bool> {
+        let operation = self.harness_mcp_operation(object, method, args)?;
+        if Self::is_secret_scan_operation(operation) {
+            return Some(true);
+        }
+        if Self::is_pr_open_operation(operation) {
+            if !scanned {
+                self.warn_missing_secret_scan(span);
+            }
+            return Some(scanned);
+        }
+        None
+    }
+
+    pub(super) fn warn_missing_secret_scan(&mut self, span: Span) {
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintPrOpenWithoutSecretScan,
+            rule: "pr-open-without-secret-scan".into(),
+            message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "run `secret_scan(content)` first and gate the PR-open call on an empty findings list"
+                    .to_string(),
+            ),
+            fix: None,
+        });
     }
 
     pub(super) fn string_literal_value(node: &SNode) -> Option<&str> {
@@ -91,7 +137,7 @@ impl Linter<'_> {
 
     pub(super) fn enter_long_running_body(&mut self, body: &[SNode]) {
         self.long_running_cleanup_stack
-            .push(Self::body_has_long_running_cleanup(body));
+            .push(self.body_has_long_running_cleanup(body));
     }
 
     pub(super) fn exit_long_running_body(&mut self) {
@@ -123,6 +169,23 @@ impl Linter<'_> {
     pub(super) fn call_uses_background_flag(name: &str, args: &[SNode]) -> bool {
         Self::long_running_capable_call(name, args)
             && args.iter().any(Self::expr_has_background_flag)
+    }
+
+    pub(super) fn harness_call_uses_background_flag(
+        &self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+    ) -> bool {
+        matches!(
+            (self.harness_capability_of(object), method),
+            (Some("fs"), "walk" | "glob" | "find_text")
+                | (Some("net"), "get" | "request" | "download")
+                | (
+                    Some("tools"),
+                    "run_command" | "run_test" | "run_build_command"
+                )
+        ) && args.iter().any(Self::expr_has_background_flag)
     }
 
     fn long_running_capable_call(name: &str, args: &[SNode]) -> bool {
@@ -157,13 +220,14 @@ impl Linter<'_> {
         matches!(&node.node, Node::DictLiteral(entries) if entries.iter().any(|entry| Self::dict_key_name(&entry.key).as_deref() == Some("background") && matches!(entry.value.node, Node::BoolLiteral(true))))
     }
 
-    fn body_has_long_running_cleanup(body: &[SNode]) -> bool {
-        body.iter().any(Self::node_has_long_running_cleanup)
+    fn body_has_long_running_cleanup(&self, body: &[SNode]) -> bool {
+        body.iter()
+            .any(|node| self.node_has_long_running_cleanup(node))
     }
 
-    fn node_has_long_running_cleanup(node: &SNode) -> bool {
+    fn node_has_long_running_cleanup(&self, node: &SNode) -> bool {
         match &node.node {
-            Node::DeferStmt { body } => Self::block_calls_cancel_handle(body),
+            Node::DeferStmt { body } => self.block_calls_cancel_handle(body),
             Node::TryCatch {
                 body,
                 catch_body,
@@ -172,19 +236,19 @@ impl Linter<'_> {
             } => {
                 finally_body
                     .as_ref()
-                    .is_some_and(|body| Self::block_calls_cancel_handle(body))
-                    || Self::body_has_long_running_cleanup(body)
-                    || Self::body_has_long_running_cleanup(catch_body)
+                    .is_some_and(|body| self.block_calls_cancel_handle(body))
+                    || self.body_has_long_running_cleanup(body)
+                    || self.body_has_long_running_cleanup(catch_body)
             }
             Node::IfElse {
                 then_body,
                 else_body,
                 ..
             } => {
-                Self::body_has_long_running_cleanup(then_body)
+                self.body_has_long_running_cleanup(then_body)
                     || else_body
                         .as_ref()
-                        .is_some_and(|body| Self::body_has_long_running_cleanup(body))
+                        .is_some_and(|body| self.body_has_long_running_cleanup(body))
             }
             Node::ForIn { body, .. }
             | Node::WhileLoop { body, .. }
@@ -193,16 +257,16 @@ impl Linter<'_> {
             | Node::Block(body)
             | Node::SpawnExpr { body }
             | Node::ScopeBlock { body }
-            | Node::Closure { body, .. } => Self::body_has_long_running_cleanup(body),
+            | Node::Closure { body, .. } => self.body_has_long_running_cleanup(body),
             _ => false,
         }
     }
 
-    fn block_calls_cancel_handle(body: &[SNode]) -> bool {
-        body.iter().any(Self::node_calls_cancel_handle)
+    fn block_calls_cancel_handle(&self, body: &[SNode]) -> bool {
+        body.iter().any(|node| self.node_calls_cancel_handle(node))
     }
 
-    fn node_calls_cancel_handle(node: &SNode) -> bool {
+    fn node_calls_cancel_handle(&self, node: &SNode) -> bool {
         if let Node::FunctionCall { name, args, .. } = &node.node {
             if name == "cancel_handle"
                 || matches!(
@@ -219,9 +283,16 @@ impl Linter<'_> {
                 return true;
             }
         }
+        if let Node::MethodCall { object, method, .. }
+        | Node::OptionalMethodCall { object, method, .. } = &node.node
+        {
+            if self.harness_capability_of(object) == Some("tools") && method == "cancel_handle" {
+                return true;
+            }
+        }
         harn_parser::visit::immediate_children(node)
             .into_iter()
-            .any(Self::node_calls_cancel_handle)
+            .any(|child| self.node_calls_cancel_handle(child))
     }
 
     pub(super) fn dict_key_name(node: &SNode) -> Option<String> {
