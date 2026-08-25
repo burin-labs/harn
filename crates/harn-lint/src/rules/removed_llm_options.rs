@@ -1,5 +1,9 @@
-//! `deprecated_llm_options` rule: hard-error on removed option keys passed
+//! `removed-llm-options` rule: hard-error on removed option keys passed
 //! in dict-literal options to `llm_call`-family surfaces.
+//!
+//! Removed, not deprecated: every key here is rejected outright, by this rule
+//! at check time and by the runtime at call time. Nothing still works with a
+//! warning.
 //!
 //! Two sources feed the removed-key set:
 //! * the canonical option registry's removal table
@@ -26,7 +30,7 @@ use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::linter::harness_facts::HarnessFacts;
 
-const RULE_NAME: &str = "deprecated_llm_options";
+const RULE_NAME: &str = "removed-llm-options";
 
 const LEGACY_RETRY_KEYS: &[&str] = &["llm_retries", "llm_backoff_ms"];
 
@@ -53,7 +57,7 @@ const OPTION_SURFACES: &[(&str, usize)] = &[
 /// Walk the program looking for calls to LLM surfaces whose dict-literal
 /// options argument contains removed keys. Emits one Error per offending
 /// key occurrence, anchored to the key's span.
-pub(crate) fn check_deprecated_llm_options(
+pub(crate) fn check_removed_llm_options(
     program: &[SNode],
     harness: &HarnessFacts,
     diagnostics: &mut Vec<LintDiagnostic>,
@@ -116,7 +120,7 @@ fn scan_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
 
 fn make_registry_diagnostic(key: &str, fix: &str, span: Span) -> LintDiagnostic {
     LintDiagnostic {
-        code: Code::LintDeprecatedLlmOptions,
+        code: Code::LintRemovedLlmOptions,
         rule: RULE_NAME.into(),
         message: format!("option `{key}` was removed — {fix}"),
         span,
@@ -134,7 +138,7 @@ fn make_diagnostic(key: &str, span: Span) -> LintDiagnostic {
         "remove `{key}` from this options dict and wrap the call with `with_retry(default_llm_caller(), {{max_attempts: K + 1}})` from `std/llm/handlers` (K = the old `llm_retries` value)."
     ));
     LintDiagnostic {
-        code: Code::LintDeprecatedLlmOptions,
+        code: Code::LintRemovedLlmOptions,
         rule: RULE_NAME.into(),
         message,
         span,
@@ -155,7 +159,7 @@ mod tests {
         let program = Parser::new(tokens).parse().expect("parse");
         let harness = HarnessFacts::collect(&program);
         let mut diags = Vec::new();
-        check_deprecated_llm_options(&program, &harness, &mut diags);
+        check_removed_llm_options(&program, &harness, &mut diags);
         diags
     }
 

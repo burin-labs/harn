@@ -329,7 +329,7 @@ diagnostic_codes! {
     LintImportOrder, "HARN-LNT-047", Lnt, "import order lint";
     LintPreferOptionalShorthand, "HARN-LNT-048", Lnt, "prefer optional shorthand lint";
     LintLegacyDocComment, "HARN-LNT-049", Lnt, "legacy doc comment lint";
-    LintDeprecatedLlmOptions, "HARN-LNT-050", Lnt, "deprecated LLM options lint";
+    LintRemovedLlmOptions, "HARN-LNT-050", Lnt, "removed LLM options lint";
     LintUnnecessarySafeNavigation, "HARN-LNT-051", Lnt, "unnecessary safe navigation lint";
     LintAmbientClockBuiltin, "HARN-LNT-052", Lnt, "ambient clock builtin replaced by `harness.clock.*`";
     LintAmbientStdioBuiltin, "HARN-LNT-053", Lnt, "ambient stdio builtin replaced by `harness.stdio.*`";
@@ -436,7 +436,7 @@ impl Code {
             // LLM call family — schema, options, provider branching.
             Code::LlmSchemaMissing => &[Code::LlmSchemaInvalid],
             Code::LlmSchemaInvalid => &[Code::LlmSchemaMissing],
-            Code::DeprecatedLlmOption => &[Code::LintDeprecatedLlmOptions],
+            Code::DeprecatedLlmOption => &[Code::LintRemovedLlmOptions],
             Code::LlmProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             // Prompt-template family.
             Code::PromptTemplateParse => &[Code::PromptTargetMissing],
@@ -520,9 +520,9 @@ impl Code {
             Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],
             // Lint pairs (drift between lint and runtime/typecheck codes).
-            Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption],
+            Code::LintRemovedLlmOptions => &[Code::DeprecatedLlmOption],
             Code::LintUnnormalizedOptions => {
-                &[Code::LintDeprecatedLlmOptions, Code::LintUntypedDictAccess]
+                &[Code::LintRemovedLlmOptions, Code::LintUntypedDictAccess]
             }
             Code::LintPromptInjectionRisk => &[Code::PromptInjectionRisk],
             Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],

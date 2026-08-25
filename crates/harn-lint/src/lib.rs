@@ -377,8 +377,13 @@ fn rule_disabled(rule: &str, disabled_rules: &[String]) -> bool {
         .any(|disabled| rule_matches_disabled(rule, disabled))
 }
 
+/// A rule id is a handle users write into `harn.toml`, so a renamed rule keeps
+/// answering to what they wrote. The old spelling is accepted for disabling
+/// only — diagnostics always report the current id.
 fn rule_matches_disabled(rule: &str, disabled: &str) -> bool {
-    rule == disabled || (rule == "dead-code-after-return" && disabled == "unreachable-code")
+    rule == disabled
+        || (rule == "dead-code-after-return" && disabled == "unreachable-code")
+        || (rule == "removed-llm-options" && disabled == "deprecated_llm_options")
 }
 
 /// Extract all function names that appear in selective import statements

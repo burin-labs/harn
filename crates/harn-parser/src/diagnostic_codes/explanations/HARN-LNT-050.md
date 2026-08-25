@@ -1,4 +1,4 @@
-# HARN-LNT-050 — deprecated LLM options lint
+# HARN-LNT-050 — removed LLM options lint
 
 ## How to fix
 
