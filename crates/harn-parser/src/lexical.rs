@@ -292,6 +292,38 @@ pub fn resolved_identifier_bindings(
     analysis.resolved
 }
 
+/// Resolve a property receiver to its root binding and ordered property path.
+///
+/// Both ordinary and optional property access recurse through the same lexical
+/// owner. Consumers can compare the returned [`BindingId`] with the parameter
+/// or local declaration they authorize instead of inferring authority from an
+/// identifier's spelling.
+pub fn resolved_receiver_path<'node, 'facts>(
+    receiver: &'node SNode,
+    resolved: &'facts HashMap<(usize, usize), BindingId>,
+) -> Option<(&'facts BindingId, Vec<&'node str>)> {
+    fn collect<'node, 'facts>(
+        node: &'node SNode,
+        resolved: &'facts HashMap<(usize, usize), BindingId>,
+        properties: &mut Vec<&'node str>,
+    ) -> Option<&'facts BindingId> {
+        match &node.node {
+            Node::Identifier(_) => resolved.get(&(node.span.start, node.span.end)),
+            Node::PropertyAccess { object, property }
+            | Node::OptionalPropertyAccess { object, property } => {
+                let root = collect(object, resolved, properties)?;
+                properties.push(property);
+                Some(root)
+            }
+            _ => None,
+        }
+    }
+
+    let mut properties = Vec::new();
+    let root = collect(receiver, resolved, &mut properties)?;
+    Some((root, properties))
+}
+
 #[derive(Debug, Clone)]
 enum BindingOwner {
     Current,
