@@ -514,6 +514,20 @@ impl Drop for SsrfGuardScope {
     }
 }
 
+/// Swap the explicit-egress-policy enforcement depth. Paired with
+/// `AmbientExecutionScope`'s per-poll swap: the gate fails OPEN at depth 0, so
+/// a subtask that read a worker thread's default would skip it.
+pub(crate) fn swap_require_explicit_egress_policy_depth(next: usize) -> usize {
+    REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH
+        .with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
+}
+
+/// Swap the SSRF-guard depth. Same fail-open shape as
+/// [`swap_require_explicit_egress_policy_depth`].
+pub(crate) fn swap_require_ssrf_guard_depth(next: usize) -> usize {
+    REQUIRE_SSRF_GUARD_DEPTH.with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
+}
+
 pub(crate) fn clear_ssrf_guard_requirement_for_host() {
     REQUIRE_SSRF_GUARD_DEPTH.with(|depth| *depth.borrow_mut() = 0);
 }

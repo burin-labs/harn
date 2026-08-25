@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use crate::value::{DeadlockError, VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
 
 use super::super::CallArgs;
+use crate::vm::subtask;
 
 /// Human-readable rendering of a `mutex(resource)` key for diagnostics
 /// (e.g. the HARN-ORC-011 deadlock message). Scalars render as themselves;
@@ -64,14 +65,14 @@ impl Drop for ParallelCancelGuard {
 /// run-everything form. `parallel` / `parallel each` use the fail-fast
 /// [`run_capped_ordered_fail_fast`] instead.
 async fn run_capped_ordered<F, T>(
-    futures: Vec<F>,
+    futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
 where
-    F: std::future::Future<Output = T> + 'static,
-    T: 'static,
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
 {
     let _cancel_guard = ParallelCancelGuard(cancel_token);
     let total = futures.len();
@@ -80,21 +81,22 @@ where
     }
     let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
     let slot = cap.unwrap_or(total).max(1).min(total);
-    let mut pending: VecDeque<(usize, F)> = futures.into_iter().enumerate().collect();
+    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>)> =
+        futures.into_iter().enumerate().collect();
     let mut join_set: tokio::task::JoinSet<(usize, T)> = tokio::task::JoinSet::new();
 
     while join_set.len() < slot {
         let Some((i, fut)) = pending.pop_front() else {
             break;
         };
-        join_set.spawn_local(async move { (i, fut.await) });
+        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
     }
 
     while let Some(joined) = join_set.join_next().await {
         let (index, value) = joined.map_err(|e| VmError::Runtime(format!("{error_label}: {e}")))?;
         results[index] = Some(value);
         if let Some((i, fut)) = pending.pop_front() {
-            join_set.spawn_local(async move { (i, fut.await) });
+            subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
         }
     }
 
@@ -127,14 +129,14 @@ where
 /// (deterministic: the construct contributes only its error), matching how
 /// `scope { }` drops output from cancelled siblings.
 async fn run_capped_ordered_fail_fast<F, T>(
-    futures: Vec<F>,
+    futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
 where
-    F: std::future::Future<Output = Result<T, VmError>> + 'static,
-    T: 'static,
+    F: std::future::Future<Output = Result<T, VmError>> + Send + 'static,
+    T: Send + 'static,
 {
     let _cancel_guard = ParallelCancelGuard(Arc::clone(&cancel_token));
     let total = futures.len();
@@ -143,7 +145,8 @@ where
     }
     let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
     let slot = cap.unwrap_or(total).max(1).min(total);
-    let mut pending: VecDeque<(usize, F)> = futures.into_iter().enumerate().collect();
+    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>)> =
+        futures.into_iter().enumerate().collect();
     let mut join_set: tokio::task::JoinSet<(usize, Result<T, VmError>)> =
         tokio::task::JoinSet::new();
 
@@ -151,7 +154,7 @@ where
         let Some((i, fut)) = pending.pop_front() else {
             break;
         };
-        join_set.spawn_local(async move { (i, fut.await) });
+        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
     }
 
     // Lowest-source-index error observed so far, if any.
@@ -162,7 +165,7 @@ where
                 results[index] = Some(value);
                 if first_error.is_none() {
                     if let Some((i, fut)) = pending.pop_front() {
-                        join_set.spawn_local(async move { (i, fut.await) });
+                        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
                     }
                 }
                 continue;
@@ -205,41 +208,16 @@ where
     }
 }
 
-/// Wrap an inline concurrent subtask future (a `parallel` / `parallel_each` /
-/// `parallel settle` map body, or a `spawn` block) so it runs under an isolated
-/// COPY of the spawning task's FULL ambient scope — the active agent session,
-/// execution context, mutation session, and capability/approval policies — in
-/// addition to its pool-registry scope.
-///
-/// The scope snapshot is captured EAGERLY here, synchronously in the spawn
-/// loop, while the spawning task's `scope_ambient` is still swapped in, so each
-/// subtask carries the agent's CURRENT session. That session is what the hostlib
-/// write chokepoint (`fs_snapshot::auto_capture_for_write` -> `active_session_id`)
-/// reads to record `files_written`. Without it, a subtask polled while a fan-out
-/// worker's scope is swapped out (the subtasks are independent `LocalSet` tasks,
-/// not nested in the parent's poll) reads an empty/sibling session and its
-/// writes vanish from the sub-agent receipt — the single-worker path hid this
-/// because nothing competed for the thread-local there.
-fn scope_inline_subtask<F: std::future::Future + 'static>(
-    registry: Arc<crate::stdlib::pool::PoolRegistry>,
-    future: F,
-) -> impl std::future::Future<Output = F::Output> {
-    crate::orchestration::scope_ambient(
-        crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask(),
-        crate::stdlib::pool::with_pool_registry_scope(registry, future),
-    )
-}
-
 async fn stream_capped_unordered<F, T>(
-    futures: Vec<F>,
+    futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
     sender: tokio::sync::mpsc::Sender<Result<T, VmError>>,
     mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) where
-    F: std::future::Future<Output = Result<T, VmError>> + 'static,
-    T: 'static,
+    F: std::future::Future<Output = Result<T, VmError>> + Send + 'static,
+    T: Send + 'static,
 {
     let _cancel_guard = ParallelCancelGuard(Arc::clone(&cancel_token));
     let total = futures.len();
@@ -247,14 +225,14 @@ async fn stream_capped_unordered<F, T>(
         return;
     }
     let slot = cap.unwrap_or(total).max(1).min(total);
-    let mut pending: VecDeque<F> = futures.into_iter().collect();
+    let mut pending: VecDeque<subtask::PreparedSubtask<F>> = futures.into_iter().collect();
     let mut join_set: tokio::task::JoinSet<Result<T, VmError>> = tokio::task::JoinSet::new();
 
     while join_set.len() < slot {
         let Some(fut) = pending.pop_front() else {
             break;
         };
-        join_set.spawn_local(fut);
+        subtask::spawn_into(&mut join_set, fut);
     }
 
     loop {
@@ -297,7 +275,7 @@ async fn stream_capped_unordered<F, T>(
             return;
         }
         if let Some(fut) = pending.pop_front() {
-            join_set.spawn_local(fut);
+            subtask::spawn_into(&mut join_set, fut);
         }
     }
 }
@@ -335,7 +313,7 @@ impl super::super::Vm {
                 task_ids.push(task_id);
                 let registry = child.pool_registry.clone();
                 let closure = closure.clone();
-                futures.push(scope_inline_subtask(registry, async move {
+                futures.push(subtask::prepare(registry, async move {
                     let arg = VmValue::Int(i as i64);
                     let result = child
                         .call_closure_args(&closure, CallArgs::One(&arg))
@@ -392,7 +370,7 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(scope_inline_subtask(registry, async move {
+                    futures.push(subtask::prepare(registry, async move {
                         let result = child
                             .call_closure_args(&closure, CallArgs::One(&item))
                             .await?;
@@ -448,7 +426,7 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(scope_inline_subtask(registry, async move {
+                    futures.push(subtask::prepare(registry, async move {
                         child
                             .call_closure_args(&closure, CallArgs::One(&item))
                             .await
@@ -457,13 +435,17 @@ impl super::super::Vm {
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
                 let cancel = VmStreamCancel::new();
-                tokio::task::spawn_local(stream_capped_unordered(
-                    futures,
-                    cap,
-                    tx,
-                    cancel.subscribe(),
-                    cancel_token,
-                    "Parallel map stream error",
+                let registry = self.pool_registry.clone();
+                subtask::spawn(subtask::prepare(
+                    registry,
+                    stream_capped_unordered(
+                        futures,
+                        cap,
+                        tx,
+                        cancel.subscribe(),
+                        cancel_token,
+                        "Parallel map stream error",
+                    ),
                 ));
                 self.stack.push(VmValue::stream(VmStream {
                     done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -505,7 +487,7 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(scope_inline_subtask(registry, async move {
+                    futures.push(subtask::prepare(registry, async move {
                         let result = child
                             .call_closure_args(&closure, CallArgs::One(&item))
                             .await;
@@ -582,11 +564,11 @@ impl super::super::Vm {
             child.cancel_token = Some(cancel_token.clone());
             let registry = child.pool_registry.clone();
             let scheduled_activity = self.wait_for_graph.register_task(runtime_task_id.clone());
-            let handle = tokio::task::spawn_local(scope_inline_subtask(registry, async move {
+            let handle = subtask::spawn_child(registry, async move {
                 let _scheduled_activity = scheduled_activity;
                 let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
                 Ok((result, std::mem::take(&mut child.output)))
-            }));
+            });
             self.spawned_tasks.insert(
                 task_id.clone(),
                 VmTaskHandle {

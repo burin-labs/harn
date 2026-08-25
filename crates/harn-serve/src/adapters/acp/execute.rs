@@ -676,12 +676,16 @@ require_declared_operations_served = true
         });
 
         let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
                 Arc::new(TokioMutex::new(std::collections::HashMap::new())),
-                cancellation.cancelled.clone(),
-                cancellation.notify.clone(),
                 Arc::new(|_line: &str| Ok(())),
                 1,
+                harn_vm::bridge::HostBridgeControlState::new(
+                    cancellation.cancelled.clone(),
+                    cancellation.notify.clone(),
+                    harn_vm::bridge::HostBridgeInjectionState::default(),
+                    Arc::new(harn_vm::tool_call_cancellations::CancellationRegistry::default()),
+                ),
             ),
         );
 
@@ -805,14 +809,18 @@ require_declared_operations_served = true
             }
         });
         let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
                 host_pending,
-                cancellation.cancelled.clone(),
-                cancellation.notify.clone(),
                 Arc::new(move |line: &str| {
                     host_tx.send(line.to_string()).map_err(|e| e.to_string())
                 }),
                 1,
+                harn_vm::bridge::HostBridgeControlState::new(
+                    cancellation.cancelled.clone(),
+                    cancellation.notify.clone(),
+                    harn_vm::bridge::HostBridgeInjectionState::default(),
+                    Arc::new(harn_vm::tool_call_cancellations::CancellationRegistry::default()),
+                ),
             ),
         );
 

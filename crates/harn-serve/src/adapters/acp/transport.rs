@@ -476,6 +476,9 @@ async fn run_acp_channel_server_inner(
                     {
                         continue;
                     }
+                    if concurrent_controls.preempt_active_tool_call_cancel(&msg, &routed_output) {
+                        continue;
+                    }
                     if concurrent_controls
                         .preempt_active_prompt_inject(&msg, &routed_output)
                         .await
@@ -595,6 +598,9 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     if concurrent_controls
                         .preempt_active_live_client_operation(&msg, &routed_output)
                     {
+                        continue;
+                    }
+                    if concurrent_controls.preempt_active_tool_call_cancel(&msg, &routed_output) {
                         continue;
                     }
                     if concurrent_controls

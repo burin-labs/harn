@@ -17,6 +17,29 @@ The practical model is:
 That gives Harn the same shape on the page as the work you are trying to run:
 fan out, wait, collect, and clean up.
 
+## Where branches run
+
+By default, `spawn`, every `parallel` form, and `pool.submit` keep child
+interpreters on the thread that created them. This preserves thread-affine host
+capabilities, cancellation registries, and `LocalSet` tasks while branches
+still overlap at await points.
+
+Set `HARN_VM_SUBTASK_PLACEMENT=worker` before starting Harn to opt an audited
+CPU-only workload into runtime-worker placement. CPU-bound branches can then
+execute on separate cores. Do not enable worker placement for an execution
+tree that reaches thread-affine host capabilities. A host built on a
+single-thread Tokio runtime still has only one runtime worker; the setting does
+not create host threads. `HARN_VM_SUBTASK_PLACEMENT=current_thread` names the
+safe default explicitly.
+Any other value is a startup configuration error rather than a scheduling
+fallback.
+
+The placement choice does not change the migrated context a child inherits.
+Harn captures session attribution, event logging, security and egress policy,
+redaction rules, call budgets, and the pool registry at the subtask boundary.
+Mutable Harn values remain isolated unless the program passes one of the shared
+handles described below.
+
 ## spawn and await
 
 Launch background tasks and collect results:
@@ -396,11 +419,13 @@ same `{index, value, channel}` dict.
 Normal values are copied into child tasks. Use shared cells or maps only when
 tasks need to coordinate on the same mutable state.
 
-The multithreaded runtime keeps child interpreters isolated, and the shared
-state primitives are the explicit bridge between them. Shared cells/maps,
-mailboxes, mutexes, rwlocks, semaphores, and gates are thread-safe handles
-inherited by `spawn` and `parallel` children. If you do not pass one of those
-handles, the child sees its own copy of the value it captured at start.
+Child interpreters are isolated from each other, and the shared state
+primitives are the explicit bridge between them. Shared cells/maps, mailboxes,
+mutexes, rwlocks, semaphores, and gates are thread-safe handles inherited by
+`spawn` and `parallel` children. If you do not pass one of those handles, the
+child sees its own copy of the value it captured at start. This holds whether
+branches run on one thread or several; see [Where branches
+run](#where-branches-run).
 
 ```harn
 const budget = shared_cell({

@@ -29,6 +29,7 @@
 //! trifecta gate only fires where an interactive approval policy is installed,
 //! so non-interactive embedders (headless evals) are unaffected by it.
 
+mod ambient;
 pub mod battery;
 pub mod behavioral;
 pub mod environment_policy;
@@ -38,6 +39,8 @@ pub mod provenance;
 pub mod session_environment;
 pub mod stance_judge;
 
+pub use ambient::current_policy;
+pub(crate) use ambient::swap_security_policy_stack;
 pub use environment_policy::{lookup_env, resolve_env, resolve_env_for_command, ENV_ALLOWLIST};
 pub use exfil_precision::{
     args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
@@ -396,12 +399,6 @@ pub fn pin_and_detect_change(server: &str, tool_name: &str, hash: &str) -> bool 
             }
         }
     })
-}
-
-/// The currently installed policy, falling back to [`SecurityPolicy::default`]
-/// (spotlight-on) when the stack is empty. Always an owned clone.
-pub fn current_policy() -> SecurityPolicy {
-    SECURITY_POLICY_STACK.with(|stack| stack.borrow().last().cloned().unwrap_or_default())
 }
 
 // --- Provenance classification ----------------------------------------------
