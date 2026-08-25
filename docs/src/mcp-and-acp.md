@@ -89,7 +89,7 @@ the equivalent direct callbacks only for older stdio peers selected by the SDK.
 | `prompts/list`, `prompts/get` | Supported through prompt builtins |
 | `completion/complete` | Not exposed as a Harn builtin |
 | Embedded `roots/list` input | Supported; returns resolved script/project roots, also exposed through `harn.mcp.roots()` / `harness.tools.mcp_roots()` |
-| Embedded `sampling/createMessage` input | Supported; dispatches to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to `llm_call`; absent approval returns a structured decline error. |
+| Embedded `sampling/createMessage` input | Supported; dispatches to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to `harness.llm.call`; absent approval returns a structured decline error. |
 | Embedded `elicitation/create` input | Form and URL modes are supported through the host bridge (`capability="mcp"`, `operation="elicit"`); URL values are never prefetched or opened by Harn |
 | `tasks/get`, `tasks/update`, `tasks/cancel` | Supported through the stable tasks extension; `mcp_call` polls task results and supplies MRTR input responses |
 
@@ -1080,7 +1080,7 @@ end-to-end.
 ### Session model pin
 
 `session/set_config_option(configId="model")` pins an LLM model selector on
-the session so subsequent `llm_call` invocations without an explicit
+the session so subsequent `harness.llm.call` invocations without an explicit
 `model:` option resolve to the pinned value instead of the
 `HARN_LLM_MODEL` / providers.toml default. This is the wire surface
 behind editor `/model` commands (Crush, OpenCode `<leader>m`, Codex
@@ -1121,7 +1121,7 @@ Accepted selector forms:
 Setting the value to the sentinel `"@inherit"` (also accepted: empty
 string) clears the pin and reverts the session to the ambient default.
 The ACP wire surface is intentionally curated; scripts that need
-ad-hoc selectors still pass `model:` directly to `llm_call`.
+ad-hoc selectors still pass `model:` directly to `harness.llm.call`.
 
 Per-call options always win over the pin — invoking
 `harness.llm.call(..., {model: "..."})` ignores the session pin so prompts that

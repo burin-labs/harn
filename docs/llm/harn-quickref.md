@@ -624,7 +624,7 @@ Common operators:
 `harness.llm.stream_call(prompt, system?, options?)` returns
 `Stream<{delta, visible_delta, partial, role, stop_reason}>` (typed as
 `LlmStreamChunk` from `std/llm/envelope`). It accepts the
-same options as `llm_call`; the `stream` option is still only the provider
+same options as `harness.llm.call`; the `stream` option is still only the provider
 transport toggle. Use `visible_delta` for UI rendering because it hides open
 internal `<think>` blocks. Breaking out of consumption drops the stream and
 cancels the background request.
@@ -656,7 +656,7 @@ Mark declarations `pub` to export them from a module: `pub fn`,
 `pub type`, and `pub import` (re-export). A `pub type` alias can be
 imported alongside the functions that use it —
 `import { SmartTarget, pick } from "./targets"` — and used in
-annotations or as an `llm_call_structured` schema type; non-`pub`
+annotations or as a `harness.llm.call_structured` schema type; non-`pub`
 type aliases stay module-private and error on import.
 
 Top-level `const` / `let` and `fn` declarations are visible inside
@@ -1349,7 +1349,7 @@ provider continuation material, including Anthropic signed `thinking` and
 opaque `redacted_thinking` blocks. Keep those blocks private and unmodified;
 the capability matrix decides whether they may be replayed to a route.
 
-### `llm_call` options
+### `harness.llm.call` options
 
 Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer an annotated
 binding or `llm_options({...})`. One runtime registry validates direct calls,
@@ -1919,7 +1919,7 @@ harness.stdio.log(verdict.verdict)
 
 Non-throwing variant `harness.llm.call_structured_safe(prompt, schema,
 options?)` returns `{ok, data, error}` (same envelope as
-`llm_call_safe`, but with the validated `.data` pre-unwrapped):
+`harness.llm.call_safe`, but with the validated `.data` pre-unwrapped):
 
 ```harn
 const r = harness.llm.call_structured_safe(
@@ -1970,11 +1970,11 @@ tier succeeded. `r.repair_tier` is `"local"` for a mechanical fix
 `r.extracted_json: true` flags responses where JSON had to be lifted
 from prose / markdown fences.
 
-Options: everything `llm_call` accepts flows through, plus
+Options: everything `harness.llm.call` accepts flows through, plus
 `retries` as an alias for `schema_retries`. Provider options,
 `system`, `provider`, `model`, `max_tokens`, etc. are all passed
 through unchanged. The `repair` block is recognized only by
-`llm_call_structured_result`.
+`harness.llm.call_structured_result`.
 
 After-the-fact recovery—`harness.llm.recover_schema(text, schema, opts?)`
 turns malformed output that's already in your hand into a validated
@@ -2005,7 +2005,7 @@ Use it as a drop-in replacement for hand-rolled `normalize_*()`
 chains downstream of `harness.llm.call(...)` / Ollama prose responses, or
 when you want a deterministic local recovery pass before paying for
 a structured re-call. The `repair` block accepts the same
-overrides as `llm_call_structured_result`'s `repair`:
+overrides as `harness.llm.call_structured_result`'s `repair`:
 
 ```harn
 const r = harness.llm.recover_schema(raw, schema, {
@@ -2026,7 +2026,7 @@ recovered) or `"repair_failed"` / `"transport"` (LLM repair was
 attempted and failed).
 
 If you need the raw response (token counts, transcript, thinking
-trace) alongside the parsed data, call `llm_call` directly:
+trace) alongside the parsed data, call `harness.llm.call` directly:
 
 ```harn
 const r = harness.llm.call(prompt, sys, {
@@ -2042,7 +2042,7 @@ harness.stdio.log(r.usage.input_tokens)
 Schema-as-type (a `type` alias drives both the schema and the
 narrowing guard — lowered to the canonical JSON-Schema dict at compile
 time; literal-string/int unions emit as `{type, enum}`). With
-`llm_call_structured` the return narrows to `T` directly:
+`harness.llm.call_structured` the return narrows to `T` directly:
 
 ```harn
 type GraderOut = {
@@ -2215,7 +2215,7 @@ annotations declare them read-only (`kind` read/search/think/fetch, or
 `side_effect_level` none/read_only — unannotated tools count as mutating)
 plus an auto-registered escape hatch (default `request_write_access`) reach
 the model. The escape hatch verifies consent agentically: its `consent_check`
-(default: a structured `llm_call` over the session's recent user messages)
+(default: a structured `harness.llm.call` over the session's recent user messages)
 grants only when the user expressed or clearly implied consent to modify the
 workspace; a grant disarms the stance next turn, a denial tells the model to
 ask the user. Every transition emits a `stance_transition` event
@@ -2653,7 +2653,7 @@ Top-level loops use the same shape: a root `agent_loop(harness, ...)` that parks
 returns `status: "suspended"` with `handle.snapshot_path`, and the CLI
 cold-restores it with `harn run --resume <snapshot_path>`.
 The snapshot records the suspending provider turn first, so its transcript
-contains the exact messages, reasoning, `llm_call` usage, and provider outcome
+contains the exact messages, reasoning, `harness.llm.call` usage, and provider outcome
 needed by cross-compute resume.
 
 ```harn,ignore
@@ -4395,8 +4395,8 @@ Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/
 
 ## Resilient LLM patterns
 
-`llm_call` throws on transport / schema / budget failures. The thrown
-value is a dict with the same fields `llm_call_safe` exposes under
+`harness.llm.call` throws on transport / schema / budget failures. The thrown
+value is a dict with the same fields `harness.llm.call_safe` exposes under
 `r.error`, so scripts can dispatch on a canonical LLM error taxonomy
 without string-sniffing:
 
@@ -4421,13 +4421,13 @@ Three helpers flatten the common recovery boilerplate:
 // try/guard/unwrap/?.data boilerplate at every callsite.
 const r = harness.llm.call_safe(user_prompt, nil, opts)
 if !r.ok {
-  harness.stdio.log("llm_call failed:", r.error.category, r.error.message)
+  harness.stdio.log("llm call failed:", r.error.category, r.error.message)
   return nil
 }
 const data = r.response.data
 
 // When the call is a JSON-against-schema extraction, prefer
-// `llm_call_structured` / `*_safe` instead: `.data` is
+// `harness.llm.call_structured` / `*_safe` instead: `.data` is
 // pre-unwrapped and the schema-validated-JSON options are forced
 // by default (no repeated `output: {schema, validation: "error"}`
 // or `schema_retries` boilerplate at each callsite).
@@ -4469,7 +4469,7 @@ LLM provider failures also include `error.kind` and `error.reason`.
 terminal reasons are `"auth_failure"`, `"context_overflow"`,
 `"content_policy"`, `"invalid_request"`, `"invalid_response"`,
 `"model_unavailable"`, and `"unknown"`. `invalid_response` identifies a
-deterministic provider decode or grammar-format failure. `llm_call` and
+deterministic provider decode or grammar-format failure. `harness.llm.call` and
 `agent_loop` spend their retry budget only when `kind == "transient"`.
 
 Pair with `harness.llm.mock_enqueue({error: {category, message, retry_after_ms?}})` or
@@ -4698,13 +4698,13 @@ Semantics:
   attempt to the same chain link without re-resolving.
 
 The policy is a reusable handle: build it once, pass it to many
-`llm_call` invocations.
+`harness.llm.call` invocations.
 
 ## Model ladders (`models:` / `ladder:`)
 
 When you just want a **cheap-first, escalate-on-failure** ladder without
 hand-building a `routing_policy`, pass `models:` (or `ladder:`) directly to
-`llm_call`. A ladder is sugar that lowers onto the same routing chain, so it
+`harness.llm.call`. A ladder is sugar that lowers onto the same routing chain, so it
 inherits the exact failover classifier, the `result.routing` trace block, and
 the schema-retry composition described above.
 
@@ -4752,7 +4752,7 @@ Composition rules:
   per step. Wrap the whole call with `with_retry` (the caller-seam middleware)
   if you want per-attempt transport retries around the entire ladder pass.
 - **Schema retries re-ask the same rung.** With an `output` schema or
-  `llm_call_structured*`, a schema failure re-asks the SAME step's model via
+  `harness.llm.call_structured*`, a schema failure re-asks the SAME step's model via
   the existing `schema_retries` mechanism — it does not escalate the ladder.
 - **`models:` + `ladder:`, `models:`/`ladder:` + explicit `model:`/`provider:`,
   and `models:`/`ladder:` + an explicit `routing:` policy are all errors** — the
@@ -4950,18 +4950,18 @@ Contributing rules: [`docs/src/contributing/preset-hooks.md`](https://harnlang.c
 
 ## Cancellation
 
-`llm_call` and `agent_loop` cooperate with the VM's cancellation token,
+`harness.llm.call` and `agent_loop` cooperate with the VM's cancellation token,
 which the host raises on Ctrl-C, `cancel(task)` inside a Harn program,
 or an ACP `session/cancel` request:
 
-- **Mid-`llm_call`**: the in-flight HTTP request is dropped
+- **Mid-`harness.llm.call`**: the in-flight HTTP request is dropped
   (best-effort) and the call returns a thrown
   `VmError::Thrown(cancelled)` that bubbles out of the enclosing
-  pipeline. Non-throwing callers can use `llm_call_safe` to catch it
+  pipeline. Non-throwing callers can use `harness.llm.call_safe` to catch it
   as `{ok: false, error.category: "cancelled"}`.
 - **Mid-tool-call inside `agent_loop`**: the tool's async handler sees
   the same cancellation token; async builtins that opted in
-  (`llm_call`, `http_*`, `sleep`, …) short-circuit immediately. The
+  (`harness.llm.call`, `http_*`, `sleep`, …) short-circuit immediately. The
   loop finalizes the transcript with the partial turn and exits with
   `status: "cancelled"`.
 - **Between turns in `agent_loop`**: the next iteration never starts;
@@ -5367,7 +5367,7 @@ for entry in drain_audit() {
   `improvement`. Small models often leave them blank, and validation
   will fail every time. Use the system prompt to demand non-empty
   strings instead.
-- On `llm_call`, `provider: "auto"` with `model: "local:foo"` strips
+- On `harness.llm.call`, `provider: "auto"` with `model: "local:foo"` strips
   the `local:` prefix and routes to Ollama. Without `"auto"`, an
   explicit provider such as `"local"` still wins.
 - `schema_retries` retries schema-validation failures with a
@@ -5441,7 +5441,7 @@ the same `workspace_roots` read boundary as `harness.fs.read_text(...)`.
   `{{- trim whitespace + one newline -}}`.
 - Missing *bare* `{{ident}}` passes through the literal source (back-compat).
   New constructs raise `template at L:C: ...` errors.
-- **`llm` scope**: inside an LLM-aware frame (`llm_call`, the default
+- **`llm` scope**: inside an LLM-aware frame (`harness.llm.call`, the default
   handler stack, `agent_loop`) the engine auto-injects
   `llm = {provider, model, family, capabilities: {...}}` so a single
   logical prompt can adapt by capability. Branch on `{{ if llm }}` for

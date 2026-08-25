@@ -119,7 +119,7 @@ never sent to the provider as part of the tool's schema.
 signals such as Git remotes, language/build files, supplied code-librarian
 signals, and available credential aliases into reducer-ready fragments. Agent
 preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
-direct `llm_call` and `prompt_explain` users pass `context_profile` in
+direct `harness.llm.call` and `prompt_explain` users pass `context_profile` in
 options.
 
 Each profile fragment is capability-gated. For example, a Rust profile fragment

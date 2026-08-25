@@ -11,7 +11,7 @@
 >   stages executed by `workflow_execute`. See the
 >   [workflow runtime](./workflow-runtime.md).
 >
-> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> On the abstraction ladder: `harness.llm.call` = one request < `agent_loop` = one
 > goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
 > how you build `agent_loop` options, not a tier of its own.) See
 > [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the

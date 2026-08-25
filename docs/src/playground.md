@@ -19,7 +19,7 @@ harn playground \
 so the example reads it with `harness.env.get_or("HARN_TASK", "")`.
 
 On a fresh install, playground runs that call provider-backed LLM builtins such
-as `llm_call`, `llm_stream_call`, or `agent_loop` detect local Ollama at
+as `harness.llm.call`, `harness.llm.stream_call`, or `agent_loop` detect local Ollama at
 `http://127.0.0.1:11434/api/tags` and offer to write
 `~/.config/harn/providers.toml` with Ollama as the default provider. Use `--yes`
 to accept that setup in non-interactive runs.

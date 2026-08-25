@@ -1345,7 +1345,7 @@ harness.stdio.log(answer)
 
 Common fields include `system` (system prompt), `user` (user message),
 `model`, `max_tokens`, and `provider`. The `ask` expression is equivalent
-to building a dict and passing it to `llm_call`.
+to building a dict and passing it to `harness.llm.call`.
 
 ## Duration literals
 

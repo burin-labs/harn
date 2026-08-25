@@ -179,7 +179,7 @@ harn lint --fix file.harn   # automatically apply safe fixes
 - Pointless comparisons and redundant clones
 - Branch-heavy functions
 - Unnecessary conversions like `to_string("hi")` or `to_int(42)`
-- Prompt-injection risks, such as interpolating untrusted input into an `llm_call` system prompt
+- Prompt-injection risks, such as interpolating untrusted input into a `harness.llm.call` system prompt
 
 **What `--fix` rewrites automatically:** simple unused locals to the `_`
 discard binding, `var` to `let`, boolean-comparison and `let`-then-`return`

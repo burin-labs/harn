@@ -210,7 +210,7 @@ attached.
 `memory_summarize` is deterministic by default. `window` may be `nil`, an
 integer limit, or a dict with `limit`, `query`, and `tag` / `tags`. The summary
 text is an extractive bullet list capped to a bounded size; callers that need
-LLM prose can pass `summary.records` to `llm_call`.
+LLM prose can pass `summary.records` to `harness.llm.call`.
 
 `memory_forget` never rewrites or removes prior observations. It appends a
 tombstone event. Predicates may be a string (substring match against searchable

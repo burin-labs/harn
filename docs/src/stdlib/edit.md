@@ -619,7 +619,7 @@ agent has broad edit intent but not a precise AST query yet. It
 separates "what should change" from "how to rewrite the bytes":
 
 1. Read the current file through `harness.fs.staged_read_text`.
-2. Call `llm_call` with `model_role: "merge"` (or `params.model_role`)
+2. Call `harness.llm.call` with `model_role: "merge"` (or `params.model_role`)
    and ask for complete updated file content.
 3. Reject lazy truncation and syntax errors for supported Tree-Sitter
    languages.
@@ -668,7 +668,7 @@ variables work for other roles.
 | `path` | yes | File to mutate. |
 | `intent` / `edit_intent` / `instruction` | yes | Natural-language edit request. |
 | `model_role` | no, default `"merge"` | Role name resolved before normal provider/model routing. |
-| `llm_options` | no | Extra `llm_call` options. Explicit options win over role defaults. |
+| `llm_options` | no | Extra `harness.llm.call` options. Explicit options win over role defaults. |
 | `dry_run` | no | Return `preview` and `per_file_unified_diff` without writing. |
 | `validate_syntax` | no, default `true` | Parse supported languages and reject `syntax_error`; unsupported paths skip validation. |
 | `session_id` | no | Routes reads and writes through the staged-fs overlay. |

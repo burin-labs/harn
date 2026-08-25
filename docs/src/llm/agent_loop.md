@@ -226,11 +226,11 @@ intervened.
 A harness that owns its own conversation history — a chat app, a replayed
 transcript, a router that reconstructs prior turns from its own store — can
 seed those turns into an agent loop with the `history` option. It is a list of
-messages in the same canonical shape `llm_call` accepts (`{role, content, ...}`,
+messages in the same canonical shape `harness.llm.call` accepts (`{role, content, ...}`,
 roles `user` / `assistant` / `tool_result` / `system`). The turns are prepended
 to the transcript as real conversational turns, ahead of the fresh task message,
 so the loop's first (and every subsequent) provider request presents them
-exactly as `llm_call`'s `messages` array would.
+exactly as `harness.llm.call`'s `messages` array would.
 
 ```harn,ignore
 const result = agent_loop(harness,
@@ -259,17 +259,17 @@ The seeded turns are ordinary transcript turns thereafter: `done_judge`,
 compaction, and per-turn projection all treat them like any turn the loop
 produced itself (compaction may summarize them once the transcript grows).
 
-This is the middle rung of the orchestration ladder: use `llm_call` for a single
+This is the middle rung of the orchestration ladder: use `harness.llm.call` for a single
 stateless request; use `agent_loop` with `history` for a tool-using chat turn
 that must see prior context; reach for a workflow only when one interaction spans
 more than one goal, attempt, or model. Chat-shaped harnesses that previously had
-to stay on raw `llm_call`/`llm_stream_call` to keep their history can now use the
+to stay on raw `harness.llm.call`/`harness.llm.stream_call` to keep their history can now use the
 full agent loop (tools, judges, compaction) without losing the conversation.
 
 ### Streaming visible-text deltas
 
 A chat-shaped harness that wants to render — or transform — tokens as they
-arrive no longer has to abandon `agent_loop` for a raw `llm_stream_call`. Pass an
+arrive no longer has to abandon `agent_loop` for a raw `harness.llm.stream_call`. Pass an
 `on_delta` closure and each per-turn model call is issued through the streaming
 transport; the callback fires once per streamed chunk of the assistant's
 **visible text**:
@@ -291,7 +291,7 @@ Semantics:
   `agent_private_stream_delta` from `std/agent/stream` inside your callback; that
   transforms what you display without altering the transcript the model sees.
 - **A complete turn is preserved.** The streaming call returns the same
-  normalized result as `llm_call`, so native tool calls and usage survive intact
+  normalized result as `harness.llm.call`, so native tool calls and usage survive intact
   and tool dispatch is unaffected. `on_delta` fires only for visible text — it
   never streams tool-call fragments (a deliberate v1 limitation, aligned with the
   [tool-calling north-star](../../rfcs/tool-calling-north-star.md) dialect
@@ -314,27 +314,27 @@ Semantics:
 ### agent_loop options
 
 The typed shape of this surface is `AgentSpec` from
-`std/agent/options` — every `llm_call` option plus the loop-control
+`std/agent/options` — every `harness.llm.call` option plus the loop-control
 keys below. Annotate a binding
 (`let opts: AgentSpec = {...}`) or build the dict via
 `agent_preset(...)` / `agent_options(...)`; inline dict literals still
 execute but are flagged by the `unnormalized-options` lint.
 
-Same as `llm_call`, plus additional options:
+Same as `harness.llm.call`, plus additional options:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
-| `history` | list | nil | Caller-managed conversation history to seed. A list of messages in the canonical `llm_call` shape (`{role, content, ...}`, roles `user`/`assistant`/`tool_result`/`system`) prepended to the transcript as real turns ahead of the task message, so the first LLM call sees them exactly as `llm_call`'s `messages` array would. Transient seeding, not session persistence — the caller owns the history. When `history` is non-empty and the task `message` is blank, no empty user turn is appended. See [Seeding caller-managed history](#seeding-caller-managed-history) |
+| `history` | list | nil | Caller-managed conversation history to seed. A list of messages in the canonical `harness.llm.call` shape (`{role, content, ...}`, roles `user`/`assistant`/`tool_result`/`system`) prepended to the transcript as real turns ahead of the task message, so the first LLM call sees them exactly as `harness.llm.call`'s `messages` array would. Transient seeding, not session persistence — the caller owns the history. When `history` is non-empty and the task `message` is blank, no empty user turn is appended. See [Seeding caller-managed history](#seeding-caller-managed-history) |
 | `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
-| `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. Ordinary tool turns omit it so structured transport cannot interfere with tool calling. At a `"done"` completion, the loop parses JSON and validates schema forms; one failed result gets one repair call through `llm_caller`. The value is `run.output` and the verdict is `run.output_valid`. Use `llm_call_structured` for one-shot extraction. |
+| `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. Ordinary tool turns omit it so structured transport cannot interfere with tool calling. At a `"done"` completion, the loop parses JSON and validates schema forms; one failed result gets one repair call through `llm_caller`. The value is `run.output` and the verdict is `run.output_valid`. Use `harness.llm.call_structured` for one-shot extraction. |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
 | `iteration_budget` | string\|dict | nil | Adaptive or fixed iteration cap. Pass a dict `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
-| `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
+| `llm_caller` | closure | nil | Custom caller wrapping the per-turn `harness.llm.call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
 | `on_delta` | closure | nil | Observational streaming callback `delta -> nil`, invoked once per streamed chunk of the assistant's visible text during each turn. Lets chat-shaped harnesses render or transform the token stream without leaving `agent_loop`. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
 | `reasoning_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; explicit levels run from `minimal` through `max`. Caller-supplied `thinking` or `effort` wins. |
 | `reasoning_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
@@ -820,7 +820,7 @@ call. The returned value is an ordinary options dict (caller overrides always
 win) that you pass to `agent_loop` directly.
 
 > **llm-tier doctrine**: there is deliberately no preset machinery at the
-> `llm_call` tier. An "llm preset" is just a plain typed `LlmCallOptions`
+> `harness.llm.call` tier. An "llm preset" is just a plain typed `LlmCallOptions`
 > value (`llm_options({...})`) you spread per call. Budgets, completion
 > policy, middleware stacks, and transport retry belong to the agent cell —
 > `agent_preset` — only.
@@ -1001,7 +1001,7 @@ Each preset installs `reasoning_policy: "auto"`, `reasoning_scale: "small"`,
 and a role-appropriate `reasoning_task` when the caller has not already set a
 low-level `thinking` / `effort` option or a reasoning policy hint.
 `agent_loop_options` then applies the same provider-aware defaults used by
-`llm_call`, so known model quirks are handled consistently instead of being
+`harness.llm.call`, so known model quirks are handled consistently instead of being
 duplicated in each preset.
 
 Caller-supplied `thinking`, `effort`, `reasoning_policy`,

@@ -306,7 +306,7 @@ The harness catches common drift such as returning a raw schema object with a
 `{ immediate_response, event }` without the required `type =
 "immediate_response"` discriminator. It also runs connector-effect-policy
 diagnostics before fixtures, so direct hot-path calls such as `http_get`,
-`llm_call`, or `read_file` inside `normalize_inbound` fail with an author-facing
+`harness.llm.call`, or `read_file` inside `normalize_inbound` fail with an author-facing
 message.
 
 Packages can declare deterministic normalize fixtures in `harn.toml`:

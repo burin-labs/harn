@@ -132,7 +132,7 @@ product state is not part of the workflow contract.
 
 Use the built-in probe for one route. It sends the request through the same
 provider adapter, request builder, stream parser, and response normalizer as
-`llm_call`. No probe script or temporary Harn file is needed.
+`harness.llm.call`. No probe script or temporary Harn file is needed.
 
 ```bash
 # Inspect the request without calling the provider.

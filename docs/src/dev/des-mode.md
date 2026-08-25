@@ -42,7 +42,7 @@ inside the testbench's mocked surface:
 | `parallel each` / `parallel settle` / `spawn` | ✅ | LocalSet-bound; cooperative. |
 | `read_file` / `write_file` (with `--fs-overlay`) | ✅ | Overlay reads pass through, writes stay in memory. |
 | `run_command` (with `--process-replay <tape>`) | ✅ | Tape lookup is deterministic. |
-| `llm_call` (with `--llm-fixture <jsonl>`) | ✅ | Fixture replay is deterministic. |
+| `harness.llm.call` (with `--llm-fixture <jsonl>`) | ✅ | Fixture replay is deterministic. |
 | `http_get` / `http_post` | ❌ | Real network I/O. Use `--llm-fixture` or `--network deny` blocks them. |
 | `run_command` without a process tape | ❌ | Real subprocess. |
 | `now_ms` without `mock_time` / `--clock paused` | ❌ | Real wall clock. |

@@ -103,7 +103,7 @@ harn run --resume /path/reported/in/worker_snapshots/0/path
 Import materializes a destination-local snapshot and rewrites only local
 snapshot references, including the snapshot's self-reference, suspension
 reference, and imported run metadata. The transcript itself is unchanged. Its
-messages and events therefore retain provider reasoning blocks, `llm_call`
+messages and events therefore retain provider reasoning blocks, `harness.llm.call`
 usage, and provider outcome facts. A self-suspending turn records those facts
 before its snapshot is written.
 

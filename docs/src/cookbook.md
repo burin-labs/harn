@@ -92,7 +92,7 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
 ```
 
 For schema-validated JSON without the manual guards, use
-[`llm_call_structured`](./llm/llm_call.md#llm_call_structured).
+[`harness.llm.call_structured`](./llm/llm_call.md#llm_call_structured).
 
 ### How to evaluate prompts in parallel
 

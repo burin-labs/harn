@@ -15,7 +15,7 @@ orchestration boundary instead of pushing orchestration logic into app code.
 >   stages (`stage`, `verify`, `join`, `condition`, `fork`, `map`, `reduce`,
 >   `subagent`, `escalation`) executed by `workflow_execute` — this page.
 >
-> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> On the abstraction ladder: `harness.llm.call` = one request < `agent_loop` = one
 > goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
 > how you build `agent_loop` options, not a tier of its own.) See
 > [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the

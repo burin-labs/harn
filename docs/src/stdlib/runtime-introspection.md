@@ -52,7 +52,7 @@ instead of guessing from training data.
 
 Every tool is `executor: "harn"` and dispatches through the VM stdlib
 short-circuit (no Harn closure allocated per call). Each returns a dict
-with a `resolved` flag — `false` until the first `llm_call` on the
+with a `resolved` flag — `false` until the first `harness.llm.call` on the
 thread populates the snapshot.
 
 | Tool                            | Returns                                                            |
@@ -91,7 +91,7 @@ harness.stdio.log("model=" + to_string(snap?.model))
 harness.stdio.log("harn=" + to_string(snap.harn_version))
 ```
 
-All fields are `nil` until at least one `llm_call` has run on the
+All fields are `nil` until at least one `harness.llm.call` has run on the
 thread; `harn_version` and `harness` are always populated.
 
 ## Configuring the harness identity

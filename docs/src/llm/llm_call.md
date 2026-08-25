@@ -88,9 +88,29 @@ for routes that declare video support. `std/llm/media` also provides
 | system | string | no | System message for the model |
 | options | dict | no | Provider, model, and generation settings |
 
+#### When `system` is given twice
+
+The system message can arrive positionally (argument 2) or as the
+`system` option. Both are accepted, and the outcome depends on which
+form the option uses:
+
+- **Option is a string.** The positional argument wins. The option is
+  consulted only when the positional argument is absent, `nil`, or
+  blank (empty or whitespace only) — then it becomes the system
+  message.
+- **Option is a fragment list.** Nothing competes. The list contributes
+  `before` / `after` fragments that surround the primary block, and the
+  positional argument supplies that primary block. Both appear.
+- **Option is `{mode: "replace", content}`.** The replacement wins over
+  everything, including a positional argument, and suppresses every
+  other prompt contributor.
+
+Passing `system` both ways is legal but easy to misread. Prefer one
+form per call site.
+
 ### Return value
 
-`llm_call` returns one rigid, canonical envelope. Every field uses a
+`harness.llm.call` returns one rigid, canonical envelope. Every field uses a
 single snake_case spelling — there are no top-level aliases, and all
 accounting lives under `usage`. The typed contract is
 `LlmResponse` from `std/llm/envelope`; the same module exports
@@ -163,7 +183,7 @@ separate accounting field.
 
 #### Provider attempts
 
-`llm_call` is one logical call, but the runtime may issue several provider
+`harness.llm.call` is one logical call, but the runtime may issue several provider
 requests to complete it: a rate-limited request is retried, so is one that
 returns nothing the loop can act on, so is a transport failure.
 `usage.provider_attempts` reports that:
@@ -274,7 +294,7 @@ catalog source data and pass only the stable ladder name from policy code.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `system` | string \| list \| dict | System text, ordered `SystemFragment` values, or an exclusive `{mode: "replace", content}` root. |
+| `system` | string \| list \| dict | System text, ordered `SystemFragment` values, or an exclusive `{mode: "replace", content}` root. See [When `system` is given twice](#when-system-is-given-twice) for how this interacts with the positional `system` argument. |
 | `messages` | list | Full canonical message history; supersedes the positional prompt. |
 | `session_id` | string | Continue a session opened with `agent_session_open`. |
 | `call_role` | string | Semantic call purpose retained in manifests and telemetry; aliases `mock_scope`, must agree with it, and is `unattributed` when undeclared. |
@@ -544,7 +564,7 @@ message list, or `{messages?, system?, metadata?}`.
 `harness.llm.call_structured(prompt, schema, options?)` is the ergonomic
 helper for the "ask for JSON against this schema, retry on
 validation failure, return just the parsed data" pattern. It wraps
-`llm_call` and pre-applies the schema-validated-JSON defaults so
+`harness.llm.call` and pre-applies the schema-validated-JSON defaults so
 callsites stop repeating the same four options.
 
 ```harn
@@ -576,7 +596,7 @@ harness.stdio.log(person.age)
 |---|---|---|---|
 | prompt | string | yes | The user message |
 | schema | dict or `Schema<T>` | yes | JSON Schema dict or a type alias in value position. When passed a `Schema<T>` the return narrows to `T`. |
-| options | dict | no | Any option `llm_call` accepts, plus `system` (lifted into the system-message slot) and `retries` (alias for `schema_retries`) |
+| options | dict | no | Any option `harness.llm.call` accepts, plus `system` (lifted into the system-message slot) and `retries` (alias for `schema_retries`) |
 
 ### Return value
 
@@ -591,7 +611,7 @@ overrides them in `options`.
 ### Non-throwing variant
 
 `harness.llm.call_structured_safe(prompt, schema, options?)` returns the
-`{ok, data, error}` envelope (mirroring `llm_call_safe` but with
+`{ok, data, error}` envelope (mirroring `harness.llm.call_safe` but with
 the validated `.data` pre-unwrapped) instead of throwing:
 
 ```harn
@@ -677,7 +697,7 @@ Repair-pass semantics:
   tokens. If the repaired text still fails the schema, it is rejected
   rather than coerced into a plausible shape.
 - The `repair` block is recognized only by
-  `llm_call_structured_result`. Pass `repair: {enabled: true, ...}`
+  `harness.llm.call_structured_result`. Pass `repair: {enabled: true, ...}`
   to enable the LLM reissue; presence of the dict implies opt-in.
 - The LLM tier runs at most once, with `schema_retries: 0`, only when
   local salvage did not produce valid JSON. It is skipped on transport
@@ -705,7 +725,7 @@ if r.ok {
 
 Set `{repair: false}` for a fully deterministic pass. The optional LLM
 repair block accepts the same overrides as
-`llm_call_structured_result`. See the language spec for the
+`harness.llm.call_structured_result`. See the language spec for the
 `{ok, data, raw_text, error, error_category, attempts, stage, repaired}`
 envelope and the `parsed` / `extracted` / `regex` / `llm_repair`
 stages.
@@ -713,19 +733,19 @@ stages.
 ### When to use which helper
 
 - Product code that needs just the parsed payload: prefer
-  `llm_call_structured`. It removes the `output`, `schema_retries`,
+  `harness.llm.call_structured`. It removes the `output`, `schema_retries`,
   and `.data` boilerplate from every
   callsite.
 - Code that also needs token counts, transcript, thinking traces, or
-  to pass a pre-built transcript: call `llm_call` directly and read
+  to pass a pre-built transcript: call `harness.llm.call` directly and read
   `.text` / `.data` / `.usage.input_tokens` / etc. off the full result
   dict.
 - Call sites that prefer explicit branching over `try` blocks:
-  `llm_call_structured_safe` (the non-throwing envelope).
+  `harness.llm.call_structured_safe` (the non-throwing envelope).
 - Production agent pipelines that need raw-text retention, attempt
   counts, and an optional repair pass on malformed JSON:
-  `llm_call_structured_result` — replaces the
-  `llm_call → response.data → try { json_parse(...) } → json_extract → repair →
+  `harness.llm.call_structured_result` — replaces the
+  `harness.llm.call → response.data → try { json_parse(...) } → json_extract → repair →
   schema_check` chain that downstream callers would otherwise
   hand-roll.
 
@@ -784,8 +804,8 @@ for the full module catalog (`handlers`, `ensemble`, `refine`,
 
 ## llm_completion
 
-Use `llm_completion` for text continuation and fill-in-the-middle generation.
-It lives at the same abstraction level as `llm_call`.
+Use `harness.llm.completion` for text continuation and fill-in-the-middle generation.
+It lives at the same abstraction level as `harness.llm.call`.
 
 ```harn
 import { LlmCallOptions } from "std/llm/options"
@@ -821,7 +841,7 @@ harness.llm.budget(1.00)
 harness.stdio.log("Remaining: $${harness.llm.budget_remaining()}")
 ```
 
-For per-call controls, pass a `budget` envelope on `llm_call` (the typed
+For per-call controls, pass a `budget` envelope on `harness.llm.call` (the typed
 shape is `LlmBudget` from `std/llm/options`):
 
 ```harn
