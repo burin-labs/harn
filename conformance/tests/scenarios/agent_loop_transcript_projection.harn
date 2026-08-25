@@ -88,7 +88,6 @@ pipeline default(harness: Harness) {
           max_iterations: 6,
           loop_until_done: true,
           done_sentinel: "##DONE##",
-          reminders: {append_only: true},
           transcript_projection: {policy: "clean_tool_repair"},
         },
       )

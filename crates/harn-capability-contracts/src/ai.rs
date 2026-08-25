@@ -604,7 +604,7 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil, append_only?: bool) -> list",
+    "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil) -> list",
     "Project an agent session's provider-visible messages."
 );
 capability_method!(

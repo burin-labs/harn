@@ -344,7 +344,7 @@ pub(crate) fn extract_llm_options(
     let messages = if opt_bool(&options, "_directives_rendered") {
         messages
     } else {
-        apply_rendered_reminder_messages(messages, &rendered_reminders, false)
+        apply_rendered_reminder_messages(messages, &rendered_reminders)
     };
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
