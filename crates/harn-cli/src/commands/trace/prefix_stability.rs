@@ -288,7 +288,7 @@ fn system_block(body: &Value, messages: &[Value]) -> Option<Value> {
         })
         .cloned()
         .collect();
-    (!leading.is_empty()).then(|| Value::Array(leading))
+    (!leading.is_empty()).then_some(Value::Array(leading))
 }
 
 fn tools<'a>(body: &'a Value, path: &str) -> Result<Option<&'a [Value]>, String> {
