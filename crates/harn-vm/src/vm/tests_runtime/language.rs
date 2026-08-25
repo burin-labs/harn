@@ -341,6 +341,66 @@ harness.stdio.log(b) }"#,
 }
 
 #[test]
+fn positive_assert_false_fallback_matches_native_truthiness() {
+    let out = run_output(
+        r"
+fn direct_accepts(x: bool?) -> bool {
+  return try {
+    assert(x)
+    true
+  } catch {
+    false
+  }
+}
+
+fn coalesced_accepts(x: bool?) -> bool {
+  return try {
+    assert(x ?? false)
+    true
+  } catch {
+    false
+  }
+}
+
+pipeline default(harness: Harness) {
+  for value in [true, false, nil] {
+    harness.stdio.log(direct_accepts(value) == coalesced_accepts(value))
+  }
+}
+",
+    );
+    assert_eq!(out, "[harn] true\n[harn] true\n[harn] true");
+}
+
+#[test]
+fn source_assert_shadows_native_intrinsic() {
+    let out = run_output(
+        r#"
+fn assert(value: bool?) -> bool { return true }
+
+pipeline default(harness: Harness) {
+  assert(nil ?? false)
+  harness.stdio.log("continued")
+}
+"#,
+    );
+    assert_eq!(out, "[harn] continued");
+}
+
+#[test]
+fn closure_binding_assert_shadows_native_intrinsic() {
+    let out = run_output(
+        r#"
+pipeline default(harness: Harness) {
+  const assert = { value -> if value == nil { "nil" } else { "false" } }
+  harness.stdio.log(assert(nil ?? false))
+}
+"#,
+    );
+    assert_eq!(out, "[harn] false");
+}
+
+#[test]
 fn test_logical_operators() {
     let out = run_output("pipeline t(harness: Harness, task: unknown) { harness.stdio.log(true && false)\nharness.stdio.log(true || false)\nharness.stdio.log(!true) }");
     assert_eq!(out, "[harn] false\n[harn] true\n[harn] false");

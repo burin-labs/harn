@@ -342,7 +342,7 @@ diagnostic_codes! {
     LintVacuousCondition, "HARN-LNT-058", Lnt, "if / while / guard condition is statically known to always succeed or always fail";
     LintRuleEngine, "HARN-LNT-059", Lnt, "project rule-engine or native lint rule";
     LintUnnormalizedOptions, "HARN-LNT-060", Lnt, "inline options dict bypasses the typed option constructors";
-    LintNilCoalesceNoop, "HARN-LNT-061", Lnt, "nil coalesce fallback is nil";
+    LintNilCoalesceNoop, "HARN-LNT-061", Lnt, "nil coalesce fallback has no effect";
     LintNilCoalesceUnreachableFallback, "HARN-LNT-062", Lnt, "nil coalesce fallback is unreachable";
     LintUnnecessaryNonNullAssert, "HARN-LNT-063", Lnt, "non-null assertion `!` on an already-non-nil value";
     LintMutableCaptureAcrossParallel, "HARN-LNT-064", Lnt, "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race";

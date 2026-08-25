@@ -567,6 +567,18 @@ impl TypeChecker {
                 Refinements::empty()
             }
 
+            // A nil coalesce with an exact falsy fallback is truthy exactly
+            // when its left operand is truthy. Preserve the left operand's
+            // bidirectional facts so `assert(x ?? false)` and
+            // `assert(x)` agree after the call as well as at runtime. Keep
+            // every other fallback opaque: `x ?? true`, for example, may pass
+            // while `x` is still nil.
+            Node::BinaryOp { op, left, right }
+                if op == "??" && matches!(right.node, Node::BoolLiteral(false)) =>
+            {
+                self.extract_refinements(left, scope)
+            }
+
             // Logical AND: both operands must be truthy, so truthy refinements compose.
             Node::BinaryOp { op, left, right } if op == "&&" => {
                 let left_ref = self.extract_refinements(left, scope);

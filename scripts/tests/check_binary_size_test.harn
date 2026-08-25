@@ -693,7 +693,7 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, measured_target)
   assert_eq(bloat.if, diagnostics)
   assert_eq(bloat["continue-on-error"], true)
-  assert(bloat.run?.contains("cargo-bloat-deserialize.txt") ?? false)
+  assert(bloat.run?.contains("cargo-bloat-deserialize.txt"))
   assert_eq(
     release_workflow_step(steps, "Check the distribution fuse").if,
     "matrix.target == 'x86_64-unknown-linux-gnu'",
@@ -713,10 +713,7 @@ pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(
     release_workflow(harness.fs).jobs.setup.steps,
     "Resolve release context",
   )
-  assert(
-    resolve.run?.contains("benchmark_cargo_bloat requires benchmark_only=true")
-      ?? false,
-  )
+  assert(resolve.run?.contains("benchmark_cargo_bloat requires benchmark_only=true"))
 }
 
 @test
@@ -849,7 +846,7 @@ pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness
   // produced it, not one standing in for the other.
   assert_eq(verdict.growth, "warn")
   assert_eq(verdict.failures.count, 2)
-  assert(verdict.failures[0]?.starts_with("distribution fuse:") ?? false)
+  assert(verdict.failures[0]?.starts_with("distribution fuse:"))
   // Not comparable, so no growth conclusion — and the fuse still fires.
   const incomparable = evaluate_release_binary_size(
     entry,
@@ -1066,7 +1063,7 @@ pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harne
   assert_eq(fuse.id, "binary_size_fuse")
   assert_eq(growth.id, "binary_size_growth")
   assert(!(fuse.run?.contains("harn run") ?? true), "the fuse must not depend on the built binary")
-  assert(growth.run?.contains("scripts/check_binary_size.harn") ?? false)
+  assert(growth.run?.contains("scripts/check_binary_size.harn"))
   assert_eq(
     growth.if,
     "always() && matrix.target == 'x86_64-unknown-linux-gnu' && steps.binary_size_fuse.outcome == 'success'",
@@ -1076,8 +1073,8 @@ pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harne
     gha_expression("needs.setup.outputs.binary_size_fuse_bytes"),
   )
   // The attested revision, not the tag that asked for the build.
-  assert(growth.run?.contains("HARN_BUILD_REVISION") ?? false)
-  assert(growth.run?.contains("export BINARY_SIZE_SOURCE_SHA=") ?? false)
+  assert(growth.run?.contains("HARN_BUILD_REVISION"))
+  assert(growth.run?.contains("export BINARY_SIZE_SOURCE_SHA="))
   assert_eq(growth.env?.BINARY_SIZE_SOURCE_REF, gha_expression("needs.setup.outputs.ref"))
 }
 

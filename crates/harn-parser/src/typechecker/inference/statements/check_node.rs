@@ -275,12 +275,12 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
-                self.check_call(name, type_args, args, scope, span);
+                let call_target = self.check_call(name, type_args, args, scope, span);
                 // `assert(cond, msg?)` throws when `cond` is falsy, so after the
                 // call the truthy refinement of `cond` holds — narrow the
                 // continuing scope like `require`/guard. Lets the idiomatic
                 // `assert(x != nil)` then `x - 1` type-check.
-                if name == "assert" {
+                if name == "assert" && call_target == super::super::calls::CallTarget::Builtin {
                     if let Some(cond) = args.first() {
                         self.extract_refinements(cond, scope).apply_truthy(scope);
                     }
