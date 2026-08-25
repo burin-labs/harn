@@ -344,20 +344,22 @@ function readDigestPin(metadataPath, assetName) {
  * is incomplete and every pinned consumer stays blocked with no signal.
  *
  * This asks the release API exactly once, on the terminal failure path only.
- * It must never move into the retry loop: unauthenticated api.github.com is 60
- * requests/hour per IP, shared across GitHub-hosted runners, so a per-attempt
- * diagnostic would spend the same budget the digest fallback depends on.
+ * A diagnostic should not scale with the retry budget: it says one thing, so
+ * it costs one request. That is hygiene rather than a rate limit -- CI is
+ * authenticated (see the token note in the digest fallback below).
  *
  * Returns undefined when the query itself fails for any reason other than a
- * definite 404 -- a throttled or unreachable API degrades to the transport
- * errors alone rather than replacing them with a worse guess.
+ * definite 404. Diagnosing a failure must never itself fail, and the query is
+ * genuinely fallible: a local run is unauthenticated and can be throttled, and
+ * a token can be absent, expired, or permission-reduced. An unknown state
+ * degrades to the transport errors alone rather than to a worse guess.
  */
 async function describeReleaseState(options) {
   const { releaseApiUrl, assetName } = options;
   const tag = releaseApiUrl.slice(releaseApiUrl.lastIndexOf("/") + 1);
   let release;
   try {
-    // Same headers the digest fallback sends; see the note there on tokens.
+    // Same headers the digest fallback sends, token included.
     const body = await fetchOnce(releaseApiUrl, options, {
       accept: "application/vnd.github+json",
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
@@ -438,10 +440,14 @@ async function resolveExpectedChecksum(options) {
     try {
       const body = await fetchOnce(releaseApiUrl, options, {
         accept: "application/vnd.github+json",
-        // Unauthenticated api.github.com is 60 requests/hour per IP, which
-        // GitHub-hosted runners share. A token is optional -- the release
-        // download host needs none -- but without one this fallback is the
-        // first thing to be throttled.
+        // A token is optional -- the release download host needs none -- but
+        // it decides which api.github.com rate limit applies. In CI there is
+        // always one: `.github/actions/setup-harn` declares `token` with
+        // `default: ${{ github.token }}`, so a caller that passes only
+        // `version` is still authenticated, against a per-repository limit
+        // orders of magnitude above the unauthenticated ceiling. The 60
+        // requests/hour per IP ceiling binds direct local invocation and any
+        // caller that deliberately passes an empty token.
         ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       });
       const checksum = parseAssetDigest(body, assetName);
