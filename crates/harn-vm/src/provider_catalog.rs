@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 9;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v8.json";
+    "https://harnlang.com/schemas/provider-catalog.v9.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -239,6 +239,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
                 .collect(),
             chat_endpoint: provider.chat_endpoint.clone(),
             completion_endpoint: provider.completion_endpoint.clone(),
+            embeddings_endpoint: provider.embeddings_endpoint.clone(),
         },
         auth: ProviderAuth {
             style: provider.auth_style.clone(),
@@ -405,6 +406,7 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
+    let embedding_model = model.is_embedding_model();
     CatalogModel {
         aliases,
         blurb: model.blurb.clone(),
@@ -429,19 +431,32 @@ fn catalog_model(
             .local_memory
             .clone()
             .filter(|memory| !memory.is_empty()),
-        modalities: modalities_from_caps(&caps),
+        modalities: modalities_from_caps(&caps, embedding_model),
         tool_support: ModelToolSupport {
-            native: caps.native_tools,
-            text: caps.text_tool_wire_format_supported,
-            preferred_format: caps.preferred_tool_format.clone(),
-            parity: caps.tool_mode_parity.clone(),
-            parity_source: caps
-                .tool_mode_parity_source
-                .map(|source| source.as_str().to_string()),
-            parity_notes: caps.tool_mode_parity_notes.clone(),
+            native: !embedding_model && caps.native_tools,
+            text: !embedding_model && caps.text_tool_wire_format_supported,
+            preferred_format: (!embedding_model)
+                .then(|| caps.preferred_tool_format.clone())
+                .flatten(),
+            parity: (!embedding_model)
+                .then(|| caps.tool_mode_parity.clone())
+                .flatten(),
+            parity_source: (!embedding_model)
+                .then(|| {
+                    caps.tool_mode_parity_source
+                        .map(|source| source.as_str().to_string())
+                })
+                .flatten(),
+            parity_notes: (!embedding_model)
+                .then(|| caps.tool_mode_parity_notes.clone())
+                .flatten(),
             empirical_parity: None,
-            tool_search: caps.tool_search.clone(),
-            max_tools: caps.max_tools,
+            tool_search: if embedding_model {
+                Vec::new()
+            } else {
+                caps.tool_search.clone()
+            },
+            max_tools: (!embedding_model).then_some(caps.max_tools).flatten(),
         },
         structured_output,
         format_preferences: ModelFormatPreferences {
@@ -489,6 +504,8 @@ fn catalog_model(
         released: model.released.clone(),
         row_kind: model.row_kind,
         current_snapshot: model.current_snapshot.clone(),
+        embedding_dim: model.embedding_dim,
+        embedding_max_tokens: model.embedding_max_tokens,
         id,
         name: model.name,
         display_name,
@@ -638,7 +655,10 @@ fn aliases_by_model(aliases: &[(String, AliasDef)]) -> BTreeMap<(String, String)
     by_model
 }
 
-fn modalities_from_caps(caps: &llm::capabilities::Capabilities) -> ModelModalities {
+fn modalities_from_caps(
+    caps: &llm::capabilities::Capabilities,
+    embedding_model: bool,
+) -> ModelModalities {
     let mut input = vec!["text".to_string()];
     if caps.vision || caps.vision_supported {
         input.push("image".to_string());
@@ -654,7 +674,7 @@ fn modalities_from_caps(caps: &llm::capabilities::Capabilities) -> ModelModaliti
     }
     ModelModalities {
         input,
-        output: vec!["text".to_string()],
+        output: vec![if embedding_model { "embedding" } else { "text" }.to_string()],
     }
 }
 

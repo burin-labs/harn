@@ -62,6 +62,13 @@ mod tests {
         )
         .unwrap()
         .is_none());
+        assert!(resolve_dir(
+            &store,
+            crate::catalog::DEFAULT_EMBEDDING_MODEL,
+            ModelPurpose::Embedding
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]

@@ -37,7 +37,7 @@ mod tokenize;
 pub use backend::{resolve_asset_dir, Embedder, LexicalEmbedder, StaticEmbedder};
 pub use similarity::{cosine, top_k, Scored};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -97,6 +97,24 @@ impl EmbedCapability {
         Self::lexical()
     }
 
+    /// Operator-supplied asset directory. When set and containing
+    /// `static-embeddings.json`, [`from_env`] selects the static backend.
+    pub const ASSET_DIR_ENV: &str = "HARN_EMBED_ASSET_DIR";
+    /// Model directory name under `<state>/embeddings/<model>/`.
+    pub const MODEL_ENV: &str = "HARN_EMBED_MODEL";
+
+    /// Select a backend from process environment: `HARN_EMBED_ASSET_DIR` as
+    /// an explicit override, then `<state>/embeddings/<model>/`, else lexical.
+    /// A missing or malformed asset never errors — it selects the floor.
+    pub fn from_env() -> Self {
+        let override_dir = std::env::var_os(Self::ASSET_DIR_ENV).map(PathBuf::from);
+        let model = std::env::var(Self::MODEL_ENV).unwrap_or_else(|_| "default".to_string());
+        let data_dir = std::env::current_dir()
+            .ok()
+            .map(|cwd| harn_vm::runtime_paths::state_root(&cwd));
+        Self::resolve(override_dir.as_deref(), data_dir.as_deref(), &model)
+    }
+
     /// Borrow the active backend (tests / embedders).
     pub fn embedder(&self) -> &Arc<dyn Embedder> {
         &self.embedder
@@ -147,7 +165,11 @@ impl EmbedCapability {
                 ])
             })
             .collect();
-        Ok(build_dict([("results", VmValue::List(Arc::new(results)))]))
+        Ok(build_dict([
+            ("backend", VmValue::string(self.embedder.name())),
+            ("is_semantic", VmValue::Bool(self.embedder.is_semantic())),
+            ("results", VmValue::List(Arc::new(results))),
+        ]))
     }
 
     fn run_vector(&self, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -166,6 +188,7 @@ impl EmbedCapability {
         Ok(build_dict([
             ("backend", VmValue::string(self.embedder.name())),
             ("dim", VmValue::Int(self.embedder.dim() as i64)),
+            ("is_semantic", VmValue::Bool(self.embedder.is_semantic())),
         ]))
     }
 }
@@ -354,6 +377,14 @@ mod tests {
             panic!()
         };
         assert_eq!(dict_int(first, "index"), 1);
+        assert_eq!(dict_str(d, "backend"), "lexical-hash");
+        let VmValue::Bool(is_semantic) = d.get("is_semantic").unwrap() else {
+            panic!("top_k must report is_semantic")
+        };
+        assert!(
+            !*is_semantic,
+            "lexical ranking must not present itself as meaning-based"
+        );
     }
 
     #[test]
@@ -404,6 +435,13 @@ mod tests {
         let VmValue::Dict(d) = &out else { panic!() };
         assert_eq!(dict_str(d, "backend"), "lexical-hash");
         assert_eq!(dict_int(d, "dim"), 256);
+        let VmValue::Bool(is_semantic) = d.get("is_semantic").unwrap() else {
+            panic!("info must report is_semantic")
+        };
+        assert!(
+            !*is_semantic,
+            "the lexical floor must not claim meaning ranking"
+        );
     }
 
     #[test]
@@ -426,6 +464,29 @@ mod tests {
         let cap = EmbedCapability::resolve(Some(&dir), None, "potion");
         assert_eq!(cap.embedder().name(), "static-model2vec");
         assert_eq!(cap.embedder().dim(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_env_honors_operator_asset_dir() {
+        let dir = std::env::temp_dir().join("embed-from-env-asset-xyz-789");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(
+            dir.join("static-embeddings.json"),
+            r#"{ "dim": 2, "vectors": { "rate": [1.0, 0.0] } }"#,
+        )
+        .unwrap();
+        let previous = std::env::var_os(EmbedCapability::ASSET_DIR_ENV);
+        unsafe {
+            std::env::set_var(EmbedCapability::ASSET_DIR_ENV, &dir);
+        }
+        let cap = EmbedCapability::from_env();
+        match previous {
+            Some(value) => unsafe { std::env::set_var(EmbedCapability::ASSET_DIR_ENV, value) },
+            None => unsafe { std::env::remove_var(EmbedCapability::ASSET_DIR_ENV) },
+        }
+        assert_eq!(cap.embedder().name(), "static-model2vec");
+        assert!(!cap.embedder().is_semantic());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

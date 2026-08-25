@@ -974,6 +974,24 @@ pub struct ModelDef {
     /// only when `row_kind` is `selector`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_snapshot: Option<String>,
+    /// Embedding vector length when this row describes an embeddings model.
+    /// Absent on chat/completion rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_dim: Option<u32>,
+    /// Maximum input tokens the embeddings endpoint accepts for this row.
+    /// Absent on chat/completion rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_max_tokens: Option<u32>,
+}
+
+impl ModelDef {
+    /// Whether this row represents an embeddings route rather than a chat or
+    /// completion model. Embedding dimensions are the typed discriminator:
+    /// they are required to interpret the response vector and are explicitly
+    /// absent from generative rows.
+    pub fn is_embedding_model(&self) -> bool {
+        self.embedding_dim.is_some()
+    }
 }
 
 fn is_false(value: &bool) -> bool {

@@ -15,6 +15,14 @@ fn tool_support_parity_carries_its_provenance() {
     let mut declared = 0;
     let mut derived = 0;
     for model in &artifact.models {
+        if !model
+            .modalities
+            .output
+            .iter()
+            .any(|output| output == "text")
+        {
+            continue;
+        }
         let support = &model.tool_support;
         match (support.parity.as_deref(), support.parity_source.as_deref()) {
             (Some(_), Some("declared")) => declared += 1,
@@ -40,6 +48,14 @@ fn tool_support_parity_carries_its_provenance() {
     let mut sources_by_verdict: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
         Default::default();
     for model in &artifact.models {
+        if !model
+            .modalities
+            .output
+            .iter()
+            .any(|output| output == "text")
+        {
+            continue;
+        }
         if let (Some(parity), Some(source)) = (
             model.tool_support.parity.as_deref(),
             model.tool_support.parity_source.as_deref(),

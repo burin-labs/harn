@@ -205,6 +205,9 @@
         "completion_endpoint": {
           "type": "string"
         },
+        "embeddings_endpoint": {
+          "type": "string"
+        },
         "region_env": {
           "type": "string"
         },
@@ -614,6 +617,14 @@
         "display_name": {
           "minLength": 1,
           "type": "string"
+        },
+        "embedding_dim": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "embedding_max_tokens": {
+          "minimum": 1,
+          "type": "integer"
         },
         "equivalence_group": {
           "minLength": 1,
@@ -1673,7 +1684,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v8.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v9.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1717,10 +1728,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v8.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v9.json"
     },
     "schema_version": {
-      "const": 8
+      "const": 9
     },
     "variants": {
       "items": {

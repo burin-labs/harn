@@ -160,6 +160,31 @@ fn vector_dim_matches_info() {
 }
 
 #[test]
+fn top_k_envelope_names_the_backend_and_its_semantic_status() {
+    let reg = registry_for(EmbedCapability::lexical());
+    let out = invoke(
+        &reg,
+        "hostlib_embed_top_k",
+        &[
+            ("query", VmValue::string("auth")),
+            (
+                "corpus",
+                VmValue::List(Arc::new(vec![VmValue::string("validate auth token")])),
+            ),
+            ("k", VmValue::Int(1)),
+        ],
+    );
+    let VmValue::String(backend) = dict_get(&out, "backend") else {
+        panic!("top_k must name the backend")
+    };
+    assert_eq!(backend.as_str(), "lexical-hash");
+    let VmValue::Bool(is_semantic) = dict_get(&out, "is_semantic") else {
+        panic!("top_k must report is_semantic")
+    };
+    assert!(!*is_semantic);
+}
+
+#[test]
 fn absent_static_asset_degrades_to_lexical() {
     // Sandbox/asset-absent contract: a missing model never errors, it just
     // selects the lexical floor. Builtins must still all work.
@@ -172,6 +197,13 @@ fn absent_static_asset_degrades_to_lexical() {
         panic!()
     };
     assert_eq!(backend.as_str(), "lexical-hash");
+    let VmValue::Bool(is_semantic) = dict_get(&info, "is_semantic") else {
+        panic!("hostlib_embed_info must report is_semantic")
+    };
+    assert!(
+        !*is_semantic,
+        "absent static asset must stay on the non-semantic floor"
+    );
 }
 
 #[test]
@@ -197,6 +229,13 @@ fn present_static_asset_is_used_end_to_end() {
         panic!()
     };
     assert_eq!(backend.as_str(), "static-model2vec");
+    let VmValue::Bool(is_semantic) = dict_get(&info, "is_semantic") else {
+        panic!("hostlib_embed_info must report is_semantic")
+    };
+    assert!(
+        !*is_semantic,
+        "an operator-supplied static table is not a measured meaning ranker"
+    );
 
     // "rate limit" should be semantically close to "throttle" in this
     // hand-built static space — the whole point of static embeddings.

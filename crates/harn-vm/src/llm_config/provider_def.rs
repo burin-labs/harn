@@ -54,6 +54,9 @@ pub struct ProviderDef {
     pub extra_headers: BTreeMap<String, String>,
     pub chat_endpoint: String,
     pub completion_endpoint: Option<String>,
+    /// Provider embeddings route, when one exists. Absent means this
+    /// provider has no embeddings API; hosts must not invent a path.
+    pub embeddings_endpoint: Option<String>,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
@@ -143,6 +146,8 @@ struct ProviderDefWire {
     #[serde(default)]
     completion_endpoint: Option<String>,
     #[serde(default)]
+    embeddings_endpoint: Option<String>,
+    #[serde(default)]
     command: Option<String>,
     #[serde(default)]
     args: Vec<String>,
@@ -207,6 +212,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             extra_headers: wire.extra_headers,
             chat_endpoint: wire.chat_endpoint,
             completion_endpoint: wire.completion_endpoint,
+            embeddings_endpoint: wire.embeddings_endpoint,
             command: wire.command,
             args: wire.args,
             env: wire.env,
@@ -249,6 +255,7 @@ impl Default for ProviderDef {
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
             completion_endpoint: None,
+            embeddings_endpoint: None,
             command: None,
             args: Vec::new(),
             env: BTreeMap::new(),
@@ -302,6 +309,7 @@ impl ProviderDef {
         self.extra_headers.extend(overlay.extra_headers.clone());
         merge_string(&mut self.chat_endpoint, &overlay.chat_endpoint);
         merge_option(&mut self.completion_endpoint, &overlay.completion_endpoint);
+        merge_option(&mut self.embeddings_endpoint, &overlay.embeddings_endpoint);
         merge_option(&mut self.command, &overlay.command);
         merge_vec(&mut self.args, &overlay.args);
         self.env.extend(overlay.env.clone());
