@@ -971,9 +971,10 @@ mod tests {
     use harn_parser::Parser;
 
     use super::{
-        compile_module_artifact, compile_module_artifact_from_source,
-        compile_privileged_wire_module_artifact_from_source, needs_imported_enum_candidates,
-        parse_module_source, ModuleImportBinding, ModuleProvenance,
+        compile_embedded_stdlib_module_artifact_from_source_with_context, compile_module_artifact,
+        compile_module_artifact_from_source, compile_privileged_wire_module_artifact_from_source,
+        needs_imported_enum_candidates, parse_module_source, ModuleCompilationContext,
+        ModuleImportBinding, ModuleProvenance,
     };
     use crate::chunk::Constant;
 
@@ -1086,6 +1087,25 @@ pub fn call() { return lib.greet() }
         let source = r#"fn probe() { return host_call("project.scan", {}) }"#;
         let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
             .expect_err("a tail call must not acquire wire authority");
+        assert!(
+            error.to_string().contains("not callable source API"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn embedded_stdlib_can_wrap_runtime_internal_builtins_without_exposing_them() {
+        let source = r#"pub fn ansi_enabled() { return __ansi_enabled("stdout") }"#;
+        let context = ModuleCompilationContext::default();
+        compile_embedded_stdlib_module_artifact_from_source_with_context(
+            Path::new("<stdlib>/ansi.harn"),
+            source,
+            &context,
+        )
+        .expect("embedded stdlib wrapper compiles");
+
+        let error = compile_module_artifact_from_source(Path::new("<test>/user.harn"), source)
+            .expect_err("ordinary source must not acquire stdlib authority");
         assert!(
             error.to_string().contains("not callable source API"),
             "{error}"

@@ -87,7 +87,7 @@ fn __dispatch_emit_call_start(agent: HarnessAgent, llm_opts: dict) {
   return nil
 }
 
-fn __dispatch_structured_output_schema(llm_opts: dict) {
+fn __dispatch_structured_output_schema(llm_opts: dict) -> dict? {
   const output = llm_opts?.output
   if output == nil || output == "text" {
     return nil
@@ -108,7 +108,7 @@ fn __dispatch_prompt_mode_request(
   harness: Harness,
   message: any,
   llm_opts: dict,
-  schema: unknown,
+  schema: dict,
 ) -> dict {
   const prompt = structured_output_preface(
     harness.fs,
@@ -244,12 +244,7 @@ fn __dispatch_invoke_once(
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_invoke_llm(
-  harness: Harness,
-  message: any,
-  turn_system: any,
-  llm_opts: dict,
-) -> dict {
+pub fn agent_invoke_llm(harness: Harness, message: any, turn_system: any, llm_opts: dict) -> dict {
   __dispatch_reject_removed_options(llm_opts)
   __dispatch_emit_call_start(harness.agent, llm_opts)
   const first = __dispatch_invoke_once(harness, message, turn_system, llm_opts)

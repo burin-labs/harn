@@ -183,9 +183,10 @@ impl CompilerOptions {
 
     /// Options for Harn's immutable, embedder-owned stdlib sources.
     ///
-    /// This grants only stdlib-private pure primitives. Source text and paths
-    /// cannot select the authority; the embedded loader and repository checker
-    /// grant it explicitly.
+    /// This grants stdlib-private primitives and runtime implementation
+    /// primitives used by their public wrappers. Source text and paths cannot
+    /// select the authority; the embedded loader and repository checker grant
+    /// it explicitly.
     #[doc(hidden)]
     pub fn embedded_stdlib() -> Self {
         let mut options = Self::from_env();

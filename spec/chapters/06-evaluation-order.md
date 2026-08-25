@@ -38,7 +38,10 @@ Pipelines may declare a return type with the same `-> TypeExpr` syntax
 as functions:
 
 ```harn
-pipeline ghost_text(harness: Harness, task: dict) -> {text: string, code: int} {
+pipeline ghost_text(
+  harness: Harness,
+  task: dict,
+) -> {text: string, code: int} {
   return {text: "hello", code: 0}
 }
 ```

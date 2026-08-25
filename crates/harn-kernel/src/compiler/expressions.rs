@@ -232,14 +232,18 @@ impl Compiler {
                     ) && self.options.stdlib_internal_authority())
                     || (matches!(
                         entry.contract.exposure,
+                        harn_builtin_meta::BuiltinExposure::RuntimeInternal
+                    ) && self.options.stdlib_internal_authority())
+                    || (matches!(
+                        entry.contract.exposure,
                         harn_builtin_meta::BuiltinExposure::HarnessMethod { .. }
                             | harn_builtin_meta::BuiltinExposure::PrivilegedWire
                             | harn_builtin_meta::BuiltinExposure::StdlibInternal
                             | harn_builtin_meta::BuiltinExposure::RuntimeInternal
                     ) && self.options.legacy_ambient_capabilities())
             });
-            if contract.is_some() && !callable {
-                let route = match contract.expect("checked above").contract.exposure {
+            if let Some(entry) = contract.filter(|_| !callable) {
+                let route = match entry.contract.exposure {
                     harn_builtin_meta::BuiltinExposure::StdlibInternal => {
                         "call the public stdlib function that wraps it"
                     }
