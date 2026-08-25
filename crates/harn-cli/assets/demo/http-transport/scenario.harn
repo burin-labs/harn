@@ -23,11 +23,17 @@
  * conformance suite in
  * `crates/harn-serve/tests/transport_conformance.rs`.
  */
-fn payload() {
+/** The body the handler serves, and the thing the ETag is computed over. */
+type Resource = {id: string, value: string}
+
+/** Just enough of an inbound request for negotiation and the WS upgrade. */
+type Request = {method: string, path: string, headers: dict}
+
+fn payload() -> {resource: Resource} {
   return {resource: {id: "r1", value: "ETag-stable across runs."}}
 }
 
-fn fake_request() {
+fn fake_request() -> Request {
   return {
     method: "GET",
     path: "/v1/resource",

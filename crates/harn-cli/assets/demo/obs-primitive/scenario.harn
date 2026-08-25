@@ -44,7 +44,10 @@ import {
   start_span,
 } from "std/observability"
 
-fn record_session_put(obs: HarnessObs) {
+/** One event kind per counter the receipt reports. */
+type KindCounts = {span_end: int, metric: int, log: int, other: int}
+
+fn record_session_put(obs: HarnessObs) -> nil {
   const handle = start_span(obs, "harn.session.put", {"harn.session.id": "sess_demo"})
   counter(obs, "harn.session.put_total", 1, {"harn.session.op": "put"})
   histogram(obs, "harn.session.duration_ms", 12, {"harn.session.op": "put"})
@@ -53,7 +56,7 @@ fn record_session_put(obs: HarnessObs) {
   end_span(obs, handle)
 }
 
-fn count_by_kind(events) {
+fn count_by_kind(events: list<dict>) -> KindCounts {
   let span_end = 0
   let metric = 0
   let log_count = 0

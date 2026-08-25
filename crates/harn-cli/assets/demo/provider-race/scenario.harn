@@ -28,7 +28,7 @@ fn prompt_for(name: string, model: string) -> string {
   return "[provider_race][provider=${name}][model=${model}] One sentence: what's the strategic moat of replay-deterministic agent runtimes vs. ad-hoc LLM scripts?"
 }
 
-pipeline default(harness: Harness, _task) {
+pipeline default(harness: Harness) {
   const prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
   harness.stdio.println("=== provider-race · prompt ===")
   harness.stdio.println(prompt)
