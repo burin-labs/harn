@@ -427,47 +427,13 @@ impl<'a> Linter<'a> {
             }
 
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                if let Node::FunctionCall { name, .. } = &object.node {
-                    if Self::is_boundary_api(name) {
-                        self.diagnostics.push(LintDiagnostic {
-                            code: Code::LintUntypedDictAccess,
-                            rule: "untyped-dict-access".into(),
-                            message: format!(
-                                "property access on raw `{name}()` result without schema validation"
-                            ),
-                            span: snode.span,
-                            severity: LintSeverity::Warning,
-                            suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or schema_check() first"
-                                    .to_string(),
-                            ),
-                            fix: None,
-                        });
-                    }
-                }
+                self.warn_unvalidated_boundary_access(object, "property", snode.span);
                 self.lint_node(object);
             }
 
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
-                if let Node::FunctionCall { name, .. } = &object.node {
-                    if Self::is_boundary_api(name) {
-                        self.diagnostics.push(LintDiagnostic {
-                            code: Code::LintUntypedDictAccess,
-                            rule: "untyped-dict-access".into(),
-                            message: format!(
-                                "subscript access on raw `{name}()` result without schema validation"
-                            ),
-                            span: snode.span,
-                            severity: LintSeverity::Warning,
-                            suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or schema_check() first"
-                                    .to_string(),
-                            ),
-                            fix: None,
-                        });
-                    }
-                }
+                self.warn_unvalidated_boundary_access(object, "subscript", snode.span);
                 self.lint_node(object);
                 self.lint_node(index);
             }
@@ -1376,6 +1342,30 @@ impl<'a> Linter<'a> {
                 fix: None,
             });
         }
+    }
+
+    /// Reading a field or index straight off a boundary call's result, with no
+    /// schema check in between.
+    ///
+    /// Property and subscript access differ only in the word, so they share
+    /// one body; the call itself is recognized in either spelling by
+    /// [`Self::boundary_api_label`].
+    fn warn_unvalidated_boundary_access(&mut self, object: &SNode, access: &str, span: Span) {
+        let Some(label) = self.boundary_api_label(object) else {
+            return;
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintUntypedDictAccess,
+            rule: "untyped-dict-access".into(),
+            message: format!("{access} access on raw `{label}` result without schema validation"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "assign to a variable and validate with schema_expect() or schema_check() first"
+                    .to_string(),
+            ),
+            fix: None,
+        });
     }
 
     /// Attribute values are compile-time metadata, not runtime expressions.

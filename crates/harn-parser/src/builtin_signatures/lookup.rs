@@ -291,41 +291,125 @@ pub fn builtin_return_type(name: &str) -> Option<TypeExpr> {
     Some(sig.returns.to_type_expr())
 }
 
+/// Builtins that produce an untyped, opaque value — parsed text, a network
+/// body, a model response, a host or tool result — which strict-types mode
+/// requires validating before field access.
+///
+/// **One owner for the question.** `HARN-OWN-004` in the typechecker and
+/// `HARN-LNT-029` in the linter both read this. They used to keep separate
+/// hand-maintained copies, which had drifted on six names: only the
+/// typechecker knew `connector_call`, `host_tool_call`, `http_download`,
+/// `http_stream_info`, and `llm_call_safe`, and only the linter knew
+/// `mcp_call`. This list is their union.
+pub const UNTYPED_BOUNDARY_SOURCES: &[&str] = &[
+    "json_parse",
+    "json_extract",
+    "yaml_parse",
+    "toml_parse",
+    "llm_call",
+    "llm_call_safe",
+    "llm_completion",
+    "http_get",
+    "http_post",
+    "http_put",
+    "http_patch",
+    "http_delete",
+    "http_download",
+    "http_request",
+    "http_session_request",
+    "http_stream_info",
+    "sse_receive",
+    "sse_server_mock_receive",
+    "sse_server_response",
+    "sse_server_status",
+    "websocket_accept",
+    "websocket_receive",
+    "host_call",
+    "connector_call",
+    "host_tool_call",
+    "mcp_call",
+];
+
 /// Returns true if this builtin produces an untyped/opaque value that
 /// should be validated before field access in strict types mode.
-///
-/// This is the same set the linter's `untyped-dict-access` rule treats
-/// as boundary sources — JSON parsing, HTTP responses, LLM outputs,
-/// host capability calls, etc.
 pub fn is_untyped_boundary_source(name: &str) -> bool {
-    matches!(
-        name,
-        "json_parse"
-            | "json_extract"
-            | "yaml_parse"
-            | "toml_parse"
-            | "llm_call"
-            | "llm_call_safe"
-            | "llm_completion"
-            | "http_get"
-            | "http_post"
-            | "http_put"
-            | "http_patch"
-            | "http_delete"
-            | "http_download"
-            | "http_request"
-            | "http_session_request"
-            | "http_stream_info"
-            | "sse_receive"
-            | "sse_server_mock_receive"
-            | "sse_server_response"
-            | "sse_server_status"
-            | "websocket_accept"
-            | "websocket_receive"
-            | "host_call"
-            | "connector_call"
-            | "host_tool_call"
-    )
+    UNTYPED_BOUNDARY_SOURCES.contains(&name)
+}
+
+/// The same question for the typed spelling: does `harness.<field>.<method>`
+/// name one of [`UNTYPED_BOUNDARY_SOURCES`]?
+///
+/// A call site that adopts the spelling `HARN-LNT-071` asks for is still
+/// reading unvalidated data — only the syntax changed. Resolving through the
+/// same list keeps one answer for both spellings, instead of a rule going
+/// quiet the moment its subject migrates.
+pub fn is_untyped_boundary_capability_method(field: &str, method: &str) -> bool {
+    UNTYPED_BOUNDARY_SOURCES
+        .iter()
+        .filter_map(|name| harness_method_for_ambient_name(name))
+        .any(|(candidate_field, candidate_method)| {
+            candidate_field == field && candidate_method == method
+        })
+}
+
+/// Whether a capability-method entry publishes the contract for the ambient
+/// builtin `ambient`.
+///
+/// Three spellings are in use and no single one covers the surface: the
+/// ambient name itself (`llm_call`, in the installed manifest),
+/// `__cap_<name>` (`__cap_llm_call`, in the static capability contracts), and
+/// `__cap_<capability>_<name>` (`__cap_tools_mcp_call`). Matching only one of
+/// them answers "not a boundary source" for part of the list, and does it
+/// silently.
+fn entry_publishes_ambient_name(entry_name: &str, capability_field: &str, ambient: &str) -> bool {
+    if entry_name == ambient {
+        return true;
+    }
+    let Some(rest) = entry_name.strip_prefix("__cap_") else {
+        return false;
+    };
+    rest == ambient
+        || rest
+            .strip_prefix(capability_field)
+            .and_then(|rest| rest.strip_prefix('_'))
+            == Some(ambient)
+}
+
+/// Where an ambient builtin moved onto a Harness handle, as
+/// `(capability field, method)`.
+///
+/// Two registration paths answer this and neither subsumes the other. A
+/// builtin with a `HarnessMethod` contract carries the pair itself. The
+/// `http_*` family never reached the builtin manifest at all — it is
+/// parser-only, with no runtime contract — so its mapping lives in the ambient
+/// replacement tables beside the other pre-cutover families.
+fn harness_method_for_ambient_name(name: &str) -> Option<(&'static str, &'static str)> {
+    // `ambient_harness_method_entries` falls back to the static capability
+    // contracts when no VM has installed the process manifest. Reading
+    // `installed_manifest` directly would make this answer "not a boundary
+    // source" for every manifest-owned builtin during parser-only checking —
+    // silently, and only for some of the list, since the `http_*` family
+    // resolves through the replacement tables either way.
+    let contract_owned = ambient_harness_method_entries()
+        .into_iter()
+        .find_map(|entry| {
+            let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure
+            else {
+                return None;
+            };
+            entry_publishes_ambient_name(entry.name, capability.field_name(), name)
+                .then_some((capability.field_name(), method))
+        });
+    if contract_owned.is_some() {
+        return contract_owned;
+    }
+    let path = crate::diagnostic::harness_net_replacement(name)
+        .or_else(|| crate::diagnostic::harness_fs_replacement(name))
+        .or_else(|| crate::diagnostic::harness_env_replacement(name))
+        .or_else(|| crate::diagnostic::harness_stdio_replacement(name))
+        .or_else(|| crate::diagnostic::harness_clock_replacement(name))
+        .or_else(|| crate::diagnostic::harness_random_replacement(name))?;
+    path.strip_prefix("harness.")?.split_once('.')
 }
 
 /// Convert the signature's return type to a tiny `&'static [&'static str]`

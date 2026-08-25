@@ -277,6 +277,80 @@ output: {schema: my_schema, validation: "error"}
 }
 
 #[test]
+fn test_strict_types_flags_the_ambient_boundary_spelling() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  harness.stdio.log(http_get("https://example.com").body)
+}"#,
+    );
+    assert!(
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "expected unvalidated error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_strict_types_flags_the_harness_boundary_spelling() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  harness.stdio.log(harness.net.get("https://example.com").body)
+}"#,
+    );
+    assert!(
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "migrating the call site must not silence HARN-OWN-004, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_strict_types_ignores_a_get_method_on_another_receiver() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  const proxy = {net: {get: { url -> {body: url} }}}
+  harness.stdio.log(proxy.net.get("https://example.com").body)
+}"#,
+    );
+    assert!(
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "`net.get` on a plain value is not the harness method, got: {errs:?}"
+    );
+}
+
+/// The suppression that makes a typed `output` schema clear the boundary must
+/// follow the call to its harness spelling. Teaching the rule the new spelling
+/// without teaching the suppression would make every typed-schema LLM call
+/// start erroring under `--strict-types`.
+#[test]
+fn test_strict_types_harness_llm_call_with_schema_is_clean() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  const my_schema = {type: "object", properties: {score: {type: "float"}}}
+  const result = harness.llm.call("rate this", "system", {
+output: {schema: my_schema, validation: "error"}
+  })
+  harness.stdio.log(result.data.score)
+}"#,
+    );
+    assert!(
+        !errs.iter().any(|w| w.contains("unvalidated")),
+        "harness.llm.call with an output schema should not error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_strict_types_harness_llm_call_without_schema_still_errors() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness) {
+  harness.stdio.log(harness.llm.call("rate this", "system").data)
+}"#,
+    );
+    assert!(
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "an unschema'd harness.llm.call result is still unvalidated, got: {errs:?}"
+    );
+}
+
+#[test]
 fn test_cross_module_unresolved_call_errors() {
     let diags =
         check_source_with_imports(r"pipeline t(task) { missing_helper() }", &["other_helper"]);
