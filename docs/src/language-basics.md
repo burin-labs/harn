@@ -779,7 +779,7 @@ Printing an iter renders `<iter>` without draining it.
 Numeric ranges (`a to b`, `range(n)`) participate in the lazy iter
 protocol directly: `.map / .filter / .take / .zip / .enumerate / ...`
 on a Range return a lazy iter with no upfront allocation, so
-`(1 to 10_000_000).map(fn(x) { return x * 2 }).take(5).to_list()`
+`(1 to 10000000).map(fn(x) { return x * 2 }).take(5).to_list()`
 finishes instantly. Range still keeps its O(1) fast paths for
 `.len / .first / .last / .contains(x)` and `r[k]` subscript — those
 don't round-trip through iter.
