@@ -155,6 +155,12 @@ fn inline_mock_scope_survives_a_deterministic_executor_thread_hop() {
     let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
         crate::observability::execution_scope::mint_execution_scope(),
         LlmMockContext::default(),
+        crate::stdlib::agents::agents_workers::fresh_worker_registry(),
+        crate::stdlib::agents_daemon::fresh_daemon_registry(),
+        crate::triggers::registry::runtime::fresh_trigger_registry(),
+        crate::agent_sessions::fresh_session_runtime(),
+        crate::tracing::fresh_tracing_runtime(),
+        crate::llm::agent_session_host::fresh_agent_host_session_runtime(),
     );
     let mut first_poll = true;
     let inner = std::future::poll_fn(move |cx| {

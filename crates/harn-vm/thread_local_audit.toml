@@ -22,7 +22,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/agent_sessions.rs"
-statics = ["SESSIONS", "SESSION_CAP", "DEFAULT_TRANSCRIPT_BUDGET_POLICY", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+statics = ["ACTIVE_SESSION_RUNTIME", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -148,7 +148,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/agent_session_host.rs"
-statics = ["AGENT_HOST_SESSIONS"]
+statics = ["ACTIVE_AGENT_HOST_SESSION_RUNTIME"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -445,13 +445,13 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/stdlib/agents_daemon.rs"
-statics = ["DAEMON_REGISTRY", "DAEMON_COUNTER"]
+statics = ["ACTIVE_DAEMON_REGISTRY"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/stdlib/agents_workers/mod.rs"
-statics = ["WORKER_REGISTRY", "WORKER_COUNTER"]
+statics = ["ACTIVE_WORKER_REGISTRY"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -460,12 +460,6 @@ path = "src/stdlib/clock.rs"
 statics = ["MOCK_TIME_GUARDS"]
 category = "thread_private"
 plan = "thread_private_test"
-
-[[thread_local]]
-path = "src/stdlib/concurrency.rs"
-statics = ["CIRCUITS"]
-category = "logical_task"
-plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/stdlib/durable_step.rs"
@@ -660,12 +654,6 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/stdlib/triggers_stdlib/auto_resume.rs"
-statics = ["AUTO_RESUME_TIMEOUTS"]
-category = "logical_task"
-plan = "task_local_or_explicit"
-
-[[thread_local]]
 path = "src/stdlib/vision.rs"
 statics = ["OCR_BACKEND_OVERRIDE"]
 category = "thread_private"
@@ -721,9 +709,9 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/tracing.rs"
-statics = ["COLLECTOR", "TRACING_ENABLED"]
-category = "logical_task"
-plan = "task_local_or_explicit"
+statics = ["ACTIVE_TRACING_RUNTIME"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/triggers/aggregation.rs"
@@ -738,8 +726,8 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/triggers/registry.rs"
-statics = ["TRIGGER_REGISTRY"]
+path = "src/triggers/registry/runtime.rs"
+statics = ["ACTIVE_TRIGGER_REGISTRY"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 

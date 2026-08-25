@@ -301,6 +301,22 @@ pub struct Vm {
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
     pub(crate) shared_state_runtime: Arc<crate::shared_state::VmSharedStateRuntime>,
+    /// Host-agent workers owned by this VM tree. Child interpreters share the
+    /// registry so delayed triggers and task migration address the same worker
+    /// state without exposing it to a sibling VM execution.
+    pub(crate) worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
+    /// Managed agent daemons owned by this VM tree.
+    pub(crate) daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,
+    /// Trigger bindings owned by this VM tree, including dynamic auto-resume
+    /// bindings that may be consumed on a different runtime worker.
+    pub(crate) trigger_registry: Arc<crate::triggers::registry::TriggerRegistryRuntime>,
+    /// Agent transcripts and subscribers owned by this VM tree.
+    pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
+    /// Structured spans owned by this VM tree.
+    pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
+    /// Host-side agent-loop state owned by this VM tree.
+    pub(crate) agent_host_session_runtime:
+        Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
     /// Per-isolate inline cache entries. `inline_cache_set_by_chunk` maps a
     /// compiled chunk identity to an index in this vector at frame entry; the
     /// dispatch loop uses the frame-local index for per-op reads/writes.
@@ -538,6 +554,13 @@ impl VmBaseline {
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            worker_registry: crate::stdlib::agents::agents_workers::active_worker_registry(),
+            daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
+            trigger_registry: crate::triggers::registry::active_trigger_registry(),
+            session_runtime: crate::agent_sessions::active_session_runtime(),
+            tracing_runtime: crate::tracing::active_tracing_runtime(),
+            agent_host_session_runtime:
+                crate::llm::agent_session_host::active_agent_host_session_runtime(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
@@ -799,6 +822,13 @@ impl Vm {
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            worker_registry: crate::stdlib::agents::agents_workers::active_worker_registry(),
+            daemon_registry: crate::stdlib::agents_daemon::active_daemon_registry(),
+            trigger_registry: crate::triggers::registry::active_trigger_registry(),
+            session_runtime: crate::agent_sessions::active_session_runtime(),
+            tracing_runtime: crate::tracing::active_tracing_runtime(),
+            agent_host_session_runtime:
+                crate::llm::agent_session_host::active_agent_host_session_runtime(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
@@ -1059,6 +1089,12 @@ impl Vm {
             process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
+            worker_registry: self.worker_registry.clone(),
+            daemon_registry: self.daemon_registry.clone(),
+            trigger_registry: self.trigger_registry.clone(),
+            session_runtime: self.session_runtime.clone(),
+            tracing_runtime: self.tracing_runtime.clone(),
+            agent_host_session_runtime: self.agent_host_session_runtime.clone(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),

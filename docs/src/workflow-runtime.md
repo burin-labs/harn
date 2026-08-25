@@ -626,7 +626,7 @@ The mailbox builtins are:
 - `workflow.query(target, name)`
 - `workflow.publish_query(target, name, value?)`
 - `workflow.update(target, name, payload?, options?)`
-- `workflow.receive(target)`
+- `workflow.receive(target, timeout_ms?)`
 - `workflow.respond_update(target, request_id, value, name?)`
 - `workflow.pause(target)`
 - `workflow.resume(target)`
@@ -652,6 +652,17 @@ const next = workflow.receive(workflow_id)
 harness.stdio.log(next?.kind == "signal")
 harness.stdio.log(workflow.query(workflow_id, "progress_pct"))
 ```
+
+`workflow.receive` is nonblocking by default and returns `nil` when the mailbox
+is empty. Pass a positive `timeout_ms` to wait for the next durable message;
+it returns `nil` only if that deadline expires. This is the synchronization
+boundary for consumers—do not use a sleep to guess when a concurrent sender
+has enqueued its message.
+
+Wait deadlines and durable message timestamps use the active `HarnessClock`,
+so paused and recorded executions remain deterministic. In-process state
+changes wake receivers directly; the durable-state poll remains as the
+cross-process fallback.
 
 `workflow.update(...)` enqueues a request and waits until
 `workflow.respond_update(...)` publishes a response for the generated

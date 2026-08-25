@@ -21,7 +21,7 @@ pub(crate) mod args;
 mod agent_sessions;
 pub mod agent_state;
 pub(crate) mod agents;
-mod agents_daemon;
+pub(crate) mod agents_daemon;
 mod artifact_emit;
 pub(crate) mod assemble;
 pub mod asset_paths;

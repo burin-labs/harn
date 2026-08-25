@@ -3,14 +3,11 @@
 //! Capability/identity context — execution policy, approval policy, command
 //! policy, dynamic permissions, the current host bridge, the bridge-trust +
 //! command-hook depths, and the runtime-context overlay — is held in
-//! thread-local LIFO stacks or single slots. The same hazard applies to
-//! single-slot contexts installed for the whole agent loop. That model is sound for a
-//! synchronous call stack, but a guard held across an `.await` is **not**:
-//! runtime tasks can interleave on one thread or migrate between worker
-//! threads. A
-//! child that installs context across an await would otherwise read a
-//! *sibling's* file scope, env, worktree, tool ceiling, approval, secret scope,
-//! or event attribution.
+//! thread-local LIFO stacks or single slots, including contexts installed for
+//! the whole agent loop. That model is sound for a synchronous call stack, but
+//! a guard held across an `.await` is **not**: tasks can interleave on one thread
+//! or migrate between workers. A child would otherwise read a *sibling's* file
+//! scope, env, worktree, tool ceiling, approval, secrets, or event attribution.
 //!
 //! [`AmbientExecutionScope`] gives every spawned worker its **own** copy of
 //! these stacks. [`scope_ambient`] wraps the worker future so the task's scope
@@ -18,9 +15,7 @@
 //! poll-exit (the same technique `tracing::Instrument` uses for span context).
 //! Only the currently-polling task's scope is ever live on a thread, so the
 //! cooperative/work-stealing interleaving is invisible to capability checks.
-//! Each swap is an O(1) `mem::replace` of a `Vec`/`usize`/`Option`, so the
-//! per-poll cost is a handful of pointer swaps regardless of stack depth.
-
+//! Swaps are O(1) pointer moves regardless of stack depth.
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -48,7 +43,7 @@ use crate::llm::capabilities::{
 };
 use crate::llm::mock::{current_llm_mock_context, swap_llm_mock_context, LlmMockContext};
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
-use crate::llm::swap_current_host_bridge;
+use crate::llm::{swap_current_host_bridge, swap_current_loop_sinks};
 use crate::llm_config::{
     swap_runtime_provider_endpoint_overrides, swap_user_overrides as swap_provider_overrides,
     ProvidersConfig, RuntimeProviderEndpointOverrides,
@@ -64,6 +59,7 @@ use crate::stdlib::process::{
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
 mod subtask_state;
+mod top_level;
 
 use subtask_state::SubtaskAmbientState;
 
@@ -124,6 +120,10 @@ pub(crate) struct AmbientExecutionScope {
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
     host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
+    /// Scoped observation sinks follow all work started inside the capture
+    /// closure, including delegated agents. A child may layer its own sink on
+    /// top without losing the outer capture when no narrower sink is present.
+    loop_sinks: Vec<std::sync::Arc<dyn crate::agent_events::AgentEventSink>>,
     /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
     /// INHERITED by fan-out workers and inline subtasks: they are part of the
     /// SAME program run, so a `run_test` executed in a fan-out body must record
@@ -159,31 +159,6 @@ fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
 }
 
 impl AmbientExecutionScope {
-    /// Capture the caller's full ambient context for one top-level VM run and
-    /// append a fresh execution owner. The resulting scope is installed by
-    /// [`scope_ambient`] around every poll of the VM future, so two top-level
-    /// executions interleaved on one thread never observe each other's owner.
-    /// Keeping the captured stack beneath the fresh owner preserves nested VM
-    /// execution: completion restores the exact outer ambient context.
-    pub(crate) fn capture_for_top_level_execution(
-        owner: std::sync::Arc<str>,
-        llm_mock: LlmMockContext,
-    ) -> Self {
-        let mut scope = Self::capture_for_inline_subtask();
-        let tool_call_cancellations = scope
-            .host_bridge
-            .as_ref()
-            .map_or_else(crate::tool_call_cancellations::fresh_registry, |bridge| {
-                bridge.tool_call_cancellation_registry()
-            });
-        scope
-            .subtask
-            .set_tool_call_cancellations(tool_call_cancellations);
-        scope.execution_scope.push(owner);
-        scope.llm_mock = llm_mock;
-        scope
-    }
-
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's
@@ -227,6 +202,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            loop_sinks: clone_via_swap(swap_current_loop_sinks),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -292,6 +268,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            loop_sinks: clone_via_swap(swap_current_loop_sinks),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -358,6 +335,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
+        swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
             &mut self.runtime_provider_endpoint_overrides,
@@ -576,6 +554,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // Host capability bridge: fan-out workers need the same host_call routing
     // as the parent agent loop, even when process cwd differs from project root.
     ("CURRENT_HOST_BRIDGE", AmbientScoping::Captured),
+    // Scoped capture/audit sinks follow every child started inside the capture,
+    // including delegated agents and inline tool fan-out.
+    ("CURRENT_LOOP_SINKS", AmbientScoping::Captured),
     // Files-written/session breadcrumb: isolated per task, but not inherited.
     ("CURRENT_SESSION_STACK", AmbientScoping::Captured),
     // Provider/capability overlays can change transport routing and tool wire
@@ -624,6 +605,15 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // runtime workers, without becoming visible to sibling embedded VMs.
     (
         "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
+        AmbientScoping::Captured,
+    ),
+    ("ACTIVE_WORKER_REGISTRY", AmbientScoping::Captured),
+    ("ACTIVE_DAEMON_REGISTRY", AmbientScoping::Captured),
+    ("ACTIVE_TRIGGER_REGISTRY", AmbientScoping::Captured),
+    ("ACTIVE_SESSION_RUNTIME", AmbientScoping::Captured),
+    ("ACTIVE_TRACING_RUNTIME", AmbientScoping::Captured),
+    (
+        "ACTIVE_AGENT_HOST_SESSION_RUNTIME",
         AmbientScoping::Captured,
     ),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet

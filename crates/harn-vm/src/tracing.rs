@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -498,9 +499,65 @@ impl SpanCollector {
     }
 }
 
+struct SharedCell<T>(parking_lot::RwLock<T>);
+
+impl<T> SharedCell<T> {
+    fn borrow(&self) -> parking_lot::RwLockReadGuard<'_, T> {
+        self.0.read()
+    }
+
+    fn borrow_mut(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
+        self.0.write()
+    }
+}
+
+pub(crate) struct TracingRuntime {
+    collector: SharedCell<SpanCollector>,
+    enabled: SharedCell<bool>,
+}
+
+impl Default for TracingRuntime {
+    fn default() -> Self {
+        Self {
+            collector: SharedCell(parking_lot::RwLock::new(SpanCollector::new())),
+            enabled: SharedCell(parking_lot::RwLock::new(false)),
+        }
+    }
+}
+
 thread_local! {
-    static COLLECTOR: RefCell<SpanCollector> = RefCell::new(SpanCollector::new());
-    static TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    static ACTIVE_TRACING_RUNTIME: RefCell<Arc<TracingRuntime>> =
+        RefCell::new(fresh_tracing_runtime());
+}
+
+pub(crate) fn fresh_tracing_runtime() -> Arc<TracingRuntime> {
+    Arc::new(TracingRuntime::default())
+}
+
+pub(crate) fn active_tracing_runtime() -> Arc<TracingRuntime> {
+    ACTIVE_TRACING_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
+}
+
+pub(crate) fn swap_active_tracing_runtime(next: Arc<TracingRuntime>) -> Arc<TracingRuntime> {
+    ACTIVE_TRACING_RUNTIME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+struct CollectorSlot;
+static COLLECTOR: CollectorSlot = CollectorSlot;
+impl CollectorSlot {
+    fn with<T>(&self, use_collector: impl FnOnce(&SharedCell<SpanCollector>) -> T) -> T {
+        let runtime = active_tracing_runtime();
+        use_collector(&runtime.collector)
+    }
+}
+
+struct TracingEnabledSlot;
+static TRACING_ENABLED: TracingEnabledSlot = TracingEnabledSlot;
+impl TracingEnabledSlot {
+    fn with<T>(&self, use_enabled: impl FnOnce(&SharedCell<bool>) -> T) -> T {
+        let runtime = active_tracing_runtime();
+        use_enabled(&runtime.enabled)
+    }
 }
 
 /// Close only spans opened after this checkpoint if its owning future is

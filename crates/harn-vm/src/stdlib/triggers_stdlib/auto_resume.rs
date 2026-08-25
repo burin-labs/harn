@@ -7,7 +7,6 @@
 //! halves, keyed by trigger id in a thread-local table so a worker that resumes
 //! early cancels its own timeout.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +18,6 @@ use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::triggers::test_util::clock;
 use crate::triggers::{
     dynamic_deregister, dynamic_register, resolve_live_trigger_binding, TriggerEvent,
     TriggerHandlerSpec, TriggerRegistryError,
@@ -29,11 +27,6 @@ use crate::value::{VmDictExt, VmError, VmValue};
 use super::args::trigger_registry_error;
 use super::binding_config::parse_trigger_config;
 use super::journal::ensure_trigger_event_log;
-
-thread_local! {
-    static AUTO_RESUME_TIMEOUTS: RefCell<BTreeMap<String, tokio::task::JoinHandle<()>>> =
-        const { RefCell::new(BTreeMap::new()) };
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct AutoResumeTriggerHandle {
@@ -52,7 +45,7 @@ struct AutoResumeTimeoutSpec {
 }
 
 pub(crate) async fn register_auto_resume_trigger(
-    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    ctx: &crate::vm::AsyncBuiltinCtx,
     worker_id: &str,
     conditions: Option<&VmValue>,
 ) -> Result<Option<AutoResumeTriggerHandle>, VmError> {
@@ -122,7 +115,7 @@ pub(crate) async fn register_auto_resume_trigger(
         version: binding.version,
     };
     if let Some(timeout) = timeout {
-        schedule_auto_resume_timeout(ctx, handle.clone(), worker_id.to_string(), timeout);
+        schedule_auto_resume_timeout(ctx, handle.clone(), worker_id.to_string(), timeout).await;
     }
     Ok(Some(handle))
 }
@@ -138,12 +131,9 @@ pub(crate) async fn unregister_auto_resume_trigger(
 }
 
 pub(crate) fn reset_auto_resume_timeouts() {
-    AUTO_RESUME_TIMEOUTS.with(|slot| {
-        let mut tasks = slot.borrow_mut();
-        for (_, task) in std::mem::take(&mut *tasks) {
-            task.abort();
-        }
-    });
+    for task in crate::triggers::registry::active_trigger_registry().drain_background_tasks() {
+        task.abort();
+    }
 }
 
 fn sanitize_auto_resume_id(worker_id: &str) -> String {
@@ -218,48 +208,67 @@ fn auto_resume_timeout_spec(
 }
 
 fn cancel_auto_resume_timeout(trigger_id: &str) {
-    AUTO_RESUME_TIMEOUTS.with(|slot| {
-        if let Some(task) = slot.borrow_mut().remove(trigger_id) {
-            task.abort();
-        }
-    });
+    if let Some(task) =
+        crate::triggers::registry::active_trigger_registry().cancel_background_task(trigger_id)
+    {
+        task.abort();
+    }
 }
 
-fn schedule_auto_resume_timeout(
-    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+async fn schedule_auto_resume_timeout(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     handle: AutoResumeTriggerHandle,
     worker_id: String,
     timeout: AutoResumeTimeoutSpec,
 ) {
     cancel_auto_resume_timeout(handle.id.as_str());
     let event_log = ensure_trigger_event_log();
-    let base_vm = ctx
-        .map(crate::vm::AsyncBuiltinCtx::child_vm)
-        .unwrap_or_default();
+    let base_vm = ctx.child_vm();
+    let worker_registry = base_vm.worker_registry.clone();
+    let pool_registry = base_vm.pool_registry.clone();
     let harness_inner = base_vm.harness().map(|harness| Arc::clone(harness.inner()));
+    let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
+    let harness_inner =
+        harness_inner.expect("auto-resume timeout requires Harness clock authority");
+    let now_unix_ms = harn_clock::now_wall_ms(harness_inner.clock().as_ref());
+    let deadline_unix_ms = now_unix_ms.saturating_add(duration.as_millis() as i64);
     let event = auto_resume_timeout_event(&handle, &worker_id, &timeout);
     let trigger_id = handle.id.clone();
     let version = handle.version;
     let task_trigger_id = trigger_id.clone();
-    let task = tokio::task::spawn_local(async move {
-        let duration = Duration::from_secs(timeout.duration_minutes.saturating_mul(60));
-        if let Some(harness_inner) = harness_inner {
-            harness_inner.wait_for_clock_advance(duration).await;
-        } else {
-            clock::sleep(duration).await;
+    let (armed_tx, armed_rx) = tokio::sync::oneshot::channel();
+    let (completion_tx, completion_rx) = tokio::sync::watch::channel(false);
+    let timeout_task = async move {
+        armed_tx
+            .send(())
+            .expect("auto-resume timeout scheduler dropped its registration barrier");
+        harness_inner.wait_for_clock_advance(duration).await;
+        crate::triggers::registry::active_trigger_registry()
+            .detach_background_task(task_trigger_id.as_str());
+        if let Ok(binding) = resolve_live_trigger_binding(trigger_id.as_str(), Some(version)) {
+            let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, event_log);
+            let _ = dispatcher.dispatch(&binding, event).await;
         }
-        AUTO_RESUME_TIMEOUTS.with(|slot| {
-            slot.borrow_mut().remove(task_trigger_id.as_str());
-        });
-        let Ok(binding) = resolve_live_trigger_binding(trigger_id.as_str(), Some(version)) else {
-            return;
-        };
-        let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, event_log);
-        let _ = dispatcher.dispatch(&binding, event).await;
-    });
-    AUTO_RESUME_TIMEOUTS.with(|slot| {
-        slot.borrow_mut().insert(handle.id.clone(), task);
-    });
+        let _ = completion_tx.send(true);
+    };
+    let task = crate::vm::subtask::spawn_inherited_child(
+        pool_registry,
+        crate::stdlib::agents::agents_workers::scope_worker_registry(worker_registry, timeout_task),
+    );
+    let replaced = crate::triggers::registry::active_trigger_registry().replace_background_task(
+        handle.id.clone(),
+        task,
+        deadline_unix_ms,
+        completion_rx,
+    );
+    assert!(
+        replaced.is_none(),
+        "auto-resume timeout was replaced without cancellation: {}",
+        handle.id
+    );
+    armed_rx
+        .await
+        .expect("auto-resume timeout task exited before registration");
 }
 
 fn auto_resume_timeout_event(

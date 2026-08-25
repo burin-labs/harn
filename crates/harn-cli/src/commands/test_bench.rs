@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
 
+use harn_vm::subtask::{scope_placement, SubtaskPlacement};
 use harn_vm::testbench::annotations::{
     annotations_for_record, validate_against_tape, AnnotationKind, AnnotationTape,
 };
@@ -146,15 +147,18 @@ async fn run_with_des_runtime(
                     Ok(s) => s,
                     Err(e) => return error_outcome(format!("activate testbench: {e}")),
                 };
-                let outcome = execute_run(
-                    &args.file,
-                    false,
-                    HashSet::new(),
-                    args.argv.clone(),
-                    Vec::new(),
-                    llm_mode,
-                    None,
-                    RunProfileOptions::default(),
+                let outcome = scope_placement(
+                    SubtaskPlacement::CurrentThread,
+                    execute_run(
+                        &args.file,
+                        false,
+                        HashSet::new(),
+                        args.argv.clone(),
+                        Vec::new(),
+                        llm_mode,
+                        None,
+                        RunProfileOptions::default(),
+                    ),
                 )
                 .await;
                 finalize_session(outcome, session, &args)

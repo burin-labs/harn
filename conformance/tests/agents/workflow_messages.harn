@@ -1,3 +1,5 @@
+type BudgetUpdatePayload = {max_usd: int}
+
 pipeline default(harness: Harness) {
   const workflow_id = "wf-messages-" + harness.random.uuid()
   const target = {workflow_id: workflow_id}
@@ -11,21 +13,27 @@ pipeline default(harness: Harness) {
   harness.stdio.println(published?.query_count == 1)
   harness.stdio.println(harness.runtime.workflow_query(target, "progress_pct") == 42)
   const waiter = spawn {
-    let result = harness.runtime.workflow_update(
+    const result = harness.runtime.workflow_update(
       target,
       "adjust_budget",
       {max_usd: 10},
       {timeout_ms: 1000},
     )
-    harness.stdio.println(result?.ok)
+    harness.stdio.println(result.ok)
   }
-  harness.clock.sleep_ms(50ms)
-  const update = harness.runtime.workflow_receive(target)
-  harness.stdio.println(update?.kind == "update")
-  harness.stdio.println(update?.name == "adjust_budget")
-  harness.stdio.println(update?.payload?.max_usd == 10)
-  harness.stdio.println(update?.request_id != nil)
-  harness.runtime.workflow_respond_update(target, update?.request_id, {ok: true}, update?.name)
+  const update = harness.runtime.workflow_receive(target, 1000)
+  require update != nil
+  harness.stdio.println(update.kind == "update")
+  harness.stdio.println(update.name == "adjust_budget")
+  if schema_is(update.payload, BudgetUpdatePayload) {
+    harness.stdio.println(update.payload.max_usd == 10)
+  } else {
+    throw "workflow update payload violated BudgetUpdatePayload"
+  }
+  const request_id = update.request_id
+  require request_id != nil
+  harness.stdio.println(request_id != nil)
+  harness.runtime.workflow_respond_update(target, request_id, {ok: true}, update.name)
   const _ = await(waiter)
   const paused = harness.runtime.workflow_pause(target)
   harness.stdio.println(paused?.paused)

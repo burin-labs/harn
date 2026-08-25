@@ -4,8 +4,8 @@ mod authority;
 mod control;
 pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
-use control::handle_cancel_tool_call_notification;
 pub use control::HostBridgeControlState;
+use control::{handle_cancel_tool_call_notification, DaemonIdleState};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::io::Write;
@@ -102,8 +102,8 @@ pub struct HostBridge {
     /// between runs (watch mode, long-running agents) to rebuild the
     /// layered skill catalog from its current filesystem + host state.
     skills_reload_requested: Arc<AtomicBool>,
-    /// Whether the current daemon-mode agent loop is blocked in idle wait.
-    daemon_idle: Arc<AtomicBool>,
+    /// State and waiters for the daemon loop's idle boundary.
+    daemon_idle: DaemonIdleState,
     /// Canonical ACP stop reason and producer-owned terminal outcome recorded
     /// by the most recent `agent_loop` finalize during this prompt.
     prompt_outcome: std::sync::Mutex<Option<(String, crate::agent_events::AgentTerminalOutcome)>>,
@@ -807,7 +807,7 @@ impl HostBridge {
         let queued_transcript_injections = HostBridgeInjectionState::default();
         let resume_requested = Arc::new(AtomicBool::new(false));
         let skills_reload_requested = Arc::new(AtomicBool::new(false));
-        let daemon_idle = Arc::new(AtomicBool::new(false));
+        let daemon_idle = DaemonIdleState::default();
 
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
@@ -943,7 +943,7 @@ impl HostBridge {
             queued_transcript_injections: control.queued_transcript_injections,
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
-            daemon_idle: Arc::new(AtomicBool::new(false)),
+            daemon_idle: DaemonIdleState::default(),
             prompt_outcome: std::sync::Mutex::new(None),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
@@ -968,7 +968,7 @@ impl HostBridge {
             queued_transcript_injections: HostBridgeInjectionState::default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
-            daemon_idle: Arc::new(AtomicBool::new(false)),
+            daemon_idle: DaemonIdleState::default(),
             prompt_outcome: std::sync::Mutex::new(None),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
@@ -1138,14 +1138,6 @@ impl HostBridge {
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
     }
-    pub fn set_daemon_idle(&self, idle: bool) {
-        self.daemon_idle.store(idle, Ordering::SeqCst);
-    }
-
-    pub fn is_daemon_idle(&self) -> bool {
-        self.daemon_idle.load(Ordering::SeqCst)
-    }
-
     /// Record the current prompt's canonical ACP stop reason and typed terminal
     /// outcome atomically. The last writer wins because the outer `agent_loop`
     /// finalizes after any inner loops it spawned.

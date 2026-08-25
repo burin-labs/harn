@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration as StdDuration;
 
+use harn_clock::Clock;
 use serde::{Deserialize, Serialize};
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -10,7 +13,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const DEFAULT_UPDATE_TIMEOUT_MS: u64 = 30_000;
-const UPDATE_POLL_INTERVAL_MS: u64 = 25;
+const WORKFLOW_POLL_INTERVAL_MS: u64 = 25;
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &WORKFLOW_SIGNAL_BUILTIN_DEF,
@@ -145,9 +148,70 @@ fn workflow_state_path(target: &WorkflowTarget) -> PathBuf {
 }
 
 fn now_rfc3339() -> String {
-    // Was `unwrap_or_else(|_| Uuid::now_v7().to_string())`, which emitted a
-    // UUID where a timestamp was expected; the shared helper emits the epoch.
-    harn_clock::system_now_rfc3339()
+    crate::clock_mock::active_clock().map_or_else(harn_clock::system_now_rfc3339, |clock| {
+        harn_clock::now_rfc3339(clock.as_ref())
+    })
+}
+
+fn workflow_clock() -> Arc<dyn Clock> {
+    crate::clock_mock::active_clock().unwrap_or_else(harn_clock::RealClock::arc)
+}
+
+struct WorkflowDeadline {
+    clock: Arc<dyn Clock>,
+    started_ms: i64,
+    timeout_ms: u64,
+}
+
+impl WorkflowDeadline {
+    fn new(timeout: StdDuration) -> Self {
+        let clock = workflow_clock();
+        let started_ms = clock.monotonic_ms();
+        Self {
+            clock,
+            started_ms,
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
+    async fn wait_for_next_poll<F>(&self, changed: F) -> bool
+    where
+        F: Future<Output = ()>,
+    {
+        let elapsed_ms = self
+            .clock
+            .monotonic_ms()
+            .saturating_sub(self.started_ms)
+            .max(0) as u64;
+        let remaining_ms = self.timeout_ms.saturating_sub(elapsed_ms);
+        if remaining_ms == 0 {
+            return false;
+        }
+        tokio::select! {
+            () = changed => {}
+            () = self.clock.sleep(StdDuration::from_millis(
+                remaining_ms.min(WORKFLOW_POLL_INTERVAL_MS),
+            )) => {}
+        }
+        // Auto-advancing test clocks complete sleeps synchronously. Yielding
+        // here preserves worker progress without coupling it to physical time.
+        tokio::task::yield_now().await;
+        true
+    }
+}
+
+fn workflow_notifier(target: &WorkflowTarget) -> Arc<tokio::sync::Notify> {
+    static NOTIFIERS: OnceLock<parking_lot::Mutex<BTreeMap<PathBuf, Weak<tokio::sync::Notify>>>> =
+        OnceLock::new();
+    let mut notifiers = NOTIFIERS.get_or_init(Default::default).lock();
+    let path = workflow_state_path(target);
+    if let Some(notifier) = notifiers.get(&path).and_then(Weak::upgrade) {
+        return notifier;
+    }
+    notifiers.retain(|_, notifier| notifier.strong_count() != 0);
+    let notifier = Arc::new(tokio::sync::Notify::new());
+    notifiers.insert(path, Arc::downgrade(&notifier));
+    notifier
 }
 
 fn load_state(target: &WorkflowTarget) -> Result<WorkflowMailboxState, String> {
@@ -179,7 +243,9 @@ fn save_state(target: &WorkflowTarget, state: &WorkflowMailboxState) -> Result<(
     let json = serde_json::to_string_pretty(state)
         .map_err(|error| format!("workflow state encode error: {error}"))?;
     crate::atomic_io::atomic_write(&path, json.as_bytes())
-        .map_err(|error| format!("workflow state write error: {error}"))
+        .map_err(|error| format!("workflow state write error: {error}"))?;
+    workflow_notifier(target).notify_one();
+    Ok(())
 }
 
 fn parse_target_json(
@@ -328,6 +394,25 @@ fn receive_message(target: &WorkflowTarget) -> Result<Option<WorkflowMessageReco
     Ok(message)
 }
 
+async fn receive_message_with_timeout(
+    target: &WorkflowTarget,
+    timeout: Option<StdDuration>,
+) -> Result<Option<WorkflowMessageRecord>, String> {
+    let Some(timeout) = timeout else {
+        return receive_message(target);
+    };
+    let deadline = WorkflowDeadline::new(timeout);
+    let notifier = workflow_notifier(target);
+    loop {
+        if let Some(message) = receive_message(target)? {
+            return Ok(Some(message));
+        }
+        if !deadline.wait_for_next_poll(notifier.notified()).await {
+            return Ok(None);
+        }
+    }
+}
+
 pub fn workflow_signal_for_base(
     base_dir: &Path,
     workflow_id: &str,
@@ -423,7 +508,8 @@ async fn wait_for_update_response(
     request_id: &str,
     timeout: StdDuration,
 ) -> Result<serde_json::Value, String> {
-    let deadline = tokio::time::Instant::now() + timeout;
+    let deadline = WorkflowDeadline::new(timeout);
+    let notifier = workflow_notifier(target);
     loop {
         match update_response_value(target, request_id) {
             Ok(Some(value)) => return Ok(value),
@@ -431,12 +517,9 @@ async fn wait_for_update_response(
             Err(error) => return Err(error),
         }
 
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
+        if !deadline.wait_for_next_poll(notifier.notified()).await {
             break;
         }
-        let next_poll = now + StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS);
-        tokio::time::sleep_until(next_poll.min(deadline)).await;
     }
     Err(format!(
         "workflow update '{name}' timed out for '{}'",
@@ -649,16 +732,37 @@ fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
-/// Receive the next workflow mailbox message.
+/// Receive the next workflow mailbox message, optionally waiting for one.
 #[harn_builtin(
     exposure = "harness.runtime.workflow_receive",
     effects = ["state.observe@dynamic", "state.mutate@dynamic"],
-    sig = "workflow.receive(target: string|dict) -> dict|nil",
+    sig = "workflow.receive(target: string | dict, timeout_ms?: int) -> {workflow_id: string, seq: int, kind: \"signal\" | \"update\" | \"control\", name: string, request_id: string?, payload: unknown, enqueued_at: string}?",
+    kind = "async",
     category = "workflow.messages"
 )]
-fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+async fn workflow_receive_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.receive")?;
-    let Some(message) = receive_message(&target).map_err(VmError::Runtime)? else {
+    let timeout = match args.get(1) {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => {
+            let timeout_ms = value.as_int().ok_or_else(|| {
+                VmError::Runtime("workflow.receive: `timeout_ms` must be an int".to_string())
+            })?;
+            if timeout_ms <= 0 {
+                return Err(VmError::Runtime(
+                    "workflow.receive: `timeout_ms` must be positive".to_string(),
+                ));
+            }
+            Some(StdDuration::from_millis(timeout_ms as u64))
+        }
+    };
+    let Some(message) = receive_message_with_timeout(&target, timeout)
+        .await
+        .map_err(VmError::Runtime)?
+    else {
         return Ok(VmValue::Nil);
     };
     Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
@@ -796,6 +900,24 @@ mod tests {
     use super::*;
     use std::task::Poll;
 
+    #[tokio::test]
+    async fn mailbox_timestamp_uses_active_harness_clock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = target_for_base(dir.path(), "wf-clock");
+        let clock = crate::clock_mock::MockClock::at_wall_ms(1_700_000_000_000);
+
+        let message = crate::clock_mock::scope_capability_clock(clock, async {
+            enqueue_message(&target, "signal", "ready", serde_json::Value::Null, None)
+                .expect("enqueue signal");
+            receive_message(&target)
+                .expect("receive signal")
+                .expect("queued signal")
+        })
+        .await;
+
+        assert_eq!(message.enqueued_at, "2023-11-14T22:13:20Z");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn update_round_trip_waits_for_response() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -838,7 +960,7 @@ mod tests {
             update_response_value(&target, &request_id).expect("read response"),
             Some(serde_json::json!({"ok": true}))
         );
-        tokio::time::advance(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
+        tokio::time::advance(StdDuration::from_millis(WORKFLOW_POLL_INTERVAL_MS)).await;
 
         let result = waiter.await.expect("update result");
         assert_eq!(result, serde_json::json!({"ok": true}));

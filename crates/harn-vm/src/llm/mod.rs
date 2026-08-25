@@ -418,7 +418,7 @@ pub use self::agent_runtime::{
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, register_session_close_hook,
-    swap_current_host_bridge, SessionCloseHookRegistration,
+    swap_current_host_bridge, swap_current_loop_sinks, SessionCloseHookRegistration,
 };
 #[cfg(test)]
 pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_hooks};

@@ -251,6 +251,26 @@ pipeline default(task) {
 }
 
 #[test]
+fn test_unused_type_ignores_schema_predicate_reference() {
+    let diags = lint_source(
+        r"
+type Payload = {value: int}
+
+pipeline default(task) {
+  const value: unknown = {value: 1}
+  if schema_is(value, Payload) {
+    log(value.value)
+  }
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "types referenced by schema predicates should not trigger unused-type: {diags:?}"
+    );
+}
+
+#[test]
 fn test_unused_type_ignores_typed_catch_reference() {
     let diags = lint_source(
         r#"

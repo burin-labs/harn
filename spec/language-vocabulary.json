@@ -529,6 +529,7 @@
     "mailbox_receive",
     "mailbox_send",
     "mailbox_try_receive",
+    "managed_daemon_wait",
     "max",
     "md5",
     "mean",

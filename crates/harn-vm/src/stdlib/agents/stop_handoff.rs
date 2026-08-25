@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::agents_workers::{
-    emit_worker_event, persist_worker_state_snapshot, with_worker_state, worker_event_snapshot,
-    worker_summary, WorkerConfig, WorkerExecutionProfile, WorkerState, WORKER_REGISTRY,
+    active_worker_registry, emit_worker_event, persist_worker_state_snapshot, with_worker_state,
+    worker_event_snapshot, worker_summary, WorkerConfig, WorkerExecutionProfile, WorkerState,
 };
 use super::{is_nil, resume::*};
 use crate::agent_events::WorkerEvent;
@@ -116,15 +116,13 @@ pub(super) fn worker_parent_session_id(worker: &WorkerState) -> Option<String> {
 pub(super) fn worker_state_for_session_id(
     session_id: &str,
 ) -> Option<Arc<parking_lot::Mutex<WorkerState>>> {
-    WORKER_REGISTRY.with(|registry| {
-        for state in registry.borrow().values() {
-            let worker = state.lock();
-            if worker_session_id(&worker).as_deref() == Some(session_id) {
-                return Some(state.clone());
-            }
+    for state in active_worker_registry().state_refs() {
+        let worker = state.lock();
+        if worker_session_id(&worker).as_deref() == Some(session_id) {
+            return Some(state.clone());
         }
-        None
-    })
+    }
+    None
 }
 
 pub(super) fn vm_value_i64(value: &VmValue) -> Option<i64> {

@@ -1,9 +1,6 @@
 circuit_open
 true
-1
-1
-2
-2
-10
-false
+true
+true
+true
 failure
