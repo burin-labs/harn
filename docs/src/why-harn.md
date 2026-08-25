@@ -33,7 +33,7 @@ fixtures, and provider response normalization.
 
 ### Native LLM calls
 
-`llm_call` and `agent_loop` are language primitives. No SDK imports, no
+`harness.llm.call` and `agent_loop` are language primitives. No SDK imports, no
 client initialization, no response parsing. Set an environment variable
 and call a model:
 

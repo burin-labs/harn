@@ -31,10 +31,19 @@ Expressions that infer to `never`:
 - `break` and `continue`
 - A block where every control path exits
 - An `if`/`else` where both branches infer to `never`
-- `while true { ... }` whose body contains no `break` binding to that loop
-  (a `break` inside a nested loop binds the inner loop and does not count),
-  so a function whose tail is such a loop needs no trailing `return`
+- A loop control never leaves: `while true { ... }` whose body contains no
+  `break` bound to that loop (see below)
 - Calls to `unreachable()`
+
+The `while` rule is about **divergence**, not about a return value.
+Control never reaches the statement after the loop, so a function whose
+tail is such a loop needs no trailing `return`. Two things defeat it:
+
+- A `break` bound to *that* loop. A `break` inside a nested loop binds the
+  inner loop, so it does not count.
+- A condition that is not the literal `true`. `while flag { ... }` may
+  exit, so it does not infer `never` even when `flag` is always true at
+  runtime.
 
 `never` is removed from union types: `never | string` simplifies to
 `string`. An empty union (all members removed by narrowing) becomes
@@ -94,9 +103,21 @@ fn describe(v: unknown) -> string {
 
 Narrowing rules for `unknown`:
 
-- `type_of(x) == "T"` narrows `x` to `T` on the truthy branch (where
-  `T` is one of the type-of protocol names: `string`, `int`, `float`,
-  `bool`, `nil`, `list`, `dict`, `closure`, `bytes`).
+- `type_of(x) == "T"` narrows `x` to `T` on the truthy branch. `T` must
+  be one of the runtime type tags the checker can narrow to: `string`,
+  `bytes`, `int`, `float`, `decimal`, `bool`, `nil`, `list`, `dict`,
+  `closure`, `duration`, `task_handle`, `channel`, `atomic`, `rng`,
+  `sync_permit`, `resource`, `resource_guard`, `mcp_client`,
+  `verdict_receipt`, `set`, `generator`, `stream`, `range`, `iter`, and
+  `pair`. `type_of` returns three further tags — `struct`,
+  `enum`, and `builtin` — as well as harness-object names such as
+  `Harness` and `HarnessFs`. Comparing against those is legal but does
+  **not** narrow: knowing a value is "some struct" says nothing about
+  which declared struct it is. The canonical vocabulary is
+  `harn_builtin_meta::runtime_type_tags` — `ALL` for everything
+  `type_of` can return, `NARROWABLE` for the subset the checker acts
+  on — and the runtime, the checker, and this list are held in lockstep
+  by a test.
 - `schema_is(x, Shape)` narrows `x` to `Shape` on the truthy branch.
 - `guard type_of(x) == "T" else { ... }` narrows `x` to `T` in the
   surrounding scope after the guard.
@@ -111,6 +132,24 @@ Narrowing rules for `unknown`:
   only a bare `unknown` variable — including the ruled-out tracking for
   the exhaustiveness check.
 
+A **union** behaves differently from `unknown` in the falsy branch. A
+union is a closed set of alternatives, so `type_of(x) == "T"` subtracts
+`T` from it on the falsy branch instead of leaving it whole:
+
+```harn
+fn describe(v: string | int | bool) -> string {
+  if type_of(v) == "string" {
+    // v: string
+    return v.upper()
+  }
+  // v: int | bool — `string` has been subtracted
+  return "${v}"
+}
+```
+
+Only `unknown` keeps its full breadth in the falsy branch; that is the
+"open top" the bullet above describes.
+
 Interop between `any` and `unknown`:
 
 - `unknown` is assignable to `any` (upward to the full escape hatch).
@@ -119,8 +158,17 @@ Interop between `any` and `unknown`:
 
 **When to pick which:**
 
-- **No annotation** — "I haven't annotated this." Callers get no
-  checking. Use for internal, unstable code.
+- **No annotation** — "let inference decide." This does *not* turn
+  checking off for local bindings. An unannotated `let` / `const` is
+  inferred and then fully checked: `const x = make_int()` has type
+  `int`, and passing `x` where a `string` is expected is a
+  `HARN-TYP-006` error. An omitted **return type** is inferred from the
+  body the same way. What actually opens a hole is an unannotated
+  **parameter**: given `fn loose(v) { return v }`, any argument is
+  accepted, and because `v` carries no type the returned value carries
+  none either — so `needs_string(loose(5))` raises no error at all.
+  Annotate the parameters and return types of anything a caller reaches;
+  leaving an obvious local binding unannotated costs no safety.
 - **`unknown`** — "this value could be anything; narrow before use."
   Use at untrusted boundaries and in APIs that hand back open-ended
   data. This is the preferred annotation for LLM / JSON / dynamic
@@ -487,7 +535,7 @@ const r = harness.llm.call(prompt, nil, {
 })
 ```
 
-`llm_call` can also express routing intent without pinning a single
+`harness.llm.call` can also express routing intent without pinning a single
 provider/model pair. The `route_policy` option accepts:
 
 - `"manual"` (default): use the normal `provider` / `model` / env resolution.
@@ -512,7 +560,7 @@ const r = harness.llm.call(prompt, nil, {
 System prompt fragments can be supplied without hand-concatenating the
 positional `system` string. The `system` option accepts either a string or an
 ordered list of `{content, title?, position?: "before"|"after", enabled?}`
-fragments for `llm_call` and `agent_loop`. In persistent
+fragments for `harness.llm.call` and `agent_loop`. In persistent
 `agent_loop` sessions, the composed session-level system prompt is recorded
 once in transcript metadata and as one leading internal `system_prompt`
 fingerprint event; it is not injected into the replayable message list. A later
@@ -538,8 +586,9 @@ const r = agent_loop(
 
 For call sites that want routing policy to be visibly scoped around the work,
 `cost_route` installs an inherited LLM routing context for the dynamic extent
-of its block. Nested `llm_call` invocations inherit the block's routing and
-budget options; an explicit option on the call wins for the same key.
+of its block. Nested `harness.llm.call` invocations inherit the block's
+routing and budget options; an explicit option on the call wins for the
+same key.
 
 ```harn
 const r = cost_route {
@@ -554,8 +603,8 @@ const r = cost_route {
 }
 ```
 
-The block config accepts the same canonical keys as `llm_call`; unknown or
-removed keys are errors. In `preference_list` mode, `targets` is the ordered
+The block config accepts the same canonical keys as `harness.llm.call`;
+unknown or removed keys are errors. In `preference_list` mode, `targets` is the ordered
 set of model aliases, model ids, or `provider:model` selectors and `strategy`
 selects `prefer_order`, `cheapest_first`, or `fastest_first`. Failures on the
 selected route advance through the remaining targets before provider-level
@@ -563,8 +612,8 @@ fallbacks are considered.
 
 For call sites that want Harn-managed response reuse, `std/llm/handlers`
 exports `with_cache(prompt, system?, options?)`. It returns the same envelope as
-`llm_call`, but first checks a persistent content-addressed cache. The key is
-`sha256:` plus canonical JSON over `{prompt, system, provider, model,
+`harness.llm.call`, but first checks a persistent content-addressed cache.
+The key is `sha256:` plus canonical JSON over `{prompt, system, provider, model,
 temperature, top_p, max_tokens}` after provider/model defaults resolve. Cache
 storage defaults to a sqlite store under Harn state with namespace
 `llm.with_cache`, a 10-minute TTL, and LRU eviction at 256 entries. Calls with
@@ -599,7 +648,7 @@ applies when the alias identifier appears as:
 - The argument of `schema_of(T)`.
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
   `schema_check`, `schema_report`, `is_type`, `json_validate`.
-- The value of an `output:` entry in an `llm_call` options dict.
+- The value of an `output:` entry in a `harness.llm.call` options dict.
 
 Public aliases keep the same reflection behavior when imported from a file or
 embedded standard-library module. Materialization resolves nested imported
@@ -616,13 +665,15 @@ builtin keeps existing schema dicts working.
 Schema-driven builtins are typed with proper generics so user-defined
 wrappers pick up the same narrowing.
 
-- `llm_call<T>(prompt, system, options: {output: Schema<T>, ...})
-  -> {data: T, text: string, ...}`
-- `llm_completion<T>` has the same signature.
-- `llm_call_structured<T>(prompt, schema: Schema<T>, options?) -> T`
-- `llm_call_structured_safe<T>(prompt, schema: Schema<T>, options?) ->
-  {ok: bool, data: T | nil, error: dict | nil}`
-- `llm_call_structured_result<T>(prompt, schema: Schema<T>, options?) ->
+- `harness.llm.call<T>(prompt, system,
+  options: {output: Schema<T>, ...}) -> {data: T, text: string, ...}`
+- `harness.llm.completion<T>` has the same signature.
+- `harness.llm.call_structured<T>(prompt, schema: Schema<T>, options?)
+  -> T`
+- `harness.llm.call_structured_safe<T>(prompt, schema: Schema<T>,
+  options?) -> {ok: bool, data: T | nil, error: dict | nil}`
+- `harness.llm.call_structured_result<T>(prompt, schema: Schema<T>,
+  options?) ->
   {ok: bool, data: T | nil, raw_text: string, error: string,
   error_category: string | nil, attempts: int, repaired: bool,
   repair_tier: string | nil,
@@ -643,7 +694,7 @@ wrappers pick up the same narrowing.
   `transient_network`, ...); JSON / schema failures surface as
   `missing_json`, `schema_validation`, or `repair_failed` when an
   optional repair pass was attempted and also failed. Options accept a
-  `repair: {enabled: bool, ...llm_call_overrides}` block. The ladder is
+  `repair: {enabled: bool, ...call_option_overrides}` block. The ladder is
   local mechanical salvage first (trailing commas, unquoted keys, prose
   preambles, truncated closers), then a single LLM reissue. `repaired`
   is true for either success; `repair_tier` is `"local"` or `"llm"`
@@ -654,18 +705,18 @@ wrappers pick up the same narrowing.
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
   {repair?: bool | dict, apply_defaults?: bool,
-  ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
+  ...call_option_overrides}) -> {ok: bool, data: T | nil, raw_text:
   string, error: string, error_category: string | nil, attempts: int,
   stage: string, repaired: bool}`. Best-effort recovery of malformed
   LLM output against a target schema. Three deterministic stages
   followed by an optional one-shot LLM repair: `parsed` (direct
   `serde_json` parse) → `extracted` (lift JSON from prose / code
   fences) → `regex` (scrape top-level `key: value` lines for scalar
-  fields) → `llm_repair` (single-shot `llm_call` with `schema_retries:
+  fields) → `llm_repair` (single-shot `harness.llm.call` with `schema_retries:
   0`). `stage` reports which stage produced the result; `failed` means
   every stage exhausted. Set `{repair: false}` for a fully
   deterministic recovery pass with no LLM calls. The LLM repair stage
-  accepts the same overrides as `llm_call_structured_result`'s
+  accepts the same overrides as `harness.llm.call_structured_result`'s
   `repair`.
 
 `Schema<T>` denotes a runtime schema value whose static shape is `T`.
@@ -695,35 +746,42 @@ whose static type is `Schema<T>`.
 
 ### Human-in-the-loop primitives
 
-Human-in-the-loop is modeled as **first-class typed expression syntax**.
-`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
-reserved keywords with VM-enforced semantics: their names cannot be
-shadowed or rebound, the result envelopes are produced (and signed) by
-the runtime, and quorum approval requires distinct principals. Each
-primitive accepts either named arguments or the legacy positional form;
-both lower to the same runtime.
+Human-in-the-loop is modeled as typed methods on the `interaction`
+capability: `harness.interaction.ask_user`, `.request_approval`,
+`.dual_control`, and `.escalate_to`. Their semantics are VM-enforced —
+the result envelopes are produced (and signed) by the runtime, and
+quorum approval requires distinct principals.
+
+Arguments are **positional**. Harn has no keyword-argument call syntax,
+so the settings each primitive accepts are gathered into a trailing
+options record rather than passed by name.
 
 ```harn,ignore
 const answer = harness.interaction.ask_user(
-  prompt: "deploy now?", schema: schema_of(Choice),
+  "deploy now?",
+  {schema: schema_of(Choice)},
 )
 const record = harness.interaction.request_approval(
-  action: "merge_pr", quorum: 2,
-  reviewers: ["alice", "bob", "carol"],
+  "merge_pr",
+  {quorum: 2, reviewers: ["alice", "bob", "carol"]},
 )
 const merged = harness.interaction.dual_control(
-  n: 2, m: 3, action: destructive_step,
-  approvers: ["alice", "bob", "carol"],
+  2,
+  3,
+  destructive_step,
+  ["alice", "bob", "carol"],
 )
 const handle = harness.interaction.escalate_to(
-  role: "oncall", reason: "deploy failed",
+  "oncall",
+  "deploy failed",
 )
 ```
 
 The runtime owns blocking semantics, timeout behavior, event-log
 records, and replay.
 
-- `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
+- `harness.interaction.ask_user<T>(prompt: string,
+  options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
 - `harness.interaction.request_approval(action: string, options?: ApprovalRequestOptions)`
   returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
   signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
@@ -731,12 +789,13 @@ records, and replay.
   reviewers?: list<string>, deadline?: duration, principal?: string,
   evidence_refs?: list<dict>, undo_metadata?: dict,
   capabilities_requested?: list<string>}`.
-- `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
+- `harness.interaction.dual_control<T>(n: int, m: int, action: fn() -> T,
+  approvers?: list<string>) -> T`
 - `harness.interaction.escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
   status: string, accepted_at: string | nil, reviewer: string | nil}`.
-- `hitl_pending(filters?: {since?: string, until?: string, kinds?: list<string>,
-  agent?: string, limit?: int})`
+- `harness.interaction.hitl_pending(filters?: {since?: string, until?: string,
+  kinds?: list<string>, agent?: string, limit?: int})`
   returns `list<{request_id: string, request_kind: string, agent: string,
   prompt: string, trace_id: string, timestamp: string, approvers: list<string>,
   metadata: dict}>`.
@@ -890,7 +949,7 @@ fn flags(entry: {arguments: list?}) -> list {
 Optional (`?.`) and plain (`.`) links address the same value, so they
 share a narrowing — `type_of(entry?.arguments) == "list"` narrows reads
 of both `entry?.arguments` and `entry.arguments`. A path whose type is
-the top type (`unknown`/`any`, common for `json_parse` / `llm_call`
+the top type (`unknown`/`any`, common for `json_parse` / `harness.llm.call`
 boundary fields) narrows to the tested kind, exactly as an
 `unknown`-typed variable does.
 
@@ -1135,7 +1194,12 @@ fn handle(v: unknown) -> string {
 ```
 
 Covering all nine `type_of` variants (`int`, `string`, `float`, `bool`,
-`nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Suppression via
+`nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Nine, not
+the full narrowable set: `unknown` values come from boundary APIs such as
+`json_parse` and `harness.llm.call`, which can only produce these kinds,
+so requiring a `rng` or `sync_permit` arm would make the warning
+unusable. The canonical list is
+`harn_builtin_meta::runtime_type_tags::UNKNOWN_COVERAGE`. Suppression via
 an explicit fallthrough `return` is intentional: a plain `return`
 doesn't claim exhaustiveness, so partial narrowing followed by a normal
 return stays silent. Reaching `throw` or `unreachable()` with no prior
@@ -1193,8 +1257,9 @@ Type error: binding `doc` expects {name: string}, got dict
 ```
 
 This is what makes an annotation on a boundary value load-bearing: the declared
-type is the validation. `json_parse`, `toml_parse`, `yaml_parse`, `llm_call`, and
-every other producer of untrusted data are checked where their result is bound.
+type is the validation. `json_parse`, `toml_parse`, `yaml_parse`,
+`harness.llm.call`, and every other producer of untrusted data are checked
+where their result is bound.
 
 Struct field annotations are checked the same way. Constructing
 `struct User { name: string }` with a non-string `name` fails at construction

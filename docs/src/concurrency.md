@@ -361,7 +361,7 @@ for chunk in ch {
 // prints "chunk 1" then "chunk 2", then the loop ends
 ```
 
-This is especially useful with `llm_stream`, which returns a channel
+This is especially useful with `harness.llm.stream`, which returns a channel
 of response chunks:
 
 ```harn
@@ -816,7 +816,7 @@ parallel 100 with { max_concurrent: 4 } { i ->
 `max_concurrent` bounds *simultaneous* in-flight tasks on the caller's
 side. A provider or model route can additionally be rate-limited at
 the throughput layer. Harn enforces catalog `rate_limits` metadata
-before each `llm_call`: requests per minute (`rpm`), total tokens per
+before each `harness.llm.call`: requests per minute (`rpm`), total tokens per
 minute (`tpm`), split input/output token buckets (`input_tpm`,
 `output_tpm`), and route concurrency. Requests past the budget wait
 for the window to free up rather than error. RPM/TPM buckets are durable

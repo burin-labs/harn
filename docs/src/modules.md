@@ -71,7 +71,7 @@ pipeline default(harness: Harness, task) {
 
 ## What needs an import
 
-Most Harn builtins — `println`, `log`, `read_file`, `write_file`, `llm_call`,
+Most Harn builtins — `println`, `log`, `read_file`, `write_file`, `harness.llm.call`,
 `agent_loop`, `http_get`, `parallel`, `workflow_*`, `transcript_*`,
 `mcp_*`, and the rest of the runtime surface — are registered globally and
 require **no import statement**. You can call them directly from top-level
@@ -437,7 +437,7 @@ Prompt helpers for deterministic system prompt composition:
 | `system_prelude(opts)` | Build a structured system prompt from persona, constraints, tools, output contract, examples, and tone |
 | `tool_use_prelude(tools, format)` | Render a deterministic tool-use prelude for non-`agent_loop` callers |
 
-`llm_call` and `agent_loop` accept one `system` option: a string or an
+`harness.llm.call` and `agent_loop` accept one `system` option: a string or an
 ordered list of `{content, title?, position?, enabled?}` fragments. For persistent
 agent sessions, Harn records the composed session-level system prompt once in
 transcript metadata, emits one leading fingerprint event, and sends the
@@ -1044,18 +1044,18 @@ Options accept `store: "namespace"` or
 
 ### std/llm/envelope
 
-The canonical `llm_call` response contract — one rigid snake_case
+The canonical `harness.llm.call` response contract — one rigid snake_case
 envelope with all accounting owned by `usage` and a typed `outcome`
 classification. Import the typed aliases when annotating call sites, and
 the predicates to branch on the outcome without re-deriving it:
 
 | Export | Kind | Description |
 |---|---|---|
-| `LlmResponse` | type | The full `llm_call` response envelope |
+| `LlmResponse` | type | The full `harness.llm.call` response envelope |
 | `LlmUsage` | type | Single owner of all call accounting (tokens, cost, prompt-cache, serving tier) |
 | `LlmOutcome` / `LlmOutcomeKind` | type | Typed `{kind, billed}` classification and its `kind` vocabulary |
 | `LlmToolCall` | type | A dispatchable tool call from the merged channel |
-| `LlmStreamChunk` | type | One streamed chunk from `llm_stream_call` (terminal chunk carries `stop_reason`) |
+| `LlmStreamChunk` | type | One streamed chunk from `harness.llm.stream_call` (terminal chunk carries `stop_reason`) |
 | `llm_response_is_empty(response)` | fn | True when the call committed nothing usable (`outcome.kind == "empty"`) |
 | `llm_response_is_billed_empty(response)` | fn | True for the billed-noncommittal class — provider charged tokens and committed nothing usable |
 | `llm_response_is_truncated(response)` | fn | True when generation was cut on an output-token limit |
@@ -1070,7 +1070,7 @@ The blessed default caller stack (the call plane's front door):
 | Function | Description |
 |---|---|
 | `llm_caller(opts?)` | The blessed default caller stack: `with_retry(default_llm_caller(), opts?.retry ?? {})` with typed reserved-status classification and billed-empty re-dispatch |
-| `default_llm_caller()` | The bottom of every middleware composition: one `llm_call` folded into the canonical caller envelope |
+| `default_llm_caller()` | The bottom of every middleware composition: one `harness.llm.call` folded into the canonical caller envelope |
 | `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?}` |
 | `LlmCaller` (type) | A composable caller: `fn(LlmCallerRequest) -> dict` — middleware wraps one and returns another |
 
@@ -1081,7 +1081,7 @@ LLM call wrappers and middleware helpers:
 | Function | Description |
 |---|---|
 | `llm_cache_key(prompt, system?, options?)` | Derive the canonical `sha256:` key for a cached LLM call |
-| `with_cache(prompt, system?, options?)` | Return a cached `llm_call` envelope when available, otherwise call and store the response |
+| `with_cache(prompt, system?, options?)` | Return a cached `harness.llm.call` envelope when available, otherwise call and store the response |
 | `with_circuit_breaker(handler, options?)` | Wrap a call handler with per-`(provider, model)` circuit-breaker pooling, or pass `name` to share one circuit |
 
 `with_cache` keys `{prompt, system, provider, model, temperature, top_p,
@@ -2080,7 +2080,7 @@ Private-span filtering and terminal envelopes for streaming chat UIs:
 | `agent_private_stream_state(config?)` | Create state for split-safe streaming private-span filtering |
 | `agent_private_stream_delta(state?, delta?, config?)` | Fold one provider delta and return a safe `visible_delta` |
 | `agent_private_stream_finish(state?, config?)` | Flush the final safe suffix and report withheld/unterminated private state |
-| `agent_stream_call(prompt, system?, options?)` | Wrap `llm_stream_call` with private filtering, callbacks, and terminal status envelopes |
+| `agent_stream_call(prompt, system?, options?)` | Wrap `harness.llm.stream_call` with private filtering, callbacks, and terminal status envelopes |
 
 ### std/agent/progress
 

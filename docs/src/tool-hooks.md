@@ -304,7 +304,7 @@ which decisions were model-driven without re-running the model.
 
 | Key | Default | Notes |
 |---|---|---|
-| `model` | (required) | Non-empty string. Pass a small/cheap model — every classifier miss is one extra `llm_call_safe`. |
+| `model` | (required) | Non-empty string. Pass a small/cheap model — every classifier miss is one extra `harness.llm.call_safe`. |
 | `threshold` | `0.8` | Float in `[0, 1]`. Verdicts below this fall through to `inner`. |
 | `meta_prompt` | shipped default | Override only if you need to extend the verdict schema; the default is the safety reviewer prompt validated by conformance. |
 | `provider` | active default | Pin a provider explicitly to avoid silent provider-switch surprises. |

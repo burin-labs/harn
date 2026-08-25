@@ -1766,7 +1766,8 @@ deny), that disposition instead routes through the consent gate: an approval let
 the command run, a denial returns a `status: "consent_denied"` envelope without
 spawning. The consent closure receives the command context enriched with
 `consent.reason` and `consent.risk_labels` (the deterministic classification) and
-may call `request_approval` / `ask_user` to block on a human.
+may call `harness.interaction.request_approval` /
+`harness.interaction.ask_user` to block on a human.
 
 The never-approvable command floor runs before consent. It blocks fork bombs;
 `git reset --hard`, `git clean -fd`, and force-pushes; recursive deletion of the
@@ -1898,10 +1899,10 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `harness.llm.call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
-| `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
+| `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `harness.llm.call`. Returns `{ok: bool, response: harness.llm.call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
+| `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `harness.llm.call`; the `stream` option remains the transport toggle |
 | `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
-| `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
+| `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `harness.llm.call` |
 | `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
 | `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
 | `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
@@ -1934,7 +1935,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust.policy_for(actor_id)` | actor_id: string | dict | Return only the derived capability policy |
 | `trust.verify_chain()` | none | dict | Verify the underlying OpenTrustGraph hash chain |
 | `harness.obs.llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
-| `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
+| `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `harness.llm.call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `harness.obs.llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `harness.llm.resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
 | `harness.llm.execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
@@ -1945,7 +1946,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `harness.llm.model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `harness.llm.healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
-| `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `effort` |
+| `harness.llm.apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to a `harness.llm.call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `harness.llm.rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `harness.llm.providers()` | — | list | List all configured provider names |
 | `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
@@ -1988,7 +1989,7 @@ event-log topics, bridge contract, and replay semantics.
 | `harness.interaction.request_approval(action, options?)` | action: string, options: `{detail?: any, args?: any, quorum?: int, reviewers?: list<string>, deadline?: duration, principal?: string, evidence_refs?: list<dict>, undo_metadata?: dict, capabilities_requested?: list<string>}` | `{approved, reviewers, approved_at, reason, signatures}` | Emit a durable approval request, wait for quorum, and return the approval record with signed reviewer timestamp receipts. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
 | `harness.interaction.escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
-| `hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
+| `harness.interaction.hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
 
 ```harn
 // Queue specific responses for the mock provider
@@ -2011,8 +2012,9 @@ harness.llm.mock_enqueue({
 
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
-// `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
-// it the same way they would a live provider failure.
+// `try { ... } catch`, `harness.llm.call_safe`, and
+// `with_rate_limit` all see it the same way they would a live
+// provider failure.
 harness.llm.mock_enqueue({
   error: {category: "rate_limit", message: "429 Too Many Requests"}
 })

@@ -10,7 +10,7 @@ see [Coming from elsewhere](./sota-comparison.md).
 ## Conversation units
 
 **LLM call.** One request to a language model. Smallest unit. Produced by
-`llm_call`.
+`harness.llm.call`.
 
 **Tool call.** The model's request to invoke a named tool, with arguments. Lives
 inside an iteration; an iteration can contain several. Executed by
@@ -246,7 +246,7 @@ conversational-unit noun.
 
 | Concept | Reference page |
 |---|---|
-| `llm_call`, `llm_call_structured`, `llm_completion` | [LLM calls](../llm/llm_call.md) |
+| `harness.llm.call`, `harness.llm.call_structured`, `harness.llm.completion` | [LLM calls](../llm/llm_call.md) |
 | `agent_loop`, `AgentSpec`, profiles, `done_judge` | [Agent loops](../llm/agent_loop.md) |
 | Tools, Tool Vault, MCP server tools | [LLM tools](../llm/tools.md) |
 | Sessions, fork, reset, compact, snapshot | [Sessions](../sessions.md) |

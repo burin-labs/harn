@@ -35,10 +35,10 @@ harness.stdio.log(result.scores)
 | `scores` | list | Per-original-candidate score records: `{index, candidate, wins, losses, ties, comparisons, score, avg_confidence}` |
 | `comparisons` | list | Pairwise audit records: `{left_index, right_index, winner, confidence, reasoning}` |
 
-By default, each comparison calls `llm_call_structured` with a small judge
+By default, each comparison calls `harness.llm.call_structured` with a small judge
 schema. The judge receives `opts.task`, `opts.criteria`, and the two
 candidate payloads. `opts.llm_options` can hold generation options; when it is
-omitted, normal `llm_call` options on `opts` are used directly.
+omitted, normal `harness.llm.call` options on `opts` are used directly.
 
 ```harn
 import { pairwise_rerank } from "std/llm/rerank"
@@ -125,7 +125,7 @@ chat-completion logprobs and legacy completion logprobs when providers return
 them, including local OpenAI-compatible servers. The mock provider accepts
 `harness.llm.mock_enqueue({text, logprobs: [...]})` for deterministic tests. Anthropic,
 Bedrock, Gemini/Vertex, and native Ollama routes currently do not expose a
-normalized live logprob surface through `llm_call`, so use supplied logprobs
+normalized live logprob surface through `harness.llm.call`, so use supplied logprobs
 or an OpenAI-compatible route for `self_certainty`.
 
 The score reflects the model's token-level certainty in generated text, not

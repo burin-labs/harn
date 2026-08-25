@@ -351,7 +351,7 @@ registry = tool_define(registry, "rare_admin_action", "...", {
 falling back to eager loading.
 
 Deferred tools are only materialised on the wire when the call opts
-into `tool_search` (see the `llm_call` option of the same name and
+into `tool_search` (see the `harness.llm.call` option of the same name and
 `docs/src/llm-and-agents.md`). Harn supports two native backends plus a
 provider-agnostic client fallback:
 

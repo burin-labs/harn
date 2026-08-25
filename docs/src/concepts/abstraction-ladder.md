@@ -9,14 +9,14 @@ transparency; climbing too low costs you machinery you'd otherwise get for free.
 The whole ladder collapses to three primary rungs, chosen by *how many goals*
 the work has:
 
-> [`llm_call`](../llm/llm_call.md) = **one request** <
+> [`harness.llm.call`](../llm/llm_call.md) = **one request** <
 > [`agent_loop`](../llm/agent_loop.md) = **one goal** (one transcript, run to
 > completion) < [`workflow`](../workflow-runtime.md) = **more than one goal,
 > attempt, or model**.
 
 Two rules keep you on the right rung:
 
-- **Never hand-write a `while` around `llm_call`.** If a single goal needs
+- **Never hand-write a `while` around `harness.llm.call`.** If a single goal needs
   several model round-trips — call a tool, read the result, decide what's next —
   that *is* `agent_loop`. Rolling your own loop re-implements completion
   detection, budgets, transcript management, and status semantics that the loop
@@ -38,7 +38,7 @@ consistently, never as a substitute for choosing a rung.
 
 ### Model ladders are not a rung either
 
-`models:` / `ladder:` on `llm_call` (and `agent_loop`) is a cheap-first,
+`models:` / `ladder:` on `harness.llm.call` (and `agent_loop`) is a cheap-first,
 escalate-on-*transport*-failure fallback *within a single request* — see
 [Model ladders](../docs/llm/harn-quickref.md#model-ladders-models--ladder). It
 changes which model answers, not which rung you are on. A ladder never advances
@@ -49,8 +49,8 @@ exclusive with an explicit `model:`/`routing:`.
 
 | Reach for | When | What you get | What you give up |
 |---|---|---|---|
-| [`llm_call`](../llm/llm_call.md) | One question, one answer. Classification, summarization, extraction, completions. | Direct control over tokens, cache, schema. Cheapest. | No looping, no automatic tool dispatch, no completion detection. |
-| [`llm_call_structured`](../llm/llm_call.md#llm_call_structured) | Same as above, but the answer must match a schema. | Validated JSON, safe and result-envelope variants. | One extra schema-validation pass. |
+| [`harness.llm.call`](../llm/llm_call.md) | One question, one answer. Classification, summarization, extraction, completions. | Direct control over tokens, cache, schema. Cheapest. | No looping, no automatic tool dispatch, no completion detection. |
+| [`harness.llm.call_structured`](../llm/llm_call.md#llm_call_structured) | Same as above, but the answer must match a schema. | Validated JSON, safe and result-envelope variants. | One extra schema-validation pass. |
 | [`agent_loop`](../llm/agent_loop.md) | The model needs several iterations — calling tools, reading results, deciding what to do next. | Tool dispatch, completion sentinels, budgets, status outcomes, transcript management, profiles, skills, daemon mode. | More machinery; opinionated about what "done" means. |
 | [`spawn_agent`](../agent-lifecycle.md) / [`sub_agent_run`](../agent-lifecycle.md) | A *separate* agent should run, possibly in parallel or background, with its own transcript and possibly a different model. | Independent execution context, suspend/resume, snapshots, joins. | Coordination overhead — handles, resume conditions, wait points. |
 | [`workflow_execute`](../workflow-runtime.md) | The orchestration shape itself matters — multiple stages, conditional branches, joins, replay, audit, typed contracts. | Typed graph, validated topology, per-stage results, replay, structured artifacts. | Up-front graph definition. Overkill for "one agent does one job." |
@@ -59,7 +59,7 @@ exclusive with an explicit `model:`/`routing:`.
 
 ## The four-step decision
 
-1. **One shot?** → `llm_call`. If you need JSON, `llm_call_structured`.
+1. **One shot?** → `harness.llm.call`. If you need JSON, `harness.llm.call_structured`.
 2. **Loop until done, optionally with `done_judge`?** → `agent_loop`.
 3. **Need a parallel or backgrounded helper agent?** → `spawn_agent` or
    `sub_agent_run`.
@@ -78,7 +78,7 @@ are linear is just an agent loop with extra YAML. Use a workflow when stages
 differ in kind (verify, join, fork, subagent) or when you need replay-aware
 artifact passing.
 
-**Building an agent loop when an `llm_call` would do.** If your "agent" makes
+**Building an agent loop when a `harness.llm.call` would do.** If your "agent" makes
 one model call, parses the result, and returns, it doesn't need a loop. The loop
 machinery adds latency, transcript management, and status semantics you're not
 using.
@@ -136,7 +136,7 @@ Harn without moving editor or terminal UI policy into the stdlib.
 ## See also
 
 - [Build your first workflow](../tutorials/build-your-first-workflow.md) — the
-  hands-on path up these rungs: one `llm_call`, then an `agent_loop`, then a
+  hands-on path up these rungs: one `harness.llm.call`, then an `agent_loop`, then a
   `workflow_stages` with a verify stage and retry-with-feedback, runnable end to
   end on the mock provider.
 - [The expressiveness spectrum](./expressiveness-spectrum.md) — the same task

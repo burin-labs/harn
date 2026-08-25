@@ -28,7 +28,7 @@ const hint = harness.llm.call(
 harness.stdio.log(hint.text)
 ```
 
-Three lines. [`llm_call`](../llm/llm_call.md) sends one prompt and hands back a
+Three lines. [`harness.llm.call`](../llm/llm_call.md) sends one prompt and hands back a
 result dict. This is the floor, and most classification, summarization, and
 extraction never needs to leave it. If your whole job is "read this, tell me
 that," stop here.
@@ -57,7 +57,7 @@ harness.stdio.log(triage.severity)
 harness.stdio.log(triage.component)
 ```
 
-Same call underneath. [`llm_call_structured`](../llm/llm_call.md#llm_call_structured)
+Same call underneath. [`harness.llm.call_structured`](../llm/llm_call.md#llm_call_structured)
 just pre-applies the schema-validated-JSON defaults and re-asks once if the model
 returns something off-shape, so `triage.severity` is a string you can switch on
 instead of a paragraph you have to parse. You climbed one rung and wrote two
@@ -224,8 +224,8 @@ composed on:
 
 | Level | Reach for | You get | You write |
 |---|---|---|---|
-| 1 | `llm_call` | one answer | 3 lines |
-| 2 | `llm_call_structured` | typed, validated output | +2 lines |
+| 1 | `harness.llm.call` | one answer | 3 lines |
+| 2 | `harness.llm.call_structured` | typed, validated output | +2 lines |
 | 3 | `agent_preset(kind)` + `agent_loop` | a tuned tool-using agent | +1 import |
 | 4 | `agent_loop` + governors / judge / lanes / overlays | bounded, gated, narrowed control | one fold per concern |
 | 5 | `workflow_stages` + `executor` + host-fed facts | attempts, verify gates, replay, your code in the loop | a closure and a callback |

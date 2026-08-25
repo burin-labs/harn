@@ -53,7 +53,7 @@ persona loops that must leave a clear stop reason instead of spinning.
 escalation_predicate, options?)` tries the cheap classifier first, then runs the
 escalation model when the cheap result has `confidence < min_confidence`, when
 the predicate returns true, or when the cheap route fails. Model specs can be
-closures, option dicts passed to `llm_call`, or model names. Use this for triage
+closures, option dicts passed to `harness.llm.call`, or model names. Use this for triage
 steps where most work should stay on a low-cost path but ambiguous cases need a
 stronger model.
 

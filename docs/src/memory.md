@@ -72,7 +72,7 @@ top_k)` are deterministic.
 `memory_summarize` returns `{_type, namespace, count, text, records}`. `window`
 may be `nil`, an integer limit, or a dict with `limit`, `query`, and `tag` or
 `tags`. The summary text is an extractive bullet list capped to a bounded size.
-Callers that need model-written prose can pass `summary.records` to `llm_call`.
+Callers that need model-written prose can pass `summary.records` to `harness.llm.call`.
 
 ## Forgetting
 

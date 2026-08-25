@@ -42,7 +42,7 @@ Run it:
 harn run fix.harn
 ```
 
-`llm_call` sends one prompt and returns [a result dict](../llm/llm_call.md#return-value).
+`harness.llm.call` sends one prompt and returns [a result dict](../llm/llm_call.md#return-value).
 The text is in `answer.text`; token counts, the model name, and the full
 transcript are on the same dict when you need them.
 
@@ -189,7 +189,7 @@ working exactly as designed. Point `model_policy` at a real model and give the
 
 You climbed the three rungs of the [abstraction ladder](../concepts/abstraction-ladder.md):
 
-- `llm_call` — one request, one answer.
+- `harness.llm.call` — one request, one answer.
 - `agent_loop` — one goal, run to completion with tools.
 - `workflow_stages` — more than one attempt, with an independent verify gate and
   retry-with-feedback.

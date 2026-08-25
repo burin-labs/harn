@@ -145,7 +145,7 @@ than another library.
 
 | BAML term | Harn equivalent | Notes |
 |---|---|---|
-| `function` with a typed return | `llm_call` into a declared shape | Both make "the model returns this type" a language-level promise instead of a parsing chore. |
+| `function` with a typed return | `harness.llm.call` into a declared shape | Both make "the model returns this type" a language-level promise instead of a parsing chore. |
 | Schema-aligned parsing | shape coercion and diagnostics | Both repair almost-valid model output rather than failing on a stray comma. BAML's is exposed as a reusable stdlib call and published against a function-calling benchmark. |
 | `spawn` / `await`, `Future<T, E>` | `spawn_agent`, structured concurrency | Both give you real concurrency. The semantics differ; see below. |
 | `test` and `testset` blocks | `harn test`, replay, evals | Both treat testing a prompt as a first-class activity. |
@@ -222,7 +222,7 @@ conversations run, not the conversations themselves.
 
 | MCP term | Harn equivalent | Notes |
 |---|---|---|
-| `sampling/createMessage` | `llm_call` | One model call. |
+| `sampling/createMessage` | `harness.llm.call` | One model call. |
 | `Tool` | tool | Same shape. |
 | `Resource` | hostlib resource, transcript asset | Same shape. |
 | `Prompt` | prompt template, prompt library | Same shape. |
