@@ -699,6 +699,28 @@ Most self-hosted rows are honestly `assumed` today; that debt is meant to
 be visible and greppable, and a row is promoted to `measured` only when a
 receipt actually exists.
 
+For `local`, `llamacpp`, `mlx`, and `ollama`, the running server gets the last
+word. The first capability lookup for an endpoint performs one short network
+probe. Harn caches the result for that endpoint. Ollama results also include
+the model because one daemon can hold packages with different templates.
+
+- llama.cpp and compatible `local` or `mlx` routes try `GET /props`. Native
+  tools require both `supports_tools` and `supports_tool_calls` in
+  `chat_template_caps`.
+- Ollama calls `POST /api/show` and checks whether `capabilities` contains
+  `tools` for the requested model.
+- A measured answer overrides the matching catalog row for the current
+  process. It doesn't rewrite the catalog.
+- A missing, rejected, or malformed probe keeps the explicit fenced-JSON
+  catch-all. Harn logs a warning and continues with the model call.
+
+The returned `runtime_probe` field is `nil` before a probe runs. Afterward, it
+contains `status`, a credential-free `endpoint`, `detail`, `native_tools`, and
+`supports_parallel_tool_calls`. `status` is `measured` or `unavailable`.
+See llama.cpp's [`/props` response](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#get-props)
+and Ollama's [`/api/show` response](https://docs.ollama.com/api/show)
+for the upstream fields.
+
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters
 (place more specific patterns above wildcards).
@@ -1140,16 +1162,16 @@ respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
 - Default host: `http://localhost:8000`
 - No authentication required
 - Same message format as OpenAI
+- Harn tries llama.cpp's `/props` capability response. Servers without that
+  route use the fenced-JSON tool fallback.
 
 ### llama.cpp OpenAI-compatible server
 
 - Endpoint: `<LLAMACPP_BASE_URL>/v1/chat/completions`
 - Default host: `http://127.0.0.1:8001`
 - No authentication required
-- Qwen3 and Devstral capability rules enable Harn's text-tool contract by
-  default. Native llama-server tool calls remain opt-in because upstream
-  llama.cpp has current OpenAI-compatible parser edge cases for malformed or
-  leaked tool-call JSON with these templates.
+- Harn reads `/props` once per endpoint. The loaded template can enable native
+  tools even when the catalog's conservative row uses fenced JSON.
 - Qwen3 rules still enable `chat_template_kwargs` and `/no_think` handling
   when the model ID matches Qwen
 
@@ -1160,6 +1182,9 @@ respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
 - Default host: `http://127.0.0.1:8002`
 - Default alias: `mlx-qwen3.6`
 - No authentication required
+- `mlx_lm.server` doesn't expose stable template capability data today. Harn
+  records the unavailable `/props` probe and keeps the fenced-JSON fallback for
+  an unknown model.
 
 ## Provider resolution order
 

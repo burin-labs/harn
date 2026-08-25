@@ -225,8 +225,8 @@ pipeline test(harness: Harness, task: unknown) {
     qwen_coder.tool_mode_parity == "native_unreliable",
     "OpenRouter Qwen Coder records native/text non-interchangeability",
   )
-  // Sibling families: together, groq, deepseek, fireworks, huggingface, local.
-  for family in ["together", "groq", "deepseek", "fireworks", "huggingface", "local"] {
+  // Hosted sibling families inherit OpenAI model capabilities.
+  for family in ["together", "groq", "deepseek", "fireworks", "huggingface"] {
     const caps = harness.llm.provider_capabilities(family, "gpt-5.4")
     assert(caps.defer_loading, family + " inherits openai defer_loading")
   }

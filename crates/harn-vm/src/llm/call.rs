@@ -7,7 +7,6 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmError, VmValue};
 
-use super::helpers::extract_llm_options;
 use super::trace::{emit_agent_event, AgentTraceEvent};
 use super::{
     agent_config, agent_observe, api,
@@ -366,7 +365,7 @@ pub(super) async fn llm_call_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let opts = extract_llm_options(&args)?;
+    let opts = crate::llm::helpers::prepare_llm_options(&args).await?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
     // Publish the resolved provider/model/capabilities to templates

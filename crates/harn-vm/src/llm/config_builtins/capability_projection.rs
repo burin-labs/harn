@@ -26,6 +26,13 @@ pub(crate) fn capabilities_to_vm_value(
         crate::value::intern_key("native_tools"),
         VmValue::Bool(caps.native_tools),
     );
+    dict.insert(
+        crate::value::intern_key("runtime_probe"),
+        caps.runtime_probe
+            .as_ref()
+            .map(runtime_probe_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
     dict.put_str("message_wire_format", caps.message_wire_format.as_str());
     // Absent for every dialect that serves one live endpoint; only the Gemini
     // routes carry a value, so scripts can tell `:generateContent` from
@@ -367,6 +374,30 @@ pub(crate) fn capabilities_to_vm_value(
             serving_tier_to_vm_value(&fast_tier),
         );
     }
+    VmValue::dict(dict)
+}
+
+fn runtime_probe_to_vm_value(
+    receipt: &crate::llm::capabilities::CapabilityProbeReceipt,
+) -> VmValue {
+    let mut dict = crate::value::DictMap::new();
+    dict.put_str("status", receipt.status.as_str());
+    dict.put_str("endpoint", &receipt.endpoint);
+    dict.put_str("detail", &receipt.detail);
+    dict.insert(
+        crate::value::intern_key("native_tools"),
+        receipt
+            .native_tools
+            .map(VmValue::Bool)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("supports_parallel_tool_calls"),
+        receipt
+            .supports_parallel_tool_calls
+            .map(VmValue::Bool)
+            .unwrap_or(VmValue::Nil),
+    );
     VmValue::dict(dict)
 }
 

@@ -96,6 +96,14 @@ top_k_supported = false
 [provider_defaults.local]
 top_k_supported = false
 
+[provider_defaults.llamacpp]
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+
+[provider_defaults.mlx]
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+
 [provider_defaults.together]
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"

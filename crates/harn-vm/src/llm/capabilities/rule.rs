@@ -6,9 +6,8 @@
 //! defaults) into a [`Capabilities`] value (`lookup_with`, `rule_to_caps`,
 //! `defaults_to_caps`, and the `rule_*` field-derivation helpers).
 
-use std::collections::{BTreeMap, HashSet};
-
 use serde::Deserialize;
+use std::collections::{BTreeMap, HashSet};
 
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
@@ -1061,6 +1060,7 @@ pub(super) fn lookup_with(
     if effective_defaults.has_any_field() {
         return defaults_to_caps(&effective_defaults);
     }
+    super::diagnostics::warn_unmatched_route_once(provider, model);
     Capabilities::default()
 }
 
@@ -1415,6 +1415,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         screenshot_scaling: rule.screenshot_scaling,
         safety_ack_flow: rule.safety_ack_flow.unwrap_or(false),
         system_message_placement: rule.system_message_placement,
+        runtime_probe: None,
     }
 }
 

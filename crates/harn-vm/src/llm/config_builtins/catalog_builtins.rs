@@ -12,14 +12,22 @@ use super::provider_projection::{provider_catalog_to_vm_value, provider_def_to_v
 /// Return provider/model capability metadata from the loaded capability matrix.
 #[harn_builtin(
     exposure = "harness.llm.provider_capabilities",
-    effects = ["llm.read@arg0"],
+    effects = ["llm.read@arg0", "network.observe@dynamic"],
     sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
+    kind = "async",
     category = "llm.config"
 )]
-pub(super) fn provider_capabilities_builtin(
-    args: &[VmValue],
-    _out: &mut String,
+pub(super) async fn provider_capabilities_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    let model = args.get(1).map(|a| a.display()).unwrap_or_default();
+    crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await;
+    provider_capabilities_value(&args)
+}
+
+pub(super) fn provider_capabilities_value(args: &[VmValue]) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     let model = args.get(1).map(|a| a.display()).unwrap_or_default();
     if provider.is_empty() {
