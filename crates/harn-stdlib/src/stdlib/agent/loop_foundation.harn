@@ -214,7 +214,12 @@ pub fn __invoke_llm_with_autocontinue(
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
   agent_session_flush(harness.agent, session_id)
-  let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
+  let call = agent_invoke_llm(
+    harness,
+    message,
+    turn_system,
+    __agent_loop_provider_request_options(llm_opts),
+  )
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0
   let cap = llm_opts?.max_tokens ?? 0
@@ -243,7 +248,12 @@ pub fn __invoke_llm_with_autocontinue(
     cap = raised
     const retry_opts = retry_llm_opts
       + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
-    call = agent_invoke_llm(harness, message, turn_system, retry_opts)
+    call = agent_invoke_llm(
+      harness,
+      message,
+      turn_system,
+      __agent_loop_provider_request_options(retry_opts),
+    )
   }
   return call
 }

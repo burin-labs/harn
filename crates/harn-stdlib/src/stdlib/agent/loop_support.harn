@@ -268,6 +268,25 @@ pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
     }
 }
 
+/**
+ * Project validated agent-loop options onto the provider request boundary.
+ *
+ * A next-tool claim derives its output schema from the full registry before
+ * this projection. The provider then receives one bare JSON-envelope grammar,
+ * without a competing native-tool grammar. The loop retains the unprojected
+ * turn options for response parsing, policy, and dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_provider_request_options(opts: dict) -> dict {
+  return if opts?._next_tool_claim_applied ?? false {
+    opts + {tools: nil, tool_choice: nil}
+  } else {
+    opts
+  }
+}
+
 pub fn __agent_loop_route_options(provider, model, tool_format) {
   return {
     provider: to_string(provider ?? ""),

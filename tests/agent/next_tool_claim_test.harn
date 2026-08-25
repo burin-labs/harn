@@ -13,7 +13,10 @@
 import { agent_capture_events, agent_next_tool_claim_receipt_schema } from "std/agent/events"
 import { compose_post_turn } from "std/agent/governors"
 import { agent_loop } from "std/agent/loop"
-import { __agent_loop_effective_llm_options } from "std/agent/loop_support"
+import {
+  __agent_loop_effective_llm_options,
+  __agent_loop_provider_request_options,
+} from "std/agent/loop_support"
 import { AgentSpec } from "std/agent/options"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_apply_tool_surface_narrowing } from "std/agent/tool_surface"
@@ -249,6 +252,12 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
     const contract_requests = harness.runtime.shared_cell(
       {scope: "task_group", key: "next-tool-dialect-contract-" + suffix, initial: 0},
     )
+    const ordinary_tool_requests = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-ordinary-tools-" + suffix, initial: 0},
+    )
+    const tool_free_contract_requests = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-tool-free-" + suffix, initial: 0},
+    )
     const canonical_history = harness.runtime.shared_cell(
       {scope: "task_group", key: "next-tool-dialect-history-" + suffix, initial: ""},
     )
@@ -263,6 +272,9 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
       const turn = harness.runtime.shared_snapshot(turns).value
       _bump(harness.runtime, turns)
       if turn == 0 {
+        if contains(_tool_names(call?.opts?.tools), "look") {
+          _bump(harness.runtime, ordinary_tool_requests)
+        }
         return {ok: true, value: _ordinary_tool_result(format, "look", "look-0")}
       }
       if turn == 1 {
@@ -272,6 +284,9 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
           && call?.opts?.tool_format
             == format {
           _bump(harness.runtime, contract_requests)
+        }
+        if call?.opts?.tools == nil && call?.opts?.tool_choice == nil {
+          _bump(harness.runtime, tool_free_contract_requests)
         }
         // All providers return this same grammar-constrained text envelope.
         // Result projection, not the ambient dialect, owns how it is parsed.
@@ -348,6 +363,8 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
         + to_string(_event_types(captured.events)),
     )
     assert_eq(harness.runtime.shared_snapshot(contract_requests).value, 1)
+    assert_eq(harness.runtime.shared_snapshot(ordinary_tool_requests).value, 1)
+    assert_eq(harness.runtime.shared_snapshot(tool_free_contract_requests).value, 1)
     assert(
       harness.runtime.shared_snapshot(canonical_calls).value
         == [{name: "look", args: {}}, {name: "verify", args: {}}],
@@ -559,8 +576,12 @@ pipeline test_all_tool_formats_share_registry_derived_claim_schema(harness: Harn
       narrowed
         + {provider: "mock", tool_format: format},
     )
+    const provider_request = __agent_loop_provider_request_options(effective)
     assert_eq(_claimed_name(effective), "verify")
     assert_eq(effective?._next_tool_claim_applied, true)
+    assert_eq(_tool_names(effective?.tools), ["look", "verify"])
+    assert_eq(provider_request?.tools, nil)
+    assert_eq(provider_request?.tool_choice, nil)
     assert_eq(
       contains(effective?.output?.schema?.properties?.args.keys(), "properties"),
       false,
