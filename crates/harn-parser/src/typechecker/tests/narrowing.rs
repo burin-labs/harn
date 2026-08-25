@@ -184,9 +184,9 @@ fn check(value: string | int) {
 #[test]
 fn generic_type_predicate_is_rejected() {
     let diagnostics = diagnostics_with_code(
-        r#"fn is_present<T>(value: T | nil) -> implies value is T {
+        r"fn is_present<T>(value: T | nil) -> implies value is T {
   return value != nil
-}"#,
+}",
         Code::InvalidTypePredicate,
         DiagnosticSeverity::Error,
     );
@@ -199,7 +199,7 @@ fn generic_type_predicate_is_rejected() {
 #[test]
 fn schema_type_predicate_proves_both_branches() {
     let errs = errors(
-        r#"type Named = {name: string}
+        r"type Named = {name: string}
 
 fn is_named(value: unknown) -> value is Named {
   return schema_is(value, Named)
@@ -209,7 +209,7 @@ fn check(value: unknown) {
   if is_named(value) {
     const name: string = value.name
   }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
@@ -231,13 +231,13 @@ fn is_string(value: unknown) -> value is string {
 #[test]
 fn circular_type_predicates_cannot_prove_each_other() {
     let diagnostics = diagnostics_with_code(
-        r#"fn first(value: unknown) -> value is string {
+        r"fn first(value: unknown) -> value is string {
   return second(value)
 }
 
 fn second(value: unknown) -> value is string {
   return first(value)
-}"#,
+}",
         Code::InvalidTypePredicate,
         DiagnosticSeverity::Error,
     );
@@ -288,9 +288,9 @@ fn two_sided_type_predicate_rejects_a_one_sided_body() {
 #[test]
 fn type_predicate_rejects_an_unrelated_body() {
     let diagnostics = diagnostics_with_code(
-        r#"fn lies(value: string | int) -> value is string {
+        r"fn lies(value: string | int) -> value is string {
   return true
-}"#,
+}",
         Code::InvalidTypePredicate,
         DiagnosticSeverity::Error,
     );
