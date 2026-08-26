@@ -303,11 +303,14 @@ pipeline test_git_path_argv_and_crlf_counts_work_end_to_end(harness: Harness, ta
     harness.fs,
     { root ->
       const path = "crates/example/src/large file [policy].rs"
+      const second_path = "crates/example/src/another large policy.rs"
       init_repo(harness.process, root)
       write_source(harness, root, path, 1502, "\r\n")
-      write_inventory(harness, root, [path])
+      write_text(harness, root, second_path, "source line\n".repeat(1501) + "final line")
+      write_inventory(harness, root, [second_path, path])
       const base = commit_all(harness.process, root, "base with quoted path")
       write_source(harness, root, path, 1501, "\r\n")
+      write_source(harness, root, second_path, 1501)
       commit_all(harness.process, root, "shrink")
       let report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(report.findings, [])

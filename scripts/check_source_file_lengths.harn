@@ -565,6 +565,7 @@ fn base_source_inventory(
     base_by_id[source.id] = source
   }
   let sources: list<BaseSourceCount> = []
+  let approved: list<dict> = []
   for source in legacy_sources {
     const base_source = base_by_id[source.id]
     if base_source == nil {
@@ -628,22 +629,69 @@ fn base_source_inventory(
         continue
       }
     }
-    const base_path = base_source.path
-    const result = process.run(
-      {program: "git", args: ["-C", root, "cat-file", "blob", revision + ":" + base_path]},
-    )
-    if result.success {
-      sources = sources.appending(
-        {path: source.path, approved: true, lines: logical_line_count(result.stdout)},
-      )
+    approved = approved.appending({path: source.path, base_path: base_source.path})
+  }
+  if approved.count == 0 {
+    return sources
+  }
+  // One comparison query keeps the ratchet proportional to repository scan
+  // work instead of paying a sandboxed process launch for every legacy file.
+  const base_paths = approved.map({ source -> source.base_path }).to_list()
+  const result = process.run(
+    {
+      program: "git",
+      args: [
+        "-c",
+        "core.quotePath=false",
+        "-C",
+        root,
+        "--literal-pathspecs",
+        "grep",
+        "--count",
+        "-e",
+        "^",
+        revision,
+        "--",
+      ]
+        + base_paths,
+    },
+  )
+  let counts: dict<string, int> = {}
+  let count_error = ""
+  if !result.success && result.exit_code != 1 {
+    count_error = git_failure(result, "count legacy sources at " + revision)
+  } else {
+    const prefix = revision + ":"
+    for line in result.stdout.lines() {
+      if !line.starts_with(prefix) {
+        count_error = "git grep returned an unexpected legacy-source record at " + revision
+        break
+      }
+      const record = line.substring(prefix.len())
+      const separator = record.last_index_of(":")
+      const count = if separator < 0 {
+        nil
+      } else {
+        to_int(record.substring(separator + 1))
+      }
+      if separator < 0 || count == nil || count < 0 {
+        count_error = "git grep returned an invalid legacy-source count at " + revision
+        break
+      }
+      counts[record.substring(0, separator)] = count
+    }
+  }
+  for source in approved {
+    const lines = counts[source.base_path]
+    if count_error == "" && lines != nil {
+      sources = sources.appending({path: source.path, approved: true, lines: lines})
     } else {
-      sources = sources.appending(
-        {
-          path: source.path,
-          approved: true,
-          error: git_failure(result, "read " + base_path + " at " + revision),
-        },
-      )
+      const error = if count_error != "" {
+        count_error
+      } else {
+        "comparison base did not contain " + source.base_path
+      }
+      sources = sources.appending({path: source.path, approved: true, error: error})
     }
   }
   return sources
