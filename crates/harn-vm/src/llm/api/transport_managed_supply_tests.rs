@@ -21,7 +21,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let served_fingerprint =
-        crate::llm::managed_supply::capability_fingerprint("groq", "llama-3.3-70b-versatile");
+        crate::llm::managed_supply::capability_fingerprint("groq", "qwen/qwen3.6-27b");
     let logical_fingerprint = served_fingerprint.clone();
     let expected_logical_fingerprint = logical_fingerprint.clone();
     let server = spawn_llm_stub("managed supply JSON stub", move |stream| {
@@ -37,7 +37,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
         );
         assert_eq!(
             body["harn_managed_supply"]["logical_route"]["model"],
-            "llama-3.3-70b-versatile"
+            "qwen/qwen3.6-27b"
         );
         assert_eq!(
             body["harn_managed_supply"]["logical_route"]["capability_fingerprint"],
@@ -56,7 +56,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
                 "provider_request_id": "provider-request",
                 "served_route": {
                     "provider": "groq",
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "qwen/qwen3.6-27b",
                     "capability_fingerprint": served_fingerprint,
                 },
                 "input_tokens": 31,
@@ -66,7 +66,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
                 "capability_mode": "exact",
                 "routing_attempts": [{
                     "provider": "groq",
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "qwen/qwen3.6-27b",
                     "outcome": "success",
                     "elapsed_ms": 12
                 }],
@@ -85,7 +85,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     install_managed_supply_stub_provider("managed-gateway", server.addr());
 
     let mut opts = base_opts("managed-gateway");
-    opts.model = "llama-3.3-70b-versatile".to_string();
+    opts.model = "qwen/qwen3.6-27b".to_string();
     opts.stream = false;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -97,7 +97,7 @@ fn managed_supply_json_uses_logical_capabilities_and_authoritative_receipt() {
     crate::llm_config::clear_user_overrides();
 
     assert_eq!(result.provider, "groq");
-    assert_eq!(result.model, "llama-3.3-70b-versatile");
+    assert_eq!(result.model, "qwen/qwen3.6-27b");
     assert_eq!((result.input_tokens, result.output_tokens), (31, 7));
     assert_eq!(result.usage().cost_usd, Some(0.0042));
     assert_eq!(
@@ -112,7 +112,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let served_fingerprint =
-        crate::llm::managed_supply::capability_fingerprint("groq", "llama-3.3-70b-versatile");
+        crate::llm::managed_supply::capability_fingerprint("groq", "qwen/qwen3.6-27b");
     let server = spawn_llm_stub("managed supply SSE stub", move |stream| {
         use std::io::{Read, Write};
         let mut buf = vec![0u8; 32_768];
@@ -154,7 +154,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
                 "provider_request_id": "provider-stream-request",
                 "served_route": {
                     "provider": "groq",
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "qwen/qwen3.6-27b",
                     "capability_fingerprint": served_fingerprint,
                 },
                 "input_tokens": 41,
@@ -164,7 +164,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
                 "capability_mode": "exact",
                 "routing_attempts": [{
                     "provider": "groq",
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "qwen/qwen3.6-27b",
                     "outcome": "success",
                     "elapsed_ms": 12
                 }],
@@ -184,7 +184,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
     install_managed_supply_stub_provider("managed-gateway-stream", server.addr());
 
     let mut opts = base_opts("managed-gateway-stream");
-    opts.model = "llama-3.3-70b-versatile".to_string();
+    opts.model = "qwen/qwen3.6-27b".to_string();
     opts.stream = true;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -208,7 +208,7 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
     assert_eq!(deltas.concat(), "hello world");
     assert_eq!(result.text, "hello world");
     assert_eq!(result.provider, "groq");
-    assert_eq!(result.model, "llama-3.3-70b-versatile");
+    assert_eq!(result.model, "qwen/qwen3.6-27b");
     assert_eq!((result.input_tokens, result.output_tokens), (41, 9));
     assert_eq!(result.usage().cost_usd, Some(0.0065));
     assert_eq!(
