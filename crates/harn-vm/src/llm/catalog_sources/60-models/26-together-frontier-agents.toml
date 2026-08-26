@@ -2,6 +2,42 @@
 # `GET /v1/models`. Keep rows here when Harn supports the provider but the
 # model is absent from direct-provider catalogs.
 
+[models."moonshotai/Kimi-K3"]
+name = "Kimi K3 (Together)"
+provider = "together"
+wire_model = "moonshotai/Kimi-K3"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "together"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# Together's model library and authenticated inventory agreed on this rate and
+# route shape on 2026-08-26.
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."Qwen/Qwen3.8-2.4T-A95B"]
+name = "Qwen3.8 2.4T A95B (Together)"
+provider = "together"
+wire_model = "Qwen/Qwen3.8-2.4T-A95B"
+logical_model = "qwen3.8-2.4t-a95b"
+equivalence_group = "qwen3.8-2.4t-a95b"
+served_variant = "together"
+api_dialect = "openai_chat"
+context_window = 1010000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# Together's model library and authenticated inventory agreed on this rate on
+# 2026-08-26. The inventory reports the exact 1,010,000-token window.
+pricing = { input_per_mtok = 2.50, output_per_mtok = 6.25, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
 [models."Qwen/Qwen3.7-Max"]
 name = "Qwen3.7 Max (Together)"
 provider = "together"

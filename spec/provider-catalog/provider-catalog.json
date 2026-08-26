@@ -6203,6 +6203,99 @@
       ]
     },
     {
+      "id": "deepinfra/Qwen/Qwen3.8-2.4T-A95B",
+      "name": "Qwen3.8 2.4T A95B (DeepInfra)",
+      "display_name": "Qwen3.8 2.4T A95B",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "qwen3.8-2.4t-a95b",
+      "equivalence_group": "qwen3.8-2.4t-a95b",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.8-2.4T-A95B",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "deepinfra/deepseek-ai/DeepSeek-V3.2",
       "name": "DeepSeek V3.2 (DeepInfra)",
       "display_name": "DeepSeek V3.2",
@@ -6541,6 +6634,102 @@
         "video",
         "prompt_caching",
         "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "deepinfra/moonshotai/Kimi-K3",
+      "name": "Kimi K3 (DeepInfra)",
+      "display_name": "Kimi K3",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "moonshot-kimi-k3",
+      "equivalence_group": "moonshot-kimi-k3",
+      "served_variant": "deepinfra",
+      "wire_model": "moonshotai/Kimi-K3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.85,
+        "output_per_mtok": 14.25,
+        "cache_read_per_mtok": 0.285,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "kimi",
@@ -12083,7 +12272,7 @@
         "deepseek"
       ],
       "tier": "frontier",
-      "open_weight": false,
+      "open_weight": true,
       "strengths": [
         "coding",
         "agentic",
@@ -22299,6 +22488,108 @@
       ]
     },
     {
+      "id": "Qwen/Qwen3.8-2.4T-A95B",
+      "name": "Qwen3.8 2.4T A95B (Together)",
+      "display_name": "Qwen3.8 2.4T A95B",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 1010000,
+      "logical_model": "qwen3.8-2.4t-a95b",
+      "equivalence_group": "qwen3.8-2.4t-a95b",
+      "served_variant": "together",
+      "wire_model": "Qwen/Qwen3.8-2.4T-A95B",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "xhigh"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 6.25,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
       "name": "DeepSeek V4 Flash 0731 (Together)",
       "display_name": "DeepSeek V4 Flash 0731",
@@ -22825,6 +23116,114 @@
         "long_context",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "moonshotai/Kimi-K3",
+      "name": "Kimi K3 (Together)",
+      "display_name": "Kimi K3",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "moonshot-kimi-k3",
+      "equivalence_group": "moonshot-kimi-k3",
+      "served_variant": "together",
+      "wire_model": "moonshotai/Kimi-K3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
       ]
     },
     {
@@ -26234,6 +26633,27 @@
     },
     {
       "provider": "deepinfra",
+      "model": "Qwen/Qwen3.8-2.4T-A95B",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Qwen3.8 2.4T A95B (DeepInfra)",
+      "family": "qwen",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "deepinfra",
       "model": "deepseek-ai/DeepSeek-V3.2",
       "base_url": "https://api.deepinfra.com/v1/openai",
       "secret_env": "DEEPINFRA_API_KEY",
@@ -26307,6 +26727,28 @@
         "thinking",
         "tools",
         "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "deepinfra",
+      "model": "moonshotai/Kimi-K3",
+      "base_url": "https://api.deepinfra.com/v1/openai",
+      "secret_env": "DEEPINFRA_API_KEY",
+      "label": "Kimi K3 (DeepInfra)",
+      "family": "kimi",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
         "vision"
       ]
     },
@@ -29542,6 +29984,28 @@
     },
     {
       "provider": "together",
+      "model": "Qwen/Qwen3.8-2.4T-A95B",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Qwen3.8 2.4T A95B (Together)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
       "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
@@ -29657,6 +30121,29 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "moonshotai/Kimi-K3",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "Kimi K3 (Together)",
+      "family": "kimi",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {

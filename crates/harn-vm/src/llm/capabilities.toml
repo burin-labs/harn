@@ -3399,6 +3399,30 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.together]]
+model_match = "Qwen/Qwen3.8-2.4T-A95B"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "xhigh"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.together]]
 model_match = "Qwen/Qwen3.7-Max"
 native_tools = true
 preferred_tool_format = "native"
@@ -3616,6 +3640,48 @@ thinking_block_style = "inline"
 # families expose an inline thinking trace; DeepSeek routes honor prompt
 # caching. Catalog keys are `deepinfra/<hf-id>`, so patterns match the
 # family substring.
+
+[[provider.deepinfra]]
+model_match = "*kimi-k3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*qwen3.8*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.deepinfra]]
 model_match = "*deepseek*"
@@ -5235,6 +5301,32 @@ thinking_block_style = "none"
 #   - GPT-OSS uses top-level `reasoning_effort`.
 # Keep each host-specific rule explicit so the generic OpenAI fallback does
 # not accidentally claim the wrong wire format.
+
+[[provider.together]]
+model_match = "moonshotai/kimi-k3"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
+allowed_tool_choice_modes = ["auto", "required", "none"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # gpt-oss on Together uses NATIVE tool calls. The prior `json`/text pin was a
 # defensive workaround for an "empty native streaming payload" defect that no

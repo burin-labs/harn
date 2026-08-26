@@ -7,6 +7,32 @@
 # Keep each host-specific rule explicit so the generic OpenAI fallback does
 # not accidentally claim the wrong wire format.
 
+[[provider.together]]
+model_match = "moonshotai/kimi-k3"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+reasoning_disable_supported = true
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
+allowed_tool_choice_modes = ["auto", "required", "none"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # gpt-oss on Together uses NATIVE tool calls. The prior `json`/text pin was a
 # defensive workaround for an "empty native streaming payload" defect that no
 # longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)
