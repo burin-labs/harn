@@ -252,6 +252,14 @@ fn ensure_dependency_requests_materialized(
     anchor: &Path,
     requested: Vec<ReachableDependency>,
 ) -> Result<String, PackageError> {
+    ensure_dependency_requests_materialized_before_lock(anchor, requested, || {})
+}
+
+fn ensure_dependency_requests_materialized_before_lock(
+    anchor: &Path,
+    requested: Vec<ReachableDependency>,
+    before_lock: impl FnOnce(),
+) -> Result<String, PackageError> {
     let workspace = PackageWorkspace::from_current_dir()?;
     let Some(ctx) = governing_manifest_context(anchor)? else {
         return Err("package imports require a governing harn.toml".into());
@@ -260,6 +268,7 @@ fn ensure_dependency_requests_materialized(
     // install saves its replacement lock before publishing its generation, so
     // a demand initializer must not derive from the old lock and then publish
     // after that install completes.
+    before_lock();
     let _install_lock = acquire_package_install_lock(&ctx)?;
     let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
         format!(
@@ -305,8 +314,9 @@ pub(crate) fn ensure_dependency_alias_materialized_after_barrier_for_test(
     ready: &std::sync::Barrier,
 ) -> Result<String, PackageError> {
     let request = dependency_request_for_test(anchor, alias)?;
-    ready.wait();
-    ensure_dependency_requests_materialized(anchor, vec![request])
+    ensure_dependency_requests_materialized_before_lock(anchor, vec![request], || {
+        ready.wait();
+    })
 }
 
 #[cfg(test)]

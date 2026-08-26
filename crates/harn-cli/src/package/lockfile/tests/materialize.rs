@@ -208,11 +208,6 @@ fn demand_cannot_republish_lock_authority_replaced_by_an_install() {
         })
     };
     ready.wait();
-    // On the pre-fix path the demand has no lock yet and can derive the old
-    // authority while it waits. Give that short read path a deterministic
-    // scheduling window before simulating the locked portion of an install.
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
     fs::write(
         root.join(MANIFEST),
         "[package]\nname = \"authority-fixture\"\n\n[dependencies]\ndep = { path = \"./vendor/new\" }\n",
