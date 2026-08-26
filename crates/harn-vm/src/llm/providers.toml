@@ -41,7 +41,8 @@ default_provider = "anthropic"
 
 # Usage-accounting declarations are fail-closed, but absence must not look like
 # a researched `false`. This typed registry makes every OpenAI-SSE provider
-# either evidence-backed or part of one explicit, expiring audit queue.
+# either evidence-backed or part of one explicit, expiring audit queue. A
+# partial verified row leaves its omitted field in that queue.
 [usage_accounting_audit]
 reviewed_on = "2026-08-26"
 expires_on = "2026-10-31"
@@ -50,7 +51,6 @@ unverified = [
   "atlas",
   "azure_openai",
   "baseten",
-  "cerebras",
   "cloudflare_ai_gateway",
   "cohere",
   "dashscope",
@@ -70,7 +70,6 @@ unverified = [
   "sambanova",
   "siliconflow",
   "tgi",
-  "together",
   "vercel_ai_gateway",
   "vllm",
   "volcengine_ark",
@@ -80,6 +79,7 @@ unverified = [
 [[usage_accounting_audit.verified]]
 provider = "deepinfra"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://docs.deepinfra.com/chat/streaming",
   "https://docs.deepinfra.com/chat/prompt-caching",
@@ -88,6 +88,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "deepseek"
 checked_on = "2026-08-25"
+fields = ["cache", "stream"]
 sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
 ]
@@ -95,6 +96,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "fireworks"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://docs.fireworks.ai/api-reference/post-chatcompletions",
   "https://docs.fireworks.ai/guides/prompt-caching",
@@ -103,14 +105,24 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "groq"
 checked_on = "2026-08-25"
+fields = ["cache", "stream"]
 sources = [
   "https://console.groq.com/docs/prompt-caching",
   "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
 ]
 
 [[usage_accounting_audit.verified]]
+provider = "cerebras"
+checked_on = "2026-08-25"
+fields = ["cache"]
+sources = [
+  "https://inference-docs.cerebras.ai/api-reference/chat-completions",
+]
+
+[[usage_accounting_audit.verified]]
 provider = "llamacpp"
 checked_on = "2026-08-25"
+fields = ["cache", "stream"]
 sources = [
   "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
   "https://github.com/burin-labs/harn/pull/7311",
@@ -119,6 +131,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "minimax"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://platform.minimax.io/docs/api-reference/text-post",
   "https://platform.minimax.io/docs/api-reference/text-prompt-caching",
@@ -127,6 +140,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "moonshot"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api",
   "https://platform.kimi.ai/docs/guide/use-context-caching-feature-of-kimi-api",
@@ -135,6 +149,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "nvidia"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://docs.nvidia.com/aiperf/dev/reference/per-request-speculative-decoding-acceptance",
   "https://docs.nvidia.com/dynamo/dev/reference/observability/metrics-catalog",
@@ -143,6 +158,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "openai"
 checked_on = "2026-08-25"
+fields = ["cache", "stream"]
 sources = [
   "https://platform.openai.com/docs/api-reference/chat/create#chat-create-stream_options",
   "https://platform.openai.com/docs/guides/prompt-caching#monitoring-cache-usage",
@@ -151,13 +167,24 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "openrouter"
 checked_on = "2026-08-25"
+fields = ["cache", "stream"]
 sources = [
   "https://openrouter.ai/docs/cookbook/administration/usage-accounting",
 ]
 
 [[usage_accounting_audit.verified]]
+provider = "together"
+checked_on = "2026-08-26"
+fields = ["stream"]
+sources = [
+  "https://docs.together.ai/reference/chat-completions-1",
+  "https://github.com/burin-labs/harn/pull/7394",
+]
+
+[[usage_accounting_audit.verified]]
 provider = "xai"
 checked_on = "2026-08-26"
+fields = ["cache", "stream"]
 sources = [
   "https://docs.x.ai/developers/cost-tracking",
   "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing",
@@ -367,6 +394,7 @@ path = "/models"
 # default; per-model rows under [models.X] hold the authoritative numbers
 # from Cerebras's public model discovery endpoint.
 [providers.cerebras]
+cache_usage_accounting = true
 base_url = "https://api.cerebras.ai/v1"
 base_url_env = "CEREBRAS_BASE_URL"
 auth_style = "bearer"
