@@ -454,6 +454,44 @@ pipeline test_validate_rejects_unknown_lifecycle(harness: Harness, task: unknown
 }
 
 @test
+pipeline test_validate_rejects_unknown_artifact_dependency(harness: Harness, task: unknown) {
+  const errs = validate(
+    {
+      artifacts: [{id: "projection", check: "check-projection", depends_on: ["missing"]}],
+      exempt: [],
+      targets: ["check-projection"],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("depends_on references unknown artifact `missing`"), true)
+}
+
+@test
+pipeline test_validate_rejects_artifact_dependency_cycle(harness: Harness, task: unknown) {
+  const errs = validate(
+    {
+      artifacts: [
+        {id: "catalog", check: "check-catalog", depends_on: ["matrix"]},
+        {id: "matrix", check: "check-matrix", depends_on: ["catalog"]},
+      ],
+      exempt: [],
+      targets: ["check-catalog", "check-matrix"],
+      all_recipe: "",
+      workflow_text: "",
+      missing_outputs: [],
+    },
+  )
+  assert_eq(errs.count, 1)
+  assert_eq(
+    errs[0],
+    "generated-artifact dependency graph contains a cycle; unresolved artifacts: catalog, matrix",
+  )
+}
+
+@test
 pipeline test_validate_missing_id_placeholder(harness: Harness, task: unknown) {
   // An artifact with no id uses the "<missing id>" placeholder.
   const errs = validate(

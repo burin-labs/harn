@@ -5697,6 +5697,26 @@ thinking_block_style = "reasoning_summary"
 # grounds, but the meter must budget for the throughput ceiling.
 serving_precision = "throttled"
 
+# Gemma 4 31B is Cerebras's current multimodal serverless model. The public
+# record reports native tools, JSON schema output, vision, and reasoning;
+# streaming tool and schema controls verified the native OpenAI-compatible
+# paths on 2026-08-25. The chat API documents no reasoning-effort parameter
+# for this model, so Harn exposes enabled thinking without inventing a knob.
+[[provider.cerebras]]
+model_match = "gemma-4-31b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # Cerebras GLM 4.7 is a public preview model with native tools, native
 # structured output, and top-level `reasoning_effort`; `none` is the documented
 # no-thinking value, while the older `disable_reasoning` knob is deprecated.

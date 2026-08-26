@@ -13,6 +13,16 @@ fail() {
   exit 1
 }
 
+# The hook executes the production warner from a temporary repository. Keep
+# its source bundle explicit here so a new relative import cannot silently turn
+# the advisory into a non-blocking runtime error.
+copy_drift_warner_fixture() {
+  local fixture_root=$1
+  mkdir -p "$fixture_root/scripts"
+  cp "$repo_root/scripts/warn_generated_artifact_drift.harn" "$fixture_root/scripts/"
+  cp "$repo_root/scripts/generated_artifacts_schema.harn" "$fixture_root/scripts/"
+}
+
 # shellcheck source=/dev/null
 source "$repo_root/.githooks/lib.sh"
 
@@ -40,8 +50,7 @@ export HOOK_DRIFT_RECORD="$record"
 
 # Run from a fake repo root so the hook can stage the path list under .harn/tmp.
 wire_root="$tmp_root/wire-root"
-mkdir -p "$wire_root/scripts"
-cp "$repo_root/scripts/warn_generated_artifact_drift.harn" "$wire_root/scripts/"
+copy_drift_warner_fixture "$wire_root"
 git -C "$wire_root" init --quiet
 staged="$tmp_root/staged.txt"
 printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$staged"
@@ -112,8 +121,7 @@ fake_bin="$tmp_root/bin"
 mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-lexer/src" "$work/scripts"
 cp "$repo_root/.githooks/lib.sh" "$work/.githooks/lib.sh"
 cp "$repo_root/.githooks/pre-commit" "$work/.githooks/pre-commit"
-cp "$repo_root/scripts/warn_generated_artifact_drift.harn" \
-  "$work/scripts/warn_generated_artifact_drift.harn"
+copy_drift_warner_fixture "$work"
 cp "$repo_root/scripts/generated_artifacts.toml" "$work/scripts/generated_artifacts.toml"
 chmod +x "$work/.githooks/pre-commit"
 

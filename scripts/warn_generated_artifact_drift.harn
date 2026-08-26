@@ -6,6 +6,7 @@
 //   harn run scripts/warn_generated_artifact_drift.harn -- \
 //     --staged-files <path> [--registry scripts/generated_artifacts.toml]
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { generated_artifact_inputs } from "./generated_artifacts_schema.harn"
 
 const DEFAULT_REGISTRY = "scripts/generated_artifacts.toml"
 
@@ -114,7 +115,7 @@ pub fn drift_warnings(artifacts: list, staged: list<string>) -> list<DriftWarnin
     if id == "" || gen == "" {
       continue
     }
-    const sources = art?.sources ?? []
+    const sources = generated_artifact_inputs(artifacts, id)
     const outputs = art?.outputs ?? []
     if sources.count == 0 || outputs.count == 0 {
       continue
