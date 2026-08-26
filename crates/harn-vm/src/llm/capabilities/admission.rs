@@ -221,6 +221,25 @@ mod tests {
     }
 
     #[test]
+    fn gemini_interactions_routes_reject_unrepresentable_penalties() {
+        for model in [
+            "gemini-3.6-flash",
+            "gemini-3.7-pro",
+            "gemini-3.5-flash-lite",
+            "models/gemini-3.5-flash-lite",
+        ] {
+            for option in [
+                PortableOption::FrequencyPenalty,
+                PortableOption::PresencePenalty,
+            ] {
+                let error = admit_portable_option("gemini", model, option)
+                    .expect_err("Interactions has no penalty wire field");
+                assert_eq!(error.option, option, "unexpected admission for {model}");
+            }
+        }
+    }
+
+    #[test]
     fn cache_and_ttl_admission_require_authored_lowering() {
         set_user_overrides_toml(
             r#"
