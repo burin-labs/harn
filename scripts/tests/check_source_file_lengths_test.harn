@@ -35,12 +35,19 @@ fn write_source(
   return nil
 }
 
-fn write_inventory(harness: Harness, root: string, paths: list<string>) -> nil {
+fn write_inventory(
+  harness: Harness,
+  root: string,
+  paths: list<string>,
+  identities: dict<string, string> = {},
+) -> nil {
   write_text(
     harness,
     root,
     "scripts/source-file-length-legacy.json",
-    json_stringify_pretty({version: 1, legacy_oversized_paths: paths}) + "\n",
+    json_stringify_pretty(
+      {version: 1, legacy_path_identities: identities, legacy_oversized_paths: paths},
+    ) + "\n",
   )
   return nil
 }
@@ -83,20 +90,33 @@ pipeline test_legacy_inventory_is_stable_sorted_policy_not_measurement(
   task: unknown,
 ) {
   const valid = parse_legacy_inventory(
-    "{\"version\":1,\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}",
+    "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}",
   )
   assert_eq(valid.ok, true)
   assert_eq(valid.paths, ["a.rs", "b.rs"])
+  assert_eq(valid.sources, [{id: "a.rs", path: "a.rs"}, {id: "b.rs", path: "b.rs"}])
+  const renamed = parse_legacy_inventory(
+    "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"b.rs\"]}",
+  )
+  assert_eq(renamed.sources, [{id: "a.rs", path: "b.rs"}])
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_oversized_paths\":[\"b.rs\",\"a.rs\"]}").ok,
+    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"b.rs\",\"a.rs\"]}").ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_oversized_paths\":[\"a.rs\",\"a.rs\"]}").ok,
+    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"a.rs\"]}").ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_oversized_paths\":[\"../escape.rs\"]}").ok,
+    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"../escape.rs\"]}").ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\"]}").ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}").ok,
     false,
   )
   assert_eq(parse_legacy_inventory("not json").ok, false)
@@ -311,8 +331,18 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       const base = commit_all(harness.process, root, "base")
       git_ok(harness.process, root, ["rm", "-q", "-r", "scripts/source-file-length-baseline"])
       git_ok(harness.process, root, ["mv", old_path, new_path])
-      write_inventory(harness, root, [new_path])
-      commit_all(harness.process, root, "rename")
+      write_text(harness, root, new_path, "completely rewritten line\n".repeat(1501))
+      let identities: dict<string, string> = {}
+      identities[new_path] = old_path
+      write_inventory(harness, root, [new_path], identities)
+      commit_all(harness.process, root, "rename and rewrite")
+      const diff = git_ok(
+        harness.process,
+        root,
+        ["diff", "--find-renames", "--name-status", base, "--", old_path, new_path],
+      )
+      assert_eq(diff.contains("D\t" + old_path), true)
+      assert_eq(diff.contains("A\t" + new_path), true)
       assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
       write_source(harness, root, new_path, 1503)
       const report = check_source_file_lengths(harness, root, "merge-base", base)
@@ -338,11 +368,49 @@ pipeline test_rename_cannot_promote_excluded_source_into_legacy_policy(
       const base = commit_all(harness.process, root, "excluded base")
       mkdirs(harness, dirname(path_join(root, new_path)) ?? root)
       git_ok(harness.process, root, ["mv", old_path, new_path])
-      write_inventory(harness, root, [new_path])
+      let identities: dict<string, string> = {}
+      identities[new_path] = old_path
+      write_inventory(harness, root, [new_path], identities)
       commit_all(harness.process, root, "promote excluded source")
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
       assert_eq(report.findings[0]?.message?.contains(old_path) ?? false, true)
+    },
+  )
+}
+
+@test
+pipeline test_stable_identity_survives_repeated_low_similarity_renames(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const identity = "crates/example/src/original.rs"
+      const middle = "crates/example/src/middle.rs"
+      const latest = "crates/example/src/latest.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, identity, 1502)
+      write_inventory(harness, root, [identity])
+      commit_all(harness.process, root, "original")
+      git_ok(harness.process, root, ["mv", identity, middle])
+      write_text(harness, root, middle, "middle rewrite\n".repeat(1501))
+      let middle_ids: dict<string, string> = {}
+      middle_ids[middle] = identity
+      write_inventory(harness, root, [middle], middle_ids)
+      const base = commit_all(harness.process, root, "first rename")
+      git_ok(harness.process, root, ["mv", middle, latest])
+      write_text(harness, root, latest, "latest rewrite\n".repeat(1501))
+      let latest_ids: dict<string, string> = {}
+      latest_ids[latest] = identity
+      write_inventory(harness, root, [latest], latest_ids)
+      commit_all(harness.process, root, "second rename")
+      assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
+      write_text(harness, root, latest, "latest growth\n".repeat(1502))
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["growth"])
+      assert_eq(report.findings[0]?.ceiling, 1501)
     },
   )
 }

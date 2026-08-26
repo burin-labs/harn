@@ -32,6 +32,8 @@ pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
 
 pub type SourceCount = {path: string, lines: int}
 
+pub type LegacySource = {id: string, path: string}
+
 pub type BaseSourceCount = {path: string, approved: bool, lines?: int, error?: string}
 
 pub type SourceLengthFindingKind = "invalid_legacy_inventory" \
@@ -250,7 +252,10 @@ fn legacy_path_shape_valid(path: string) -> bool {
     || (path.starts_with(STDLIB_SOURCE_DIR + "/") && path.ends_with(".harn"))
 }
 
-/** Parse the stable policy inventory; it deliberately contains no measurements. */
+/**
+ * Parse stable debt identity and current paths; the policy deliberately
+ * contains no measurements. Identity survives arbitrary rewrites and renames.
+ */
 pub fn parse_legacy_inventory(text: string) -> dict {
   const parsed = try {
     json_parse(text)
@@ -267,10 +272,11 @@ pub fn parse_legacy_inventory(text: string) -> dict {
     {
       type: "object",
       additionalProperties: false,
-      required: ["version", "legacy_oversized_paths"],
+      required: ["version", "legacy_oversized_paths", "legacy_path_identities"],
       properties: {
         version: {type: "integer"},
         legacy_oversized_paths: {type: "array", items: {type: "string"}},
+        legacy_path_identities: {type: "object", additionalProperties: {type: "string"}},
       },
     },
   )
@@ -286,10 +292,13 @@ pub fn parse_legacy_inventory(text: string) -> dict {
     }
   }
   const paths = inventory.legacy_oversized_paths
+  const identities = inventory.legacy_path_identities
   if paths != paths.sorted() {
     return {ok: false, paths: [], error: "legacy inventory paths must be sorted"}
   }
   let seen: dict<string, bool> = {}
+  let seen_ids: dict<string, bool> = {}
+  let sources: list<LegacySource> = []
   for path in paths {
     if !legacy_path_shape_valid(path) {
       return {ok: false, paths: [], error: "invalid legacy source path: " + path}
@@ -298,8 +307,27 @@ pub fn parse_legacy_inventory(text: string) -> dict {
       return {ok: false, paths: [], error: "duplicate legacy source path: " + path}
     }
     seen[path] = true
+    const id = to_string(identities[path] ?? path)
+    if !legacy_path_shape_valid(id) {
+      return {ok: false, paths: [], sources: [], error: "invalid legacy source identity: " + id}
+    }
+    if seen_ids[id] ?? false {
+      return {ok: false, paths: [], sources: [], error: "duplicate legacy source identity: " + id}
+    }
+    seen_ids[id] = true
+    sources = sources.appending({id: id, path: path})
   }
-  return {ok: true, paths: paths, error: ""}
+  for path in identities.keys() {
+    if !(seen[path] ?? false) {
+      return {
+        ok: false,
+        paths: [],
+        sources: [],
+        error: "legacy identity names a path outside the inventory: " + path,
+      }
+    }
+  }
+  return {ok: true, paths: paths, sources: sources, error: ""}
 }
 
 fn legacy_inventory(fs: HarnessFs, root: string) -> dict {
@@ -328,7 +356,7 @@ pub fn evaluate_inventory(
           kind: "legacy_path_missing",
           path: path,
           message:
-            "legacy source is missing at HEAD; remove it from the inventory after deletion or update the path after a rename",
+            "legacy source is missing at HEAD; remove it after deletion or update its path and preserve its identity after a rename",
         },
       )
       continue
@@ -528,34 +556,40 @@ fn base_source_inventory(
   process: HarnessProcess,
   root: string,
   revision: string,
-  legacy_paths: list<string>,
-  base_legacy_paths: list<string>,
+  legacy_sources: list<LegacySource>,
+  base_legacy_sources: list<LegacySource>,
 ) -> list<BaseSourceCount> {
-  const renamed: dict<string, string> = renamed_base_paths(process, root, revision)
+  let base_by_id: dict<string, LegacySource> = {}
+  for source in base_legacy_sources {
+    base_by_id[source.id] = source
+  }
   let sources: list<BaseSourceCount> = []
-  for path in legacy_paths {
-    const base_path = to_string(renamed[path] ?? path)
-    if !base_legacy_paths.contains(base_path) {
+  for source in legacy_sources {
+    const base_source = base_by_id[source.id]
+    if base_source == nil {
       sources = sources.appending(
         {
-          path: path,
+          path: source.path,
           approved: false,
-          error: "comparison-base policy did not approve legacy source " + base_path,
+          error:
+            "comparison-base policy did not approve legacy identity " + source.id
+            + "; after a rename, map the current path to its prior identity in legacy_path_identities",
         },
       )
       continue
     }
+    const base_path = base_source.path
     const result = process.run(
       {program: "git", args: ["-C", root, "cat-file", "blob", revision + ":" + base_path]},
     )
     if result.success {
       sources = sources.appending(
-        {path: path, approved: true, lines: logical_line_count(result.stdout)},
+        {path: source.path, approved: true, lines: logical_line_count(result.stdout)},
       )
     } else {
       sources = sources.appending(
         {
-          path: path,
+          path: source.path,
           approved: true,
           error: git_failure(result, "read " + base_path + " at " + revision),
         },
@@ -611,46 +645,8 @@ fn base_legacy_inventory(process: HarnessProcess, root: string, revision: string
       error: "comparison base has neither the legacy inventory nor historical count shards",
     }
   }
-  return {ok: true, paths: paths.sorted(), error: ""}
-}
-
-/** Map a current renamed path to its comparison-base path. */
-fn renamed_base_paths(
-  process: HarnessProcess,
-  root: string,
-  revision: string,
-) -> dict<string, string> {
-  const result = process.run(
-    {
-      program: "git",
-      args: [
-        "-C",
-        root,
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--find-renames",
-        "--name-status",
-        revision,
-        "--",
-      ],
-    },
-  )
-  if !result.success {
-    return {}
-  }
-  let paths: dict<string, string> = {}
-  for line in result.stdout.lines() {
-    const fields = line.split("\t")
-    if fields.count == 3 && fields[0]?.starts_with("R") {
-      const old_path = normalize_source_path(fields[1] ?? "")
-      const new_path = normalize_source_path(fields[2] ?? "")
-      if legacy_path_shape_valid(old_path) && legacy_path_shape_valid(new_path) {
-        paths[new_path] = old_path
-      }
-    }
-  }
-  return paths
+  const sources = paths.sorted().map({ path -> {id: path, path: path} }).to_list()
+  return {ok: true, paths: paths.sorted(), sources: sources, error: ""}
 }
 
 /**
@@ -774,8 +770,8 @@ pub fn check_source_file_lengths(
           harness.process,
           resolved_root,
           base.revision,
-          inventory.paths,
-          base_inventory.paths,
+          inventory.sources,
+          base_inventory.sources,
         ),
       )
   }

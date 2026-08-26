@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "legacy_path_identities": {},
   "legacy_oversized_paths": [
     "crates/harn-cli/src/commands/check/preflight.rs",
     "crates/harn-cli/src/commands/doctor.rs",
