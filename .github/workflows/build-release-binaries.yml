@@ -902,6 +902,10 @@ jobs:
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
       CARGO_PROFILE_RELEASE_STRIP: symbols
+      # Compilation, size measurement, and cargo-bloat attribution must share
+      # one build identity. Step-scoping this value made the growth signal
+      # misclassify required-AOT release binaries as non-comparable.
+      HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && '1' || '0' }}
       HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
     strategy:
       # Release artifacts are uploaded incrementally per target. If one leg
@@ -1118,11 +1122,6 @@ jobs:
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
-          # Published and benchmarked binaries must contain the payload prepared
-          # once above. A missing/malformed payload fails the harn-cli build
-          # script instead of silently measuring or releasing a slower
-          # source-fallback binary.
-          HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && '1' || '0' }}
         run: |
           set -euo pipefail
           start=$SECONDS
