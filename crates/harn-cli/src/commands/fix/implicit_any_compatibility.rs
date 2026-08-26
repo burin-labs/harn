@@ -134,6 +134,10 @@ pub(super) fn migrate(
     for file in files {
         let file_name = file.to_string_lossy().into_owned();
         report.scanned_files.push(file_name.clone());
+        if commands::declares_expected_invalid(&file) {
+            report.excluded_files.push(file_name);
+            continue;
+        }
         let source = match std::fs::read_to_string(&file) {
             Ok(source) => source,
             Err(error) => {
@@ -146,10 +150,6 @@ pub(super) fn migrate(
         };
         let program = match harn_parser::parse_source(&source) {
             Ok(program) => program,
-            Err(_) if commands::declares_expected_invalid(&file) => {
-                report.excluded_files.push(file_name);
-                continue;
-            }
             Err(error) => {
                 report.unresolved.push(file_finding(
                     &file_name,
@@ -531,5 +531,37 @@ mod tests {
         assert_eq!(report.scanned_file_count, 1);
         assert_eq!(report.unresolved_count, 1);
         assert!(report.unresolved[0].file.ends_with("broken.harn"));
+    }
+
+    #[test]
+    fn declared_invalid_fixture_is_excluded_before_parse_and_left_unchanged() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("implicit_any_parameter.harn");
+        let expected_error_path = temp.path().join("implicit_any_parameter.error");
+        let source = "fn unchecked(value) {\n  return value\n}\n";
+        std::fs::write(&source_path, source).unwrap();
+        std::fs::write(&expected_error_path, "has no type annotation\n").unwrap();
+
+        let report = migrate(&[temp.path().to_path_buf()], false).unwrap();
+        assert!(report.is_complete(), "{report:#?}");
+        assert_eq!(report.scanned_file_count, 1);
+        assert_eq!(report.excluded_file_count, 1);
+        assert_eq!(
+            report.excluded_files,
+            vec![source_path.display().to_string()]
+        );
+        assert_eq!(report.observed_count, 0);
+        assert_eq!(report.changed_count, 0);
+        assert_eq!(report.pending_count, 0);
+        assert_eq!(std::fs::read_to_string(&source_path).unwrap(), source);
+
+        let strict_error = harn_parser::check_source_strict(source).unwrap_err();
+        let harn_parser::PipelineError::TypeCheck(diagnostic) = strict_error else {
+            panic!("fixture must remain parse-valid and fail strict type checking");
+        };
+        assert_eq!(
+            diagnostic.code,
+            harn_parser::DiagnosticCode::ImplicitAnyParameter
+        );
     }
 }
