@@ -344,12 +344,20 @@ impl ProviderTelemetry {
         if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
             telemetry.request_id = Some(request_id.to_string());
         }
-        telemetry.provider_cost_usd = usage
+        let direct_cost_usd = usage
             .get("cost")
             .or_else(|| usage.get("total_cost"))
             .or_else(|| usage.get("estimated_cost"))
             .and_then(serde_json::Value::as_f64)
             .filter(|cost| cost.is_finite() && *cost >= 0.0);
+        telemetry.provider_cost_usd = direct_cost_usd.or_else(|| {
+            const XAI_USD_TICKS_PER_DOLLAR: f64 = 10_000_000_000.0;
+            usage
+                .get("cost_in_usd_ticks")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|ticks| ticks.is_finite() && *ticks >= 0.0)
+                .map(|ticks| ticks / XAI_USD_TICKS_PER_DOLLAR)
+        });
         telemetry.capture_provider_metadata(response);
         telemetry
     }
@@ -748,6 +756,50 @@ mod tests {
         for invalid in [serde_json::json!(-0.003), serde_json::json!("0.003")] {
             let response = serde_json::json!({
                 "usage": { "estimated_cost": invalid }
+            });
+            assert_eq!(
+                ProviderTelemetry::from_openai_response(&response, None).provider_cost_usd,
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn openai_usage_converts_xai_cost_ticks_after_direct_cost_fields() {
+        let ticks_only = serde_json::json!({
+            "usage": { "cost_in_usd_ticks": 3_546_000 }
+        });
+        let direct_and_ticks = serde_json::json!({
+            "usage": {
+                "estimated_cost": 0.0002736,
+                "cost_in_usd_ticks": 3_546_000
+            }
+        });
+
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(&ticks_only, None).provider_cost_usd,
+            Some(0.0003546)
+        );
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(&direct_and_ticks, None).provider_cost_usd,
+            Some(0.0002736)
+        );
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(
+                &serde_json::json!({"usage": {"cost_in_usd_ticks": 0}}),
+                None,
+            )
+            .provider_cost_usd,
+            Some(0.0)
+        );
+
+        for invalid in [
+            serde_json::json!(-3_546_000),
+            serde_json::json!("3546000"),
+            serde_json::Value::Null,
+        ] {
+            let response = serde_json::json!({
+                "usage": { "cost_in_usd_ticks": invalid }
             });
             assert_eq!(
                 ProviderTelemetry::from_openai_response(&response, None).provider_cost_usd,
