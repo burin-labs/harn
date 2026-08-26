@@ -2,9 +2,9 @@
 //!
 //! The public provider catalog keeps its stable v9 projection: two optional
 //! booleans consumed by existing hosts. This source-only registry owns the
-//! evidence behind those booleans and the finite queue of providers whose
-//! behavior remains unverified. Catalog generation refuses missing, stale,
-//! duplicate, or vacuous audit coverage.
+//! evidence behind each boolean and the finite queue of fields whose behavior
+//! remains unverified. Catalog generation refuses missing, stale, duplicate,
+//! or vacuous audit coverage.
 
 use std::collections::BTreeSet;
 
@@ -30,7 +30,15 @@ pub struct UsageAccountingAuditRegistry {
 pub struct VerifiedUsageAccountingAudit {
     pub provider: String,
     pub checked_on: String,
+    pub fields: Vec<UsageAccountingField>,
     pub sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageAccountingField {
+    Cache,
+    Stream,
 }
 
 /// Provider-level transport family used by the catalog projection and audit.
@@ -148,7 +156,10 @@ pub fn validate_usage_accounting_audit(
                 registry.expires_on, registry.reviewed_on
             ));
         }
-        if !registry.unverified.is_empty() && as_of.is_some_and(|as_of| expires_on < as_of) {
+        let has_partial_audit = registry.verified.iter().any(|audit| audit.fields.len() < 2);
+        if (!registry.unverified.is_empty() || has_partial_audit)
+            && as_of.is_some_and(|as_of| expires_on < as_of)
+        {
             result.errors.push(format!(
                 "usage-accounting unverified queue expired on {} (tracking issue #{})",
                 registry.expires_on, registry.tracking_issue
@@ -166,10 +177,10 @@ pub fn validate_usage_accounting_audit(
         validate_provider_membership(provider, &openai_sse, &mut result);
         if config.providers.get(provider).is_some_and(|definition| {
             definition.cache_usage_accounting.is_some()
-                && definition.stream_usage_accounting.is_some()
+                || definition.stream_usage_accounting.is_some()
         }) {
             result.errors.push(format!(
-                "provider {provider} declares both usage-accounting fields but remains unverified"
+                "provider {provider} declares usage-accounting fields but has no verified evidence"
             ));
         }
     }
@@ -190,6 +201,19 @@ pub fn validate_usage_accounting_audit(
             &audit.checked_on,
             &mut result,
         );
+        let fields: BTreeSet<_> = audit.fields.iter().copied().collect();
+        if fields.is_empty() {
+            result.errors.push(format!(
+                "verified provider {} must name at least one usage-accounting field",
+                audit.provider
+            ));
+        }
+        if fields.len() != audit.fields.len() {
+            result.errors.push(format!(
+                "verified provider {} repeats a usage-accounting field",
+                audit.provider
+            ));
+        }
         if audit.sources.is_empty()
             || audit
                 .sources
@@ -201,15 +225,21 @@ pub fn validate_usage_accounting_audit(
                 audit.provider
             ));
         }
-        match config.providers.get(&audit.provider) {
-            Some(provider)
-                if provider.cache_usage_accounting.is_some()
-                    && provider.stream_usage_accounting.is_some() => {}
-            Some(_) => result.errors.push(format!(
-                "verified provider {} must declare both cache_usage_accounting and stream_usage_accounting",
-                audit.provider
-            )),
-            None => {}
+        if let Some(provider) = config.providers.get(&audit.provider) {
+            validate_field_evidence(
+                &audit.provider,
+                UsageAccountingField::Cache,
+                provider.cache_usage_accounting,
+                &fields,
+                &mut result,
+            );
+            validate_field_evidence(
+                &audit.provider,
+                UsageAccountingField::Stream,
+                provider.stream_usage_accounting,
+                &fields,
+                &mut result,
+            );
         }
     }
 
@@ -219,6 +249,28 @@ pub fn validate_usage_accounting_audit(
         ));
     }
     result
+}
+
+fn validate_field_evidence(
+    provider: &str,
+    field: UsageAccountingField,
+    declaration: Option<bool>,
+    verified: &BTreeSet<UsageAccountingField>,
+    result: &mut UsageAccountingAuditValidation,
+) {
+    let field_name = match field {
+        UsageAccountingField::Cache => "cache_usage_accounting",
+        UsageAccountingField::Stream => "stream_usage_accounting",
+    };
+    match (verified.contains(&field), declaration.is_some()) {
+        (true, false) => result.errors.push(format!(
+            "verified provider {provider} must declare {field_name}"
+        )),
+        (false, true) => result.errors.push(format!(
+            "provider {provider} declares {field_name} without verified evidence"
+        )),
+        _ => {}
+    }
 }
 
 fn validate_provider_membership(
@@ -272,10 +324,41 @@ mod tests {
             .cache_usage_accounting = None;
 
         let validation = validate_usage_accounting_audit(&config, "2026-08-25");
-        assert!(validation
-            .errors
+        assert!(validation.errors.iter().any(|error| {
+            error.contains("verified provider openai must declare cache_usage_accounting")
+        }));
+    }
+
+    #[test]
+    fn audit_accepts_partial_evidence_without_inventing_the_other_field() {
+        let mut config = super::super::embedded_config(None);
+        let cerebras = config.providers.get("cerebras").expect("Cerebras provider");
+        assert_eq!(cerebras.cache_usage_accounting, Some(true));
+        assert_eq!(cerebras.stream_usage_accounting, None);
+
+        let audit = config
+            .usage_accounting_audit
+            .as_ref()
+            .expect("usage accounting audit");
+        let cerebras = audit
+            .verified
             .iter()
-            .any(|error| { error.contains("verified provider openai must declare both") }));
+            .find(|entry| entry.provider == "cerebras")
+            .expect("Cerebras evidence");
+        assert_eq!(cerebras.fields, vec![UsageAccountingField::Cache]);
+
+        let validation = validate_usage_accounting_audit(&config, "2026-08-25");
+        assert!(validation.is_clean(), "{:?}", validation.errors);
+
+        config
+            .providers
+            .get_mut("cerebras")
+            .expect("Cerebras provider")
+            .cache_usage_accounting = None;
+        let validation = validate_usage_accounting_audit(&config, "2026-08-25");
+        assert!(validation.errors.iter().any(|error| {
+            error.contains("verified provider cerebras must declare cache_usage_accounting")
+        }));
     }
 
     #[test]
