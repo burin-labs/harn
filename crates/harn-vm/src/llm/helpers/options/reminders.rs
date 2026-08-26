@@ -1,7 +1,23 @@
 use super::*;
 
-pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS: &str = "Follow each directive according to its authority and lifetime. A directive with ttl_turns=\"N\" applies only to the N assistant turns immediately after the message where it first appears; later copies in history do not renew it. Contract directives override corrective directives; corrective directives override advisory directives.";
+pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
+    "llm/prompts/directive_envelope_instructions.harn.prompt";
 pub(super) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
+
+pub(super) fn directive_envelope_instructions() -> &'static str {
+    static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    RENDERED
+        .get_or_init(|| {
+            crate::stdlib::template::render_stdlib_prompt_asset(
+                DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
+                None,
+            )
+            .expect("directive envelope instruction prompt asset is embedded and must render")
+            .trim_end()
+            .to_string()
+        })
+        .as_str()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RenderedReminder {
@@ -50,8 +66,9 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String
     if blocks.is_empty() {
         return None;
     }
+    let instructions = directive_envelope_instructions();
     Some(format!(
-        "<context-directives>\n{DIRECTIVE_ENVELOPE_INSTRUCTIONS}\n{}\n</context-directives>",
+        "<context-directives>\n{instructions}\n{}\n</context-directives>",
         blocks.join("\n")
     ))
 }

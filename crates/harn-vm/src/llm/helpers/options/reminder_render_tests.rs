@@ -97,6 +97,34 @@ fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
 }
 
 #[test]
+fn directive_envelope_instruction_asset_is_embedded_and_reviewed() {
+    use sha2::Digest as _;
+
+    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
+        .expect("directive envelope instruction prompt asset");
+    assert_eq!(
+        hex::encode(sha2::Sha256::digest(source.as_bytes())),
+        "7c11892da0341af36499b7112f1ab2328a002496abecd3aecde65c29c5b2399a"
+    );
+    assert_eq!(directive_envelope_instructions(), source.trim_end());
+}
+
+#[test]
+fn directive_envelope_uses_the_instruction_asset_verbatim() {
+    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
+        .expect("directive envelope instruction prompt asset");
+    let directive = RenderedReminder::untracked(
+        "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+    );
+    let expected = format!(
+        "<context-directives>\n{}\n{}\n</context-directives>",
+        source.trim_end(),
+        directive.text()
+    );
+    assert_eq!(directive_envelope(&[directive]), Some(expected));
+}
+
+#[test]
 fn system_text_reminders_are_excluded_from_system_string() {
     let options = crate::value::DictMap::from_iter([(
         "system".to_string(),
@@ -125,7 +153,8 @@ fn system_text_reminders_are_excluded_from_system_string() {
     assert_eq!(
         last["content"],
         format!(
-            "<context-directives>\n{DIRECTIVE_ENVELOPE_INSTRUCTIONS}\nreminder\n</context-directives>"
+            "<context-directives>\n{}\nreminder\n</context-directives>",
+            directive_envelope_instructions()
         )
     );
 }
@@ -232,7 +261,8 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     assert_eq!(
         msgs_n_plus_1[1]["content"],
         format!(
-            "<context-directives>\n{DIRECTIVE_ENVELOPE_INSTRUCTIONS}\n{pressure}\n</context-directives>"
+            "<context-directives>\n{}\n{pressure}\n</context-directives>",
+            directive_envelope_instructions()
         )
     );
 }
@@ -273,7 +303,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
         out[4]["content"],
         [
             "<context-directives>",
-            DIRECTIVE_ENVELOPE_INSTRUCTIONS,
+            directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "R",
             "</directive>",
@@ -298,7 +328,7 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
         out[1]["content"],
         [
             "<context-directives>",
-            DIRECTIVE_ENVELOPE_INSTRUCTIONS,
+            directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "A",
             "</directive>",

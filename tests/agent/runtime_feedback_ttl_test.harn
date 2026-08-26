@@ -313,6 +313,18 @@ pipeline test_post_turn_callback_reinjection_renews_same_feedback(harness: Harne
         const messages = call.messages
         if len(messages) > 0
           && contains(to_string(messages[len(messages) - 1]?.content), "SAME_STILL_TRUE_VERDICT") {
+          const active = to_string(messages[len(messages) - 1]?.content)
+          assert(
+            contains(active, "Re-sending that same historical message does not renew it."),
+            "the model-facing asset must distinguish historical replay from renewal",
+          )
+          assert(
+            contains(
+              active,
+              "A newly appended directive starts its own lifetime, even when its text matches an earlier directive.",
+            ),
+            "the model-facing asset must explain same-text instance renewal",
+          )
           active_at_tail = active_at_tail + 1
         }
       }
