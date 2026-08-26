@@ -4,7 +4,8 @@ use super::{append_ollama_tool_calls, non_stream_send_error, telemetry_source};
 use crate::llm::api::response::parse_tool_arguments;
 use crate::llm::api::DialectContract;
 use crate::llm::capabilities::WireDialect;
-use crate::value::{error_to_category, ErrorCategory, VmError};
+use crate::llm::usage::ProviderUsageReceipt;
+use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use std::time::Duration;
 
 /// Drive a real `reqwest::Error` of the requested kind so the classifier is
@@ -155,6 +156,23 @@ async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
         err.to_string()
             .contains("[ollama_empty_content_parser_bug]"),
         "err was: {err}"
+    );
+    assert!(
+        super::is_ollama_empty_content_parser_bug(&err),
+        "typed empty-completion error must preserve the native retry decision"
+    );
+    let receipt = ProviderUsageReceipt::from_error(&err)
+        .expect("token-bearing parser error must retain provider usage");
+    let VmValue::Dict(fields) = receipt.to_vm_value() else {
+        panic!("provider usage receipt must be a dictionary");
+    };
+    assert_eq!(
+        fields.get("input_tokens").and_then(VmValue::as_int),
+        Some(10)
+    );
+    assert_eq!(
+        fields.get("output_tokens").and_then(VmValue::as_int),
+        Some(4)
     );
 }
 
