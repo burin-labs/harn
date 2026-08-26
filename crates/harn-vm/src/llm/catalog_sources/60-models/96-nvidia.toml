@@ -46,6 +46,20 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "reasoning", "coding", "tool_use", "long_context"]
 
+[models."nvidia/nemotron-3.5-lightning-30b-a3b"]
+name = "Nemotron 3.5 Lightning 30B A3B (NVIDIA NIM)"
+provider = "nvidia"
+context_window = 1048576
+logical_model = "nemotron-3.5-lightning-30b-a3b"
+equivalence_group = "nemotron-3.5-lightning-30b-a3b"
+served_variant = "nvidia-nim"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "structured_output"]
+architecture = { parameter_count_b = 30.0, active_parameter_count_b = 3.0, moe = true, source_url = "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b/modelcard", last_verified = "2026-08-26" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "reasoning", "tool_use", "long_context"]
+
 [models."nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
 name = "Nemotron 3 Nano Omni 30B A3B Reasoning (NVIDIA NIM)"
 provider = "nvidia"
