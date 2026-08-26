@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::secrets::{SecretId, SecretProvider};
-use crate::triggers::{registered_provider_metadata, ProviderId, ProviderRuntimeMetadata};
+use crate::triggers::{
+    provider_metadata, registered_provider_metadata, ProviderId, ProviderRuntimeMetadata,
+};
 
 use super::defaults::default_connector_for_provider;
 use super::secret_injection::{with_declared_secrets, DeclaredConnectorSecrets};
@@ -63,6 +65,32 @@ impl ConnectorRegistry {
         Ok(())
     }
 
+    /// Install one provider from the built-in catalog without constructing the
+    /// rest of the default connector set. Hosts use this demand boundary when
+    /// a manifest adds credentials or other policy to a built-in provider.
+    pub fn register_default_provider(
+        &mut self,
+        provider: &ProviderId,
+    ) -> Result<(), ConnectorError> {
+        let metadata = provider_metadata(provider.as_str()).ok_or_else(|| {
+            ConnectorError::Unsupported(format!(
+                "provider '{}' is not registered in the connector catalog",
+                provider.as_str()
+            ))
+        })?;
+        if !matches!(metadata.runtime, ProviderRuntimeMetadata::Builtin { .. }) {
+            return Err(ConnectorError::Unsupported(format!(
+                "provider '{}' has no built-in connector",
+                provider.as_str()
+            )));
+        }
+        self.remove(provider);
+        self.register(default_connector_for_provider(
+            &metadata,
+            harn_clock::RealClock::arc(),
+        ))
+    }
+
     /// Record the credentials `provider`'s manifest declared, so dispatched
     /// calls carry them without the caller ever reading a secret value.
     ///
@@ -75,6 +103,15 @@ impl ConnectorRegistry {
         } else {
             self.declared_secrets.insert(provider, secrets);
         }
+    }
+
+    /// Credential identifiers attached to `provider`; values remain owned by
+    /// the secret store and are never exposed through this metadata view.
+    pub fn declared_secrets_for(&self, provider: &ProviderId) -> &[SecretId] {
+        self.declared_secrets
+            .get(provider)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     pub fn get(&self, id: &ProviderId) -> Option<ConnectorHandle> {

@@ -48,6 +48,11 @@ fn package_export_map_resolves_declared_module() {
     );
 
     let graph = build(std::slice::from_ref(&entry));
+    assert_eq!(
+        graph.package_import_aliases(),
+        ["acme".to_string()],
+        "classification must retain the raw alias after a snapshot resolves it"
+    );
     let imported = graph
         .imported_names_for_file(&entry)
         .expect("package export should resolve");

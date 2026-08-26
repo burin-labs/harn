@@ -615,14 +615,22 @@ async fn register_provider_connector(
     registry: &mut harn_vm::ConnectorRegistry,
     config: &package::ResolvedProviderConnectorConfig,
 ) -> Result<(), String> {
-    if let Some(connector) = package::load_provider_connector(config)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        registry.remove(&config.id);
-        registry
-            .register(connector)
-            .map_err(|error| error.to_string())?;
+    match &config.connector {
+        package::ResolvedProviderConnectorKind::RustBuiltin => registry
+            .register_default_provider(&config.id)
+            .map_err(|error| error.to_string())?,
+        package::ResolvedProviderConnectorKind::Harn { .. }
+        | package::ResolvedProviderConnectorKind::Invalid(_) => {
+            if let Some(connector) = package::load_provider_connector(config)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                registry.remove(&config.id);
+                registry
+                    .register(connector)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
     }
     registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
     Ok(())
@@ -654,9 +662,10 @@ pub(crate) fn default_harness_for_secret_namespace(
 #[cfg(test)]
 mod tests {
     use super::{
-        default_harness_for_secret_namespace, should_install_default_connector_clients,
-        ProjectConnectorResolver,
+        default_harness_for_secret_namespace, register_provider_connector,
+        should_install_default_connector_clients, ProjectConnectorResolver,
     };
+    use crate::package;
     use harn_vm::ConnectorClientResolver;
     use std::path::Path;
     use std::sync::Arc;
@@ -763,6 +772,42 @@ pub fn call(_harness: Harness, method, _args) { return method }
         let state = resolver.state.lock().await;
         assert_eq!(state.provider_errors.len(), 1);
         assert!(state.initialized_project_providers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn builtin_manifest_provider_keeps_its_declared_credentials() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "builtin-connector-fixture"
+
+[[providers]]
+id = "webhook"
+connector = { rust = "builtin" }
+
+[providers.setup]
+required_secrets = ["webhook/signing-secret"]
+"#,
+        )
+        .expect("write manifest");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let connectors = package::try_load_provider_connectors(&entry)
+            .expect("resolve built-in manifest provider");
+        let config = connectors.configs.first().expect("provider config");
+        let mut registry = harn_vm::ConnectorRegistry::empty();
+
+        register_provider_connector(&mut registry, config)
+            .await
+            .expect("register configured built-in provider");
+
+        assert!(registry.get(&config.id).is_some());
+        assert_eq!(
+            registry.declared_secrets_for(&config.id),
+            harn_vm::declared_secret_ids(["webhook/signing-secret"])
+        );
     }
 
     #[test]
