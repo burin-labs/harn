@@ -347,6 +347,7 @@ impl ProviderTelemetry {
         telemetry.provider_cost_usd = usage
             .get("cost")
             .or_else(|| usage.get("total_cost"))
+            .or_else(|| usage.get("estimated_cost"))
             .and_then(serde_json::Value::as_f64)
             .filter(|cost| cost.is_finite() && *cost >= 0.0);
         telemetry.capture_provider_metadata(response);
@@ -710,6 +711,49 @@ mod tests {
         assert_eq!(telemetry.server_prompt_eval_ms, None);
         assert_eq!(telemetry.request_id.as_deref(), Some("req-abc"));
         assert_eq!(telemetry.provider_cost_usd, Some(0.00125));
+    }
+
+    #[test]
+    fn openai_usage_cost_names_keep_precedence_and_validate_estimates() {
+        let all_names = serde_json::json!({
+            "usage": {
+                "cost": 0.001,
+                "total_cost": 0.002,
+                "estimated_cost": 0.003
+            }
+        });
+        let total_and_estimate = serde_json::json!({
+            "usage": {
+                "total_cost": 0.002,
+                "estimated_cost": 0.003
+            }
+        });
+        let estimate_only = serde_json::json!({
+            "usage": { "estimated_cost": 0.003 }
+        });
+
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(&all_names, None).provider_cost_usd,
+            Some(0.001)
+        );
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(&total_and_estimate, None).provider_cost_usd,
+            Some(0.002)
+        );
+        assert_eq!(
+            ProviderTelemetry::from_openai_response(&estimate_only, None).provider_cost_usd,
+            Some(0.003)
+        );
+
+        for invalid in [serde_json::json!(-0.003), serde_json::json!("0.003")] {
+            let response = serde_json::json!({
+                "usage": { "estimated_cost": invalid }
+            });
+            assert_eq!(
+                ProviderTelemetry::from_openai_response(&response, None).provider_cost_usd,
+                None
+            );
+        }
     }
 
     #[test]
