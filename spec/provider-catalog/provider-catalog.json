@@ -1273,7 +1273,7 @@
         "method": "GET",
         "path": "/models"
       },
-      "stream_usage_accounting": false,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],

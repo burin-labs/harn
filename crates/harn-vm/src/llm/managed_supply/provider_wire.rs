@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn together_projection_omits_undocumented_stream_usage_extension() {
+    fn together_projection_requests_terminal_usage() {
         let value = serde_json::to_value(
             hosted_openai_request(
                 "together",
@@ -351,7 +351,7 @@ mod tests {
             .expect("Together request"),
         )
         .expect("JSON");
-        assert!(value.get("stream_options").is_none());
+        assert_eq!(value["stream_options"]["include_usage"], true);
     }
 
     #[test]

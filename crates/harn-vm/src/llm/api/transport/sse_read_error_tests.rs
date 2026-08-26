@@ -108,7 +108,7 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let result = consume_sse_lines(
         tokio::io::BufReader::new(reader),
-        "together",
+        "baseten",
         "test-model",
         DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
@@ -121,6 +121,34 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     drop(writer);
     assert_eq!(result.text, "hello");
     assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+}
+
+#[tokio::test]
+async fn together_reads_trailing_usage_after_finish_reason() {
+    let body = concat!(
+        "data: {\"id\":\"req-live\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
+        "data: {\"id\":\"req-live\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"id\":\"req-live\",\"choices\":[],\"usage\":{\"prompt_tokens\":139,\"completion_tokens\":35,\"total_tokens\":174,\"prompt_tokens_details\":{\"cached_tokens\":64},\"completion_tokens_details\":{\"reasoning_tokens\":7}}}\n",
+        "data: [DONE]\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "together",
+        "test-model",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("Together trailing usage must be consumed");
+    assert_eq!(result.text, "hello");
+    assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+    assert_eq!(result.input_tokens, 139);
+    assert_eq!(result.output_tokens, 35);
+    assert_eq!(result.cache_read_tokens, 64);
 }
 
 #[tokio::test]
