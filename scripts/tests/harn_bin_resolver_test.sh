@@ -50,7 +50,7 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v3\n' >"$7"
+    printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
   printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
@@ -242,7 +242,7 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v3\n' >"$7"
+    printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
   printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
@@ -547,7 +547,7 @@ chmod +x "$authority_bin/cygpath"
 )
 seen_cargo_authority=0
 while IFS= read -r -d '' authority; do
-  if [[ "$authority" != C:\\* ]]; then
+  if [[ "$authority" != [fg]C:\\* ]]; then
     echo "Windows manifest authority was not projected to a native path: $authority" >&2
     exit 1
   fi
@@ -689,6 +689,12 @@ exit 91
 SH
 chmod +x "$hostile_diff"
 export FRESHNESS_TEST_DIFF_MARKER="$hostile_diff_marker"
+fixture_global_config="$tmp_root/global.gitconfig"
+fixture_system_config="$tmp_root/system.gitconfig"
+printf '[user]\n\temail = global@example.invalid\n' > "$fixture_global_config"
+printf '[user]\n\temail = system@example.invalid\n' > "$fixture_system_config"
+export GIT_CONFIG_GLOBAL="$fixture_global_config"
+export GIT_CONFIG_SYSTEM="$fixture_system_config"
 git -C "$cargo_fixture" init -q
 git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
 git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
@@ -768,6 +774,93 @@ if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
   exit 1
 fi
 cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
+
+# Git config authority is narrowed in the native checker, not in this shell.
+# Create an actual linked-worktree branch and publish it with `git push -u`:
+# that mutates the shared common config while leaving the receipt worktree's
+# HEAD and branch ref untouched. Either fast path would have rejected the
+# receipt while the manifest hashed .git/config wholesale.
+fixture_remote="$tmp_root/cargo-fixture-remote.git"
+fixture_sibling="$tmp_root/cargo-fixture-sibling"
+git init --bare -q "$fixture_remote"
+git -C "$cargo_fixture" remote add origin "$fixture_remote"
+git -C "$cargo_fixture" worktree add -qb receipt-churn "$fixture_sibling"
+git -C "$fixture_sibling" push -qu origin receipt-churn
+if [[ "$(git -C "$cargo_fixture" config --get branch.receipt-churn.remote)" != origin ]]; then
+  echo "fixture did not create the expected upstream-tracking branch" >&2
+  exit 1
+fi
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-config-churn.out"
+)
+if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-config-churn.out"; then
+  echo "branch or remote config churn invalidated the resolver freshness receipt" >&2
+  exit 1
+fi
+fixture_hook_bin="$(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    REPO_ROOT="$repo_root" \
+    "$minimum_bash" -c \
+      '. "$REPO_ROOT/.githooks/lib.sh"; hook_find_fresh_worktree_harn_bin'
+)"
+if [[ "$fixture_hook_bin" != "$cargo_fixture_bin" ]]; then
+  echo "branch or remote config churn invalidated the hook freshness receipt" >&2
+  exit 1
+fi
+
+# The same native projection must still fail closed when any resolved scope
+# changes an option that changes untracked inventory or recorded content.
+assert_config_change_rejected() {
+  local scope="$1"
+  if (
+    cd "$cargo_fixture"
+    CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+      "$repo_root/scripts/harn_bin.sh" --no-build --print \
+      > "$tmp_root/cargo-fixture-$scope-config-stale.out" \
+      2> "$tmp_root/cargo-fixture-$scope-config-stale.err"
+  ); then
+    echo "$scope Git config change left the freshness receipt usable" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'manifest input content changed' \
+    "$tmp_root/cargo-fixture-$scope-config-stale.err"; then
+    echo "$scope Git config failure did not name manifest content proof" >&2
+    cat "$tmp_root/cargo-fixture-$scope-config-stale.err" >&2
+    exit 1
+  fi
+  if (
+    cd "$cargo_fixture"
+    CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+      REPO_ROOT="$repo_root" \
+      "$minimum_bash" -c \
+        '. "$REPO_ROOT/.githooks/lib.sh"; hook_find_fresh_worktree_harn_bin' \
+      > "$tmp_root/cargo-fixture-$scope-hook-stale.out" \
+      2> "$tmp_root/cargo-fixture-$scope-hook-stale.err"
+  ); then
+    echo "$scope Git config change left the hook freshness receipt usable" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'manifest input content changed' \
+    "$tmp_root/cargo-fixture-$scope-hook-stale.err"; then
+    echo "$scope hook failure did not name manifest content proof" >&2
+    cat "$tmp_root/cargo-fixture-$scope-hook-stale.err" >&2
+    exit 1
+  fi
+}
+
+git -C "$cargo_fixture" config core.excludesFile "$tmp_root/repository-ignore"
+assert_config_change_rejected repository
+git -C "$cargo_fixture" config --unset core.excludesFile
+git -C "$cargo_fixture" config --global core.excludesFile "$tmp_root/global-ignore"
+assert_config_change_rejected global
+git -C "$cargo_fixture" config --global --unset core.excludesFile
+git -C "$cargo_fixture" config --system core.excludesFile "$tmp_root/system-ignore"
+assert_config_change_rejected system
+git -C "$cargo_fixture" config --system --unset core.excludesFile
 
 # Cargo owns its top-level checker output and may replace it while compiling
 # later test targets. The receipt binds the producer's immutable checker
