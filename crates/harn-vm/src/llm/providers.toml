@@ -1986,9 +1986,9 @@ max_tokens = 8192
 [model_defaults."moonshot/kimi-k2.5"]
 temperature = 1.0
 
-# K3 always reasons and accepts only its maximum effort setting. Sampling is
-# omitted by the capability row; this default selects the required effort
-# without leaking Moonshot-specific request logic into callers.
+# K3 always reasons and accepts low, high, or maximum effort. Sampling is
+# omitted by the capability row; this default preserves Moonshot's documented
+# maximum-effort default without leaking route-specific logic into callers.
 [model_defaults."moonshot/kimi-k3"]
 reasoning_effort = "max"
 

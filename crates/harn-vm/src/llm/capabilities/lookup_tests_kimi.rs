@@ -1,7 +1,7 @@
 use super::{clear_user_overrides, lookup};
 
 #[test]
-fn moonshot_kimi_k3_requires_max_effort_and_catalog_owned_reasoning_replay() {
+fn moonshot_kimi_k3_exposes_its_documented_effort_ladder_and_reasoning_replay() {
     clear_user_overrides();
     let caps = lookup("moonshot", "moonshot/kimi-k3");
     assert!(caps.native_tools);
@@ -17,7 +17,7 @@ fn moonshot_kimi_k3_requires_max_effort_and_catalog_owned_reasoning_replay() {
     assert!(caps.requires_completion_tokens);
     assert!(caps.reasoning_effort_supported);
     assert_eq!(caps.thinking_modes, vec!["effort"]);
-    assert_eq!(caps.reasoning_effort_levels, vec!["max"]);
+    assert_eq!(caps.reasoning_effort_levels, vec!["low", "high", "max"]);
     assert!(!caps.reasoning_none_supported);
     assert!(!caps.reasoning_disable_supported);
     assert_eq!(

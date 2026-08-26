@@ -927,23 +927,26 @@ auto_reasoning_overrides = { agent = "off" }
     }
 
     #[test]
-    fn single_rung_ladders_resolve_to_the_only_effort_they_accept() {
-        // Kimi K3 always reasons and declares `max` alone, so there is no
-        // bracketing rung to interpolate between: every task and scale has to
-        // land on it. This is the same defect as GLM-5.3's missing `medium`
-        // with the ladder collapsed to one entry.
-        for task in ["agent", "code", "verify", "chat"] {
-            for scale in ["small", "medium", "large"] {
-                let out = apply(policy_opts("moonshot", "moonshot/kimi-k3", task, scale));
-                let Some(thinking) = out.get("thinking").and_then(VmValue::as_dict) else {
-                    continue;
-                };
-                assert_eq!(
-                    thinking.get("level").map(VmValue::display).as_deref(),
-                    Some("max"),
-                    "kimi-k3 task={task} scale={scale} must resolve its only declared rung"
-                );
-            }
+    fn kimi_k3_auto_policy_uses_its_documented_effort_ladder() {
+        for (task, scale, expected) in [
+            ("verify", "large", "low"),
+            ("chat", "medium", "low"),
+            ("code", "small", "low"),
+            ("agent", "medium", "high"),
+            ("code", "large", "high"),
+        ] {
+            let out = apply(policy_opts("moonshot", "moonshot/kimi-k3", task, scale));
+            let thinking = out
+                .get("thinking")
+                .and_then(VmValue::as_dict)
+                .unwrap_or_else(|| {
+                    panic!("kimi-k3 task={task} scale={scale} produced no thinking")
+                });
+            assert_eq!(
+                thinking.get("level").map(VmValue::display).as_deref(),
+                Some(expected),
+                "kimi-k3 task={task} scale={scale}"
+            );
         }
     }
 

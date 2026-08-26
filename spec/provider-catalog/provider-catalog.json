@@ -12235,6 +12235,8 @@
         ],
         "effort_supported": true,
         "effort_levels": [
+          "low",
+          "high",
           "max"
         ],
         "none_supported": false,
