@@ -288,27 +288,48 @@ fn thinking_maps_onto_the_level_ladder_and_requests_summaries() {
 
 #[test]
 fn structured_output_uses_response_format() {
+    let payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    assert!(
+        GeminiInteractions::build_request_body(&payload)
+            .get("response_format")
+            .is_none(),
+        "plain text must not acquire a structured-output constraint"
+    );
+
     let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
     payload.output_format = OutputFormat::JsonObject;
     assert_eq!(
         GeminiInteractions::build_request_body(&payload)["response_format"],
-        json!({"type": "object"})
+        json!({
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": {"type": "object"},
+        })
     );
 
     let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
     payload.output_format = OutputFormat::JsonSchema {
         schema: json!({
             "type": "object",
-            "properties": {"city": {"type": "string"}},
+            "additionalProperties": true,
+            "properties": {"city": {"type": "string", "default": "London"}},
             "required": ["city"],
         }),
         strict: true,
     };
     let body = GeminiInteractions::build_request_body(&payload);
-    assert_eq!(body["response_format"]["type"], "object");
-    assert_eq!(
-        body["response_format"]["properties"]["city"]["type"],
-        "string"
+    let response_format = &body["response_format"];
+    assert_eq!(response_format["type"], "text");
+    assert_eq!(response_format["mime_type"], "application/json");
+    let sanitized = &response_format["schema"];
+    assert_eq!(sanitized["type"], "object");
+    assert_eq!(sanitized["required"], json!(["city"]));
+    assert_eq!(sanitized["properties"]["city"]["type"], "string");
+    assert!(sanitized.get("additionalProperties").is_none());
+    assert!(sanitized["properties"]["city"].get("default").is_none());
+    assert!(
+        response_format.get("properties").is_none(),
+        "the retired bare-schema shape must not survive beside the current contract"
     );
 }
 

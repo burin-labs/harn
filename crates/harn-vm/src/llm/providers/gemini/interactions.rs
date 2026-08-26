@@ -650,7 +650,7 @@ pub(crate) fn tool_choice_mode(tool_choice: Option<&Value>) -> Option<&'static s
 }
 
 fn response_format(opts: &LlmRequestPayload) -> Option<Value> {
-    match &opts.output_format {
+    let schema = match &opts.output_format {
         OutputFormat::Text => None,
         OutputFormat::JsonObject => Some(json!({"type": "object"})),
         OutputFormat::JsonSchema { schema, .. } => Some(sanitize_schema_for_provider(
@@ -660,7 +660,12 @@ fn response_format(opts: &LlmRequestPayload) -> Option<Value> {
             SchemaSurface::StructuredOutput,
             schema,
         )),
-    }
+    }?;
+    Some(json!({
+        "type": "text",
+        "mime_type": "application/json",
+        "schema": schema,
+    }))
 }
 
 // ---------------------------------------------------------------------------
