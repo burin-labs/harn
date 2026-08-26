@@ -28,7 +28,7 @@ pub(super) struct HookRuntimeRelease {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(super) struct HookRuntimeRefreshReport {
+pub(crate) struct HookRuntimeRefreshReport {
     pub status: HookRuntimeRefreshStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binary_sha256: Option<String>,
@@ -40,7 +40,7 @@ pub(super) struct HookRuntimeRefreshReport {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum HookRuntimeRefreshStatus {
+pub(crate) enum HookRuntimeRefreshStatus {
     NotEnrolled,
     Refreshed,
     SkippedUnverified,
