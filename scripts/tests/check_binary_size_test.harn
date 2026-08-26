@@ -40,6 +40,7 @@ type ReleaseWorkflow = {
         CARGO_PROFILE_RELEASE_LTO: string,
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS: string,
         CARGO_PROFILE_RELEASE_STRIP: string,
+        HARN_REQUIRE_CLI_AOT: string,
       },
       steps: list<ReleaseWorkflowStep>,
     },
@@ -106,6 +107,7 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
                           CARGO_PROFILE_RELEASE_LTO: schema_field(schema_string()),
                           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: schema_field(schema_string()),
                           CARGO_PROFILE_RELEASE_STRIP: schema_field(schema_string()),
+                          HARN_REQUIRE_CLI_AOT: schema_field(schema_string()),
                         },
                       ),
                     ),
@@ -741,7 +743,14 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
   assert_eq(restore.if, aot_condition)
   assert_eq(restore.uses, "./.github/actions/download-artifact-with-retry")
-  assert_eq(build.env?.HARN_REQUIRE_CLI_AOT, "$" + "{{ (" + aot_condition + ") && '1' || '0' }}")
+  const required_aot = "$" + "{{ (" + aot_condition + ") && '1' || '0' }}"
+  assert_eq(workflow.jobs.build.env.HARN_REQUIRE_CLI_AOT, required_aot)
+  assert_eq(build.env?.HARN_REQUIRE_CLI_AOT, nil)
+  assert_eq(
+    release_workflow_step(workflow.jobs.build.steps, "Evaluate the binary-size growth signal").env
+      ?.HARN_REQUIRE_CLI_AOT,
+    nil,
+  )
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)
