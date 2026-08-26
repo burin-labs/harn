@@ -57,6 +57,123 @@ acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
 }
 
 #[test]
+fn disjoint_demand_publications_preserve_one_cumulative_generation() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    for alias in ["alpha", "beta"] {
+        let dependency = root.join("vendor").join(alias);
+        fs::create_dir_all(&dependency).unwrap();
+        fs::write(
+            dependency.join(MANIFEST),
+            format!("[package]\nname = \"{alias}\"\n"),
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("lib.harn"),
+            format!("pub fn value() -> string {{ return \"{alias}\" }}\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        root.join(MANIFEST),
+        r#"
+[package]
+name = "cumulative-demand-fixture"
+
+[dependencies]
+alpha = { path = "./vendor/alpha" }
+beta = { path = "./vendor/beta" }
+"#,
+    )
+    .unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    fs::remove_dir_all(root.join(".harn")).unwrap();
+    let entry = root.join("main.harn");
+    fs::write(&entry, "pipeline main() {}\n").unwrap();
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let handles = ["alpha", "beta"].map(|alias| {
+        let entry = entry.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            ensure_dependency_alias_materialized_for_test(&entry, alias)
+        })
+    });
+    for handle in handles {
+        handle.join().unwrap().unwrap();
+    }
+
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .unwrap();
+    let lock = LockFile::load(snapshot.lock_path()).unwrap().unwrap();
+    assert_eq!(
+        lock.packages
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "beta"]
+    );
+    for alias in ["alpha", "beta"] {
+        assert!(snapshot
+            .packages_root()
+            .join(alias)
+            .join("lib.harn")
+            .is_file());
+    }
+}
+
+#[test]
+fn cumulative_demand_reuses_an_installed_remote_package_without_refetching() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let beta = root.join("vendor/beta");
+    fs::create_dir_all(&beta).unwrap();
+    fs::write(beta.join(MANIFEST), "[package]\nname = \"beta\"\n").unwrap();
+    fs::write(beta.join("lib.harn"), "pub fn value() { 2 }\n").unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            r#"
+[package]
+name = "cumulative-remote-fixture"
+
+[dependencies]
+acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+beta = {{ path = "./vendor/beta" }}
+"#,
+        ),
+    )
+    .unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    fs::remove_dir_all(root.join(".harn")).unwrap();
+    let entry = root.join("main.harn");
+    fs::write(&entry, "pipeline main() {}\n").unwrap();
+
+    ensure_dependency_alias_materialized_for_test(&entry, "acme-lib").unwrap();
+    fs::remove_dir_all(&repo).unwrap();
+    fs::remove_dir_all(workspace.cache_dir()).unwrap();
+    ensure_dependency_alias_materialized_for_test(&entry, "beta").unwrap();
+
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .unwrap();
+    assert!(snapshot.packages_root().join("acme-lib/lib.harn").is_file());
+    assert!(snapshot.packages_root().join("beta/lib.harn").is_file());
+    assert!(
+        !workspace.cache_dir().exists(),
+        "cumulative publication must copy the immutable installed source"
+    );
+}
+
+#[test]
 fn materialization_rejects_lock_alias_path_traversal_before_removing_paths() {
     let tmp = tempfile::tempdir().unwrap();
     let dep = tmp.path().join("dep");

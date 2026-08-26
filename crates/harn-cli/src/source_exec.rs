@@ -487,6 +487,15 @@ impl ProjectConnectorResolver {
     }
 }
 
+fn is_catalog_builtin(provider: &harn_vm::ProviderId) -> bool {
+    harn_vm::provider_metadata(provider.as_str()).is_some_and(|metadata| {
+        matches!(
+            metadata.runtime,
+            harn_vm::ProviderRuntimeMetadata::Builtin { .. }
+        )
+    })
+}
+
 #[async_trait::async_trait]
 impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
     async fn resolve(
@@ -535,7 +544,8 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                     .find(|config| config.id == provider)
             })
             .cloned();
-        if config.is_none() {
+        let uses_catalog_default = config.is_none() && is_catalog_builtin(&provider);
+        if config.is_none() && !uses_catalog_default {
             if let Some(error) = &state.package_error {
                 return Err(error.clone());
             }
@@ -573,8 +583,11 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                 })
                 .cloned();
         }
-        let needs_project_initialization =
-            config.is_some() && !state.initialized_project_providers.contains(&provider);
+        let needs_initialization = (config.is_some() || uses_catalog_default)
+            && !state.initialized_project_providers.contains(&provider);
+        if !needs_initialization {
+            return Ok(state.clients.get(&provider).cloned());
+        }
         if state.context.is_none() {
             let context = match connector_context_for_event_log(self.event_log.clone()).await {
                 Ok(context) => context,
@@ -584,21 +597,11 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                     return Err(error);
                 }
             };
-            let registry = harn_vm::ConnectorRegistry::default();
-            state.clients = match initialized_registry_clients(&registry, context.clone()).await {
-                Ok(clients) => clients,
-                Err(error) => {
-                    let error = harn_vm::ClientError::Other(error);
-                    state.terminal_error = Some(error.clone());
-                    return Err(error);
-                }
-            };
             state.context = Some(context);
         }
 
-        if needs_project_initialization {
-            let config = config.as_ref().expect("project connector config");
-            let mut registry = harn_vm::ConnectorRegistry::empty();
+        let mut registry = harn_vm::ConnectorRegistry::empty();
+        if let Some(config) = config.as_ref() {
             if let Err(error) = register_provider_connector(&mut registry, config).await {
                 let error = harn_vm::ClientError::Other(error);
                 state
@@ -606,26 +609,32 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                     .insert(provider.clone(), error.clone());
                 return Err(error);
             }
-            let mut initialized = match initialized_registry_clients(
-                &registry,
-                state.context.as_ref().expect("connector context").clone(),
-            )
-            .await
-            {
-                Ok(initialized) => initialized,
-                Err(error) => {
-                    let error = harn_vm::ClientError::Other(error);
-                    state
-                        .provider_errors
-                        .insert(provider.clone(), error.clone());
-                    return Err(error);
-                }
-            };
-            if let Some(client) = initialized.remove(&provider) {
-                state.clients.insert(provider.clone(), client);
-            }
-            state.initialized_project_providers.insert(provider.clone());
+        } else if let Err(error) = registry.register_default_provider(&provider) {
+            let error = harn_vm::ClientError::Other(error.to_string());
+            state
+                .provider_errors
+                .insert(provider.clone(), error.clone());
+            return Err(error);
         }
+        let mut initialized = match initialized_registry_clients(
+            &registry,
+            state.context.as_ref().expect("connector context").clone(),
+        )
+        .await
+        {
+            Ok(initialized) => initialized,
+            Err(error) => {
+                let error = harn_vm::ClientError::Other(error);
+                state
+                    .provider_errors
+                    .insert(provider.clone(), error.clone());
+                return Err(error);
+            }
+        };
+        if let Some(client) = initialized.remove(&provider) {
+            state.clients.insert(provider.clone(), client);
+        }
+        state.initialized_project_providers.insert(provider.clone());
         Ok(state.clients.get(&provider).cloned())
     }
 }
@@ -897,6 +906,44 @@ connector = { rust = "builtin" }
             !project.path().join("harn.lock").exists(),
             "root provider resolution must not materialize dependencies"
         );
+    }
+
+    #[tokio::test]
+    async fn catalog_builtin_does_not_prepare_an_unrelated_broken_dependency() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "catalog-provider-precedence-fixture"
+
+[dependencies]
+missing = { git = "https://example.invalid/missing.git" }
+"#,
+        )
+        .expect("write manifest");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let resolver = ProjectConnectorResolver::new(&entry);
+
+        assert!(
+            resolver
+                .resolve("webhook")
+                .await
+                .expect("catalog provider must bypass the package layer")
+                .is_some(),
+            "the catalog provider must remain available"
+        );
+        assert!(
+            !project.path().join("harn.lock").exists(),
+            "catalog provider resolution must not materialize dependencies"
+        );
+
+        let error = match resolver.resolve("missing_package_provider").await {
+            Err(error) => error,
+            Ok(_) => panic!("a non-catalog lookup must still validate package dependencies"),
+        };
+        assert!(error.to_string().contains("harn.lock"));
     }
 
     #[tokio::test]

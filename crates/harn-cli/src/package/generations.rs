@@ -30,6 +30,21 @@ where
     F: FnOnce(&Path) -> Result<usize, PackageError>,
 {
     let _install_lock = acquire_package_install_lock(ctx)?;
+    publish_package_generation_locked(ctx, lock, force_rebuild, materialize)
+}
+
+/// Publish while the caller holds this project's package-install lock.
+/// Demand-driven publication uses this seam to read, merge, and replace the
+/// current immutable generation as one cross-process critical section.
+pub(crate) fn publish_package_generation_locked<F>(
+    ctx: &ManifestContext,
+    lock: &LockFile,
+    force_rebuild: bool,
+    materialize: F,
+) -> Result<usize, PackageError>
+where
+    F: FnOnce(&Path) -> Result<usize, PackageError>,
+{
     let generations_dir = package_generations_dir(&ctx.dir);
     fs::create_dir_all(&generations_dir)
         .map_err(|error| format!("failed to create {}: {error}", generations_dir.display()))?;
@@ -297,7 +312,7 @@ pub(crate) fn dependency_package_snapshot(
     Ok(snapshot)
 }
 
-fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
+pub(crate) fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
     let path = ctx.dir.join(".harn").join("package-install.lock");
     let file = open_lock_file(&path).map_err(|error| PackageError::Lockfile(error.to_string()))?;
     harn_flock::lock_with_deadline(

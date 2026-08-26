@@ -12,62 +12,77 @@ pub(crate) fn materialize_dependencies_from_lock(
     offline: bool,
 ) -> Result<usize, PackageError> {
     publish_package_generation(ctx, lock, refetch.is_some(), |packages_dir| {
-        let mut installed = 0usize;
-        for entry in &lock.packages {
-            let alias = &entry.name;
-            validate_package_alias(alias)?;
-            if entry.source.starts_with("path+") {
-                let source = path_from_source_uri(&entry.source)?;
-                materialize_path_dependency(&source, packages_dir, alias)?;
-                installed += 1;
-                continue;
-            }
+        materialize_lock_entries(workspace, lock, packages_dir, refetch, offline, None)
+    })
+}
 
-            let expected_hash = entry
-                .content_hash
-                .as_deref()
-                .ok_or_else(|| format!("missing content hash for {alias}"))?;
-            let source = entry.source.clone();
-            let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
-            let cache_dir = if source.starts_with("git+") {
-                let commit = entry
-                    .commit
-                    .as_deref()
-                    .ok_or_else(|| format!("missing locked commit for {alias}"))?;
-                let url = source.trim_start_matches("git+");
-                ensure_git_cache_populated_in(
-                    workspace,
-                    url,
-                    &source,
-                    commit,
-                    Some(expected_hash),
-                    refetch_this,
-                    offline,
-                )?;
-                git_cache_dir_in(workspace, &source, commit)?
-            } else if source.starts_with("archive+") {
-                let url = archive_url_from_source_uri(&source)?;
-                ensure_archive_cache_populated_in(
-                    workspace,
-                    url,
-                    &source,
-                    expected_hash,
-                    refetch_this,
-                    offline,
-                )?;
-                archive_cache_dir_in(workspace, &source, expected_hash)?
-            } else {
-                return Err(
-                    format!("unsupported locked package source for {alias}: {source}").into(),
-                );
-            };
-            let dest_dir = packages_dir.join(alias);
-            copy_dir_recursive(&cache_dir, &dest_dir)?;
+fn materialize_lock_entries(
+    workspace: &PackageWorkspace,
+    lock: &LockFile,
+    packages_dir: &Path,
+    refetch: Option<&str>,
+    offline: bool,
+    installed_sources: Option<&InstalledPackageSources>,
+) -> Result<usize, PackageError> {
+    let mut installed = 0usize;
+    for entry in &lock.packages {
+        let alias = &entry.name;
+        validate_package_alias(alias)?;
+        if entry.source.starts_with("path+") {
+            let source = path_from_source_uri(&entry.source)?;
+            materialize_path_dependency(&source, packages_dir, alias)?;
+            installed += 1;
+            continue;
+        }
+
+        let expected_hash = entry
+            .content_hash
+            .as_deref()
+            .ok_or_else(|| format!("missing content hash for {alias}"))?;
+        let dest_dir = packages_dir.join(alias);
+        if let Some(source) = installed_sources.and_then(|sources| sources.source_for(entry)) {
+            copy_dir_recursive(&source, &dest_dir)?;
             write_cached_content_hash(&dest_dir, expected_hash)?;
             installed += 1;
+            continue;
         }
-        Ok(installed)
-    })
+        let source = entry.source.clone();
+        let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
+        let cache_dir = if source.starts_with("git+") {
+            let commit = entry
+                .commit
+                .as_deref()
+                .ok_or_else(|| format!("missing locked commit for {alias}"))?;
+            let url = source.trim_start_matches("git+");
+            ensure_git_cache_populated_in(
+                workspace,
+                url,
+                &source,
+                commit,
+                Some(expected_hash),
+                refetch_this,
+                offline,
+            )?;
+            git_cache_dir_in(workspace, &source, commit)?
+        } else if source.starts_with("archive+") {
+            let url = archive_url_from_source_uri(&source)?;
+            ensure_archive_cache_populated_in(
+                workspace,
+                url,
+                &source,
+                expected_hash,
+                refetch_this,
+                offline,
+            )?;
+            archive_cache_dir_in(workspace, &source, expected_hash)?
+        } else {
+            return Err(format!("unsupported locked package source for {alias}: {source}").into());
+        };
+        copy_dir_recursive(&cache_dir, &dest_dir)?;
+        write_cached_content_hash(&dest_dir, expected_hash)?;
+        installed += 1;
+    }
+    Ok(installed)
 }
 
 pub(crate) fn validate_lock_matches_manifest(
@@ -250,11 +265,67 @@ fn ensure_dependency_requests_materialized(
     let runtime_lock = lock_for_materialization(&workspace, &ctx, lock)?;
     let reachable_lock = dependency_closure_lock(&workspace, &ctx, &runtime_lock, requested)?;
     let digest = harn_modules::package_snapshot::package_lock_digest(&reachable_lock.encode()?);
+    let _install_lock = acquire_package_install_lock(&ctx)?;
     if current_generation_satisfies_lock_subset(&ctx, &reachable_lock)? {
         return Ok(digest);
     }
-    materialize_dependencies_from_lock(&workspace, &ctx, &reachable_lock, None, false)?;
+    let installed_sources = InstalledPackageSources::acquire(&ctx)?;
+    let cumulative_lock =
+        cumulative_demand_lock(&runtime_lock, reachable_lock, installed_sources.as_ref());
+    publish_package_generation_locked(&ctx, &cumulative_lock, false, |packages_dir| {
+        materialize_lock_entries(
+            &workspace,
+            &cumulative_lock,
+            packages_dir,
+            None,
+            false,
+            installed_sources.as_ref(),
+        )
+    })?;
     Ok(digest)
+}
+
+#[cfg(test)]
+pub(crate) fn ensure_dependency_alias_materialized_for_test(
+    anchor: &Path,
+    alias: &str,
+) -> Result<String, PackageError> {
+    let Some(ctx) = governing_manifest_context(anchor)? else {
+        return Err("test dependency requires a governing harn.toml".into());
+    };
+    let dependency = ctx
+        .manifest
+        .dependencies
+        .get(alias)
+        .cloned()
+        .ok_or_else(|| format!("test dependency {alias} is not declared"))?;
+    ensure_dependency_requests_materialized(
+        anchor,
+        vec![ReachableDependency {
+            alias: alias.to_string(),
+            dependency,
+            manifest_dir: ctx.dir,
+        }],
+    )
+}
+
+fn cumulative_demand_lock(
+    authoritative: &LockFile,
+    mut requested: LockFile,
+    installed: Option<&InstalledPackageSources>,
+) -> LockFile {
+    if let Some(installed) = installed {
+        for entry in &installed.lock.packages {
+            let Some(authoritative_entry) = authoritative.find(&entry.name) else {
+                continue;
+            };
+            if entry.same_resolution(authoritative_entry) && requested.find(&entry.name).is_none() {
+                requested.packages.push(authoritative_entry.clone());
+            }
+        }
+    }
+    requested.sort_entries();
+    requested
 }
 
 fn dependency_closure_lock(
