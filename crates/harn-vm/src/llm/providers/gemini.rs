@@ -8,6 +8,7 @@
 //! the capability matrix and switched on in exactly one place
 //! ([`GeminiProvider::chat_impl`]).
 
+mod generate_content_stream;
 pub(crate) mod interactions;
 mod interactions_stream;
 #[cfg(test)]
@@ -28,6 +29,7 @@ use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
 use crate::value::{VmError, VmValue};
+use generate_content_stream::{generate_content_url, read_generate_content_stream};
 
 pub(crate) struct GeminiProvider;
 
@@ -250,8 +252,12 @@ impl GeminiProvider {
             .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
         let wire_model = crate::llm_config::wire_model_id(&request.model);
         let model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
-        let url = format!("{base_url}/v1beta/models/{model}:generateContent");
-        let client = crate::llm::blocking_client_for_base_url(&base_url);
+        let url = generate_content_url(&base_url, model, request.stream);
+        let client = if request.stream {
+            crate::llm::streaming_client_for_base_url(&base_url)
+        } else {
+            crate::llm::blocking_client_for_base_url(&base_url)
+        };
         let req = client
             .post(url)
             .header("Content-Type", "application/json")
@@ -269,6 +275,10 @@ impl GeminiProvider {
                 dialect, "gemini", response,
             )
             .await);
+        }
+        if request.stream {
+            let envelope = read_generate_content_stream(response, delta_tx, dialect).await?;
+            return dialect.parse_response(&envelope, request, false);
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
