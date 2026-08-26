@@ -438,6 +438,15 @@ pub fn agent_session_totals(agent: HarnessAgent, session_id: string) {
  * model-facing context envelope. Equivalent feedback is deduplicated with
  * structural directives at the typed reminder boundary.
  *
+ * `ttl_turns` declares how long the advice stays true. Omit it (or pass nil)
+ * for a standing condition that should survive until it is resolved. Pass 1
+ * for advice about the turn that just ended — a malformed call, a stale
+ * verdict, an exhausted wait — which asserts an already-resolved condition on
+ * every later turn if it persists. Do not pass 1 for guidance whose
+ * re-injection is capped (`stall_diagnostics.max_feedback`): the injected copy
+ * is the model's only one, and expiring it leaves the model without its
+ * repair instructions part-way through a bounded recovery.
+ *
  * @effects: [host]
  * @errors: []
  * @api_stability: experimental
@@ -447,8 +456,9 @@ pub fn agent_session_inject_feedback(
   session_id: any,
   kind: any,
   content: any,
+  ttl_turns: int? = nil,
 ) {
-  return agent.session_inject_feedback(session_id, kind, content)
+  return agent.session_inject_feedback(session_id, kind, content, ttl_turns)
 }
 
 /**

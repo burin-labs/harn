@@ -48,13 +48,80 @@ fn every_route_and_legacy_role_hint_use_the_same_directive_shape() {
             );
             assert_eq!(
                 rendered,
-                vec![RenderedReminder::SystemText(
-                    "<directive authority=\"corrective\">\nremember &lt;this&gt;\n</directive>"
-                        .to_string()
+                vec![RenderedReminder::tracked(
+                    "reminder-1",
+                    "<directive authority=\"corrective\">\nremember &lt;this&gt;\n</directive>",
                 )]
             );
         }
     }
+}
+
+#[test]
+fn finite_lifetime_is_part_of_the_model_facing_directive() {
+    let mut finite = reminder(
+        ReminderRoleHint::System,
+        DirectiveAuthority::Corrective,
+        "verify once",
+    );
+    finite.ttl_turns = Some(1);
+    let rendered = render_pending_reminders(
+        &crate::llm::capabilities::Capabilities::default(),
+        &[finite],
+    );
+    assert_eq!(
+        rendered,
+        vec![RenderedReminder::tracked(
+            "reminder-1",
+            "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+        )]
+    );
+}
+
+#[test]
+fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
+    let tracked = RenderedReminder::tracked(
+        "reminder-1",
+        "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+    );
+    let mut messages = apply_rendered_reminder_messages(Vec::new(), &[tracked]);
+    assert_eq!(
+        messages[0][DIRECTIVE_IDS_KEY],
+        serde_json::json!(["reminder-1"])
+    );
+    strip_directive_commit_metadata(&mut messages);
+    assert!(messages[0].get(DIRECTIVE_IDS_KEY).is_none());
+    assert!(messages[0]["content"]
+        .as_str()
+        .is_some_and(|content| content.contains("ttl_turns=\"1\"")));
+}
+
+#[test]
+fn directive_envelope_instruction_asset_is_embedded_and_reviewed() {
+    use sha2::Digest as _;
+
+    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
+        .expect("directive envelope instruction prompt asset");
+    assert_eq!(
+        hex::encode(sha2::Sha256::digest(source.as_bytes())),
+        "7c11892da0341af36499b7112f1ab2328a002496abecd3aecde65c29c5b2399a"
+    );
+    assert_eq!(directive_envelope_instructions(), source.trim_end());
+}
+
+#[test]
+fn directive_envelope_uses_the_instruction_asset_verbatim() {
+    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
+        .expect("directive envelope instruction prompt asset");
+    let directive = RenderedReminder::untracked(
+        "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+    );
+    let expected = format!(
+        "<context-directives>\n{}\n{}\n</context-directives>",
+        source.trim_end(),
+        directive.text()
+    );
+    assert_eq!(directive_envelope(&[directive]), Some(expected));
 }
 
 #[test]
@@ -70,7 +137,7 @@ fn system_text_reminders_are_excluded_from_system_string() {
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::SystemText("reminder".to_string())],
+        &[RenderedReminder::untracked("reminder")],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -79,13 +146,16 @@ fn system_text_reminders_are_excluded_from_system_string() {
     // The directive instead lands in the one trailing user envelope.
     let messages = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
-        &[RenderedReminder::SystemText("reminder".to_string())],
+        &[RenderedReminder::untracked("reminder")],
     );
     let last = messages.last().expect("trailing message");
     assert_eq!(last["role"], "user");
     assert_eq!(
         last["content"],
-        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\nreminder\n</context-directives>"
+        format!(
+            "<context-directives>\n{}\nreminder\n</context-directives>",
+            directive_envelope_instructions()
+        )
     );
 }
 
@@ -125,7 +195,7 @@ fn full_host_option_ordering_is_faithful() {
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::SystemText("R".to_string())],
+        &[RenderedReminder::untracked("R")],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -160,7 +230,7 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     let turn_n_plus_1 = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::SystemText(pressure.to_string())],
+        &[RenderedReminder::untracked(pressure)],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -175,10 +245,8 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     // not in the system string and not merged into the turn already there.
     let base_messages = || vec![serde_json::json!({"role": "user", "content": "hello"})];
     let msgs_n = apply_rendered_reminder_messages(base_messages(), &[]);
-    let msgs_n_plus_1 = apply_rendered_reminder_messages(
-        base_messages(),
-        &[RenderedReminder::SystemText(pressure.to_string())],
-    );
+    let msgs_n_plus_1 =
+        apply_rendered_reminder_messages(base_messages(), &[RenderedReminder::untracked(pressure)]);
     // Turn N: no reminder anywhere in the message array.
     assert!(!serde_json::to_string(&msgs_n)
         .unwrap()
@@ -193,7 +261,8 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     assert_eq!(
         msgs_n_plus_1[1]["content"],
         format!(
-            "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{pressure}\n</context-directives>"
+            "<context-directives>\n{}\n{pressure}\n</context-directives>",
+            directive_envelope_instructions()
         )
     );
 }
@@ -219,8 +288,8 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
     ];
     let out = apply_rendered_reminder_messages(
         messages,
-        &[RenderedReminder::SystemText(
-            "<directive authority=\"contract\">\nR\n</directive>".to_string(),
+        &[RenderedReminder::untracked(
+            "<directive authority=\"contract\">\nR\n</directive>",
         )],
     );
     assert_eq!(out.len(), 5);
@@ -234,7 +303,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
         out[4]["content"],
         [
             "<context-directives>",
-            "Follow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.",
+            directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "R",
             "</directive>",
@@ -249,12 +318,8 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
     let out = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
         &[
-            RenderedReminder::SystemText(
-                "<directive authority=\"contract\">\nA\n</directive>".to_string(),
-            ),
-            RenderedReminder::SystemText(
-                "<directive authority=\"corrective\">\nB\n</directive>".to_string(),
-            ),
+            RenderedReminder::untracked("<directive authority=\"contract\">\nA\n</directive>"),
+            RenderedReminder::untracked("<directive authority=\"corrective\">\nB\n</directive>"),
         ],
     );
     assert_eq!(out.len(), 2);
@@ -263,7 +328,7 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
         out[1]["content"],
         [
             "<context-directives>",
-            "Follow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.",
+            directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "A",
             "</directive>",

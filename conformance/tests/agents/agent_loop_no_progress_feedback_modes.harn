@@ -66,7 +66,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("text.status=" + text_result.status)
       harness.stdio.println(
         "text.has_streak="
-          + to_string(contains(text_retry, "<directive authority=\"corrective\">")),
+          + to_string(contains(text_retry, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "text.has_tool_call_tag=" + to_string(contains(text_retry, "&lt;tool_call&gt;")),
@@ -106,7 +106,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("native.status=" + native_result.status)
       harness.stdio.println(
         "native.has_streak="
-          + to_string(contains(native_retry, "<directive authority=\"corrective\">")),
+          + to_string(contains(native_retry, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "native.has_native_final=" + to_string(contains(native_retry, "concise assistant text")),
@@ -149,7 +149,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("json.status=" + json_result.status)
       harness.stdio.println(
         "json.has_streak="
-          + to_string(contains(json_retry, "<directive authority=\"corrective\">")),
+          + to_string(contains(json_retry, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println("json.has_tool_fence=" + to_string(contains(json_retry, "```tool")))
       harness.stdio.println(

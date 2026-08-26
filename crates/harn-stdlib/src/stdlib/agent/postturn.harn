@@ -281,6 +281,7 @@ fn __maybe_inject_completion_confirmation(
     session.session_id,
     "completion_confirmation",
     "You ended your turn without calling a tool. If you intended to call a tool, call it now. If this was your final answer, restate it briefly on the next line — do not describe your process.",
+    1,
   )
   agent_emit_event(
     agent,
@@ -648,6 +649,7 @@ fn __maybe_inject_action_nudge(
         + " fence — that is ignored. Emit the call as a "
         + paradigm.call_noun
         + " instead.",
+      1,
     )
     agent_emit_event(
       harness.agent,
@@ -677,6 +679,7 @@ fn __maybe_inject_action_nudge(
         + "` but no call could be read from it. Emit the call as a "
         + paradigm.call_noun
         + " instead.",
+      1,
     )
     agent_emit_event(
       harness.agent,
@@ -719,6 +722,7 @@ fn __maybe_inject_action_nudge(
         + to_string(tool_name)
         + "` but did not call it. "
         + instruction,
+      1,
     )
     agent_emit_event(
       harness.agent,
@@ -871,6 +875,7 @@ fn __post_turn_verdict_result(
       session.session_id,
       effective_feedback_kind,
       verdict.message,
+      1,
     )
     return {kind: "continue"}
   }
@@ -883,6 +888,7 @@ fn __post_turn_verdict_result(
       session.session_id,
       effective_feedback_kind,
       verdict.message,
+      1,
     )
   }
   if verdict.stop {

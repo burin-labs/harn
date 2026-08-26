@@ -64,7 +64,7 @@ pipeline main(harness: Harness) {
       const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
       const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       harness.stdio.println(contains(retry_messages, "empty/blank name"))
       harness.stdio.println(result.llm.iterations >= 2)
       require !contains(retry_messages, "parse_guidance"),
@@ -97,7 +97,7 @@ pipeline main(harness: Harness) {
       const calls = harness.llm.mock_calls()
       const retry_messages = json_stringify(calls[1].messages)
       const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       harness.stdio.println(result.llm.iterations >= 2)
       require !contains(retry_messages, "parse_guidance"),
         "all-blank guidance omits its internal kind"

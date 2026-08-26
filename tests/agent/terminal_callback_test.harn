@@ -4,6 +4,11 @@
 // mock LLM script and explicit callback verdicts, so it proves the loop
 // mechanics without sleeps, wall-clock polling, API calls, or broad eval
 // machinery.
+import {
+  agent_capture_events,
+  agent_event_value,
+  agent_feedback_injected_event_schema,
+} from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
@@ -48,8 +53,10 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
       llm_text("The rescue turn completed the task. ##DONE##"),
     ],
     { ->
+      const session = "terminal-callback-" + harness.random.uuid()
       const opts: AgentSpec = {
         provider: "mock",
+        session_id: session,
         tools: terminal_callback_tools(),
         loop_until_done: true,
         iteration_budget: {mode: "fixed", initial: 4, max: 4, extend_by: 0, expose_decisions: true},
@@ -68,7 +75,12 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
           }
         },
       }
-      const result = agent_loop(harness, "Continue once, then finish.", nil, opts)
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Continue once, then finish.", nil, opts) },
+      )
+      const result = captured.result
       assert_eq(result.status, "done")
       assert(result.llm.iterations >= 5, "terminal callback must allow the scripted rescue turn")
       const decisions = result?.adaptive_budget?.decisions ?? []
@@ -76,29 +88,43 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
         "adaptive budget decisions should record the terminal rescue extension",
       )
-      const reminders = transcript_events_by_kind(result.transcript, "system_reminder")
-      let saw_post_turn_feedback = false
-      let saw_terminal_feedback = false
-      for event in reminders {
-        if event?.reminder?.dedupe_key == "runtime_feedback/post_turn"
-          && event?.reminder?.authority
-            == "corrective" {
-          saw_post_turn_feedback = true
+      const feedback_kinds = captured.events.filter({ event -> event.type == "feedback_injected" })
+        .map({ event -> agent_event_value(event, agent_feedback_injected_event_schema()).kind })
+        .to_list()
+      assert(
+        contains(feedback_kinds, "post_turn"),
+        "post-turn callback feedback should be injected as runtime feedback",
+      )
+      assert(
+        contains(feedback_kinds, "terminal_callback"),
+        "terminal callback feedback should be injected under its own kind",
+      )
+      let post_turn_directives = 0
+      let terminal_directives = 0
+      for message in result?.transcript?.messages ?? [] {
+        const content = to_string(message?.content)
+        if contains(content, "Keep going until the done sentinel is present.") {
+          post_turn_directives = post_turn_directives + 1
+          assert(
+            contains(content, "<context-directives>")
+              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
+            "post-turn callback feedback must retain directive role and lifetime metadata",
+          )
         }
-        if event?.reminder?.dedupe_key == "runtime_feedback/terminal_callback"
-          && event?.reminder?.authority
-            == "corrective" {
-          saw_terminal_feedback = true
+        if contains(content, "Terminal callback granted a bounded rescue turn.") {
+          terminal_directives = terminal_directives + 1
+          assert(
+            contains(content, "<context-directives>")
+              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
+            "terminal callback feedback must retain directive role and lifetime metadata",
+          )
         }
       }
       assert(
-        saw_post_turn_feedback,
-        "post-turn callback feedback should use a corrective directive",
+        post_turn_directives >= 2,
+        "repeated post-turn feedback must commit a fresh finite directive for each served turn",
       )
-      assert(
-        saw_terminal_feedback,
-        "terminal callback feedback should have its own corrective directive lifecycle",
-      )
+      assert_eq(terminal_directives, 1, "terminal feedback must be committed once")
     },
   )
 }

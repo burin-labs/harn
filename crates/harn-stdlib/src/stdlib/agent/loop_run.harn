@@ -574,6 +574,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               session.session_id,
               "structural_validator",
               feedback,
+              1,
             )
           }
           const structural_totals = agent_session_record_usage(
@@ -992,6 +993,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
                   session.session_id,
                   "step_judge",
                   critique,
+                  1,
                 )
               } else {
                 __inject_feedback_with_tool_repair(

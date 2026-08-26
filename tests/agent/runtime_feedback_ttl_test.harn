@@ -1,0 +1,345 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import {
+  agent_session_apply_reminder_post_turn,
+  agent_session_inject_feedback,
+  agent_session_inject_reminder,
+  agent_session_messages,
+} from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * tests/agent/runtime_feedback_ttl_test.harn
+ *
+ * Runtime feedback is advice about the turn that just happened. It is spent
+ * once the next turn reads it.
+ *
+ * `inject_agent_feedback` built its reminder with `SystemReminder::new`, which
+ * leaves `ttl_turns: None` — never expires. So ONE injection was re-served on
+ * every later turn for the rest of the session, still asserting a condition
+ * that may have been resolved many turns earlier.
+ *
+ * The observed shape of that failure: a single post-turn callback firing once
+ * produced one `feedback_injected` and then twenty identical `reminder_emitted`
+ * across the following twenty turns, each one repeating a directive the agent
+ * could no longer act on.
+ *
+ * The obvious repair — expire every runtime directive after one turn — is
+ * WRONG, and this suite is deliberately arranged so that it fails. Not every
+ * injector is free to repeat itself: `stall_diagnostics.max_feedback` caps
+ * re-injection, so there the first copy is the model's only copy, and expiring
+ * it strands a model part-way through a bounded repair with no instructions.
+ * That case is pinned by
+ * tests/agent/parse_feedback_event_cardinality_test.harn.
+ *
+ * So retention is DECLARED by the caller, not inherited: sites whose advice
+ * describes the turn that just ended pass `1`, and everything else keeps the
+ * documented durable contract. The last two cases hold both halves of that
+ * contract down.
+ */
+/** Render the session's next prompt and return the directive block it carries. */
+fn rendered_prompt(harness: Harness, session: any) -> string {
+  let rendered = ""
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      harness.llm.call(
+        "ignored",
+        "base system",
+        {
+          provider: "mock",
+          model: "mock",
+          messages: agent_session_messages(harness.agent, session),
+          session_id: session,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const call = calls[len(calls) - 1]
+      rendered = to_string(call.messages[len(call.messages) - 1].content)
+    },
+  )
+  return rendered
+}
+
+/**
+ * THE REGRESSION. One injection must be served to exactly one turn.
+ *
+ * Before the fix this failed on the SECOND assertion: the directive was still
+ * present on turn two, and on every turn after it.
+ */
+pipeline test_runtime_feedback_is_served_once_then_expires(harness: Harness, task: unknown) {
+  const session = harness.agent.open("feedback-ttl-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  agent_session_inject_feedback(harness.agent, session, "post_turn", "RUN_VERIFY_NEXT", 1)
+  // Turn one reads it. This is the control: if the directive never arrived at
+  // all, the expiry assertion below would pass vacuously.
+  assert(
+    contains(rendered_prompt(harness, session), "RUN_VERIFY_NEXT"),
+    "the turn immediately after injection must still receive the directive",
+  )
+  agent_session_apply_reminder_post_turn(harness.agent, session, 1)
+  // Turn two must not. Nothing re-injected it, so it has nothing to say.
+  assert(
+    !contains(rendered_prompt(harness, session), "RUN_VERIFY_NEXT"),
+    "a spent runtime_feedback directive must not be re-served on later turns",
+  )
+  harness.agent.close(session)
+}
+
+/**
+ * The incident shape, directly: one injection, several turns, and a count of
+ * how many of them carried the directive. The pathology was 1 injection to 20
+ * turns; the contract is 1 to 1.
+ */
+pipeline test_one_injection_does_not_chant_across_turns(harness: Harness, task: unknown) {
+  const session = harness.agent.open("feedback-chant-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  agent_session_inject_feedback(harness.agent, session, "post_turn", "DO_NOT_EDIT_AGAIN", 1)
+  let served = 0
+  for turn in [1, 2, 3, 4, 5] {
+    if contains(rendered_prompt(harness, session), "DO_NOT_EDIT_AGAIN") {
+      served = served + 1
+    }
+    agent_session_apply_reminder_post_turn(harness.agent, session, turn)
+  }
+  assert_eq(served, 1, "one injection must reach exactly one turn, not chant across the session")
+  harness.agent.close(session)
+}
+
+/**
+ * Re-injection still works, so bounding retention does not silence a directive
+ * that remains true. This is what makes the expiry safe: the injectors run
+ * every turn, so a live condition simply says itself again.
+ */
+pipeline test_a_still_true_directive_can_be_reinjected_each_turn(harness: Harness, task: unknown) {
+  const session = harness.agent.open("feedback-reinject-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  let served = 0
+  for turn in [1, 2, 3] {
+    agent_session_inject_feedback(harness.agent, session, "post_turn", "STILL_TRUE", 1)
+    if contains(rendered_prompt(harness, session), "STILL_TRUE") {
+      served = served + 1
+    }
+    agent_session_apply_reminder_post_turn(harness.agent, session, turn)
+  }
+  assert_eq(served, 3, "a condition that is still true is re-injected and must still be served")
+  harness.agent.close(session)
+}
+
+/**
+ * THE OTHER HALF OF THE CONTRACT, and the reason this is a declaration rather
+ * than a new default. A caller that says nothing keeps the durable behavior its
+ * documentation promises.
+ *
+ * This case is what stops the next person from "finishing the job" by making
+ * expiry the default. Doing that strips capped guidance — `max_feedback` sites
+ * cannot repeat themselves — from a model that is still trying to recover.
+ */
+pipeline test_undeclared_feedback_keeps_the_durable_contract(harness: Harness, task: unknown) {
+  const session = harness.agent.open("feedback-undeclared-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  // No ttl argument: the documented "persist one corrective directive" path.
+  agent_session_inject_feedback(harness.agent, session, "stall_diagnostics", "CAPPED_REPAIR_HINT")
+  let served = 0
+  for turn in [1, 2, 3] {
+    if contains(rendered_prompt(harness, session), "CAPPED_REPAIR_HINT") {
+      served = served + 1
+    }
+    agent_session_apply_reminder_post_turn(harness.agent, session, turn)
+  }
+  assert_eq(
+    served,
+    3,
+    "feedback that declared no lifetime must persist; only sites that opt in are spent after a turn",
+  )
+  harness.agent.close(session)
+}
+
+/**
+ * THE ESCAPE HATCH, proven working rather than merely declared. A caller that
+ * needs a directive to outlive the next turn states that explicitly through
+ * `agent_session_inject_reminder`, whose retention is a parameter rather than
+ * an inherited default.
+ */
+pipeline test_explicit_reminder_keeps_durability(harness: Harness, task: unknown) {
+  const session = harness.agent.open("feedback-durable-" + harness.random.uuid())
+  harness.agent.inject(session, {role: "user", content: "Fix the failing test."})
+  agent_session_inject_reminder(
+    harness.agent,
+    session,
+    {body: "DURABLE_CONTRACT", authority: "contract", dedupe_key: "task-contract"},
+  )
+  let served = 0
+  for turn in [1, 2, 3] {
+    if contains(rendered_prompt(harness, session), "DURABLE_CONTRACT") {
+      served = served + 1
+    }
+    agent_session_apply_reminder_post_turn(harness.agent, session, turn)
+  }
+  assert_eq(
+    served,
+    3,
+    "a reminder that declared no ttl must still persist; the fix bounds feedback, not every directive",
+  )
+  harness.agent.close(session)
+}
+
+/**
+ * THE INCIDENT ITSELF, driven through the production path instead of the
+ * injector. The cases above prove the retention primitive; this one proves the
+ * post-turn callback site actually declares it.
+ *
+ * That distinction is the whole point. The primitive was never broken — a
+ * caller could always have passed a lifetime. What produced twenty identical
+ * directives was a real site not declaring one, so a test that only calls the
+ * injector by hand would have stayed green throughout the incident.
+ *
+ * Falsifier: drop the `1` at either `__post_turn_verdict_result` injection and
+ * the durable directive loses its `ttl_turns="1"` contract. Counting raw text
+ * across requests is not a valid lifetime measurement because append-only
+ * history deliberately re-sends earlier messages at the same indices.
+ */
+pipeline test_post_turn_callback_directive_is_active_for_one_turn(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("first pass"),
+      llm_text("second pass"),
+      llm_text("third pass"),
+      llm_text("finished ##DONE##"),
+    ],
+    { ->
+      const session = "post-turn-chant-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        post_turn_callback: { info ->
+          // Fire once, on the first turn only, then stay silent. A still-true
+          // condition would re-inject on its own; this one is over.
+          if info?.iteration == 1 {
+            return "RUN_VERIFY_NEXT"
+          }
+          return nil
+        },
+      }
+      const result = agent_loop(harness, "Do the work, then finish.", nil, opts)
+      assert_eq(result.status, "done")
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) >= 3, "the test needs later turns to distinguish active from historical")
+      let active_at_tail = 0
+      let historical = 0
+      for call in harness.llm.mock_calls() {
+        let directive_index = -1
+        let index = 0
+        for message in call.messages {
+          if contains(to_string(message?.content), "RUN_VERIFY_NEXT") {
+            directive_index = index
+            assert(
+              contains(to_string(message.content), "<context-directives>"),
+              "callback feedback must keep the typed directive envelope",
+            )
+            assert(
+              contains(
+                to_string(message.content),
+                "<directive authority=\"corrective\" ttl_turns=\"1\">",
+              ),
+              "the model-facing callback directive must carry its one-turn lifetime",
+            )
+          }
+          index = index + 1
+        }
+        if directive_index == len(call.messages) - 1 {
+          active_at_tail = active_at_tail + 1
+        } else if directive_index >= 0 {
+          historical = historical + 1
+        }
+      }
+      assert_eq(
+        active_at_tail,
+        1,
+        "one post-turn directive must be the active trailing instruction for exactly one turn",
+      )
+      assert(
+        historical >= 1,
+        "a later turn must observe the same bytes as history or prefix preservation was not tested",
+      )
+      let committed = 0
+      for message in result?.transcript?.messages ?? [] {
+        if contains(to_string(message?.content), "RUN_VERIFY_NEXT") {
+          committed = committed + 1
+        }
+      }
+      assert_eq(committed, 1, "the callback directive must be committed once, not chanted anew")
+    },
+  )
+}
+
+/**
+ * Repeating the same still-true verdict is a new finite directive, not the old
+ * directive's historical copy. This reaches the durable commit boundary that
+ * the by-hand primitive test above deliberately does not exercise.
+ */
+pipeline test_post_turn_callback_reinjection_renews_same_feedback(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("first pass"),
+      llm_text("second pass"),
+      llm_text("third pass"),
+      llm_text("finished ##DONE##"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: "post-turn-reinjection-" + harness.random.uuid(),
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        post_turn_callback: { info ->
+          if info?.iteration <= 2 {
+            return "SAME_STILL_TRUE_VERDICT"
+          }
+          return nil
+        },
+      }
+      const result = agent_loop(harness, "Do the work, then finish.", nil, opts)
+      assert_eq(result.status, "done")
+      let active_at_tail = 0
+      for call in harness.llm.mock_calls() {
+        const messages = call.messages
+        if len(messages) > 0
+          && contains(to_string(messages[len(messages) - 1]?.content), "SAME_STILL_TRUE_VERDICT") {
+          const active = to_string(messages[len(messages) - 1]?.content)
+          assert(
+            contains(active, "Re-sending that same historical message does not renew it."),
+            "the model-facing asset must distinguish historical replay from renewal",
+          )
+          assert(
+            contains(
+              active,
+              "A newly appended directive starts its own lifetime, even when its text matches an earlier directive.",
+            ),
+            "the model-facing asset must explain same-text instance renewal",
+          )
+          active_at_tail = active_at_tail + 1
+        }
+      }
+      let committed = 0
+      for message in result?.transcript?.messages ?? [] {
+        if contains(to_string(message?.content), "SAME_STILL_TRUE_VERDICT") {
+          committed = committed + 1
+        }
+      }
+      assert(committed >= 2, "the callback must repeat the same still-true verdict")
+      assert_eq(
+        active_at_tail,
+        committed,
+        "each same-text callback firing must renew the one-turn directive at the prompt tail",
+      )
+    },
+  )
+}

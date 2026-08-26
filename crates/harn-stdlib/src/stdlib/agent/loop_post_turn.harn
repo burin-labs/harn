@@ -172,7 +172,10 @@ pub fn agent_loop_command_hold_transition(
     },
   )
   if hold.outcome == "digest" {
-    agent_session_inject_feedback(harness.agent, session_id, "command_status", hold.digest)
+    // A snapshot of which background commands were running or finished at this
+    // iteration. It is re-digested on every post-turn that still holds, so a
+    // durable copy only preserves a stale roster beside the current one.
+    agent_session_inject_feedback(harness.agent, session_id, "command_status", hold.digest, 1)
     reentry_cap = hold.reentry_cap
     // Only a fully retired, green terminal digest may arbitrate same-turn DONE.
     if !(hold.terminal_succeeded && !command_ledger_has_awaited(ledger)) {
@@ -213,6 +216,7 @@ pub fn agent_loop_command_hold_transition(
       "await_exhausted",
       "Background commands are still running after repeated waits. Take a different action now: "
         + "act on what you have, kill_command to abort, or release_command to leave them running.",
+      1,
     )
     return {
       action: "continue",
@@ -234,6 +238,9 @@ pub fn agent_loop_command_hold_transition(
   }
 }
 
+// "Take a different action now" is advice about the immediate next turn.
+// The awaited rows are released just above, so the condition this
+// describes is already gone by the turn after the one that reads it.
 /**
  * Fold post-turn completion, verification, progress, and budget-control policy
  * into one explicit transition. The caller owns only applying the returned

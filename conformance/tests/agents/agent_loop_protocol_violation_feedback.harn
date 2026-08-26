@@ -44,7 +44,7 @@ pipeline default(harness: Harness) {
       const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       harness.stdio.println(contains(retry_messages, "Stray text outside response tags"))
       harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
       require !contains(retry_messages, "parse_guidance"),
@@ -137,7 +137,7 @@ pipeline default(harness: Harness) {
       const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       harness.stdio.println(contains(retry_messages, "parsed successfully and were dispatched"))
       harness.stdio.println(!contains(retry_messages, "no_progress_streak"))
       require !contains(retry_messages, "parse_guidance"),
@@ -179,7 +179,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.status)
       harness.stdio.println(result.tools.successful[0])
       harness.stdio.println(len(result.tools.successful))
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       harness.stdio.println(contains(retry_messages, "none were dispatched"))
       harness.stdio.println(!contains(retry_messages, "parsed successfully and were dispatched"))
       require !contains(retry_messages, "parse_guidance"),

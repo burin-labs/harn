@@ -275,7 +275,7 @@ pub(super) fn host_agent_session_totals_builtin(
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string) -> nil",
+    sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string, ttl_turns?: int|nil) -> nil",
     category = "agent.host",
     runtime_only = true
 )]
@@ -286,7 +286,21 @@ fn host_agent_session_inject_feedback_builtin(
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
     let content = args.get(2).map(|v| v.display()).unwrap_or_default();
-    crate::llm::agent_config::inject_agent_feedback(&session_id, &kind, &content)
+    // Omitted or nil keeps the directive for the rest of the session, which is
+    // this helper's documented contract; a caller that knows its advice is
+    // spent after one turn says so.
+    let ttl_turns = match args.get(3) {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Int(turns)) if *turns > 0 => Some(*turns),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_session_inject_feedback: ttl_turns must be a positive int or nil, \
+                 got {}",
+                other.display()
+            )))
+        }
+    };
+    crate::llm::agent_config::inject_agent_feedback(&session_id, &kind, &content, ttl_turns)
         .map_err(VmError::Runtime)?;
     crate::llm::agent_runtime::emit_agent_event_sync(&AgentEvent::feedback_injected(
         session_id, kind, content,

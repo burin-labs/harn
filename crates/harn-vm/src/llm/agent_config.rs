@@ -35,10 +35,21 @@ fn agent_prefill_message(content: &str) -> VmValue {
 /// Persist model-facing runtime feedback through the same typed directive
 /// lifecycle as every structural reminder. `prefill_assistant` is provider
 /// history rather than a directive and deliberately remains an assistant turn.
+/// `ttl_turns` is the caller's declaration of how long the advice stays true.
+/// `Some(1)` spends it on the turn that reads it; `None` keeps it for the rest
+/// of the session. Neither is safe as a blanket default, which is why it is
+/// passed rather than inferred: a directive about the turn that just ended
+/// (a malformed call, a stale verdict) asserts a resolved condition forever if
+/// it persists, while guidance served under a re-injection cap such as
+/// `stall_diagnostics.max_feedback` is the model's only copy and goes missing
+/// mid-repair if it expires. The kind string cannot decide this — callers pick
+/// it dynamically, and several call sites are routers forwarding kinds they do
+/// not own.
 pub(crate) fn inject_agent_feedback(
     session_id: &str,
     kind: &str,
     content: &str,
+    ttl_turns: Option<i64>,
 ) -> Result<(), String> {
     if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
         return crate::agent_sessions::inject_message(session_id, agent_prefill_message(content))
@@ -48,6 +59,7 @@ pub(crate) fn inject_agent_feedback(
     reminder.tags = vec!["runtime_feedback".to_string(), kind.to_string()];
     reminder.dedupe_key = Some(format!("runtime_feedback/{kind}"));
     reminder.authority = DirectiveAuthority::Corrective;
+    reminder.ttl_turns = ttl_turns;
     crate::agent_sessions::inject_reminder(session_id, reminder).map(|_| ())
 }
 
@@ -391,7 +403,10 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
             ))
         }
     };
-    inject_agent_feedback(&session_id, &kind, &content).map_err(VmError::Runtime)?;
+    // This public compatibility surface remains durable. The stdlib's internal
+    // session helper owns the optional lifetime declaration used by audited
+    // agent-loop call sites.
+    inject_agent_feedback(&session_id, &kind, &content, None).map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 

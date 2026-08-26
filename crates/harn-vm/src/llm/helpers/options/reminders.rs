@@ -1,19 +1,60 @@
 use super::*;
 
+pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
+    "llm/prompts/directive_envelope_instructions.harn.prompt";
+pub(super) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
+
+pub(super) fn directive_envelope_instructions() -> &'static str {
+    static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    RENDERED
+        .get_or_init(|| {
+            crate::stdlib::template::render_stdlib_prompt_asset(
+                DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
+                None,
+            )
+            .expect("directive envelope instruction prompt asset is embedded and must render")
+            .trim_end()
+            .to_string()
+        })
+        .as_str()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RenderedReminder {
-    SystemText(String),
+pub(crate) struct RenderedReminder {
+    reminder_id: Option<String>,
+    text: String,
 }
 
 impl RenderedReminder {
+    #[cfg(test)]
+    pub(super) fn untracked(text: impl Into<String>) -> Self {
+        Self {
+            reminder_id: None,
+            text: text.into(),
+        }
+    }
+
+    pub(super) fn tracked(reminder_id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            reminder_id: Some(reminder_id.into()),
+            text: text.into(),
+        }
+    }
+
     fn rendered_role(&self) -> String {
         "user".to_string()
     }
 
     fn rendered_bytes(&self) -> usize {
-        match self {
-            Self::SystemText(text) => text.len(),
-        }
+        self.text.len()
+    }
+
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub(super) fn reminder_id(&self) -> Option<&str> {
+        self.reminder_id.as_deref()
     }
 }
 
@@ -21,17 +62,13 @@ impl RenderedReminder {
 /// legacy per-request projection and append-only placement render through
 /// here, so the model-visible text is identical under either placement.
 pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String> {
-    let blocks: Vec<&str> = rendered
-        .iter()
-        .map(|reminder| match reminder {
-            RenderedReminder::SystemText(text) => text.as_str(),
-        })
-        .collect();
+    let blocks: Vec<&str> = rendered.iter().map(RenderedReminder::text).collect();
     if blocks.is_empty() {
         return None;
     }
+    let instructions = directive_envelope_instructions();
     Some(format!(
-        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{}\n</context-directives>",
+        "<context-directives>\n{instructions}\n{}\n</context-directives>",
         blocks.join("\n")
     ))
 }
@@ -40,14 +77,39 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String
 pub(crate) fn directive_envelope_message(
     rendered: &[RenderedReminder],
 ) -> Option<serde_json::Value> {
-    directive_envelope(rendered)
-        .map(|envelope| serde_json::json!({"role": "user", "content": envelope}))
+    directive_envelope(rendered).map(|envelope| {
+        let mut message = serde_json::json!({"role": "user", "content": envelope});
+        let reminder_ids: Vec<&str> = rendered
+            .iter()
+            .filter_map(RenderedReminder::reminder_id)
+            .collect();
+        if !reminder_ids.is_empty() {
+            message[DIRECTIVE_IDS_KEY] = serde_json::json!(reminder_ids);
+        }
+        message
+    })
+}
+
+/// Remove durable placement receipts before a message array reaches any
+/// provider. The receipts distinguish reminder instances inside Harn; the
+/// model-facing directive text carries authority and lifetime, not IDs.
+pub(super) fn strip_directive_commit_metadata(messages: &mut [serde_json::Value]) {
+    for message in messages {
+        if let Some(object) = message.as_object_mut() {
+            object.remove(DIRECTIVE_IDS_KEY);
+        }
+    }
 }
 
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
+    let lifetime = reminder
+        .ttl_turns
+        .map(|turns| format!(" ttl_turns=\"{turns}\""))
+        .unwrap_or_default();
     format!(
-        "<directive authority=\"{}\">\n{}\n</directive>",
+        "<directive authority=\"{}\"{}>\n{}\n</directive>",
         reminder.authority.as_str(),
+        lifetime,
         escape_xml_text(&reminder.body)
     )
 }
@@ -58,7 +120,9 @@ pub(crate) fn render_pending_reminders(
 ) -> Vec<RenderedReminder> {
     reminders
         .iter()
-        .map(|reminder| RenderedReminder::SystemText(reminder_directive_text(reminder)))
+        .map(|reminder| {
+            RenderedReminder::tracked(reminder.id.clone(), reminder_directive_text(reminder))
+        })
         .collect()
 }
 

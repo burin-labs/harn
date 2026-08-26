@@ -377,11 +377,12 @@ pub(crate) fn extract_llm_options(
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
     };
-    let messages = if opt_bool(&options, "_directives_rendered") {
+    let mut messages = if opt_bool(&options, "_directives_rendered") {
         messages
     } else {
         apply_rendered_reminder_messages(messages, &rendered_reminders)
     };
+    strip_directive_commit_metadata(&mut messages);
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
     let audio = option_is_enabled(options.as_ref(), "audio")
