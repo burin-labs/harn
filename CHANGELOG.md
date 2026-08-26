@@ -9,6 +9,68 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.118
+
+### Breaking
+
+- Add typed advanced LLM generation controls and exact tokenizer-scoped
+  `TokenRef` values. `logit_bias`, `min_p`, `repetition_penalty`, `prediction`,
+  `verbosity`, `mirostat`, and `parallel_tool_calls` now use provider capability
+  admission before transport. Replace `logprobs: true, top_logprobs: N` with
+  `logprobs: {top: N}`. Provider override bags can no longer shadow first-class
+  generation fields.
+
+### Added
+
+- Harn now catalogs Kimi K3 and Qwen3.8 on Together and DeepInfra with
+  provider-specific prices, context windows, reasoning controls, and tool support.
+
+### Removed
+
+- Removed NVIDIA catalog routes for MiniMax M2.7, Mistral Medium 3.5 128B, and GLM 5.2 after NVIDIA stopped serving them.
+- Removed the Fireworks Kimi K2.5 route after Fireworks stopped serving it.
+
+### Fixed
+
+- Together streaming calls now retain the provider's final usage counters, so
+  successful calls can be priced instead of reported as unknown.
+- **Native Ollama retries now retain every response's usage.** A recovered
+  empty response is counted with the successful retry in usage, traces, and
+  metrics (#7354).
+- **Live tool probes now mark unreported usage as unknown (#7369).** Reports
+  no longer present an unmeasured provider call as zero tokens and zero cost.
+- Fixed tool-probe summaries that reported untested native modes as failures when a text or JSON format was explicitly requested.
+- The shared agent shell guard now prefers an attested standalone Harn runtime and
+  bounds expired policies with TERM-to-KILL cleanup before denying the command.
+- **Runtime bumps preserve legacy implicit parameter behavior (#7386).** The
+  reusable bump workflow now translates every formerly unannotated declared
+  parameter to explicit `any` before strict validation. A typed census names
+  scanned, changed, unresolved, and semantics-changing sites and fails the bump
+  rather than inferring a narrower contract; ordinary `HARN-TYP-028` authoring
+  repair remains an explicit surface-changing inference mode.
+- Release binary builds now carry one AOT identity through compilation, size
+  measurement, and attribution, so material growth cannot pass as an
+  incomparable build because a later workflow step lost the build setting.
+- `harn models test` now preserves nonzero costs below one dollar instead of displaying them as free calls.
+- Unchanged non-expiring reminder-provider output with a stable `dedupe_key` is
+  no longer committed again on every subscribed agent lifecycle event. Harn
+  retains the active reminder atomically, reports the provider evaluation as
+  skipped, and still renews finite reminders or emits changed directives.
+- DeepInfra call receipts now preserve the provider's estimated cost instead of replacing it with a catalog estimate.
+- **Provider effort probes now find served-route effort ladders (#7403).**
+  Provider-qualified model selectors report the same declared reasoning levels
+  that Harn uses to validate calls, without contacting the provider during a
+  plan. Narrow probes also report rejections only for levels they tested.
+- Make the parallel tool-dispatch conformance check deterministic across valid task schedules.
+- **xAI exact cost receipts.** Harn now uses `cost_in_usd_ticks` from xAI usage
+  receipts instead of estimating the billed amount from visible token counts
+  (#7412).
+- Harn now accepts Moonshot Kimi K3's documented `low`, `high`, and `max`
+  reasoning effort settings. Automatic reasoning uses the lower settings when the
+  task does not need maximum effort.
+- Hosted binary-size diagnostics now run both cargo-bloat reports outside Harn's
+  sandbox. A failed report no longer prevents the other report from running.
+
 ## v0.10.117
 
 ### Breaking
