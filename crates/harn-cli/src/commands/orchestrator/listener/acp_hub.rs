@@ -17,6 +17,8 @@ use harn_vm::ActorChain;
 use super::routes::{normalize_headers, HttpError, ListenerAuth};
 use crate::commands::orchestrator::errors::OrchestratorError;
 
+pub(super) mod persisted_sessions;
+
 pub(super) const ACP_PATH: &str = "/acp";
 const ACP_TOPIC_PREFIX: &str = "acp.session";
 const ACP_PING_INTERVAL: Duration = Duration::from_secs(30);
@@ -29,6 +31,7 @@ const ACP_REPLAY_BUFFER_LIMIT: usize = 4096;
 pub(super) struct AcpWebSocketState {
     pub(super) event_log: Arc<AnyEventLog>,
     pub(super) auth: Arc<ListenerAuth>,
+    pub(super) project_authority: persisted_sessions::ProjectAuthority,
     pub(super) pipeline: Option<String>,
     pub(super) hub: Arc<AcpWebSocketHub>,
 }
@@ -354,44 +357,6 @@ impl AcpWebSocketHub {
                 .unwrap_or_else(|e| e.into_inner())
                 .is_some()
         })
-    }
-
-    async fn discover_sessions(&self, params: &JsonValue) -> Vec<JsonValue> {
-        let mut summaries: BTreeMap<String, JsonValue> = BTreeMap::new();
-        let workers: Vec<Arc<AcpWorker>> = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .workers_by_session
-            .values()
-            .cloned()
-            .collect();
-        for worker in workers {
-            let live_state = worker.live_state();
-            let attachable_roles = worker.attachable_roles();
-            for summary in worker.session_summaries() {
-                if acp_session_summary_matches(&summary, live_state, params) {
-                    summaries.insert(
-                        summary.session_id.clone(),
-                        summary.to_json(live_state, &attachable_roles),
-                    );
-                }
-            }
-        }
-
-        for summary in persisted_acp_session_summaries(&self.event_log).await {
-            if summaries.contains_key(&summary.session_id) {
-                continue;
-            }
-            if acp_session_summary_matches(&summary, "expired_replay_only", params) {
-                summaries.insert(
-                    summary.session_id.clone(),
-                    summary.to_json("expired_replay_only", &[]),
-                );
-            }
-        }
-
-        summaries.into_values().collect()
     }
 }
 
@@ -1239,21 +1204,24 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                         .await;
                         match serde_json::from_str::<JsonValue>(&line) {
                             Ok(value) => {
-                                if is_session_list_request(&value) {
-                                    let sessions = state
-                                        .hub
-                                        .discover_sessions(
-                                            value.get("params").unwrap_or(&JsonValue::Null),
-                                        )
-                                        .await;
-                                    send_socket_jsonrpc_result(
-                                        &socket_tx,
-                                        value.get("id").unwrap_or(&JsonValue::Null),
-                                        json!({"sessions": sessions}),
-                                    );
+                                if persisted_sessions::answer_list_request(
+                                    &state.hub,
+                                    &state.project_authority,
+                                    &socket_tx,
+                                    &value,
+                                )
+                                .await
+                                {
                                     continue;
                                 }
                                 if let Some(load_session_id) = session_load_session_id(&value) {
+                                    if persisted_sessions::reject_unauthorized_requested_root(
+                                        &state.project_authority,
+                                        &socket_tx,
+                                        &value,
+                                    ) {
+                                        continue;
+                                    }
                                     let requested_role = attach_role_from_request(&value);
                                     let requested_client_id =
                                         client_id_from_request(&value, &connection_id);
@@ -1320,17 +1288,16 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                                             "replayed": replay.replayed,
                                                         }),
                                                     );
-                                                } else {
-                                                    send_socket_jsonrpc_error(
-                                                        &socket_tx,
-                                                        value
-                                                            .get("id")
-                                                            .unwrap_or(&JsonValue::Null),
-                                                        -32004,
-                                                        &format!("Session not found: {load_session_id}"),
-                                                    );
+                                                    continue;
                                                 }
-                                                continue;
+                                                if persisted_sessions::reject_unavailable_restore_root(
+                                                    &state.project_authority,
+                                                    &socket_tx,
+                                                    &value,
+                                                ) {
+                                                    continue;
+                                                }
+                                                session_id = Some(load_session_id);
                                             }
                                         }
                                     }

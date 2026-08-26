@@ -436,16 +436,16 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_restore_methods_reject_unknown_sessions() {
+    let project = tempfile::tempdir().expect("project root");
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
     for (id, method) in [(1, "session/load"), (2, "session/resume")] {
         server
             .handle_incoming_message(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "method": method,
-                "params": {"sessionId": "missing-session"},
+                "params": {"sessionId": "missing-session", "cwd": project.path()},
             }))
             .await;
         let response = recv_json(&mut rx).await;
@@ -544,7 +544,7 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
 async fn acp_session_load_rejects_session_without_persisted_events() {
     harn_vm::event_log::reset_active_event_log();
     let _log = harn_vm::event_log::install_memory_for_current_thread(64);
-
+    let project = tempfile::tempdir().expect("project root");
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
 
@@ -553,7 +553,7 @@ async fn acp_session_load_rejects_session_without_persisted_events() {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/load",
-            "params": {"sessionId": "never-existed"},
+            "params": {"sessionId": "never-existed", "cwd": project.path()},
         }))
         .await;
 

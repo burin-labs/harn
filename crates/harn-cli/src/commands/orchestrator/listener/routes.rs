@@ -1068,7 +1068,8 @@ impl ListenerAuthConfig {
 pub(crate) struct ListenerAuth {
     api_keys: Vec<String>,
     hmac_secret: Option<String>,
-    session_store: Option<Arc<harn_vm::SessionStore>>,
+    /// Login-session records used only to validate bearer credentials.
+    bearer_session_store: Option<Arc<harn_vm::SessionStore>>,
 }
 
 impl ListenerAuth {
@@ -1099,7 +1100,7 @@ impl ListenerAuth {
         Ok(Self {
             api_keys: config.api_keys,
             hmac_secret: config.hmac_secret,
-            session_store,
+            bearer_session_store: session_store,
         })
     }
 
@@ -1108,7 +1109,7 @@ impl ListenerAuth {
     }
 
     pub(crate) fn has_credentials(&self) -> bool {
-        self.has_api_keys() || self.hmac_secret.is_some() || self.session_store.is_some()
+        self.has_api_keys() || self.hmac_secret.is_some() || self.bearer_session_store.is_some()
     }
 
     pub(crate) async fn authorize(
@@ -1139,7 +1140,7 @@ impl ListenerAuth {
             if self.matches_api_key(value) {
                 return Ok(());
             }
-            if let Some(store) = &self.session_store {
+            if let Some(store) = &self.bearer_session_store {
                 let touch = harn_vm::TouchSession::new(value, OffsetDateTime::now_utc());
                 if matches!(store.touch(touch).await, Ok(Some(_))) {
                     return Ok(());

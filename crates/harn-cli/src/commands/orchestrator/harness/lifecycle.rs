@@ -397,6 +397,7 @@ async fn orchestrator_lifecycle(
         mcp_router,
         routes: route_configs,
         tenant_store: tenant_store.clone(),
+        acp_project_root: Some(manifest_dir.clone()),
         session_store: Some(Arc::new(harn_vm::SessionStore::new(event_log.clone()))),
         public_metrics: config.public_metrics,
     })

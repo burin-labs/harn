@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -286,6 +287,13 @@ async fn start_acp_test_listener() -> (ListenerRuntime, Arc<AnyEventLog>, TempDi
 async fn start_acp_test_listener_with_env(
     runtime_env: ListenerRuntimeEnv,
 ) -> (ListenerRuntime, Arc<AnyEventLog>, TempDir) {
+    start_acp_test_listener_with_project_root(runtime_env, None).await
+}
+
+async fn start_acp_test_listener_with_project_root(
+    runtime_env: ListenerRuntimeEnv,
+    acp_project_root: Option<&Path>,
+) -> (ListenerRuntime, Arc<AnyEventLog>, TempDir) {
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
     let listener = ListenerRuntime::start_with_env(
@@ -303,6 +311,7 @@ async fn start_acp_test_listener_with_env(
             mcp_router: None,
             routes: Vec::new(),
             tenant_store: None,
+            acp_project_root: acp_project_root.map(Path::to_path_buf),
             session_store: None,
             public_metrics: false,
         },
@@ -540,8 +549,9 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 
     let dir = tempdir().expect("tempdir");
     let cwd = dir.path().display().to_string();
-    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+    let (listener, _log, _dir) = start_acp_test_listener_with_project_root(
         ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+        Some(dir.path()),
     )
     .await;
     let (mut owner, _) =
@@ -553,6 +563,18 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
         .as_str()
         .expect("session id")
         .to_string();
+    let roots = acp_request(
+        &mut owner,
+        2,
+        "harn.session_workspace_roots",
+        json!({"sessionId": session_id}),
+    )
+    .await;
+    assert_eq!(
+        roots["result"]["workspaceAnchor"]["primary"],
+        json!(cwd),
+        "the session must advertise the anchor used by the list filter: {roots}"
+    );
 
     let (mut observer, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
@@ -574,6 +596,18 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
         listed["result"]["sessions"][0]["attachableRoles"],
         json!(["observer", "controller"])
     );
+    let anchored = acp_request(
+        &mut observer,
+        3,
+        "session/list",
+        json!({"workspaceAnchor": {"primary": cwd.clone()}}),
+    )
+    .await;
+    assert_eq!(
+        anchored["result"]["sessions"][0]["sessionId"],
+        json!(session_id),
+        "the documented workspace anchor must select the listener project: {anchored}"
+    );
 
     owner.close(None).await.expect("close owner");
     drop(owner);
@@ -581,7 +615,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 
     let detached = acp_request(
         &mut observer,
-        3,
+        4,
         "session/list",
         json!({
             "cwd": cwd,
@@ -605,6 +639,8 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
     reset_active_event_log();
 }
 
+#[path = "tests/session_restore.rs"]
+mod session_restore;
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
     let _guard = lock_harn_state_async().await;
@@ -987,6 +1023,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
             mcp_router: None,
             routes: vec![route("/a2a/v1", 1)],
             tenant_store: None,
+            acp_project_root: None,
             session_store: None,
             public_metrics: false,
         },
@@ -1165,6 +1202,7 @@ async fn webhook_first_delivery_is_appended() {
             mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
+            acp_project_root: None,
             session_store: None,
             public_metrics: false,
         },
@@ -1235,6 +1273,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
             mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
+            acp_project_root: None,
             session_store: None,
             public_metrics: false,
         },
@@ -1318,6 +1357,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
             mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
+            acp_project_root: None,
             session_store: None,
             public_metrics: false,
         },
@@ -1395,6 +1435,7 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
             mcp_router: None,
             routes: vec![route],
             tenant_store: None,
+            acp_project_root: None,
             session_store: None,
             public_metrics: false,
         },

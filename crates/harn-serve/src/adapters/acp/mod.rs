@@ -60,6 +60,9 @@ pub use schema::{
     HARN_STAGED_WRITES_PENDING_FIELDS, HARN_STAGED_WRITE_FIELDS,
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
+pub use sessions::{
+    acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
+};
 use sessions::{
     apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
     prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,

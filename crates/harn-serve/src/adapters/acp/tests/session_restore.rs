@@ -1,4 +1,4 @@
-//! Session restore across a process boundary (burin-labs/burin-code#6267).
+//! Session restore across a process boundary.
 //!
 //! `session/list` answers what exists from the canonical session store, so
 //! `session/load` has to answer restorability from the same store. These tests
@@ -10,7 +10,7 @@ use super::*;
 
 /// A session this server never saw, present only in the project's canonical
 /// store, must load — the store is the same oracle `session/list` answers from,
-/// so anything listable is loadable (burin-labs/burin-code#6267).
+/// so anything listable is loadable.
 ///
 /// The failure this pins down: restorability used to be decided by replaying
 /// the observability event log, which holds nothing for a session recorded by a
