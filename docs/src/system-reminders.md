@@ -389,6 +389,13 @@ transcript messages, so a transcript contains one `user` turn per distinct
 directive emission. Code that counts messages or scans for text should filter
 by role and directive lifetime.
 
+For reminder providers, an active `preserve_on_compact` reminder with the same
+`dedupe_key` and lifecycle fields is one emission even when its provider is
+evaluated by several subscribed events. Harn retains that reminder atomically
+and records `unchanged_durable_reminder` in the iteration's skipped reports.
+Changing its body or lifecycle fields emits a new directive. Expiry or
+revocation removes the active instance, so a later equal reminder is new again.
+
 `ttl_turns`, `preserve_on_compact`, and `dedupe_key` still govern the pending
 queue and compaction. TTL also travels with the delivered directive so its
 meaning survives append-only history; expiry removes it from the pending queue

@@ -95,4 +95,5 @@ pub struct SessionCheckpointOutcome {
 pub struct ReminderInjectionReport {
     pub reminder_id: String,
     pub deduped_count: usize,
+    pub injected: bool,
 }

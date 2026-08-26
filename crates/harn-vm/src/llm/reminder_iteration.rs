@@ -174,6 +174,11 @@ enum ReminderIterationDecision {
     Skip(JsonValue),
 }
 
+enum ReminderInjectionDecision {
+    Injected(JsonValue),
+    Unchanged(JsonValue),
+}
+
 fn prepare_and_inject_reminder(
     session_id: &str,
     provider_id: &str,
@@ -186,8 +191,16 @@ fn prepare_and_inject_reminder(
     {
         ReminderIterationDecision::Inject(prepared) => {
             let body_bytes = prepared.body_bytes();
-            reports.push(inject_report(session_id, provider_id, prepared)?);
-            Ok(body_bytes)
+            match inject_report(session_id, provider_id, prepared)? {
+                ReminderInjectionDecision::Injected(report) => {
+                    reports.push(report);
+                    Ok(body_bytes)
+                }
+                ReminderInjectionDecision::Unchanged(report) => {
+                    skipped_reports.push(report);
+                    Ok(0)
+                }
+            }
         }
         ReminderIterationDecision::Skip(skipped) => {
             skipped_reports.push(skipped);
@@ -200,19 +213,33 @@ fn inject_report(
     session_id: &str,
     provider_id: &str,
     prepared: PreparedReminder,
-) -> Result<JsonValue, VmError> {
+) -> Result<ReminderInjectionDecision, VmError> {
     let reminder = prepared.reminder;
-    let report =
-        crate::agent_sessions::inject_reminder(session_id, reminder).map_err(VmError::Runtime)?;
-    Ok(serde_json::json!({
-        "provider": provider_id,
-        "reminder_id": report.reminder_id,
-        "deduped_count": report.deduped_count,
-        "body_bytes": prepared.body_bytes,
-        "original_body_bytes": prepared.original_body_bytes,
-        "delta_compressed": prepared.delta_compressed,
-        "body_sha256": prepared.body_hash,
-    }))
+    let dedupe_key = reminder.dedupe_key.clone();
+    let tags = reminder.tags.clone();
+    let report = crate::agent_sessions::inject_provider_reminder(session_id, reminder)
+        .map_err(VmError::Runtime)?;
+    if report.injected {
+        Ok(ReminderInjectionDecision::Injected(serde_json::json!({
+            "provider": provider_id,
+            "reminder_id": report.reminder_id,
+            "deduped_count": report.deduped_count,
+            "body_bytes": prepared.body_bytes,
+            "original_body_bytes": prepared.original_body_bytes,
+            "delta_compressed": prepared.delta_compressed,
+            "body_sha256": prepared.body_hash,
+        })))
+    } else {
+        Ok(ReminderInjectionDecision::Unchanged(serde_json::json!({
+            "provider": provider_id,
+            "reason": "unchanged_durable_reminder",
+            "reminder_id": report.reminder_id,
+            "body_bytes": prepared.body_bytes,
+            "body_sha256": prepared.body_hash,
+            "dedupe_key": dedupe_key,
+            "tags": tags,
+        })))
+    }
 }
 
 fn prepare_reminder_for_iteration(
@@ -340,6 +367,173 @@ fn json_i64(value: &JsonValue, key: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn durable_reminder(key: &str, body: &str) -> ReminderSpec {
+        let mut reminder =
+            ReminderSpec::new(body, crate::llm::helpers::ReminderSource::StdlibProvider, 0);
+        reminder.dedupe_key = Some(key.to_string());
+        reminder.preserve_on_compact = true;
+        reminder
+    }
+
+    fn system_reminder_count(session_id: &str) -> usize {
+        crate::agent_sessions::snapshot(session_id)
+            .and_then(|snapshot| {
+                snapshot
+                    .as_dict()
+                    .and_then(|dict| dict.get("events"))
+                    .and_then(|events| match events {
+                        crate::value::VmValue::List(events) => Some(
+                            events
+                                .iter()
+                                .filter(|event| {
+                                    crate::llm::helpers::reminder_from_event(event).is_some()
+                                })
+                                .count(),
+                        ),
+                        _ => None,
+                    })
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn unchanged_durable_provider_reminder_is_not_reissued() {
+        let session_id = crate::agent_sessions::open_or_create(None);
+        let mut first = ReminderIterationState::new(&serde_json::json!({}));
+        first
+            .inject(
+                &session_id,
+                "standing-policy",
+                durable_reminder("policy", "keep going"),
+            )
+            .expect("first provider evaluation");
+        assert_eq!(first.into_json()["fired_count"], 1);
+
+        let mut repeated = ReminderIterationState::new(&serde_json::json!({}));
+        repeated
+            .inject(
+                &session_id,
+                "standing-policy",
+                durable_reminder("policy", "keep going"),
+            )
+            .expect("repeated provider evaluation");
+        let report = repeated.into_json();
+        assert_eq!(report["fired_count"], 0);
+        assert_eq!(report["skipped_count"], 1);
+        assert_eq!(
+            report["skipped_reports"][0]["reason"],
+            "unchanged_durable_reminder"
+        );
+        assert_eq!(system_reminder_count(&session_id), 1);
+        crate::agent_sessions::close(&session_id);
+    }
+
+    #[test]
+    fn changed_or_expired_durable_reminder_is_reissued() {
+        let session_id = crate::agent_sessions::open_or_create(None);
+        let mut first = ReminderIterationState::new(&serde_json::json!({}));
+        first
+            .inject(
+                &session_id,
+                "standing-policy",
+                durable_reminder("policy", "first"),
+            )
+            .expect("first provider evaluation");
+
+        let mut changed = ReminderIterationState::new(&serde_json::json!({}));
+        changed
+            .inject(
+                &session_id,
+                "standing-policy",
+                durable_reminder("policy", "second"),
+            )
+            .expect("changed provider evaluation");
+        assert_eq!(changed.into_json()["fired_count"], 1);
+        assert_eq!(system_reminder_count(&session_id), 1);
+
+        let mut finite = durable_reminder("finite", "verify once");
+        finite.ttl_turns = Some(1);
+        let mut finite_first = ReminderIterationState::new(&serde_json::json!({}));
+        finite_first
+            .inject(&session_id, "finite-policy", finite.clone())
+            .expect("finite provider evaluation");
+        crate::agent_sessions::apply_reminder_post_turn(&session_id, 0)
+            .expect("expire finite reminder");
+        finite.id = uuid::Uuid::now_v7().to_string();
+        let mut after_expiry = ReminderIterationState::new(&serde_json::json!({}));
+        after_expiry
+            .inject(&session_id, "finite-policy", finite)
+            .expect("provider evaluation after expiry");
+        assert_eq!(after_expiry.into_json()["fired_count"], 1);
+        crate::agent_sessions::close(&session_id);
+    }
+
+    #[test]
+    fn durable_reminder_dedupe_is_session_local() {
+        let session_a = crate::agent_sessions::open_or_create(None);
+        let session_b = crate::agent_sessions::open_or_create(None);
+        for session_id in [&session_a, &session_b] {
+            let mut state = ReminderIterationState::new(&serde_json::json!({}));
+            state
+                .inject(
+                    session_id,
+                    "standing-policy",
+                    durable_reminder("policy", "same"),
+                )
+                .expect("session-local provider evaluation");
+            assert_eq!(state.into_json()["fired_count"], 1);
+            assert_eq!(system_reminder_count(session_id), 1);
+        }
+        crate::agent_sessions::close(&session_a);
+        crate::agent_sessions::close(&session_b);
+    }
+
+    #[test]
+    fn concurrent_provider_evaluations_inject_one_durable_reminder() {
+        let session_id = crate::agent_sessions::open_or_create(None);
+        let runtime = crate::agent_sessions::active_session_runtime();
+        let reports = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let runtime = runtime.clone();
+                    let session_id = session_id.clone();
+                    scope.spawn(move || {
+                        let previous = crate::agent_sessions::swap_active_session_runtime(runtime);
+                        let mut state = ReminderIterationState::new(&serde_json::json!({}));
+                        let result = state.inject(
+                            &session_id,
+                            "standing-policy",
+                            durable_reminder("policy", "same"),
+                        );
+                        crate::agent_sessions::swap_active_session_runtime(previous);
+                        result.expect("concurrent provider evaluation");
+                        state.into_json()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("provider thread"))
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report["fired_count"].as_u64().unwrap_or(0))
+                .sum::<u64>(),
+            1
+        );
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report["skipped_count"].as_u64().unwrap_or(0))
+                .sum::<u64>(),
+            7
+        );
+        assert_eq!(system_reminder_count(&session_id), 1);
+        crate::agent_sessions::close(&session_id);
+    }
 
     fn reminder_emission(
         tags: &[&str],
