@@ -1227,6 +1227,21 @@ pub(crate) async fn observed_llm_call(
                     "error"
                 };
                 let event_retryable = can_retry || (status == "error" && retryable);
+                let error_usage =
+                    crate::llm::usage::ProviderUsageReceipt::from_error(&error).map(|receipt| {
+                        crate::llm::usage::LlmUsage::from_provider_error_receipt(
+                            &opts.provider,
+                            &opts.model,
+                            &receipt,
+                        )
+                    });
+                let terminal_usage = (!can_retry).then(|| {
+                    let mut reported = completed_retry_usage.clone();
+                    if let Some(usage) = error_usage.as_ref() {
+                        reported.push(usage.clone());
+                    }
+                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(&reported, attempt_count)
+                });
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
                     ("error", serde_json::json!(message.as_str())),
@@ -1243,7 +1258,7 @@ pub(crate) async fn observed_llm_call(
                     classified: &classified,
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
-                    usage: None,
+                    usage: terminal_usage.as_ref().or(error_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
@@ -1296,14 +1311,18 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
-                        let unknown_attempts =
-                            attempt_count.saturating_sub(completed_retry_usage.len());
-                        let usage = crate::llm::usage::LlmUsage::aggregate_with_unknown_attempts(
-                            &completed_retry_usage,
-                            unknown_attempts,
-                        );
-                        metrics.record_llm_call(&opts.provider, &opts.model, status, &usage);
+                        let usage = terminal_usage
+                            .as_ref()
+                            .expect("terminal error must own an attempt ledger");
+                        metrics.record_llm_call(&opts.provider, &opts.model, status, usage);
                     }
+                    let usage = terminal_usage.expect("terminal error must own an attempt ledger");
+                    trace_llm_call(LlmTraceEntry {
+                        model: opts.model.clone(),
+                        provider: opts.provider.clone(),
+                        usage,
+                        duration_ms,
+                    });
                     // Terminal failure: emit the self-contained dispatch record
                     // with the error-derived outcome so a consumer sees the
                     // resolved route AND why it failed without joining events or
@@ -1331,8 +1350,11 @@ pub(crate) async fn observed_llm_call(
                         empty_completion_reason.expect("empty retry has a classified reason"),
                         duration_ms,
                         &error.to_string(),
-                        None,
+                        error_usage.as_ref(),
                     );
+                }
+                if let Some(usage) = error_usage {
+                    completed_retry_usage.push(usage);
                 }
                 // Apply the runtime tool_format degrade for the next attempt:
                 // swap the working request to its text-channel form, flip the

@@ -2,6 +2,7 @@
 //! shape and the OpenAI-compatible `choices[0].message` shape; streaming
 //! variants live in [`super::transport`].
 
+use crate::llm::usage::ProviderUsageReceipt;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
@@ -15,8 +16,13 @@ mod test_support;
 
 mod boundary;
 mod cache_mapping;
+mod completion_contract;
 mod item_kinds;
 pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_tokens};
+pub(crate) use completion_contract::{
+    billed_noncommittal_completion_error, empty_generation_error,
+    is_billed_noncommittal_completion, is_length_stop_reason, CompletionContractSignals,
+};
 use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
 
 #[cfg(test)]
@@ -588,29 +594,43 @@ pub(crate) fn parse_openai_responses_response(
         }
     }
 
+    let usage = &json["usage"];
+    let reported_input_tokens = usage["input_tokens"]
+        .as_i64()
+        .or_else(|| usage["prompt_tokens"].as_i64());
+    let reported_output_tokens = usage["output_tokens"]
+        .as_i64()
+        .or_else(|| usage["completion_tokens"].as_i64());
+    let input_tokens = reported_input_tokens.unwrap_or(0);
+    let output_tokens = reported_output_tokens.unwrap_or(0);
+    let cache_read_tokens = extract_cache_read_tokens(usage);
+    let cache_write_tokens = extract_cache_write_tokens(usage);
+    let request_id = json["id"].as_str().filter(|value| !value.is_empty());
+    let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
+    let served_fast = crate::llm::serving_tiers::served_fast(model, json);
+    let provider_usage = ProviderUsageReceipt::new(
+        reported_input_tokens,
+        reported_output_tokens,
+        telemetry.provider_cost_usd,
+        served_fast,
+    )
+    .with_cache(
+        cache_read_tokens,
+        cache_write_tokens,
+        telemetry.cache_accounting_declared,
+        true,
+    );
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
         return Err(empty_generation_error(
             provider,
             model,
-            json["usage"]["output_tokens"].as_i64(),
+            provider_usage,
             format!(
                 "openai Responses model {model} delivered no content, reasoning, or tool calls"
             ),
         ));
     }
-
-    let usage = &json["usage"];
-    let input_tokens = usage["input_tokens"]
-        .as_i64()
-        .or_else(|| usage["prompt_tokens"].as_i64())
-        .unwrap_or(0);
-    let output_tokens = usage["output_tokens"]
-        .as_i64()
-        .or_else(|| usage["completion_tokens"].as_i64())
-        .unwrap_or(0);
-    let cache_read_tokens = extract_cache_read_tokens(usage);
-    let cache_write_tokens = extract_cache_write_tokens(usage);
     let stop_reason = json["status"]
         .as_str()
         .or_else(|| {
@@ -619,8 +639,6 @@ pub(crate) fn parse_openai_responses_response(
                 .and_then(|value| value.as_str())
         })
         .map(str::to_string);
-    let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
 
     Ok(LlmResult {
         attempts: Default::default(),
@@ -642,129 +660,11 @@ pub(crate) fn parse_openai_responses_response(
             Some(thinking_summary)
         },
         stop_reason,
-        served_fast: crate::llm::serving_tiers::served_fast(model, json),
+        served_fast,
         blocks,
         logprobs: Vec::new(),
         telemetry,
     })
-}
-
-/// Structural signals describing a finished LLM turn, used by
-/// [`is_billed_noncommittal_completion`]. All fields are derived from the
-/// parsed response plus the outbound request; none involve model-name or
-/// provider-name branching.
-pub(crate) struct CompletionContractSignals<'a> {
-    /// The provider-reported finish/stop reason, if any.
-    pub stop_reason: Option<&'a str>,
-    /// Billed completion/output tokens for this turn.
-    pub output_tokens: i64,
-    /// Whether the outbound request offered any tools to the model.
-    pub tools_offered: bool,
-    /// Number of dispatchable tool calls captured from the response.
-    pub tool_call_count: usize,
-    /// Whether the response carried a server-side tool-search block (which
-    /// counts as the model "doing something" even with no committed text).
-    pub has_tool_search_block: bool,
-    /// The committed visible answer text.
-    pub text: &'a str,
-}
-
-/// Deterministic detector for a finished-clean LLM turn that billed output
-/// but delivered neither a dispatchable tool call nor a committed answer — an
-/// upstream contract violation (the model serialized its action only onto the
-/// reasoning channel, or onto no wire field at all).
-///
-/// Returns `true` only when ALL hold:
-/// - the turn finished cleanly (stop reason is `stop` / `tool_calls` /
-///   `end_turn` / absent — NOT `length`, so genuine truncation never misfires),
-/// - the provider billed output tokens (`output_tokens > 0`),
-/// - tools were offered in the request (so a deliberate terse text answer to a
-///   tool-less prompt is never flagged),
-/// - no dispatchable tool call was captured,
-/// - no server-side tool-search block was present, and
-/// - no committed visible text was present.
-///
-/// Do not use a minimum visible-text length here. Agent loops often request a
-/// terse token or sentinel answer after a tool result; rejecting those in the
-/// parser masks successful native tool loops. Non-empty committed text belongs
-/// to `agent_loop`, which can accept it, nudge for more work, or fail required
-/// tool policy.
-pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSignals) -> bool {
-    let finished_clean = !is_length_stop_reason(signals.stop_reason);
-    finished_clean
-        && signals.output_tokens > 0
-        && signals.tools_offered
-        && signals.tool_call_count == 0
-        && !signals.has_tool_search_block
-        && signals.text.trim().is_empty()
-}
-
-fn is_length_stop_reason(stop_reason: Option<&str>) -> bool {
-    stop_reason.is_some_and(super::result::stop_reason_is_length)
-}
-
-/// Build the loud, actionable error returned when
-/// [`is_billed_noncommittal_completion`] fires. Names the provider/model and
-/// the structural facts so eval dashboards and operators can route around the
-/// broken upstream instead of silently absorbing a billed no-op.
-pub(crate) fn billed_noncommittal_completion_error(
-    provider: &str,
-    model: &str,
-    output_tokens: i64,
-) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "provider {provider} model {model} returned billed output \
-         (completion_tokens={output_tokens}) with no dispatchable tool call or answer \
-         (upstream contract violation): the model finished cleanly but committed neither a \
-         tool call nor visible text. This usually means the route serialized \
-         the action only in a private reasoning channel or returned an empty committed \
-         message. For OpenRouter aggregate routes, consider provider_route_denylist or \
-         provider_order; for first-party routes, prefer a Harn text/json tool format or \
-         disable auto reasoning when the capability row documents it."
-    ))))
-}
-
-/// Typed provider-empty contract shared by complete and streaming parsers.
-/// Dispatch branches on `code`; `message` is diagnostic and may evolve.
-pub(crate) fn empty_generation_error(
-    provider: &str,
-    model: &str,
-    output_tokens: Option<i64>,
-    message: String,
-) -> VmError {
-    let mut fields = crate::value::DictMap::from_iter([
-        (
-            "category".to_string(),
-            VmValue::String(arcstr::ArcStr::from("server_error")),
-        ),
-        (
-            "code".to_string(),
-            VmValue::String(arcstr::ArcStr::from("empty_generation")),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from("empty_generation")),
-        ),
-        (
-            "provider".to_string(),
-            VmValue::String(arcstr::ArcStr::from(provider)),
-        ),
-        (
-            "model".to_string(),
-            VmValue::String(arcstr::ArcStr::from(model)),
-        ),
-        (
-            "message".to_string(),
-            VmValue::String(arcstr::ArcStr::from(message)),
-        ),
-    ]);
-    if let Some(tokens) = output_tokens {
-        fields.insert(
-            crate::value::intern_key("output_tokens"),
-            VmValue::Int(tokens),
-        );
-    }
-    VmError::Thrown(VmValue::dict(fields))
 }
 
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
@@ -893,25 +793,39 @@ pub(crate) fn parse_llm_response(
             }
         }
 
-        if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
-        {
-            return Err(empty_generation_error(
-                provider,
-                model,
-                json["usage"]["output_tokens"].as_i64(),
-                format!(
-                    "anthropic-style model {model} delivered no content, reasoning, or tool calls"
-                ),
-            ));
-        }
-
-        let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
-        let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
+        let reported_input_tokens = json["usage"]["input_tokens"].as_i64();
+        let reported_output_tokens = json["usage"]["output_tokens"].as_i64();
+        let input_tokens = reported_input_tokens.unwrap_or(0);
+        let output_tokens = reported_output_tokens.unwrap_or(0);
         let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_anthropic_usage(&json["usage"], request_id);
+        let provider_usage = ProviderUsageReceipt::new(
+            reported_input_tokens,
+            reported_output_tokens,
+            telemetry.provider_cost_usd,
+            crate::llm::serving_tiers::served_fast(model, json),
+        )
+        .with_cache(
+            cache_read_tokens,
+            cache_write_tokens,
+            telemetry.cache_accounting_declared,
+            true,
+        );
+
+        if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
+        {
+            return Err(empty_generation_error(
+                provider,
+                model,
+                provider_usage,
+                format!(
+                    "anthropic-style model {model} delivered no content, reasoning, or tool calls"
+                ),
+            ));
+        }
 
         Ok(LlmResult {
             attempts: Default::default(),
@@ -1104,13 +1018,28 @@ pub(crate) fn parse_llm_response(
             }
         }
 
-        let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
-        let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
+        let reported_input_tokens = json["usage"]["prompt_tokens"].as_i64();
+        let reported_output_tokens = json["usage"]["completion_tokens"].as_i64();
+        let input_tokens = reported_input_tokens.unwrap_or(0);
+        let output_tokens = reported_output_tokens.unwrap_or(0);
         let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = finish_reason.map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_openai_response(json, request_id);
+        let served_fast = crate::llm::serving_tiers::served_fast(model, json);
+        let provider_usage = ProviderUsageReceipt::new(
+            reported_input_tokens,
+            reported_output_tokens,
+            telemetry.provider_cost_usd,
+            served_fast,
+        )
+        .with_cache(
+            cache_read_tokens,
+            cache_write_tokens,
+            telemetry.cache_accounting_declared,
+            true,
+        );
         let billed_length_truncation =
             is_length_stop_reason(stop_reason.as_deref()) && output_tokens > 0;
 
@@ -1140,7 +1069,7 @@ pub(crate) fn parse_llm_response(
             return Err(empty_generation_error(
                 provider,
                 model,
-                Some(output_tokens),
+                provider_usage,
                 format!(
                     "openai-compatible model {model} delivered no content, reasoning, or tool calls"
                 ),
@@ -1158,7 +1087,7 @@ pub(crate) fn parse_llm_response(
             return Err(billed_noncommittal_completion_error(
                 provider,
                 model,
-                output_tokens,
+                provider_usage,
             ));
         }
 
@@ -1186,7 +1115,7 @@ pub(crate) fn parse_llm_response(
                 Some(reasoning_summary)
             },
             stop_reason,
-            served_fast: crate::llm::serving_tiers::served_fast(model, json),
+            served_fast,
             blocks,
             logprobs: extract_openai_choice_logprobs(choice),
             telemetry,
@@ -1199,6 +1128,7 @@ mod raw_tool_receipts_tests;
 
 #[cfg(test)]
 mod tests {
+    use crate::llm::usage::ProviderUsageReceipt;
     use crate::value::{VmError, VmValue};
 
     use super::{
@@ -1206,6 +1136,22 @@ mod tests {
         is_billed_noncommittal_completion, parse_openai_responses_response, parse_tool_arguments,
         preview_chars, test_support::parse_llm_response, CompletionContractSignals,
     };
+
+    fn assert_provider_usage_receipt(error: &VmError, input_tokens: i64, output_tokens: i64) {
+        let receipt = ProviderUsageReceipt::from_error(error)
+            .expect("parser error must retain a typed provider usage receipt");
+        let VmValue::Dict(fields) = receipt.to_vm_value() else {
+            panic!("receipt must lower to a dictionary");
+        };
+        assert_eq!(
+            fields.get("input_tokens").and_then(VmValue::as_int),
+            Some(input_tokens)
+        );
+        assert_eq!(
+            fields.get("output_tokens").and_then(VmValue::as_int),
+            Some(output_tokens)
+        );
+    }
 
     #[test]
     fn parse_tool_arguments_preview_does_not_panic_mid_utf8() {
@@ -1353,6 +1299,7 @@ mod tests {
             message.contains("upstream contract violation"),
             "error must name the contract violation: {message}"
         );
+        assert_provider_usage_receipt(&err, 321, 342);
     }
 
     #[test]
@@ -1709,6 +1656,34 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_empty_completion_keeps_provider_usage_receipt() {
+        let response = serde_json::json!({
+            "id": "msg-empty",
+            "content": [],
+            "usage": {"input_tokens": 11, "output_tokens": 7}
+        });
+
+        let error = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
+            .expect_err("empty Anthropic completion must be rejected");
+
+        assert_provider_usage_receipt(&error, 11, 7);
+    }
+
+    #[test]
+    fn openai_responses_empty_completion_keeps_provider_usage_receipt() {
+        let response = serde_json::json!({
+            "id": "resp-empty",
+            "output": [],
+            "usage": {"input_tokens": 19, "output_tokens": 3}
+        });
+
+        let error = parse_openai_responses_response(&response, "openai", "gpt-5.4-preview")
+            .expect_err("empty Responses API completion must be rejected");
+
+        assert_provider_usage_receipt(&error, 19, 3);
+    }
+
+    #[test]
     fn openai_parser_rejects_missing_choices_array() {
         let response = serde_json::json!({
             "id": "chatcmpl-bad",
@@ -1739,14 +1714,11 @@ mod tests {
         let VmError::Thrown(VmValue::Dict(fields)) = &error else {
             panic!("empty generation must be structured: {error:?}");
         };
-        assert_eq!(
-            fields.get("code").map(VmValue::display).as_deref(),
-            Some("empty_generation")
-        );
-        assert_eq!(
-            fields.get("output_tokens").and_then(VmValue::as_int),
-            Some(0)
-        );
+        assert!(fields
+            .get("code")
+            .is_some_and(|value| value.display() == "empty_generation"));
+        assert!(matches!(fields.get("output_tokens"), Some(VmValue::Int(0))));
+        assert_provider_usage_receipt(&error, 1, 0);
         assert!(error.to_string().contains("delivered no content"));
     }
 

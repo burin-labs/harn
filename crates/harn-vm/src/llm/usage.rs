@@ -78,6 +78,197 @@ pub struct UsageCostCertainty {
     pub usage_unknown_calls: i64,
 }
 
+/// Provider-reported accounting facts that arrive with an unusable response.
+///
+/// A parser may know that a response billed tokens before it knows whether the
+/// response contains an answer or dispatchable tool call. Keeping that fact in
+/// this small receipt lets the parser throw a typed completion error without
+/// discarding spend that the observed-call ledger must retain. `None` means the
+/// provider omitted a field; `Some(0)` is an observed zero.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct ProviderUsageReceipt {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    cache_accounting_declared: Option<bool>,
+    cache_supported: bool,
+    provider_cost_usd: Option<f64>,
+    served_fast: bool,
+}
+
+impl ProviderUsageReceipt {
+    pub(crate) fn new(
+        input_tokens: Option<i64>,
+        output_tokens: Option<i64>,
+        provider_cost_usd: Option<f64>,
+        served_fast: bool,
+    ) -> Self {
+        Self {
+            input_tokens: input_tokens.filter(|tokens| *tokens >= 0),
+            output_tokens: output_tokens.filter(|tokens| *tokens >= 0),
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_accounting_declared: None,
+            cache_supported: true,
+            provider_cost_usd: provider_cost_usd.filter(|cost| cost.is_finite() && *cost >= 0.0),
+            served_fast,
+        }
+    }
+
+    /// Retain cache facts alongside the token receipt. The parser already
+    /// derives these from the same usage object on successful calls, so an
+    /// unusable response must not change its accounting convention.
+    pub(crate) fn with_cache(
+        mut self,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+        cache_accounting_declared: Option<bool>,
+        cache_supported: bool,
+    ) -> Self {
+        self.cache_read_tokens = cache_read_tokens.max(0);
+        self.cache_write_tokens = cache_write_tokens.max(0);
+        self.cache_accounting_declared = cache_accounting_declared;
+        self.cache_supported = cache_supported;
+        self
+    }
+
+    /// Preserve this receipt on a typed parser error. It is deliberately a
+    /// nested field so ordinary error classification does not need to learn
+    /// provider-accounting vocabulary.
+    pub(crate) fn to_vm_value(&self) -> VmValue {
+        VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("input_tokens"),
+                self.input_tokens.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("output_tokens"),
+                self.output_tokens.map_or(VmValue::Nil, VmValue::Int),
+            ),
+            (
+                crate::value::intern_key("cache_read_tokens"),
+                VmValue::Int(self.cache_read_tokens),
+            ),
+            (
+                crate::value::intern_key("cache_write_tokens"),
+                VmValue::Int(self.cache_write_tokens),
+            ),
+            (
+                crate::value::intern_key("cache_accounting_declared"),
+                self.cache_accounting_declared
+                    .map_or(VmValue::Nil, VmValue::Bool),
+            ),
+            (
+                crate::value::intern_key("cache_supported"),
+                VmValue::Bool(self.cache_supported),
+            ),
+            (
+                crate::value::intern_key("provider_cost_usd"),
+                self.provider_cost_usd.map_or(VmValue::Nil, VmValue::Float),
+            ),
+            (
+                crate::value::intern_key("served_fast"),
+                VmValue::Bool(self.served_fast),
+            ),
+        ]))
+    }
+
+    /// Decode only the parser-owned, nested receipt. Malformed or absent
+    /// receipts remain unknown; callers must never promote an error string to
+    /// a measured ledger.
+    pub(crate) fn from_error(error: &crate::value::VmError) -> Option<Self> {
+        let crate::value::VmError::Thrown(VmValue::Dict(error_fields)) = error else {
+            return None;
+        };
+        let VmValue::Dict(fields) = error_fields.get("provider_usage")? else {
+            return None;
+        };
+        let input_tokens = optional_non_negative_int(fields, "input_tokens").ok()?;
+        let output_tokens = optional_non_negative_int(fields, "output_tokens").ok()?;
+        let cache_read_tokens = non_negative_int(fields, "cache_read_tokens")?;
+        let cache_write_tokens = non_negative_int(fields, "cache_write_tokens")?;
+        let cache_accounting_declared = optional_bool(fields, "cache_accounting_declared").ok()?;
+        let VmValue::Bool(cache_supported) = fields.get("cache_supported")? else {
+            return None;
+        };
+        let provider_cost_usd = optional_non_negative_float(fields, "provider_cost_usd").ok()?;
+        let VmValue::Bool(served_fast) = fields.get("served_fast")? else {
+            return None;
+        };
+        Some(Self {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            cache_accounting_declared,
+            cache_supported: *cache_supported,
+            provider_cost_usd,
+            served_fast: *served_fast,
+        })
+    }
+
+    fn has_complete_token_counts(&self) -> bool {
+        self.input_tokens.is_some() && self.output_tokens.is_some()
+    }
+
+    pub(crate) fn output_tokens(&self) -> Option<i64> {
+        self.output_tokens
+    }
+}
+
+fn non_negative_int(fields: &crate::value::DictMap, key: &str) -> Option<i64> {
+    match fields.get(key)? {
+        VmValue::Int(value) if *value >= 0 => Some(*value),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InvalidOptionalReceiptField;
+
+fn optional_bool(
+    fields: &crate::value::DictMap,
+    key: &str,
+) -> Result<Option<bool>, InvalidOptionalReceiptField> {
+    match fields.get(key) {
+        None => Err(InvalidOptionalReceiptField),
+        Some(value) => match value {
+            VmValue::Nil => Ok(None),
+            VmValue::Bool(value) => Ok(Some(*value)),
+            _ => Err(InvalidOptionalReceiptField),
+        },
+    }
+}
+
+fn optional_non_negative_int(
+    fields: &crate::value::DictMap,
+    key: &str,
+) -> Result<Option<i64>, InvalidOptionalReceiptField> {
+    match fields.get(key) {
+        None => Err(InvalidOptionalReceiptField),
+        Some(value) => match value {
+            VmValue::Nil => Ok(None),
+            VmValue::Int(value) if *value >= 0 => Ok(Some(*value)),
+            _ => Err(InvalidOptionalReceiptField),
+        },
+    }
+}
+
+fn optional_non_negative_float(
+    fields: &crate::value::DictMap,
+    key: &str,
+) -> Result<Option<f64>, InvalidOptionalReceiptField> {
+    match fields.get(key) {
+        None => Err(InvalidOptionalReceiptField),
+        Some(value) => match value {
+            VmValue::Nil => Ok(None),
+            VmValue::Float(value) if value.is_finite() && *value >= 0.0 => Ok(Some(*value)),
+            _ => Err(InvalidOptionalReceiptField),
+        },
+    }
+}
+
 /// Fold cost and accounting certainty once for every reporting projection.
 pub fn summarize_usage_cost_certainty<'a>(
     usages: impl IntoIterator<Item = &'a LlmUsage>,
@@ -323,6 +514,98 @@ impl LlmUsage {
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: 0,
         }
+    }
+
+    /// Normalize the accounting carried by a typed parser error. Complete
+    /// token counts earn the same catalog pricing as a completed response;
+    /// partial receipts retain their measured fields but remain explicitly
+    /// unknown rather than turning absence into a free zero.
+    pub(crate) fn from_provider_error_receipt(
+        provider: &str,
+        model: &str,
+        receipt: &ProviderUsageReceipt,
+    ) -> Self {
+        let input_tokens = receipt.input_tokens.unwrap_or(0);
+        let output_tokens = receipt.output_tokens.unwrap_or(0);
+        let complete_counts = receipt.has_complete_token_counts();
+        let free_route = crate::llm_config::provider_is_self_hosted(provider);
+        let cost_usd = receipt
+            .provider_cost_usd
+            .or_else(|| free_route.then_some(0.0))
+            .or_else(|| {
+                complete_counts
+                    .then(|| {
+                        super::cost::pricing_detail_for_tier(
+                            provider,
+                            model,
+                            receipt.served_fast,
+                            input_tokens,
+                        )
+                    })
+                    .flatten()
+                    .map(|detail| {
+                        super::cost::project_call_cost(
+                            &detail,
+                            input_tokens,
+                            output_tokens,
+                            receipt.cache_read_tokens,
+                            receipt.cache_write_tokens,
+                        )
+                    })
+            });
+        let usage_unknown = i64::from(!complete_counts);
+        Self {
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            cache_read_tokens: receipt.cache_read_tokens,
+            cache_write_tokens: receipt.cache_write_tokens,
+            cache_supported: receipt.cache_supported,
+            cache_accounting_declared: receipt.cache_accounting_declared,
+            cache_hit_ratio: (receipt.cache_accounting_declared == Some(true)
+                && receipt.cache_supported)
+                .then(|| {
+                    super::cost::cache_hit_ratio(
+                        input_tokens,
+                        receipt.cache_read_tokens,
+                        receipt.cache_write_tokens,
+                    )
+                }),
+            cache_savings_usd: super::cost::cache_savings_usd_for_provider(
+                provider,
+                model,
+                input_tokens,
+                receipt.cache_read_tokens,
+                receipt.cache_write_tokens,
+            ),
+            cache_hit: receipt.cache_read_tokens > 0,
+            served_fast: receipt.served_fast,
+            accounting_status: if usage_unknown == 0 {
+                UsageAccountingStatus::Reported
+            } else {
+                UsageAccountingStatus::Unknown
+            },
+            known_cost_usd: cost_usd.unwrap_or(0.0),
+            provider_call_count: 1,
+            unpriced_calls: i64::from(cost_usd.is_none()),
+            usage_unknown_calls: usage_unknown,
+        }
+    }
+
+    /// Aggregate physical attempts once at a terminal observed-call boundary.
+    /// Every attempt is either a reported ledger or one explicit unknown
+    /// ledger, so a successful pricing total can never be mistaken for a
+    /// shorter call sequence.
+    pub(crate) fn aggregate_attempt_ledger(reported: &[Self], total_attempts: usize) -> Self {
+        assert!(
+            reported.len() <= total_attempts,
+            "reported attempt ledgers cannot exceed physical attempts"
+        );
+        let unknown_attempts = total_attempts.saturating_sub(reported.len());
+        if unknown_attempts == 0 {
+            return Self::aggregate(reported);
+        }
+        Self::aggregate_with_unknown_attempts(reported, unknown_attempts)
     }
 
     /// Project the stable Harn `usage` envelope. Retry accounting is supplied
@@ -676,7 +959,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        extract_probe_usage, summarize_usage_cost_certainty, LlmUsage, UsageAccountingStatus,
+        extract_probe_usage, summarize_usage_cost_certainty, LlmUsage, ProviderUsageReceipt,
+        UsageAccountingStatus,
     };
     use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
     use crate::value::VmValue;
@@ -768,6 +1052,45 @@ mod tests {
             "a paid route with no usage counts and no provider cost cannot be priced"
         );
         assert_eq!(usage.unpriced_calls, 1);
+    }
+
+    #[test]
+    fn partial_provider_error_receipt_stays_explicitly_unknown() {
+        let receipt = ProviderUsageReceipt::new(Some(9), None, Some(0.25), false).with_cache(
+            3,
+            2,
+            Some(true),
+            true,
+        );
+        let VmValue::Dict(fields) = receipt.to_vm_value() else {
+            panic!("receipt must lower to a dictionary");
+        };
+        assert_eq!(
+            fields.get("input_tokens").and_then(VmValue::as_int),
+            Some(9)
+        );
+        assert!(matches!(fields.get("output_tokens"), Some(VmValue::Nil)));
+        assert_eq!(
+            fields.get("cache_read_tokens").and_then(VmValue::as_int),
+            Some(3)
+        );
+
+        let usage = LlmUsage::from_provider_error_receipt(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            &receipt,
+        );
+
+        assert_eq!(usage.input_tokens, 9);
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(usage.cost_usd, Some(0.25));
+        assert_eq!(usage.known_cost_usd, 0.25);
+        assert_eq!(usage.cache_read_tokens, 3);
+        assert_eq!(usage.cache_write_tokens, 2);
+        assert!(usage.cache_hit);
+        assert_eq!(usage.unpriced_calls, 0);
+        assert_eq!(usage.usage_unknown_calls, 1);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
     }
 
     #[test]

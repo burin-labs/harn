@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::usage::ProviderUsageReceipt;
 
 /// Consume an SSE streaming response from an already-sent request.
 /// Parses `data: {...}` lines from the response body, then defers to
@@ -596,6 +597,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
     let mut output_tokens: i64 = 0;
+    // Keep presence apart from the result's zero defaults. An empty provider
+    // completion can still carry a complete priced usage receipt, while an
+    // omitted stream frame must remain explicitly unknown.
+    let mut reported_input_tokens: Option<i64> = None;
+    let mut reported_output_tokens: Option<i64> = None;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut raw_tool_calls: Vec<RawProviderToolCall> = Vec::new();
     let mut blocks: Vec<serde_json::Value> = Vec::new();
@@ -740,6 +746,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 Some("message_start") => {
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
                         input_tokens = n;
+                        reported_input_tokens = Some(n);
                     }
                     served_fast |= crate::llm::serving_tiers::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
@@ -929,6 +936,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 Some("message_delta") => {
                     if let Some(n) = json["usage"]["output_tokens"].as_i64() {
                         output_tokens = n;
+                        reported_output_tokens = Some(n);
                     }
                     let usage = &json["usage"];
                     let cr = extract_cache_read_tokens(usage);
@@ -1111,9 +1119,11 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             if let Some(usage) = json.get("usage") {
                 if let Some(n) = usage["prompt_tokens"].as_i64() {
                     input_tokens = n;
+                    reported_input_tokens = Some(n);
                 }
                 if let Some(n) = usage["completion_tokens"].as_i64() {
                     output_tokens = n;
+                    reported_output_tokens = Some(n);
                 }
                 let cr = extract_cache_read_tokens(usage);
                 if cr > 0 {
@@ -1277,6 +1287,18 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             Some("tool_search_query") | Some("tool_search_result")
         )
     });
+    let provider_usage = ProviderUsageReceipt::new(
+        reported_input_tokens,
+        reported_output_tokens,
+        telemetry.provider_cost_usd,
+        served_fast,
+    )
+    .with_cache(
+        cache_read_tokens,
+        cache_write_tokens,
+        telemetry.cache_accounting_declared,
+        true,
+    );
     if text.is_empty()
         && thinking_text.is_empty()
         && output_tokens > 0
@@ -1298,7 +1320,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         return Err(empty_generation_error(
             provider,
             model,
-            Some(output_tokens),
+            provider_usage,
             format!(
                 "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
             ),
@@ -1320,7 +1342,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         return Err(billed_noncommittal_completion_error(
             provider,
             model,
-            output_tokens,
+            provider_usage,
         ));
     }
     stream_tool_closeout.finish_success(&tool_calls);

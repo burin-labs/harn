@@ -19,6 +19,8 @@ use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
 use crate::llm::api::DialectContract;
 use crate::llm::api::LlmResult;
 use crate::llm::capabilities::WireDialect;
+use crate::llm::usage::ProviderUsageReceipt;
+use crate::value::VmValue;
 use std::time::Duration;
 
 const OBSERVED_BUILD: &str = "b9994-14d3ba45f";
@@ -114,6 +116,39 @@ async fn streamed_system_fingerprint_reaches_telemetry() {
     assert_eq!(
         result.telemetry.serving_fingerprint.as_deref(),
         Some(OBSERVED_BUILD)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn empty_openai_stream_keeps_provider_usage_receipt() {
+    let body = sse_body(&[usage_chunk(None)]);
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+    let error = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "openai",
+        "gpt-5.4-preview",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("token-bearing empty stream must be rejected");
+
+    let receipt = ProviderUsageReceipt::from_error(&error)
+        .expect("stream parser error must retain provider usage");
+    let VmValue::Dict(fields) = receipt.to_vm_value() else {
+        panic!("provider usage receipt must be a dictionary");
+    };
+    assert_eq!(
+        fields.get("input_tokens").and_then(VmValue::as_int),
+        Some(14)
+    );
+    assert_eq!(
+        fields.get("output_tokens").and_then(VmValue::as_int),
+        Some(6)
     );
 }
 
