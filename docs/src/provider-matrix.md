@@ -410,6 +410,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `nvidia` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-ultra-550b-a55b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `nvidia` | `nvidia/nemotron-3.5-lightning-30b-a3b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
