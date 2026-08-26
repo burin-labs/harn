@@ -216,14 +216,15 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
 }
 
 #[test]
-fn moonshot_kimi_k3_builder_projects_admitted_generation_knobs() {
+fn moonshot_kimi_k3_builder_projects_admitted_request_shape() {
     let mut opts = base_opts("moonshot");
     opts.model = "moonshot/kimi-k3".to_string();
     opts.max_tokens = 128;
-    opts.temperature = Some(0.7);
-    opts.top_p = Some(0.8);
-    opts.frequency_penalty = Some(0.3);
-    opts.presence_penalty = Some(0.2);
+    // Portable-option admission rejects these before provider lowering.
+    opts.temperature = None;
+    opts.top_p = None;
+    opts.frequency_penalty = None;
+    opts.presence_penalty = None;
     opts.thinking = ThinkingConfig::Effort {
         level: ReasoningEffort::Max,
     };
@@ -235,10 +236,7 @@ fn moonshot_kimi_k3_builder_projects_admitted_generation_knobs() {
             "parameters": {"type": "object"},
         },
     })]);
-    // A forced `required` is deliberately requested to prove the caller clamps
-    // it: K3 always reasons, and Moonshot rejects forced tool_choice with HTTP
-    // 400 "incompatible with thinking enabled", so `required` is not in K3's
-    // `allowed_tool_choice_modes` (`["auto", "none"]`) and must degrade to auto.
+    // K3 now accepts required tool choice with its mandatory max reasoning.
     opts.tool_choice = Some(json!("required"));
 
     let payload = LlmRequestPayload::from(&opts);
@@ -247,11 +245,11 @@ fn moonshot_kimi_k3_builder_projects_admitted_generation_knobs() {
     assert_eq!(body["model"], "kimi-k3");
     assert_eq!(body["max_completion_tokens"], 128);
     assert_eq!(body["reasoning_effort"], "max");
-    assert_eq!(body["tool_choice"], "auto");
+    assert_eq!(body["tool_choice"], "required");
     assert_eq!(body["tools"][0]["function"]["name"], "read");
     assert!(body.get("max_tokens").is_none());
-    assert_eq!(body["temperature"], 0.7);
-    assert_eq!(body["top_p"], 0.8);
-    assert_eq!(body["frequency_penalty"], 0.3);
-    assert_eq!(body["presence_penalty"], 0.2);
+    assert!(body.get("temperature").is_none());
+    assert!(body.get("top_p").is_none());
+    assert!(body.get("frequency_penalty").is_none());
+    assert!(body.get("presence_penalty").is_none());
 }
