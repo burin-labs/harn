@@ -352,20 +352,14 @@ fn join_limited_keys(keys: &[String]) -> String {
     )
 }
 
-/// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
-/// full schema-retry loop; on success returns the LLM result dict, on
-/// failure returns the underlying `VmError`. `llm_call` propagates the
-/// error (re-wrapped as a thrown `{kind, reason, category, message,
-/// retry_after_ms?, provider, model}` dict so catch blocks can dispatch
-/// on the LLM error taxonomy);
-/// `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope with
-/// the same fields.
-pub(super) async fn llm_call_impl(
+/// Run a preflighted call through the schema-retry loop. Preflight chooses the
+/// error surface once; dispatch failures always use the shared LLM taxonomy.
+async fn execute_prepared_llm_call(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    args: Vec<VmValue>,
+    options: Option<crate::value::DictMap>,
+    result: Result<api::LlmCallOptions, VmError>,
 ) -> Result<VmValue, VmError> {
-    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let opts = crate::llm::helpers::prepare_llm_options(&args).await?;
+    let opts = result?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
     // Publish the resolved provider/model/capabilities to templates
@@ -384,6 +378,29 @@ pub(super) async fn llm_call_impl(
         Err(err) => Err(VmError::Thrown(build_llm_error_dict(
             &err, &provider, &model,
         ))),
+    }
+}
+
+/// Shared implementation of the ordinary throwing `llm_call` surface.
+pub(super) async fn llm_call_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = args.get(2).and_then(VmValue::as_dict).cloned();
+    let result = crate::llm::helpers::prepare_llm_options(&args).await;
+    execute_prepared_llm_call(ctx, options, result).await
+}
+
+/// Shared implementation of the non-throwing `llm_call_safe` surface.
+pub(super) async fn llm_call_safe_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> VmValue {
+    let options = args.get(2).and_then(VmValue::as_dict).cloned();
+    let result = crate::llm::helpers::prepare_llm_options_safe(&args).await;
+    match execute_prepared_llm_call(ctx, options, result).await {
+        Ok(response) => llm_safe_envelope_ok(response),
+        Err(error) => llm_safe_envelope_err(&error),
     }
 }
 
