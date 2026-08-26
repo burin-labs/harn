@@ -180,11 +180,11 @@ async fn project_run_cannot_observe_or_fire_a_prior_runs_manifest_trigger() {
     let project = tempfile::tempdir().expect("temp project");
     let trigger_run = write_manifest_trigger_project(
         project.path(),
-        r#"
+        r"
 pipeline main(harness: Harness) {
   harness.stdio.println(len(harness.runtime.trigger_list()))
 }
-"#,
+",
     );
     std::fs::write(
         project.path().join("trigger_handlers.harn"),
