@@ -2237,6 +2237,7 @@ distinguish new failure modes.
 |---|---|
 | `timeout` | Network or connection timeout |
 | `auth` | Authentication or authorization failure |
+| `invalid_request` | A provider rejected the request. Correct the request before trying again |
 | `rate_limit` | Rate limit exceeded (HTTP 429 / quota) |
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |

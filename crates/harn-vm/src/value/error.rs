@@ -349,6 +349,8 @@ pub enum ErrorCategory {
     Timeout,
     /// Authentication/authorization failure
     Auth,
+    /// Provider rejected the request. Correct it before retrying.
+    InvalidRequest,
     /// Rate limit exceeded (HTTP 429 / quota)
     RateLimit,
     /// Upstream provider is overloaded (HTTP 503 / 529).
@@ -421,9 +423,10 @@ impl ErrorCategory {
     /// a round-trip guard — needs to enumerate them. While this list lived in
     /// one module's test scope, the tool-call wire projection could not consult
     /// it, and a category with no decided wire bucket went unnoticed (#5537).
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Timeout,
         Self::Auth,
+        Self::InvalidRequest,
         Self::RateLimit,
         Self::Overloaded,
         Self::ServerError,
@@ -449,6 +452,7 @@ impl ErrorCategory {
         match self {
             ErrorCategory::Timeout => "timeout",
             ErrorCategory::Auth => "auth",
+            ErrorCategory::InvalidRequest => "invalid_request",
             ErrorCategory::RateLimit => "rate_limit",
             ErrorCategory::Overloaded => "overloaded",
             ErrorCategory::ServerError => "server_error",
@@ -475,6 +479,7 @@ impl ErrorCategory {
         match s {
             "timeout" => ErrorCategory::Timeout,
             "auth" => ErrorCategory::Auth,
+            "invalid_request" => ErrorCategory::InvalidRequest,
             "rate_limit" => ErrorCategory::RateLimit,
             "overloaded" => ErrorCategory::Overloaded,
             "server_error" => ErrorCategory::ServerError,
@@ -807,6 +812,7 @@ mod tests {
             match category {
                 ErrorCategory::Timeout
                 | ErrorCategory::Auth
+                | ErrorCategory::InvalidRequest
                 | ErrorCategory::RateLimit
                 | ErrorCategory::Overloaded
                 | ErrorCategory::ServerError
@@ -830,7 +836,7 @@ mod tests {
         }
         assert_eq!(
             ErrorCategory::ALL.len(),
-            21,
+            22,
             "a category was added or removed — update `ErrorCategory::ALL` and the \
              `Error categories` table in docs/src/builtins.md"
         );

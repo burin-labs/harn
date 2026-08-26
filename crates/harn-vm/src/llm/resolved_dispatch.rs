@@ -25,8 +25,9 @@
 //! result and emits a record; it never feeds back into request construction,
 //! so the model's next-turn payload is byte-identical with or without it.
 
-use super::api::{LlmCallOptions, ThinkingConfig};
+use super::api::{LlmCallOptions, LlmErrorReason, ThinkingConfig};
 use super::capabilities::WireDialect;
+use crate::value::{VmError, VmValue};
 
 /// Where a single resolved dispatch field came from. Carried on
 /// [`LlmCallOptions::dispatch_provenance`], populated from the internal
@@ -166,11 +167,32 @@ impl DispatchOutcome {
         }
     }
 
-    /// Classify a thrown TERMINAL error message into the outcome vocabulary.
-    /// Only called on the surfaced (non-retryable) error, so an empty-completion
-    /// error here is by definition terminal. Keyed on the same stable substrings
-    /// the retry/skip classifiers use, so the record agrees with the runtime's
-    /// own routing decisions.
+    /// Classify a thrown terminal error into the outcome vocabulary.
+    ///
+    /// Structured LLM envelopes carry a reason the provider adapter already
+    /// decided. Use it directly so telemetry fields cannot alter the terminal
+    /// outcome. Older unstructured errors retain the message-based fallback.
+    pub(crate) fn from_error(error: &VmError) -> Self {
+        let reason = match error {
+            VmError::Thrown(VmValue::Dict(fields)) => fields
+                .get("reason")
+                .map(VmValue::display)
+                .as_deref()
+                .and_then(LlmErrorReason::parse),
+            _ => None,
+        };
+
+        match reason {
+            Some(LlmErrorReason::RateLimit) => Self::UsageLimit,
+            Some(reason) if reason != LlmErrorReason::Unknown => Self::ProviderError {
+                class: reason.as_str().to_string(),
+            },
+            _ => Self::from_error_message(&error.to_string()),
+        }
+    }
+
+    /// Classify an older unstructured terminal error message into the outcome
+    /// vocabulary. New provider envelopes should use [`Self::from_error`].
     pub(crate) fn from_error_message(message: &str) -> Self {
         let lower = message.to_lowercase();
         if lower.contains("completion_tokens=")
@@ -412,6 +434,25 @@ mod tests {
             DispatchOutcome::from_error_message("provider returned 429 rate limit exceeded"),
             DispatchOutcome::UsageLimit
         );
+    }
+
+    #[test]
+    fn outcome_invalid_request_is_not_reclassified_by_quota_metadata() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-limit-tokens", "200000".parse().unwrap());
+        headers.insert("x-ratelimit-remaining-tokens", "16751".parse().unwrap());
+        let error = crate::llm::api::provider_http_error(
+            None,
+            "test",
+            reqwest::StatusCode::BAD_REQUEST,
+            &headers,
+            r#"{"error":{"type":"invalid_request_error","message":"unsupported parameter"}}"#,
+        );
+
+        match DispatchOutcome::from_error(&error) {
+            DispatchOutcome::ProviderError { class } => assert_eq!(class, "invalid_request"),
+            other => panic!("expected invalid-request provider error, got {other:?}"),
+        }
     }
 
     #[test]

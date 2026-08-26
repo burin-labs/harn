@@ -485,7 +485,10 @@ pub(crate) fn invalid_request_error(
     model: &str,
 ) -> VmError {
     let mut fields = std::collections::BTreeMap::new();
-    fields.put_str("category", "generic");
+    fields.put_str(
+        "category",
+        crate::value::ErrorCategory::InvalidRequest.as_str(),
+    );
     fields.put_str("kind", "terminal");
     fields.put_str("reason", "invalid_request");
     fields.put_str("message", message);
