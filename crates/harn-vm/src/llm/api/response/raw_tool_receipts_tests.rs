@@ -38,6 +38,42 @@ fn deepinfra_estimated_cost_becomes_the_public_usage_cost() {
 }
 
 #[test]
+fn xai_cost_ticks_become_the_public_usage_cost() {
+    let response = serde_json::json!({
+        "id": "chatcmpl-xai-receipt",
+        "model": "grok-build-0.1",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": { "role": "assistant", "content": "ok" }
+        }],
+        "usage": {
+            "prompt_tokens": 191,
+            "completion_tokens": 1,
+            "total_tokens": 324,
+            "cost_in_usd_ticks": 3_546_000
+        }
+    });
+
+    let result = parse_llm_response(
+        &response,
+        "xai",
+        "grok-build-0.1",
+        WireDialect::OpenAiCompat,
+        false,
+    )
+    .expect("xAI response parses");
+
+    assert_eq!(result.telemetry.provider_cost_usd, Some(0.0003546));
+    let usage = result.usage();
+    assert_eq!(usage.input_tokens, 191);
+    assert_eq!(usage.output_tokens, 1);
+    assert_eq!(usage.cost_usd, Some(0.0003546));
+    assert_eq!(usage.known_cost_usd, 0.0003546);
+    assert_eq!(usage.unpriced_calls, 0);
+}
+
+#[test]
 fn openai_parser_preserves_harmony_wrapper_before_normalizing() {
     let response = serde_json::json!({
         "choices": [{
