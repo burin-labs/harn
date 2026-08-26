@@ -221,6 +221,19 @@ impl Compiler {
             .map(CompiledFunction::from_portable)
     }
 
+    pub fn compile_named_fn_body(
+        &mut self,
+        name: &str,
+        type_params: &[harn_parser::TypeParam],
+        params: &[harn_parser::TypedParam],
+        body: &[harn_parser::SNode],
+        source_file: Option<String>,
+    ) -> Result<CompiledFunction, CompileError> {
+        self.inner
+            .compile_named_fn_body(name, type_params, params, body, source_file)
+            .map(CompiledFunction::from_portable)
+    }
+
     pub fn compile_public_type_schema_initializers(
         program: &[harn_parser::SNode],
         source_file: Option<String>,

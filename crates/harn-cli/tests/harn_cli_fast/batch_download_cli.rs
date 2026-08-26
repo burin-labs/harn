@@ -111,3 +111,127 @@ fn accepts_each_optional_provider_result_file() {
         );
     }
 }
+
+#[test]
+fn status_writer_round_trip_preserves_optional_result_handles() {
+    let cases = [
+        ("openai", "openai", "output_file_id"),
+        ("mistral", "mistral", "output_file"),
+    ];
+
+    for (provider, wire_format, output_field) in cases {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let submission_path = tmp.path().join("submission.json");
+        let status_path = tmp.path().join("status.json");
+        let results_dir = tmp.path().join("results");
+        let handle = format!("file-{provider}-output");
+        let mut job = serde_json::json!({
+            "id": format!("{provider}-completed-output-only"),
+            "provider": provider,
+            "status": "completed",
+            "provider_status": "completed",
+            "provider_batch_id": format!("batch-{provider}"),
+            "batch": {"wire_format": wire_format},
+        });
+        job[output_field] = serde_json::Value::String(handle.clone());
+        let submission = serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "harn.model_batch_submission_receipt",
+            "status": "completed",
+            "jobs": [job],
+        });
+        fs::write(
+            &submission_path,
+            serde_json::to_string_pretty(&submission).expect("serialize submission receipt"),
+        )
+        .expect("write submission receipt");
+
+        let status = run(
+            &[
+                "models",
+                "batch",
+                "status",
+                "--submission",
+                submission_path.to_str().expect("UTF-8 submission path"),
+                "--out",
+                status_path.to_str().expect("UTF-8 status path"),
+                "--dry-run",
+                "--json",
+            ],
+            &[],
+        );
+        assert_eq!(
+            status.exit_code, 0,
+            "provider={provider}: {}",
+            status.stderr
+        );
+        let status_envelope = parse_json(&status, "batch status round trip");
+        assert_eq!(status_envelope["ok"], true, "provider={provider}");
+        let persisted = serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(&status_path).expect("read persisted status receipt"),
+        )
+        .expect("parse persisted status receipt");
+        assert_eq!(
+            persisted["jobs"][0][output_field], handle,
+            "status writer dropped provider={provider} handle"
+        );
+
+        let download = run(
+            &[
+                "models",
+                "batch",
+                "download",
+                "--status",
+                status_path.to_str().expect("UTF-8 status path"),
+                "--out-dir",
+                results_dir.to_str().expect("UTF-8 results dir"),
+                "--dry-run",
+                "--json",
+            ],
+            &[],
+        );
+        assert_eq!(
+            download.exit_code, 0,
+            "provider={provider}: {}",
+            download.stderr
+        );
+        let downloaded = parse_json(&download, "batch download round trip");
+        assert_eq!(downloaded["ok"], true, "provider={provider}");
+        assert_eq!(
+            downloaded["data"]["artifact_count"], 1,
+            "provider={provider}"
+        );
+        assert_eq!(
+            downloaded["data"]["jobs"][0]["artifacts"][0]["handle"], handle,
+            "download reader changed provider={provider} handle"
+        );
+
+        let mut missing_handle = persisted;
+        missing_handle["jobs"][0]
+            .as_object_mut()
+            .expect("persisted job is an object")
+            .remove(output_field);
+        fs::write(
+            &status_path,
+            serde_json::to_string_pretty(&missing_handle).expect("serialize negative control"),
+        )
+        .expect("write handle-free status receipt");
+        let rejected = run(
+            &[
+                "models",
+                "batch",
+                "download",
+                "--status",
+                status_path.to_str().expect("UTF-8 status path"),
+                "--out-dir",
+                results_dir.to_str().expect("UTF-8 results dir"),
+                "--dry-run",
+                "--json",
+            ],
+            &[],
+        );
+        assert_ne!(rejected.exit_code, 0, "provider={provider}");
+        let rejected_payload = parse_json(&rejected, "missing result handle negative control");
+        assert_eq!(rejected_payload["ok"], false, "provider={provider}");
+    }
+}
