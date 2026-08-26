@@ -9,7 +9,7 @@
 # a researched `false`. This typed registry makes every OpenAI-SSE provider
 # either evidence-backed or part of one explicit, expiring audit queue.
 [usage_accounting_audit]
-reviewed_on = "2026-08-25"
+reviewed_on = "2026-08-26"
 expires_on = "2026-10-31"
 tracking_issue = 7320
 unverified = [
@@ -20,7 +20,6 @@ unverified = [
   "cloudflare_ai_gateway",
   "cohere",
   "dashscope",
-  "deepinfra",
   "fireworks",
   "flexai",
   "friendli",
@@ -30,7 +29,6 @@ unverified = [
   "hyperbolic",
   "inception",
   "local",
-  "minimax",
   "mistral",
   "mlx",
   "moonshot",
@@ -47,6 +45,14 @@ unverified = [
   "volcengine_ark",
   "xai",
   "zai",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "deepinfra"
+checked_on = "2026-08-26"
+sources = [
+  "https://docs.deepinfra.com/chat/streaming",
+  "https://docs.deepinfra.com/chat/prompt-caching",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -70,6 +76,14 @@ checked_on = "2026-08-25"
 sources = [
   "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
   "https://github.com/burin-labs/harn/pull/7311",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "minimax"
+checked_on = "2026-08-26"
+sources = [
+  "https://platform.minimax.io/docs/api-reference/text-post",
+  "https://platform.minimax.io/docs/api-reference/text-prompt-caching",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -381,6 +395,8 @@ path = "/models"
 # /v1/chat/completions URL; the wire format mirrors OpenAI chat completions
 # with native tool calls and model-specific thinking controls.
 [providers.minimax]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.minimax.io/v1"
 base_url_env = "MINIMAX_BASE_URL"
 auth_style = "bearer"
@@ -485,6 +501,8 @@ path = "/models"
 # `deepinfra/<hf-id>` prefix and carry `wire_model` so they stay
 # collision-free with the bare/openrouter ids for the same weights.
 [providers.deepinfra]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.deepinfra.com/v1/openai"
 base_url_env = "DEEPINFRA_BASE_URL"
 auth_style = "bearer"
