@@ -114,6 +114,16 @@ fn __difference(left: list, right: list) -> list {
   return out
 }
 
+fn __intersection(left: list, right: list) -> list {
+  let out = []
+  for item in left {
+    if contains(right, item) && !contains(out, item) {
+      out = out.appending(item)
+    }
+  }
+  return out
+}
+
 fn __split_csv(raw: string?) -> list {
   let out = []
   for piece in split(to_string(raw ?? ""), ",") {
@@ -140,7 +150,7 @@ fn __split_csv(raw: string?) -> list {
  * different question, and counting them as refusals is how a probe invents
  * drift it never observed.
  */
-fn __failure_class(error: dict) -> string {
+fn __failure_class(error: unknown) -> string {
   // Provenance first. Harn's own pre-dispatch option checks and a provider's
   // HTTP 400 are both `terminal`/`invalid_request`, so `kind` and `reason`
   // cannot separate them; only `origin` can. Reading a local refusal as a
@@ -323,7 +333,8 @@ fn __probe_route(
   // died on auth or a rate limit answered a different question — counting
   // either as a refusal is how a probe manufactures drift it never observed.
   const unmeasured = gated + inconclusive
-  const measured_declared = __difference(declared, unmeasured)
+  const requested_declared = __intersection(declared, rungs)
+  const measured_declared = __difference(requested_declared, unmeasured)
   return {
     provider: provider,
     model: model,
@@ -433,8 +444,19 @@ fn __one_per_claim(targets: list) -> list {
 }
 
 fn __declared_ladder(catalog: list, provider: string, model: string) -> list {
+  // Prefer the public catalog id. A provider wire id can equal another route's
+  // public id, so letting row order decide would make the report unstable.
   for row in catalog {
     if type_of(row) == "dict" && to_string(row?.id ?? "") == model
+      && to_string(row?.provider ?? "") == provider {
+      return row?.reasoning_effort_levels ?? []
+    }
+  }
+  // Explicit provider selectors resolve to the provider's wire model. Served
+  // variants keep a provider-prefixed public id to avoid cross-provider
+  // collisions, and expose that resolved value through `wire_model`.
+  for row in catalog {
+    if type_of(row) == "dict" && to_string(row?.wire_model ?? "") == model
       && to_string(row?.provider ?? "") == provider {
       return row?.reasoning_effort_levels ?? []
     }
