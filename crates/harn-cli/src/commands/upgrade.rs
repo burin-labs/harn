@@ -13,12 +13,14 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::cli::UpgradeArgs;
 use crate::json_envelope::{self, JsonEnvelope};
 use crate::net;
+
+mod hook_runtime;
 
 /// Schema version for `harn upgrade --json`.
 pub(crate) const UPGRADE_SCHEMA_VERSION: u32 = 1;
@@ -48,6 +50,9 @@ pub(crate) struct UpgradeReport {
     /// Target triple resolved at compile time, for log/telemetry use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_triple: Option<String>,
+    /// Outcome for the independently enrolled standalone hook runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_runtime: Option<hook_runtime::HookRuntimeRefreshReport>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -61,6 +66,13 @@ const REPO: &str = "burin-labs/harn";
 const RELEASES_BASE: &str = "https://github.com/burin-labs/harn/releases";
 const USER_AGENT: &str = concat!("harn-cli/", env!("CARGO_PKG_VERSION"));
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
+const MAX_TAG_PEEL_DEPTH: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChecksumVerification {
+    Verified,
+    Unavailable(u16),
+}
 
 /// `harn upgrade` lives on tokio's blocking pool so the synchronous
 /// `reqwest::blocking` / `tar::Archive` / `fs::rename` calls below can
@@ -124,11 +136,19 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
     println!("Downloading {archive_name}");
     download(&archive_url, &archive_path)?;
 
-    if args.no_verify {
+    let verification = if args.no_verify {
         eprintln!("warning: SHA256 verification skipped (--no-verify)");
+        ChecksumVerification::Unavailable(0)
     } else {
-        verify_checksum(&checksums_url, &archive_name, &archive_path)?;
-    }
+        let result = verify_checksum(&checksums_url, &archive_name, &archive_path)?;
+        match result {
+            ChecksumVerification::Verified => println!("Verified SHA256 ({archive_name})"),
+            ChecksumVerification::Unavailable(status) => eprintln!(
+                "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
+            ),
+        }
+        result
+    };
 
     println!("Extracting");
     extract_tarball(&archive_path, staging.path())?;
@@ -142,6 +162,11 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
     }
 
     install_binaries(staging.path(), &install_dir)?;
+
+    let hook_report = refresh_hook_runtime(verification, &target, &staged_binary).map_err(
+        |error| format!("harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"),
+    )?;
+    print_hook_runtime_outcome(&hook_report);
 
     println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
     Ok(())
@@ -186,6 +211,7 @@ fn run_blocking_json(args: UpgradeArgs) -> i32 {
         archive_url: Some(archive_url.clone()),
         checksums_url: Some(checksums_url.clone()),
         target_triple: Some(triple.to_string()),
+        hook_runtime: None,
     };
 
     if args.check {
@@ -231,11 +257,24 @@ fn run_blocking_json(args: UpgradeArgs) -> i32 {
         return emit_upgrade_error_with(&report, "download_failed", error);
     }
 
-    if args.no_verify {
+    let verification = if args.no_verify {
         eprintln!("warning: SHA256 verification skipped (--no-verify)");
-    } else if let Err(error) = verify_checksum(&checksums_url, &archive_name, &archive_path) {
-        return emit_upgrade_error_with(&report, "checksum_failed", error);
-    }
+        ChecksumVerification::Unavailable(0)
+    } else {
+        match verify_checksum(&checksums_url, &archive_name, &archive_path) {
+            Ok(ChecksumVerification::Verified) => {
+                eprintln!("Verified SHA256 ({archive_name})");
+                ChecksumVerification::Verified
+            }
+            Ok(ChecksumVerification::Unavailable(status)) => {
+                eprintln!(
+                    "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
+                );
+                ChecksumVerification::Unavailable(status)
+            }
+            Err(error) => return emit_upgrade_error_with(&report, "checksum_failed", error),
+        }
+    };
 
     eprintln!("Extracting");
     if let Err(error) = extract_tarball(&archive_path, staging.path()) {
@@ -259,6 +298,15 @@ fn run_blocking_json(args: UpgradeArgs) -> i32 {
     }
 
     report.installed = true;
+    match refresh_hook_runtime(verification, &target, &staged_binary) {
+        Ok(hook_report) => {
+            print_hook_runtime_outcome(&hook_report);
+            report.hook_runtime = Some(hook_report);
+        }
+        Err(error) => {
+            return emit_upgrade_error_with(&report, "hook_runtime_refresh_failed", error);
+        }
+    }
     emit_upgrade_ok(report);
     0
 }
@@ -396,6 +444,132 @@ fn fetch_latest_tag() -> Result<String, String> {
     Ok(tag.to_string())
 }
 
+#[derive(Debug, Deserialize)]
+struct GitObjectEnvelope {
+    object: GitObject,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GitObject {
+    #[serde(rename = "type")]
+    kind: String,
+    sha: String,
+}
+
+fn fetch_release_source_revision(tag: &str) -> Result<String, String> {
+    let client = http_client()?;
+    peel_release_tag(tag, |kind, identifier| {
+        let url = format!("https://api.github.com/repos/{REPO}/git/{kind}/{identifier}");
+        let response = client
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|error| {
+                format!(
+                    "failed to resolve release source revision: {}",
+                    net::reqwest_error(&error)
+                )
+            })?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "GitHub API returned status {} when resolving release source revision",
+                response.status()
+            ));
+        }
+        response
+            .json::<GitObjectEnvelope>()
+            .map(|body| body.object)
+            .map_err(|error| format!("failed to parse release tag response: {error}"))
+    })
+}
+
+fn peel_release_tag(
+    tag: &str,
+    mut fetch: impl FnMut(&str, &str) -> Result<GitObject, String>,
+) -> Result<String, String> {
+    let mut object = fetch("ref/tags", tag)?;
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..MAX_TAG_PEEL_DEPTH {
+        validate_git_sha(&object.sha)?;
+        if !seen.insert(object.sha.clone()) {
+            return Err("release tag contains a cycle".to_string());
+        }
+        match object.kind.as_str() {
+            "commit" => return Ok(object.sha),
+            "tag" => object = fetch("tags", &object.sha)?,
+            kind => {
+                return Err(format!(
+                    "release tag points to unsupported Git object type {kind:?}"
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "release tag exceeds the maximum peel depth of {MAX_TAG_PEEL_DEPTH}"
+    ))
+}
+
+fn validate_git_sha(sha: &str) -> Result<(), String> {
+    if sha.len() == 40
+        && sha
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
+    {
+        Ok(())
+    } else {
+        Err("release tag object SHA must be 40 lowercase hex characters".to_string())
+    }
+}
+
+fn refresh_hook_runtime(
+    verification: ChecksumVerification,
+    target: &str,
+    candidate: &Path,
+) -> Result<hook_runtime::HookRuntimeRefreshReport, String> {
+    let runtime_path = hook_runtime::enrolled_runtime_path()?;
+    refresh_hook_runtime_at(
+        runtime_path.as_deref(),
+        verification,
+        target,
+        candidate,
+        fetch_release_source_revision,
+    )
+}
+
+fn refresh_hook_runtime_at(
+    runtime_path: Option<&Path>,
+    verification: ChecksumVerification,
+    target: &str,
+    candidate: &Path,
+    resolve_source_revision: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<hook_runtime::HookRuntimeRefreshReport, String> {
+    let Some(runtime_path) = runtime_path else {
+        return Ok(hook_runtime::HookRuntimeRefreshReport::not_enrolled());
+    };
+    if !matches!(verification, ChecksumVerification::Verified) {
+        return Ok(hook_runtime::HookRuntimeRefreshReport::skipped_unverified());
+    }
+    let release = hook_runtime::HookRuntimeRelease {
+        version: target.to_string(),
+        source_revision: resolve_source_revision(target)?,
+    };
+    hook_runtime::refresh_runtime_if_enrolled(runtime_path, candidate, &release)
+}
+
+fn print_hook_runtime_outcome(report: &hook_runtime::HookRuntimeRefreshReport) {
+    use hook_runtime::HookRuntimeRefreshStatus;
+
+    match report.status {
+        HookRuntimeRefreshStatus::NotEnrolled => {}
+        HookRuntimeRefreshStatus::Refreshed => {
+            eprintln!("Refreshed enrolled standalone hook runtime.")
+        }
+        HookRuntimeRefreshStatus::SkippedUnverified => eprintln!(
+            "warning: enrolled standalone hook runtime was not refreshed because the archive was not checksum-verified"
+        ),
+    }
+}
+
 fn download(url: &str, dest: &Path) -> Result<(), String> {
     let client = http_client()?;
     let mut response = client.get(url).send().map_err(|error| {
@@ -420,7 +594,11 @@ fn download(url: &str, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), String> {
+fn verify_checksum(
+    checksums_url: &str,
+    asset: &str,
+    path: &Path,
+) -> Result<ChecksumVerification, String> {
     let client = http_client()?;
     let response = client
         .get(checksums_url)
@@ -430,11 +608,9 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
         // Releases predating the SHA256SUMS workflow step won't have
         // this manifest. Match install.sh's behavior and warn-and-skip
         // rather than refusing — TLS to github.com is still in place.
-        eprintln!(
-            "warning: no SHA256SUMS published for this release (status {}); skipping verification",
-            response.status()
-        );
-        return Ok(());
+        return Ok(ChecksumVerification::Unavailable(
+            response.status().as_u16(),
+        ));
     }
     let manifest = response.text().map_err(|error| {
         format!(
@@ -446,6 +622,16 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
     let expected = find_expected_sha(&manifest, asset)
         .ok_or_else(|| format!("SHA256SUMS does not include an entry for {asset}"))?;
 
+    let actual = file_sha256_hex(path)?;
+    if actual != expected {
+        return Err(format!(
+            "SHA256 mismatch for {asset}: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(ChecksumVerification::Verified)
+}
+
+fn file_sha256_hex(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
@@ -461,15 +647,7 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
         }
         hasher.update(&buf[..n]);
     }
-    let actual = hex_lower(&hasher.finalize());
-
-    if actual != expected {
-        return Err(format!(
-            "SHA256 mismatch for {asset}: expected {expected}, got {actual}"
-        ));
-    }
-    println!("Verified SHA256 ({asset})");
-    Ok(())
+    Ok(hex_lower(&hasher.finalize()))
 }
 
 /// Parse a coreutils-style SHA256SUMS manifest and return the digest
@@ -623,7 +801,12 @@ fn next_upgrade_counter() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
     fn normalize_version_accepts_v_prefix() {
@@ -641,6 +824,96 @@ mod tests {
         assert!(normalize_version("v0.8").is_err());
         assert!(normalize_version("").is_err());
         assert!(normalize_version("v0.8.x").is_err());
+    }
+
+    #[test]
+    fn release_tag_peeling_handles_lightweight_and_annotated_tags() {
+        let lightweight = peel_release_tag("v1.2.3", |kind, identifier| {
+            assert_eq!((kind, identifier), ("ref/tags", "v1.2.3"));
+            Ok(GitObject {
+                kind: "commit".to_string(),
+                sha: SHA_A.to_string(),
+            })
+        })
+        .expect("lightweight tag");
+        assert_eq!(lightweight, SHA_A);
+
+        let calls = Cell::new(0);
+        let annotated = peel_release_tag("v1.2.3", |kind, identifier| {
+            let call = calls.get();
+            calls.set(call + 1);
+            match call {
+                0 => {
+                    assert_eq!((kind, identifier), ("ref/tags", "v1.2.3"));
+                    Ok(GitObject {
+                        kind: "tag".to_string(),
+                        sha: SHA_A.to_string(),
+                    })
+                }
+                1 => {
+                    assert_eq!((kind, identifier), ("tags", SHA_A));
+                    Ok(GitObject {
+                        kind: "commit".to_string(),
+                        sha: SHA_B.to_string(),
+                    })
+                }
+                _ => panic!("unexpected peel request"),
+            }
+        })
+        .expect("annotated tag");
+        assert_eq!(annotated, SHA_B);
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn release_tag_peeling_rejects_cycles_and_untrusted_object_shapes() {
+        let cycle = peel_release_tag("v1.2.3", |_kind, _identifier| {
+            Ok(GitObject {
+                kind: "tag".to_string(),
+                sha: SHA_A.to_string(),
+            })
+        })
+        .expect_err("cycle");
+        assert!(cycle.contains("cycle"), "{cycle}");
+
+        let malformed = peel_release_tag("v1.2.3", |_kind, _identifier| {
+            Ok(GitObject {
+                kind: "commit".to_string(),
+                sha: "A".repeat(40),
+            })
+        })
+        .expect_err("uppercase SHA");
+        assert!(malformed.contains("lowercase hex"), "{malformed}");
+    }
+
+    #[test]
+    fn unverified_upgrade_does_not_resolve_or_mutate_enrolled_runtime() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root.path().join("harn");
+        let candidate = root.path().join("candidate");
+        fs::write(&runtime, b"old-runtime").expect("runtime");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        fs::write(
+            root.path().join("harn.standalone-v1"),
+            b"harn-run-standalone-v1\n",
+        )
+        .expect("marker");
+
+        let report = refresh_hook_runtime_at(
+            Some(&runtime),
+            ChecksumVerification::Unavailable(404),
+            "v1.2.3",
+            &candidate,
+            |_| panic!("unverified bytes must not resolve source provenance"),
+        )
+        .expect("unverified refresh is a typed skip");
+        assert_eq!(
+            report.status,
+            hook_runtime::HookRuntimeRefreshStatus::SkippedUnverified
+        );
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+        assert!(!root.path().join("provenance-v1").exists());
+        assert!(!root.path().join(".upgrade.lock").exists());
     }
 
     #[test]

@@ -157,7 +157,10 @@ match; version-only consumers may ignore the field.
 `upgrade --json --check` is the lowest-risk probe: it resolves the
 target release without downloading. Combined with a real install, the
 envelope is printed after the install action so callers can read the
-final `installed` flag.
+final `installed` flag. An install also reports `hook_runtime` as
+`not_enrolled`, `refreshed`, or `skipped_unverified`. A refreshed record includes
+the release version, peeled source revision, and binary SHA-256. The field is
+absent in check mode and same-version no-op responses.
 
 ```jsonc
 {

@@ -92,6 +92,15 @@ authority cannot delay a command-policy decision. An explicit executable
 Harn releases. Without either path, the adapter falls back to an existing
 repository or installed executable without building one.
 
+Once that exact marker enrolls the cache, a checksum-verified `harn upgrade`
+also refreshes the hook-owned binary from the downloaded release archive. The
+updater serializes concurrent refreshes, publishes digest-keyed release and
+source provenance, and atomically replaces the executable. An absent or
+malformed marker never enrolls or mutates the cache. `--no-verify` and legacy
+releases without a checksum manifest leave the existing hook runtime untouched.
+The hook itself never checks for updates, accesses the network, or hashes the
+installed binary during command evaluation.
+
 The project-aware fallback loads project trigger and hook handler code only if
 a handler runs. A top-level handler initialization failure therefore cannot
 disable command checks. Harn still parses `harn.toml` and validates handler
