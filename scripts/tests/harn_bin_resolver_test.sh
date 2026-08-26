@@ -867,7 +867,13 @@ git -C "$cargo_fixture" config --system --unset core.excludesFile
 # snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn.
 cargo_fixture_cargo_checker="$(harn_cargo_freshness_checker_path "$cargo_fixture_bin")"
 cargo_fixture_proof_checker="$(harn_binary_freshness_checker_path "$cargo_fixture_bin")"
-printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_cargo_checker"
+# Cargo publishes relinked binaries atomically. Do the same here: an in-place
+# append can race a just-finished verifier process and fail with ETXTBSY.
+cargo_fixture_relinked_checker="$(mktemp "${cargo_fixture_cargo_checker}.relink.XXXXXX")"
+cp "$cargo_fixture_cargo_checker" "$cargo_fixture_relinked_checker"
+printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_relinked_checker"
+chmod +x "$cargo_fixture_relinked_checker"
+mv "$cargo_fixture_relinked_checker" "$cargo_fixture_cargo_checker"
 (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
