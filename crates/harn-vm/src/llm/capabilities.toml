@@ -3519,8 +3519,8 @@ preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
 tool_mode_parity_notes = "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode."
 structured_output = "native"
-# K3 always reasons through the OpenAI-compatible `reasoning_effort` field;
-# it accepts only the `max` effort below, rather than a generic enabled mode.
+# K3 always reasons through the OpenAI-compatible `reasoning_effort` field.
+# Moonshot documents `low`, `high`, and `max`; `max` remains the route default.
 thinking_modes = ["effort"]
 vision = true
 vision_supported = true
@@ -3530,11 +3530,11 @@ prompt_caching = true
 # 2026-07-18); only `auto`/`none` are real modes.
 allowed_tool_choice_modes = ["auto", "none"]
 requires_tool_result_adjacency = true
-# K3 always reasons, accepts only `reasoning_effort: max`, requires
-# `max_completion_tokens`, and rejects fixed sampling/penalty knobs.
+# K3 always reasons, requires `max_completion_tokens`, and rejects fixed
+# sampling and penalty knobs.
 requires_completion_tokens = true
 reasoning_effort_supported = true
-reasoning_effort_levels = ["max"]
+reasoning_effort_levels = ["low", "high", "max"]
 reasoning_none_supported = false
 reasoning_disable_supported = false
 reasoning_history_wire_field = "reasoning_content"

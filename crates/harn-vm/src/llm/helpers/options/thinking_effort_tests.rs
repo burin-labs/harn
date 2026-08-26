@@ -1,5 +1,51 @@
 use super::extract::extract_llm_options;
+use super::routing_test_support::{extract_with_options, ScopedEnvVar};
 use super::*;
+
+#[test]
+fn moonshot_kimi_k3_accepts_only_its_documented_effort_ladder() {
+    let _moonshot_key = ScopedEnvVar::set("MOONSHOT_API_KEY", "test-key");
+
+    for level in ["low", "high", "max"] {
+        let options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("moonshot")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("moonshot/kimi-k3")),
+            ),
+            (
+                crate::value::intern_key("effort"),
+                VmValue::String(arcstr::ArcStr::from(level)),
+            ),
+        ]);
+        extract_with_options(options)
+            .unwrap_or_else(|err| panic!("documented effort `{level}` was rejected: {err}"));
+    }
+
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("moonshot")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("moonshot/kimi-k3")),
+        ),
+        (
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from("medium")),
+        ),
+    ]);
+    let err = extract_with_options(options).expect_err("undocumented effort must fail locally");
+    assert!(
+        err.to_string()
+            .contains("supported reasoning_effort values: low, high, max"),
+        "unexpected error: {err}"
+    );
+}
 
 #[test]
 fn thinking_modes_effort_is_the_capability_gate() {
