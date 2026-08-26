@@ -87,11 +87,10 @@ jobs:
       # Optional. The shared workflow applies `harn fix --safety
       # behavior-preserving` to your sources before your refresh command, so a
       # bump can normalize its own fallout. Set false to decline that pass and
-      # keep the bump limited to the version change plus your own commands.
-      # Capability migrations and deterministic formatting are applied either
-      # way — they are what keeps a bump compiling and formatted under the
-      # target runtime — so declining this does not strand you on a keyword,
-      # capability, or formatter change. Defaults to true.
+      # keep the bump limited to the version change plus mandatory compatibility
+      # migrations and your own commands. The implicit-any compatibility
+      # census, capability migrations, and deterministic formatting are applied
+      # either way. Defaults to true.
       apply-behavior-preserving-fixes: true
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -110,6 +109,11 @@ arbitrary orchestration ref.
 
 - Already current: the pin already matches the resolved target → clean no-op,
   zero mutation.
+- Old implicit parameters: before caller regeneration or strict validation,
+  the target runtime translates each checker-owned omitted annotation to
+  explicit `any`. The printed typed census names scanned, changed, pending,
+  unresolved, and changed-semantics sites; any nonzero pending or failure count
+  stops the bump.
 - Not yet published: a target whose release is still finalizing is a clean exit
   (`outcome: not_ready`); the next scheduled run picks it up.
 - Refresh or validation failure: the default remains fail-before-publish.

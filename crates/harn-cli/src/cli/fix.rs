@@ -20,6 +20,16 @@ pub(crate) struct FixArgs {
     /// Restrict the plan/apply pass to explicit Harness capability migrations.
     #[arg(long)]
     pub capability_migrations_only: bool,
+    /// Preserve pre-HARN-TYP-028 behavior by translating omitted declared
+    /// parameter types to explicit `any`. Intended for unattended version
+    /// migrations; ordinary authoring repair keeps inference/`unknown` under
+    /// the surface-changing safety class.
+    #[arg(
+        long,
+        requires = "apply",
+        conflicts_with_all = ["plan", "capability_migrations_only", "codes"]
+    )]
+    pub preserve_implicit_any: bool,
     /// Only plan or apply repairs for this diagnostic code. Repeatable;
     /// omitting it keeps every code.
     #[arg(long = "code", value_parser = parse_diagnostic_code, value_name = "CODE")]

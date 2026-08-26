@@ -1258,6 +1258,7 @@ harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
 harn fix --apply --safety surface-changing --code HARN-TYP-028 src/
+harn fix --apply --safety behavior-preserving --preserve-implicit-any --json src/
 harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
 
@@ -1274,6 +1275,18 @@ with inferred and unresolved counts plus cause clusters. Unresolved parameters
 receive explicit `unknown`, preserving type checks at every use site until a
 human supplies a narrower contract. Review that residue before applying a large
 migration.
+
+`--preserve-implicit-any` is the unattended version-migration mode for source
+written before `HARN-TYP-028`. It translates every formerly unannotated
+declared parameter to explicit `any`; it never infers a narrower type or writes
+`unknown`. Its JSON census names every scanned file and observed parameter,
+plus changed, pending, unresolved, and changed-semantics names and counts.
+Completion requires zero pending and failure counts. The command
+exits nonzero if ordinary source cannot be read or parsed, an observed
+parameter remains unannotated, or the audited result is anything other than
+`any`. Intentionally invalid fixtures with a sibling `.error` declaration are
+listed under `excludedFiles`. Use the ordinary `--code HARN-TYP-028`
+surface-changing repair when authoring a narrower contract.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient

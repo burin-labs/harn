@@ -22,6 +22,7 @@ mod alias_widening;
 mod capability_arguments;
 #[path = "fix/capability_migrations.rs"]
 mod capability_migrations;
+mod implicit_any_compatibility;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
 mod manifest_host_entries;
@@ -320,6 +321,56 @@ fn resolve_targets(args: &FixArgs) -> Result<Vec<PathBuf>, String> {
 
 pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     let targets = resolve_targets(args)?;
+    if args.preserve_implicit_any {
+        let safety = args.safety.ok_or_else(|| {
+            "`harn fix --preserve-implicit-any` requires `--safety behavior-preserving`".to_string()
+        })?;
+        if !RepairSafety::BehaviorPreserving.is_at_most(safety)
+            || safety == RepairSafety::NeedsHuman
+        {
+            return Err(
+                "`harn fix --preserve-implicit-any` requires a safety ceiling at or above `behavior-preserving`"
+                    .to_string()
+                    .into(),
+            );
+        }
+        let report = implicit_any_compatibility::migrate(&targets, args.dry_run)?;
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report)
+                    .map_err(|error| format!("failed to serialize migration census: {error}"))?
+            );
+        } else {
+            println!(
+                "implicit-any compatibility: scanned={} observed={} changed={} pending={} unresolved={} changed-semantics={}",
+                report.scanned_file_count,
+                report.observed_count,
+                report.changed_count,
+                report.pending_count,
+                report.unresolved_count,
+                report.changed_semantics_count
+            );
+            for finding in report
+                .unresolved
+                .iter()
+                .chain(report.changed_semantics.iter())
+            {
+                let name = finding
+                    .site
+                    .as_ref()
+                    .map_or("<file>", |site| site.parameter.as_str());
+                println!("  {}::{name}: {}", finding.file, finding.reason);
+            }
+        }
+        if !report.is_complete() {
+            return Err(FixRunError::PartialFailure(format!(
+                "implicit-any compatibility migration incomplete: pending={}, unresolved={}, changed-semantics={}",
+                report.pending_count, report.unresolved_count, report.changed_semantics_count
+            )));
+        }
+        return Ok(());
+    }
     if args.apply {
         let safety = args.safety.ok_or_else(|| {
             "`harn fix --apply` requires `--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`"

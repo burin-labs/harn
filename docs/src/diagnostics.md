@@ -768,6 +768,13 @@ how the body uses it and from the arguments at every call site in the module
 graph, writes the annotation, and reports how many parameters it could not
 prove anything about. Those fall back to `unknown` for a human to refine.
 
+For an unattended runtime-version migration of code written before this rule,
+use `harn fix --apply --safety behavior-preserving --preserve-implicit-any
+--json <path>`. That compatibility mode writes only explicit `any`, preserving
+the former unchecked call contract. Its census fails if any eligible parameter
+is unresolved or receives a narrower annotation. It does not replace the
+surface-changing authoring repair above.
+
 ### `HARN-TYP-029`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
