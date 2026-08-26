@@ -778,11 +778,10 @@ pub(crate) struct LlmRequestPayload {
     /// so confirmed-fast responses bill at the premium tier.
     pub fast: bool,
     pub output_format: OutputFormat,
-    /// Normalized `output_schema` forwarded to the streaming transport
-    /// so it can fail-fast when partial JSON can no longer satisfy the
-    /// schema. Mirrors `LlmCallOptions::output_schema` after option
-    /// resolution; transport layers only need this field, not the
-    /// VM-local original.
+    /// Provider-compatible output schema used for both the request and
+    /// streaming validation. It retains the caller-selected contract after
+    /// compatibility projection, so transport layers never enforce a rule
+    /// the provider did not receive.
     pub output_schema: Option<serde_json::Value>,
     /// See `LlmCallOptions::schema_stream_abort`. Forwarded so the
     /// off-thread transport task can decide without re-reading VM-local
@@ -857,46 +856,58 @@ impl LlmRequestPayload {
 }
 
 impl LlmCallOptions {
+    /// Return the one caller-selected schema for a structured-output request.
+    ///
+    /// Script option parsing populates both fields from `output`, but Rust
+    /// callers can construct options directly. In that case, the explicit
+    /// `output_schema` is the contract; `output_format` supplies only the
+    /// transport dialect and strictness. Falling back to its schema keeps
+    /// hand-built modern-format requests complete.
+    fn structured_output_schema(&self) -> Option<(&serde_json::Value, bool)> {
+        let OutputFormat::JsonSchema { schema, strict } = &self.output_format else {
+            return None;
+        };
+        Some((self.output_schema.as_ref().unwrap_or(schema), *strict))
+    }
+
     /// Return the provider-compatible schema that local response validation
     /// must enforce. This is deliberately the same projection payload creation
     /// records for the wire request; the original schema still owns retry
     /// guidance and transcript context.
     pub(crate) fn validation_output_schema(&self) -> Option<serde_json::Value> {
-        match &self.output_format {
-            OutputFormat::JsonSchema { schema, strict } => {
-                Some(project_output_schema_for_provider(
-                    &self.provider,
-                    &self.model,
-                    *strict,
-                    schema,
-                    false,
-                ))
-            }
-            _ => self.output_schema.clone(),
-        }
+        let Some((schema, strict)) = self.structured_output_schema() else {
+            return self.output_schema.clone();
+        };
+        Some(project_output_schema_for_provider(
+            &self.provider,
+            &self.model,
+            strict,
+            schema,
+            false,
+        ))
     }
 }
 
 impl From<&LlmCallOptions> for LlmRequestPayload {
     fn from(opts: &LlmCallOptions) -> Self {
-        let (output_format, output_schema) = match &opts.output_format {
-            OutputFormat::JsonSchema { schema, strict } => {
+        let (output_format, output_schema) = match opts.structured_output_schema() {
+            Some((raw_schema, strict)) => {
                 let schema = project_output_schema_for_provider(
                     &opts.provider,
                     &opts.model,
-                    *strict,
-                    schema,
+                    strict,
+                    raw_schema,
                     true,
                 );
                 (
                     OutputFormat::JsonSchema {
                         schema: schema.clone(),
-                        strict: *strict,
+                        strict,
                     },
                     Some(schema),
                 )
             }
-            output_format => (output_format.clone(), opts.output_schema.clone()),
+            None => (opts.output_format.clone(), opts.output_schema.clone()),
         };
         let mut payload = Self {
             provider: opts.provider.clone(),
