@@ -539,6 +539,31 @@ fn is_structured_sse_error_frame(
     }
 }
 
+/// OpenAI-compatible providers may close the response body after the
+/// usage-only receipt instead of sending a trailing `[DONE]` sentinel. Require
+/// both the empty choice list and at least one measured counter so an empty or
+/// unrelated frame cannot turn absence into success.
+fn is_terminal_usage_receipt(json: &serde_json::Value) -> bool {
+    let choices_are_empty = json
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let measured_usage = json
+        .get("usage")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|usage| {
+            ["prompt_tokens", "completion_tokens", "total_tokens"]
+                .into_iter()
+                .any(|field| {
+                    usage
+                        .get(field)
+                        .and_then(serde_json::Value::as_i64)
+                        .is_some()
+                })
+        });
+    choices_are_empty && measured_usage
+}
+
 /// Pure SSE-line consumer used by the response wrapper and by tests
 /// that drive canned byte streams without standing up a full
 /// `reqwest::Response`. The Anthropic / OpenAI branches and the
@@ -740,6 +765,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 })
             })
         };
+        let terminal_usage_receipt = awaits_stream_usage && is_terminal_usage_receipt(&json);
 
         if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             match json["type"].as_str() {
@@ -1155,7 +1181,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         // A finish_reason ends content, not necessarily accounting. Providers
         // with a declared stream-usage contract and managed gateways append
         // their authoritative receipt in later empty-choices frames.
-        if managed_receipt_frame || (terminal_frame && !managed_transport && !awaits_stream_usage) {
+        if managed_receipt_frame
+            || terminal_usage_receipt
+            || (terminal_frame && !managed_transport && !awaits_stream_usage)
+        {
             break;
         }
     }
