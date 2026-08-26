@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 
 use crate::connectors::ConnectorError;
 use crate::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+use crate::TenantId;
 
 pub(crate) const CRON_STATE_TOPIC: &str = "connectors.cron.state";
 const STATE_EVENT_KIND: &str = "cron_trigger_state";
@@ -22,6 +23,15 @@ impl CronStateStore {
             event_log,
             topic: Topic::new(CRON_STATE_TOPIC).expect("cron state topic is valid"),
         }
+    }
+
+    pub(crate) fn for_tenant(
+        event_log: Arc<AnyEventLog>,
+        tenant_id: &TenantId,
+    ) -> Result<Self, ConnectorError> {
+        let topic = Topic::new(CRON_STATE_TOPIC).expect("cron state topic is valid");
+        let topic = crate::tenant_topic(tenant_id, &topic)?;
+        Ok(Self { event_log, topic })
     }
 
     pub(crate) async fn load_all(

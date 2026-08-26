@@ -3498,6 +3498,7 @@ harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
 harn serve worker jobs.harn                # scheduled and queued @job functions
+harn serve worker --tenant acme jobs.harn  # one active tenant's jobs
 harn serve test                            # reusable user-test worker over stdio
 ```
 
@@ -3507,6 +3508,17 @@ nearest `harn.toml`. A job can call them through
 declared credentials through the same secret providers used by direct Harn
 runs. Startup reports a connector load or initialization error before it
 accepts work; a missing credential remains a call error from that connector.
+Pass `--tenant ID` to bind every worker dispatch to an active tenant in the
+local tenant registry. The same option works with `harn run --as-job`. Job code
+and connector clients then share that tenant's secret scope, and
+`harness.tenant.id()` returns the bound ID. An unknown or suspended tenant
+stops startup. A request for another tenant's secret is denied; it is not
+reported as a missing credential. Without `--tenant`, the existing
+single-tenant secret namespace remains active, and the worker only claims jobs
+that have no tenant ID. Tenanted work stays queued for a matching worker. The
+default registry is `<script-dir>/.harn/orchestrator`; pass
+`--tenant-state-dir PATH` or set
+`HARN_ORCHESTRATOR_STATE_DIR` when the orchestrator uses another location.
 
 `harn serve test` lets a caller retain one isolated test-run session instead
 of spawning a fresh Harn process for every suite. It accepts JSON-RPC 2.0 as

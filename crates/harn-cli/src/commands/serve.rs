@@ -292,6 +292,8 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
     let consumer_id = args.consumer_id.clone();
     let claim_ttl = StdDuration::from_secs(args.claim_ttl_secs);
     let drain_timeout = StdDuration::from_secs(args.drain_timeout_secs);
+    let tenant_id = args.tenant.clone();
+    let tenant_state_dir = args.tenant_state_dir.clone();
 
     let local = tokio::task::LocalSet::new();
     local
@@ -302,11 +304,17 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
                 crate::build_connector_registry(&extensions.provider_connectors)
                     .await
                     .map_err(|error| format!("failed to load worker connectors: {error}"))?;
+            let tenant_scope = crate::worker_tenant::resolve_worker_tenant_scope(
+                &script_path,
+                tenant_id.as_deref(),
+                tenant_state_dir.as_deref(),
+            )?;
             let options = harn_serve::WorkerServeOptions {
                 consumer_id,
                 claim_ttl,
                 drain_timeout,
                 connector_registry: Some(connector_registry),
+                tenant_scope,
             };
             let server = harn_serve::start_worker_server(&script_path, options)
                 .await
