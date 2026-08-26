@@ -50,6 +50,7 @@ enum TranscriptMutation {
 pub(crate) struct JournalState {
     config: JournalConfig,
     pending: VecDeque<TranscriptMutation>,
+    first_event_id: Option<u64>,
 }
 
 impl JournalState {
@@ -59,6 +60,10 @@ impl JournalState {
 
     pub(crate) fn store(&self) -> SqliteSessionStore {
         self.config.store.clone()
+    }
+
+    pub(crate) fn first_event_id(&self) -> Option<u64> {
+        self.first_event_id
     }
 
     pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
@@ -72,8 +77,13 @@ impl JournalState {
             .transpose()
     }
 
-    pub(crate) fn pop_front(&mut self) {
+    fn pop_front(&mut self) {
         self.pending.pop_front();
+    }
+
+    pub(crate) fn record_persisted_event(&mut self, event_id: u64) {
+        self.first_event_id.get_or_insert(event_id);
+        self.pop_front();
     }
 }
 
@@ -137,6 +147,7 @@ pub(crate) async fn prepare(
                 workflow_learning_eligibility,
             },
             pending: VecDeque::new(),
+            first_event_id: None,
         },
     })
 }
@@ -237,11 +248,11 @@ pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
         let Some((store, event)) = crate::agent_sessions::next_journal_event(session_id)? else {
             return Ok(());
         };
-        store
+        let stored = store
             .append(session_id, event)
             .await
             .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
-        crate::agent_sessions::pop_journal_event(session_id);
+        crate::agent_sessions::record_persisted_journal_event(session_id, stored.event_id);
     }
 }
 
@@ -923,7 +934,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn generic_agent_loop_persists_canonical_transcript_lifecycle() {
+    async fn generic_agent_loop_projects_the_current_run_after_a_long_session_history() {
         crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();
         let root = tempfile::tempdir().expect("temp root");
@@ -933,6 +944,32 @@ mod tests {
                 .expect("temporary path must be valid UTF-8"),
         )
         .expect("serialize root literal");
+        let session_id = "live-journal-agent-loop";
+        let prior_event_count = crate::session_recap::DEFAULT_RECAP_SOURCE_LIMIT;
+        let expected_first_event_id =
+            u64::try_from(prior_event_count).expect("recap source limit fits an event id") + 1;
+        let store = session_store::open_canonical_agent_session(
+            &session_store::SessionStoreDir::under_root(root.path()),
+            session_id,
+            None,
+            SessionType::User,
+        )
+        .await
+        .expect("open canonical store for prior history");
+        for index in 0..prior_event_count {
+            store
+                .append(
+                    session_id,
+                    AppendEvent::new(
+                        SessionEventKind::Custom {
+                            custom_type: "prior_run_fixture".to_string(),
+                        },
+                        serde_json::json!({"index": index}),
+                    ),
+                )
+                .await
+                .expect("append prior history");
+        }
         let source = format!(
             r###"
 import {{ agent_loop }} from "std/agent/loop"
@@ -978,6 +1015,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.println(result.recap.state)
   harness.stdio.println(result.recap.snapshot.coverage.scanned)
   harness.stdio.println(result.recap.snapshot.coverage.matched)
+  harness.stdio.println(result.recap.snapshot.query.fromEventId)
   harness.stdio.println(result.recap.snapshot.projectionHash)
 }}
 "###,
@@ -994,20 +1032,38 @@ pipeline main(harness: Harness, task: unknown) {{
             .await;
         assert!(output.lines().any(|line| line.ends_with("done")));
         let output_lines = output.lines().collect::<Vec<_>>();
-        assert!(output_lines.contains(&"available"));
+        let recap_line = output_lines
+            .iter()
+            .position(|line| *line == "available")
+            .expect("terminal AgentResult must expose an available recap");
+        let scanned = output_lines
+            .get(recap_line + 1)
+            .and_then(|line| line.parse::<usize>().ok())
+            .expect("recap must expose a numeric scanned count");
+        let matched = output_lines
+            .get(recap_line + 2)
+            .and_then(|line| line.parse::<usize>().ok())
+            .expect("recap must expose a numeric matched count");
+        let from_event_id = output_lines
+            .get(recap_line + 3)
+            .and_then(|line| line.parse::<u64>().ok())
+            .expect("recap must expose its first source event");
+        let projection_hash = output_lines
+            .get(recap_line + 4)
+            .expect("recap must expose its projection hash");
         assert!(
-            output_lines
-                .iter()
-                .filter_map(|line| line.parse::<usize>().ok())
-                .any(|count| count > 0),
+            scanned > 0 && matched > 0,
             "terminal AgentResult must expose a non-vacuous recap: {output}"
         );
+        assert_eq!(
+            from_event_id, expected_first_event_id,
+            "terminal recap must begin at the first event in this invocation: {output}"
+        );
         assert!(
-            output_lines.iter().any(|line| line.starts_with("sha256:")),
+            projection_hash.starts_with("sha256:"),
             "terminal AgentResult must expose the recap projection hash: {output}"
         );
 
-        let session_id = "live-journal-agent-loop";
         let store = session_store::open_canonical_agent_session(
             &session_store::SessionStoreDir::under_root(root.path()),
             session_id,
@@ -1089,7 +1145,12 @@ pipeline main(harness: Harness, task: unknown) {{
                 SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal"
             )
         }));
-        assert!(events.iter().all(|event| {
+        let current_events = events
+            .iter()
+            .filter(|event| event.event_id >= expected_first_event_id)
+            .collect::<Vec<_>>();
+        assert!(!current_events.is_empty());
+        assert!(current_events.iter().all(|event| {
             event.headers.get("run_id") == Some(run_id)
                 && event.headers.get("turn_id") == Some(turn_id)
         }));

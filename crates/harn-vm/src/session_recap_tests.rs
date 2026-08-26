@@ -185,6 +185,14 @@ fn progress() -> AppendEvent {
     )
 }
 
+fn terminal_secret() -> String {
+    format!(
+        "{}_{}",
+        ["sk", "live"].join("_"),
+        "abcdefghijklmnopqrstuvwxyz"
+    )
+}
+
 fn terminal() -> AppendEvent {
     identified(
         custom("agent_run_terminal"),
@@ -199,7 +207,7 @@ fn terminal() -> AppendEvent {
                 "terminal": {
                     "kind": "natural",
                     "owner": "agent",
-                    "reason": "synthetic-sensitive-marker_123456789012345678901234",
+                    "reason": terminal_secret(),
                 }
             }),
         ),
@@ -299,7 +307,7 @@ async fn recap_projects_non_vacuous_typed_turn_facts_without_private_content() {
     assert!(!rendered.contains("private chain of thought"));
     assert!(!rendered.contains("must never surface"));
     assert!(!rendered.contains("synthetic-sensitive-marker"));
-    assert!(!rendered.contains("synthetic-sensitive-marker_123456789012345678901234"));
+    assert!(!rendered.contains(&terminal_secret()));
     assert!(!rendered.contains("Bearer hidden-token"));
     assert!(rendered.contains("[redacted]"));
 }
@@ -433,25 +441,68 @@ async fn sqlite_restart_replay_is_byte_stable_and_provider_free() {
     }
 }
 
-#[test]
-fn one_source_mutation_changes_both_hashes() {
-    let original = SessionRecapSource {
-        first_event_id: Some(1),
-        last_event_id: Some(1),
-        events: vec![SessionRecapSourceEvent {
-            event_id: 1,
-            record_hash: "sha256:original".to_string(),
-        }],
-    };
-    let mut mutated = original.clone();
-    mutated.events[0].record_hash = "sha256:mutated".to_string();
-    let original_content = sha256_canonical(&original);
-    let mutated_content = sha256_canonical(&mutated);
-    assert_ne!(original_content, mutated_content);
-    assert_ne!(
-        sha256_canonical(&json!({"content_hash": original_content, "turns": []})),
-        sha256_canonical(&json!({"content_hash": mutated_content, "turns": []}))
+#[tokio::test]
+async fn changing_one_source_payload_changes_both_projected_hashes() {
+    let temp = tempfile::tempdir().expect("session root");
+    let path = temp.path().join("session-store.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("open source store");
+    create_session(&store, "content-bound").await;
+    let stored = store
+        .append("content-bound", user("Original prompt"))
+        .await
+        .expect("append original source event");
+    let original = query_session_recap(&store, SessionRecapQuery::for_session("content-bound"))
+        .await
+        .expect("query original recap")
+        .expect("source session exists");
+    drop(store);
+
+    let mut changed = stored;
+    changed.payload = transcript("message", "user", "public", "Changed prompt", json!({}));
+    changed.record_hash = harn_session_store::compute_record_hash(&changed);
+    let changed_root = harn_session_store::chain_root_hash(std::slice::from_ref(&changed));
+    let connection = rusqlite::Connection::open(&path).expect("open source database");
+    connection
+        .execute(
+            "UPDATE session_events
+             SET payload_json = ?1, record_hash = ?2
+             WHERE session_id = ?3 AND event_id = ?4",
+            rusqlite::params![
+                serde_json::to_string(&changed.payload).expect("serialize changed payload"),
+                changed.record_hash,
+                changed.session_id,
+                i64::try_from(changed.event_id).expect("fixture event id fits SQLite INTEGER"),
+            ],
+        )
+        .expect("replace the source payload in the negative-control fixture");
+    connection
+        .execute(
+            "UPDATE sessions SET chain_root_hash = ?1 WHERE id = ?2",
+            rusqlite::params![changed_root, "content-bound"],
+        )
+        .expect("keep the negative-control source chain valid");
+    drop(connection);
+
+    let reopened = SqliteSessionStore::open(&path).expect("reopen changed store");
+    let projected = query_session_recap(&reopened, SessionRecapQuery::for_session("content-bound"))
+        .await
+        .expect("query changed recap")
+        .expect("changed source session exists");
+
+    assert_eq!(original.coverage.scanned, 1);
+    assert_eq!(projected.coverage.scanned, 1);
+    assert_eq!(
+        original.source.first_event_id,
+        projected.source.first_event_id
     );
+    assert_eq!(
+        original.source.last_event_id,
+        projected.source.last_event_id
+    );
+    assert_eq!(original.turns[0].prompts[0].text, "Original prompt");
+    assert_eq!(projected.turns[0].prompts[0].text, "Changed prompt");
+    assert_ne!(original.content_hash, projected.content_hash);
+    assert_ne!(original.projection_hash, projected.projection_hash);
 }
 
 #[test]

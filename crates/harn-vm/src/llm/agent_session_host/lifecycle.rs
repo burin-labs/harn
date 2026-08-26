@@ -461,6 +461,7 @@ async fn host_agent_session_finalize(
             .map_err(VmError::Runtime)?;
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
+    let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
     live_transcript_journal::flush_terminal(
         &session_id,
         &canonical_status,
@@ -475,6 +476,7 @@ async fn host_agent_session_finalize(
             &store,
             crate::session_recap::SessionRecapQuery {
                 run_id: Some(session.run_id.clone()),
+                from_event_id: recap_from_event_id,
                 ..crate::session_recap::SessionRecapQuery::for_session(&session_id)
             },
         )
