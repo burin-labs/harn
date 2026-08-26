@@ -42,7 +42,7 @@ fn git_context_profile() -> dict {
   }
 }
 
-pipeline test(harness: Harness, _task: unknown) {
+pipeline test(harness: Harness) {
   skill git {
     description "Git repository and pull request workflow"
     when_to_use "Use for Git branches, commits, pull requests, and repository history"

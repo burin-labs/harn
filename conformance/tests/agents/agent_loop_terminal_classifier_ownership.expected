@@ -1,0 +1,9 @@
+native.status=done
+native.calls=2
+native.classifier_events=0
+judge.status=done
+judge.calls=2
+judge.classifier_events=0
+judge.decisions=1
+prefix.action=tool_call_intended
+prefix.stable_first=true

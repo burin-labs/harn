@@ -1077,16 +1077,6 @@ fn unsupported_capability_options_error_with_provider_matrix_hint() {
             VmValue::String(arcstr::ArcStr::from("json".to_string())),
         )],
     );
-    assert_unsupported_local_option(
-        "tools",
-        vec![
-            (
-                "tool_format",
-                VmValue::String(arcstr::ArcStr::from("native".to_string())),
-            ),
-            ("tools", one_tool_list()),
-        ],
-    );
     assert_unsupported_local_option("cache", vec![("cache", VmValue::Bool(true))]);
     assert_unsupported_local_option("vision", vec![("vision", VmValue::Bool(true))]);
     assert_unsupported_local_option("audio", vec![("audio", VmValue::Bool(true))]);

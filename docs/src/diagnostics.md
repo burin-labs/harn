@@ -35,18 +35,18 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 28 |
+| [`TYP`](#typ--type-checker) | Type checker | 29 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 8 |
-| [`LLM`](#llm--llm-calls) | LLM calls | 5 |
+| [`LLM`](#llm--llm-calls) | LLM calls | 4 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 72 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 73 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -91,6 +91,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-026`](#harn-typ-026) | thrown value type is not covered by the callable's declared throws set | — | — |
 | [`HARN-TYP-027`](#harn-typ-027) | constant tuple index is outside the fixed arity | — | — |
 | [`HARN-TYP-028`](#harn-typ-028) | declared parameter has no type annotation | `types/annotate-parameter` | `surface-changing` |
+| [`HARN-TYP-029`](#harn-typ-029) | type predicate contract is invalid | — | — |
 
 ## PAR — Parser / lexer
 
@@ -145,7 +146,6 @@ A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-v
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
-| [`HARN-LLM-002`](#harn-llm-002) | LLM option key is deprecated | `llm/migrate-deprecated-option` | `scope-local` |
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
@@ -300,7 +300,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-047`](#harn-lnt-047) | import order lint | `imports/reorder` | `format-only` |
 | [`HARN-LNT-048`](#harn-lnt-048) | prefer optional shorthand lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-049`](#harn-lnt-049) | legacy doc comment lint | `doc/migrate-comment-style` | `format-only` |
-| [`HARN-LNT-050`](#harn-lnt-050) | deprecated LLM options lint | `llm/migrate-deprecated-option` | `scope-local` |
+| [`HARN-LNT-050`](#harn-lnt-050) | removed LLM options lint | `llm/migrate-removed-option` | `scope-local` |
 | [`HARN-LNT-051`](#harn-lnt-051) | unnecessary safe navigation lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-052`](#harn-lnt-052) | ambient clock builtin replaced by `harness.clock.*` | `bindings/thread-harness-clock` | `scope-local` |
 | [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness` | `scope-local` |
@@ -323,6 +323,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-071`](#harn-lnt-071) | global builtin has moved to a Harness capability method | `bindings/thread-harness-method` | `scope-local` |
 | [`HARN-LNT-072`](#harn-lnt-072) | call names a builtin whose declared exposure keeps Harn source from naming it | — | — |
 | [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
+| [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused test pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 
 ## FMT — Formatter
 
@@ -766,6 +767,46 @@ genuine dynamic boundary, then narrow or validate it before use.
 how the body uses it and from the arguments at every call site in the module
 graph, writes the annotation, and reports how many parameters it could not
 prove anything about. Those fall back to `unknown` for a human to refine.
+
+### `HARN-TYP-029`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+type predicate contract is invalid
+
+A type predicate tells callers how a boolean result narrows one argument. Harn
+checks the function body before trusting that claim.
+
+This error means the declaration does not prove its contract. Common causes
+include:
+
+- The predicate names a missing, untyped, or rest parameter.
+- The narrower type is not a subtype of the parameter type.
+- The body does not end with one return condition.
+- The true branch does not prove the narrower type.
+- A two-sided predicate claims too much about the false branch.
+- The predicate targets a generic type parameter.
+
+#### Fix it
+
+Use a two-sided predicate when true and false both give exact type facts:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+```
+
+Add `implies` when only a true result proves the type:
+
+```harn
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+```
+
+A false result in the second example may still mean an empty string, so Harn
+does not narrow the false branch.
 
 ### `HARN-PAR-001`
 
@@ -1249,22 +1290,6 @@ Both shapes are marked `safety: surface-changing`, so `harn fix --apply
 The matched `EffectInheritanceViolation` runtime payload's `_type`
 discriminator (`effect_inheritance_violation`) is part of the stable
 contract.
-
-### `HARN-LLM-002`
-
-**Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
-
-LLM option key is deprecated
-
-- **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the deprecated option with its supported equivalent
-- **See also:** [`HARN-LNT-050`](#harn-lnt-050)
-
-#### How to fix
-
-- Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
-- Drop or rename deprecated options to the names listed in the LLM call quickref.
-- Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
 
 ### `HARN-LLM-003`
 
@@ -2619,6 +2644,8 @@ unused parameter lint
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
+- Functions, closures, public or extended pipelines, and fixture- or table-bound
+  tests keep positional arity and prefix the unused parameter with `_`.
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
 
 ### `HARN-LNT-017`
@@ -3103,11 +3130,10 @@ legacy doc comment lint
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
 
-deprecated LLM options lint
+removed LLM options lint
 
-- **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the deprecated option with its supported equivalent
-- **See also:** [`HARN-LLM-002`](#harn-llm-002)
+- **Repair:** `llm/migrate-removed-option` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the removed option with its supported equivalent
 
 #### How to fix
 
@@ -3958,6 +3984,29 @@ nothing when:
 A dict key that happens to share the parameter's name is a record field, not a
 reference, so `{harness: harness}` becomes `{harness: net}` and the record's
 shape is unchanged.
+
+### `HARN-LNT-074`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+explicitly unused test pipeline input can be removed
+
+- **Repair:** `bindings/remove-unused-pipeline-input` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Remove an explicitly unused test pipeline input
+
+#### What it means
+
+An underscore-prefixed input on a private pipeline structurally marked with a
+bare `@test` is not used by its body or a local caller and is not bound by a
+fixture or table-driven case. The Harn test runner derives its invocation from
+that declaration, but another host can still select any named pipeline.
+
+#### How to fix
+
+Review external host callers, then apply the surface-changing fix explicitly to
+remove the input. Keep and type a named input when the test uses the value.
+Unattributed, extended, called, fixture-bound, and table-bound pipelines preserve
+their positional contracts.
 
 ### `HARN-FMT-001`
 

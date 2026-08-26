@@ -429,9 +429,11 @@ pub struct TriggerRegistry {
     secret_provider: Option<Arc<dyn SecretProvider>>,
 }
 
-thread_local! {
-    static TRIGGER_REGISTRY: RefCell<TriggerRegistry> = RefCell::new(TriggerRegistry::default());
-}
+pub(crate) mod runtime;
+pub(crate) use runtime::{
+    active_trigger_registry, swap_active_trigger_registry, TriggerRegistryRuntime,
+};
+use runtime::{with_trigger_registry, with_trigger_registry_mut};
 
 thread_local! {
     static ORCHESTRATOR_BUDGET: RefCell<OrchestratorBudgetState> =
@@ -471,8 +473,8 @@ struct HistoricalVersionLookup {
 }
 
 pub fn clear_trigger_registry() {
-    TRIGGER_REGISTRY.with(|slot| {
-        *slot.borrow_mut() = TriggerRegistry::default();
+    with_trigger_registry_mut(|registry| {
+        *registry = TriggerRegistry::default();
     });
     clear_orchestrator_budget();
     super::aggregation::clear_aggregation_state();
@@ -742,8 +744,7 @@ fn utc_hour_key() -> i64 {
 }
 
 pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         let mut snapshots = Vec::new();
         for bindings in registry.bindings.values() {
             for binding in bindings {
@@ -807,10 +808,7 @@ pub fn resolve_live_or_as_of(
 }
 
 pub fn binding_version_as_of(id: &str, as_of: OffsetDateTime) -> Result<u32, TriggerRegistryError> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
-        registry.binding_version_as_of(id, as_of)
-    })
+    with_trigger_registry(|registry| registry.binding_version_as_of(id, as_of))
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -818,8 +816,7 @@ fn resolve_trigger_binding_version(
     id: &str,
     version: u32,
 ) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         registry
             .binding(id, version)
             .ok_or_else(|| TriggerRegistryError::UnknownBindingVersion {
@@ -834,8 +831,7 @@ pub fn resolve_live_trigger_binding(
     id: &str,
     version: Option<u32>,
 ) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         if let Some(version) = version {
             let binding = registry.binding(id, version).ok_or_else(|| {
                 TriggerRegistryError::UnknownBindingVersion {
@@ -870,8 +866,7 @@ pub(crate) fn channel_bindings_matching(
     scope_id: &str,
     name: &str,
 ) -> Vec<Arc<TriggerBinding>> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         let Some(binding_ids) = registry.by_provider.get("channel") else {
             return Vec::new();
         };
@@ -910,8 +905,7 @@ pub(crate) fn channel_bindings_matching(
 }
 
 pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerBinding>> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         let Some(binding_ids) = registry.by_provider.get(event.provider.as_str()) else {
             return Vec::new();
         };
@@ -960,8 +954,7 @@ fn trigger_event_kind_matches(event: &super::TriggerEvent, expected: &str) -> bo
 pub async fn install_manifest_triggers(
     specs: Vec<TriggerBindingSpec>,
 ) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         registry.refresh_runtime_context();
         let mut touched_ids = BTreeSet::new();
 
@@ -1050,8 +1043,7 @@ pub async fn dynamic_register(
     }
     spec.source = TriggerBindingSource::Dynamic;
     let id = spec.id.clone();
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         registry.refresh_runtime_context();
 
         if registry.bindings.contains_key(id.as_str()) {
@@ -1069,8 +1061,7 @@ pub async fn dynamic_register(
 }
 
 pub async fn dynamic_deregister(id: &str) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         let live_dynamic = registry.live_bindings(id, TriggerBindingSource::Dynamic);
         if live_dynamic.is_empty() {
             return Err(TriggerRegistryError::UnknownId(id.to_string()));
@@ -1087,8 +1078,7 @@ pub async fn dynamic_deregister(id: &str) -> Result<(), TriggerRegistryError> {
 }
 
 pub async fn drain(id: &str) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         let live = registry.live_bindings_any_source(id);
         if live.is_empty() {
             return Err(TriggerRegistryError::UnknownId(id.to_string()));
@@ -1105,8 +1095,7 @@ pub async fn drain(id: &str) -> Result<(), TriggerRegistryError> {
 }
 
 pub async fn pause(id: &str) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         let live = registry.live_bindings_any_source(id);
         if live.is_empty() {
             return Err(TriggerRegistryError::UnknownId(id.to_string()));
@@ -1132,8 +1121,7 @@ pub async fn pause(id: &str) -> Result<(), TriggerRegistryError> {
 }
 
 pub async fn resume(id: &str) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         let live = registry.live_bindings_any_source(id);
         if live.is_empty() {
             return Err(TriggerRegistryError::UnknownId(id.to_string()));
@@ -1156,8 +1144,7 @@ fn pin_trigger_binding_inner(
     version: u32,
     allow_terminated: bool,
 ) -> Result<(), TriggerRegistryError> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         let binding = registry.binding(id, version).ok_or_else(|| {
             TriggerRegistryError::UnknownBindingVersion {
                 id: id.to_string(),
@@ -1186,8 +1173,7 @@ pub fn pin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistry
 }
 
 pub async fn unpin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
-    let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    let (event_log, events) = with_trigger_registry_mut(|registry| {
         let binding = registry.binding(id, version).ok_or_else(|| {
             TriggerRegistryError::UnknownBindingVersion {
                 id: id.to_string(),
@@ -1225,8 +1211,7 @@ fn begin_in_flight_inner(
     allow_terminated: bool,
 ) -> Result<(), TriggerRegistryError> {
     pin_trigger_binding_inner(id, version, allow_terminated)?;
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = slot.borrow();
+    with_trigger_registry(|registry| {
         let binding = registry.binding(id, version).ok_or_else(|| {
             TriggerRegistryError::UnknownBindingVersion {
                 id: id.to_string(),
@@ -1248,8 +1233,7 @@ pub async fn finish_in_flight(
     version: u32,
     outcome: TriggerDispatchOutcome,
 ) -> Result<(), TriggerRegistryError> {
-    TRIGGER_REGISTRY.with(|slot| {
-        let registry = &mut *slot.borrow_mut();
+    with_trigger_registry_mut(|registry| {
         let binding = registry.binding(id, version).ok_or_else(|| {
             TriggerRegistryError::UnknownBindingVersion {
                 id: id.to_string(),

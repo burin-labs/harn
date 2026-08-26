@@ -6,9 +6,8 @@
 //! defaults) into a [`Capabilities`] value (`lookup_with`, `rule_to_caps`,
 //! `defaults_to_caps`, and the `rule_*` field-derivation helpers).
 
-use std::collections::{BTreeMap, HashSet};
-
 use serde::Deserialize;
+use std::collections::{BTreeMap, HashSet};
 
 use super::model::{
     fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
@@ -367,6 +366,10 @@ pub struct ProviderRule {
     /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
     #[serde(default)]
     pub reasoning_wire_format: Option<String>,
+    /// Caller-selected portable generation options this route permits normally
+    /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
+    #[serde(default)]
+    pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -627,6 +630,7 @@ impl ProviderRule {
             reasoning_required_for_tools,
             reasoning_text_promotable,
             reasoning_wire_format,
+            reasoning_excluded_portable_options,
             seed_supported,
             top_k_supported,
             temperature_supported,
@@ -768,6 +772,10 @@ impl ProviderRule {
             reasoning_text_promotable,
         );
         fill_opt(&mut self.reasoning_wire_format, reasoning_wire_format);
+        fill_opt(
+            &mut self.reasoning_excluded_portable_options,
+            reasoning_excluded_portable_options,
+        );
         fill_opt(&mut self.seed_supported, seed_supported);
         fill_opt(&mut self.top_k_supported, top_k_supported);
         fill_opt(&mut self.temperature_supported, temperature_supported);
@@ -1061,6 +1069,7 @@ pub(super) fn lookup_with(
     if effective_defaults.has_any_field() {
         return defaults_to_caps(&effective_defaults);
     }
+    super::diagnostics::warn_unmatched_route_once(provider, model);
     Capabilities::default()
 }
 
@@ -1157,6 +1166,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
+        reasoning_excluded_portable_options: None,
         seed_supported: None,
         top_k_supported: None,
         temperature_supported: None,
@@ -1365,6 +1375,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .reasoning_wire_format
             .clone()
             .or_else(|| defaults.reasoning_wire_format.clone()),
+        reasoning_excluded_portable_options: rule
+            .reasoning_excluded_portable_options
+            .clone()
+            .unwrap_or_default(),
         seed_supported: rule
             .seed_supported
             .or(defaults.seed_supported)
@@ -1415,6 +1429,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         screenshot_scaling: rule.screenshot_scaling,
         safety_ack_flow: rule.safety_ack_flow.unwrap_or(false),
         system_message_placement: rule.system_message_placement,
+        runtime_probe: None,
     }
 }
 

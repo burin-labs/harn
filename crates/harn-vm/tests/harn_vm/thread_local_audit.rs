@@ -7,8 +7,21 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 struct ThreadLocalAudit {
     plans: BTreeMap<String, String>,
+    subtask_scope: SubtaskScopeAudit,
     #[serde(rename = "thread_local")]
     entries: Vec<AuditEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubtaskScopeAudit {
+    captured: Vec<String>,
+    reviewed_exclusions: Vec<ReviewedExclusion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewedExclusion {
+    name: String,
+    reason: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +53,7 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
     let audit = parse_audit(&audit_path);
 
     let mut audited = BTreeSet::new();
+    let mut declarations: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for entry in &audit.entries {
         assert!(
             matches!(
@@ -63,6 +77,12 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
             path: entry.path.clone(),
             statics: entry.statics.clone(),
         });
+        for name in &entry.statics {
+            declarations
+                .entry(name.clone())
+                .or_default()
+                .push((entry.path.clone(), entry.category.clone()));
+        }
     }
 
     let missing: Vec<_> = actual.difference(&audited).cloned().collect();
@@ -71,6 +91,63 @@ fn thread_local_audit_tracks_every_vm_thread_local_site() {
         missing.is_empty() && stale.is_empty(),
         "thread_local! audit drift\nmissing: {missing:#?}\nstale: {stale:#?}"
     );
+
+    let captured: BTreeSet<_> = audit.subtask_scope.captured.iter().cloned().collect();
+    assert_eq!(
+        captured.len(),
+        audit.subtask_scope.captured.len(),
+        "subtask_scope.captured contains a duplicate"
+    );
+    let excluded: BTreeSet<_> = audit
+        .subtask_scope
+        .reviewed_exclusions
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect();
+    assert_eq!(
+        excluded.len(),
+        audit.subtask_scope.reviewed_exclusions.len(),
+        "subtask_scope.reviewed_exclusions contains a duplicate"
+    );
+    let overlap: Vec<_> = captured.intersection(&excluded).cloned().collect();
+    assert!(
+        overlap.is_empty(),
+        "thread-locals cannot be both captured and excluded: {overlap:?}"
+    );
+
+    for name in &captured {
+        let matching_declarations = declarations
+            .get(name)
+            .unwrap_or_else(|| panic!("captured thread-local {name} is absent from the audit"));
+        assert_eq!(
+            matching_declarations.len(),
+            1,
+            "captured thread-local {name} is ambiguous across audit entries: {matching_declarations:?}"
+        );
+        assert!(
+            matching_declarations[0].1 != "thread_private",
+            "thread-private state must not be inherited by child interpreters: {name}"
+        );
+    }
+    for exclusion in &audit.subtask_scope.reviewed_exclusions {
+        let matching_declarations = declarations.get(&exclusion.name).unwrap_or_else(|| {
+            panic!(
+                "reviewed exclusion {} is absent from the audit",
+                exclusion.name
+            )
+        });
+        assert_eq!(
+            matching_declarations.len(),
+            1,
+            "reviewed exclusion {} is ambiguous across audit entries: {matching_declarations:?}",
+            exclusion.name
+        );
+        assert!(
+            !exclusion.reason.trim().is_empty(),
+            "reviewed exclusion {} has no reason",
+            exclusion.name
+        );
+    }
 }
 
 #[test]

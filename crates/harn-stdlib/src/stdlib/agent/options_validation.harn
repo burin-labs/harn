@@ -735,12 +735,6 @@ pub fn __validate_agent_loop_callback_options(opts: any) {
   if __has_key(opts, "scratchpad") {
     agent_scratchpad_options(opts)
   }
-  if type_of(opts?.reminders) == "dict" && opts.reminders?.append_only != nil
-    && type_of(opts.reminders.append_only)
-      != "bool" {
-    throw "agent_loop: `reminders.append_only` must be a bool or nil; got "
-      + type_of(opts.reminders.append_only)
-  }
 }
 
 pub fn __normalize_reminder_provider_options(opts: dict) {

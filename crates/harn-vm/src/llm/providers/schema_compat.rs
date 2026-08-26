@@ -1,8 +1,9 @@
 //! Provider-facing JSON Schema compatibility transforms.
 //!
-//! Harn keeps the caller's original schema semantics in transcripts and local
-//! validation. This module only shapes the copy that is sent to providers whose
-//! strict request validators accept a narrower JSON Schema subset.
+//! Harn keeps the caller's original schema in transcripts and retry guidance.
+//! It projects one provider-compatible schema for both the wire request and
+//! local response validation, so Harn never rejects a response for a rule the
+//! provider did not receive.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -45,6 +46,55 @@ pub(crate) fn sanitize_schema_for_provider(
     surface: SchemaSurface,
     schema: &Value,
 ) -> Value {
+    sanitize_schema(provider, model, profile, surface, schema, true)
+}
+
+/// Project a structured-output schema onto the dialect selected for one route.
+///
+/// The result is the effective contract for that call: request builders send
+/// it and response validators enforce it. The original schema remains on
+/// [`LlmCallOptions`](crate::llm::api::LlmCallOptions) for transcript and
+/// corrective-nudge context.
+pub(crate) fn project_output_schema_for_provider(
+    provider: &str,
+    model: &str,
+    strict: bool,
+    schema: &Value,
+    emit_receipts: bool,
+) -> Value {
+    use crate::llm::capabilities::WireDialect;
+
+    let profile = match crate::llm::capabilities::lookup(provider, model).message_wire_format {
+        WireDialect::Anthropic => Some(SchemaCompatProfile::AnthropicStrict),
+        WireDialect::Gemini => Some(SchemaCompatProfile::Google),
+        WireDialect::Ollama => None,
+        WireDialect::OpenAiCompat => Some(if strict {
+            SchemaCompatProfile::OpenAiStrict
+        } else {
+            SchemaCompatProfile::OpenAiLenient
+        }),
+    };
+    match profile {
+        Some(profile) => sanitize_schema(
+            provider,
+            model,
+            profile,
+            SchemaSurface::StructuredOutput,
+            schema,
+            emit_receipts,
+        ),
+        None => schema.clone(),
+    }
+}
+
+fn sanitize_schema(
+    provider: &str,
+    model: &str,
+    profile: SchemaCompatProfile,
+    surface: SchemaSurface,
+    schema: &Value,
+    emit_receipts: bool,
+) -> Value {
     let mut sanitizer = SchemaSanitizer {
         provider,
         model,
@@ -54,7 +104,9 @@ pub(crate) fn sanitize_schema_for_provider(
     };
     let mut sanitized = schema.clone();
     sanitizer.sanitize_node(&mut sanitized, "#");
-    sanitizer.emit_receipts();
+    if emit_receipts {
+        sanitizer.emit_receipts();
+    }
     sanitized
 }
 

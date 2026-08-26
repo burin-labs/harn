@@ -31,6 +31,9 @@ pub(crate) struct TimeRunArgs {
     /// invocation only.
     #[arg(long = "no-cache")]
     pub no_cache: bool,
+    /// Register project manifest triggers while timing the run.
+    #[arg(long = "project-triggers")]
+    pub project_triggers: bool,
     #[command(flatten)]
     pub sandbox: super::SandboxArgs,
     /// Positional arguments passed to the pipeline as the global `argv`

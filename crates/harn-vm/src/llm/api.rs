@@ -74,6 +74,7 @@ pub(crate) use schema_stream::{
 pub(crate) use telemetry::elapsed_ms;
 pub use telemetry::{source as telemetry_source, OllamaPsModel, ProviderTelemetry};
 pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};
+pub(crate) use transport::premature_eof as premature_stream_eof;
 pub(crate) use transport::vm_call_llm_api_with_body;
 
 use transport::vm_call_llm_api;

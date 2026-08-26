@@ -1,0 +1,23 @@
+{
+  "schema_version": "harn.llm.raw_provider_request.v1",
+  "kind": "request",
+  "captured_at": "2026-08-25T00:00:02Z",
+  "call_id": "fixture-turn-2",
+  "iteration": 2,
+  "attempt": 0,
+  "provider": "openai",
+  "model": "fixture-model",
+  "wire_dialect": "openai",
+  "body": {
+    "messages": [
+      {"role": "system", "content": "You help."},
+      {"role": "user", "content": "Inspect the project."},
+      {"role": "assistant", "content": null, "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]},
+      {"role": "tool", "tool_call_id": "call-1", "content": "README.md"},
+      {"role": "assistant", "content": "The project is ready."}
+    ],
+    "tools": [
+      {"type": "function", "function": {"name": "read", "parameters": {"type": "object"}}}
+    ]
+  }
+}

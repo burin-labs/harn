@@ -44,8 +44,10 @@ statement_list     ::= (NEWLINE)* [statement (statement_sep statement)* [stateme
 statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
-                       '(' fn_param_list ')' ['->' type_expr]
+                       '(' fn_param_list ')' [return_contract]
                        [where_clause] '{' block '}'
+return_contract    ::= '->' (type_expr | type_predicate)
+type_predicate     ::= ['implies'] IDENTIFIER 'is' type_expr
 where_clause       ::= 'where' where_bound (',' where_bound)*
 where_bound        ::= IDENTIFIER ':' type_expr ('+' type_expr)*
 type_decl          ::= ['pub'] 'type' IDENTIFIER [generic_params] '=' type_expr

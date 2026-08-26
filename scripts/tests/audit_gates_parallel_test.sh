@@ -17,6 +17,11 @@ fake_harn="$fake_bin/harn"
 cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = "__internal-source-gate-receipt-v1" && "${2:-}" = "write" ]]; then
+  mkdir -p "$(dirname "$3")"
+  printf '{"test_double":true}\n' > "$3"
+  exit 0
+fi
 invocation="$*"
 printf '%s\t%s\tSESSION_STORE=%s\n' "$invocation" "HARN_BIN=$0" "$HARN_SESSION_STORE_ROOT" >> "$FAKE_CONFORMANCE_RECORD"
 trap 'if [[ -n "${FAKE_CHILD_TERMINATED_RECORD-}" ]]; then printf "terminated\n" >> "$FAKE_CHILD_TERMINATED_RECORD"; fi; exit 143' TERM
@@ -43,6 +48,16 @@ fi
 printf 'fake conformance runner ok\n'
 SH
 chmod +x "$fake_harn"
+
+export GITHUB_ACTIONS=true
+export SOURCE_GATE_CI_BINARY_COMMIT="$(git -C "$repo_root" rev-parse --verify HEAD)"
+export SOURCE_GATE_CI_BINARY_BUILD_FRESHNESS_ID="$(printf 'a%.0s' {1..40})"
+if command -v sha256sum >/dev/null 2>&1; then
+  SOURCE_GATE_CI_BINARY_SHA256="$(sha256sum "$fake_harn" | cut -d ' ' -f 1)"
+else
+  SOURCE_GATE_CI_BINARY_SHA256="$(shasum -a 256 "$fake_harn" | cut -d ' ' -f 1)"
+fi
+export SOURCE_GATE_CI_BINARY_SHA256
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash

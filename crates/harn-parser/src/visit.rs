@@ -609,6 +609,7 @@ mod tests {
                 rest: false,
                 span: harn_lexer::Span::dummy(),
             }],
+            type_predicate: None,
             return_type: None,
             throws: None,
             where_clauses: Vec::new(),

@@ -5,6 +5,41 @@ use super::{
 };
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
 
+/// Resolve an outbound call after refreshing runtime-owned capabilities.
+pub(crate) async fn prepare_llm_options(
+    args: &[VmValue],
+) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+    match extract_llm_options(args) {
+        Ok(initial) => {
+            let (provider, model) =
+                crate::llm::managed_supply::logical_route(&initial.provider, &initial.model)?;
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+                extract_llm_options(args)
+            } else {
+                Ok(initial)
+            }
+        }
+        Err(initial_error) => {
+            // A stale conservative row can reject an explicit native request
+            // before full extraction finishes. Resolve the ordinary call hint,
+            // measure it, then let the canonical extractor decide again.
+            let mut options = crate::llm::cost_route::merge_context_options(
+                args.get(2).and_then(VmValue::as_dict).cloned(),
+            );
+            apply_model_role_defaults(&mut options);
+            apply_active_step_defaults(&mut options);
+            let provider = vm_resolve_provider(&options);
+            let model = vm_resolve_model(&options, &provider);
+            let (provider, model) = crate::llm::managed_supply::logical_route(&provider, &model)?;
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+                extract_llm_options(args)
+            } else {
+                Err(initial_error)
+            }
+        }
+    }
+}
+
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
@@ -178,6 +213,7 @@ pub(crate) fn extract_llm_options(
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
+    let call_stage = opt_str(&options, "_call_stage").filter(|value| !value.trim().is_empty());
     let rate_limit_consumer_id = opt_str(&options, "rate_limit_consumer_id")
         .filter(|value| !value.trim().is_empty())
         .or_else(|| session_id.clone());
@@ -344,7 +380,7 @@ pub(crate) fn extract_llm_options(
     let messages = if opt_bool(&options, "_directives_rendered") {
         messages
     } else {
-        apply_rendered_reminder_messages(messages, &rendered_reminders, false)
+        apply_rendered_reminder_messages(messages, &rendered_reminders)
     };
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
@@ -815,6 +851,7 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         region: None,
         session_id,
+        call_stage,
         rate_limit_consumer_id,
         rate_limit_reroute_on_timeout: false,
         mock_scope,
@@ -964,7 +1001,12 @@ pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result
                 ttl.as_str(),
             )
         } else {
-            crate::llm::capabilities::admit_portable_option(&opts.provider, &opts.model, *option)
+            crate::llm::capabilities::admit_portable_option_for_thinking(
+                &opts.provider,
+                &opts.model,
+                &opts.thinking,
+                *option,
+            )
         };
         admitted.map_err(|error| {
             crate::llm::call::invalid_request_error(error.to_string(), &opts.provider, &opts.model)

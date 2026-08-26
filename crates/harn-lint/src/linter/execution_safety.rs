@@ -12,31 +12,29 @@ impl Linter<'_> {
         matches!(&node.node, Node::InterpolatedString(segments) if segments.iter().any(|segment| matches!(segment, StringSegment::Expression(_, _, _))))
     }
 
-    pub(super) fn is_boundary_api(name: &str) -> bool {
-        matches!(
-            name,
-            "json_parse"
-                | "json_extract"
-                | "yaml_parse"
-                | "toml_parse"
-                | "llm_call"
-                | "llm_completion"
-                | "http_get"
-                | "http_post"
-                | "http_put"
-                | "http_patch"
-                | "http_delete"
-                | "http_request"
-                | "http_session_request"
-                | "sse_receive"
-                | "sse_server_mock_receive"
-                | "sse_server_response"
-                | "sse_server_status"
-                | "websocket_accept"
-                | "websocket_receive"
-                | "host_call"
-                | "mcp_call"
-        )
+    /// The boundary API a node calls, in either spelling, labelled as it
+    /// should read in a diagnostic.
+    ///
+    /// `HARN-LNT-029` and the typechecker's `HARN-OWN-004` ask the same
+    /// question of the same list — `builtin_signatures` owns it — so the two
+    /// cannot drift apart again, and neither goes quiet when a call site
+    /// adopts the spelling `HARN-LNT-071` asks for.
+    pub(super) fn boundary_api_label(&self, node: &SNode) -> Option<String> {
+        match &node.node {
+            Node::FunctionCall { name, .. } => {
+                harn_parser::builtin_signatures::is_untyped_boundary_source(name)
+                    .then(|| format!("{name}()"))
+            }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. } => {
+                let capability = self.harness_capability_of(object)?;
+                harn_parser::builtin_signatures::is_untyped_boundary_capability_method(
+                    capability, method,
+                )
+                .then(|| format!("harness.{capability}.{method}()"))
+            }
+            _ => None,
+        }
     }
 
     pub(super) fn root_var_name(node: &SNode) -> Option<String> {

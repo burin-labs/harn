@@ -139,6 +139,7 @@ mod api_design;
 mod assert_pipeline;
 mod autofix;
 mod boolean_patterns;
+mod boundary_access_spelling;
 mod break_loop;
 mod builtin_call_spelling;
 mod complexity;

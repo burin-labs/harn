@@ -974,6 +974,37 @@ fn namespace_member_signature_excludes_a_defaulted_tail_from_required_params() {
     assert_eq!(signature.required_params, 1);
 }
 
+#[test]
+fn namespace_member_signature_carries_a_type_predicate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub fn is_text(value: unknown) -> value is string { return type_of(value) == \"string\" }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nlib.is_text(value)\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let namespaces = graph
+        .namespace_imports_for_file(&entry)
+        .expect("namespace info");
+    let predicate = namespaces[0].member_signatures["is_text"]
+        .type_predicate
+        .as_ref()
+        .expect("predicate contract");
+    assert_eq!(predicate.parameter, "value");
+    assert_eq!(
+        predicate.type_expr,
+        harn_parser::TypeExpr::Named("string".into())
+    );
+    assert!(!predicate.one_sided);
+}
+
 /// A generic member stays gradual: lowering it to a fixed `FnType` would
 /// compare arguments against an unbound type parameter and reject valid calls.
 #[test]

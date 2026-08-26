@@ -107,6 +107,24 @@ pub(crate) fn compiler_for_source(path: &Path, source: &str) -> harn_vm::Compile
     )
 }
 
+/// Build the same import-aware compiler without consulting ambient project
+/// authority. Standalone execution uses this path so a nearby manifest cannot
+/// elevate an otherwise identical script or its cached entry chunk.
+pub(crate) fn compiler_for_standalone_source(path: &Path, source: &str) -> harn_vm::Compiler {
+    let graph = harn_modules::build_with_standalone_source(path, source);
+    let imported = harn_vm::module_artifact::ModuleCompilationContext::for_source_in_graph(
+        &graph, path, source,
+    )
+    .unwrap_or_default();
+    SourceCompilerAuthority {
+        trusted_host_dispatch: false,
+    }
+    .compiler_with_imported_symbols(
+        imported.enum_candidates().iter().cloned(),
+        imported.source_callable_names().iter().cloned(),
+    )
+}
+
 pub(crate) fn imported_symbols_for_source(
     path: &Path,
     source: &str,

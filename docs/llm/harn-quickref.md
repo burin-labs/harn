@@ -735,6 +735,28 @@ fn handle(v: unknown) -> string {
 }
 ```
 
+Narrowing survives `const` aliases. A helper can publish the same fact with a
+type predicate:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+
+fn normalize(value: string | int) -> string {
+  const text = is_text(value)
+  if text { return value.upper() }
+  return to_string(value)
+}
+```
+
+Use `value is T` when false rules out `T`. Use `implies value is T` when only
+true proves `T`. The checker rejects a false contract with `HARN-TYP-029`.
+
 `never` is the bottom type — expressions like `throw`, `return`,
 `unreachable()`, and blocks that always exit infer to `never`. It's a
 subtype of every type.
@@ -2346,18 +2368,14 @@ or a session-hook effect list. Hosts inject ambient context with the
 bridge `session/remind` notification; `session/inject` remains user-role
 input.
 
-Append-only placement is experimental and off by default. Enable it with
-`reminders: {append_only: true}` or `HARN_REMINDERS_APPEND_ONLY=1`; an explicit
-`false` overrides the environment fallback. The runtime then commits each
-emitted envelope as one durable trailing user turn, and later requests retain
-those exact bytes at the same message index. This preserves provider prompt
-prefixes; compaction remains the deliberate prefix break.
+The runtime commits each reminder envelope as one durable trailing user turn.
+Later requests retain those exact bytes at the same message index. This
+preserves provider prompt prefixes; compaction remains the deliberate prefix
+break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives>` envelope, folded into the trailing user message by
-default or emitted as its own trailing user message in append-only mode. Its
-directives are ordered by authority (`contract`, `corrective`, `advisory`) and
-then lifecycle
+`<context-directives>` envelope in its own trailing user message. Its directives
+are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
 order; internal tags, dedupe keys, and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
 `role_hint` values remain accepted for replay compatibility but do not control
@@ -2416,7 +2434,7 @@ invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 error observations and appear under `tools.rejected`. The
 resilience surface is the `llm_caller:` seam (see "Composable LLM
 callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
-removed and the `deprecated_llm_options` lint hard-errors on them. Plus its
+removed and the `removed-llm-options` lint hard-errors on them. Plus its
 own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
 `native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that

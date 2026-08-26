@@ -662,6 +662,22 @@ embedding_max_tokens = 8191
     assert_eq!(model.embedding_max_tokens, Some(8191));
 }
 
+#[test]
+fn retired_groq_llama_models_are_absent_from_bundled_catalog() {
+    reset_overrides();
+
+    for model in ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"] {
+        assert!(
+            model_catalog_entry(model).is_none(),
+            "retired Groq model `{model}` must not be selected from the bundled catalog"
+        );
+    }
+
+    let active = model_catalog_entry("qwen/qwen3.6-27b")
+        .expect("the current Groq catalog route must remain available");
+    assert_eq!(active.provider, "groq");
+}
+
 mod diagnostics;
 mod embedded_catalog;
 mod overlays;

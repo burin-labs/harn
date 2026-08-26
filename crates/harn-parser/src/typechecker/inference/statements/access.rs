@@ -644,6 +644,38 @@ impl TypeChecker {
                 }
             }
         }
+        if let Node::MethodCall {
+            object: receiver,
+            method,
+            args,
+        }
+        | Node::OptionalMethodCall {
+            object: receiver,
+            method,
+            args,
+        } = &object.node
+        {
+            if let Some(field) = self.harness_capability_field(receiver, scope) {
+                if builtin_signatures::is_untyped_boundary_capability_method(field, method) {
+                    // The same schema suppression the ambient spelling gets.
+                    // `harness.llm.call` preserves the ambient argument
+                    // positions, so a typed `schema` option still means the
+                    // result was validated — without this, every
+                    // typed-schema LLM call would start erroring here.
+                    let has_schema = matches!(
+                        (field, method.as_str()),
+                        ("llm", "call") | ("llm", "completion")
+                    ) && Self::llm_call_has_typed_schema_option(args, scope);
+                    if !has_schema {
+                        self.error_at_with_help(Code::BoundaryValueUnvalidated,
+                            format!("{} on unvalidated `harness.{field}.{method}()` result", kind.direct_label()),
+                            span,
+                            "assign to a variable and validate with schema_expect() or schema_check() first".to_string(),
+                        );
+                    }
+                }
+            }
+        }
         if let Node::Identifier(name) = &object.node {
             if let Some(source) = scope.is_untyped_source(name) {
                 self.error_at_with_help(Code::BoundaryValueUnvalidated,
@@ -658,6 +690,24 @@ impl TypeChecker {
                 );
             }
         }
+    }
+
+    /// The capability field of a `harness.<capability>` receiver.
+    ///
+    /// Resolved from the receiver's *type*, not its spelling: `harness.net`
+    /// has type `HarnessNet`, while a local dict someone named `harness` does
+    /// not. The typechecker therefore needs none of the binding-identity
+    /// machinery the linter uses for the same question.
+    fn harness_capability_field(
+        &self,
+        receiver: &SNode,
+        scope: &TypeScope,
+    ) -> Option<&'static str> {
+        let raw_type = self.infer_type(receiver, scope)?;
+        let TypeExpr::Named(type_name) = self.resolve_alias(&raw_type, scope) else {
+            return None;
+        };
+        Some(harn_builtin_meta::CapabilityId::from_type_name(type_name.as_str())?.field_name())
     }
 
     /// Diagnose a property/subscript assignment target and compute the type

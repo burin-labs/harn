@@ -887,7 +887,7 @@ async fn llm_compaction_summary(
     })];
     let manifest = &mut compact_opts.context_manifest;
     manifest.record_system_transform("compaction", "stdlib:compaction", "removed system", None);
-    compact_opts.set_call_role("compaction");
+    compact_opts.set_call_attribution("compaction", "compact");
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {

@@ -24,6 +24,7 @@ impl TypeChecker {
         type_params: &[TypeParam],
         params: &[TypedParam],
         return_type: Option<&TypeExpr>,
+        type_predicate: Option<&TypePredicate>,
         name: &str,
         span: Span,
     ) {
@@ -35,6 +36,9 @@ impl TypeChecker {
         }
         if let Some(rt) = return_type {
             positions.push((rt, Polarity::Covariant));
+        }
+        if let Some(predicate) = type_predicate {
+            positions.push((&predicate.type_expr, Polarity::Covariant));
         }
         let kind = format!("function '{name}'");
         self.check_decl_variance(&kind, type_params, &positions, span);

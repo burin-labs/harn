@@ -37,6 +37,36 @@ pub struct ShellInvocation {
     pub shell: ShellDescriptor,
 }
 
+/// Shell grammars understood by Harn's command-safety analyzer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShellDialect {
+    Posix,
+    PowerShell,
+    Cmd,
+}
+
+impl ShellDialect {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Posix => "posix",
+            Self::PowerShell => "powershell",
+            Self::Cmd => "cmd",
+        }
+    }
+}
+
+pub(crate) fn shell_dialect_for_id(id: &str) -> Option<ShellDialect> {
+    let basename = id.rsplit(['/', '\\']).next().unwrap_or(id);
+    let lowercase = basename.to_ascii_lowercase();
+    let normalized = lowercase.strip_suffix(".exe").unwrap_or(&lowercase);
+    match normalized {
+        "sh" | "bash" | "zsh" => Some(ShellDialect::Posix),
+        "powershell" | "windowspowershell" | "pwsh" => Some(ShellDialect::PowerShell),
+        "cmd" => Some(ShellDialect::Cmd),
+        _ => None,
+    }
+}
+
 pub fn clear_selected_default_shell_for_test() {
     SELECTED_DEFAULT_SHELL_ID.with(|selected| *selected.borrow_mut() = None);
 }
@@ -44,23 +74,34 @@ pub fn clear_selected_default_shell_for_test() {
 pub fn discover_shells() -> ShellCatalog {
     let shells = platform_shells();
     let selected = SELECTED_DEFAULT_SHELL_ID.with(|selected| selected.borrow().clone());
-    let default_shell_id = selected
-        .filter(|id| {
-            shells
-                .iter()
-                .any(|shell| shell.id == *id && shell.available)
-        })
-        .or_else(|| {
-            shells
-                .iter()
-                .find(|shell| shell.available)
-                .map(|shell| shell.id.clone())
-        })
-        .or_else(|| shells.first().map(|shell| shell.id.clone()));
+    let default_shell_id =
+        select_default_shell(&shells, selected.as_deref()).map(|shell| shell.id.clone());
     ShellCatalog {
         shells,
         default_shell_id,
     }
+}
+
+fn select_default_shell<'a>(
+    shells: &'a [ShellDescriptor],
+    selected: Option<&str>,
+) -> Option<&'a ShellDescriptor> {
+    selected
+        .and_then(|id| {
+            shells.iter().find(|shell| {
+                shell.id == id && shell.available && shell_dialect_for_id(&shell.id).is_some()
+            })
+        })
+        .or_else(|| {
+            shells
+                .iter()
+                .find(|shell| shell.available && shell_dialect_for_id(&shell.id).is_some())
+        })
+        .or_else(|| {
+            shells
+                .iter()
+                .find(|shell| shell_dialect_for_id(&shell.id).is_some())
+        })
 }
 
 pub fn get_default_shell() -> Option<ShellDescriptor> {
@@ -83,8 +124,19 @@ pub fn set_default_shell(shell_id: &str) -> Result<ShellDescriptor, String> {
     else {
         return Err(format!("unknown or unavailable shell id {shell_id:?}"));
     };
+    validate_default_shell(&shell)?;
     SELECTED_DEFAULT_SHELL_ID.with(|selected| *selected.borrow_mut() = Some(shell.id.clone()));
     Ok(shell)
+}
+
+fn validate_default_shell(shell: &ShellDescriptor) -> Result<(), String> {
+    if shell_dialect_for_id(&shell.id).is_some() {
+        return Ok(());
+    }
+    Err(format!(
+        "shell {:?} cannot be the default because Harn cannot analyze its command syntax",
+        shell.id
+    ))
 }
 
 pub fn list_shells_vm_value() -> VmValue {
@@ -600,6 +652,12 @@ fn string_list(values: &[String]) -> VmValue {
 mod tests {
     use super::*;
 
+    fn available_shell(path: &str) -> ShellDescriptor {
+        let mut shell = descriptor_for_path(path, "test");
+        shell.available = true;
+        shell
+    }
+
     #[test]
     fn unix_shell_descriptor_uses_split_login_args() {
         let shell = descriptor_for_path("/bin/zsh", "fallback");
@@ -659,6 +717,26 @@ mod tests {
         assert_eq!(
             invocation.args[invocation.command_arg_index],
             "echo default-shell"
+        );
+    }
+
+    #[test]
+    fn implicit_default_skips_shells_the_command_analyzer_cannot_parse() {
+        let shells = vec![
+            available_shell("/usr/local/bin/fish"),
+            available_shell("/bin/zsh"),
+        ];
+
+        let default = select_default_shell(&shells, None).expect("supported default");
+        assert_eq!(default.id, "zsh");
+
+        let rejected_selection =
+            select_default_shell(&shells, Some("fish")).expect("supported fallback");
+        assert_eq!(rejected_selection.id, "zsh");
+
+        assert_eq!(
+            validate_default_shell(&shells[0]).unwrap_err(),
+            "shell \"fish\" cannot be the default because Harn cannot analyze its command syntax"
         );
     }
 

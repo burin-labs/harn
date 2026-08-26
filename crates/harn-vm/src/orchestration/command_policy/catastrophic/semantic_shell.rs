@@ -36,13 +36,7 @@ pub(crate) struct ShellAnalysis {
     pub(crate) unresolved: bool,
 }
 
-/// Shell grammars owned by the command-safety parser registry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ShellDialect {
-    Posix,
-    PowerShell,
-    Cmd,
-}
+use crate::shells::ShellDialect;
 
 #[derive(Debug)]
 pub(crate) struct ShellRedirect {
@@ -489,7 +483,12 @@ fn native_powershell_accepts(command: &str) -> Option<bool> {
             .spawn()
         {
             Ok(mut child) => match child.wait_timeout(Duration::from_secs(2)) {
-                Ok(Some(status)) => return Some(status.success()),
+                Ok(Some(status)) => {
+                    // Only the fixed parser program's exit code 2 proves a
+                    // syntax error. Startup and runtime failures leave the
+                    // native oracle unavailable.
+                    return powershell_parse_result(status.code());
+                }
                 Ok(None) => {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -502,6 +501,14 @@ fn native_powershell_accepts(command: &str) -> Option<bool> {
         }
     }
     None
+}
+
+fn powershell_parse_result(exit_code: Option<i32>) -> Option<bool> {
+    match exit_code {
+        Some(0) => Some(true),
+        Some(2) => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(windows)]
@@ -1028,6 +1035,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn powershell_native_parser_reserves_syntax_error_exit() {
+        assert_eq!(powershell_parse_result(Some(0)), Some(true));
+        assert_eq!(powershell_parse_result(Some(2)), Some(false));
+        assert_eq!(powershell_parse_result(Some(1)), None);
+        assert_eq!(powershell_parse_result(None), None);
+    }
+
+    #[test]
     fn powershell_fallback_agrees_with_native_parser_when_available() {
         let cases = [
             "Write-Output 'literal value'",
@@ -1035,11 +1050,10 @@ mod tests {
             "Write-Output before; Get-ChildItem | Select-Object Name",
             "Write-Output \"unterminated",
         ];
-        if native_powershell_accepts(cases[0]).is_none() {
-            return;
-        }
         for command in cases {
-            let native_accepts = native_powershell_accepts(command).expect("native parser present");
+            let Some(native_accepts) = native_powershell_accepts(command) else {
+                return;
+            };
             let fallback_accepts = !analyze_powershell(command).unresolved;
             assert_eq!(
                 fallback_accepts, native_accepts,

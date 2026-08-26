@@ -21,9 +21,12 @@ import {
 } from "lib/common.harn"
 import { profile_for_task } from "lib/profiles.harn"
 import {
+  background_command_tools,
   read_workspace,
   run_workspace,
+  run_workspace_command,
   search_workspace,
+  wait_workspace_command,
   workspace_root,
   write_workspace,
 } from "lib/workspace.harn"
@@ -84,6 +87,22 @@ fn edit_tools(fs: HarnessFs, process: HarnessProcess) {
 
 fn verify_tools(fs: HarnessFs, process: HarnessProcess) {
   return edit_tools(fs, process)
+}
+
+/**
+ * The execute-stage registry for one profile.
+ *
+ * A profile that declares `background_after_ms` gets the handle lifecycle; every
+ * other profile keeps the blocking `run` it has always had, so the existing
+ * canonical tasks and their fixtures are untouched by this seam.
+ */
+fn execute_tools_for(harness: Harness, profile: dict) {
+  const budget = profile?.background_after_ms ?? 0
+  const tools = edit_tools(harness.fs, harness.process)
+  if budget > 0 {
+    return background_command_tools({fs: harness.fs, tools: harness.tools}, tools, budget)
+  }
+  return tools
 }
 
 fn planner_prompt(
@@ -336,10 +355,10 @@ fn graph_research_template(harness: Harness) {
   }
 }
 
-fn graph_execute_template(harness: Harness) {
+fn graph_execute_template(harness: Harness, profile: dict) {
   return {
     mode: "agent",
-    tools: edit_tools(harness.fs, harness.process),
+    tools: execute_tools_for(harness, profile),
     system: execute_system(),
     model_policy: apply_reasoning_policy(
       harness.env,
@@ -386,7 +405,7 @@ fn execute_graph(harness: Harness, task: any, profile: dict, facts: list, plan: 
     {
       name: "burin_mini_${profile?.id}",
       research: graph_research_template(harness),
-      execute: graph_execute_template(harness),
+      execute: graph_execute_template(harness, profile),
       verify: graph_verify_template(profile),
     },
     {

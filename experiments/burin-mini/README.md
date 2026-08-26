@@ -15,6 +15,10 @@ This version stays deliberately small:
 1. `Explain this repo to me in simple terms`
 2. `Comment what this file does`
 3. `Add rate limiting middleware to the auth module`
+4. `Add rate limiting middleware to the auth module with the slow verifier`
+
+Task 4 is task 3 with a verifier that does not answer inline. See
+[Slow verifiers and the command handle lifecycle](#slow-verifiers-and-the-command-handle-lifecycle).
 
 The host and pipeline resolve those prompts onto the local sample workspace so
 the experiment is reproducible from this clone.
@@ -29,6 +33,44 @@ harn playground \
   --script experiments/burin-mini/pipeline.harn \
   --task "Explain this repo to me in simple terms"
 ```
+
+## Slow verifiers and the command handle lifecycle
+
+Most verifiers in this playground return instantly, which hides a lifecycle that
+real test suites always have: a command slower than its foreground budget does
+**not** answer inline. The runner hands back a handle whose status is `running`,
+and the exit status plus output arrive later, on the wait that resolves that
+handle.
+
+A loop that never performs that wait can watch a passing suite forever and never
+learn it passed, because each fresh call starts another command and returns
+another handle. That failure mode is invisible to a playground whose commands
+all finish in milliseconds.
+
+The `slow_verify_auth` profile makes it reachable. It declares
+`background_after_ms`, which swaps the blocking `run` tool for a pair:
+
+- `run` returns a handle with `status: running` for any command that outlives
+  the budget
+- `wait_command` turns that handle into an exit status and output
+
+Profiles that do not declare `background_after_ms` keep the blocking `run` they
+have always had, so the first three tasks are unaffected.
+
+`tests/verify_channel_test.harn` pins the contract: a slow command really does
+convert to a handle, waiting on it yields the real exit code and output, a
+failing verifier comes back red, a fast command still answers inline in one
+round trip, and resolving a handle costs what the command costs rather than a
+multiple of the budget. Two of those cases go through the tool registry the
+execute stage hands the model and recover the handle from the rendered result
+the way a model must.
+
+Note that a static `--llm-mock` fixture cannot express that last step: its tool
+arguments are fixed before the handle exists, so it can never name the handle
+the run just issued. The fixture below therefore runs the slow verifier and
+stops at the handle. That is a faithful reproduction of the failure mode, not a
+demonstration of the fix -- the run reports `verdict=pass` having never
+collected the verifier's result.
 
 ## Deterministic fixture runs
 
@@ -50,7 +92,17 @@ harn playground \
   --script experiments/burin-mini/pipeline.harn \
   --task "Add rate limiting middleware to the auth module" \
   --llm-mock experiments/burin-mini/fixtures/rate-limit.jsonl
+
+harn playground \
+  --host experiments/burin-mini/host.harn \
+  --script experiments/burin-mini/pipeline.harn \
+  --task "Add rate limiting middleware to the auth module with the slow verifier" \
+  --llm-mock experiments/burin-mini/fixtures/slow-verify.jsonl
 ```
+
+Running a fixture writes into the tracked sample workspace under `workspace/`.
+Restore it with `git checkout -- experiments/burin-mini/workspace` (and delete
+any file the run created) before committing.
 
 ## Live Ollama runs
 
@@ -139,7 +191,9 @@ requests were not stable enough in this harness during the May 2026 tuning pass.
 - Semantic evaluator helpers live in `lib/eval_common.harn`, and the grader
   entrypoint is `evaluator.harn`.
 - The verify script for the rate-limit task lives at
-  `workspace/scripts/verify-rate-limit.sh`.
+  `workspace/scripts/verify-rate-limit.sh`. The slow-verifier variant is
+  `workspace/scripts/verify-slow.sh`; override its delay with
+  `MINI_VERIFY_SLEEP_SECONDS`.
 - Repo integration:
   `cargo test -p harn-cli --test burin_mini_playground` exercises the paired
   playground host+pipeline flow, while `make lint-harn` checks the standalone

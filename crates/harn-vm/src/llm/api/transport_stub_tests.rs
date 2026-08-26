@@ -12,6 +12,8 @@ use super::{
 };
 use crate::llm::env_guard;
 
+mod terminal_usage;
+
 /// Cooperative accept: blocks the stub thread on a real
 /// `accept()` call until a client connects, then returns the
 /// stream. Shutdown wakes the thread by self-connecting to the
@@ -255,6 +257,14 @@ fn spawn_openai_empty_stub_many(
 fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let cache_usage_accounting = crate::llm_config::provider_config(provider)
         .and_then(|provider| provider.cache_usage_accounting);
+    install_openai_stub_provider_with_cache_accounting(provider, addr, cache_usage_accounting);
+}
+
+fn install_openai_stub_provider_with_cache_accounting(
+    provider: &str,
+    addr: std::net::SocketAddr,
+    cache_usage_accounting: Option<bool>,
+) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
     overlay.providers.insert(
         provider.to_string(),
@@ -277,7 +287,7 @@ mod managed_supply_tests;
 mod cache_accounting_tests;
 
 #[test]
-fn capability_admission_rejects_before_transport_egress() {
+fn reasoning_scoped_capability_admission_rejects_before_transport_egress() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -289,15 +299,18 @@ fn capability_admission_rejects_before_transport_egress() {
     crate::llm::capabilities::set_user_overrides_toml(
         r#"
 [[provider.admission-sentinel]]
-model_match = "unsupported-temperature"
-temperature_supported = false
+model_match = "reasoning-temperature"
+reasoning_excluded_portable_options = ["temperature"]
 "#,
     )
     .expect("capability overlay");
 
     let mut opts = base_opts("admission-sentinel");
-    opts.model = "unsupported-temperature".to_string();
+    opts.model = "reasoning-temperature".to_string();
     opts.temperature = Some(0.2);
+    opts.thinking = crate::llm::api::ThinkingConfig::Effort {
+        level: crate::llm::api::ReasoningEffort::Low,
+    };
     opts.portable_option_intent
         .insert(crate::llm::capabilities::PortableOption::Temperature);
 
@@ -327,7 +340,7 @@ temperature_supported = false
     );
     assert_eq!(
         fields.get("model").map(crate::value::VmValue::display),
-        Some("unsupported-temperature".to_string())
+        Some("reasoning-temperature".to_string())
     );
     assert_eq!(
         request_count.load(std::sync::atomic::Ordering::SeqCst),
@@ -544,7 +557,7 @@ fn offthread_streaming_completes_inside_localset() {
 }
 
 #[test]
-fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
+fn llamacpp_openai_transport_reports_route_and_supported_cache_accounting() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -567,7 +580,7 @@ fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
         assert_eq!(
             crate::llm_config::provider_config("llamacpp")
                 .and_then(|provider| provider.cache_usage_accounting),
-            Some(false)
+            Some(true)
         );
 
         let mut opts = base_opts("llamacpp");
@@ -582,7 +595,7 @@ fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
         assert!(result.output_tokens > 0);
         assert_eq!(result.cache_read_tokens, 0);
         assert_eq!(result.cache_write_tokens, 0);
-        assert!(!result.cache_supported);
+        assert!(result.cache_supported);
         assert_eq!(
             result.telemetry.serving_base_url.as_deref(),
             Some(format!("http://{addr}/v1").as_str())

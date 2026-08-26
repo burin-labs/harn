@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{WorkerQueueClaimHandle, WorkerQueueJob, WorkerQueueResponseRecord};
+use super::{TenantClaimScope, WorkerQueueClaimHandle, WorkerQueueJob, WorkerQueueResponseRecord};
 use crate::triggers::scheduler::{self, SchedulableJob, SchedulerPolicy, SchedulerState};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,11 +74,22 @@ impl WorkerQueueState {
         policy: &SchedulerPolicy,
         now_ms: i64,
         excluded_job_event_ids: &BTreeSet<u64>,
+        tenant_scope: TenantClaimScope<'_>,
     ) -> Option<(&WorkerQueueJobState, scheduler::SchedulerSelection)> {
         let candidates: Vec<&WorkerQueueJobState> = self
             .jobs
             .iter()
-            .filter(|job| job.is_ready() && !excluded_job_event_ids.contains(&job.job_event_id))
+            .filter(|job| {
+                job.is_ready()
+                    && !excluded_job_event_ids.contains(&job.job_event_id)
+                    && match tenant_scope {
+                        TenantClaimScope::Any => true,
+                        TenantClaimScope::Untenanted => job.job.event.tenant_id.is_none(),
+                        TenantClaimScope::Tenant(tenant_id) => {
+                            job.job.event.tenant_id.as_ref() == Some(tenant_id)
+                        }
+                    }
+            })
             .collect();
         if candidates.is_empty() {
             return None;

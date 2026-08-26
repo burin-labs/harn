@@ -720,6 +720,49 @@ async fn sse_transcript_drives_the_same_assembly() {
 }
 
 #[tokio::test]
+async fn sse_transcript_rejects_eof_before_interaction_completion() {
+    let transcript = concat!(
+        "event: interaction.created\n",
+        "data: {\"interaction\":{\"id\":\"v1_abc\",\"status\":\"in_progress\"},\"event_type\":\"interaction.created\"}\n",
+        "\n",
+        "event: step.start\n",
+        "data: {\"index\":0,\"step\":{\"type\":\"model_output\"},\"event_type\":\"step.start\"}\n",
+        "\n",
+        "event: step.delta\n",
+        "data: {\"index\":0,\"delta\":{\"text\":\"partial\",\"type\":\"text\"},\"event_type\":\"step.delta\"}\n",
+        "\n",
+    );
+
+    let error = super::interactions::consume_interaction_sse(
+        transcript.as_bytes(),
+        None,
+        interactions_dialect(),
+    )
+    .await
+    .expect_err("an incomplete interaction stream must not become a response");
+
+    let failure = error
+        .provider_stream_failure()
+        .expect("an incomplete stream must report a typed failure");
+    assert_eq!(failure.provider, "gemini");
+    assert_eq!(
+        failure.reason,
+        crate::value::ProviderStreamFailureReason::PrematureEof
+    );
+    assert_eq!(failure.phase, crate::value::ProviderStreamPhase::Streaming);
+    assert!(
+        failure.partial,
+        "the text delta must be recorded as partial"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("stream ended before interaction.completed"),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
 async fn stream_parser_rejects_a_mismatched_dialect_contract() {
     let dialect = crate::llm::api::DialectContract::new(
         crate::llm::capabilities::WireDialect::OpenAiCompat,

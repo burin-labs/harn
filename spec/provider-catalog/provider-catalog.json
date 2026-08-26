@@ -684,7 +684,8 @@
         "method": "GET",
         "path": "/v1/models"
       },
-      "cache_usage_accounting": false,
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1903,8 +1904,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Retired 2026-01-05 per Anthropic deprecations page. Use claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2252,8 +2253,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Deprecated 2026-06-05 per Anthropic deprecations page; retires 2026-08-05. Use claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2366,8 +2367,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8.",
-        "superseded_by": "claude-opus-4-8"
+        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5.",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2480,7 +2481,7 @@
       },
       "deprecation": {
         "status": "active",
-        "superseded_by": "claude-opus-4-8"
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2589,9 +2590,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
-        "superseded_by": "claude-opus-4-8"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2712,9 +2712,8 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
-        "superseded_by": "claude-opus-4-8"
+        "status": "active",
+        "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2865,8 +2864,7 @@
         "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Superseded by claude-opus-5 (same $5/$25 pricing). No formal sunset yet; switch when convenient.",
+        "status": "active",
         "superseded_by": "claude-opus-5"
       },
       "availability": "serverless",
@@ -9136,7 +9134,7 @@
         "tpm": 200000,
         "tier": "developer",
         "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-07-09",
+        "last_verified": "2026-08-25",
         "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
       },
       "modalities": {
@@ -9184,7 +9182,9 @@
         "turnaround_hours": 24
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-25 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-120b, the Groq route that keeps built-in web search and code execution.",
+        "superseded_by": "groq/openai/gpt-oss-120b"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9214,7 +9214,7 @@
         "tpm": 200000,
         "tier": "developer",
         "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-07-09",
+        "last_verified": "2026-08-25",
         "notes": "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec."
       },
       "modalities": {
@@ -9262,7 +9262,9 @@
         "turnaround_hours": 24
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-24 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-20b, Groq's recommended replacement for its retired small routes.",
+        "superseded_by": "groq/openai/gpt-oss-20b"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9492,200 +9494,6 @@
         "cheap",
         "tool_use",
         "reasoning"
-      ]
-    },
-    {
-      "id": "llama-3.1-8b-instant",
-      "name": "Llama 3.1 8B Instant (Groq)",
-      "display_name": "Llama 3.1 8B Instant",
-      "provider": "groq",
-      "aliases": [],
-      "context_window": 131072,
-      "logical_model": "llama-3.1-8b-instruct",
-      "equivalence_group": "llama-3.1-8b-instruct",
-      "served_variant": "groq-lpu",
-      "api_dialect": "openai_chat",
-      "rate_limits": {
-        "rpm": 1000,
-        "tpm": 250000,
-        "tier": "developer",
-        "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-06-05"
-      },
-      "architecture": {
-        "parameter_count_b": 8.0,
-        "moe": false,
-        "license": "Llama 3.1 Community",
-        "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-06-05"
-      },
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "none"
-      },
-      "reasoning": {
-        "modes": [],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": false,
-      "batch": {
-        "wire_format": "openai",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "per_request",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24
-      },
-      "pricing": {
-        "input_per_mtok": 0.05,
-        "output_per_mtok": 0.08,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "deprecated",
-        "note": "Groq shut down this developer-tier route on 2026-08-16. Enterprise committed-spend routes are unaffected. Use openai/gpt-oss-20b.",
-        "superseded_by": "openai/gpt-oss-20b"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "structured_output",
-        "batch"
-      ],
-      "family": "llama",
-      "lineage": "llama",
-      "tier": "small",
-      "open_weight": true,
-      "strengths": [
-        "speed",
-        "cheap"
-      ]
-    },
-    {
-      "id": "llama-3.3-70b-versatile",
-      "name": "Llama 3.3 70B Versatile (Groq)",
-      "display_name": "Llama 3.3 70B Versatile",
-      "provider": "groq",
-      "aliases": [],
-      "context_window": 131072,
-      "logical_model": "llama-3.3-70b-instruct",
-      "equivalence_group": "llama-3.3-70b-instruct",
-      "served_variant": "groq-lpu",
-      "api_dialect": "openai_chat",
-      "rate_limits": {
-        "rpm": 1000,
-        "tpm": 300000,
-        "tier": "developer",
-        "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-06-05"
-      },
-      "architecture": {
-        "parameter_count_b": 70.0,
-        "moe": false,
-        "license": "Llama 3.3 Community",
-        "source_url": "https://console.groq.com/docs/models",
-        "last_verified": "2026-06-05"
-      },
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "none"
-      },
-      "reasoning": {
-        "modes": [],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": false,
-      "batch": {
-        "wire_format": "openai",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "per_request",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24
-      },
-      "pricing": {
-        "input_per_mtok": 0.59,
-        "output_per_mtok": 0.79,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "deprecated",
-        "note": "Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/deprecations. Use qwen/qwen3.6-27b on Groq or llama-3.1-8b-instant for the cheap tier."
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "structured_output",
-        "batch"
-      ],
-      "family": "llama",
-      "lineage": "llama",
-      "tier": "mid",
-      "open_weight": true,
-      "strengths": [
-        "speed",
-        "cheap",
-        "tool_use"
       ]
     },
     {
@@ -25991,6 +25799,89 @@
     },
     {
       "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.6",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.7",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Opus 4.8",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
       "model": "claude-opus-5",
       "base_url": "https://api.anthropic.com/v1",
       "secret_env": "ANTHROPIC_API_KEY",
@@ -27124,34 +27015,6 @@
         "thinking",
         "tools",
         "vision"
-      ]
-    },
-    {
-      "provider": "groq",
-      "model": "groq/compound",
-      "base_url": "https://api.groq.com/openai/v1",
-      "secret_env": "GROQ_API_KEY",
-      "label": "Groq Compound",
-      "family": "groq",
-      "capabilities": [
-        "batch",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output_mode:none"
-      ]
-    },
-    {
-      "provider": "groq",
-      "model": "groq/compound-mini",
-      "base_url": "https://api.groq.com/openai/v1",
-      "secret_env": "GROQ_API_KEY",
-      "label": "Groq Compound Mini",
-      "family": "groq",
-      "capabilities": [
-        "batch",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output_mode:none"
       ]
     },
     {

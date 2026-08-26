@@ -13,6 +13,7 @@ fn native_tool_calls_replay_with_canonical_durable_shape() {
     let result = crate::stdlib::json_to_vm_value(&json!({
         "provider": "local",
         "text": "",
+        "_effective_tool_format": "native",
         "native_tool_calls": [{
             "id": "call_001",
             "name": "release_run",

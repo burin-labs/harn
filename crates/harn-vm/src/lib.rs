@@ -77,9 +77,9 @@ pub mod host_attachments;
 
 /// Placement policy for child-interpreter subtasks.
 ///
-/// Current-thread placement is the safe default. Embedders may scope an
-/// audited execution tree to worker placement when every reachable capability
-/// supports crossing a runtime thread boundary.
+/// Worker placement is the default. Embedders with a deliberately
+/// single-threaded host may scope an execution tree to current-thread
+/// placement explicitly.
 pub mod subtask {
     pub use crate::vm::subtask::{
         placement, scope_placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV,
@@ -278,9 +278,10 @@ pub use connectors::{
     },
     hmac::{verify_hmac_signed, SIGNATURE_VERIFY_AUDIT_TOPIC},
     install_active_connector_clients, install_active_metrics_registry,
-    postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
-    ConnectorCtx, ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse,
-    ConnectorMetricsSnapshot, ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
+    postprocess_normalized_event, scope_active_connector_clients, ActivationHandle,
+    ActiveConnectorClientsGuard, ClientError, Connector, ConnectorClient, ConnectorCtx,
+    ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse, ConnectorMetricsSnapshot,
+    ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
     HarnConnectorEffectPolicies, MetricsRegistry, PostNormalizeOutcome, ProviderPayloadSchema,
     RateLimitConfig, RateLimiterFactory, RawInbound, StreamConnector, TriggerBinding, TriggerKind,
     TriggerRegistry, WebhookSignatureVariant,
@@ -545,32 +546,80 @@ pub fn compile_source_named(source: &str, pipeline_name: &str) -> Result<Chunk, 
         .map_err(|e| e.to_string())
 }
 
-/// Lowers Harn `TypeExpr`s to JSON Schema with `type`-alias EXPANSION, built once
-/// from a parsed program's alias declarations. Without expansion, a tool parameter
-/// typed as a user alias (`p: EvalSource`, `p: FunnelStage`) erases to an empty
-/// `{}` schema because the low-level lowering only recognizes built-in type names —
-/// the exporter must first resolve the alias to its underlying shape/union (a
-/// literal-union alias then round-trips as a JSON `enum`). Cycle-safe via the same
-/// `expand_alias` guard the compiler and typechecker share.
-pub struct SchemaAliasResolver {
+/// Lowers resolved Harn declarations to JSON Schema for public host boundaries.
+///
+/// The resolver owns aliases, structs, enums, imports, and generic
+/// instantiation. Building it once from the visible module declarations keeps
+/// transports and SDK generators from reproducing Harn's type system.
+pub struct TypeSchemaResolver {
     compiler: compiler::Compiler,
+    nominal_types: std::collections::BTreeMap<String, SchemaNominalType>,
 }
 
-impl SchemaAliasResolver {
-    /// A resolver with no aliases in scope — lowering is identical to the raw
-    /// (unexpanded) form, so `Named(alias)` still lowers to `{}` when unknown.
+#[derive(Clone)]
+enum SchemaNominalType {
+    Struct {
+        type_params: Vec<harn_parser::TypeParam>,
+        fields: Vec<harn_parser::StructField>,
+    },
+    Enum {
+        type_params: Vec<harn_parser::TypeParam>,
+        variants: Vec<harn_parser::EnumVariant>,
+    },
+}
+
+impl TypeSchemaResolver {
+    /// A resolver with no user declarations in scope.
     pub fn empty() -> Self {
         Self {
             compiler: compiler::Compiler::new(),
+            nominal_types: std::collections::BTreeMap::new(),
         }
     }
 
-    /// Collect every `type` alias declared in `program`, so named references in
-    /// tool signatures resolve to their bodies.
+    /// Collect every visible type declaration in `program`.
     pub fn from_program(program: &[harn_parser::SNode]) -> Self {
         let mut compiler = compiler::Compiler::new();
         compiler.collect_type_aliases(program);
-        Self { compiler }
+        let mut nominal_types = std::collections::BTreeMap::new();
+        for node in program {
+            let (_, declaration) = harn_parser::peel_attributes(node);
+            match &declaration.node {
+                harn_parser::Node::StructDecl {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
+                    nominal_types.insert(
+                        name.clone(),
+                        SchemaNominalType::Struct {
+                            type_params: type_params.clone(),
+                            fields: fields.clone(),
+                        },
+                    );
+                }
+                harn_parser::Node::EnumDecl {
+                    name,
+                    type_params,
+                    variants,
+                    ..
+                } => {
+                    nominal_types.insert(
+                        name.clone(),
+                        SchemaNominalType::Enum {
+                            type_params: type_params.clone(),
+                            variants: variants.clone(),
+                        },
+                    );
+                }
+                _ => {}
+            }
+        }
+        Self {
+            compiler,
+            nominal_types,
+        }
     }
 
     /// JSON Schema for one `TypeExpr`, expanding any named alias first. `None`
@@ -579,10 +628,196 @@ impl SchemaAliasResolver {
         &self,
         type_expr: &harn_parser::TypeExpr,
     ) -> Option<serde_json::Value> {
+        self.json_schema_for_type_expr_inner(type_expr, &mut Vec::new())
+    }
+
+    /// Input projection keeps the established structural contract: inline
+    /// shapes and aliases lower to JSON Schema, while nominal declarations do
+    /// not advertise a wire form until the argument bridge can hydrate that
+    /// form into a nominal runtime value.
+    pub fn json_schema_for_input_type_expr(
+        &self,
+        type_expr: &harn_parser::TypeExpr,
+    ) -> Option<serde_json::Value> {
         let expanded = self.compiler.expand_alias(type_expr);
         let schema = compiler::Compiler::type_expr_to_schema_value(&expanded)?;
         let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
         Some(llm::vm_value_to_json(&json_schema))
+    }
+
+    fn json_schema_for_type_expr_inner(
+        &self,
+        type_expr: &harn_parser::TypeExpr,
+        resolving: &mut Vec<harn_parser::TypeExpr>,
+    ) -> Option<serde_json::Value> {
+        const MAX_SCHEMA_TYPE_NEST: usize = 128;
+        let expanded = self.compiler.expand_alias(type_expr);
+        if resolving.len() >= MAX_SCHEMA_TYPE_NEST || resolving.contains(&expanded) {
+            return Some(serde_json::json!({}));
+        }
+
+        if let Some((name, args)) = nominal_reference(&expanded) {
+            if let Some(declaration) = self.nominal_types.get(name).cloned() {
+                resolving.push(expanded.clone());
+                let schema = self.json_schema_for_nominal(name, &declaration, args, resolving);
+                resolving.pop();
+                return schema;
+            }
+        }
+
+        if !contains_nominal_reference(&expanded, &self.nominal_types) {
+            let schema = compiler::Compiler::type_expr_to_schema_value(&expanded)?;
+            let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
+            return Some(llm::vm_value_to_json(&json_schema));
+        }
+
+        use harn_parser::TypeExpr;
+        match expanded {
+            TypeExpr::Shape(fields) => {
+                let mut properties = serde_json::Map::new();
+                let mut required = Vec::new();
+                for field in fields {
+                    let mut field_schema =
+                        self.json_schema_for_type_expr_inner(&field.type_expr, resolving)?;
+                    if field.optional {
+                        field_schema = serde_json::json!({
+                            "anyOf": [field_schema, {"type": "null"}],
+                        });
+                    } else {
+                        required.push(serde_json::Value::String(field.name.clone()));
+                    }
+                    properties.insert(field.name, field_schema);
+                }
+                Some(serde_json::json!({
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                }))
+            }
+            TypeExpr::List(inner) => Some(serde_json::json!({
+                "type": "array",
+                "items": self.json_schema_for_type_expr_inner(&inner, resolving)?,
+            })),
+            TypeExpr::Tuple(elements) => {
+                let prefix_items = elements
+                    .iter()
+                    .map(|element| self.json_schema_for_type_expr_inner(element, resolving))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(serde_json::json!({
+                    "type": "array",
+                    "prefixItems": prefix_items,
+                    "items": false,
+                    "minItems": elements.len(),
+                    "maxItems": elements.len(),
+                }))
+            }
+            TypeExpr::DictType(key, value) if matches!(key.as_ref(), TypeExpr::Named(name) if name == "string") => {
+                Some(serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": self
+                        .json_schema_for_type_expr_inner(&value, resolving)?,
+                }))
+            }
+            TypeExpr::Union(members) => Some(serde_json::json!({
+                "anyOf": members
+                    .iter()
+                    .map(|member| self.json_schema_for_type_expr_inner(member, resolving))
+                    .collect::<Option<Vec<_>>>()?,
+            })),
+            TypeExpr::Intersection(members) => Some(serde_json::json!({
+                "allOf": members
+                    .iter()
+                    .map(|member| self.json_schema_for_type_expr_inner(member, resolving))
+                    .collect::<Option<Vec<_>>>()?,
+            })),
+            TypeExpr::Owned(inner) => self.json_schema_for_type_expr_inner(&inner, resolving),
+            _ => None,
+        }
+    }
+
+    fn json_schema_for_nominal(
+        &self,
+        name: &str,
+        declaration: &SchemaNominalType,
+        args: &[harn_parser::TypeExpr],
+        resolving: &mut Vec<harn_parser::TypeExpr>,
+    ) -> Option<serde_json::Value> {
+        let type_params = match declaration {
+            SchemaNominalType::Struct { type_params, .. }
+            | SchemaNominalType::Enum { type_params, .. } => type_params,
+        };
+        if type_params.len() != args.len() {
+            return None;
+        }
+        let bindings = type_params
+            .iter()
+            .zip(args.iter().cloned())
+            .map(|(param, arg)| (param.name.clone(), arg))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        match declaration {
+            SchemaNominalType::Struct { fields, .. } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| harn_parser::ShapeField {
+                        name: field.name.clone(),
+                        type_expr: field
+                            .type_expr
+                            .as_ref()
+                            .map(|ty| harn_parser::substitute_type_expr(ty, &bindings))
+                            .unwrap_or_else(|| harn_parser::TypeExpr::Named("unknown".into())),
+                        optional: field.optional,
+                        span: field.span,
+                    })
+                    .collect();
+                self.json_schema_for_type_expr_inner(
+                    &harn_parser::TypeExpr::Shape(fields),
+                    resolving,
+                )
+            }
+            SchemaNominalType::Enum { variants, .. } => {
+                let branches = variants
+                    .iter()
+                    .map(|variant| {
+                        let prefix_items = variant
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                let type_expr = field.type_expr.as_ref()?;
+                                let instantiated =
+                                    harn_parser::substitute_type_expr(type_expr, &bindings);
+                                let mut schema =
+                                    self.json_schema_for_type_expr_inner(&instantiated, resolving)?;
+                                if let serde_json::Value::Object(object) = &mut schema {
+                                    object.insert(
+                                        "title".to_string(),
+                                        serde_json::Value::String(field.name.clone()),
+                                    );
+                                }
+                                Some(schema)
+                            })
+                            .collect::<Option<Vec<_>>>()?;
+                        Some(serde_json::json!({
+                            "type": "object",
+                            "properties": {
+                                "enum": {"const": name},
+                                "variant": {"const": variant.name},
+                                "fields": {
+                                    "type": "array",
+                                    "prefixItems": prefix_items,
+                                    "items": false,
+                                    "minItems": variant.fields.len(),
+                                    "maxItems": variant.fields.len(),
+                                },
+                            },
+                            "required": ["enum", "variant", "fields"],
+                            "additionalProperties": false,
+                        }))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(serde_json::json!({"oneOf": branches}))
+            }
+        }
     }
 
     /// JSON Schema `object` for a parameter list (a served tool's `inputSchema`),
@@ -598,7 +833,7 @@ impl SchemaAliasResolver {
             let param_schema = param
                 .type_expr
                 .as_ref()
-                .and_then(|type_expr| self.json_schema_for_type_expr(type_expr))
+                .and_then(|type_expr| self.json_schema_for_input_type_expr(type_expr))
                 .unwrap_or_else(|| serde_json::json!({}));
             if param.default_value.is_none() {
                 required.push(serde_json::Value::String(param.name.clone()));
@@ -622,15 +857,74 @@ impl SchemaAliasResolver {
     }
 }
 
-/// Raw lowering with no program aliases in scope. Prefer
-/// [`SchemaAliasResolver::from_program`] when serving a module so named-alias
-/// parameters resolve instead of erasing to `{}`.
+fn nominal_reference(
+    type_expr: &harn_parser::TypeExpr,
+) -> Option<(&str, &[harn_parser::TypeExpr])> {
+    match type_expr {
+        harn_parser::TypeExpr::Named(name) => Some((name, &[])),
+        harn_parser::TypeExpr::Applied { name, args } => Some((name, args)),
+        _ => None,
+    }
+}
+
+fn contains_nominal_reference(
+    type_expr: &harn_parser::TypeExpr,
+    nominal_types: &std::collections::BTreeMap<String, SchemaNominalType>,
+) -> bool {
+    use harn_parser::TypeExpr;
+    match type_expr {
+        TypeExpr::Named(name) => nominal_types.contains_key(name),
+        TypeExpr::Applied { name, args } => {
+            nominal_types.contains_key(name)
+                || args
+                    .iter()
+                    .any(|arg| contains_nominal_reference(arg, nominal_types))
+        }
+        TypeExpr::Union(types) | TypeExpr::Intersection(types) | TypeExpr::Tuple(types) => types
+            .iter()
+            .any(|ty| contains_nominal_reference(ty, nominal_types)),
+        TypeExpr::Shape(fields) => fields
+            .iter()
+            .any(|field| contains_nominal_reference(&field.type_expr, nominal_types)),
+        TypeExpr::OpenShape { fields, rests } => {
+            fields
+                .iter()
+                .any(|field| contains_nominal_reference(&field.type_expr, nominal_types))
+                || rests
+                    .iter()
+                    .any(|rest| contains_nominal_reference(rest, nominal_types))
+        }
+        TypeExpr::List(inner)
+        | TypeExpr::Iter(inner)
+        | TypeExpr::Generator(inner)
+        | TypeExpr::Stream(inner)
+        | TypeExpr::Owned(inner) => contains_nominal_reference(inner, nominal_types),
+        TypeExpr::DictType(key, value) => {
+            contains_nominal_reference(key, nominal_types)
+                || contains_nominal_reference(value, nominal_types)
+        }
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => {
+            params
+                .iter()
+                .any(|param| contains_nominal_reference(param, nominal_types))
+                || contains_nominal_reference(return_type, nominal_types)
+        }
+        TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => false,
+    }
+}
+
+/// Raw lowering with no program declarations in scope. Prefer
+/// [`TypeSchemaResolver::from_program`] when serving a module so named
+/// declarations resolve instead of erasing to `{}`.
 pub fn json_schema_for_type_expr(type_expr: &harn_parser::TypeExpr) -> Option<serde_json::Value> {
-    SchemaAliasResolver::empty().json_schema_for_type_expr(type_expr)
+    TypeSchemaResolver::empty().json_schema_for_type_expr(type_expr)
 }
 
 pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde_json::Value {
-    SchemaAliasResolver::empty().json_schema_for_typed_params(params)
+    TypeSchemaResolver::empty().json_schema_for_typed_params(params)
 }
 
 #[cfg(test)]
@@ -639,7 +933,7 @@ mod schema_alias_resolver_tests {
 
     fn fn_params_schema(src: &str) -> serde_json::Value {
         let program = harn_parser::parse_source(src).expect("parse test source");
-        let resolver = SchemaAliasResolver::from_program(&program);
+        let resolver = TypeSchemaResolver::from_program(&program);
         for node in &program {
             let (_, inner) = harn_parser::peel_attributes(node);
             if let harn_parser::Node::FnDecl { params, .. } = &inner.node {

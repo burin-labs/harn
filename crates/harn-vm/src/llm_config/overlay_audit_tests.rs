@@ -393,6 +393,7 @@ fn every_config_section_is_auditable() {
         patch,
         model_ladders,
         presentation,
+        usage_accounting_audit,
     } = &populated;
     assert!(default_provider.is_some());
     assert!(!providers.is_empty());
@@ -410,6 +411,7 @@ fn every_config_section_is_auditable() {
     assert!(!model_ladders.is_empty());
     assert!(!presentation.variants.is_empty());
     assert!(!presentation.families.is_empty());
+    assert!(usage_accounting_audit.is_some());
 
     let stripped = strip_all_auditable_entries(&populated);
     assert!(
@@ -421,6 +423,12 @@ fn every_config_section_is_auditable() {
 /// An overlay that exercises every section [`ProvidersConfig`] carries.
 const EVERY_SECTION: &str = r#"
 default_provider = "demo"
+
+[usage_accounting_audit]
+reviewed_on = "2026-08-25"
+expires_on = "2026-10-31"
+tracking_issue = 7320
+unverified = ["other"]
 
 [providers.other]
 display_name = "Other"

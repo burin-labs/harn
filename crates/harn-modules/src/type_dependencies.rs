@@ -117,12 +117,16 @@ fn collect_callable_type_names(callable: &SNode, names: &mut HashSet<String>) {
         Node::FnDecl {
             params,
             return_type,
+            type_predicate,
             throws,
             where_clauses,
             ..
         } => {
             collect_parameter_type_names(params, names);
             collect_optional_type_name(return_type, names);
+            if let Some(predicate) = type_predicate {
+                collect_type_names(&predicate.type_expr, names);
+            }
             collect_optional_type_name(throws, names);
             for clause in where_clauses {
                 collect_type_names(&clause.bound, names);

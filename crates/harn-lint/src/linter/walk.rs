@@ -29,6 +29,7 @@ impl<'a> Linter<'a> {
                 body,
                 name,
                 is_pub,
+                extends,
                 ..
             } => {
                 self.known_functions.insert(name.clone());
@@ -54,12 +55,9 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                for p in params {
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(p.name.clone());
-                    }
-                    self.references.insert(p.name.clone());
-                }
+                let removal_allowed =
+                    !*is_pub && extends.is_none() && self.test_pipeline_input_owned;
+                self.declare_pipeline_parameters(params, name, removal_allowed);
                 self.references.insert(name.clone());
                 if Self::is_test_pipeline_name(name) {
                     self.test_pipeline_depth += 1;
@@ -389,8 +387,15 @@ impl<'a> Linter<'a> {
                 for type_arg in type_args {
                     self.record_type_expr_references(type_arg);
                 }
-                if name == "schema_of" && args.len() == 1 {
-                    if let Node::Identifier(type_name) = &args[0].node {
+                let schema_type_token = match (name.as_str(), args.as_slice()) {
+                    ("schema_of", [type_token]) => Some(type_token),
+                    ("schema_is" | "schema_expect" | "is_type", [_, type_token]) => {
+                        Some(type_token)
+                    }
+                    _ => None,
+                };
+                if let Some(type_token) = schema_type_token {
+                    if let Node::Identifier(type_name) = &type_token.node {
                         self.type_references.insert(type_name.clone());
                     }
                 }
@@ -427,47 +432,13 @@ impl<'a> Linter<'a> {
             }
 
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                if let Node::FunctionCall { name, .. } = &object.node {
-                    if Self::is_boundary_api(name) {
-                        self.diagnostics.push(LintDiagnostic {
-                            code: Code::LintUntypedDictAccess,
-                            rule: "untyped-dict-access".into(),
-                            message: format!(
-                                "property access on raw `{name}()` result without schema validation"
-                            ),
-                            span: snode.span,
-                            severity: LintSeverity::Warning,
-                            suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or schema_check() first"
-                                    .to_string(),
-                            ),
-                            fix: None,
-                        });
-                    }
-                }
+                self.warn_unvalidated_boundary_access(object, "property", snode.span);
                 self.lint_node(object);
             }
 
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
-                if let Node::FunctionCall { name, .. } = &object.node {
-                    if Self::is_boundary_api(name) {
-                        self.diagnostics.push(LintDiagnostic {
-                            code: Code::LintUntypedDictAccess,
-                            rule: "untyped-dict-access".into(),
-                            message: format!(
-                                "subscript access on raw `{name}()` result without schema validation"
-                            ),
-                            span: snode.span,
-                            severity: LintSeverity::Warning,
-                            suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or schema_check() first"
-                                    .to_string(),
-                            ),
-                            fix: None,
-                        });
-                    }
-                }
+                self.warn_unvalidated_boundary_access(object, "subscript", snode.span);
                 self.lint_node(object);
                 self.lint_node(index);
             }
@@ -1322,6 +1293,11 @@ impl<'a> Linter<'a> {
                         self.record_attribute_argument_references(&argument.value);
                     }
                 }
+                let previous_test_input_owner = self.test_pipeline_input_owned;
+                self.test_pipeline_input_owned = attributes.len() == 1
+                    && attributes.first().is_some_and(|attribute| {
+                        attribute.name == "test" && attribute.args.is_empty()
+                    });
                 if suppresses_complexity {
                     self.complexity_suppression_depth += 1;
                 }
@@ -1329,6 +1305,7 @@ impl<'a> Linter<'a> {
                 if suppresses_complexity {
                     self.complexity_suppression_depth -= 1;
                 }
+                self.test_pipeline_input_owned = previous_test_input_owner;
             }
 
             Node::OrPattern(alternatives) => {
@@ -1376,6 +1353,30 @@ impl<'a> Linter<'a> {
                 fix: None,
             });
         }
+    }
+
+    /// Reading a field or index straight off a boundary call's result, with no
+    /// schema check in between.
+    ///
+    /// Property and subscript access differ only in the word, so they share
+    /// one body; the call itself is recognized in either spelling by
+    /// [`Self::boundary_api_label`].
+    fn warn_unvalidated_boundary_access(&mut self, object: &SNode, access: &str, span: Span) {
+        let Some(label) = self.boundary_api_label(object) else {
+            return;
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintUntypedDictAccess,
+            rule: "untyped-dict-access".into(),
+            message: format!("{access} access on raw `{label}` result without schema validation"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "assign to a variable and validate with schema_expect() or schema_check() first"
+                    .to_string(),
+            ),
+            fix: None,
+        });
     }
 
     /// Attribute values are compile-time metadata, not runtime expressions.

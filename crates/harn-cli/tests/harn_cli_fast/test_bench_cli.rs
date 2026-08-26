@@ -13,6 +13,7 @@ use std::thread;
 
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
+use harn_vm::subtask::{scope_placement, SubtaskPlacement};
 use harn_vm::testbench::fidelity::{compare, FidelityMode};
 use harn_vm::testbench::overlay_fs::{DiffKind, OverlayFs};
 use harn_vm::testbench::process_tape::{
@@ -595,15 +596,18 @@ where
 
                 let bench = configure();
                 let session = bench.activate().expect("activate testbench");
-                let outcome = execute_run(
-                    &script.to_string_lossy(),
-                    false,
-                    HashSet::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    CliLlmMockMode::Off,
-                    None,
-                    RunProfileOptions::default(),
+                let outcome = scope_placement(
+                    SubtaskPlacement::CurrentThread,
+                    execute_run(
+                        &script.to_string_lossy(),
+                        false,
+                        HashSet::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        CliLlmMockMode::Off,
+                        None,
+                        RunProfileOptions::default(),
+                    ),
                 )
                 .await;
                 let _ = session.finalize();

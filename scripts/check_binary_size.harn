@@ -384,7 +384,7 @@ fn baseline_sections(fs: HarnessFs, path: string) -> list<ElfSection> {
 }
 
 @complexity(allow)
-pipeline main(harness: Harness, task: unknown) {
+pipeline main(harness: Harness) {
   const defaults = {
     target: binary_size_env_or(harness.env, "HARN_RELEASE_TARGET", ""),
     harn_bin: binary_size_env_or(harness.env, "HARN_BIN", ""),

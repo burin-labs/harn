@@ -39,6 +39,30 @@ command. `harn connect setup-plan --connector <id> --json` is the
 machine-readable source for the package's current secrets, scopes, health
 checks, and recovery copy.
 
+### Headless API-key setup
+
+Use a package-declared environment variable on a server, CI runner, container,
+or SSH session that has no unlocked keyring. Read the accepted names from the
+setup plan, set one in the process that launches Harn, and check the result:
+
+```bash
+harn connect setup-plan --connector duffel --json
+printf 'Duffel key: '
+read -rs DUFFEL_TEST_KEY
+printf '\n'
+export DUFFEL_TEST_KEY
+harn connect status --connector duffel --json
+```
+
+The variable must remain set in the service, job, or shell that runs Harn.
+`--from-env NAME` has a different purpose: it copies a value into the configured
+keyring. If that write fails, Harn names any environment variables declared for
+the same secret. It never prints their values.
+
+Run `harn doctor` when keyring storage should work. The `secret:keyring` check
+writes, reads, and deletes a unique scratch entry. A locked or read-only store
+therefore fails the check instead of appearing healthy.
+
 ### GitHub App and user OAuth
 
 Create a GitHub App owned by the example organization. Set its webhook URL to

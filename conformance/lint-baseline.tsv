@@ -36,7 +36,6 @@
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
 3	agents/workflow_executor_agent_loop.harn	HARN-LNT-018
-1	agents/workflow_messages.harn	HARN-LNT-018
 2	agents/workflow_policy_guardrails.harn	HARN-LNT-016
 4	agents/workflow_run_repair_executor.harn	HARN-LNT-018
 2	agents/workflow_run_repair_tracing_isolation.harn	HARN-LNT-018
@@ -83,6 +82,7 @@
 6	net_policy/request_uses_url_argument.harn	HARN-LNT-025
 1	personas/prelude_bounded_loop.harn	HARN-LNT-018
 1	pool/max_concurrent_caps_in_flight.harn	HARN-LNT-018
+1	pool/pool_task_sees_queued_mock.harn	HARN-LNT-029
 3	pool/pool_unsettled_state_integration.harn	HARN-LNT-014
 1	pool_durability/stale_inflight_marked_failed.harn	HARN-LNT-014
 1	reminders/reminder_lifecycle_event_log.harn	HARN-LNT-014
@@ -112,6 +112,7 @@
 1	scenarios/llm_caller_with_retry_recovers_from_transient_error.harn	HARN-LNT-018
 1	scenarios/llm_handlers_with_repair.harn	HARN-LNT-018
 1	scenarios/llm_handlers_with_retry.harn	HARN-LNT-018
+6	scenarios/llm_mock.harn	HARN-LNT-029
 6	scenarios/llm_rewrite_supersedes_system_fragments.harn	HARN-LNT-016
 2	scenarios/llm_structural_experiments.harn	HARN-LNT-018
 1	scenarios/llm_transcripts.harn	HARN-LNT-014

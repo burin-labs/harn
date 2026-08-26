@@ -18,6 +18,7 @@ harn run --profile --profile-json profile.json <file.harn>
 harn run -e 'harness.stdio.log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --standalone --allow json_parse policy.harn
 harn run --approve-risky git.push release.harn
 harn run --no-sandbox <file.harn>
 harn run --write-root /path/to/output main.harn
@@ -47,6 +48,8 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
+| `--project-triggers` | Register manifest triggers and reconcile their durable state for this run |
+| `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, child traffic stays denied until `HARN_EGRESS_*` or `harness.net.egress_policy(...)` configures an allow decision through the managed proxy. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
@@ -80,13 +83,39 @@ records a receipt on the protected operation and never relaxes the generic
 
 ### Project handler startup
 
-`harn run` parses and validates project trigger and hook declarations, exports,
-and callable signatures before it runs the entry script. It initializes each
-handler module and its imports only when an event dispatches to that handler.
-This keeps unrelated project code off the startup path.
+`harn run` installs project hooks by default so policy remains fail-closed, but
+does not register manifest triggers or reconcile their durable state unless the
+run passes `--project-triggers`. Trigger-oriented commands continue to register
+the triggers they operate. This makes durable project side effects explicit for
+ordinary entrypoint runs.
+
+With `--project-triggers`, Harn parses and validates project trigger and hook
+declarations, exports, and callable signatures before it runs the entry script.
+It initializes each handler module and its imports only when an event dispatches
+to that handler. This keeps unrelated project code off the startup path.
 
 Use `--eager-project-handlers` to diagnose failures in top-level handler module
-initialization. It restores fail-fast initialization for every project handler.
+initialization. It restores fail-fast initialization for every project handler
+and implies `--project-triggers`.
+
+Embedded callers select the same contract with
+`commands::run::RunExecutionOptions::project_runtime`. Use
+`ProjectRuntimeMode::WithTriggers` for lazy trigger dispatch or
+`ProjectRuntimeMode::EagerHandlers` for fail-fast handler initialization; the
+default `Project` mode keeps hooks active without reconciling durable trigger
+state. The JSON execution API has the matching `execute_run_json_with_options`
+entrypoint. Every in-process entrypoint owns a poll-scoped trigger registry;
+manifest bindings created by one run are discarded at its boundary while the
+embedding caller's prior registry is restored unchanged.
+
+Use `--standalone` for latency-sensitive utilities and policy scripts that must
+behave the same regardless of their containing directory. Relative and standard
+library imports still work, and explicit CLI limits such as `--allow`, `--deny`,
+and sandbox roots still apply. Standalone mode does not load a surrounding
+`harn.toml`, project skills, project handlers, project state roots, or
+manifest-derived trusted-host authority. It conflicts with commands whose
+meaning requires project state, including `--eager-project-handlers`,
+`--project-triggers`, `--resume`, and `--as-job`.
 
 ### Environment policies and grants
 
@@ -2074,7 +2103,9 @@ which intentionally returns complete authoritative rows.
 
 Round-trip a small prompt through one resolved model and report model id,
 provider, latency, first streamed delta timing, token usage, and estimated
-cost.
+cost. When Harn has no price for the resolved route, JSON returns
+`"estimated_cost_usd": null` and text output says `estimated_cost_usd=unavailable`.
+A returned `0` is an exact zero cost.
 
 ```bash
 harn models test gpt-5.4-mini --prompt "Reply with pong."
@@ -2621,17 +2652,20 @@ flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
 override that metadata for one run.
 
 For `auth_type = "api-key"` with one `required_secrets` entry, the same command
-prompts without echoing the key. Use `--from-env NAME` or `--value-file PATH`
-for unattended setup; the option contains only the source name or path, never
-the secret. A connector with several required secrets returns the exact
-`harn connect api-key` command for each target so their values cannot be mixed
-up.
+prompts without echoing the key. `--from-env NAME` and `--value-file PATH` read
+the value from that source and store it in the configured keyring; the option
+contains only the source name or path, never the secret. A connector with
+several required secrets returns the exact `harn connect api-key` command for
+each target so their values cannot be mixed up.
 
 Connectors can declare `credential_environment` mappings from logical secret
 ids to accepted environment-variable names. `harn connect status` then treats
 a declared, non-blank variable as ready even when the local keyring is not
 available. JSON and table output show the variable name but never its value.
-Undeclared variables are ignored.
+Undeclared variables are ignored. If a keyring write fails, the error names the
+declared variables that can satisfy that exact secret on a headless host. See
+[Headless API-key setup](./connectors/operator-runbook.md#headless-api-key-setup)
+for the operator steps.
 
 Stored OAuth tokens are written under connector-friendly secret ids:
 
@@ -3283,6 +3317,25 @@ The source file is JSONL. Each line should contain at least
 used directly with `harn run --llm-mock ...`, `harn eval
 --llm-mock ...`, or `harn test --determinism`.
 
+## harn trace prefix-stability
+
+Check whether each captured provider request keeps the prior request's prompt
+prefix unchanged:
+
+```bash
+harn trace prefix-stability .harn-runs/<run-id>-llm --json
+```
+
+The directory must contain `llm_transcript.jsonl` and the `raw-provider/`
+files written when `HARN_LLM_TRANSCRIPT_RAW=1` is set. The command checks each
+consecutive request pair. Prior messages must remain byte-for-byte equal and in
+the same positions. The system block and ordered tool list must also remain
+equal. New messages may only be appended.
+
+The command exits with status 1 when a prefix changes. Its report names the
+first changed message's index and role, then shows the values before and after
+the change. `--json` emits a `harn.trace.prefix_stability.v1` report.
+
 ## harn crystallize
 
 Mine repeated traces into a reviewable deterministic workflow candidate.
@@ -3464,8 +3517,28 @@ harn serve api agent.harn                  # local OpenAPI + SSE Agents API
 harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
+harn serve worker jobs.harn                # scheduled and queued @job functions
+harn serve worker --tenant acme jobs.harn  # one active tenant's jobs
 harn serve test                            # reusable user-test worker over stdio
 ```
+
+`harn serve worker` and `harn run --as-job` load connectors declared by the
+nearest `harn.toml`. A job can call them through
+`harness.net.connector_call(...)`. The worker resolves each connector's
+declared credentials through the same secret providers used by direct Harn
+runs. Startup reports a connector load or initialization error before it
+accepts work; a missing credential remains a call error from that connector.
+Pass `--tenant ID` to bind every worker dispatch to an active tenant in the
+local tenant registry. The same option works with `harn run --as-job`. Job code
+and connector clients then share that tenant's secret scope, and
+`harness.tenant.id()` returns the bound ID. An unknown or suspended tenant
+stops startup. A request for another tenant's secret is denied; it is not
+reported as a missing credential. Without `--tenant`, the existing
+single-tenant secret namespace remains active, and the worker only claims jobs
+that have no tenant ID. Tenanted work stays queued for a matching worker. The
+default registry is `<script-dir>/.harn/orchestrator`; pass
+`--tenant-state-dir PATH` or set
+`HARN_ORCHESTRATOR_STATE_DIR` when the orchestrator uses another location.
 
 `harn serve test` lets a caller retain one isolated test-run session instead
 of spawning a fresh Harn process for every suite. It accepts JSON-RPC 2.0 as

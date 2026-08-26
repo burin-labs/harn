@@ -16,6 +16,12 @@ async fn top_level_execution_owns_one_isolated_cancellation_registry() {
     let scope = AmbientExecutionScope::capture_for_top_level_execution(
         std::sync::Arc::from("isolated-execution"),
         LlmMockContext::default(),
+        crate::stdlib::agents::agents_workers::fresh_worker_registry(),
+        crate::stdlib::agents_daemon::fresh_daemon_registry(),
+        crate::triggers::registry::runtime::fresh_trigger_registry(),
+        crate::agent_sessions::fresh_session_runtime(),
+        crate::tracing::fresh_tracing_runtime(),
+        crate::llm::agent_session_host::fresh_agent_host_session_runtime(),
     );
 
     scope_ambient(scope, async {

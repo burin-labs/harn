@@ -511,7 +511,7 @@ summary: Listed the workspace\n\
     ));
     install_active_event_log(event_log.clone());
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-    dump_llm_response(0, "call-textfmt", &result, 42, None);
+    dump_llm_response(0, "call-textfmt", &result, 42, None, None);
     pop_llm_transcript_dir();
 
     let transcript =

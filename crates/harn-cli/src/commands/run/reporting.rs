@@ -53,7 +53,7 @@ pub struct RunAuxOptions {
 #[derive(Clone, Debug, Default)]
 pub struct RunControlOptions {
     pub timeout: Option<Duration>,
-    pub eager_project_handlers: bool,
+    pub project_runtime: super::ProjectRuntimeMode,
 }
 
 #[derive(Clone, Debug)]
@@ -140,7 +140,15 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
         timeout: args.timeout,
-        eager_project_handlers: args.eager_project_handlers,
+        project_runtime: if args.standalone {
+            super::ProjectRuntimeMode::Standalone
+        } else if args.eager_project_handlers {
+            super::ProjectRuntimeMode::EagerHandlers
+        } else if args.project_triggers {
+            super::ProjectRuntimeMode::WithTriggers
+        } else {
+            super::ProjectRuntimeMode::Project
+        },
     }
 }
 
@@ -212,10 +220,17 @@ fn build_run_summary<'a>(
 }
 
 pub(super) fn run_summary_llm_snapshot() -> RunSummaryLlm {
-    let (input_tokens, output_tokens, time_ms, call_count) = harn_vm::llm::peek_trace_summary();
-    let trace = harn_vm::llm::peek_trace();
-    let certainty = summarize_usage_cost_certainty(trace.iter().map(|entry| &entry.usage));
-    run_summary_llm_from_parts(input_tokens, output_tokens, time_ms, call_count, certainty)
+    run_summary_llm_from_trace_snapshot(harn_vm::llm::peek_trace_usage_summary())
+}
+
+fn run_summary_llm_from_trace_snapshot(trace: harn_vm::llm::LlmTraceUsageSummary) -> RunSummaryLlm {
+    run_summary_llm_from_parts(
+        trace.input_tokens,
+        trace.output_tokens,
+        trace.duration_ms,
+        trace.call_count,
+        trace.cost,
+    )
 }
 
 fn run_summary_llm_from_parts(
@@ -586,10 +601,12 @@ fn render_token_certainty(known_tokens: i64, usage_unknown_calls: i64) -> String
 
 #[cfg(test)]
 mod trace_summary_pricing_tests {
-    use super::{render_trace_entries, run_summary_llm_from_parts};
+    use super::{
+        render_trace_entries, run_summary_llm_from_parts, run_summary_llm_from_trace_snapshot,
+    };
     use harn_vm::llm::{
         usage::{LlmUsage, UsageCostCertainty},
-        LlmTraceEntry,
+        LlmTraceEntry, LlmTraceUsageSummary,
     };
 
     fn entry(model: &str, cost_usd: Option<f64>) -> LlmTraceEntry {
@@ -719,5 +736,29 @@ mod trace_summary_pricing_tests {
         assert_eq!(summary.known_cost_usd, 0.0123);
         assert_eq!(summary.unpriced_calls, 1);
         assert_eq!(summary.usage_unknown_calls, 1);
+    }
+
+    #[test]
+    fn run_summary_snapshot_keeps_priced_empty_terminal_retries() {
+        let summary = run_summary_llm_from_trace_snapshot(LlmTraceUsageSummary {
+            input_tokens: 26,
+            output_tokens: 0,
+            duration_ms: 9,
+            call_count: 1,
+            cost: UsageCostCertainty {
+                known_cost_usd: 0.0000117,
+                provider_call_count: 2,
+                unpriced_calls: 0,
+                usage_unknown_calls: 0,
+            },
+        });
+        assert_eq!(summary.call_count, 1);
+        assert_eq!(summary.provider_call_count, 2);
+        assert_eq!(summary.input_tokens, 26);
+        assert_eq!(summary.output_tokens, 0);
+        assert_eq!(summary.cost_usd, Some(0.0000117));
+        assert_eq!(summary.known_cost_usd, 0.0000117);
+        assert_eq!(summary.unpriced_calls, 0);
+        assert_eq!(summary.usage_unknown_calls, 0);
     }
 }

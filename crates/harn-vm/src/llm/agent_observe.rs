@@ -37,7 +37,7 @@
 //!   emitted once before `provider_call_request` whenever a routing
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
-//! - `provider_call_request` core `{call_id, iteration, model, provider, call_role,
+//! - `provider_call_request` core `{call_id, iteration, model, provider, call_role, stage?,
 //!   max_tokens, temperature, tool_choice, tool_format, context_token_breakdown}` —
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
@@ -50,7 +50,7 @@
 //!   Set `HARN_LLM_TRANSCRIPT_RAW=1` to persist redacted, exact provider
 //!   request/response sidecars under `raw-provider/` and emit
 //!   `provider_raw_capture` pointer events for extraction-drop debugging.
-//! - `provider_call_response` core `{call_id, iteration, model, provider,
+//! - `provider_call_response` core `{call_id, iteration, model, provider, stage?,
 //!   text, tool_calls, parsed_tool_calls?, parsed_tool_calls_ref?, input_tokens, output_tokens,
 //!   response_ms}`. `tool_calls` is the provider-native tool-call array
 //!   (empty for text-format local models). The canonical parsed view is either
@@ -933,6 +933,7 @@ pub(crate) async fn observed_llm_call(
                     let message = error.to_string();
                     let classified = super::api::classify_llm_error(category.clone(), &message);
                     let status = "retries_exhausted";
+                    let usage = result.usage();
                     annotate_current_span(&[
                         ("status", serde_json::json!(status)),
                         ("error", serde_json::json!(message.as_str())),
@@ -940,12 +941,14 @@ pub(crate) async fn observed_llm_call(
                         ("failover_eligible", serde_json::json!(true)),
                         ("attempt", serde_json::json!(attempt)),
                     ]);
+                    annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
                     dump_llm_response(
                         iteration.unwrap_or(0),
                         &call_id,
                         &result,
                         duration_ms,
                         opts.applied_structural_experiment.as_ref(),
+                        opts.call_stage.as_deref(),
                     );
                     append_provider_call_error_observability(ProviderCallErrorObservation {
                         iteration: iteration.unwrap_or(0),
@@ -957,6 +960,7 @@ pub(crate) async fn observed_llm_call(
                         classified: &classified,
                         message: &message,
                         stream_failure: None,
+                        usage: Some(&usage),
                         retryable: false,
                         failover_eligible: true,
                         attempt_count: Some(attempt_count),
@@ -966,7 +970,7 @@ pub(crate) async fn observed_llm_call(
                         &call_id,
                         opts,
                         &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
                     );
                     if let Some(b) = bridge {
                         b.send_call_end(
@@ -985,9 +989,14 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
-                        let usage = result.usage();
                         metrics.record_llm_call(&result.provider, &result.model, status, &usage);
                     }
+                    trace_llm_call(LlmTraceEntry {
+                        model: result.model.clone(),
+                        provider: result.provider.clone(),
+                        usage,
+                        duration_ms,
+                    });
                     return Err(error);
                 }
                 let usage = result.usage();
@@ -999,6 +1008,7 @@ pub(crate) async fn observed_llm_call(
                     &result,
                     duration_ms,
                     opts.applied_structural_experiment.as_ref(),
+                    opts.call_stage.as_deref(),
                 );
                 dump_resolved_dispatch(
                     iteration.unwrap_or(0),
@@ -1233,6 +1243,7 @@ pub(crate) async fn observed_llm_call(
                     classified: &classified,
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
+                    usage: None,
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
@@ -1304,7 +1315,7 @@ pub(crate) async fn observed_llm_call(
                         &call_id,
                         opts,
                         &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
                     );
                     return Err(surfaced_error.unwrap_or(error));
                 }

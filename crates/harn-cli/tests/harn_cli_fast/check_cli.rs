@@ -242,8 +242,13 @@ fn namespace_check_diagnostics(entry: &Path) -> Vec<String> {
                         .collect(),
                     member_required_params: info
                         .member_signatures
+                        .iter()
+                        .map(|(name, sig)| (name.clone(), sig.required_params))
+                        .collect(),
+                    member_type_predicates: info
+                        .member_signatures
                         .into_iter()
-                        .map(|(name, sig)| (name, sig.required_params))
+                        .filter_map(|(name, sig)| sig.type_predicate.map(|value| (name, value)))
                         .collect(),
                 },
             )

@@ -11,6 +11,7 @@ use crate::event_log::{
 
 use super::scheduler::{self, SchedulerPolicy, SchedulerSnapshot, SchedulerState};
 use super::{DispatchOutcome, TriggerEvent};
+use crate::TenantId;
 
 #[cfg(test)]
 mod exclusion_tests;
@@ -83,6 +84,13 @@ pub struct WorkerQueue {
     /// created lazily on first claim. Self-correcting — safe to lose on
     /// process restart.
     scheduler_states: Arc<Mutex<BTreeMap<String, SchedulerState>>>,
+}
+
+#[derive(Clone, Copy)]
+enum TenantClaimScope<'a> {
+    Any,
+    Untenanted,
+    Tenant(&'a TenantId),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -378,8 +386,52 @@ impl WorkerQueue {
         consumer_id: &str,
         ttl: StdDuration,
     ) -> Result<Option<ClaimedWorkerJob>, LogError> {
-        self.claim_next_excluding(queue, consumer_id, ttl, &BTreeSet::new())
-            .await
+        self.claim_next_matching(
+            queue,
+            consumer_id,
+            ttl,
+            &BTreeSet::new(),
+            TenantClaimScope::Any,
+        )
+        .await
+    }
+
+    /// Claim the next ready job that has no tenant identity.
+    pub async fn claim_next_untenanted(
+        &self,
+        queue: &str,
+        consumer_id: &str,
+        ttl: StdDuration,
+    ) -> Result<Option<ClaimedWorkerJob>, LogError> {
+        self.claim_next_matching(
+            queue,
+            consumer_id,
+            ttl,
+            &BTreeSet::new(),
+            TenantClaimScope::Untenanted,
+        )
+        .await
+    }
+
+    /// Claim the next ready job whose event belongs to `tenant_id`.
+    ///
+    /// Foreign and unscoped jobs remain unclaimed so another worker can
+    /// process them under the correct authority.
+    pub async fn claim_next_for_tenant(
+        &self,
+        queue: &str,
+        consumer_id: &str,
+        ttl: StdDuration,
+        tenant_id: &TenantId,
+    ) -> Result<Option<ClaimedWorkerJob>, LogError> {
+        self.claim_next_matching(
+            queue,
+            consumer_id,
+            ttl,
+            &BTreeSet::new(),
+            TenantClaimScope::Tenant(tenant_id),
+        )
+        .await
     }
 
     /// Claim the next eligible job except those already attempted by this
@@ -391,6 +443,24 @@ impl WorkerQueue {
         consumer_id: &str,
         ttl: StdDuration,
         excluded_job_event_ids: &BTreeSet<u64>,
+    ) -> Result<Option<ClaimedWorkerJob>, LogError> {
+        self.claim_next_matching(
+            queue,
+            consumer_id,
+            ttl,
+            excluded_job_event_ids,
+            TenantClaimScope::Any,
+        )
+        .await
+    }
+
+    async fn claim_next_matching(
+        &self,
+        queue: &str,
+        consumer_id: &str,
+        ttl: StdDuration,
+        excluded_job_event_ids: &BTreeSet<u64>,
+        tenant_scope: TenantClaimScope<'_>,
     ) -> Result<Option<ClaimedWorkerJob>, LogError> {
         let queue_name = queue.trim();
         if queue_name.is_empty() {
@@ -418,6 +488,7 @@ impl WorkerQueue {
                     &policy,
                     now_ms,
                     excluded_job_event_ids,
+                    tenant_scope,
                 ) else {
                     return Ok(None);
                 };

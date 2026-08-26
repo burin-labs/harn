@@ -301,4 +301,9 @@ mod tests {
     fn fireworks_streams_a_trailing_usage_frame() {
         assert!(DialectContract::provider_reports_stream_usage("fireworks"));
     }
+
+    #[test]
+    fn llamacpp_requests_its_trailing_usage_frame() {
+        assert!(DialectContract::provider_reports_stream_usage("llamacpp"));
+    }
 }

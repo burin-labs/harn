@@ -212,6 +212,7 @@ impl ToolCallErrorCategory {
             // the fix is to widen the policy, not to change the agent's work.
             Internal::EgressBlocked => Self::Environment,
             Internal::Auth
+            | Internal::InvalidRequest
             | Internal::ChannelClosed
             | Internal::NotFound
             | Internal::CircuitOpen

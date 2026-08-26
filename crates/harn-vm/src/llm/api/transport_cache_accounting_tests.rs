@@ -1,6 +1,6 @@
 use super::{
-    allow_stubbed_llm_transport, base_opts, env_guard, install_openai_stub_provider,
-    spawn_llm_stub, vm_call_llm_full, LlmStub,
+    allow_stubbed_llm_transport, base_opts, env_guard,
+    install_openai_stub_provider_with_cache_accounting, spawn_llm_stub, vm_call_llm_full, LlmStub,
 };
 
 /// OpenAI-compatible success response whose `usage` block reports cached
@@ -56,10 +56,11 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
         .expect("runtime");
 
     runtime.block_on(async {
-        let call = |provider: &'static str, model: &'static str| async move {
+        let call =
+            |provider: &'static str, model: &'static str, declaration: Option<bool>| async move {
             let server = spawn_openai_cached_usage_stub();
             let addr = server.addr();
-            install_openai_stub_provider(provider, addr);
+            install_openai_stub_provider_with_cache_accounting(provider, addr, declaration);
             crate::llm_config::set_runtime_provider_endpoint_overrides(
                 crate::llm_config::RuntimeProviderEndpointOverrides::single(
                     provider,
@@ -80,13 +81,15 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
             result
         };
 
-        // Declared `true`: parsed cache fields are authoritative.
+        // llama.cpp declares `true`: its standard OpenAI-compatible cache
+        // fields are authoritative rather than zeroed as unsupported.
         assert_eq!(
-            crate::llm_config::provider_config("openai")
+            crate::llm_config::provider_config("llamacpp")
                 .and_then(|provider| provider.cache_usage_accounting),
             Some(true)
         );
-        let declared_true = call("openai", "gpt-4o-mini").await;
+        let declared_true =
+            call("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl", Some(true)).await;
         assert_eq!(declared_true.cache_read_tokens, 150);
         assert!(declared_true.cache_supported);
         assert_eq!(
@@ -96,12 +99,7 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
 
         // Declared `false`: the route reports no cache fields, so zeroing
         // whatever leaked into the response shape is intentional.
-        assert_eq!(
-            crate::llm_config::provider_config("llamacpp")
-                .and_then(|provider| provider.cache_usage_accounting),
-            Some(false)
-        );
-        let declared_false = call("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl").await;
+        let declared_false = call("declared-false", "cached-model", Some(false)).await;
         assert_eq!(declared_false.cache_read_tokens, 0);
         assert_eq!(declared_false.cache_write_tokens, 0);
         assert!(!declared_false.cache_supported);
@@ -117,7 +115,8 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
                 .and_then(|provider| provider.cache_usage_accounting),
             None
         );
-        let undeclared = call("fireworks", "accounts/fireworks/models/stub").await;
+        let undeclared =
+            call("fireworks", "accounts/fireworks/models/stub", None).await;
         assert_eq!(undeclared.cache_read_tokens, 150);
         assert!(undeclared.cache_supported);
         assert_eq!(undeclared.telemetry.cache_accounting_declared, None);

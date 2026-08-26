@@ -18,6 +18,7 @@ mod calls_and_generics;
 mod coalesce;
 mod enum_construct;
 mod exhaustiveness;
+mod flow_predicates;
 mod harness_capabilities;
 mod implicit_any_parameters;
 mod imports;

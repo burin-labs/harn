@@ -85,7 +85,15 @@ capability handles. `harn run --as-job file.harn --job scan --request req.json`
 runs that job once, delivering the request JSON as
 `event.provider_payload.raw` and printing the returned value as JSON.
 `harn serve worker file.harn` activates every `@schedule`d job in the
-file and consumes any declared `@queue` worker queues until shutdown.
+file and consumes any declared `@queue` worker queues until shutdown. Both
+worker entrypoints install the nearest package manifest's provider connectors
+before dispatch, using the worker's event log and secret-provider boundary.
+When either entrypoint receives `--tenant ID`, the host must resolve an active
+tenant before dispatch. The job's ambient tenant identity, direct secret reads,
+and connector credentials use that one scope. An unknown or suspended tenant
+prevents startup, and a secret namespace owned by another tenant is an access
+denial rather than a missing credential. Without `--tenant`, the worker keeps
+the single-tenant behavior and must not claim tenant-tagged work.
 
 `@retry(max: N, backoff: "...")` applies the dispatcher's retry policy
 to the job. `max`/`max_attempts` must be a non-negative integer;

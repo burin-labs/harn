@@ -49,6 +49,8 @@
 "not" @keyword.operator
 "to" @keyword.operator
 "exclusive" @keyword.operator
+"implies" @keyword.operator
+"is" @keyword.operator
 
 ; Literals
 (true) @boolean

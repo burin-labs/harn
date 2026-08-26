@@ -191,72 +191,19 @@ impl Linter<'_> {
             .and_then(|name| name.as_deref())
     }
 
-    /// The capability segment of a `harness.<capability>` method receiver, so
-    /// `harness.interaction.request_approval(...)` yields `"interaction"`.
-    ///
-    /// The root is compared against the enclosing binding rather than the
-    /// literal name `harness`, because the parameter may be declared
-    /// `_harness`, and a local named `harness` that is not the host handle
-    /// must not be mistaken for one.
+    /// See [`HarnessFacts::capability_of`][super::harness_facts::HarnessFacts::capability_of].
     pub(super) fn harness_capability_of<'a>(&self, object: &'a SNode) -> Option<&'a str> {
-        let (root, properties) = harn_parser::lexical::resolved_receiver_path(
-            object,
-            &self.resolved_identifier_bindings,
-        )?;
-        self.harness_bindings
-            .contains(root)
-            .then(|| properties.first().copied())
-            .flatten()
+        self.harness_facts.capability_of(object)
     }
 
-    /// The arguments of `node` when it calls `builtin`, in either spelling:
-    /// the ambient global itself, or the typed `harness.<capability>.<method>`
-    /// that replaced it.
-    ///
-    /// Rules identify a call by which builtin it names. Matching the syntax
-    /// instead makes them stop applying the moment a call site adopts the
-    /// spelling `HARN-LNT-071` asks for, and a rule that quietly stops
-    /// applying reads exactly like one that found nothing. Routing the
-    /// question here keeps one owner for it — the migration recipe already
-    /// derived from the capability surface — instead of a second name table
-    /// that would drift from it.
-    ///
-    /// A migration that reshapes arguments resolves to `None`: the caller is
-    /// about to read the ambient call's argument positions, and a request
-    /// record or a call-then-property projection no longer has them.
+    /// See
+    /// [`HarnessFacts::call_names_builtin`][super::harness_facts::HarnessFacts::call_names_builtin].
     pub(super) fn call_names_builtin<'node>(
         &self,
         node: &'node SNode,
         builtin: &str,
     ) -> Option<&'node [SNode]> {
-        match &node.node {
-            harn_parser::Node::FunctionCall { name, args, .. } => {
-                (name == builtin).then_some(args.as_slice())
-            }
-            harn_parser::Node::MethodCall {
-                object,
-                method,
-                args,
-            }
-            | harn_parser::Node::OptionalMethodCall {
-                object,
-                method,
-                args,
-            } => {
-                let migration = harn_vm::stdlib::harness_migration_for_builtin(builtin)?;
-                if !matches!(
-                    migration.arguments,
-                    harn_vm::stdlib::HarnessBuiltinArgumentMigration::Forward
-                ) {
-                    return None;
-                }
-                (migration.method == method
-                    && self.harness_capability_of(object)
-                        == Some(migration.capability.field_name()))
-                .then_some(args.as_slice())
-            }
-            _ => None,
-        }
+        self.harness_facts.call_names_builtin(node, builtin)
     }
 
     fn has_local_or_imported_name(&self, name: &str) -> bool {

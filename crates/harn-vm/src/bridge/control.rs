@@ -1,9 +1,43 @@
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use tokio::sync::Notify;
 
-use super::HostBridgeInjectionState;
+use super::{HostBridge, HostBridgeInjectionState};
 use crate::tool_call_cancellations::{fresh_registry, CancellationRegistry};
+
+/// Observable idle boundary for one daemon-mode host bridge.
+pub(super) struct DaemonIdleState {
+    idle: AtomicBool,
+    changed: Arc<Notify>,
+}
+
+impl Default for DaemonIdleState {
+    fn default() -> Self {
+        Self {
+            idle: AtomicBool::new(false),
+            changed: Arc::new(Notify::new()),
+        }
+    }
+}
+
+impl HostBridge {
+    pub fn set_daemon_idle(&self, idle: bool) {
+        if self.daemon_idle.idle.swap(idle, Ordering::SeqCst) != idle {
+            self.daemon_idle.changed.notify_waiters();
+        }
+    }
+
+    pub fn is_daemon_idle(&self) -> bool {
+        self.daemon_idle.idle.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn daemon_idle_notifier(&self) -> Arc<Notify> {
+        self.daemon_idle.changed.clone()
+    }
+}
 
 /// Shared control state for one host-bridge execution domain.
 ///

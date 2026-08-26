@@ -183,28 +183,6 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 
-# Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/
-# deprecations (verified 2026-07-02); llama-4-scout and qwen3-32b go
-# 2026-07-17. qwen/qwen3.6-27b below is the current Groq speed route
-# for agentic coding.
-[models."llama-3.3-70b-versatile"]
-name = "Llama 3.3 70B Versatile (Groq)"
-provider = "groq"
-context_window = 131072
-logical_model = "llama-3.3-70b-instruct"
-equivalence_group = "llama-3.3-70b-instruct"
-served_variant = "groq-lpu"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.59, output_per_mtok = 0.79 }
-rate_limits = { rpm = 1000, tpm = 300000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
-architecture = { parameter_count_b = 70.0, moe = false, license = "Llama 3.3 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
-deprecated = true
-deprecation_note = "Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/deprecations. Use qwen/qwen3.6-27b on Groq or llama-3.1-8b-instant for the cheap tier."
-tier = "mid"
-open_weight = true
-strengths = ["speed", "cheap", "tool_use"]
-
 [models."qwen/qwen3.6-27b"]
 name = "Qwen3.6 27B (Groq)"
 provider = "groq"
@@ -224,25 +202,6 @@ benchmarks = { swe_bench_verified = 77.2 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "agentic"]
-
-[models."llama-3.1-8b-instant"]
-name = "Llama 3.1 8B Instant (Groq)"
-provider = "groq"
-context_window = 131072
-logical_model = "llama-3.1-8b-instruct"
-equivalence_group = "llama-3.1-8b-instruct"
-served_variant = "groq-lpu"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.05, output_per_mtok = 0.08 }
-deprecated = true
-deprecation_note = "Groq shut down this developer-tier route on 2026-08-16. Enterprise committed-spend routes are unaffected. Use openai/gpt-oss-20b."
-superseded_by = "openai/gpt-oss-20b"
-rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
-architecture = { parameter_count_b = 8.0, moe = false, license = "Llama 3.1 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
-tier = "small"
-open_weight = true
-strengths = ["speed", "cheap"]
 
 # Cohere and xAI first-party routes. Both are OpenAI-compatible enough for
 # Harn's chat-completions adapter, but their economics are unusual: Command A+

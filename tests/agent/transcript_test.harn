@@ -21,7 +21,7 @@ import { write_jsonl } from "std/jsonl"
 import { is_type } from "std/schema"
 import { with_temp_dir } from "std/testing"
 
-pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harness, _task: unknown) {
+pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harness) {
   const records = [
     {type: "message", role: "user", content: [{type: "text", text: "write tests"}]},
     {
@@ -78,10 +78,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
   assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
 }
 
-pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(
-  harness: Harness,
-  _task: unknown,
-) {
+pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(harness: Harness) {
   const rows = agent_transcript_normalize(
     [
       {
@@ -114,7 +111,6 @@ pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(
 
 pipeline test_agent_transcript_lifecycle_report_fails_closed_on_pairing_anomalies(
   harness: Harness,
-  _task: unknown,
 ) {
   const records = [
     {
@@ -148,10 +144,7 @@ pipeline test_agent_transcript_lifecycle_report_fails_closed_on_pairing_anomalie
   assert(contains(codes, "orphan_tool_result"))
 }
 
-pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(
-  harness: Harness,
-  _task: unknown,
-) {
+pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(harness: Harness) {
   const records = [
     {
       type: "response",
@@ -197,7 +190,7 @@ pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request
   assert_eq(results[1].outcome, "unknown", "legacy prose is preserved without inventing outcome")
 }
 
-pipeline test_agent_transcript_helpers_cover_provider_variants(harness: Harness, _task: unknown) {
+pipeline test_agent_transcript_helpers_cover_provider_variants(harness: Harness) {
   assert(
     agent_transcript_text([{type: "text", text: "hello"}, {type: "text", text: "world"}])
       == "hello\nworld",
@@ -225,7 +218,7 @@ pipeline test_agent_transcript_helpers_cover_provider_variants(harness: Harness,
   assert(blocks[0].tool_call_id == "c1", "block id")
 }
 
-pipeline test_agent_transcript_normalize_is_composable(harness: Harness, _task: unknown) {
+pipeline test_agent_transcript_normalize_is_composable(harness: Harness) {
   const raw = [
     {
       type: "message",
@@ -255,7 +248,7 @@ pipeline test_agent_transcript_normalize_is_composable(harness: Harness, _task: 
   )
 }
 
-pipeline test_agent_transcript_read_jsonl(harness: Harness, _task: unknown) {
+pipeline test_agent_transcript_read_jsonl(harness: Harness) {
   with_temp_dir(
     harness.fs,
     { dir ->
@@ -282,7 +275,7 @@ pipeline test_agent_transcript_read_jsonl(harness: Harness, _task: unknown) {
   )
 }
 
-pipeline test_agent_transcript_report_surfaces_malformed_records(harness: Harness, _task: unknown) {
+pipeline test_agent_transcript_report_surfaces_malformed_records(harness: Harness) {
   let report = agent_transcript_normalize_report(
     [
       42,

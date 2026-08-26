@@ -5,7 +5,7 @@ import {
   hypothesis_fixture_intent_v2,
 } from "./hypothesis_fixture_lib.harn"
 
-pipeline default(harness: Harness, _task: unknown) {
+pipeline default(harness: Harness) {
   const invalid = hypothesis_fixture_intent_v2()
     + {intervention: {adapter_id: "prompt", variant_id: "invented"}}
   const valid = hypothesis_fixture_intent_v2()

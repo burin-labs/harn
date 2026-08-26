@@ -6,14 +6,13 @@ use crate::vm::Vm;
 
 /// Return exactly the message view passed to model callers.
 ///
-/// With append-only placement enabled, the envelope is committed to durable
-/// history at the turn boundary that emits it, so this projection adds only
-/// directives no committed message carries yet. The default preserves the
-/// legacy fold-first projection while embedders measure the new placement.
+/// The envelope is committed to durable history at the turn boundary that
+/// emits it, so this projection adds only directives no committed message
+/// carries yet.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_visible_messages(session_id: string, messages?: list|nil, append_only?: bool) -> list",
+    sig = "__host_agent_session_visible_messages(session_id: string, messages?: list|nil) -> list",
     category = "agent.host",
     runtime_only = true
 )]
@@ -31,9 +30,8 @@ fn host_agent_session_visible_messages_builtin(
     let reminders = crate::llm::helpers::pending_reminders_from_session(Some(&session_id));
     let capabilities = crate::llm::capabilities::Capabilities::default();
     let rendered = crate::llm::helpers::render_pending_reminders(&capabilities, &reminders);
-    let append_only = args.get(2).is_some_and(VmValue::is_truthy);
     Ok(super::json_to_vm(&serde_json::Value::Array(
-        crate::llm::helpers::apply_rendered_reminder_messages(messages, &rendered, append_only),
+        crate::llm::helpers::apply_rendered_reminder_messages(messages, &rendered),
     )))
 }
 

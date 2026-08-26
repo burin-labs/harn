@@ -1,3 +1,4 @@
+use super::routing_test_support::{extract_with_options, ScopedEnvVar};
 use super::*;
 
 fn explicit_option_error(option: &str, value: VmValue) -> VmError {
@@ -18,6 +19,19 @@ fn explicit_option_error(option: &str, value: VmValue) -> VmError {
         VmValue::dict(options),
     ])
     .expect_err("authored generation denial must reject")
+}
+
+fn gemini_interactions_options() -> crate::value::DictMap {
+    crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("gemini")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("gemini-3.5-flash-lite")),
+        ),
+    ])
 }
 
 #[test]
@@ -61,4 +75,84 @@ fn portable_generation_denials_share_one_typed_admission_gate() {
     }
 
     crate::llm::capabilities::clear_user_overrides();
+}
+
+#[test]
+fn reasoning_scoped_generation_denial_preserves_the_non_reasoning_route() {
+    crate::llm::capabilities::set_user_overrides_toml(concat!(
+        "[[provider.local]]\n",
+        "model_match = \"conditional-generation\"\n",
+        "thinking_modes = [\"effort\"]\n",
+        "reasoning_none_supported = true\n",
+        "reasoning_excluded_portable_options = [\"temperature\"]\n",
+    ))
+    .expect("conditional generation capability fixture");
+
+    let options = |effort: Option<&str>| {
+        let mut options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("local")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("conditional-generation")),
+            ),
+            (crate::value::intern_key("temperature"), VmValue::Float(0.2)),
+        ]);
+        if let Some(effort) = effort {
+            options.insert(
+                crate::value::intern_key("effort"),
+                VmValue::String(arcstr::ArcStr::from(effort)),
+            );
+        }
+        options
+    };
+    let extract = |options| {
+        extract_llm_options(&[
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::Nil,
+            VmValue::dict(options),
+        ])
+    };
+
+    extract(options(None)).expect("temperature remains valid with reasoning disabled");
+    extract(options(Some("none"))).expect("effort none keeps reasoning disabled");
+    let error = extract(options(Some("low")))
+        .expect_err("temperature must be rejected when reasoning is enabled");
+
+    crate::llm::capabilities::clear_user_overrides();
+    assert!(
+        error
+            .to_string()
+            .contains("option `temperature` is not supported while reasoning is enabled"),
+        "unexpected conditional-admission error: {error}"
+    );
+}
+
+#[test]
+fn gemini_interactions_penalties_fail_before_request_construction() {
+    let _guard = crate::llm::env_guard();
+    // The shared guard restores this inert test credential before another test
+    // can observe it. Extraction reaches admission but never dispatches.
+    let _key = ScopedEnvVar::set("GEMINI_API_KEY", "test-key");
+
+    for (option, value) in [
+        ("frequency_penalty", VmValue::Float(0.2)),
+        ("presence_penalty", VmValue::Float(0.2)),
+    ] {
+        let mut options = gemini_interactions_options();
+        options.insert(crate::value::intern_key(option), value);
+        let error = extract_with_options(options)
+            .expect_err("Interactions must reject a portable penalty before transport");
+        assert!(
+            error.to_string().contains(&format!(
+                "option `{option}` is not supported by `gemini-3.5-flash-lite` (provider `gemini`)."
+            )),
+            "unexpected error for {option}: {error}"
+        );
+    }
+
+    extract_with_options(gemini_interactions_options())
+        .expect("an Interactions call without penalties remains admissible");
 }

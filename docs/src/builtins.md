@@ -1911,6 +1911,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
 | `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
 | `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
+| `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)` | handle: typed daemon record or string, min_iterations: int, timeout_ms: int | typed daemon snapshot | Wait for an idle daemon with an empty trigger queue and a snapshot at or beyond the requested iteration; defaults to 0 iterations and 5000 ms, and throws on timeout or terminal daemon state |
 | `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
 | `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
 | `external_agent_delegate(agent, random, target, task, options?)` | agent: `HarnessAgent`, random: `HarnessRandom`, target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
@@ -2236,6 +2237,7 @@ distinguish new failure modes.
 |---|---|
 | `timeout` | Network or connection timeout |
 | `auth` | Authentication or authorization failure |
+| `invalid_request` | A provider rejected the request. Correct the request before trying again |
 | `rate_limit` | Rate limit exceeded (HTTP 429 / quota) |
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
@@ -2990,7 +2992,7 @@ normalized but are not yet used to sleep between attempts.
 | `workflow.query(target, name)` | target, name: string | any | Read the last published query value, or `nil` when absent |
 | `workflow.publish_query(target, name, value?)` | target, name: string, value: any | dict | Publish or replace a named query value for a workflow |
 | `workflow.update(target, name, payload?, options?)` | target, name: string, payload: any, options: dict | any | Enqueue an update request and wait for a matching response |
-| `workflow.receive(target)` | target | dict or nil | Pop the next queued message (`signal`, `update`, or control message) |
+| `workflow.receive(target, timeout_ms?)` | target, timeout_ms: int (optional) | typed record or nil | Pop the next queued message, optionally waiting up to `timeout_ms` |
 | `workflow.respond_update(target, request_id, value, name?)` | target, request_id: string, value: any, name: string (optional) | dict | Fulfill a pending workflow update request |
 | `workflow.pause(target)` | target | dict | Mark a workflow paused and enqueue a control message |
 | `workflow.resume(target)` | target | dict | Mark a workflow resumed and enqueue a control message |

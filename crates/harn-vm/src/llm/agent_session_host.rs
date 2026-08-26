@@ -180,9 +180,62 @@ impl Drop for SessionPolicyGuard {
     }
 }
 
+struct SharedHostSessions(parking_lot::RwLock<BTreeMap<String, AgentHostSession>>);
+
+impl SharedHostSessions {
+    fn borrow(&self) -> parking_lot::RwLockReadGuard<'_, BTreeMap<String, AgentHostSession>> {
+        self.0.read()
+    }
+
+    fn borrow_mut(&self) -> parking_lot::RwLockWriteGuard<'_, BTreeMap<String, AgentHostSession>> {
+        self.0.write()
+    }
+
+    fn try_borrow(
+        &self,
+    ) -> Result<parking_lot::RwLockReadGuard<'_, BTreeMap<String, AgentHostSession>>, ()> {
+        self.0.try_read().ok_or(())
+    }
+}
+
+pub(crate) struct AgentHostSessionRuntime {
+    sessions: SharedHostSessions,
+}
+
+impl Default for AgentHostSessionRuntime {
+    fn default() -> Self {
+        Self {
+            sessions: SharedHostSessions(parking_lot::RwLock::new(BTreeMap::new())),
+        }
+    }
+}
+
 thread_local! {
-    static AGENT_HOST_SESSIONS: RefCell<BTreeMap<String, AgentHostSession>> =
-        const { RefCell::new(std::collections::BTreeMap::new()) };
+    static ACTIVE_AGENT_HOST_SESSION_RUNTIME: RefCell<Arc<AgentHostSessionRuntime>> =
+        RefCell::new(fresh_agent_host_session_runtime());
+}
+
+pub(crate) fn fresh_agent_host_session_runtime() -> Arc<AgentHostSessionRuntime> {
+    Arc::new(AgentHostSessionRuntime::default())
+}
+
+pub(crate) fn active_agent_host_session_runtime() -> Arc<AgentHostSessionRuntime> {
+    ACTIVE_AGENT_HOST_SESSION_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
+}
+
+pub(crate) fn swap_active_agent_host_session_runtime(
+    next: Arc<AgentHostSessionRuntime>,
+) -> Arc<AgentHostSessionRuntime> {
+    ACTIVE_AGENT_HOST_SESSION_RUNTIME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+struct AgentHostSessionsSlot;
+static AGENT_HOST_SESSIONS: AgentHostSessionsSlot = AgentHostSessionsSlot;
+impl AgentHostSessionsSlot {
+    fn with<T>(&self, use_sessions: impl FnOnce(&SharedHostSessions) -> T) -> T {
+        let runtime = active_agent_host_session_runtime();
+        use_sessions(&runtime.sessions)
+    }
 }
 
 pub(crate) fn reset_agent_session_host_state() {

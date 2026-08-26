@@ -1,0 +1,1 @@
+does not exclude `string` from `value` when it is false

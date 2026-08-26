@@ -8,6 +8,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::connectors::{ConnectorError, MetricsRegistry};
 use crate::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+use crate::TenantId;
 
 use super::{TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC};
 
@@ -30,18 +31,42 @@ impl InboxIndex {
         event_log: Arc<AnyEventLog>,
         metrics: Arc<MetricsRegistry>,
     ) -> Result<Self, ConnectorError> {
-        let topic =
+        Self::new_scoped(event_log, metrics, None).await
+    }
+
+    pub async fn new_for_tenant(
+        event_log: Arc<AnyEventLog>,
+        metrics: Arc<MetricsRegistry>,
+        tenant_id: &TenantId,
+    ) -> Result<Self, ConnectorError> {
+        Self::new_scoped(event_log, metrics, Some(tenant_id)).await
+    }
+
+    async fn new_scoped(
+        event_log: Arc<AnyEventLog>,
+        metrics: Arc<MetricsRegistry>,
+        tenant_id: Option<&TenantId>,
+    ) -> Result<Self, ConnectorError> {
+        let base_topic =
             Topic::new(TRIGGER_INBOX_CLAIMS_TOPIC).expect("trigger inbox claims topic is valid");
+        let topic = match tenant_id {
+            Some(tenant_id) => crate::tenant_topic(tenant_id, &base_topic)?,
+            None => base_topic,
+        };
         let records = event_log
             .read_range(&topic, None, usize::MAX)
             .await
             .map_err(ConnectorError::from)?;
-        let legacy_topic =
-            Topic::new(TRIGGER_INBOX_LEGACY_TOPIC).expect("legacy trigger inbox topic is valid");
-        let legacy_records = event_log
-            .read_range(&legacy_topic, None, usize::MAX)
-            .await
-            .map_err(ConnectorError::from)?;
+        let legacy_records = if tenant_id.is_none() {
+            let legacy_topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC)
+                .expect("legacy trigger inbox topic is valid");
+            event_log
+                .read_range(&legacy_topic, None, usize::MAX)
+                .await
+                .map_err(ConnectorError::from)?
+        } else {
+            Vec::new()
+        };
         let now_ms = now_ms();
         let mut entries = HashMap::new();
         let mut expired = 0u64;

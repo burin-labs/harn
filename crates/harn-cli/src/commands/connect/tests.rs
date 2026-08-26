@@ -1004,3 +1004,17 @@ fn connect_writes_where_the_runtime_resolves() {
         "harn connect status must read the namespace the runtime resolves from"
     );
 }
+
+#[test]
+fn api_key_store_failure_names_the_declared_headless_path_without_a_value() {
+    let message = store::format_store_failure(
+        "duffel/test-access-token",
+        "keyring interaction was dismissed",
+        &["DUFFEL_TEST_KEY".to_string()],
+    );
+
+    assert!(message.contains("failed to store duffel/test-access-token"));
+    assert!(message.contains("export DUFFEL_TEST_KEY"));
+    assert!(message.contains("keep it set when Harn runs"));
+    assert!(!message.contains("sample-secret-value"));
+}

@@ -15,21 +15,16 @@ pub(super) struct UsageSnapshot {
 }
 
 pub(super) fn llm_usage_snapshot() -> UsageSnapshot {
-    let (input_tokens, output_tokens, total_duration_ms, call_count) =
-        crate::llm::peek_trace_summary();
-    let trace = crate::llm::peek_trace();
-    let certainty =
-        crate::llm::usage::summarize_usage_cost_certainty(trace.iter().map(|entry| &entry.usage));
-    let trace_len = trace.len();
+    let trace = crate::llm::peek_trace_usage_summary();
     UsageSnapshot {
-        input_tokens,
-        output_tokens,
-        total_duration_ms,
-        call_count,
-        total_cost: certainty.known_cost_usd,
-        unpriced_calls: certainty.unpriced_calls,
-        usage_unknown_calls: certainty.usage_unknown_calls,
-        trace_len,
+        input_tokens: trace.input_tokens,
+        output_tokens: trace.output_tokens,
+        total_duration_ms: trace.duration_ms,
+        call_count: trace.call_count,
+        total_cost: trace.cost.known_cost_usd,
+        unpriced_calls: trace.cost.unpriced_calls,
+        usage_unknown_calls: trace.cost.usage_unknown_calls,
+        trace_len: usize::try_from(trace.call_count).unwrap_or(usize::MAX),
     }
 }
 

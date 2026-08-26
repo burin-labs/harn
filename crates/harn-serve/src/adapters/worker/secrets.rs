@@ -28,6 +28,7 @@ use crate::DispatchError;
 /// The provider is a handle. No secret value passes through this function, and
 /// none is logged or recorded by it.
 pub(super) fn worker_secret_provider(
+    tenant_scope: Option<&harn_vm::TenantScope>,
 ) -> Result<Arc<dyn harn_vm::secrets::SecretProvider>, DispatchError> {
     let chain = harn_vm::secrets::configured_secret_chain()
         .map_err(|error| DispatchError::SecretBackend(error.to_string()))?;
@@ -38,7 +39,11 @@ pub(super) fn worker_secret_provider(
             harn_vm::secrets::configured_secret_namespace()
         )));
     }
-    Ok(Arc::new(chain))
+    let provider: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(chain);
+    Ok(match tenant_scope {
+        Some(scope) => Arc::new(harn_vm::TenantSecretProvider::new(provider, scope.clone())),
+        None => provider,
+    })
 }
 
 /// The harness a job VM runs with.
@@ -48,6 +53,8 @@ pub(super) fn worker_secret_provider(
 /// harness" -- the same missing wiring the connector context had, wearing a
 /// second symptom. Both take the provider from one place so they cannot drift
 /// into disagreeing about which credentials a worker can see.
-pub(super) fn worker_job_harness() -> Result<harn_vm::Harness, DispatchError> {
-    Ok(harn_vm::Harness::real().with_secret_provider(worker_secret_provider()?))
+pub(super) fn worker_job_harness(
+    provider: Arc<dyn harn_vm::secrets::SecretProvider>,
+) -> harn_vm::Harness {
+    harn_vm::Harness::real().with_secret_provider(provider)
 }

@@ -12,7 +12,7 @@
 //!   unknown (with a did-you-mean) or removed (with the recorded fix);
 //! * the stdlib allowlist (`std/llm/options.llm_call_options`) is served by
 //!   the `__llm_call_option_registry` builtin, which reads these tables;
-//! * the `deprecated_llm_options` lint rule reports [`LLM_REMOVED_OPTIONS`]
+//! * the `removed-llm-options` lint rule reports [`LLM_REMOVED_OPTIONS`]
 //!   entries at `harn check` time.
 //!
 //! There is deliberately NO other list of accepted or removed option keys

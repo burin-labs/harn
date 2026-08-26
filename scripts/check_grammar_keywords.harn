@@ -31,6 +31,8 @@ const CONTEXTUAL = [
   "block",
   "default",
   "each",
+  "implies",
+  "is",
   "max_concurrent",
   "out",
   "settle",

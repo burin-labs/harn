@@ -32,6 +32,7 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 
 mod admission;
 mod audit;
+mod diagnostics;
 mod effort;
 mod lookup;
 #[cfg(test)]
@@ -62,8 +63,10 @@ mod pattern;
 mod rule;
 #[cfg(test)]
 mod rule_tests;
+mod runtime_probe;
 mod tool_format;
 
+pub(crate) use admission::admit_portable_option_for_thinking;
 pub(crate) use lookup::should_use_responses_transport;
 pub(crate) use overrides::swap_user_overrides;
 
@@ -81,11 +84,12 @@ pub use lookup::{
     set_user_overrides_from_manifest_toml, set_user_overrides_toml,
 };
 pub use model::{
-    CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff,
-    LiveEndpointFamily, ProviderDefaults, ProviderLimits, ReasoningHistoryWireField,
-    ReasoningRoundTripPolicy, ScreenshotScaling, SystemMessagePlacement, ToolFormatJustification,
-    ToolFormatMirror, WireDialect,
+    CacheBreakpointStyle, Capabilities, CapabilitiesFile, CapabilityProbeReceipt,
+    CapabilityProbeStatus, ComputerUseStyle, GovernorBackoff, LiveEndpointFamily, ProviderDefaults,
+    ProviderLimits, ReasoningHistoryWireField, ReasoningRoundTripPolicy, ScreenshotScaling,
+    SystemMessagePlacement, ToolFormatJustification, ToolFormatMirror, WireDialect,
 };
+pub(crate) use runtime_probe::ensure_runtime_probe;
 
 /// Resolve the effective placement for an interleaved `system`/`developer`
 /// message on this route. An explicit `system_message_placement` capability

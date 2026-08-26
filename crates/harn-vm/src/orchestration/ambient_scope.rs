@@ -3,14 +3,11 @@
 //! Capability/identity context — execution policy, approval policy, command
 //! policy, dynamic permissions, the current host bridge, the bridge-trust +
 //! command-hook depths, and the runtime-context overlay — is held in
-//! thread-local LIFO stacks or single slots. The same hazard applies to
-//! single-slot contexts installed for the whole agent loop. That model is sound for a
-//! synchronous call stack, but a guard held across an `.await` is **not**:
-//! runtime tasks can interleave on one thread or migrate between worker
-//! threads. A
-//! child that installs context across an await would otherwise read a
-//! *sibling's* file scope, env, worktree, tool ceiling, approval, secret scope,
-//! or event attribution.
+//! thread-local LIFO stacks or single slots, including contexts installed for
+//! the whole agent loop. That model is sound for a synchronous call stack, but
+//! a guard held across an `.await` is **not**: tasks can interleave on one thread
+//! or migrate between workers. A child would otherwise read a *sibling's* file
+//! scope, env, worktree, tool ceiling, approval, secrets, or event attribution.
 //!
 //! [`AmbientExecutionScope`] gives every spawned worker its **own** copy of
 //! these stacks. [`scope_ambient`] wraps the worker future so the task's scope
@@ -18,9 +15,7 @@
 //! poll-exit (the same technique `tracing::Instrument` uses for span context).
 //! Only the currently-polling task's scope is ever live on a thread, so the
 //! cooperative/work-stealing interleaving is invisible to capability checks.
-//! Each swap is an O(1) `mem::replace` of a `Vec`/`usize`/`Option`, so the
-//! per-poll cost is a handful of pointer swaps regardless of stack depth.
-
+//! Swaps are O(1) pointer moves regardless of stack depth.
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -48,7 +43,7 @@ use crate::llm::capabilities::{
 };
 use crate::llm::mock::{current_llm_mock_context, swap_llm_mock_context, LlmMockContext};
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
-use crate::llm::swap_current_host_bridge;
+use crate::llm::{swap_current_host_bridge, swap_current_loop_sinks};
 use crate::llm_config::{
     swap_runtime_provider_endpoint_overrides, swap_user_overrides as swap_provider_overrides,
     ProvidersConfig, RuntimeProviderEndpointOverrides,
@@ -64,6 +59,7 @@ use crate::stdlib::process::{
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
 mod subtask_state;
+mod top_level;
 
 use subtask_state::SubtaskAmbientState;
 
@@ -124,6 +120,10 @@ pub(crate) struct AmbientExecutionScope {
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
     host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
+    /// Scoped observation sinks follow all work started inside the capture
+    /// closure, including delegated agents. A child may layer its own sink on
+    /// top without losing the outer capture when no narrower sink is present.
+    loop_sinks: Vec<std::sync::Arc<dyn crate::agent_events::AgentEventSink>>,
     /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
     /// INHERITED by fan-out workers and inline subtasks: they are part of the
     /// SAME program run, so a `run_test` executed in a fan-out body must record
@@ -159,31 +159,6 @@ fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
 }
 
 impl AmbientExecutionScope {
-    /// Capture the caller's full ambient context for one top-level VM run and
-    /// append a fresh execution owner. The resulting scope is installed by
-    /// [`scope_ambient`] around every poll of the VM future, so two top-level
-    /// executions interleaved on one thread never observe each other's owner.
-    /// Keeping the captured stack beneath the fresh owner preserves nested VM
-    /// execution: completion restores the exact outer ambient context.
-    pub(crate) fn capture_for_top_level_execution(
-        owner: std::sync::Arc<str>,
-        llm_mock: LlmMockContext,
-    ) -> Self {
-        let mut scope = Self::capture_for_inline_subtask();
-        let tool_call_cancellations = scope
-            .host_bridge
-            .as_ref()
-            .map_or_else(crate::tool_call_cancellations::fresh_registry, |bridge| {
-                bridge.tool_call_cancellation_registry()
-            });
-        scope
-            .subtask
-            .set_tool_call_cancellations(tool_call_cancellations);
-        scope.execution_scope.push(owner);
-        scope.llm_mock = llm_mock;
-        scope
-    }
-
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's
@@ -227,6 +202,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            loop_sinks: clone_via_swap(swap_current_loop_sinks),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -292,6 +268,7 @@ impl AmbientExecutionScope {
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
+            loop_sinks: clone_via_swap(swap_current_loop_sinks),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -358,6 +335,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
+        swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
             &mut self.runtime_provider_endpoint_overrides,
@@ -503,212 +481,19 @@ pub fn scope_llm_runtime_overrides_with_provider_endpoints<F: Future>(
     scope_ambient(scope, inner)
 }
 
-/// How an ambient-shape thread-local relates to per-task fan-out scoping.
+/// Run one entrypoint future with an execution-owned trigger registry.
 ///
-/// "Ambient-shape" means a thread-local whose name follows the LIFO-stack
-/// (`*_STACK`), recursion-depth (`*_DEPTH`), or single-slot
-/// execution/identity context (`*_CONTEXT` / `*_SESSION` / `*_CTX`, plus
-/// `VM_SOURCE_DIR`) convention — the family that holds context which a worker
-/// future may read across an `.await`. F1/F2 were `RefCell<Option<_>>` context
-/// slots that escaped the original `*_STACK`-only audit, so the drift guard
-/// covers the single-slot shapes too.
-///
-/// This catalog is the drift guard's test fixture, so it is `#[cfg(test)]`; it
-/// lives next to the scope it documents on purpose — read it before adding any
-/// ambient thread-local.
-#[cfg(test)]
-#[derive(Clone, Copy)]
-enum AmbientScoping {
-    /// Swapped per-poll by [`AmbientExecutionScope::swap_in`]. The worker keeps
-    /// its own copy across `.await`, so cooperatively-scheduled siblings never
-    /// cross-wire it.
-    Captured,
-    /// A human reviewed this thread-local and deliberately left it out of the
-    /// scope (today). The string records why. Audited capability/identity stacks
-    /// that should be wired in the day they become read-across-await inside
-    /// fan-out are also listed in [`AUDITED_LATENT_CAPABILITIES`].
-    Uncaptured(&'static str),
+/// The registry is swapped around every poll with the rest of the ambient
+/// execution scope. Manifest reconciliation and dynamic registrations made by
+/// the entrypoint therefore cannot leak into a later in-process run, while the
+/// caller's exact registry is restored when the future yields or completes.
+pub fn scope_fresh_trigger_registry<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_trigger_registry(crate::triggers::registry::runtime::fresh_trigger_registry());
+    scope_ambient(scope, inner)
 }
-
-/// THE decision record for every ambient-shape thread-local in this crate.
-///
-/// F1/F2 (VM_EXECUTION_CONTEXT + CURRENT_MUTATION_SESSION cross-wiring) happened
-/// because the capture set was a hand-maintained allow-list with no forcing
-/// function: two same-shape thread-locals existed, were read across a worker's
-/// awaits, and nobody noticed they weren't captured. This catalog plus
-/// `every_ambient_shape_thread_local_is_cataloged` is that forcing
-/// function — a new `*_STACK` / `*_DEPTH` / `*_CONTEXT` / `*_SESSION` / `*_CTX`
-/// thread-local FAILS the test until it is classified here, so the author must
-/// consciously decide `Captured` vs `Uncaptured`.
-///
-/// Keep the `Captured` entries in lockstep with the fields of
-/// [`AmbientExecutionScope`] and the swaps in `swap_in`; the
-/// `captured_catalog_matches_scope_fields` test enforces the set.
-#[cfg(test)]
-const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
-    // --- Captured: swapped per-poll into each worker's isolated scope. ---
-    ("EXECUTION_POLICY_STACK", AmbientScoping::Captured),
-    ("EXECUTION_APPROVAL_POLICY_STACK", AmbientScoping::Captured),
-    ("OPERATOR_APPROVAL_GRANT_STACK", AmbientScoping::Captured),
-    ("COMMAND_POLICY_STACK", AmbientScoping::Captured),
-    ("DYNAMIC_PERMISSION_STACK", AmbientScoping::Captured),
-    ("RUNTIME_CONTEXT_OVERLAY_STACK", AmbientScoping::Captured),
-    ("AUTONOMY_POLICY_STACK", AmbientScoping::Captured),
-    ("LLM_RENDER_STACK", AmbientScoping::Captured),
-    ("ACTIVE_HARN_CONNECTOR_CTX", AmbientScoping::Captured),
-    ("TRUSTED_BRIDGE_CALL_DEPTH", AmbientScoping::Captured),
-    ("COMMAND_POLICY_HOOK_DEPTH", AmbientScoping::Captured),
-    // Deterministic pre-approval tool-deny seam: a spawned worker inherits the
-    // parent's prechecks and carries its own re-entrancy depth across awaits.
-    ("TOOL_PRECHECK_STACK", AmbientScoping::Captured),
-    ("TOOL_PRECHECK_DEPTH", AmbientScoping::Captured),
-    // F1: cwd/env/source-dir + capability path-scope root.
-    ("VM_EXECUTION_CONTEXT", AmbientScoping::Captured),
-    ("VM_SOURCE_DIR", AmbientScoping::Captured),
-    // F2: audit/run_id/approval/secret-scope.
-    ("CURRENT_MUTATION_SESSION", AmbientScoping::Captured),
-    // Session environment policy (isolated/granted grants): read at subprocess
-    // spawn across a worker's awaits, so each fan-out child holds its own copy.
-    ("SESSION_ENVIRONMENT_CONTEXT", AmbientScoping::Captured),
-    // A case-local admission gate and receipt follows every subprocess spawned
-    // by that case, including inline and delegated VM work.
-    ("PROCESS_ADMISSION_CONTEXT", AmbientScoping::Captured),
-    // Host capability bridge: fan-out workers need the same host_call routing
-    // as the parent agent loop, even when process cwd differs from project root.
-    ("CURRENT_HOST_BRIDGE", AmbientScoping::Captured),
-    // Files-written/session breadcrumb: isolated per task, but not inherited.
-    ("CURRENT_SESSION_STACK", AmbientScoping::Captured),
-    // Provider/capability overlays can change transport routing and tool wire
-    // policy, so embedded ACP requests carry them across every await.
-    ("LLM_CONFIG_OVERRIDES_CONTEXT", AmbientScoping::Captured),
-    (
-        "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
-        AmbientScoping::Captured,
-    ),
-    ("LLM_CAPABILITY_OVERRIDES_CONTEXT", AmbientScoping::Captured),
-    // Inline fixture state follows the VM execution tree across every await.
-    ("LLM_MOCK_CONTEXT", AmbientScoping::Captured),
-    // A test pipeline's egress policy follows all inline and delegated work.
-    ("EGRESS_POLICY_CONTEXT", AmbientScoping::Captured),
-    // Verdict execution-scope owner: INHERITED (unlike the session stack) because
-    // a fan-out worker runs the same program run and its run_test must record /
-    // issue under that run's owner. See observability/execution_scope.rs.
-    ("ACTIVE_EXECUTION_SCOPE_STACK", AmbientScoping::Captured),
-    // Ordered run events follow the same execution tree without leaking into a
-    // concurrently-polled sibling run.
-    ("RUN_EVENT_SINK_CONTEXT", AmbientScoping::Captured),
-    // Where this execution tree's subtasks run. Captured so a nested fan-out
-    // keeps the placement its run started with.
-    ("SUBTASK_PLACEMENT_CONTEXT", AmbientScoping::Captured),
-    // Security policy and the two egress enforcement depths all fail OPEN when
-    // unset, so a subtask reading a worker thread's default would silently drop
-    // the strict-security, explicit-egress-policy, and SSRF gates.
-    ("SECURITY_POLICY_STACK", AmbientScoping::Captured),
-    (
-        "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
-        AmbientScoping::Captured,
-    ),
-    ("REQUIRE_SSRF_GUARD_DEPTH", AmbientScoping::Captured),
-    // Operator-registered secret patterns: an empty set on a worker thread
-    // writes secrets to a subtask's transcript in the clear.
-    ("CUSTOM_PATTERNS", AmbientScoping::Captured),
-    // The observable event log, captured as a shared Arc so parent and subtask
-    // append to one log instead of one unread log per worker thread.
-    ("ACTIVE_EVENT_LOG", AmbientScoping::Captured),
-    // Per-dispatch call ceilings. The count is shared, not copied: a branch
-    // that got its own count could spend the whole `@budget(...)` allowance.
-    ("MCP_CALL_BUDGET", AmbientScoping::Captured),
-    ("PG_QUERY_BUDGET", AmbientScoping::Captured),
-    // One execution tree's in-flight tool calls remain addressable when
-    // registration, cancellation, and guard teardown land on different
-    // runtime workers, without becoming visible to sibling embedded VMs.
-    (
-        "ACTIVE_TOOL_CALL_CANCELLATION_REGISTRY",
-        AmbientScoping::Captured,
-    ),
-    // --- Uncaptured: audited capability/identity context, same shape, NOT yet
-    // read across a fan-out child's awaits. Wire each into the scope the day it
-    // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
-    (
-        "ACTIVE_TENANT_STACK",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] harness_tenant.rs tenant identity; not set per-worker today.",
-        ),
-    ),
-    (
-        "ACTIVE_PRINCIPAL_STACK",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] harness_auth.rs principal identity; not set per-worker today.",
-        ),
-    ),
-    (
-        "REDACTION_POLICY_STACK",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] redact/mod.rs redaction policy; pushed around synchronous \
-             redaction, not held across a child await today.",
-        ),
-    ),
-    (
-        "ACTIVE_REQUEST_ID_STACK",
-        AmbientScoping::Uncaptured(
-            "[latent-capability] observability/request_id.rs request-id breadcrumb; attribution \
-             only, no capability decision rides on it.",
-        ),
-    ),
-    // --- Uncaptured: shape-matches the naming convention but is structurally
-    // not cross-task ambient context. ---
-    ("PERSONA_STACK", AmbientScoping::Captured),
-    ("STEP_STACK", AmbientScoping::Captured),
-    ("ACTIVE_CONTEXT_SUSPENSION_STACK", AmbientScoping::Captured),
-    (
-        "CURRENT_TOOL_CALL_STACK",
-        AmbientScoping::Uncaptured(
-            "agent_sessions.rs tool-call breadcrumb; pushed+popped within a single synchronous \
-             dispatch frame.",
-        ),
-    ),
-    ("TRANSCRIPT_DIR_STACK", AmbientScoping::Captured),
-    (
-        "VM_TRACE_STACK",
-        AmbientScoping::Uncaptured(
-            "stdlib/logging.rs log-trace breadcrumb (trace ids for log lines); attribution \
-             only, no capability decision rides on it.",
-        ),
-    ),
-    (
-        "ACTIVE_DISPATCH_CONTEXT",
-        AmbientScoping::Uncaptured(
-            "triggers/dispatcher trigger-dispatch context for the dispatcher runner, not the \
-             fan-out worker path.",
-        ),
-    ),
-    (
-        "CURRENT_WORKFLOW_SKILL_CONTEXT",
-        AmbientScoping::Uncaptured(
-            "orchestration/mod.rs workflow skill context; the workflow runner pins itself to \
-             one LocalSet task, so every stage observes the same context (see its doc-comment).",
-        ),
-    ),
-    (
-        "INPUT_CONTEXT",
-        AmbientScoping::Uncaptured(
-            "mcp_input.rs Tokio task-local scoped directly around one stable MCP handler \
-             invocation; Tokio isolates it across sibling tasks and scope_input_context removes \
-             it at the request boundary.",
-        ),
-    ),
-];
-
-#[cfg(test)]
-#[path = "ambient_scope/drift_tests.rs"]
-mod drift_tests;
-
-/// The same-shape capability/identity thread-locals the F1/F2 audit named as
-/// latent: NOT captured today, but the next dev to make one cross-task-relevant
-/// must wire it into [`AmbientExecutionScope`]. `audited_latent_capabilities_are_cataloged`
-/// asserts each stays present and `Uncaptured` so they cannot silently flip.
-#[cfg(test)]
-const AUDITED_LATENT_CAPABILITIES: &[&str] = &["ACTIVE_TENANT_STACK", "ACTIVE_PRINCIPAL_STACK"];
 
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
@@ -825,12 +610,54 @@ mod tests {
         current_llm_render_context, LlmRenderContext, LlmRenderContextGuard,
     };
     use std::future::pending;
+    use std::sync::Arc;
 
     fn policy_named(tool: &str) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: vec![tool.to_string()],
             ..Default::default()
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fresh_trigger_registry_scope_survives_task_migration() {
+        let stable = scope_fresh_trigger_registry(async {
+            let owner = crate::triggers::registry::active_trigger_registry();
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            Arc::ptr_eq(
+                &owner,
+                &crate::triggers::registry::active_trigger_registry(),
+            )
+        })
+        .await;
+
+        assert!(stable, "one logical run must retain one trigger registry");
+    }
+
+    #[tokio::test]
+    async fn fresh_trigger_registry_scopes_are_isolated_and_restore_the_caller() {
+        let caller = crate::triggers::registry::active_trigger_registry();
+        let (alpha, beta) = tokio::join!(
+            scope_fresh_trigger_registry(async {
+                let owner = crate::triggers::registry::active_trigger_registry();
+                tokio::task::yield_now().await;
+                owner
+            }),
+            scope_fresh_trigger_registry(async {
+                let owner = crate::triggers::registry::active_trigger_registry();
+                tokio::task::yield_now().await;
+                owner
+            }),
+        );
+
+        assert!(!Arc::ptr_eq(&alpha, &beta));
+        assert!(!Arc::ptr_eq(&alpha, &caller));
+        assert!(!Arc::ptr_eq(&beta, &caller));
+        assert!(Arc::ptr_eq(
+            &caller,
+            &crate::triggers::registry::active_trigger_registry(),
+        ));
     }
 
     #[tokio::test]

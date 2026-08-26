@@ -26,6 +26,7 @@ done < <(find "$fixture_root" -type f -name '*.harn' -print0)
 
 : > "$tmp/raw.tsv"
 batch_index=0
+collection_failed=0
 run_check_batch() {
   local -a requested=("$@")
   local report="$tmp/report-$batch_index.json"
@@ -85,10 +86,12 @@ run_check_batch() {
 
     error_count=$(jq '[.data.files[] | select(.status == "error")] | length' "$report")
     missing_count=$(wc -l < "$missing_paths" | tr -d ' ')
-    if [[ -s $unexpected_paths ]] \
+    if ((missing_count != 0)) \
+      || [[ -s $unexpected_paths ]] \
       || ((check_status != 0 && error_count + missing_count == 0)) \
       || ((check_status == 0 && error_count != 0)); then
       cat "$stderr" >&2
+      collection_failed=1
       printf '%s\t%s\n' '__BATCH__' '__CHECK_FAILED__' >> "$tmp/raw.tsv"
     fi
   elif ((check_status != 0)) \
@@ -101,6 +104,7 @@ run_check_batch() {
     done < "$requested_paths"
   else
     cat "$stderr" >&2
+    collection_failed=1
     printf '%s\t%s\n' '__BATCH__' '__CHECK_FAILED__' >> "$tmp/raw.tsv"
   fi
 }
@@ -112,6 +116,11 @@ LC_ALL=C sort "$tmp/raw.tsv" | uniq -c |
   sed -E 's/^ *([0-9]+) /\1\t/' > "$tmp/actual.tsv"
 
 if [[ ${1:-} == "--update" ]]; then
+  if ((collection_failed != 0)); then
+    printf '%s\n' \
+      'Refusing to replace the reviewed conformance baseline because diagnostic collection failed.' >&2
+    exit 1
+  fi
   cp "$tmp/actual.tsv" "$baseline"
   printf 'Updated %s\n' "$baseline"
   exit 0

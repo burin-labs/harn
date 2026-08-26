@@ -270,6 +270,30 @@ Bracket literals remain lists unless a `tuple<...>` annotation or function
 parameter supplies tuple context. Constant out-of-bounds indexes are
 `HARN-TYP-027`; dynamic indexes return the union of all positions plus `nil`.
 
+## Reuse narrowing checks
+
+A `const` keeps the narrowing facts from its condition:
+
+```harn
+fn normalize(value: string | int) -> string {
+  const kind = type_of(value)
+  const text = kind == "string"
+  if text { return value.upper() }
+  return to_string(value)
+}
+```
+
+Declare a predicate when several callers need the same check:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+```
+
+Use `implies value is T` if a false result can still be `T`. Invalid predicate
+contracts report `HARN-TYP-029`.
+
 ## Regex
 
 ```harn

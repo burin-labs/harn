@@ -45,6 +45,12 @@ pub struct ProvidersConfig {
     /// itself; it only describes how clients may present catalog choices.
     #[serde(default)]
     pub presentation: PresentationConfig,
+    /// Source-only audit registry for provider usage-accounting behavior.
+    /// The generated catalog projects the audited booleans, while this
+    /// registry keeps evidence and the explicit unverified queue at their
+    /// owning source seam without changing the public artifact schema.
+    #[serde(default)]
+    pub usage_accounting_audit: Option<UsageAccountingAuditRegistry>,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -127,6 +133,7 @@ impl ProvidersConfig {
             && self.patch.models.is_empty()
             && self.model_ladders.is_empty()
             && self.presentation.is_empty()
+            && self.usage_accounting_audit.is_none()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -187,6 +194,10 @@ impl ProvidersConfig {
 
         if overlay.default_provider.is_some() {
             self.default_provider = overlay.default_provider.clone();
+        }
+
+        if overlay.usage_accounting_audit.is_some() {
+            self.usage_accounting_audit = overlay.usage_accounting_audit.clone();
         }
 
         if !overlay.inference_rules.is_empty() {

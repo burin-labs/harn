@@ -1,18 +1,17 @@
 //! `provider_capabilities` — the capability row a script sees for a route.
 
-use super::super::catalog_builtins::provider_capabilities_builtin;
+use super::super::catalog_builtins::provider_capabilities_value;
 use crate::llm_config;
 use crate::value::VmValue;
 
 #[test]
 fn test_provider_capabilities_exposes_tools_for_text_only_models() {
     crate::llm::capabilities::clear_user_overrides();
-    let mut out = String::new();
     let args = vec![
         VmValue::String(arcstr::ArcStr::from("ollama")),
         VmValue::String(arcstr::ArcStr::from("qwen3.6:35b-a3b-coding-nvfp4")),
     ];
-    let result = provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
+    let result = provider_capabilities_value(&args).expect("builtin returned error");
     let dict = result.as_dict().expect("expected dict");
     // qwen3.6 on Ollama uses Harn's text tool-call wire format, not native API tools.
     // Scripts gating on `tools` should still see it as tool-capable.
@@ -36,17 +35,32 @@ fn test_provider_capabilities_exposes_tools_for_text_only_models() {
 }
 
 #[test]
+fn provider_capabilities_exposes_reasoning_scoped_generation_limits() {
+    crate::llm::capabilities::clear_user_overrides();
+    let result = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("openai")),
+        VmValue::String(arcstr::ArcStr::from("gpt-5.4")),
+    ])
+    .expect("builtin returned error");
+    let dict = result.as_dict().expect("expected dict");
+
+    match dict.get("reasoning_excluded_portable_options") {
+        Some(VmValue::List(options)) => assert_eq!(
+            options.iter().map(VmValue::display).collect::<Vec<_>>(),
+            ["temperature"]
+        ),
+        other => panic!("expected reasoning exclusion list, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
     crate::llm::capabilities::clear_user_overrides();
-    let mut out = String::new();
 
-    let direct_openai = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("openai")),
-            VmValue::String(arcstr::ArcStr::from("gpt-4o")),
-        ],
-        &mut out,
-    )
+    let direct_openai = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("openai")),
+        VmValue::String(arcstr::ArcStr::from("gpt-4o")),
+    ])
     .expect("builtin returned error");
     let direct_openai = direct_openai.as_dict().expect("expected dict");
     assert!(matches!(
@@ -131,13 +145,10 @@ fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
         other => panic!("expected nested batch operational notes list, got {other:?}"),
     }
 
-    let openrouter_family = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("openrouter")),
-            VmValue::String(arcstr::ArcStr::from("gpt-4o")),
-        ],
-        &mut out,
-    )
+    let openrouter_family = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("openrouter")),
+        VmValue::String(arcstr::ArcStr::from("gpt-4o")),
+    ])
     .expect("builtin returned error");
     let openrouter_family = openrouter_family.as_dict().expect("expected dict");
     assert!(matches!(
@@ -161,15 +172,12 @@ fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
         Some(VmValue::Nil)
     ));
 
-    let together = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("together")),
-            VmValue::String(arcstr::ArcStr::from(
-                "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-            )),
-        ],
-        &mut out,
-    )
+    let together = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("together")),
+        VmValue::String(arcstr::ArcStr::from(
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        )),
+    ])
     .expect("builtin returned error");
     let together = together.as_dict().expect("expected dict");
     assert!(matches!(
@@ -205,16 +213,12 @@ fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
 #[test]
 fn test_provider_capabilities_surfaces_fast_serving_tier() {
     crate::llm::capabilities::clear_user_overrides();
-    let mut out = String::new();
 
     // Opus 4.8 advertises a usable (research-preview) fast tier.
-    let opus = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("anthropic")),
-            VmValue::String(arcstr::ArcStr::from("claude-opus-4-8")),
-        ],
-        &mut out,
-    )
+    let opus = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("anthropic")),
+        VmValue::String(arcstr::ArcStr::from("claude-opus-4-8")),
+    ])
     .expect("builtin returned error");
     let opus = opus.as_dict().expect("expected dict");
     let expect_str = |dict: &crate::value::DictMap, key: &str, want: &str| match dict.get(key) {
@@ -238,13 +242,10 @@ fn test_provider_capabilities_surfaces_fast_serving_tier() {
     expect_str(request, "beta_header", "fast-mode-2026-02-01");
 
     // A model with no fast tier reports false and omits the dict.
-    let gpt4o = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("openai")),
-            VmValue::String(arcstr::ArcStr::from("gpt-4o")),
-        ],
-        &mut out,
-    )
+    let gpt4o = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("openai")),
+        VmValue::String(arcstr::ArcStr::from("gpt-4o")),
+    ])
     .expect("builtin returned error");
     let gpt4o = gpt4o.as_dict().expect("expected dict");
     assert!(matches!(
@@ -275,14 +276,10 @@ fn test_provider_capabilities_rejects_fast_tier_without_request_knob() {
     .expect("overlay parses");
     llm_config::set_user_overrides(Some(overlay));
 
-    let mut out = String::new();
-    let caps = provider_capabilities_builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("test_fast_gate")),
-            VmValue::String(arcstr::ArcStr::from("test-fast-without-knob")),
-        ],
-        &mut out,
-    )
+    let caps = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("test_fast_gate")),
+        VmValue::String(arcstr::ArcStr::from("test-fast-without-knob")),
+    ])
     .expect("builtin returned error");
     let caps = caps.as_dict().expect("expected dict");
     assert!(matches!(
@@ -300,12 +297,11 @@ fn test_provider_capabilities_rejects_fast_tier_without_request_knob() {
 #[test]
 fn test_provider_capabilities_exposes_prompt_format_preferences() {
     crate::llm::capabilities::clear_user_overrides();
-    let mut out = String::new();
     let args = vec![
         VmValue::String(arcstr::ArcStr::from("anthropic")),
         VmValue::String(arcstr::ArcStr::from("claude-opus-4-7")),
     ];
-    let result = provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
+    let result = provider_capabilities_value(&args).expect("builtin returned error");
     let dict = result.as_dict().expect("expected dict");
 
     let expect_bool = |key: &str, want: bool| match dict.get(key) {

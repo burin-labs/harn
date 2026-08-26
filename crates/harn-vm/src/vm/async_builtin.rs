@@ -45,11 +45,18 @@ impl AsyncBuiltinCtx {
         Self::new(parent.child_vm_inline())
     }
 
-    /// Construct a standalone ctx around `vm` for unit tests that drive an async
-    /// builtin handler directly (outside the dispatch loop). Production code
-    /// receives its ctx from the dispatch path, never this.
+    /// Construct a standalone ctx around `vm` for tests that drive an async
+    /// builtin directly. Reuse the fixture's active execution registries just
+    /// as the production dispatch scope would; production never calls this.
     #[cfg(test)]
-    pub fn for_test(vm: Vm) -> Self {
+    pub fn for_test(mut vm: Vm) -> Self {
+        vm.worker_registry = crate::stdlib::agents::agents_workers::active_worker_registry();
+        vm.daemon_registry = crate::stdlib::agents_daemon::active_daemon_registry();
+        vm.trigger_registry = crate::triggers::registry::active_trigger_registry();
+        vm.session_runtime = crate::agent_sessions::active_session_runtime();
+        vm.tracing_runtime = crate::tracing::active_tracing_runtime();
+        vm.agent_host_session_runtime =
+            crate::llm::agent_session_host::active_agent_host_session_runtime();
         Self::new(vm)
     }
 

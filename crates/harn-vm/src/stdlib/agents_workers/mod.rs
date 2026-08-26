@@ -1,8 +1,9 @@
 use super::*;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Instant;
 
 use crate::orchestration::{
@@ -219,33 +220,124 @@ pub(super) struct WorkerState {
     pub(super) audit: MutationSessionRecord,
 }
 
+pub(super) type WorkerStateRef = Arc<parking_lot::Mutex<WorkerState>>;
+
+/// The worker-state owner for one VM execution tree.
+///
+/// The thread-local below is only an ambient address installed while a task is
+/// polled. The registry itself is shared explicitly by `Arc`, so a worker can
+/// be registered on one Tokio thread and awaited, resumed, or stopped on
+/// another without falling through to an unrelated empty map.
+#[derive(Default)]
+pub(crate) struct WorkerRegistry {
+    states: parking_lot::Mutex<BTreeMap<String, WorkerStateRef>>,
+}
+
+impl WorkerRegistry {
+    pub(super) fn insert(&self, worker_id: String, state: WorkerStateRef) {
+        self.states.lock().insert(worker_id, state);
+    }
+
+    pub(super) fn get(&self, worker_id: &str) -> Option<WorkerStateRef> {
+        self.states.lock().get(worker_id).cloned()
+    }
+
+    #[cfg(test)]
+    pub(super) fn remove(&self, worker_id: &str) -> Option<WorkerStateRef> {
+        self.states.lock().remove(worker_id)
+    }
+
+    pub(super) fn state_refs(&self) -> Vec<WorkerStateRef> {
+        self.states.lock().values().cloned().collect()
+    }
+
+    pub(super) fn worker_ids(&self) -> Vec<String> {
+        self.states.lock().keys().cloned().collect()
+    }
+
+    fn drain(&self) -> Vec<WorkerStateRef> {
+        std::mem::take(&mut *self.states.lock())
+            .into_values()
+            .collect()
+    }
+}
+
 thread_local! {
-    pub(super) static WORKER_REGISTRY: RefCell<BTreeMap<String, Arc<parking_lot::Mutex<WorkerState>>>> = const { RefCell::new(BTreeMap::new()) };
-    static WORKER_COUNTER: Cell<u64> = const { Cell::new(0) };
+    static ACTIVE_WORKER_REGISTRY: RefCell<Arc<WorkerRegistry>> =
+        RefCell::new(Arc::new(WorkerRegistry::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn fresh_worker_registry() -> Arc<WorkerRegistry> {
+    Arc::new(WorkerRegistry::default())
+}
+
+pub(crate) fn swap_active_worker_registry(next: Arc<WorkerRegistry>) -> Arc<WorkerRegistry> {
+    ACTIVE_WORKER_REGISTRY.with(|registry| std::mem::replace(&mut *registry.borrow_mut(), next))
+}
+
+pin_project_lite::pin_project! {
+    pub(crate) struct WorkerRegistryScope<F> {
+        registry: Arc<WorkerRegistry>,
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for WorkerRegistryScope<F> {
+    type Output = F::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let previous = swap_active_worker_registry(this.registry.clone());
+        let _restore = WorkerRegistryRestore {
+            registry: this.registry,
+            previous: Some(previous),
+        };
+        this.inner.poll(context)
+    }
+}
+
+/// Restore the polling thread even when the scoped future panics.
+struct WorkerRegistryRestore<'a> {
+    registry: &'a mut Arc<WorkerRegistry>,
+    previous: Option<Arc<WorkerRegistry>>,
+}
+
+impl Drop for WorkerRegistryRestore<'_> {
+    fn drop(&mut self) {
+        let previous = self
+            .previous
+            .take()
+            .expect("worker registry restore guard consumed twice");
+        *self.registry = swap_active_worker_registry(previous);
+    }
+}
+
+pub(crate) fn scope_worker_registry<F: std::future::Future>(
+    registry: Arc<WorkerRegistry>,
+    inner: F,
+) -> WorkerRegistryScope<F> {
+    WorkerRegistryScope { registry, inner }
+}
+
+pub(crate) fn active_worker_registry() -> Arc<WorkerRegistry> {
+    ACTIVE_WORKER_REGISTRY.with(|registry| registry.borrow().clone())
 }
 
 pub(super) fn next_worker_id() -> String {
-    WORKER_COUNTER.with(|counter| {
-        let next = counter.get() + 1;
-        counter.set(next);
-        format!("worker_{}", uuid::Uuid::now_v7())
-    })
+    format!("worker_{}", uuid::Uuid::now_v7())
 }
 
 pub(super) fn reset_worker_registry() {
-    WORKER_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        for state in registry.values() {
-            let mut worker = state.lock();
-            worker.cancel_token.store(true, Ordering::SeqCst);
-            worker.suspend_signal.store(true, Ordering::SeqCst);
-            if let Some(handle) = worker.handle.take() {
-                handle.abort();
-            }
+    for state in active_worker_registry().drain() {
+        let mut worker = state.lock();
+        worker.cancel_token.store(true, Ordering::SeqCst);
+        worker.suspend_signal.store(true, Ordering::SeqCst);
+        if let Some(handle) = worker.handle.take() {
+            handle.abort();
         }
-        registry.clear();
-    });
-    WORKER_COUNTER.with(|counter| counter.set(0));
+    }
 }
 
 pub(super) fn worker_trigger_payload_text(value: &VmValue) -> String {
@@ -527,14 +619,10 @@ pub(super) fn with_worker_state<T>(
     worker_id: &str,
     f: impl FnOnce(Arc<parking_lot::Mutex<WorkerState>>) -> Result<T, VmError>,
 ) -> Result<T, VmError> {
-    WORKER_REGISTRY.with(|registry| {
-        let state = registry
-            .borrow()
-            .get(worker_id)
-            .cloned()
-            .ok_or_else(|| VmError::Runtime(format!("unknown worker: {worker_id}")))?;
-        f(state)
-    })
+    let state = active_worker_registry()
+        .get(worker_id)
+        .ok_or_else(|| VmError::Runtime(format!("unknown worker: {worker_id}")))?;
+    f(state)
 }
 
 #[cfg(test)]

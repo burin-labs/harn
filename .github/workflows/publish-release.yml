@@ -422,11 +422,13 @@ jobs:
             exit 1
           fi
           echo "version=$actual" >> "$GITHUB_OUTPUT"
+          echo "harn_bin=$harn_bin" >> "$GITHUB_OUTPUT"
 
       - name: Open auto-merge pull request
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVELOPMENT_VERSION: ${{ steps.prepare.outputs.version }}
+          HARN_BIN: ${{ steps.prepare.outputs.harn_bin }}
         run: |
           set -euo pipefail
           branch="automation/development-$DEVELOPMENT_VERSION"
@@ -435,14 +437,12 @@ jobs:
             echo "::notice::Development bump already open: $existing"
             exit 0
           fi
-          git config user.name "harn-release-bot[bot]"
-          git config user.email "harn-release-bot[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git add Cargo.toml Cargo.lock crates/*/Cargo.toml tree-sitter-harn/Cargo.toml \
-            crates/harn-hostlib/data/grammar-fitness/receipt.v1.json \
-            conformance/protocols/fixtures spec/protocol-artifacts
-          git commit -m "Start $DEVELOPMENT_VERSION development"
-          git push -u origin "$branch"
+          HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN" \
+            HARN_DEVELOPMENT_BUMP_BRANCH="$branch" \
+            HARN_DEVELOPMENT_BUMP_BASE_OID="$(git rev-parse HEAD)" \
+            HARN_DEVELOPMENT_BUMP_VERSION="$DEVELOPMENT_VERSION" \
+            "$HARN_BIN" run --no-sandbox \
+              scripts/bump-driver/publish_development_bump.harn
           body_file="$(mktemp)"
           trap 'rm -f "$body_file"' EXIT
           printf '%s\n' \

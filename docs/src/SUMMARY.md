@@ -34,6 +34,7 @@
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
+- [Reuse narrowing checks](./narrowing-checks.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
 - [Run an A/B experiment](./cookbooks/ab-experiment.md)
@@ -381,4 +382,3 @@
 - [Thread-local work-stealing audit](./dev/thread-local-work-stealing-audit.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
-

@@ -6,9 +6,9 @@
 //! 2. Closure subscribers that fire on agent-loop events for this session.
 //! 3. Its own lifecycle (open, reset, fork, trim, compact, close).
 //!
-//! Storage is thread-local because session lifecycle and subscriber dispatch
-//! are owned by the current-thread agent-loop worker. The subscribers register,
-//! fire, and unregister on that same thread, keeping ordering deterministic.
+//! Storage is owned by the VM execution tree. Agent-loop workers can migrate
+//! between runtime threads, so the ambient slot carries an `Arc` address while
+//! the typed owner serializes transcript and subscriber mutations.
 //!
 //! Lifecycle is explicit. Builtins (`agent_session_open`,
 //! `_reset`, `_fork`, `_fork_at`, `_close`, `_trim`, `_compact`,
@@ -17,10 +17,11 @@
 //! performs lifecycle as a side effect.
 
 use crate::value::VmDictExt;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::actor_chain::ActorChain;
@@ -297,13 +298,105 @@ use metadata::{
 pub use transcript_lifecycle::*;
 pub use types::*;
 
+struct SharedCell<T>(parking_lot::RwLock<T>);
+
+impl<T> SharedCell<T> {
+    fn borrow(&self) -> parking_lot::RwLockReadGuard<'_, T> {
+        self.0.read()
+    }
+
+    fn borrow_mut(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
+        self.0.write()
+    }
+
+    fn try_borrow(&self) -> Result<parking_lot::RwLockReadGuard<'_, T>, ()> {
+        self.0.try_read().ok_or(())
+    }
+}
+
+struct SharedValue<T: Copy>(parking_lot::Mutex<T>);
+
+impl<T: Copy> SharedValue<T> {
+    fn get(&self) -> T {
+        *self.0.lock()
+    }
+
+    fn set(&self, value: T) {
+        *self.0.lock() = value;
+    }
+}
+
+pub(crate) struct AgentSessionRuntime {
+    sessions: SharedCell<HashMap<String, SessionState>>,
+    session_cap: SharedValue<usize>,
+    default_transcript_budget_policy: SharedCell<SessionTranscriptBudgetPolicy>,
+}
+
+impl Default for AgentSessionRuntime {
+    fn default() -> Self {
+        Self {
+            sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
+            session_cap: SharedValue(parking_lot::Mutex::new(DEFAULT_SESSION_CAP)),
+            default_transcript_budget_policy: SharedCell(parking_lot::RwLock::new(
+                SessionTranscriptBudgetPolicy::default(),
+            )),
+        }
+    }
+}
+
 thread_local! {
-    static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
-    static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
-    static DEFAULT_TRANSCRIPT_BUDGET_POLICY: RefCell<SessionTranscriptBudgetPolicy> =
-        RefCell::new(SessionTranscriptBudgetPolicy::default());
+    static ACTIVE_SESSION_RUNTIME: RefCell<Arc<AgentSessionRuntime>> =
+        RefCell::new(fresh_session_runtime());
     static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
+    Arc::new(AgentSessionRuntime::default())
+}
+
+pub(crate) fn active_session_runtime() -> Arc<AgentSessionRuntime> {
+    ACTIVE_SESSION_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
+}
+
+pub(crate) fn swap_active_session_runtime(
+    next: Arc<AgentSessionRuntime>,
+) -> Arc<AgentSessionRuntime> {
+    ACTIVE_SESSION_RUNTIME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+struct SessionsSlot;
+static SESSIONS: SessionsSlot = SessionsSlot;
+impl SessionsSlot {
+    fn with<T>(
+        &self,
+        use_sessions: impl FnOnce(&SharedCell<HashMap<String, SessionState>>) -> T,
+    ) -> T {
+        let runtime = active_session_runtime();
+        use_sessions(&runtime.sessions)
+    }
+}
+
+struct SessionCapSlot;
+static SESSION_CAP: SessionCapSlot = SessionCapSlot;
+impl SessionCapSlot {
+    fn with<T>(&self, use_cap: impl FnOnce(&SharedValue<usize>) -> T) -> T {
+        let runtime = active_session_runtime();
+        use_cap(&runtime.session_cap)
+    }
+}
+
+struct DefaultTranscriptBudgetPolicySlot;
+static DEFAULT_TRANSCRIPT_BUDGET_POLICY: DefaultTranscriptBudgetPolicySlot =
+    DefaultTranscriptBudgetPolicySlot;
+impl DefaultTranscriptBudgetPolicySlot {
+    fn with<T>(
+        &self,
+        use_policy: impl FnOnce(&SharedCell<SessionTranscriptBudgetPolicy>) -> T,
+    ) -> T {
+        let runtime = active_session_runtime();
+        use_policy(&runtime.default_transcript_budget_policy)
+    }
 }
 
 tokio::task_local! {

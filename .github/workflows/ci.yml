@@ -1041,6 +1041,7 @@ jobs:
         env:
           AUDIT_GATES_CONCURRENCY: "4"
           HARN_CONFORMANCE_JOBS: "4"
+          HARN_EXT_GATE_RECEIPT: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
           TREE_SITTER_PARSER_PREFLIGHTED: ${{ matrix.kind == 'audit' && 'true' || 'false' }}
         run: |
           args=(--phase "${{ matrix.kind }}")
@@ -1048,6 +1049,13 @@ jobs:
             args+=(--tree-sitter-parser-preflighted)
           fi
           ./scripts/audit_gates.sh "${args[@]}"
+      - name: Upload source gate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-source-gate-${{ matrix.kind }}
+          path: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
+          if-no-files-found: error
+          retention-days: 14
 
   ci-walltime-report:
     name: Write CI timing report

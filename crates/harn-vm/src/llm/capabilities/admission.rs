@@ -7,7 +7,8 @@ use super::rule::declared_portable_option_support;
 /// This enum is the shared vocabulary for runtime admission, routing-step
 /// overrides, and static preflight. Provider-specific escape hatches remain
 /// below `provider_options.<provider>` and never enter this portable lane.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PortableOption {
     Temperature,
     TopP,
@@ -73,6 +74,9 @@ pub struct CapabilityAdmissionError {
     pub provider: String,
     pub model: String,
     pub option: PortableOption,
+    /// Whether the route rejects this otherwise-supported option only while
+    /// reasoning is enabled.
+    pub reasoning_enabled: bool,
     pub requested_value: Option<String>,
     pub supported_values: Vec<String>,
 }
@@ -81,12 +85,17 @@ impl std::fmt::Display for CapabilityAdmissionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "option `{}`{} is not supported by `{}` (provider `{}`).",
+            "option `{}`{} is not supported{} by `{}` (provider `{}`).",
             self.option.name(),
             self.requested_value
                 .as_deref()
                 .map(|value| format!(" value `{value}`"))
                 .unwrap_or_default(),
+            if self.reasoning_enabled {
+                " while reasoning is enabled"
+            } else {
+                ""
+            },
             self.model,
             self.provider,
         )?;
@@ -114,19 +123,43 @@ pub fn admit_portable_option(
     model: &str,
     option: PortableOption,
 ) -> Result<(), CapabilityAdmissionError> {
+    admit_portable_option_for_thinking(
+        provider,
+        model,
+        &crate::llm::api::ThinkingConfig::Disabled,
+        option,
+    )
+}
+
+/// Admit a caller-selected portable option for one resolved call. Unlike the
+/// cross-crate static preflight above, this seam can inspect the final thinking
+/// configuration after routing and policy have selected it.
+pub(crate) fn admit_portable_option_for_thinking(
+    provider: &str,
+    model: &str,
+    thinking: &crate::llm::api::ThinkingConfig,
+    option: PortableOption,
+) -> Result<(), CapabilityAdmissionError> {
     debug_assert_ne!(option, PortableOption::PromptCacheTtl);
     let user = current_user_overrides();
     let builtin = super::lookup::builtin();
     let (supported, _) =
         declared_portable_option_support(user.as_ref(), builtin, provider, model, option);
+    let rejected_while_reasoning = thinking.is_enabled()
+        && super::lookup::lookup(provider, model)
+            .reasoning_excluded_portable_options
+            .contains(&option);
     let requires_authored_support = option == PortableOption::Cache;
-    if supported == Some(true) || (supported.is_none() && !requires_authored_support) {
+    if !rejected_while_reasoning
+        && (supported == Some(true) || (supported.is_none() && !requires_authored_support))
+    {
         return Ok(());
     }
     Err(CapabilityAdmissionError {
         provider: provider.to_string(),
         model: model.to_string(),
         option,
+        reasoning_enabled: rejected_while_reasoning,
         requested_value: None,
         supported_values: Vec::new(),
     })
@@ -164,6 +197,7 @@ pub fn admit_prompt_cache_ttl(
         provider: provider.to_string(),
         model: model.to_string(),
         option: PortableOption::PromptCacheTtl,
+        reasoning_enabled: false,
         requested_value: Some(ttl.to_string()),
         supported_values: supported_values.unwrap_or_default(),
     })
@@ -184,6 +218,25 @@ mod tests {
         assert!(
             admit_portable_option("my-proxy", "custom-model", PortableOption::Temperature,).is_ok()
         );
+    }
+
+    #[test]
+    fn gemini_interactions_routes_reject_unrepresentable_penalties() {
+        for model in [
+            "gemini-3.6-flash",
+            "gemini-3.7-pro",
+            "gemini-3.5-flash-lite",
+            "models/gemini-3.5-flash-lite",
+        ] {
+            for option in [
+                PortableOption::FrequencyPenalty,
+                PortableOption::PresencePenalty,
+            ] {
+                let error = admit_portable_option("gemini", model, option)
+                    .expect_err("Interactions has no penalty wire field");
+                assert_eq!(error.option, option, "unexpected admission for {model}");
+            }
+        }
     }
 
     #[test]

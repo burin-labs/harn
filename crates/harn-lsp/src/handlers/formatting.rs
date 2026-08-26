@@ -315,12 +315,12 @@ pub(crate) fn build_code_actions(
     if fix_all_requested(context.only.as_deref()) {
         let mut all_edits: Vec<harn_lexer::FixEdit> = Vec::new();
         for ld in lint_diags {
-            if let Some(fix) = &ld.fix {
+            if let Some(fix) = ld.machine_applicable_fix() {
                 all_edits.extend(fix.iter().cloned());
             }
         }
         for td in type_diags {
-            if let Some(fix) = &td.fix {
+            if let Some(fix) = td.machine_applicable_fix() {
                 all_edits.extend(fix.iter().cloned());
             }
         }
@@ -562,7 +562,8 @@ mod tests {
     use crate::source_text::SourceText;
     use harn_lexer::Span;
     use tower_lsp::lsp_types::{
-        CodeActionContext, CodeActionOrCommand, NumberOrString, Position, Range, Url,
+        CodeActionContext, CodeActionKind, CodeActionOrCommand, NumberOrString, Position, Range,
+        Url,
     };
 
     #[test]
@@ -621,6 +622,38 @@ mod tests {
             data.get("diagnostic_code").and_then(|value| value.as_str()),
             Some("HARN-TYP-003")
         );
+    }
+
+    #[test]
+    fn fix_all_excludes_surface_changing_pipeline_repairs() {
+        let source = "@test\npipeline test_ready(_task: unknown) {\n  assert(true)\n}\n";
+        let state = DocumentState::new(source.to_string());
+        assert!(state.lint_diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == harn_parser::DiagnosticCode::LintUnusedPipelineInput
+        }));
+        let uri = Url::parse("file:///workspace/main.harn").unwrap();
+        let context = CodeActionContext {
+            diagnostics: state.diagnostics.clone(),
+            only: Some(vec![CodeActionKind::new("source.fixAll.harn")]),
+            trigger_kind: None,
+        };
+
+        let actions = build_code_actions(
+            &uri,
+            &state.source,
+            &state.lint_diagnostics,
+            &state.type_diagnostics,
+            &state.rule_diagnostics,
+            &context,
+        );
+
+        assert!(actions.iter().all(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => action
+                .kind
+                .as_ref()
+                .is_none_or(|kind| kind.as_str() != "source.fixAll.harn"),
+            CodeActionOrCommand::Command(_) => true,
+        }));
     }
 
     #[test]

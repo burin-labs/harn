@@ -208,13 +208,13 @@ pub(crate) fn lint_fix_file(
 
     let edits: Vec<harn_lexer::FixEdit> = lint_diags
         .iter()
-        .filter_map(|d| d.fix.as_ref())
+        .filter_map(harn_lint::LintDiagnostic::machine_applicable_fix)
         .chain(
             output
                 .diagnostics
                 .iter()
                 .filter(|d| !harn_lint::type_diagnostic_lint_disabled(d, &config.disable_rules))
-                .filter_map(|d| d.fix.as_ref()),
+                .filter_map(harn_parser::TypeDiagnostic::machine_applicable_fix),
         )
         .flatten()
         .cloned()

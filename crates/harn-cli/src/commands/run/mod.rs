@@ -150,6 +150,53 @@ pub struct RunInterruptTokens {
     pub signal_token: Arc<Mutex<Option<String>>>,
 }
 
+/// Whether a run inherits configuration discovered from the entry file's
+/// surrounding project. This is deliberately a mode rather than a collection
+/// of booleans so every ambient project surface follows one decision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectContextMode {
+    #[default]
+    Project,
+    Standalone,
+}
+
+/// Ambient project runtime surfaces installed for one entrypoint execution.
+///
+/// This is one mode rather than independent booleans so embedded callers cannot
+/// request an invalid combination such as eager trigger handlers without the
+/// trigger registry they belong to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProjectRuntimeMode {
+    /// Load project imports, skills, and policy hooks; do not mutate durable
+    /// manifest-trigger lifecycle state.
+    #[default]
+    Project,
+    /// Also register manifest triggers, initializing handlers on dispatch.
+    WithTriggers,
+    /// Register triggers and initialize every project handler before execution.
+    EagerHandlers,
+    /// Ignore ambient project configuration.
+    Standalone,
+}
+
+impl ProjectRuntimeMode {
+    fn context(self) -> ProjectContextMode {
+        if self == Self::Standalone {
+            ProjectContextMode::Standalone
+        } else {
+            ProjectContextMode::Project
+        }
+    }
+
+    fn project_triggers(self) -> bool {
+        matches!(self, Self::WithTriggers | Self::EagerHandlers)
+    }
+
+    fn eager_handlers(self) -> bool {
+        self == Self::EagerHandlers
+    }
+}
+
 struct ExecuteRunInputs<'a> {
     path: &'a str,
     trace: bool,
@@ -165,7 +212,7 @@ struct ExecuteRunInputs<'a> {
     aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
-    eager_project_handlers: bool,
+    project_runtime: ProjectRuntimeMode,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -260,7 +307,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         aux,
         timing: None,
         harnpack,
-        eager_project_handlers: control.eager_project_handlers,
+        project_runtime: control.project_runtime,
     })
     .await;
     if let Some(guard) = &deadline_guard {
@@ -375,7 +422,12 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
     };
 
     let mut had_type_error = false;
-    let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
+    let type_diagnostics = match typecheck_with_imports(
+        &program,
+        Path::new(path),
+        &source,
+        ProjectContextMode::Project,
+    ) {
         Ok(diagnostics) => diagnostics,
         Err(error) => {
             stderr.push_str(&format!("error: {error}\n"));
@@ -451,8 +503,7 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
-    crate::ensure_builtin_signatures_installed();
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -461,8 +512,7 @@ pub async fn execute_run(
         llm_mock_mode,
         attestation,
         profile,
-        RunSandboxOptions::default(),
-        HarnpackRunOptions::default(),
+        RunExecutionOptions::default(),
     )
     .await
 }
@@ -482,7 +532,7 @@ pub async fn execute_run_with_sandbox_options(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
 ) -> RunOutcome {
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -491,8 +541,10 @@ pub async fn execute_run_with_sandbox_options(
         llm_mock_mode,
         attestation,
         profile,
-        sandbox,
-        HarnpackRunOptions::default(),
+        RunExecutionOptions {
+            sandbox,
+            ..RunExecutionOptions::default()
+        },
     )
     .await
 }
@@ -513,7 +565,7 @@ pub async fn execute_run_with_harnpack_options(
     profile: RunProfileOptions,
     harnpack: HarnpackRunOptions,
 ) -> RunOutcome {
-    execute_run_with_harnpack_and_sandbox_options(
+    execute_run_with_options(
         path,
         trace,
         denied_builtins,
@@ -522,14 +574,26 @@ pub async fn execute_run_with_harnpack_options(
         llm_mock_mode,
         attestation,
         profile,
-        RunSandboxOptions::default(),
-        harnpack,
+        RunExecutionOptions {
+            harnpack,
+            ..RunExecutionOptions::default()
+        },
     )
     .await
 }
 
+/// Complete in-process execution configuration. Existing convenience wrappers
+/// use its default; embedded and headless hosts use this seam when they need a
+/// non-default project runtime without forking CLI behavior.
+#[derive(Clone, Debug, Default)]
+pub struct RunExecutionOptions {
+    pub sandbox: RunSandboxOptions,
+    pub harnpack: HarnpackRunOptions,
+    pub project_runtime: ProjectRuntimeMode,
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn execute_run_with_harnpack_and_sandbox_options(
+pub async fn execute_run_with_options(
     path: &str,
     trace: bool,
     denied_builtins: HashSet<String>,
@@ -538,9 +602,14 @@ async fn execute_run_with_harnpack_and_sandbox_options(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
-    sandbox: RunSandboxOptions,
-    harnpack: HarnpackRunOptions,
+    options: RunExecutionOptions,
 ) -> RunOutcome {
+    crate::ensure_builtin_signatures_installed();
+    let RunExecutionOptions {
+        sandbox,
+        harnpack,
+        project_runtime,
+    } = options;
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -556,7 +625,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         aux: RunAuxOptions::default(),
         timing: None,
         harnpack,
-        eager_project_handlers: false,
+        project_runtime,
     })
     .await
 }
@@ -579,6 +648,42 @@ pub async fn execute_run_json(
     out: Box<dyn io::Write + Send>,
     options: RunJsonOptions,
 ) -> RunOutcome {
+    execute_run_json_with_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        out,
+        options,
+        RunExecutionOptions::default(),
+    )
+    .await
+}
+
+/// JSON-streaming counterpart to [`execute_run_with_options`].
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_run_json_with_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    out: Box<dyn io::Write + Send>,
+    json_options: RunJsonOptions,
+    execution_options: RunExecutionOptions,
+) -> RunOutcome {
+    let RunExecutionOptions {
+        sandbox,
+        harnpack,
+        project_runtime,
+    } = execution_options;
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -588,13 +693,13 @@ pub async fn execute_run_json(
         llm_mock_mode,
         attestation,
         profile,
-        sandbox: RunSandboxOptions::default(),
+        sandbox,
         interrupt_tokens: None,
-        json: Some(JsonRunSession::new(options, out)),
+        json: Some(JsonRunSession::new(json_options, out)),
         aux: RunAuxOptions::default(),
         timing: None,
-        harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
+        harnpack,
+        project_runtime,
     })
     .await
 }
@@ -607,6 +712,7 @@ pub(crate) async fn execute_run_with_timing(
     script_argv: Vec<String>,
     timing: Option<&mut RunTiming>,
     sandbox: RunSandboxOptions,
+    project_runtime: ProjectRuntimeMode,
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         path,
@@ -623,7 +729,7 @@ pub(crate) async fn execute_run_with_timing(
         aux: RunAuxOptions::default(),
         timing,
         harnpack: HarnpackRunOptions::default(),
-        eager_project_handlers: false,
+        project_runtime,
     })
     .await
 }
@@ -652,6 +758,10 @@ fn entry_source_dir(path: &str) -> std::path::PathBuf {
 // the intentional reborrow pattern here.
 #[allow(clippy::needless_option_as_deref)]
 async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
+    harn_vm::orchestration::scope_fresh_trigger_registry(execute_run_inner_isolated(inputs)).await
+}
+
+async fn execute_run_inner_isolated(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let mut inputs = inputs;
     let json_session = inputs.json.take();
     let Some(json_session) = json_session else {
@@ -680,8 +790,11 @@ async fn execute_run_inner_scoped(
         aux,
         timing,
         harnpack,
-        eager_project_handlers,
+        project_runtime,
     } = inputs;
+    let eager_project_handlers = project_runtime.eager_handlers();
+    let project_triggers = project_runtime.project_triggers();
+    let project_context = project_runtime.context();
     let RunAuxOptions {
         summary,
         phase,
@@ -790,7 +903,12 @@ async fn execute_run_inner_scoped(
             link_table: None,
         })
     } else {
-        compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
+        compile_or_load_chunk_with_timing(
+            resolved_path,
+            &mut stderr,
+            timing.as_deref_mut(),
+            project_context,
+        )
     };
     let LoadedChunk {
         source,
@@ -874,19 +992,23 @@ async fn execute_run_inner_scoped(
     // own trigger handlers were compiled without the authority and refused
     // every `host_call` before the script body ever ran. Enable it here, ahead
     // of the first import, so one declaration means one thing everywhere.
-    if let Err(error) = crate::compiler_context::enable_trusted_host_dispatch_for_source(
-        &mut vm,
-        std::path::Path::new(path),
-    ) {
-        stderr.push_str(&format!(
-            "warning: failed to enable trusted host dispatch: {error}\n"
-        ));
+    if project_context == ProjectContextMode::Project {
+        if let Err(error) = crate::compiler_context::enable_trusted_host_dispatch_for_source(
+            &mut vm,
+            std::path::Path::new(path),
+        ) {
+            stderr.push_str(&format!(
+                "warning: failed to enable trusted host dispatch: {error}\n"
+            ));
+        }
     }
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
     // Metadata/store rooted at harn.toml when present; source dir otherwise.
-    let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+    let project_root = (project_context == ProjectContextMode::Project)
+        .then(|| harn_vm::stdlib::process::find_project_root(source_parent))
+        .flatten();
     let store_base = project_root.as_deref().unwrap_or(source_parent);
     let sandbox_root = sandbox
         .workspace_root
@@ -979,7 +1101,8 @@ async fn execute_run_inner_scoped(
     let cli_dirs = canonicalize_cli_dirs(&skill_dirs_raw, None);
     let loaded = load_skills(&SkillLoaderInputs {
         cli_dirs,
-        source_path: Some(std::path::PathBuf::from(path)),
+        source_path: (project_context == ProjectContextMode::Project)
+            .then(|| std::path::PathBuf::from(path)),
     });
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
@@ -1025,37 +1148,46 @@ async fn execute_run_inner_scoped(
     };
     vm.set_harness(runtime_harness);
 
-    // Declarations and callable signatures are validated during installation.
-    // Handler module graphs initialize only when an event dispatches to them,
-    // unless the operator explicitly requests fail-fast initialization.
-    let _manifest_runtime = match manifest_runtime::install_manifest_runtime(
-        Path::new(path),
-        &mut vm,
-        handler_initialization,
-    )
-    .await
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            stderr.push_str(&format!("error: failed to {}: {error}\n", error.label()));
-            time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-            return finalize_run_error(
-                stdout,
-                stderr,
-                json_session,
-                summary.as_ref(),
-                phase.as_ref(),
-                rusage.as_ref(),
-                run_started,
-                None,
-                timing.as_deref(),
-                0,
-                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-                crate::exit::RunFailure::Setup,
-                error.phase(),
-                error.to_string(),
-            );
-        }
+    // Hook declarations and callable signatures are always validated because
+    // hooks can supply policy authority. Manifest triggers also validate when
+    // explicitly enabled; their durable lifecycle reconciliation is otherwise
+    // kept off an ordinary entrypoint's startup path. Handler module graphs
+    // initialize only on dispatch unless fail-fast initialization was requested.
+    let _manifest_runtime = if project_context == ProjectContextMode::Project {
+        Some(
+            match manifest_runtime::install_manifest_runtime(
+                Path::new(path),
+                &mut vm,
+                handler_initialization,
+                project_triggers,
+            )
+            .await
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    stderr.push_str(&format!("error: failed to {}: {error}\n", error.label()));
+                    time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
+                    return finalize_run_error(
+                        stdout,
+                        stderr,
+                        json_session,
+                        summary.as_ref(),
+                        phase.as_ref(),
+                        rusage.as_ref(),
+                        run_started,
+                        None,
+                        timing.as_deref(),
+                        0,
+                        cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                        crate::exit::RunFailure::Setup,
+                        error.phase(),
+                        error.to_string(),
+                    );
+                }
+            },
+        )
+    } else {
+        None
     };
 
     let local = tokio::task::LocalSet::new();

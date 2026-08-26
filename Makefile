@@ -525,7 +525,7 @@ lint-harn:
 # parses fine, but whose semicolon style the formatter would normalize away,
 # erasing the thing it exists to test.
 FMT_HARN_SKIP := semicolon_statements.harn
-EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
+EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn experiments/burin-mini/lib/workspace.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # Extra directories that contain user-facing .harn fixtures but were
 # historically outside the fmt-harn gate. Keeping them in the
@@ -629,6 +629,7 @@ test-pr-gate-scripts:
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
+	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh
 	./scripts/tests/rust_artifact_test.sh
 	./scripts/tests/windows_workspace_warm_artifact_test.sh

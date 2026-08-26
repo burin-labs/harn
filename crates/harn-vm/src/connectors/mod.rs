@@ -2,7 +2,6 @@
 //!
 //! Runtime connector contracts live here alongside their event, secret, and trigger dependencies.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +22,7 @@ use crate::triggers::{
 };
 
 pub mod a2a_push;
+mod active_clients;
 pub mod cron;
 mod defaults;
 pub mod effect_policy;
@@ -40,6 +40,10 @@ pub mod testkit;
 pub mod webhook;
 
 pub use a2a_push::A2aPushConnector;
+pub use active_clients::{
+    active_connector_client, clear_active_connector_clients, install_active_connector_clients,
+    scope_active_connector_clients, ActiveConnectorClientsGuard,
+};
 pub use cron::{CatchupMode, CronConnector};
 pub use effect_policy::{
     connector_export_denied_builtin_reason, connector_export_denied_harness_method_reason,
@@ -83,11 +87,6 @@ pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client 
 
 /// Shared owned handle to a connector instance registered with the runtime.
 pub type ConnectorHandle = Arc<AsyncMutex<Box<dyn Connector>>>;
-
-thread_local! {
-    static ACTIVE_CONNECTOR_CLIENTS: RefCell<BTreeMap<String, Arc<dyn ConnectorClient>>> =
-        RefCell::new(BTreeMap::new());
-}
 
 /// Provider implementation contract for inbound connectors.
 #[async_trait]
@@ -1344,11 +1343,7 @@ fn prometheus_float(value: f64) -> String {
     if value.fract() == 0.0 {
         format!("{value:.0}")
     } else {
-        let rendered = format!("{value:.6}");
-        rendered
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
+        value.to_string()
     }
 }
 
@@ -1735,23 +1730,6 @@ impl Connector for PlaceholderConnector {
     fn client(&self) -> Arc<dyn ConnectorClient> {
         Arc::new(PlaceholderClient)
     }
-}
-
-pub fn install_active_connector_clients(clients: BTreeMap<ProviderId, Arc<dyn ConnectorClient>>) {
-    ACTIVE_CONNECTOR_CLIENTS.with(|slot| {
-        *slot.borrow_mut() = clients
-            .into_iter()
-            .map(|(provider, client)| (provider.as_str().to_string(), client))
-            .collect();
-    });
-}
-
-pub fn active_connector_client(provider: &str) -> Option<Arc<dyn ConnectorClient>> {
-    ACTIVE_CONNECTOR_CLIENTS.with(|slot| slot.borrow().get(provider).cloned())
-}
-
-pub fn clear_active_connector_clients() {
-    ACTIVE_CONNECTOR_CLIENTS.with(|slot| slot.borrow_mut().clear());
 }
 
 #[cfg(test)]

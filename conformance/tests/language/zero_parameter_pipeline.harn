@@ -1,0 +1,7 @@
+pipeline default() {
+  require "truthy"
+}
+
+pipeline test_zero_parameter() {
+  assert("truthy")
+}

@@ -7,7 +7,6 @@
 pub(crate) mod api_design;
 pub(crate) mod ast_walk;
 pub(crate) mod blank_lines;
-pub(crate) mod deprecated_llm_options;
 pub(crate) mod file_header;
 pub(crate) mod import_order;
 pub(crate) mod nil_coalesce;
@@ -15,6 +14,7 @@ pub(crate) mod optional_shorthand;
 pub(crate) mod parallel_capture;
 pub(crate) mod reminder_lifecycle;
 pub(crate) mod reminder_provider_count;
+pub(crate) mod removed_llm_options;
 pub(crate) mod template_provider_identity;
 pub(crate) mod template_unknown_filter;
 pub(crate) mod template_variant_explosion;

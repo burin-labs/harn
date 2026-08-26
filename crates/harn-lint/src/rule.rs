@@ -28,6 +28,7 @@ use harn_parser::SNode;
 use std::path::Path;
 
 use crate::diagnostic::LintDiagnostic;
+use crate::linter::harness_facts::HarnessFacts;
 
 /// Read-only context shared with every rule hook. Carries the inputs a
 /// rule needs beyond the node/program it is handed; today that is just
@@ -38,6 +39,11 @@ pub(crate) struct RuleCtx<'a> {
     /// Whether the package manifest declares this file as a provider's
     /// connector module. See [`crate::LintOptions::connector_runtime_module`].
     pub connector_runtime_module: bool,
+    /// Which receivers in this file are the host `Harness`. A rule keyed on a
+    /// builtin's name needs these to recognize the typed
+    /// `harness.<capability>.<method>` spelling that replaced it; without
+    /// them it silently stops applying once a call site migrates.
+    pub harness: &'a HarnessFacts,
 }
 
 /// A single lint rule plugged into the registry.
@@ -88,7 +94,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(ImportOrder),
         Box::new(PreferOptionalShorthand),
         Box::new(UnnecessaryParentheses),
-        Box::new(DeprecatedLlmOptions),
+        Box::new(RemovedLlmOptions),
         Box::new(UnnormalizedOptions),
         Box::new(NilCoalesceNoop),
         Box::new(MutableCaptureAcrossParallel),
@@ -97,11 +103,23 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
-    // must be unique. Checked in debug builds so a colliding id surfaces
-    // the moment a new rule is added.
+    // must be unique, and a user typing one into `harn.toml` should not have
+    // to remember which rules spell themselves with underscores. Both are
+    // checked in debug builds so a colliding or off-convention id surfaces
+    // the moment a new rule is added, rather than after it ships as a handle
+    // people have already written down.
     if cfg!(debug_assertions) {
         let mut ids: Vec<&str> = rules.iter().map(|rule| rule.id()).collect();
         let count = ids.len();
+        for id in &ids {
+            assert!(
+                !id.is_empty()
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "built-in lint rule id `{id}` must be kebab-case"
+            );
+        }
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), count, "built-in lint rule ids must be unique");
@@ -199,12 +217,30 @@ program_rule!(
     src,
     crate::rules::unnecessary_parentheses::check_unnecessary_parentheses
 );
-program_rule!(
-    DeprecatedLlmOptions,
-    "deprecated_llm_options",
-    ast,
-    crate::rules::deprecated_llm_options::check_deprecated_llm_options
-);
+/// Removed LLM option keys need more than the AST.
+///
+/// The rule is keyed on the names of the LLM surfaces that take an options
+/// dict, and `harness.llm.call(...)` names `llm_call` just as much as
+/// `llm_call(...)` does. Recognizing only the ambient spelling makes the rule
+/// stop reporting the moment a call site migrates — silently (harn#7280). So
+/// it needs the file's harness receiver facts, which the `ast` macro arm does
+/// not pass along.
+struct RemovedLlmOptions;
+
+impl Rule for RemovedLlmOptions {
+    fn id(&self) -> &'static str {
+        "removed-llm-options"
+    }
+
+    fn check_program(
+        &mut self,
+        program: &[SNode],
+        ctx: &RuleCtx<'_>,
+        out: &mut Vec<LintDiagnostic>,
+    ) {
+        crate::rules::removed_llm_options::check_removed_llm_options(program, ctx.harness, out);
+    }
+}
 program_rule!(
     UnnormalizedOptions,
     "unnormalized-options",

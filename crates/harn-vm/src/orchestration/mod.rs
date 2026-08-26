@@ -105,7 +105,7 @@ pub(crate) use ambient_scope::{
     scope_run_event_sink, scope_spawned_source_dir, AmbientExecutionScope,
 };
 pub use ambient_scope::{
-    scope_execution_policy, scope_llm_runtime_overrides,
+    scope_execution_policy, scope_fresh_trigger_registry, scope_llm_runtime_overrides,
     scope_llm_runtime_overrides_with_provider_endpoints,
 };
 

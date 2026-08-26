@@ -258,7 +258,7 @@ pub(crate) use test_bench::{
 };
 pub(crate) use time::{TimeArgs, TimeCommand, TimeRunArgs};
 pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs};
-pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
+pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs, TracePrefixStabilityArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
 pub(crate) use upgrade::UpgradeArgs;
@@ -438,7 +438,7 @@ SCRIPTING
     Routes(RoutesArgs),
     /// Aggregate LLM spend/usage analytics from the local event log's
     /// `provider_call_response` records: cost, tokens, and prompt-cache
-    /// efficiency rolled up by provider, model, or a day/week/month
+    /// efficiency rolled up by provider, model, stage, or a day/week/month
     /// time series. Reuses the runtime-computed `cost_usd` — no pricing
     /// is recomputed. Pair with `--json` for an agent-readable envelope.
     Usage(UsageArgs),

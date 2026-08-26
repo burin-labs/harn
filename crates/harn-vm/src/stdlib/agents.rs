@@ -4,7 +4,7 @@
 //! stdlib.
 
 #[path = "agents_workers/mod.rs"]
-pub(super) mod agents_workers;
+pub(crate) mod agents_workers;
 #[path = "records.rs"]
 pub(super) mod records;
 #[path = "agents_sub_agent.rs"]
@@ -22,11 +22,12 @@ use std::sync::Arc;
 use harn_parser::diagnostic_codes::Code;
 
 use self::agents_workers::{
-    emit_worker_event, ensure_worker_config_session_ids, next_worker_id, parse_worker_config,
-    persist_worker_state_snapshot, reset_worker_registry, spawn_worker_task, with_worker_state,
-    worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
-    worker_summary, worker_trigger_payload_text, SuspendInitiator, WorkerCarryPolicy, WorkerConfig,
-    WorkerExecutionProfile, WorkerInit, WorkerState, WorkerSuspension, WORKER_REGISTRY,
+    active_worker_registry, emit_worker_event, ensure_worker_config_session_ids, next_worker_id,
+    parse_worker_config, persist_worker_state_snapshot, reset_worker_registry, spawn_worker_task,
+    with_worker_state, worker_event_snapshot, worker_id_from_value, worker_request_for_config,
+    worker_snapshot_path, worker_summary, worker_trigger_payload_text, SuspendInitiator,
+    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerInit, WorkerState,
+    WorkerStateRef, WorkerSuspension,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::agent_events::WorkerEvent;
@@ -228,9 +229,7 @@ async fn finalize_and_run_worker(
         }
     }
     let worker_id = state.lock().id.clone();
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(worker_id, state.clone());
-    });
+    active_worker_registry().insert(worker_id, state.clone());
     spawn_worker_task(state.clone(), ctx.child_ctx());
     if wait_for_terminal {
         // The summary is the parent's result collapse, so it runs inside the
@@ -533,7 +532,7 @@ async fn suspend_agent_builtin(
     })?;
     if should_emit {
         if let Some(auto_resume_trigger) = super::triggers_stdlib::register_auto_resume_trigger(
-            Some(&ctx),
+            &ctx,
             &worker_id,
             conditions_value.as_ref(),
         )
@@ -700,7 +699,7 @@ pub(crate) async fn panic_suspend_worker(
 /// `BTreeMap` iteration order so a panic broadcast is deterministic across
 /// replays.
 pub(crate) fn all_registered_worker_ids() -> Vec<String> {
-    WORKER_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
+    active_worker_registry().worker_ids()
 }
 
 #[harn_builtin(
@@ -846,11 +845,9 @@ async fn top_level_agent_suspend_builtin(
     let mut snapshot = worker_event_snapshot(&worker);
     let mut summary = worker_summary(&worker)?;
     let state = Arc::new(parking_lot::Mutex::new(worker));
-    WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(worker_id.clone(), state);
-    });
+    active_worker_registry().insert(worker_id.clone(), state);
     if let Some(auto_resume_trigger) = super::triggers_stdlib::register_auto_resume_trigger(
-        Some(&ctx),
+        &ctx,
         &worker_id,
         conditions_value.as_ref(),
     )
@@ -911,7 +908,7 @@ async fn resume_agent_builtin(
     };
     let registry_hit = warm_target_id
         .as_deref()
-        .and_then(|id| WORKER_REGISTRY.with(|registry| registry.borrow().get(id).cloned()));
+        .and_then(|id| active_worker_registry().get(id));
 
     let (state, loaded_from_snapshot) = if let Some(state) = registry_hit {
         (state, false)
@@ -987,7 +984,7 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
     doc = "Wait for one or more host workers to reach a terminal state."
 )]
 async fn wait_agent_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = args
@@ -998,6 +995,7 @@ async fn wait_agent_builtin(
         for item in list.iter() {
             let worker_id = worker_id_from_value(item)?;
             let state = with_worker_state(&worker_id, Ok)?;
+            await_due_auto_resume(&ctx, &state).await;
             results.push(
                 wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await?,
             );
@@ -1006,7 +1004,39 @@ async fn wait_agent_builtin(
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
+    await_due_auto_resume(&ctx, &state).await;
     wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await
+}
+
+/// If a suspended worker's virtual timeout is already due, join that timeout
+/// transition before returning its summary. Before the deadline, suspended
+/// workers remain immediately observable; after it, `wait_agent` cannot expose
+/// the stale pre-timeout state merely because the timer runs on another core.
+async fn await_due_auto_resume(ctx: &crate::vm::AsyncBuiltinCtx, state: &WorkerStateRef) {
+    let trigger_id = state.lock().suspension.as_ref().and_then(|suspension| {
+        suspension
+            .auto_resume_trigger
+            .as_ref()
+            .map(|handle| handle.id.clone())
+    });
+    let Some(trigger_id) = trigger_id else {
+        return;
+    };
+    let vm = ctx.child_vm();
+    let now_unix_ms = vm
+        .harness()
+        .map_or_else(crate::clock_mock::now_ms, |harness| {
+            harn_clock::now_wall_ms(harness.inner().clock().as_ref())
+        });
+    let Some(mut completion) = vm
+        .trigger_registry
+        .due_background_completion(&trigger_id, now_unix_ms)
+    else {
+        return;
+    };
+    if !*completion.borrow() {
+        let _ = completion.changed().await;
+    }
 }
 
 #[harn_builtin(
@@ -1100,13 +1130,11 @@ async fn close_agent_builtin(
     doc = "List local host worker summaries."
 )]
 fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let workers = WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .values()
-            .map(|state| worker_summary(&state.lock()))
-            .collect::<Result<Vec<_>, _>>()
-    })?;
+    let workers = active_worker_registry()
+        .state_refs()
+        .into_iter()
+        .map(|state| worker_summary(&state.lock()))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(VmValue::List(std::sync::Arc::new(workers)))
 }
 
@@ -1126,77 +1154,75 @@ fn parse_resume_conditions_builtin(
 }
 
 pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .values()
-            .filter_map(|state| {
-                let worker = state.lock();
-                if worker.status == "suspended" {
-                    let suspension = worker.suspension.as_ref();
-                    let suspended_at_ms =
-                        suspension.and_then(|value| uuid_v7_unix_ms(&value.suspended_at));
-                    let age_ms = suspended_at_ms
-                        .map(|started| crate::stdlib::clock::now_wall_ms().saturating_sub(started))
-                        .unwrap_or(0)
-                        .max(0);
-                    return Some(serde_json::json!({
-                        "handle": worker.id.clone(),
-                        "session_id": worker_session_id_json(&worker),
-                        "reason": suspension
-                            .map(|value| value.reason.clone())
-                            .filter(|value| !value.trim().is_empty())
-                            .unwrap_or_else(|| "suspended".to_string()),
-                        "conditions": suspension
-                            .and_then(|value| value.conditions.clone())
-                            .unwrap_or(serde_json::Value::Null),
-                        "age_ms": age_ms,
-                        "initiator": suspension
-                            .and_then(|value| serde_json::to_value(value.initiator).ok())
-                            .unwrap_or_else(|| serde_json::json!("operator")),
-                        "mode": worker.mode.clone(),
-                        "status": worker.status.clone(),
-                        "suspended_at": suspension
-                            .map(|value| value.suspended_at.clone())
-                            .unwrap_or_default(),
-                        "snapshot_ref": suspension
-                            .map(|value| value.snapshot_ref.clone())
-                            .unwrap_or_else(|| worker.snapshot_path.clone()),
-                        "auto_resume_trigger": suspension
-                            .and_then(|value| value.auto_resume_trigger.as_ref())
-                            .and_then(|value| serde_json::to_value(value).ok()),
-                    }));
-                }
-                if crate::agent_events::AgentLifecycleState::from_wire(&worker.status)
-                    != Some(crate::agent_events::AgentLifecycleState::AwaitingInput)
-                    || worker.mode != "sub_agent"
-                {
-                    return None;
-                }
-                let age_ms = worker
-                    .awaiting_since
-                    .map(|started| started.elapsed().as_millis().min(i64::MAX as u128) as i64)
-                    .unwrap_or(0);
-                Some(serde_json::json!({
+    active_worker_registry()
+        .state_refs()
+        .into_iter()
+        .filter_map(|state| {
+            let worker = state.lock();
+            if worker.status == "suspended" {
+                let suspension = worker.suspension.as_ref();
+                let suspended_at_ms =
+                    suspension.and_then(|value| uuid_v7_unix_ms(&value.suspended_at));
+                let age_ms = suspended_at_ms
+                    .map(|started| crate::stdlib::clock::now_wall_ms().saturating_sub(started))
+                    .unwrap_or(0)
+                    .max(0);
+                return Some(serde_json::json!({
                     "handle": worker.id.clone(),
                     "session_id": worker_session_id_json(&worker),
-                    "reason": "awaiting_input",
-                    "conditions": {
-                        "status": worker.status.clone(),
-                        "retriggerable": worker.carry_policy.retriggerable,
-                        "awaiting_started_at": worker.awaiting_started_at.clone(),
-                    },
+                    "reason": suspension
+                        .map(|value| value.reason.clone())
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "suspended".to_string()),
+                    "conditions": suspension
+                        .and_then(|value| value.conditions.clone())
+                        .unwrap_or(serde_json::Value::Null),
                     "age_ms": age_ms,
-                    "initiator": worker
-                        .parent_worker_id
-                        .clone()
-                        .unwrap_or_else(|| "pipeline".to_string()),
+                    "initiator": suspension
+                        .and_then(|value| serde_json::to_value(value.initiator).ok())
+                        .unwrap_or_else(|| serde_json::json!("operator")),
                     "mode": worker.mode.clone(),
                     "status": worker.status.clone(),
-                }))
-            })
-            .collect()
-    })
+                    "suspended_at": suspension
+                        .map(|value| value.suspended_at.clone())
+                        .unwrap_or_default(),
+                    "snapshot_ref": suspension
+                        .map(|value| value.snapshot_ref.clone())
+                        .unwrap_or_else(|| worker.snapshot_path.clone()),
+                    "auto_resume_trigger": suspension
+                        .and_then(|value| value.auto_resume_trigger.as_ref())
+                        .and_then(|value| serde_json::to_value(value).ok()),
+                }));
+            }
+            if crate::agent_events::AgentLifecycleState::from_wire(&worker.status)
+                != Some(crate::agent_events::AgentLifecycleState::AwaitingInput)
+                || worker.mode != "sub_agent"
+            {
+                return None;
+            }
+            let age_ms = worker
+                .awaiting_since
+                .map(|started| started.elapsed().as_millis().min(i64::MAX as u128) as i64)
+                .unwrap_or(0);
+            Some(serde_json::json!({
+                "handle": worker.id.clone(),
+                "session_id": worker_session_id_json(&worker),
+                "reason": "awaiting_input",
+                "conditions": {
+                    "status": worker.status.clone(),
+                    "retriggerable": worker.carry_policy.retriggerable,
+                    "awaiting_started_at": worker.awaiting_started_at.clone(),
+                },
+                "age_ms": age_ms,
+                "initiator": worker
+                    .parent_worker_id
+                    .clone()
+                    .unwrap_or_else(|| "pipeline".to_string()),
+                "mode": worker.mode.clone(),
+                "status": worker.status.clone(),
+            }))
+        })
+        .collect()
 }
 
 fn worker_session_id_json(worker: &WorkerState) -> serde_json::Value {

@@ -116,6 +116,12 @@ impl Vm {
         let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
             owner,
             self.llm_mock_context.clone(),
+            self.worker_registry.clone(),
+            self.daemon_registry.clone(),
+            self.trigger_registry.clone(),
+            self.session_runtime.clone(),
+            self.tracing_runtime.clone(),
+            self.agent_host_session_runtime.clone(),
         );
         let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_entry_scoped(entry).await

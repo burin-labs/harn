@@ -351,8 +351,10 @@ statement_list     ::= (NEWLINE)* [statement (statement_sep statement)* [stateme
 statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
-                       '(' fn_param_list ')' ['->' type_expr]
+                       '(' fn_param_list ')' [return_contract]
                        [where_clause] '{' block '}'
+return_contract    ::= '->' (type_expr | type_predicate)
+type_predicate     ::= ['implies'] IDENTIFIER 'is' type_expr
 where_clause       ::= 'where' where_bound (',' where_bound)*
 where_bound        ::= IDENTIFIER ':' type_expr ('+' type_expr)*
 type_decl          ::= ['pub'] 'type' IDENTIFIER [generic_params] '=' type_expr
@@ -4269,7 +4271,15 @@ capability handles. `harn run --as-job file.harn --job scan --request req.json`
 runs that job once, delivering the request JSON as
 `event.provider_payload.raw` and printing the returned value as JSON.
 `harn serve worker file.harn` activates every `@schedule`d job in the
-file and consumes any declared `@queue` worker queues until shutdown.
+file and consumes any declared `@queue` worker queues until shutdown. Both
+worker entrypoints install the nearest package manifest's provider connectors
+before dispatch, using the worker's event log and secret-provider boundary.
+When either entrypoint receives `--tenant ID`, the host must resolve an active
+tenant before dispatch. The job's ambient tenant identity, direct secret reads,
+and connector credentials use that one scope. An unknown or suspended tenant
+prevents startup, and a secret namespace owned by another tenant is an access
+denial rather than a missing credential. Without `--tenant`, the worker keeps
+the single-tenant behavior and must not claim tenant-tagged work.
 
 `@retry(max: N, backoff: "...")` applies the dispatcher's retry policy
 to the job. `max`/`max_attempts` must be a non-negative integer;
@@ -5447,6 +5457,64 @@ fn describe(x: string | int) {
   }
 }
 ```
+
+#### Const condition aliases
+
+A `const` can name a narrowing condition. The checker keeps the same facts
+when code branches on that name.
+
+```harn
+fn describe(x: string | int) -> string {
+  const kind = type_of(x)
+  const is_text = kind == "string"
+  if is_text {
+    return x.upper() // x is `string`
+  }
+  return to_string(x + 1) // x is `int`
+}
+```
+
+Aliases can refer to earlier `const` aliases. They also work with nil checks,
+schema checks, discriminants, logical operators, and declared type predicates.
+The checker does not carry alias facts from a mutable `let` binding. A later
+assignment could make those facts stale.
+
+#### Type predicates
+
+A function can declare that its boolean result narrows one parameter:
+
+```harn
+fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+```
+
+When `is_text(value)` is true, `value` narrows to `string`. When it is false,
+`string` is removed from a closed union. The predicate type must be a subtype
+of the parameter type.
+
+Use `implies` when only the true result proves the type:
+
+```harn
+fn is_nonempty_text(value: unknown) -> implies value is string {
+  return type_of(value) == "string" && len(value) > 0
+}
+```
+
+A false result from this helper does not rule out `string`; the string may be
+empty. The checker verifies both branches of a two-sided predicate and only the
+true branch of an `implies` predicate. An invalid contract reports
+`HARN-TYP-029`.
+
+The body may contain plain `const` aliases followed by one `return` condition.
+The named parameter must have an explicit type and cannot be a rest parameter.
+The narrower type cannot contain a generic type parameter. A type argument can
+mean a different type at each call, so Harn cannot prove one body for every
+substitution.
+Predicate calls narrow plain variables and stable reference paths. The contract
+also follows named and namespace imports. Calling the same function through an
+ordinary `fn(...)` value keeps its boolean result but does not carry narrowing
+facts.
 
 #### Reference paths
 
@@ -7029,9 +7097,12 @@ each integration.
   has `id`, `label`, `path`, `platform`, `available`, `supports_login`,
   `supports_interactive`, `default_args`, `login_args`, and `source`.
 - `process.get_default_shell` returns the selected shell object for the
-  current host/session.
+  current host/session. Harn only chooses a shell whose command syntax its
+  safety analyzer supports. An unrecognized login shell remains listed but
+  can't become the implicit default.
 - `process.set_default_shell` may be implemented by stateful hosts. Harn's
-  standalone fallback stores the selection for the current thread/session.
+  standalone fallback stores a supported selection for the current
+  thread/session and rejects an unsupported shell.
 - `process.shell_invocation` resolves `{shell_id?, shell?, command?, login?,
   interactive?}` into `{program, args, command_arg_index, shell}`. When neither
   `shell_id` nor `shell` is supplied, it uses the selected default shell.
@@ -7041,6 +7112,11 @@ this capability, and otherwise use the selected default shell. `argv` mode
 remains preferred for programmatic execution; shell mode is for user-authored
 commands and interactive shell semantics. The normative schema is
 `spec/schemas/host-shell-discovery.schema.json`.
+
+Command-risk scans include `execution_semantics` with the request mode,
+resolved dialect, resolution source, shell ID, and unresolved reason. An
+explicit unsupported shell adds both `shell_dialect_unknown` and
+`execution_semantics_unresolved`, so command policy still fails closed.
 
 ## Workspace manifest (`harn.toml`)
 

@@ -25,17 +25,17 @@ fn run_with_options(harness: Harness, key: string, options: dict) {
   return omit(harness.runtime.shared_get(observed), ["messages"])
 }
 
-pipeline test_agent_loop_enables_equivalent_failover_on_primary(harness: Harness, _task: unknown) {
+pipeline test_agent_loop_enables_equivalent_failover_on_primary(harness: Harness) {
   const opts = run_with_options(harness, "equivalent-primary", {})
   assert_eq(opts.equivalent_failover, {max_routes: 3, on_no_dispatch: true})
 }
 
-pipeline test_agent_loop_preserves_equivalent_failover_opt_out(harness: Harness, _task: unknown) {
+pipeline test_agent_loop_preserves_equivalent_failover_opt_out(harness: Harness) {
   const opts = run_with_options(harness, "equivalent-opt-out", {equivalent_failover: false})
   assert_eq(opts.equivalent_failover, false)
 }
 
-pipeline test_agent_loop_preserves_explicit_route_owner(harness: Harness, _task: unknown) {
+pipeline test_agent_loop_preserves_explicit_route_owner(harness: Harness) {
   const opts = run_with_options(
     harness,
     "equivalent-route-owner",

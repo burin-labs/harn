@@ -743,6 +743,38 @@ fn lexical_block_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn flow_predicates_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("flow-predicates");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "flow-predicates demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    let receipt = outcome
+        .stdout
+        .lines()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .unwrap_or_else(|| {
+            panic!(
+                "flow-predicates stdout missing JSON receipt:\n{}",
+                outcome.stdout
+            )
+        });
+    assert_eq!(
+        receipt,
+        serde_json::json!({
+            "alias_number": "5",
+            "alias_text": "READY",
+            "empty_is_nonempty": false,
+            "kind": "flow_predicates_receipt",
+            "predicate_number": "7",
+            "predicate_text": "CHECKED",
+        }),
+        "aliases and helper predicates must preserve their branch facts"
+    );
+}
+
+#[test]
 fn catalog_patch_models_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("catalog-patch-models");
     assert_eq!(

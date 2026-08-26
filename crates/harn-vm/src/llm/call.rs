@@ -7,7 +7,6 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmError, VmValue};
 
-use super::helpers::extract_llm_options;
 use super::trace::{emit_agent_event, AgentTraceEvent};
 use super::{
     agent_config, agent_observe, api,
@@ -111,15 +110,15 @@ fn schema_validation_errors(result: &VmValue) -> Vec<String> {
     }
 }
 
-/// Compute schema validation errors against `opts.output_schema` without
-/// deciding disposition (warn vs error vs off). Returns an empty vec when
-/// no schema is configured or the data validates. Used by the schema-retry
-/// loop in `llm_call`.
-pub(super) fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
-    let Some(schema_json) = &opts.output_schema else {
+/// Compute schema validation errors against the effective output schema
+/// without deciding disposition (warn vs error vs off). Returns an empty vec
+/// when no schema is configured or the data validates. Used by the
+/// schema-retry loop in `llm_call`.
+pub(crate) fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
+    let Some(schema_json) = opts.validation_output_schema() else {
         return Vec::new();
     };
-    let schema_vm = json_to_vm_value(schema_json);
+    let schema_vm = json_to_vm_value(&schema_json);
     let validation = schema_result_value(data, &schema_vm, false);
     schema_validation_errors(&validation)
 }
@@ -366,7 +365,7 @@ pub(super) async fn llm_call_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let opts = extract_llm_options(&args)?;
+    let opts = crate::llm::helpers::prepare_llm_options(&args).await?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
     // Publish the resolved provider/model/capabilities to templates
@@ -486,7 +485,10 @@ pub(crate) fn invalid_request_error(
     model: &str,
 ) -> VmError {
     let mut fields = std::collections::BTreeMap::new();
-    fields.put_str("category", "generic");
+    fields.put_str(
+        "category",
+        crate::value::ErrorCategory::InvalidRequest.as_str(),
+    );
     fields.put_str("kind", "terminal");
     fields.put_str("reason", "invalid_request");
     fields.put_str("message", message);

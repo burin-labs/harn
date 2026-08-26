@@ -37,12 +37,13 @@ use std::time::Duration as StdDuration;
 
 use futures::StreamExt;
 use harn_vm::event_log::{install_default_for_base_dir, AnyEventLog, EventLog, Topic};
-use harn_vm::triggers::event::{GenericWebhookPayload, KnownProviderPayload};
+use harn_vm::triggers::event::KnownProviderPayload;
 use harn_vm::{
-    dynamic_register, resolve_live_trigger_binding, DispatchOutcome, DispatchStatus, Dispatcher,
-    MetricsRegistry, ProviderId, ProviderPayload, RateLimitConfig, RateLimiterFactory, RetryPolicy,
-    SignatureStatus, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerHandlerSpec,
-    TriggerRetryConfig, Vm, WorkerQueue, WorkerQueuePriority, WorkerQueueResponseRecord,
+    dynamic_register, resolve_live_trigger_binding, ConnectorRegistry, DispatchOutcome,
+    DispatchStatus, Dispatcher, MetricsRegistry, ProviderId, ProviderPayload, RateLimitConfig,
+    RateLimiterFactory, RetryPolicy, TriggerBindingSource, TriggerBindingSpec, TriggerEvent,
+    TriggerHandlerSpec, TriggerRetryConfig, Vm, WorkerQueue, WorkerQueuePriority,
+    WorkerQueueResponseRecord,
 };
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -52,41 +53,29 @@ use crate::{
     DispatchError, ExportCatalog, ExportedFunction, JobSpec, RetryBackoff, RetrySpec, ScheduleSpec,
 };
 
-/// Provider id stamped on synthetic job events. Reuses the generic
-/// `webhook` payload variant so the request JSON rides in
-/// `provider_payload.raw`, the idiomatic place `.harn` handlers read a
-/// request body from (matching every other trigger handler).
+mod connectors;
+mod event;
+mod options;
 mod secrets;
 #[cfg(test)]
 mod secrets_tests;
+mod tenant;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests;
 
+use connectors::install_worker_connector_clients;
+use event::{job_event, JOB_PROVIDER};
+pub use options::{JobRunOptions, WorkerServeOptions};
 use secrets::{worker_job_harness, worker_secret_provider};
+use tenant::{enforce_event as enforce_event_tenant, topic as worker_topic};
 
-const JOB_PROVIDER: &str = "webhook";
 const CRON_PROVIDER: &str = "cron";
 const CRON_KIND: &str = "cron";
 
 const DEFAULT_CLAIM_TTL: StdDuration = StdDuration::from_mins(5);
 const DEFAULT_SHUTDOWN_DRAIN: StdDuration = StdDuration::from_secs(30);
-
-#[derive(Clone, Debug)]
-pub struct WorkerServeOptions {
-    pub consumer_id: Option<String>,
-    pub claim_ttl: StdDuration,
-    pub drain_timeout: StdDuration,
-}
-
-impl Default for WorkerServeOptions {
-    fn default() -> Self {
-        Self {
-            consumer_id: None,
-            claim_ttl: DEFAULT_CLAIM_TTL,
-            drain_timeout: DEFAULT_SHUTDOWN_DRAIN,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerJobRegistration {
@@ -118,6 +107,8 @@ pub struct WorkerServer {
     jobs: Vec<WorkerJobRegistration>,
     queues: BTreeSet<String>,
     drain_timeout: StdDuration,
+    _connector_clients: Option<harn_vm::ActiveConnectorClientsGuard>,
+    _tenant_scope: Option<harn_vm::TenantScopeGuard>,
 }
 
 impl WorkerServer {
@@ -209,8 +200,12 @@ impl JobRunOutcome {
 
 struct PreparedJobRuntime {
     event_log: Arc<AnyEventLog>,
+    secret_provider: Arc<dyn harn_vm::secrets::SecretProvider>,
     vm: Vm,
     jobs: Vec<PreparedJob>,
+    tenant_id: Option<harn_vm::TenantId>,
+    connector_clients: Option<harn_vm::ActiveConnectorClientsGuard>,
+    tenant_scope: Option<harn_vm::TenantScopeGuard>,
 }
 
 struct PreparedJob {
@@ -228,7 +223,21 @@ pub async fn start_worker_server(
     script_path: &Path,
     options: WorkerServeOptions,
 ) -> Result<WorkerServer, DispatchError> {
-    let prepared = prepare_job_runtime(script_path, |_vm| {}, None).await?;
+    let WorkerServeOptions {
+        consumer_id,
+        claim_ttl,
+        drain_timeout,
+        connector_registry,
+        tenant_scope,
+    } = options;
+    let prepared = prepare_job_runtime(
+        script_path,
+        |_vm| {},
+        None,
+        connector_registry,
+        tenant_scope,
+    )
+    .await?;
     if prepared.jobs.is_empty() {
         return Err(DispatchError::Validation(format!(
             "{} does not export any `@job` functions",
@@ -254,6 +263,7 @@ pub async fn start_worker_server(
         prepared.event_log.clone(),
         dispatcher.clone(),
         budgets_by_binding.clone(),
+        prepared.tenant_id.clone(),
         shutdown_tx.subscribe(),
     )?);
 
@@ -262,36 +272,50 @@ pub async fn start_worker_server(
         tasks.push(spawn_cron_pump(
             prepared.event_log.clone(),
             dispatcher.clone(),
+            prepared.tenant_id.clone(),
             shutdown_tx.subscribe(),
         )?);
     }
 
-    let consumer_id = options.consumer_id.unwrap_or_else(default_consumer_id);
+    let consumer_id = consumer_id.unwrap_or_else(default_consumer_id);
     for queue_name in &queues {
         tasks.push(spawn_queue_consumer(
             prepared.event_log.clone(),
             dispatcher.clone(),
             queue_name.clone(),
             consumer_id.clone(),
-            options.claim_ttl,
+            claim_ttl,
             budgets_by_binding.clone(),
+            prepared.tenant_id.clone(),
             shutdown_tx.subscribe(),
         )?);
     }
 
-    let mut cron_connector = harn_vm::CronConnector::new();
+    let mut cron_connector = prepared.tenant_id.clone().map_or_else(
+        harn_vm::CronConnector::new,
+        harn_vm::CronConnector::for_tenant,
+    );
     if has_scheduled_jobs {
         let metrics = Arc::new(MetricsRegistry::default());
         let inbox = Arc::new(
-            harn_vm::InboxIndex::new(prepared.event_log.clone(), metrics.clone())
-                .await
-                .map_err(|error| DispatchError::Execution(error.to_string()))?,
+            match prepared.tenant_id.as_ref() {
+                Some(tenant_id) => {
+                    harn_vm::InboxIndex::new_for_tenant(
+                        prepared.event_log.clone(),
+                        metrics.clone(),
+                        tenant_id,
+                    )
+                    .await
+                }
+                None => harn_vm::InboxIndex::new(prepared.event_log.clone(), metrics.clone()).await,
+            }
+            .map_err(|error| DispatchError::Execution(error.to_string()))?,
         );
         harn_vm::Connector::init(
             &mut cron_connector,
             harn_vm::ConnectorCtx {
                 event_log: prepared.event_log.clone(),
-                secrets: worker_secret_provider()?,
+                secrets: prepared.secret_provider.clone(),
                 inbox,
                 metrics,
                 rate_limiter: Arc::new(RateLimiterFactory::new(RateLimitConfig::default())),
@@ -316,7 +340,9 @@ pub async fn start_worker_server(
         tasks,
         jobs,
         queues,
-        drain_timeout: options.drain_timeout,
+        drain_timeout,
+        _connector_clients: prepared.connector_clients,
+        _tenant_scope: prepared.tenant_scope,
     })
 }
 
@@ -324,6 +350,8 @@ async fn prepare_job_runtime(
     script_path: &Path,
     configure: impl FnOnce(&mut Vm),
     retry_override: Option<&TriggerRetryConfig>,
+    connector_registry: Option<ConnectorRegistry>,
+    tenant_scope: Option<harn_vm::TenantScope>,
 ) -> Result<PreparedJobRuntime, DispatchError> {
     harn_vm::reset_thread_local_state();
     harn_vm::clear_trigger_registry();
@@ -357,8 +385,19 @@ async fn prepare_job_runtime(
     harn_vm::register_store_builtins(&mut vm, &base_dir);
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);
     vm.set_source_dir(&base_dir);
-    vm.set_harness(worker_job_harness()?);
+    let tenant_id = tenant_scope.as_ref().map(|scope| scope.id.clone());
+    let tenant_guard = tenant_id.clone().map(harn_vm::enter_tenant);
+    let secret_provider = worker_secret_provider(tenant_scope.as_ref())?;
+    vm.set_harness(worker_job_harness(secret_provider.clone()));
     configure(&mut vm);
+
+    let connector_clients = match connector_registry {
+        Some(registry) => Some(
+            install_worker_connector_clients(registry, event_log.clone(), secret_provider.clone())
+                .await?,
+        ),
+        None => None,
+    };
 
     let exports = vm
         .load_module_exports(script_path)
@@ -399,8 +438,12 @@ async fn prepare_job_runtime(
 
     Ok(PreparedJobRuntime {
         event_log,
+        secret_provider,
         vm,
         jobs,
+        tenant_id,
+        connector_clients,
+        tenant_scope: tenant_guard,
     })
 }
 
@@ -439,14 +482,19 @@ fn cron_connector_binding(job: &WorkerJobRegistration) -> Option<harn_vm::Trigge
 fn spawn_cron_pump(
     event_log: Arc<AnyEventLog>,
     dispatcher: Dispatcher,
+    tenant_id: Option<harn_vm::TenantId>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<JoinHandle<Result<(), DispatchError>>, DispatchError> {
-    let topic = Topic::new(harn_vm::connectors::cron::CRON_TICK_TOPIC)
-        .map_err(|error| DispatchError::Execution(error.to_string()))?;
+    let topic = worker_topic(
+        harn_vm::connectors::cron::CRON_TICK_TOPIC,
+        tenant_id.as_ref(),
+    )
+    .map_err(|error| DispatchError::Execution(error.to_string()))?;
     Ok(tokio::task::spawn_local(run_cron_pump(
         event_log,
         dispatcher,
         topic,
+        tenant_id,
         shutdown_rx,
     )))
 }
@@ -455,6 +503,7 @@ async fn run_cron_pump(
     event_log: Arc<AnyEventLog>,
     dispatcher: Dispatcher,
     topic: Topic,
+    tenant_id: Option<harn_vm::TenantId>,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), DispatchError> {
     let start_from = event_log
@@ -479,8 +528,9 @@ async fn run_cron_pump(
                 if logged.kind != "trigger_event" {
                     continue;
                 }
-                let event: TriggerEvent = serde_json::from_value(logged.payload)
+                let mut event: TriggerEvent = serde_json::from_value(logged.payload)
                     .map_err(|error| DispatchError::Execution(format!("failed to decode cron trigger event: {error}")))?;
+                enforce_event_tenant(&mut event, tenant_id.as_ref())?;
                 let trigger_id = match &event.provider_payload {
                     ProviderPayload::Known(KnownProviderPayload::Cron(payload)) => {
                         payload.cron_id.clone()
@@ -501,15 +551,17 @@ fn spawn_inbox_pump(
     event_log: Arc<AnyEventLog>,
     dispatcher: Dispatcher,
     budgets_by_binding: Arc<BTreeMap<String, Option<BudgetSpec>>>,
+    tenant_id: Option<harn_vm::TenantId>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<JoinHandle<Result<(), DispatchError>>, DispatchError> {
-    let topic = Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
+    let topic = worker_topic(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC, tenant_id.as_ref())
         .map_err(|error| DispatchError::Execution(error.to_string()))?;
     Ok(tokio::task::spawn_local(run_inbox_pump(
         event_log,
         dispatcher,
         budgets_by_binding,
         topic,
+        tenant_id,
         shutdown_rx,
     )))
 }
@@ -519,6 +571,7 @@ async fn run_inbox_pump(
     dispatcher: Dispatcher,
     budgets_by_binding: Arc<BTreeMap<String, Option<BudgetSpec>>>,
     topic: Topic,
+    tenant_id: Option<harn_vm::TenantId>,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), DispatchError> {
     let start_from = event_log
@@ -543,9 +596,10 @@ async fn run_inbox_pump(
                 if logged.kind != "event_ingested" {
                     continue;
                 }
-                let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
+                let mut envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
                     serde_json::from_value(logged.payload)
                         .map_err(|error| DispatchError::Execution(format!("failed to decode dispatcher inbox event: {error}")))?;
+                enforce_event_tenant(&mut envelope.event, tenant_id.as_ref())?;
                 let budget = budget_for_envelope(&envelope, &budgets_by_binding).cloned().flatten();
                 let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 dispatcher
@@ -565,30 +619,40 @@ fn spawn_queue_consumer(
     consumer_id: String,
     claim_ttl: StdDuration,
     budgets_by_binding: Arc<BTreeMap<String, Option<BudgetSpec>>>,
+    tenant_id: Option<harn_vm::TenantId>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<JoinHandle<Result<(), DispatchError>>, DispatchError> {
     let topic = Topic::new(harn_vm::worker_job_topic_name(&queue_name))
         .map_err(|error| DispatchError::Execution(error.to_string()))?;
-    Ok(tokio::task::spawn_local(run_queue_consumer(
-        event_log,
-        dispatcher,
+    let config = QueueConsumerConfig {
         queue_name,
         consumer_id,
         claim_ttl,
+        tenant_id,
+    };
+    Ok(tokio::task::spawn_local(run_queue_consumer(
+        event_log,
+        dispatcher,
         budgets_by_binding,
         topic,
+        config,
         shutdown_rx,
     )))
+}
+
+struct QueueConsumerConfig {
+    queue_name: String,
+    consumer_id: String,
+    claim_ttl: StdDuration,
+    tenant_id: Option<harn_vm::TenantId>,
 }
 
 async fn run_queue_consumer(
     event_log: Arc<AnyEventLog>,
     dispatcher: Dispatcher,
-    queue_name: String,
-    consumer_id: String,
-    claim_ttl: StdDuration,
     budgets_by_binding: Arc<BTreeMap<String, Option<BudgetSpec>>>,
     topic: Topic,
+    config: QueueConsumerConfig,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), DispatchError> {
     let start_from = event_log
@@ -605,10 +669,11 @@ async fn run_queue_consumer(
     drain_queue(
         &queue,
         &dispatcher,
-        &queue_name,
-        &consumer_id,
-        claim_ttl,
+        &config.queue_name,
+        &config.consumer_id,
+        config.claim_ttl,
         &budgets_by_binding,
+        config.tenant_id.as_ref(),
     )
     .await?;
 
@@ -625,10 +690,11 @@ async fn run_queue_consumer(
                     drain_queue(
                         &queue,
                         &dispatcher,
-                        &queue_name,
-                        &consumer_id,
-                        claim_ttl,
+                        &config.queue_name,
+                        &config.consumer_id,
+                        config.claim_ttl,
                         &budgets_by_binding,
+                        config.tenant_id.as_ref(),
                     )
                     .await?;
                 }
@@ -645,14 +711,24 @@ async fn drain_queue(
     consumer_id: &str,
     claim_ttl: StdDuration,
     budgets_by_binding: &BTreeMap<String, Option<BudgetSpec>>,
+    tenant_id: Option<&harn_vm::TenantId>,
 ) -> Result<(), DispatchError> {
     loop {
-        let Some(claimed) = queue
-            .claim_next(queue_name, consumer_id, claim_ttl)
-            .await
-            .map_err(|error| {
-                DispatchError::Execution(format!("failed to claim worker job: {error}"))
-            })?
+        let claim = match tenant_id {
+            Some(tenant_id) => {
+                queue
+                    .claim_next_for_tenant(queue_name, consumer_id, claim_ttl, tenant_id)
+                    .await
+            }
+            None => {
+                queue
+                    .claim_next_untenanted(queue_name, consumer_id, claim_ttl)
+                    .await
+            }
+        };
+        let Some(claimed) = claim.map_err(|error| {
+            DispatchError::Execution(format!("failed to claim worker job: {error}"))
+        })?
         else {
             break;
         };
@@ -796,46 +872,6 @@ fn now_ms() -> i64 {
     harn_vm::clock_mock::now_ms()
 }
 
-/// Driver-level knobs for a one-shot `@job` run.
-///
-/// The default is **exactly** the production behaviour: no override, so the
-/// dispatcher uses the `@job`'s declared `@retry`/`retry:` policy (or its
-/// own default). Overrides are opt-in — they let a one-shot or failure-path
-/// test runner cap or disable retry without editing the `@job` source, so an
-/// erroring job fails fast instead of sleeping through a multi-hour backoff.
-#[derive(Clone, Debug, Default)]
-pub struct JobRunOptions {
-    /// When set, this retry config replaces the `@job`'s declared policy for
-    /// this run only. `None` (the default) preserves production behaviour.
-    pub retry_override: Option<TriggerRetryConfig>,
-}
-
-impl JobRunOptions {
-    /// Override the retry policy for this run, replacing the `@job`'s
-    /// declared policy. The dispatcher's binding is otherwise unchanged.
-    pub fn with_retry(mut self, retry: TriggerRetryConfig) -> Self {
-        self.retry_override = Some(retry);
-        self
-    }
-
-    /// Run the `@job` at most once: a single attempt with no retry and no
-    /// backoff sleep. The natural choice for one-shot CLI / failure-path
-    /// test drivers that must fail fast rather than inherit a long backoff.
-    ///
-    /// `max_attempts: 1` makes `TriggerRetryConfig::next_retry_delay` return
-    /// `None` after the first attempt, so the dispatcher never sleeps. The
-    /// `Linear { delay_ms: 0 }` policy is belt-and-suspenders: even the
-    /// first-attempt delay is zero.
-    pub fn fail_fast() -> Self {
-        Self {
-            retry_override: Some(TriggerRetryConfig::new(
-                1,
-                RetryPolicy::Linear { delay_ms: 0 },
-            )),
-        }
-    }
-}
-
 /// Run one `@job` function against a single JSON request and return its
 /// outcome. This is the one-shot driver behind `harn run --as-job`.
 ///
@@ -901,8 +937,19 @@ pub async fn run_job_once_with_options(
     options: JobRunOptions,
     configure: impl FnOnce(&mut Vm),
 ) -> Result<JobRunOutcome, DispatchError> {
-    let prepared =
-        prepare_job_runtime(script_path, configure, options.retry_override.as_ref()).await?;
+    let JobRunOptions {
+        retry_override,
+        connector_registry,
+        tenant_scope,
+    } = options;
+    let prepared = prepare_job_runtime(
+        script_path,
+        configure,
+        retry_override.as_ref(),
+        connector_registry,
+        tenant_scope,
+    )
+    .await?;
     let job = prepared
         .jobs
         .iter()
@@ -917,7 +964,7 @@ pub async fn run_job_once_with_options(
         .map_err(|error| DispatchError::Execution(error.to_string()))?;
     let _budget_guard = job.budget.as_ref().and_then(BudgetSpec::install);
 
-    let event = job_event(&job.export.job, request)?;
+    let event = job_event(&job.export.job, request, prepared.tenant_id.clone());
     let dispatcher = Dispatcher::with_event_log(prepared.vm, prepared.event_log);
     let outcome = dispatcher
         .dispatch(&binding, event)
@@ -1002,27 +1049,6 @@ fn retry_config(spec: &RetrySpec) -> TriggerRetryConfig {
     TriggerRetryConfig::new(spec.max_attempts, policy)
 }
 
-/// Wrap a request JSON object as a synthetic [`TriggerEvent`]. The request
-/// rides in the generic-webhook payload's `raw` field, so the `@job`
-/// handler reads it as `event.provider_payload.raw` — the same place
-/// every other webhook-shaped trigger handler reads its body.
-fn job_event(job_name: &str, request: serde_json::Value) -> Result<TriggerEvent, DispatchError> {
-    Ok(TriggerEvent::new(
-        ProviderId::from(JOB_PROVIDER),
-        "job",
-        None,
-        format!("job:{job_name}:{}", uuid::Uuid::new_v4()),
-        None,
-        std::collections::BTreeMap::new(),
-        ProviderPayload::Known(KnownProviderPayload::Webhook(GenericWebhookPayload {
-            source: Some(format!("job:{job_name}")),
-            content_type: Some("application/json".to_string()),
-            raw: request,
-        })),
-        SignatureStatus::Verified,
-    ))
-}
-
 fn job_run_outcome(job_name: &str, outcome: DispatchOutcome) -> JobRunOutcome {
     JobRunOutcome {
         job: job_name.to_string(),
@@ -1047,6 +1073,25 @@ pub async fn run_job_from_files(
     result_out: Option<&Path>,
     pretty: bool,
 ) -> Result<(JobRunOutcome, String), DispatchError> {
+    run_job_from_files_with_options(
+        script_path,
+        job_name,
+        request_path,
+        result_out,
+        pretty,
+        JobRunOptions::default(),
+    )
+    .await
+}
+
+pub async fn run_job_from_files_with_options(
+    script_path: &Path,
+    job_name: &str,
+    request_path: &Path,
+    result_out: Option<&Path>,
+    pretty: bool,
+    options: JobRunOptions,
+) -> Result<(JobRunOutcome, String), DispatchError> {
     let raw = std::fs::read_to_string(request_path).map_err(|error| {
         DispatchError::Io(format!(
             "failed to read request {}: {error}",
@@ -1060,7 +1105,8 @@ pub async fn run_job_from_files(
         ))
     })?;
 
-    let outcome = run_job_once(script_path, job_name, request).await?;
+    let outcome =
+        run_job_once_with_options(script_path, job_name, request, options, |_vm| {}).await?;
     let report = outcome.report_json();
     let rendered = if pretty {
         serde_json::to_string_pretty(&report)
@@ -1081,587 +1127,4 @@ pub async fn run_job_from_files(
 /// Convenience for callers that only have a script path string.
 pub fn script_path_buf(path: &str) -> PathBuf {
     PathBuf::from(path)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::test_support::{write_script, ScopedEnvVar, ENV_LOCK};
-    use super::*;
-
-    async fn wait_for_log_event(
-        event_log: Arc<AnyEventLog>,
-        topic_name: &str,
-        matches: impl Fn(&harn_vm::event_log::LogEvent) -> bool,
-    ) -> harn_vm::event_log::LogEvent {
-        let topic = Topic::new(topic_name).expect("test topic is valid");
-        let latest = event_log.latest(&topic).await.expect("latest event id");
-        let mut stream = event_log
-            .clone()
-            .subscribe(&topic, latest)
-            .await
-            .expect("subscribe to topic");
-
-        for (_, event) in event_log
-            .read_range(&topic, None, usize::MAX)
-            .await
-            .expect("read topic")
-        {
-            if matches(&event) {
-                return event;
-            }
-        }
-
-        tokio::time::timeout(StdDuration::from_secs(5), async {
-            loop {
-                let Some(received) = stream.next().await else {
-                    panic!("event stream ended before matching event");
-                };
-                let (_, event) = received.expect("read event");
-                if matches(&event) {
-                    return event;
-                }
-            }
-        })
-        .await
-        .expect("matching event")
-    }
-
-    async fn wait_for_attempt(
-        event_log: Arc<AnyEventLog>,
-        trigger_id: &str,
-    ) -> harn_vm::event_log::LogEvent {
-        wait_for_log_event(event_log, harn_vm::TRIGGER_ATTEMPTS_TOPIC, |event| {
-            event.kind == "attempt_recorded"
-                && event
-                    .payload
-                    .get("trigger_id")
-                    .and_then(|value| value.as_str())
-                    == Some(trigger_id)
-        })
-        .await
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn one_shot_job_echoes_request_and_succeeds() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  let req = event.provider_payload.raw
-  return {status: "ok", echo: req}
-}
-"#,
-                )
-                .await;
-
-                let request = serde_json::json!({"repo": "burin-labs/harn", "n": 7});
-                let outcome = run_job_once(&script, "scan", request.clone())
-                    .await
-                    .expect("run job");
-
-                assert_eq!(outcome.status, DispatchStatus::Succeeded);
-                assert_eq!(outcome.attempt_count, 1);
-                let result = outcome.result.expect("result");
-                assert_eq!(result["status"], serde_json::json!("ok"));
-                assert_eq!(result["echo"], request);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn one_shot_resolves_public_job_name_not_function_name() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-pub fn run_scan(harness: Harness, event: TriggerEvent) -> dict {
-  return {status: "ok", echo: event.provider_payload.raw}
-}
-"#,
-                )
-                .await;
-
-                let outcome = run_job_once(&script, "scan", serde_json::json!({"id": 7}))
-                    .await
-                    .expect("run job by public name");
-
-                assert_eq!(outcome.job, "scan");
-                assert_eq!(outcome.status, DispatchStatus::Succeeded);
-                assert_eq!(
-                    outcome.result.expect("result")["echo"],
-                    serde_json::json!({"id": 7})
-                );
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn configure_hook_registers_callable_host_builtin() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  let req = event.provider_payload.raw
-  return {status: "ok", host: host_echo(req.repo)}
-}
-"#,
-                )
-                .await;
-
-                let request = serde_json::json!({"repo": "burin-labs/harn"});
-                let outcome = run_job_once_with(&script, "scan", request, |vm| {
-                    // An embedder-defined builtin, injected via the configure
-                    // hook on the fully-built job VM. The `@job` closure calls
-                    // it by bare name, exactly like the stdlib builtins.
-                    vm.register_builtin("host_echo", |args, _out| {
-                        let x = args.first().map(|a| a.display()).unwrap_or_default();
-                        Ok(harn_vm::VmValue::String(arcstr::ArcStr::from(
-                            format!("host:{x}").as_str(),
-                        )))
-                    });
-                })
-                .await
-                .expect("run job");
-
-                assert_eq!(outcome.status, DispatchStatus::Succeeded);
-                let result = outcome.result.expect("result");
-                assert_eq!(result["status"], serde_json::json!("ok"));
-                assert_eq!(result["host"], serde_json::json!("host:burin-labs/harn"));
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn handler_error_retries_then_dlqs() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-@retry(max: 2, backoff: "linear")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  throw "boom"
-}
-"#,
-                )
-                .await;
-
-                let outcome = run_job_once(&script, "scan", serde_json::json!({}))
-                    .await
-                    .expect("run job returns terminal outcome");
-
-                assert_eq!(outcome.status, DispatchStatus::Dlq);
-                assert_eq!(outcome.attempt_count, 2);
-                assert!(!outcome.succeeded());
-                // The rendered report is a JSON object even on failure.
-                let report = outcome.report_json();
-                assert_eq!(report["status"], serde_json::json!("dlq"));
-                assert!(report["error"].as_str().is_some_and(|e| e.contains("boom")));
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn compact_job_retry_dict_still_maps_to_dispatcher_retry() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan", retry: { max: 2, backoff: "linear" })
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  throw "boom"
-}
-"#,
-                )
-                .await;
-
-                let outcome = run_job_once(&script, "scan", serde_json::json!({}))
-                    .await
-                    .expect("run job returns terminal outcome");
-
-                assert_eq!(outcome.status, DispatchStatus::Dlq);
-                assert_eq!(outcome.attempt_count, 2);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn fail_fast_override_runs_a_single_attempt_for_an_erroring_job() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                // The `@job` declares the production default (svix, max 7),
-                // whose backoff would sleep minutes-to-hours between
-                // attempts. The driver override must cap it to one attempt.
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-@retry(max: 7, backoff: "svix")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  throw "boom"
-}
-"#,
-                )
-                .await;
-
-                let started = std::time::Instant::now();
-                let outcome = run_job_once_with_options(
-                    &script,
-                    "scan",
-                    serde_json::json!({}),
-                    JobRunOptions::fail_fast(),
-                    |_vm| {},
-                )
-                .await
-                .expect("run job returns terminal outcome");
-                let elapsed = started.elapsed();
-
-                // One attempt, no retry, no backoff sleep: terminal failure
-                // arrives effectively immediately despite the `@job`'s
-                // multi-hour svix policy.
-                assert_eq!(outcome.attempt_count, 1);
-                assert_eq!(outcome.status, DispatchStatus::Dlq);
-                assert!(!outcome.succeeded());
-                assert!(
-                    elapsed < StdDuration::from_secs(5),
-                    "fail-fast run should not sleep through retry backoff (took {elapsed:?})"
-                );
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn retry_override_caps_attempts_below_the_job_policy() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                // Declared policy is 5 attempts; the driver caps it to 3 with
-                // an immediate (zero-delay) backoff so the test is fast.
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-@retry(max: 5, backoff: "linear")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  throw "boom"
-}
-"#,
-                )
-                .await;
-
-                let outcome = run_job_once_with_options(
-                    &script,
-                    "scan",
-                    serde_json::json!({}),
-                    JobRunOptions::default().with_retry(TriggerRetryConfig::new(
-                        3,
-                        RetryPolicy::Linear { delay_ms: 0 },
-                    )),
-                    |_vm| {},
-                )
-                .await
-                .expect("run job returns terminal outcome");
-
-                assert_eq!(outcome.attempt_count, 3);
-                assert_eq!(outcome.status, DispatchStatus::Dlq);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn default_options_preserve_the_job_declared_retry_policy() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                // Linear backoff: attempt 1 is immediate, attempt 2 sleeps
-                // 1s, so the default (no override) path stays fast enough to
-                // test while still proving the `@job`'s `max: 2` is honoured.
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-@retry(max: 2, backoff: "linear")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  throw "boom"
-}
-"#,
-                )
-                .await;
-
-                // `JobRunOptions::default()` carries no override, so the
-                // dispatcher must use the `@job`'s declared `max: 2`.
-                let outcome = run_job_once_with_options(
-                    &script,
-                    "scan",
-                    serde_json::json!({}),
-                    JobRunOptions::default(),
-                    |_vm| {},
-                )
-                .await
-                .expect("run job returns terminal outcome");
-
-                assert_eq!(outcome.attempt_count, 2);
-                assert_eq!(outcome.status, DispatchStatus::Dlq);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn worker_server_activates_scheduled_jobs() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let _env_lock = ENV_LOCK.lock().await;
-                let _single_tick = ScopedEnvVar::set("HARN_TEST_CRON_SINGLE_TICK_AT", "1700000000");
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("tick")
-@schedule("* * * * *", "UTC")
-pub fn run_tick(harness: Harness, event: TriggerEvent) -> dict {
-  return {status: "ok"}
-}
-"#,
-                )
-                .await;
-
-                let server = start_worker_server(
-                    &script,
-                    WorkerServeOptions {
-                        drain_timeout: StdDuration::from_secs(5),
-                        ..WorkerServeOptions::default()
-                    },
-                )
-                .await
-                .expect("start worker server");
-                assert_eq!(server.jobs().len(), 1);
-                assert_eq!(server.jobs()[0].job, "tick");
-
-                let event_log = server.event_log();
-                let attempt = wait_for_attempt(event_log, "job:tick").await;
-                assert_eq!(attempt.payload["outcome"], serde_json::json!("success"));
-
-                let report = server.shutdown().await.expect("shutdown worker");
-                assert!(report.drained);
-                assert_eq!(report.jobs, 1);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn worker_server_consumes_worker_queue_jobs() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-@queue("scan-jobs")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  return {status: "ok", echo: event.provider_payload.raw}
-}
-"#,
-                )
-                .await;
-
-                let server = start_worker_server(
-                    &script,
-                    WorkerServeOptions {
-                        consumer_id: Some("test-worker".to_string()),
-                        claim_ttl: StdDuration::from_secs(30),
-                        drain_timeout: StdDuration::from_secs(5),
-                    },
-                )
-                .await
-                .expect("start worker server");
-                let registration = server.jobs().first().expect("job registration").clone();
-                assert_eq!(registration.queue.as_deref(), Some("scan-jobs"));
-
-                let event_log = server.event_log();
-                let response_topic = harn_vm::worker_response_topic_name("scan-jobs");
-                let topic = Topic::new(response_topic.clone()).expect("response topic");
-                let latest = event_log.latest(&topic).await.expect("latest response");
-                let mut responses = event_log
-                    .clone()
-                    .subscribe(&topic, latest)
-                    .await
-                    .expect("subscribe responses");
-
-                let request = serde_json::json!({"repo": "burin-labs/harn"});
-                let event = job_event("scan", request.clone()).expect("job event");
-                WorkerQueue::new(event_log.clone())
-                    .enqueue(&harn_vm::WorkerQueueJob {
-                        queue: "scan-jobs".to_string(),
-                        trigger_id: registration.binding_id.clone(),
-                        binding_key: registration.binding_key.clone(),
-                        binding_version: registration.binding_version,
-                        event,
-                        replay_of_event_id: None,
-                        priority: WorkerQueuePriority::Normal,
-                    })
-                    .await
-                    .expect("enqueue job");
-
-                let response = tokio::time::timeout(StdDuration::from_secs(5), async {
-                    loop {
-                        let Some(received) = responses.next().await else {
-                            panic!("response stream ended");
-                        };
-                        let (_, event) = received.expect("response event");
-                        if event.kind != "job_response" {
-                            continue;
-                        }
-                        return serde_json::from_value::<WorkerQueueResponseRecord>(event.payload)
-                            .expect("response record");
-                    }
-                })
-                .await
-                .expect("worker response");
-
-                let outcome = response.outcome.expect("dispatch outcome");
-                assert_eq!(outcome.status, DispatchStatus::Succeeded);
-                assert_eq!(outcome.result.expect("result")["echo"], request);
-                assert_eq!(response.error, None);
-
-                let report = server.shutdown().await.expect("shutdown worker");
-                assert!(report.drained);
-                assert_eq!(report.queues, 1);
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn duplicate_job_names_are_rejected() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-@job("scan")
-pub fn scan_a() -> dict { return {} }
-
-@job("scan")
-pub fn scan_b() -> dict { return {} }
-"#,
-                )
-                .await;
-
-                let error = run_job_once(&script, "scan", serde_json::json!({}))
-                    .await
-                    .expect_err("duplicate job name");
-                assert!(error.message().contains("job names must be unique"));
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn run_from_files_writes_result_out() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r#"
-import "std/triggers"
-
-@job("scan")
-pub fn scan(harness: Harness, event: TriggerEvent) -> dict {
-  return {status: "ok", echo: event.provider_payload.raw}
-}
-"#,
-                )
-                .await;
-                let request_path = dir.path().join("req.json");
-                tokio::fs::write(&request_path, r#"{"k": "v"}"#)
-                    .await
-                    .expect("write request");
-                let out_path = dir.path().join("out.json");
-
-                let (outcome, rendered) =
-                    run_job_from_files(&script, "scan", &request_path, Some(&out_path), false)
-                        .await
-                        .expect("run job from files");
-
-                assert!(outcome.succeeded());
-                let written = tokio::fs::read_to_string(&out_path)
-                    .await
-                    .expect("read out");
-                assert_eq!(written, rendered);
-                let parsed: serde_json::Value =
-                    serde_json::from_str(&written).expect("parse report");
-                assert_eq!(parsed["echo"], serde_json::json!({"k": "v"}));
-            })
-            .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn missing_job_attribute_is_an_error() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let dir = tempfile::tempdir().expect("tempdir");
-                let script = write_script(
-                    dir.path(),
-                    r"
-pub fn scan(req: dict) -> dict { return req }
-",
-                )
-                .await;
-                let error = run_job_once(&script, "scan", serde_json::json!({}))
-                    .await
-                    .expect_err("not a job");
-                assert!(error.message().contains("no `@job(\"scan\")`"));
-            })
-            .await;
-    }
 }

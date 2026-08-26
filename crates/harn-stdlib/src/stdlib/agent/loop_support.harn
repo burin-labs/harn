@@ -417,18 +417,9 @@ pub fn __agent_loop_build_turn_prompt(
   opts: dict?,
   iteration: int,
 ) {
-  const append_only = if type_of(opts?.reminders) == "dict"
-    && opts.reminders?.append_only != nil {
-    opts.reminders.append_only
-  } else {
-    env_bool(harness.env, "HARN_REMINDERS_APPEND_ONLY", false)
-  }
-  if append_only {
-    // Commit the active directives into one durable trailing user message
-    // before this turn's history is read, so every later request re-sends those
-    // exact bytes at the same index instead of moving the envelope.
-    let _ = agent_session_commit_directives(harness.agent, session.session_id)
-  }
+  // Commit active directives before reading this turn's history. Every later
+  // request then sends those exact bytes at the same message index.
+  let _ = agent_session_commit_directives(harness.agent, session.session_id)
   return __agent_loop_with_llm_render_context(
     harness,
     opts,
@@ -443,7 +434,6 @@ pub fn __agent_loop_build_turn_prompt(
       for fragment in fragments {
         parts = parts.appending(fragment.body)
       }
-      const prompt_opts = effective + {_reminders_append_only: append_only}
       return {
         fragments: fragments,
         system: join(parts, "\n\n"),
@@ -451,7 +441,7 @@ pub fn __agent_loop_build_turn_prompt(
           render_harness.agent,
           render_harness.clock,
           session,
-          prompt_opts,
+          effective,
           iteration,
         ),
       }

@@ -1,11 +1,14 @@
-import { MissingToolCallRecoveryOptions } from "std/agent/options_types"
+import {
+  MissingToolCallRecoveryOptions,
+  MissingToolCallRecoveryRequest,
+} from "std/agent/options_types"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 
 type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
 
 type MissingToolCallTool = {name: string, description?: string}
 
-type MissingToolCallVerdict = {
+pub type MissingToolCallVerdict = {
   action: MissingToolCallAction,
   original_action?: string,
   tool_name: string,
@@ -18,6 +21,8 @@ type MissingToolCallVerdict = {
   typed_checkpoint?: any,
   error?: string,
 }
+
+pub type MissingToolCallClassifier = fn(MissingToolCallRecoveryRequest) -> MissingToolCallVerdict?
 
 fn __missing_tool_call_string(value: any) -> string {
   if value == nil {
@@ -144,21 +149,14 @@ fn __missing_tool_call_schema() {
   }
 }
 
-fn __missing_tool_call_prompt(payload: dict, candidate_tools: any) {
-  return "You classify assistant text before a tool-dispatch step.\n\n"
-    + "The parser already found ZERO valid tool calls in this turn. Decide whether the assistant text "
-    + "is nevertheless expressing an intent to invoke one of the candidate tools.\n\n"
-    + "Assistant text:\n"
-    + __missing_tool_call_string(payload?.text ?? payload?.visible_text)
-    + "\n\nCandidate tools JSON:\n"
-    + json_stringify(candidate_tools)
-    + "\n\nReturn JSON exactly matching this shape: "
-    + "{\"action\":\"tool_call_intended|no_tool_call_intended|ambiguous\",\"tool_name\":\"\",\"confidence\":0.0,\"evidence\":\"...\",\"language\":\"...\"}\n\n"
-    + "Rules:\n"
-    + "- Use tool_call_intended only when the assistant text says it is about to, trying to, or intending to use a candidate tool, even if the text has typos or is not in English.\n"
-    + "- Choose tool_name from Candidate tools exactly; leave it empty if no single candidate is clear.\n"
-    + "- Use no_tool_call_intended for final answers, status summaries, questions, or ordinary explanation.\n"
-    + "- Use ambiguous when the intent or target tool is unclear. Do not infer intent from the original user task alone.\n"
+fn __missing_tool_call_prompt(fs: HarnessFs, payload: dict, candidate_tools: any) {
+  return fs.render_prompt(
+    "std/llm/prompts/missing_tool_call_classifier.harn.prompt",
+    {
+      assistant_text: __missing_tool_call_string(payload?.text ?? payload?.visible_text),
+      candidate_tools_json: json_stringify(candidate_tools),
+    },
+  )
 }
 
 fn __missing_tool_call_action(value: any) -> MissingToolCallAction {
@@ -243,10 +241,9 @@ fn __missing_tool_call_fail_open(error: any, threshold: float) -> MissingToolCal
  * @api_stability: experimental
  */
 pub fn missing_tool_call_classifier(
-  agent: HarnessAgent,
-  llm: HarnessLlm,
+  harness: Harness,
   opts: MissingToolCallRecoveryOptions? = nil,
-) {
+) -> MissingToolCallClassifier {
   const cfg = opts ?? {}
   if type_of(cfg) != "dict" {
     throw __missing_tool_call_config_error(
@@ -320,10 +317,10 @@ pub fn missing_tool_call_classifier(
       }
     }
     const checkpoint = agent_typed_output_checkpoint(
-      agent,
-      llm,
+      harness.agent,
+      harness.llm,
       "agent.missing_tool_call",
-      __missing_tool_call_prompt(classifier_payload, candidate_tools),
+      __missing_tool_call_prompt(harness.fs, classifier_payload, candidate_tools),
       schema,
       llm_opts,
     )

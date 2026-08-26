@@ -1,5 +1,5 @@
 use crate::value::VmDictExt;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -24,6 +24,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &DAEMON_SNAPSHOT_BUILTIN_DEF,
     &DAEMON_SPAWN_BUILTIN_DEF,
     &DAEMON_TRIGGER_BUILTIN_DEF,
+    &MANAGED_DAEMON_WAIT_BUILTIN_DEF,
     &DAEMON_STOP_BUILTIN_DEF,
     &DAEMON_RESUME_BUILTIN_DEF,
 ];
@@ -97,10 +98,48 @@ struct DaemonState {
     stop_requested: bool,
 }
 
+type DaemonStateRef = Arc<parking_lot::Mutex<DaemonState>>;
+
+/// The managed-daemon owner for one VM execution tree.
+#[derive(Default)]
+pub(crate) struct DaemonRegistry {
+    states: parking_lot::Mutex<BTreeMap<String, DaemonStateRef>>,
+}
+
+impl DaemonRegistry {
+    fn insert(&self, daemon_id: String, state: DaemonStateRef) {
+        self.states.lock().insert(daemon_id, state);
+    }
+
+    fn get(&self, daemon_id: &str) -> Option<DaemonStateRef> {
+        self.states.lock().get(daemon_id).cloned()
+    }
+
+    fn find_by_root(&self, persist_root: &str) -> Option<DaemonStateRef> {
+        self.states
+            .lock()
+            .values()
+            .find(|state| state.lock().persist_root == persist_root)
+            .cloned()
+    }
+}
+
 thread_local! {
-    static DAEMON_REGISTRY: RefCell<BTreeMap<String, Arc<parking_lot::Mutex<DaemonState>>>> =
-        const { RefCell::new(BTreeMap::new()) };
-    static DAEMON_COUNTER: Cell<u64> = const { Cell::new(0) };
+    static ACTIVE_DAEMON_REGISTRY: RefCell<Arc<DaemonRegistry>> =
+        RefCell::new(Arc::new(DaemonRegistry::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn fresh_daemon_registry() -> Arc<DaemonRegistry> {
+    Arc::new(DaemonRegistry::default())
+}
+
+pub(crate) fn active_daemon_registry() -> Arc<DaemonRegistry> {
+    ACTIVE_DAEMON_REGISTRY.with(|registry| registry.borrow().clone())
+}
+
+pub(crate) fn swap_active_daemon_registry(next: Arc<DaemonRegistry>) -> Arc<DaemonRegistry> {
+    ACTIVE_DAEMON_REGISTRY.with(|registry| std::mem::replace(&mut *registry.borrow_mut(), next))
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
@@ -112,7 +151,7 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "harness.agent.daemon_spawn",
     effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],
-    sig = "daemon_spawn(config: dict) -> dict",
+    sig = "daemon_spawn(config: dict<string, unknown>) -> {id: string, name: string, status: string, session_id: string, persist_path: string, snapshot_path: string, pending_event_count: int, queued_event_count: int, event_queue_capacity: int, daemon_state?: string, saved_at?: string, error?: string, result?: unknown, inflight_event?: unknown}",
     kind = "async",
     category = "agent.daemon"
 )]
@@ -180,7 +219,7 @@ async fn daemon_spawn_builtin(
 #[harn_builtin(
     exposure = "harness.agent.daemon_trigger",
     effects = ["worker.mutate@arg0", "state.mutate@arg0"],
-    sig = "daemon_trigger(handle: any, event: any) -> dict",
+    sig = "daemon_trigger(handle: string | {id: string, ...rest}, event: unknown) -> {id: string, name: string, status: string, session_id: string, persist_path: string, snapshot_path: string, pending_event_count: int, queued_event_count: int, event_queue_capacity: int, daemon_state?: string, saved_at?: string, error?: string, result?: unknown, inflight_event?: unknown}",
     kind = "async",
     category = "agent.daemon"
 )]
@@ -240,9 +279,95 @@ async fn daemon_trigger_builtin(
 }
 
 #[harn_builtin(
+    exposure = "harness.agent.managed_daemon_wait",
+    effects = ["state.read@arg0"],
+    sig = "managed_daemon_wait(handle: string | {id: string, ...rest}, min_iterations?: int, timeout_ms?: int) -> {_type: string, saved_at: string, daemon_state: string, visible_messages: list<unknown>, recorded_messages: list<unknown>, transcript_summary: string?, transcript_events: list<unknown>, total_text: string, last_iteration_text: string, all_tools_used: list<string>, rejected_tools: list<string>, deferred_user_messages: list<string>, total_iterations: int, idle_backoff_ms: int, last_run_exit_code: int?, watch_state: dict<string, int>, pending_events: list<unknown>, pending_event_count: int, inflight_event: unknown?, queued_event_count: int, event_queue_capacity: int}",
+    kind = "async",
+    category = "agent.daemon"
+)]
+async fn managed_daemon_wait_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let wait = Args::runtime("managed_daemon_wait", &args);
+    let target = wait
+        .get(0)
+        .ok_or_else(|| VmError::Runtime("managed_daemon_wait: `handle` is required".to_string()))?;
+    let min_iterations = wait.opt_int(1, "min_iterations")?.unwrap_or(0);
+    let timeout_ms = wait.opt_int(2, "timeout_ms")?.unwrap_or(5_000);
+    if min_iterations < 0 {
+        return Err(VmError::Runtime(
+            "managed_daemon_wait: `min_iterations` must be non-negative".to_string(),
+        ));
+    }
+    if timeout_ms <= 0 {
+        return Err(VmError::Runtime(
+            "managed_daemon_wait: `timeout_ms` must be positive".to_string(),
+        ));
+    }
+
+    let daemon_id = daemon_id_from_value(target)?;
+    let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+    let started = tokio::time::Instant::now();
+    let timeout = tokio::time::Duration::from_millis(timeout_ms as u64);
+
+    loop {
+        let notifier = state.lock().bridge.daemon_idle_notifier();
+        let notified = notifier.notified();
+        tokio::pin!(notified);
+
+        maybe_deliver_next_event(state.clone()).await?;
+        let ready = {
+            let mut daemon = state.lock();
+            let snapshot = refresh_snapshot(&mut daemon)?;
+            reconcile_inflight_event(&mut daemon)?;
+            if daemon.status != "running" {
+                return Err(VmError::Runtime(format!(
+                    "managed_daemon_wait: daemon {} {}: {}",
+                    daemon.id,
+                    daemon.status,
+                    daemon.last_error.as_deref().unwrap_or("no error detail"),
+                )));
+            }
+            snapshot.and_then(|snapshot| {
+                let is_ready = daemon.bridge.is_daemon_idle()
+                    && queued_event_len(&daemon) == 0
+                    && snapshot.total_iterations >= min_iterations as usize;
+                is_ready.then(|| {
+                    let pending_events = daemon.pending_events.iter().cloned().collect::<Vec<_>>();
+                    snapshot_to_vm(
+                        &snapshot,
+                        &pending_events,
+                        daemon.inflight_event.as_ref(),
+                        daemon.event_queue_capacity,
+                    )
+                })
+            })
+        };
+        if let Some(snapshot) = ready {
+            return Ok(snapshot);
+        }
+
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return Err(VmError::Runtime(format!(
+                "managed_daemon_wait: daemon {daemon_id} did not become idle after {timeout_ms}ms"
+            )));
+        };
+        if tokio::time::timeout(remaining, &mut notified)
+            .await
+            .is_err()
+        {
+            return Err(VmError::Runtime(format!(
+                "managed_daemon_wait: daemon {daemon_id} did not become idle after {timeout_ms}ms"
+            )));
+        }
+    }
+}
+
+#[harn_builtin(
     exposure = "harness.agent.managed_daemon_snapshot",
     effects = ["state.read@arg0"],
-    sig = "daemon_snapshot(handle: any) -> dict",
+    sig = "daemon_snapshot(handle: string | {id: string, ...rest}) -> {_type: string, saved_at: string, daemon_state: string, visible_messages: list<unknown>, recorded_messages: list<unknown>, transcript_summary: string?, transcript_events: list<unknown>, total_text: string, last_iteration_text: string, all_tools_used: list<string>, rejected_tools: list<string>, deferred_user_messages: list<string>, total_iterations: int, idle_backoff_ms: int, last_run_exit_code: int?, watch_state: dict<string, int>, pending_events: list<unknown>, pending_event_count: int, inflight_event: unknown?, queued_event_count: int, event_queue_capacity: int}",
     category = "agent.daemon"
 )]
 fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -274,12 +399,12 @@ fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(
     exposure = "harness.agent.daemon_stop",
     effects = ["worker.mutate@arg0", "state.mutate@arg0"],
-    sig = "daemon_stop(handle: any) -> dict",
+    sig = "daemon_stop(handle: string | {id: string, ...rest}) -> {id: string, name: string, status: string, session_id: string, persist_path: string, snapshot_path: string, pending_event_count: int, queued_event_count: int, event_queue_capacity: int, daemon_state?: string, saved_at?: string, error?: string, result?: unknown, inflight_event?: unknown}",
     kind = "async",
     category = "agent.daemon"
 )]
 async fn daemon_stop_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = args
@@ -289,7 +414,10 @@ async fn daemon_stop_builtin(
     let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
     let start_cleanup = {
         let mut daemon = state.lock();
-        if daemon.status == "stopped" && !daemon.stop_requested {
+        if daemon.status == "stopped"
+            && !daemon.stop_requested
+            && !crate::agent_sessions::has_journal(&daemon.session_id)
+        {
             return daemon_summary(&daemon);
         }
         if daemon.stop_requested {
@@ -307,7 +435,7 @@ async fn daemon_stop_builtin(
     };
     if start_cleanup {
         let cleanup_state = state.clone();
-        let cleanup = tokio::task::spawn_local(async move {
+        let cleanup = crate::vm::subtask::spawn_inherited_child(ctx.pool_registry(), async move {
             if let Err(error) = finish_daemon_stop(cleanup_state.clone()).await {
                 let mut daemon = cleanup_state.lock();
                 // Distinguish an incomplete stop from a naturally failed
@@ -391,7 +519,7 @@ async fn finish_daemon_stop(state: Arc<parking_lot::Mutex<DaemonState>>) -> Resu
 #[harn_builtin(
     exposure = "harness.agent.daemon_resume",
     effects = ["worker.mutate@arg0", "state.mutate@arg0"],
-    sig = "daemon_resume(path: string) -> dict",
+    sig = "daemon_resume(path: string) -> {id: string, name: string, status: string, session_id: string, persist_path: string, snapshot_path: string, pending_event_count: int, queued_event_count: int, event_queue_capacity: int, daemon_state?: string, saved_at?: string, error?: string, result?: unknown, inflight_event?: unknown}",
     kind = "async",
     category = "agent.daemon"
 )]
@@ -660,28 +788,16 @@ fn parse_spawn_spec(
 }
 
 fn next_daemon_id() -> String {
-    DAEMON_COUNTER.with(|counter| {
-        let next = counter.get() + 1;
-        counter.set(next);
-        format!("daemon_{}", uuid::Uuid::now_v7())
-    })
+    format!("daemon_{}", uuid::Uuid::now_v7())
 }
 
 fn register_daemon(state: Arc<parking_lot::Mutex<DaemonState>>) {
     let daemon_id = state.lock().id.clone();
-    DAEMON_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(daemon_id, state);
-    });
+    active_daemon_registry().insert(daemon_id, state);
 }
 
 fn find_daemon_by_root(persist_root: &str) -> Option<Arc<parking_lot::Mutex<DaemonState>>> {
-    DAEMON_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .values()
-            .find(|state| state.lock().persist_root == persist_root)
-            .cloned()
-    })
+    active_daemon_registry().find_by_root(persist_root)
 }
 
 fn daemon_id_from_value(value: &VmValue) -> Result<String, VmError> {
@@ -704,7 +820,7 @@ fn with_daemon_state<T>(
     daemon_id: &str,
     f: impl FnOnce(&Arc<parking_lot::Mutex<DaemonState>>) -> Result<T, VmError>,
 ) -> Result<T, VmError> {
-    let state = DAEMON_REGISTRY.with(|registry| registry.borrow().get(daemon_id).cloned());
+    let state = active_daemon_registry().get(daemon_id);
     let state = state.ok_or_else(|| VmError::Runtime(format!("unknown daemon '{daemon_id}'")))?;
     f(&state)
 }
@@ -882,7 +998,8 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
     };
     vm.set_bridge(bridge.clone());
     let task_state = state.clone();
-    let handle = tokio::task::spawn_local(async move {
+    let pool_registry = vm.pool_registry.clone();
+    let handle = crate::vm::subtask::spawn_child(pool_registry, async move {
         let harness = vm.root_harness_value().ok_or_else(|| {
             VmError::Runtime("daemon agent loop has no root Harness authority".to_string())
         })?;
@@ -946,7 +1063,7 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
 
 fn start_daemon_monitor(state: Arc<parking_lot::Mutex<DaemonState>>) {
     let monitor_state = state.clone();
-    let handle = tokio::task::spawn_local(async move {
+    let handle = tokio::spawn(async move {
         loop {
             let should_exit = {
                 let mut daemon = monitor_state.lock();

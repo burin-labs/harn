@@ -1,0 +1,283 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { command_run, command_wait } from "std/command"
+import { background_command_tools } from "../lib/workspace.harn"
+
+/**
+ * tests/verify_channel_test.harn
+ *
+ * Does a verification command that outlives its foreground budget still deliver
+ * its REAL outcome back to the caller?
+ *
+ * A verifier slower than the budget does not answer inline. The command runner
+ * hands back a handle whose status is "running", and the exit status plus the
+ * output arrive later, on the wait that resolves that handle. A loop that never
+ * performs that wait can watch a passing test suite forever and never learn it
+ * passed: every fresh call starts another verifier and returns another handle.
+ *
+ * The playground had no coverage of that lifecycle at all -- its command tool
+ * was a blocking shell call, so the handle path was unreachable from here and
+ * no `.harn` in this repo exercised `background_after_ms`. These cases pin the
+ * contract the agent loop depends on:
+ *
+ *   1. a slow command really does convert to a handle (the precondition -- if
+ *      this stops holding, every other case below passes vacuously)
+ *   2. waiting on that handle yields a TERMINAL result carrying the real exit
+ *      code and the real output
+ *   3. a FAILING slow verifier is delivered just as faithfully, so "terminal
+ *      delivery" is not a property of passing runs only
+ *   4. a fast command still answers inline in one round trip, so the budget is
+ *      a maximum foreground wait rather than a floor charged to every call
+ *   5. resolving the handle costs about what the command costs, not a multiple
+ *      of the budget
+ */
+/** Skip the process-backed cases on Windows; the fixtures are POSIX shell. */
+fn posix_only(harness: Harness) -> bool {
+  return harness.system.platform().os != "windows"
+}
+
+/** A command that sleeps past any short foreground budget, then succeeds. */
+fn slow_passing_command() -> list {
+  return ["sh", "-c", "sleep 1; printf 'VERIFY_OK'"]
+}
+
+/** The same shape, but exiting non-zero after the same delay. */
+fn slow_failing_command() -> list {
+  return ["sh", "-c", "sleep 1; printf 'VERIFY_FAILED' >&2; exit 3"]
+}
+
+/**
+ * Recover a background handle from a tool result the way a model must: by
+ * reading it out of the rendered text, which is all the loop is given.
+ */
+fn handle_from_text(text: string) -> string {
+  const captures = regex_captures(r"handle_id:\s*([A-Za-z0-9_.\-]+)", text) ?? []
+  guard len(captures) > 0 else {
+    return ""
+  }
+  return to_string(captures[0]?.groups[0] ?? "").trim()
+}
+
+/** Short enough that a one-second command always outlives it. */
+const FOREGROUND_BUDGET_MS = 200
+
+/**
+ * PRECONDITION + the central claim. A slow verifier must first be observed
+ * converting to a handle -- otherwise the wait below would be resolving a
+ * command that had already finished inline, and the terminal-delivery
+ * assertion would prove nothing about the background path.
+ */
+@test
+pipeline test_backgrounded_verify_delivers_a_terminal_result(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const started = command_run(
+    harness.tools,
+    slow_passing_command(),
+    {background_after_ms: FOREGROUND_BUDGET_MS, capture: {max_inline_bytes: 4000}},
+  )
+  assert_eq(started.status, "running")
+  assert(
+    to_string(started?.handle_id ?? "") != "",
+    "a backgrounded verify must name the handle that carries its result",
+  )
+  // NOT "the banner carries no output": a running snapshot may legitimately
+  // carry streamed stdout, which is what its offset/line-count fields are for.
+  // The invariant is narrower and is the one the loop depends on -- a handle
+  // has no EXIT STATUS yet, and that absence is what makes the wait necessary.
+  assert(
+    started?.exit_code == nil,
+    "a handle must not already carry an exit status; got ${to_string(started?.exit_code)}",
+  )
+  const waited = command_wait(harness.tools, started, {timeout_ms: 30000})
+  assert_eq(waited.status, "completed")
+  assert_eq(waited.exit_code, 0)
+  assert_eq(waited.stdout, "VERIFY_OK")
+}
+
+/**
+ * Terminal delivery must not be a property of passing runs only. A red verifier
+ * that backgrounded has to come back red, with its diagnostic text, or the loop
+ * would read a real failure as "still running" and never repair it.
+ */
+@test
+pipeline test_backgrounded_failing_verify_is_delivered_red(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const started = command_run(
+    harness.tools,
+    slow_failing_command(),
+    {background_after_ms: FOREGROUND_BUDGET_MS, capture: {max_inline_bytes: 4000}},
+  )
+  assert_eq(started.status, "running")
+  const waited = command_wait(harness.tools, started, {timeout_ms: 30000})
+  assert_eq(waited.status, "completed")
+  assert_eq(waited.exit_code, 3)
+  assert_eq(waited.stderr, "VERIFY_FAILED")
+}
+
+/**
+ * NEGATIVE CONTROL for case 1. The budget is a maximum foreground wait, not a
+ * fixed delay: a fast verifier must answer inline, in one round trip, with no
+ * handle to chase. This is what makes `status == "running"` above a real
+ * discrimination rather than something every command reports.
+ */
+@test
+pipeline test_fast_verify_still_answers_inline(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const started = command_run(
+    harness.tools,
+    ["sh", "-c", "printf 'FAST_OK'"],
+    {background_after_ms: 5000, capture: {max_inline_bytes: 4000}},
+  )
+  assert_eq(started.status, "completed")
+  assert_eq(started.exit_code, 0)
+  assert_eq(started.stdout, "FAST_OK")
+}
+
+/**
+ * The wait must track the command, not the budget. If resolving a handle cost a
+ * fresh budget every time, a loop would pay that toll per attempt while the
+ * verifier it is waiting on makes no extra progress -- the wall-clock signature
+ * of the poll pathology.
+ */
+@test
+pipeline test_resolving_a_handle_costs_the_command_not_the_budget(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const start_ms = harness.clock.monotonic_ms()
+  const started = command_run(
+    harness.tools,
+    slow_passing_command(),
+    {background_after_ms: FOREGROUND_BUDGET_MS, capture: {max_inline_bytes: 4000}},
+  )
+  assert_eq(started.status, "running")
+  const waited = command_wait(harness.tools, started, {timeout_ms: 30000})
+  assert_eq(waited.status, "completed")
+  const elapsed_ms = harness.clock.monotonic_ms() - start_ms
+  // The command sleeps 1s. A generous ceiling still fails loudly if the wait
+  // were to serialize additional full budgets behind the command itself.
+  assert(
+    elapsed_ms < 10000,
+    "one backgrounded verify plus its wait took ${elapsed_ms}ms; the command itself is ~1000ms",
+  )
+}
+
+/**
+ * The loop-facing proof.
+ *
+ * The cases above exercise the command capability directly. This one goes
+ * through the tool registry the execute stage actually hands the model, and
+ * asserts on the rendered text the model really receives -- then recovers the
+ * handle from that text the same way a model must, and spends it on a second
+ * call.
+ *
+ * A static `--llm-mock` fixture cannot express that step: its tool arguments
+ * are fixed before the handle exists, so it can never name the handle the run
+ * just issued. That is why registry dispatch, not a mock fixture, is the right
+ * instrument for this particular claim.
+ */
+@test
+pipeline test_registry_delivers_a_terminal_result_to_the_loop(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const registry = background_command_tools(
+    {fs: harness.fs, tools: harness.tools},
+    tool_registry(),
+    FOREGROUND_BUDGET_MS,
+  )
+  assert(
+    tool_find(registry, "wait_command") != nil,
+    "the loop must be given a way to await a handle",
+  )
+  const started = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "v1", name: "run", arguments: {command: "sleep 1; printf 'VERIFY_OK'"}},
+    registry,
+  )
+  const started_text = to_string(started?.rendered_result ?? "")
+  assert(
+    contains(started_text, "status: running"),
+    "a slow verify must reach the loop as still running; got ${started_text}",
+  )
+  // The rendered result echoes the command line, so the output marker is not a
+  // usable absence probe here. The exit status is: a handle has none yet, and
+  // that missing status is exactly what makes the wait necessary.
+  assert(
+    contains(started_text, "exit_code: nil"),
+    "the handle result must not already carry an exit status; got ${started_text}",
+  )
+  const handle_id = handle_from_text(started_text)
+  assert(handle_id != "", "the loop cannot await what the result does not name: ${started_text}")
+  const waited = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "v2", name: "wait_command", arguments: {handle_id: handle_id}},
+    registry,
+  )
+  const waited_text = to_string(waited?.rendered_result ?? "")
+  assert(
+    contains(waited_text, "status: completed"),
+    "awaiting the handle must reach a terminal status; got ${waited_text}",
+  )
+  assert(
+    contains(waited_text, "exit_code: 0"),
+    "the terminal result must carry the real exit code; got ${waited_text}",
+  )
+  assert(
+    contains(waited_text, "VERIFY_OK"),
+    "the terminal result must carry the command's real output; got ${waited_text}",
+  )
+}
+
+/**
+ * The same path driven by the task shape's real verifier script rather than a
+ * synthetic sleep. Its exit code depends on whether the deliverable is present
+ * in the sample workspace, so this asserts only that the script backgrounded
+ * and then reached a TERMINAL state carrying an exit code -- which is the
+ * channel claim. Pinning a specific code here would couple this test to
+ * whatever another run left behind in the shared workspace.
+ */
+@test
+pipeline test_task_shape_verifier_reaches_a_terminal_state(harness: Harness, task: unknown) {
+  if !posix_only(harness) {
+    return nil
+  }
+  const registry = background_command_tools(
+    {fs: harness.fs, tools: harness.tools},
+    tool_registry(),
+    FOREGROUND_BUDGET_MS,
+  )
+  const started = agent_dispatch_tool_call(
+    harness.tools,
+    {
+      id: "s1",
+      name: "run",
+      arguments: {command: "MINI_VERIFY_SLEEP_SECONDS=1 ./scripts/verify-slow.sh"},
+    },
+    registry,
+  )
+  const started_text = to_string(started?.rendered_result ?? "")
+  assert(
+    contains(started_text, "status: running"),
+    "the task shape's verifier must outlive the budget; got ${started_text}",
+  )
+  const waited = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "s2", name: "wait_command", arguments: {handle_id: handle_from_text(started_text)}},
+    registry,
+  )
+  const waited_text = to_string(waited?.rendered_result ?? "")
+  assert(
+    contains(waited_text, "status: completed"),
+    "the task shape's verifier must reach a terminal status; got ${waited_text}",
+  )
+  assert(
+    !contains(waited_text, "exit_code: nil"),
+    "a terminal verify result must carry an exit code; got ${waited_text}",
+  )
+}

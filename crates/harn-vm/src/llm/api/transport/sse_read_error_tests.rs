@@ -221,6 +221,10 @@ fn assert_structured_sse_error(
         panic!("structured SSE error must throw a taxonomy dict; got: {err}");
     };
     assert_eq!(
+        dict.get("category").map(|value| value.display()).as_deref(),
+        Some("invalid_request")
+    );
+    assert_eq!(
         dict.get("kind").map(|value| value.display()).as_deref(),
         Some("terminal")
     );

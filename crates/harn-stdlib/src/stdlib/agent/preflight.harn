@@ -535,8 +535,7 @@ fn __agent_system_prompt_option_present(value: string | bytes | list | dict | se
 
 fn __agent_has_system_prompt_options(opts: dict) {
   return __agent_system_prompt_option_present(opts?._primary_system)
-    || type_of(opts?.system)
-      == "string"
+    || __agent_system_prompt_option_present(opts?.system)
 }
 
 fn __agent_push_system_fragment(fragments: list, id: string, body: string?) {
@@ -815,12 +814,7 @@ pub fn agent_build_turn_messages(
   const projected_messages = __agent_apply_projection(agent, session.session_id, raw_messages, opts)
   const decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
-    return agent_session_visible_messages(
-      agent,
-      session.session_id,
-      projected_messages,
-      opts?._reminders_append_only ?? false,
-    )
+    return agent_session_visible_messages(agent, session.session_id, projected_messages)
   }
   const timestamp = clock.date_iso()
   let out = []
@@ -831,10 +825,5 @@ pub fn agent_build_turn_messages(
     )
     index = index + 1
   }
-  return agent_session_visible_messages(
-    agent,
-    session.session_id,
-    out,
-    opts?._reminders_append_only ?? false,
-  )
+  return agent_session_visible_messages(agent, session.session_id, out)
 }

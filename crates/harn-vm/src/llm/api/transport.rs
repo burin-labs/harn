@@ -30,6 +30,8 @@ mod liveness;
 mod ndjson;
 mod sse;
 
+pub(crate) use liveness::premature_eof;
+
 use capture::{capture_stream_bytes, captured_stream_text, RawProviderCaptureTarget};
 
 fn response_content_type(response: &reqwest::Response) -> Option<String> {

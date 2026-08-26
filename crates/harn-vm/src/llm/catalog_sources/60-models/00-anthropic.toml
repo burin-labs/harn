@@ -202,8 +202,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Use claude-opus-4-8."
-superseded_by = "claude-opus-4-8"
+deprecation_note = "Retired 2026-01-05 per Anthropic deprecations page. Harn recommends claude-opus-5."
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "long_context"]
@@ -214,8 +214,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8."
-superseded_by = "claude-opus-4-8"
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Harn recommends claude-opus-5."
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -227,8 +227,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retires 2026-08-05. Use claude-opus-4-8."
-superseded_by = "claude-opus-4-8"
+deprecation_note = "Deprecated 2026-06-05 per Anthropic deprecations page; retired 2026-08-05. Harn recommends claude-opus-5."
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -239,7 +239,7 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-superseded_by = "claude-opus-4-8"
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -249,9 +249,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-deprecated = true
-deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
-superseded_by = "claude-opus-4-8"
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -262,9 +260,7 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-deprecated = true
-deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
-superseded_by = "claude-opus-4-8"
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -290,8 +286,6 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
-deprecated = true
-deprecation_note = "Superseded by claude-opus-5 (same $5/$25 pricing). No formal sunset yet; switch when convenient."
 superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false

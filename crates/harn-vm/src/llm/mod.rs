@@ -418,7 +418,7 @@ pub use self::agent_runtime::{
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, register_session_close_hook,
-    swap_current_host_bridge, SessionCloseHookRegistration,
+    swap_current_host_bridge, swap_current_loop_sinks, SessionCloseHookRegistration,
 };
 #[cfg(test)]
 pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_hooks};
@@ -440,7 +440,7 @@ pub use self::healthcheck::{
     ProviderHealthcheckOptions, ProviderHealthcheckResult,
 };
 pub(crate) use self::helpers::extract_llm_options;
-pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
+pub use self::helpers::{vm_value_to_export_json, vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{
     load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,
     parse_llm_mocks_jsonl, serialize_llm_mock, serialize_llm_mock_fixture,
@@ -464,7 +464,8 @@ pub(crate) use self::provider_auth::{
 pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
-    take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+    peek_trace_usage_summary, take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+    LlmTraceUsageSummary,
 };
 
 /// Fully wipe the process-global rate-limiter registry (config-derived

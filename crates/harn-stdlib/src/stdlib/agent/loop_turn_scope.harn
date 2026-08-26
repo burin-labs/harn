@@ -798,6 +798,7 @@ pub fn __agent_loop_final_wrapup(
       tools: nil,
       _iteration: iteration + 1,
       _final_wrapup: true,
+      _call_stage: "wrapup",
     }
   let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   if !call.ok {
@@ -1005,6 +1006,7 @@ pub fn __agent_loop_apply_output_contract(
       tool_format: opts?.tool_format,
       _iteration: iteration + 1,
       _output_contract_repair: true,
+      _call_stage: "repair",
     }
   const repair = try {
     agent_invoke_llm(

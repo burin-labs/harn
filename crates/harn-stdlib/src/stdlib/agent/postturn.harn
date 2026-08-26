@@ -421,7 +421,7 @@ fn __missing_tool_call_recovery_config(opts: dict) {
   return {enabled: true, options: options}
 }
 
-fn __missing_tool_call_recovery_classifier(agent: HarnessAgent, llm: HarnessLlm, opts: dict) {
+fn __missing_tool_call_recovery_classifier(harness: Harness, opts: dict) {
   const recovery = __missing_tool_call_recovery_config(opts)
   if !recovery.enabled {
     return nil
@@ -434,7 +434,7 @@ fn __missing_tool_call_recovery_classifier(agent: HarnessAgent, llm: HarnessLlm,
   if opts?._llm_caller != nil && !has_test_classifier {
     return nil
   }
-  return missing_tool_call_classifier(agent, llm, options)
+  return missing_tool_call_classifier(harness, options)
 }
 
 fn __tool_name_in_list(name: string, names: list<string>) -> bool {
@@ -451,8 +451,7 @@ fn __tool_name_in_list(name: string, names: list<string>) -> bool {
  * recovery path. Classifier failures fail open to no nudge.
  */
 fn __classify_missing_tool_call(
-  agent: HarnessAgent,
-  llm: HarnessLlm,
+  harness: Harness,
   session: dict,
   text: string?,
   opts: dict,
@@ -461,7 +460,7 @@ fn __classify_missing_tool_call(
   if __text_has_call_shape(text) {
     return nil
   }
-  const classifier = __missing_tool_call_recovery_classifier(agent, llm, opts)
+  const classifier = __missing_tool_call_recovery_classifier(harness, opts)
   if classifier == nil {
     return nil
   }
@@ -498,7 +497,7 @@ fn __classify_missing_tool_call(
     return nil
   }
   agent_emit_event(
-    agent,
+    harness.agent,
     session.session_id,
     "missing_tool_call_verdict",
     result
@@ -538,7 +537,8 @@ fn __required_argument_sentence(tool_name: string, names: list<string>) -> strin
 /**
  * Corrective nudges for a toolless turn. Text mode also detects fenced calls;
  * both text and native modes use the same typed missing-tool-call classifier.
- * Native callers invoke this before accepting prose as natural completion.
+ * Native callers use it only while prose remains unresolved by the completion
+ * contract.
  * Two cases, in priority order:
  *   1. fenced-call attempt → tell the model to emit the call bare.
  *   2. missing-tool-call recovery → tell the model to emit the intended call.
@@ -546,15 +546,6 @@ fn __required_argument_sentence(tool_name: string, names: list<string>) -> strin
  * Returns `true` if a content-specific nudge was injected this turn, so the
  * loop can suppress the fallback progress-streak nudge and avoid
  * double-injecting on the same turn.
- *
- * `classifier_only` drops case 1 and keeps case 2. Callers pass it on the turn
- * shape that is ALSO a completion candidate, where the question is not "what
- * kind of stall is this?" but "is this a stall at all?". Only the classifier
- * answers that with evidence; the fence detector's opener list is a heuristic
- * that cannot tell a botched call from an illustrative code block in a genuine
- * final answer, and treating the latter as a stall would talk over a finished
- * run. A real fenced attempt is not lost — the classifier reads the same text
- * and answers it with the concrete exemplar, which is the better corrective.
  */
 /**
  * A closing call marker left in the text with no call parsed from the turn.
@@ -629,14 +620,12 @@ fn __dangling_tool_marker(trimmed: any) -> string? {
 }
 
 fn __maybe_inject_action_nudge(
-  agent: HarnessAgent,
-  llm: HarnessLlm,
+  harness: Harness,
   session: dict,
   opts: any,
   has_tool_calls: bool,
   text: any,
   iteration: int,
-  classifier_only: bool = false,
 ) {
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
@@ -646,15 +635,15 @@ fn __maybe_inject_action_nudge(
   // The corrective wording renders the taught call syntax from the single
   // format-aware owner, so a `json` lane is told to emit a ```tool block and a
   // `text` lane a `<tool_call>` block — never the wrong grammar.
-  const paradigm = agent_tool_call_paradigm(llm, opts)
-  const fenced = if text_family && !classifier_only {
+  const paradigm = agent_tool_call_paradigm(harness.llm, opts)
+  const fenced = if text_family {
     __detect_fenced_call_attempt(text)
   } else {
     nil
   }
   if fenced != nil {
     agent_session_inject_feedback(
-      agent,
+      harness.agent,
       session.session_id,
       "fenced_call_attempt",
       "You wrapped a tool call in a ```"
@@ -665,7 +654,7 @@ fn __maybe_inject_action_nudge(
       1,
     )
     agent_emit_event(
-      agent,
+      harness.agent,
       session.session_id,
       "fenced_call_attempt_nudge",
       {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
@@ -684,7 +673,7 @@ fn __maybe_inject_action_nudge(
   }
   if malformed != nil {
     agent_session_inject_feedback(
-      agent,
+      harness.agent,
       session.session_id,
       "malformed_call_markup",
       "Your call markup was malformed: the message ended with `"
@@ -695,7 +684,7 @@ fn __maybe_inject_action_nudge(
       1,
     )
     agent_emit_event(
-      agent,
+      harness.agent,
       session.session_id,
       "malformed_call_markup_nudge",
       {iteration: iteration, marker: malformed, visible_text_prefix: visible_text_excerpt(text)},
@@ -704,7 +693,7 @@ fn __maybe_inject_action_nudge(
     // text without reading a call out of it, so the claim names no tool.
     return {tool: ""}
   }
-  const missing = __classify_missing_tool_call(agent, llm, session, text, opts, iteration)
+  const missing = __classify_missing_tool_call(harness, session, text, opts, iteration)
   if missing != nil {
     const tool_name = missing.tool_name
     const instruction = if native_mode {
@@ -719,7 +708,7 @@ fn __maybe_inject_action_nudge(
       // indistinguishable from a value, so what the call needs is said in
       // prose, from the tool's own declared required parameters.
       "Emit the call now: "
-        + agent_render_tool_call_exemplar(llm, to_string(tool_name), [], opts)
+        + agent_render_tool_call_exemplar(harness.llm, to_string(tool_name), [], opts)
         + " Fill in the argument values this call needs and leave out the ones it does not."
         + __required_argument_sentence(
           to_string(tool_name),
@@ -728,7 +717,7 @@ fn __maybe_inject_action_nudge(
         + " Do not describe the action again."
     }
     agent_session_inject_feedback(
-      agent,
+      harness.agent,
       session.session_id,
       "missing_tool_call",
       "You appeared to intend a call to `"
@@ -738,7 +727,7 @@ fn __maybe_inject_action_nudge(
       1,
     )
     agent_emit_event(
-      agent,
+      harness.agent,
       session.session_id,
       "missing_tool_call_nudge",
       {
@@ -1006,14 +995,13 @@ fn __verdict_option_changes(verdict: dict) -> dict {
  *
  *   1. An embedder verdict that STOPS the loop. Terminating is the embedder's
  *      authority and nothing may override it.
- *   2. The content-specific repair corrective. It is the only claimant that can
- *      tell a stall from a finished answer, because it fires solely on a call
- *      the model described and never emitted, and it answers with that concrete
- *      call rather than a generic directive.
- *   3. A non-stopping embedder verdict: advisory message and option changes.
- *   4. Completion adjudication.
+ *   2. An existing completion contract: a completion judge, native tool
+ *      completion, or satisfaction of every required tool.
+ *   3. The content-specific repair corrective for turns that remain unresolved.
+ *   4. A non-stopping embedder verdict: advisory message and option changes.
+ *   5. Fallback completion adjudication.
  *
- * When 2 claims the turn, 3's advisory MESSAGE is held for that turn: two
+ * When 3 claims the turn, 4's advisory MESSAGE is held for that turn: two
  * owners issuing different directives in one turn is the contradiction that
  * stalls a loop, and between the two the corrective's is the actionable one.
  * Option changes still apply, per `__verdict_option_changes`. The embedder is
@@ -1024,8 +1012,7 @@ fn __verdict_option_changes(verdict: dict) -> dict {
  * No other site may return a post-turn result for this turn shape.
  */
 fn __arbitrate_stalled_toolless_turn(
-  agent: HarnessAgent,
-  llm: HarnessLlm,
+  harness: Harness,
   session: dict,
   opts: any,
   payload: dict,
@@ -1036,51 +1023,44 @@ fn __arbitrate_stalled_toolless_turn(
   const verdict_stops = verdict?.kind == "stop"
     || (verdict?.kind == "rich" && (verdict?.stop ?? false))
   if verdict_stops {
-    const stop_result = __post_turn_verdict_result(agent, session, opts, verdict)
+    const stop_result = __post_turn_verdict_result(harness.agent, session, opts, verdict)
     if stop_result != nil {
       return stop_result
     }
   }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   const has_judge = agent_has_done_judge(opts?.done_judge)
-  // A repair claim only means something if the loop has another turn to give.
-  // A single-shot loop ends ON this turn, so claiming it would replace a clean
-  // completion with a dangling continue asking for a call that can never be
-  // made. This is the reachability the pre-arbitration branches had by accident
-  // of where they sat; here it is stated.
-  const loop_continues = loop_until_done || daemon || has_judge
-  // The fence detector is a text-shape heuristic. A judge-installed loop keeps
-  // it out of the arbitration so an honest completion is never re-opened over
-  // formatting alone; there, the classifier is the only claimant.
-  const format_is_native = lowercase(to_string(opts?.tool_format ?? "")) == "native"
-  const classifier_only = !format_is_native && has_judge
-  const repaired = if loop_continues {
-    __maybe_inject_action_nudge(agent, llm, session, opts, false, text, iteration, classifier_only)
-  } else {
-    nil
-  }
-  if repaired != nil {
-    return __repair_claimed_result(repaired?.tool) + __verdict_option_changes(verdict)
-  }
-  const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
-  if verdict_result != nil {
-    return verdict_result
-  }
-  // Completion reasons keep their original relative order: a judge grants
-  // completion, then the native prose-means-done read, then required-tools
-  // satisfaction, then the plain non-looping case. Reordering these would
-  // silently change the reported `stop_reason` when two of them hold at once.
+  // These contracts already own completion for this turn. A second model call
+  // cannot add authority; it can only delay or contradict the terminal owner.
   if has_judge || __native_tool_text_completion(opts, false, text) {
     return __completion_result(opts, payload, "natural")
   }
   if __required_tools_text_completion(opts, false, text) {
     return __completion_result(opts, payload, "required_tools_satisfied")
   }
+  // A repair claim only means something if the loop has another turn to give.
+  // A single-shot loop ends ON this turn, so claiming it would replace a clean
+  // completion with a dangling continue asking for a call that can never be
+  // made. This is the reachability the pre-arbitration branches had by accident
+  // of where they sat; here it is stated.
+  const loop_continues = loop_until_done || daemon
+  const repaired = if loop_continues {
+    __maybe_inject_action_nudge(harness, session, opts, false, text, iteration)
+  } else {
+    nil
+  }
+  if repaired != nil {
+    return __repair_claimed_result(repaired?.tool) + __verdict_option_changes(verdict)
+  }
+  const verdict_result = __post_turn_verdict_result(harness.agent, session, opts, verdict)
+  if verdict_result != nil {
+    return verdict_result
+  }
   if !loop_until_done && !daemon {
     return __completion_result(opts, payload, "natural")
   }
   const confirmation_nudged = __maybe_inject_completion_confirmation(
-    agent,
+    harness.agent,
     session,
     opts,
     false,
@@ -1091,8 +1071,7 @@ fn __arbitrate_stalled_toolless_turn(
 }
 
 pub fn agent_compute_post_turn(
-  agent: HarnessAgent,
-  llm: HarnessLlm,
+  harness: Harness,
   session: dict,
   llm_result: any,
   dispatch: AgentToolDispatch,
@@ -1147,11 +1126,11 @@ pub fn agent_compute_post_turn(
     parsed_done_marker: parsed_done_marker,
   }
   __host_fire_session_hook("post_turn", payload)
-  agent_session_apply_reminder_post_turn(agent, session.session_id, iteration)
+  agent_session_apply_reminder_post_turn(harness.agent, session.session_id, iteration)
   const narrowing = if contains(successful_tool_names, "load_skill") {
     {history: [], narrowed_tools: nil, changed: false}
   } else {
-    __tool_surface_narrowing_post_turn(agent, session, llm_result, dispatch_results, opts)
+    __tool_surface_narrowing_post_turn(harness.agent, session, llm_result, dispatch_results, opts)
   }
   // Tool attempts take precedence over a completion marker from the same
   // turn: the next model turn must see the dispatch result before completion.
@@ -1169,20 +1148,11 @@ pub fn agent_compute_post_turn(
   // this shape must not be adjudicated anywhere below.
   if !has_tool_calls && trim(text) != "" {
     return __post_turn_with_narrowing(
-      __arbitrate_stalled_toolless_turn(
-        agent,
-        llm,
-        session,
-        opts,
-        payload,
-        verdict,
-        text,
-        iteration,
-      ),
+      __arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration),
       narrowing,
     )
   }
-  const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
+  const verdict_result = __post_turn_verdict_result(harness.agent, session, opts, verdict)
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
@@ -1194,7 +1164,7 @@ pub fn agent_compute_post_turn(
   // the corrective's own gates require a toolless turn WITH prose, which the
   // arbiter above already owns, so there is no action nudge left to inject.
   const confirmation_nudged = __maybe_inject_completion_confirmation(
-    agent,
+    harness.agent,
     session,
     opts,
     has_tool_calls,

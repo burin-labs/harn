@@ -38,6 +38,7 @@ import { memory_forget } from "std/memory"
 import {
   SessionStoreListOptions,
   SessionStoreOptions,
+  SessionStoreRead,
   session_store_events,
   session_store_list,
 } from "std/session-store"
@@ -155,6 +156,13 @@ fn pl_session_store_list_options(limit: int, options: any = nil) -> SessionStore
     sort_by: "updated_at",
     order: "descending",
   }
+}
+
+fn pl_session_store_values<T>(read: SessionStoreRead<list<T>>) -> list<T> {
+  if read.state == "absent" {
+    return []
+  }
+  return read.value
 }
 
 fn pl_session_event_kind(event: dict) -> string {
@@ -283,7 +291,9 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
     OBSERVATION_CAP,
     max(1, options?.session_import_limit ?? DEFAULT_SESSION_IMPORT_LIMIT),
   )
-  const sessions = session_store_list(harness.agent, pl_session_store_list_options(limit, options))
+  const sessions = pl_session_store_values(
+    session_store_list(harness.agent, pl_session_store_list_options(limit, options)),
+  )
   let observed_evidence_keys = pl_observed_evidence_keys(harness.fs, harness.memory, options)
   let imported = 0
   let skipped_existing = 0
@@ -295,7 +305,9 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
       skipped_ineligible = skipped_ineligible + 1
       continue
     }
-    const events = session_store_events(harness.agent, session_id, session_options)
+    const events = pl_session_store_values(
+      session_store_events(harness.agent, session_id, session_options),
+    )
     const runs = pl_session_runs(events)
     if len(runs) == 0 {
       skipped_ineligible = skipped_ineligible + 1

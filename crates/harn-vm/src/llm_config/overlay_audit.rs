@@ -471,6 +471,18 @@ const SECTIONS: &[SectionSpec] = &[
         baseline_duplicate: no_baseline_duplicate,
     },
     SectionSpec {
+        name: "usage_accounting_audit",
+        keys: |overlay| {
+            singleton(
+                "usage_accounting_audit",
+                overlay.usage_accounting_audit.is_some(),
+            )
+        },
+        remove: |overlay, _| overlay.usage_accounting_audit = None,
+        dangling_target: no_dangling_target,
+        baseline_duplicate: no_baseline_duplicate,
+    },
+    SectionSpec {
         name: "providers",
         keys: |overlay| map_keys(&overlay.providers),
         remove: |overlay, key| {

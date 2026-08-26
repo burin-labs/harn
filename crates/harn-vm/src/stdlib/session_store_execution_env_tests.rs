@@ -65,8 +65,15 @@ async fn exercise_execution_env_store(
             )
             .await
             .unwrap();
-            let VmValue::List(events) = events else {
-                panic!("{label}: expected a list of stored events");
+            let read = events
+                .as_dict()
+                .unwrap_or_else(|| panic!("{label}: expected a session-store read result"));
+            assert!(matches!(
+                read.get("state"),
+                Some(VmValue::String(state)) if state.as_str() == "present"
+            ));
+            let Some(VmValue::List(events)) = read.get("value") else {
+                panic!("{label}: expected a present list of stored events");
             };
             assert_eq!(events.len(), 1, "{label}: expected one isolated event");
             let child = events[0]
