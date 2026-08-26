@@ -18,7 +18,7 @@ use std::{
 };
 
 const RECEIPT_FORMAT: &str = "harn-bin-freshness-v6";
-const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3";
+const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4";
 const CHECKER_FORMAT: &str = "harn-freshness-check-v4";
 
 fn main() -> ExitCode {
@@ -98,21 +98,7 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         )
     })?;
     let lines = receipt_text.lines().collect::<Vec<_>>();
-    if lines.len() != 13
-        || lines[0] != RECEIPT_FORMAT
-        || !valid_keyed_hash(lines[1], "worktree", &[40, 64])
-        || lines[2] != EVIDENCE_FORMAT
-        || !valid_keyed_hash(lines[3], "build-freshness", &[40, 64])
-        || !valid_keyed_hex_range(lines[4], "build-id", 2, 128)
-        || !valid_keyed_hash(lines[5], "artifact-stat", &[64])
-        || !valid_keyed_hash(lines[6], "dep-info", &[64])
-        || !valid_keyed_hash(lines[7], "dependencies", &[64])
-        || lines[8] != CHECKER_FORMAT
-        || !valid_keyed_hash(lines[9], "repo-path", &[64])
-        || !valid_keyed_hex_range(lines[10], "checker-build-id", 2, 128)
-        || !valid_keyed_hash(lines[11], "checker-content", &[64])
-        || !valid_keyed_hash(lines[12], "manifest", &[64])
-    {
+    if !receipt_shape_is_valid(&lines) {
         return Err(format!(
             "malformed Harn freshness receipt at {}",
             receipt.display()
@@ -135,6 +121,23 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         return Err("worktree Harn executable changed after the build receipt".into());
     }
     Ok(())
+}
+
+fn receipt_shape_is_valid(lines: &[&str]) -> bool {
+    lines.len() == 13
+        && lines[0] == RECEIPT_FORMAT
+        && valid_keyed_hash(lines[1], "worktree", &[40, 64])
+        && lines[2] == EVIDENCE_FORMAT
+        && valid_keyed_hash(lines[3], "build-freshness", &[40, 64])
+        && valid_keyed_hex_range(lines[4], "build-id", 2, 128)
+        && valid_keyed_hash(lines[5], "artifact-stat", &[64])
+        && valid_keyed_hash(lines[6], "dep-info", &[64])
+        && valid_keyed_hash(lines[7], "dependencies", &[64])
+        && lines[8] == CHECKER_FORMAT
+        && valid_keyed_hash(lines[9], "repo-path", &[64])
+        && valid_keyed_hex_range(lines[10], "checker-build-id", 2, 128)
+        && valid_keyed_hash(lines[11], "checker-content", &[64])
+        && valid_keyed_hash(lines[12], "manifest", &[64])
 }
 
 fn evidence_mismatch_detail(recorded: &str, current: &str) -> Option<String> {
@@ -207,6 +210,35 @@ mod tests {
             path_with_suffix(binary, ".freshness"),
             Path::new("target/debug/harn.freshness")
         );
+    }
+
+    #[test]
+    fn receipt_contract_rejects_legacy_manifest_evidence() {
+        let hash40 = "0".repeat(40);
+        let hash64 = "0".repeat(64);
+        let mut receipt = vec![
+            RECEIPT_FORMAT.to_owned(),
+            format!("worktree={hash40}"),
+            EVIDENCE_FORMAT.to_owned(),
+            format!("build-freshness={hash40}"),
+            "build-id=00".to_owned(),
+            format!("artifact-stat={hash64}"),
+            format!("dep-info={hash64}"),
+            format!("dependencies={hash64}"),
+            CHECKER_FORMAT.to_owned(),
+            format!("repo-path={hash64}"),
+            "checker-build-id=00".to_owned(),
+            format!("checker-content={hash64}"),
+            format!("manifest={hash64}"),
+        ];
+        assert!(receipt_shape_is_valid(
+            &receipt.iter().map(String::as_str).collect::<Vec<_>>()
+        ));
+
+        receipt[2] = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3".into();
+        assert!(!receipt_shape_is_valid(
+            &receipt.iter().map(String::as_str).collect::<Vec<_>>()
+        ));
     }
 
     #[cfg(unix)]

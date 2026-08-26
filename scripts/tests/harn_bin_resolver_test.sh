@@ -52,7 +52,7 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   if [[ -n "${7:-}" ]]; then
     printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
     "$binary_hash" "$dep_hash" "$dep_hash"
   exit 0
@@ -244,7 +244,7 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   if [[ -n "${7:-}" ]]; then
     printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0
@@ -659,7 +659,7 @@ fn main() {
                 Path::new(&args[2]), &dependencies, Path::new(&args[6]),
             ).unwrap();
         }
-        println!("harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3");
+        println!("harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4");
         println!("build-freshness={BUILD_FRESHNESS}");
         println!("build-id={}", digest(&[&args[3]]));
         println!("artifact-stat={}", freshness_manifest::artifact_stat_id(Path::new(&args[3])).unwrap());

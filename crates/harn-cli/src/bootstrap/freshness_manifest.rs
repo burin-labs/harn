@@ -490,12 +490,12 @@ fn parse_git_config_section(line: &str, line_number: usize) -> Result<GitConfigS
         .map(str::trim)
         .filter(|inner| !inner.is_empty())
         .ok_or_else(|| format!("line {line_number} has an invalid section header"))?;
-    let section_end = inner
-        .find(|character: char| {
+    let name = inner
+        .split(|character: char| {
             character == '.' || character == '"' || character.is_ascii_whitespace()
         })
-        .unwrap_or(inner.len());
-    let name = &inner[..section_end];
+        .next()
+        .unwrap_or_default();
     if !is_git_config_name(name) {
         return Err(format!("line {line_number} has an invalid section name"));
     }
