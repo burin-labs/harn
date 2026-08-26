@@ -819,33 +819,41 @@ pub struct ToolProbeUsage {
     pub output_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Whether this probe received provider accounting rather than inferred
+    /// zeroes. Older saved reports did not carry this field and are therefore
+    /// conservatively unknown.
+    #[serde(default)]
+    pub accounting_status: UsageAccountingStatus,
 }
 
 impl ToolProbeUsage {
     pub(crate) fn from_llm_result(result: &LlmResult) -> Self {
-        Self::from_totals(
-            &result.provider,
-            &result.model,
-            UsageTotals {
-                input_tokens: Some(result.input_tokens),
-                output_tokens: Some(result.output_tokens),
-            },
-        )
+        Self::from_usage(LlmUsage::from_result(result))
     }
 
     fn from_totals(provider: &str, model: &str, totals: UsageTotals) -> Self {
         if let Some((input_tokens, output_tokens)) = totals.input_tokens.zip(totals.output_tokens) {
-            let usage = LlmUsage::from_probe_counts(provider, model, input_tokens, output_tokens);
-            return Self {
-                input_tokens: Some(usage.input_tokens),
-                output_tokens: Some(usage.output_tokens),
-                cost_usd: usage.cost_usd,
-            };
+            return Self::from_usage(LlmUsage::from_probe_counts(
+                provider,
+                model,
+                input_tokens,
+                output_tokens,
+            ));
         }
         Self {
             input_tokens: totals.input_tokens,
             output_tokens: totals.output_tokens,
             cost_usd: None,
+            accounting_status: UsageAccountingStatus::Unknown,
+        }
+    }
+
+    fn from_usage(usage: LlmUsage) -> Self {
+        Self {
+            input_tokens: Some(usage.input_tokens),
+            output_tokens: Some(usage.output_tokens),
+            cost_usd: usage.cost_usd,
+            accounting_status: usage.accounting_status,
         }
     }
 }
@@ -960,7 +968,7 @@ mod tests {
 
     use super::{
         extract_probe_usage, summarize_usage_cost_certainty, LlmUsage, ProviderUsageReceipt,
-        UsageAccountingStatus,
+        ToolProbeUsage, UsageAccountingStatus,
     };
     use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
     use crate::value::VmValue;
@@ -1037,6 +1045,47 @@ mod tests {
         // tokens the call used, and the ledger should not pretend otherwise.
         assert_eq!(usage.usage_unknown_calls, 1);
         assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+
+    #[test]
+    fn live_tool_probe_preserves_missing_usage_as_unknown() {
+        let result = LlmResult {
+            provider: "together".to_string(),
+            model: "Qwen/Qwen3.6-Plus".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            telemetry: ProviderTelemetry::default(),
+            attempts: ProviderAttempts::default(),
+            ..accounted_result()
+        };
+
+        let usage = ToolProbeUsage::from_llm_result(&result);
+        let report = serde_json::to_value(&usage).expect("serialize probe usage");
+
+        assert_eq!(usage.input_tokens, Some(0));
+        assert_eq!(usage.output_tokens, Some(0));
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+        assert_eq!(report["accounting_status"], "unknown");
+        assert!(report.get("cost_usd").is_none());
+
+        let reported_zero = ToolProbeUsage::from_llm_result(&LlmResult {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            telemetry: ProviderTelemetry {
+                server_prompt_tokens: Some(0),
+                server_output_tokens: Some(0),
+                ..ProviderTelemetry::default()
+            },
+            ..accounted_result()
+        });
+        assert_eq!(
+            reported_zero.accounting_status,
+            UsageAccountingStatus::Reported
+        );
+        assert_eq!(reported_zero.cost_usd, Some(0.0));
     }
 
     #[test]

@@ -232,6 +232,7 @@ fn scorecard_aggregates_saved_probe_telemetry_without_guessing_missing_usage() {
         input_tokens: Some(100),
         output_tokens: Some(20),
         cost_usd: Some(0.0012),
+        accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
     });
     let mut throttled = case_with_mode(
         ToolProbeMode::Streaming,
@@ -244,6 +245,7 @@ fn scorecard_aggregates_saved_probe_telemetry_without_guessing_missing_usage() {
         input_tokens: Some(40),
         output_tokens: None,
         cost_usd: None,
+        accounting_status: crate::llm::usage::UsageAccountingStatus::Unknown,
     });
 
     let scorecard =
