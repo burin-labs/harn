@@ -3,6 +3,7 @@ use std::time::Instant;
 use serde::Serialize;
 
 use super::api::{vm_call_llm_full_streaming, LlmCallOptions};
+use super::usage::LlmUsage;
 use crate::value::{VmError, VmValue};
 
 const SMOKE_TEST_MAX_TOKENS: i64 = 32;
@@ -23,7 +24,9 @@ pub struct ModelSmokeTestResult {
     pub first_token_ms: Option<u64>,
     pub input_tokens: i64,
     pub output_tokens: i64,
-    pub estimated_cost_usd: f64,
+    /// `None` means the provider returned usage but the resolved route has no
+    /// known price. It must stay distinct from an exact zero cost.
+    pub estimated_cost_usd: Option<f64>,
 }
 
 pub async fn run_model_smoke_test(
@@ -85,15 +88,31 @@ pub async fn run_model_smoke_test(
     let result = result?;
     let usage = result.usage();
 
-    Ok(ModelSmokeTestResult {
-        model_id: result.model,
-        provider: result.provider,
+    Ok(model_smoke_test_result(
+        result.model,
+        result.provider,
+        latency_ms,
+        first_token_ms,
+        &usage,
+    ))
+}
+
+fn model_smoke_test_result(
+    model_id: String,
+    provider: String,
+    latency_ms: u64,
+    first_token_ms: Option<u64>,
+    usage: &LlmUsage,
+) -> ModelSmokeTestResult {
+    ModelSmokeTestResult {
+        model_id,
+        provider,
         latency_ms,
         first_token_ms,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
-        estimated_cost_usd: usage.cost_usd.unwrap_or(0.0),
-    })
+        estimated_cost_usd: usage.cost_usd,
+    }
 }
 
 fn readiness_status_blocks_smoke_test(status: super::readiness::ReadinessStatus) -> bool {
@@ -123,8 +142,12 @@ fn vm_error_message(error: VmError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{readiness_status_blocks_smoke_test, run_model_smoke_test, ModelSmokeTestOptions};
+    use super::{
+        model_smoke_test_result, readiness_status_blocks_smoke_test, run_model_smoke_test,
+        ModelSmokeTestOptions,
+    };
     use crate::llm::readiness::ReadinessStatus;
+    use crate::llm::usage::LlmUsage;
 
     #[test]
     fn smoke_test_blocks_provider_mismatch_before_generation() {
@@ -138,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_provider_smoke_test_reports_timing_tokens_and_cost() {
+    async fn mock_provider_smoke_test_reports_timing_and_tokens() {
         crate::llm::reset_llm_state();
         let result = run_model_smoke_test(ModelSmokeTestOptions {
             model: "mock".to_string(),
@@ -152,7 +175,46 @@ mod tests {
         assert_eq!(result.provider, "mock");
         assert_eq!(result.input_tokens, 4);
         assert_eq!(result.output_tokens, 30);
-        assert_eq!(result.estimated_cost_usd, 0.0);
+        assert_eq!(result.estimated_cost_usd, None);
         assert!(result.first_token_ms.is_some());
+    }
+
+    #[test]
+    fn smoke_test_preserves_an_exact_zero_cost_as_json_zero() {
+        let mut usage = LlmUsage::known_zero_attempt();
+        usage.cost_usd = Some(0.0);
+
+        let result = model_smoke_test_result(
+            "provider-model".to_string(),
+            "provider".to_string(),
+            10,
+            Some(4),
+            &usage,
+        );
+
+        assert_eq!(result.estimated_cost_usd, Some(0.0));
+        let rendered = serde_json::to_value(result).expect("smoke-test result serializes");
+        assert_eq!(rendered["estimated_cost_usd"], serde_json::json!(0.0));
+    }
+
+    #[test]
+    fn smoke_test_preserves_an_unpriced_usage_as_null() {
+        let mut usage = LlmUsage::known_zero_attempt();
+        usage.input_tokens = 14;
+        usage.output_tokens = 6;
+        usage.cost_usd = None;
+        usage.unpriced_calls = 1;
+
+        let result = model_smoke_test_result(
+            "provider-model".to_string(),
+            "provider".to_string(),
+            10,
+            Some(4),
+            &usage,
+        );
+
+        assert_eq!(result.estimated_cost_usd, None);
+        let rendered = serde_json::to_value(result).expect("smoke-test result serializes");
+        assert_eq!(rendered["estimated_cost_usd"], serde_json::Value::Null);
     }
 }

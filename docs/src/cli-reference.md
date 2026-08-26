@@ -2103,7 +2103,9 @@ which intentionally returns complete authoritative rows.
 
 Round-trip a small prompt through one resolved model and report model id,
 provider, latency, first streamed delta timing, token usage, and estimated
-cost.
+cost. When Harn has no price for the resolved route, JSON returns
+`"estimated_cost_usd": null` and text output says `estimated_cost_usd=unavailable`.
+A returned `0` is an exact zero cost.
 
 ```bash
 harn models test gpt-5.4-mini --prompt "Reply with pong."
