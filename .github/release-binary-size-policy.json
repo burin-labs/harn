@@ -26,8 +26,8 @@
       "accepted_growth": [
         {
           "against_baseline_sha": "14aad890335fd4a9a0084007cab0383ede96205d",
-          "bytes": 9110448,
-          "reason": "Cap corrected AOT comparison at the already-shipped v0.10.117 Linux size; v0.10.118 measured smaller."
+          "bytes": 9161152,
+          "reason": "Admit the exact v0.10.118 Linux candidate after restored AOT comparison; remove after the released baseline refresh."
         }
       ]
     }

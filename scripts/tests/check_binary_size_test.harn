@@ -385,16 +385,16 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert_eq(target.accepted_growth.count, 1)
   const accepted = unwrap(target.accepted_growth[0])
   assert_eq(accepted.against_baseline_sha, target.baseline.source_sha)
-  assert_eq(accepted.bytes, 9110448)
+  assert_eq(accepted.bytes, 9161152)
   assert_eq(
     accepted.reason,
-    "Cap corrected AOT comparison at the already-shipped v0.10.117 Linux size; v0.10.118 measured smaller.",
+    "Admit the exact v0.10.118 Linux candidate after restored AOT comparison; remove after the released baseline refresh.",
   )
-  const candidate = evaluate_release_binary_size(target, measurement(242296384))
+  const candidate = evaluate_release_binary_size(target, measurement(242571968))
   assert_eq(candidate.growth, "accepted")
   assert_eq(candidate.failures, [])
-  // The acceptance is capped at the exact v0.10.117 released measurement.
-  assert_eq(evaluate_release_binary_size(target, measurement(242521265)).growth, "warn")
+  // The temporary acceptance is capped at the exact v0.10.118 candidate.
+  assert_eq(evaluate_release_binary_size(target, measurement(242571969)).growth, "warn")
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 
