@@ -571,7 +571,7 @@ fn refresh_hook_runtime_before_shared_install(
     candidate: &Path,
     install_destination: &Path,
 ) -> Result<Option<hook_runtime::HookRuntimeRefreshReport>, String> {
-    let runtime_path = hook_runtime::enrolled_runtime_path()?;
+    let runtime_path = hook_runtime::configured_runtime_path();
     refresh_hook_runtime_before_shared_install_at(
         runtime_path.as_deref(),
         verification,
@@ -594,6 +594,9 @@ fn refresh_hook_runtime_before_shared_install_at(
         return Ok(None);
     };
     if !paths_refer_to_same_file(runtime_path, install_destination) {
+        return Ok(None);
+    }
+    if !hook_runtime::runtime_is_enrolled(runtime_path)? {
         return Ok(None);
     }
     if !matches!(verification, ChecksumVerification::Verified) {
@@ -1043,6 +1046,52 @@ mod tests {
         assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
         assert!(!root.path().join("provenance-v1").exists());
         assert!(!root.path().join(".upgrade.lock").exists());
+    }
+
+    #[test]
+    fn unverified_self_upgrade_without_enrollment_remains_an_ordinary_install() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root.path().join("harn");
+        let candidate = root.path().join("candidate");
+        fs::write(&runtime, b"old-runtime").expect("runtime");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+
+        let report = refresh_hook_runtime_before_shared_install_at(
+            Some(&runtime),
+            ChecksumVerification::Unavailable(0),
+            "v1.2.3",
+            &candidate,
+            &runtime,
+            |_| panic!("unenrolled bytes must not resolve source provenance"),
+        )
+        .expect("unenrolled shared destination");
+        assert!(report.is_none());
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+        assert!(!root.path().join(".upgrade.lock").exists());
+    }
+
+    #[test]
+    fn unrelated_hook_cache_is_not_read_before_the_primary_install() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root.path().join("hook-harn");
+        let install_destination = root.path().join("installed-harn");
+        let candidate = root.path().join("candidate");
+        fs::write(&runtime, b"old-hook").expect("runtime");
+        fs::write(&install_destination, b"old-main").expect("main");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        fs::create_dir(root.path().join("hook-harn.standalone-v1"))
+            .expect("unreadable marker shape");
+
+        let report = refresh_hook_runtime_before_shared_install_at(
+            Some(&runtime),
+            ChecksumVerification::Verified,
+            "v1.2.3",
+            &candidate,
+            &install_destination,
+            |_| panic!("unrelated cache must not resolve source provenance"),
+        )
+        .expect("unrelated cache is deferred");
+        assert!(report.is_none());
     }
 
     #[test]

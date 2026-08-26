@@ -108,11 +108,15 @@ pub(super) fn enrolled_runtime_path() -> Result<Option<PathBuf>, String> {
     let Some(runtime_path) = configured_runtime_path() else {
         return Ok(None);
     };
-    if marker_enrolls(&marker_path(&runtime_path))? {
+    if runtime_is_enrolled(&runtime_path)? {
         Ok(Some(runtime_path))
     } else {
         Ok(None)
     }
+}
+
+pub(super) fn runtime_is_enrolled(runtime_path: &Path) -> Result<bool, String> {
+    marker_enrolls(&marker_path(runtime_path))
 }
 
 fn marker_path(runtime_path: &Path) -> PathBuf {
