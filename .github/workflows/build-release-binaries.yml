@@ -1600,6 +1600,7 @@ jobs:
               mv "$staged" "$report"
             else
               rm -f "$staged"
+              echo "::warning title=Binary size attribution missing::cargo-bloat did not produce ${report}" >&2
               return 1
             fi
           }

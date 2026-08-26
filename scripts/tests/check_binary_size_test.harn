@@ -702,6 +702,7 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   assert(bloat.run?.contains("test -s \"$staged\""))
   assert(bloat.run?.contains("mv \"$staged\" \"$report\""))
   assert(bloat.run?.contains("rm -f \"$staged\""))
+  assert(bloat.run?.contains("::warning title=Binary size attribution missing::"))
   assert(bloat.run?.contains("--crates -n 40 || true"))
   assert(bloat.run?.contains("--filter deserialize -n 100 || true"))
   assert_eq(
