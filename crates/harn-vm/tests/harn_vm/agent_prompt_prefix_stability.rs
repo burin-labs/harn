@@ -170,6 +170,116 @@ pipeline main(harness: Harness, task: unknown) {{
     )
 }
 
+/// Three-iteration `agent_loop` where one durable reminder provider is
+/// evaluated after every request. Each evaluation constructs a fresh reminder
+/// instance with the same logical key and model-visible contract body.
+fn durable_provider_reassertion_pipeline(session_id: &str) -> String {
+    format!(
+        r#"
+import {{ agent_reminder_providers_fire }} from "std/agent/state"
+
+pipeline main(harness: Harness, task: unknown) {{
+  harness.tools.clear_hooks()
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
+    {{
+      id: "durable_contract_provider",
+      subscribes_to: ["session_idle"],
+      evaluate: {{ _ctx ->
+        return {{
+          reminder: {{
+            body: "DURABLE_CONTRACT_MARKER",
+            tags: ["durable-contract"],
+            dedupe_key: "durable-contract",
+            preserve_on_compact: true,
+            authority: "contract",
+          }},
+        }}
+      }},
+    }},
+  )
+  const session_id = harness.agent.open("{session_id}")
+  harness.agent.reset(session_id)
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "inspect",
+    "Deterministic stand-in tool.",
+    {{parameters: {{}}, handler: {{ _args -> return "inspected" }}}},
+  )
+
+  let _ = agent_reminder_providers_fire(
+    harness.agent,
+    session_id,
+    "session_idle",
+    {{session: {{id: session_id}}, iteration: 0, wake_interval_ms: 0}},
+    {{}},
+  )
+
+  const iteration_state = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "durable-iter-{session_id}", initial: 0}},
+  )
+  const mock_llm = {{ call ->
+    const snap = harness.runtime.shared_snapshot(iteration_state)
+    const n = snap.value
+    harness.runtime.shared_cas(iteration_state, snap, n + 1)
+    let captured = []
+    for message in (call?.opts?.messages ?? []) {{
+      captured = captured.appending(
+        {{role: to_string(message?.role ?? ""), content: to_string(message?.content ?? "")}},
+      )
+    }}
+    harness.stdio.log("request " + json_stringify(captured))
+    if n < 2 {{
+      let _ = agent_reminder_providers_fire(
+        harness.agent,
+        session_id,
+        "session_idle",
+        {{session: {{id: session_id}}, iteration: n + 1, wake_interval_ms: 0}},
+        {{}},
+      )
+      return {{
+        ok: true,
+        value: {{
+          text: "",
+          tool_calls: [{{
+            id: "call_" + to_string(n),
+            name: "inspect",
+            arguments: {{}},
+          }}],
+          provider: "mock",
+          model: "mock",
+        }},
+      }}
+    }}
+    return {{
+      ok: true,
+      value: {{text: "finished ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
+    }}
+  }}
+
+  const result = agent_loop(
+    harness,
+    "summarize the module",
+    nil,
+    {{
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      max_iterations: 4,
+      loop_until_done: true,
+      session_id: session_id,
+      llm_caller: mock_llm,
+    }},
+  )
+  harness.agent.clear_reminder_providers()
+  harness.stdio.log("status " + result.status)
+}}
+"#
+    )
+}
+
 /// One captured provider request: the message array exactly as the loop
 /// handed it to the transport, as `(role, content)` pairs.
 type CapturedRequest = Vec<(String, String)>;
@@ -310,6 +420,51 @@ fn reminder_placement_keeps_the_request_prefix_append_only() {
     assert!(
         last.contains(envelope),
         "the committed envelope must reappear verbatim in the later request"
+    );
+}
+
+/// Regression for harn#7397. A durable reminder provider may re-evaluate its
+/// unchanged contract every turn. Fresh evaluation ids must not grow the
+/// provider prompt with byte-identical directive copies.
+#[test]
+fn durable_provider_reassertion_is_committed_once_across_three_turns() {
+    let raw = run_with_bridge(&durable_provider_reassertion_pipeline(&fresh_session_id(
+        "durable-provider-reassertion",
+    )))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert!(
+        lines.iter().any(|line| line == "status done"),
+        "loop must reach a terminal `done` status; lines: {lines:?}"
+    );
+    let requests = captured_requests(&lines);
+    assert_eq!(
+        requests.len(),
+        3,
+        "two tool calls must force exactly three provider requests; requests: {requests:#?}"
+    );
+    assert_append_only(&requests);
+    for window in requests.windows(2) {
+        assert!(
+            window[1].len() > window[0].len(),
+            "each tool turn must grow durable history; requests: {requests:#?}"
+        );
+    }
+
+    let occurrences: Vec<usize> = requests
+        .iter()
+        .map(|request| {
+            request
+                .iter()
+                .map(|(_, content)| content.matches("DURABLE_CONTRACT_MARKER").count())
+                .sum()
+        })
+        .collect();
+    assert_eq!(
+        occurrences,
+        vec![1, 1, 1],
+        "the unchanged durable directive must fire and remain exactly once per request; \
+         requests: {requests:#?}"
     );
 }
 

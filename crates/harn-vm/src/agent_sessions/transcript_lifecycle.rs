@@ -376,7 +376,7 @@ pub(crate) fn inject_provider_reminder(
 fn inject_reminder_with_policy(
     id: &str,
     reminder: crate::llm::helpers::SystemReminder,
-    skip_unchanged_durable: bool,
+    retain_unchanged_nonexpiring: bool,
 ) -> Result<ReminderInjectionReport, String> {
     let reminder_id = reminder.id.clone();
     let dedupe_key = reminder.dedupe_key.clone();
@@ -405,7 +405,10 @@ fn inject_reminder_with_policy(
                 .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
                 .unwrap_or_default(),
         };
-        if skip_unchanged_durable && reminder.preserve_on_compact {
+        if retain_unchanged_nonexpiring
+            && reminder.preserve_on_compact
+            && reminder.ttl_turns.is_none()
+        {
             if let Some(existing) = events
                 .iter()
                 .filter_map(crate::llm::helpers::reminder_from_event)

@@ -470,6 +470,31 @@ mod tests {
     }
 
     #[test]
+    fn finite_durable_provider_reminder_is_reissued_before_expiry() {
+        let session_id = crate::agent_sessions::open_or_create(None);
+        let mut finite = durable_reminder("finite", "verify for two turns");
+        finite.ttl_turns = Some(2);
+
+        let mut first = ReminderIterationState::new(&serde_json::json!({}));
+        first
+            .inject(&session_id, "finite-policy", finite.clone())
+            .expect("first finite provider evaluation");
+        assert_eq!(first.into_json()["fired_count"], 1);
+
+        finite.id = uuid::Uuid::now_v7().to_string();
+        let mut renewed = ReminderIterationState::new(&serde_json::json!({}));
+        renewed
+            .inject(&session_id, "finite-policy", finite)
+            .expect("finite provider re-evaluation before expiry");
+        let report = renewed.into_json();
+        assert_eq!(report["fired_count"], 1);
+        assert_eq!(report["skipped_count"], 0);
+        assert_eq!(report["reports"][0]["deduped_count"], 1);
+        assert_eq!(system_reminder_count(&session_id), 1);
+        crate::agent_sessions::close(&session_id);
+    }
+
+    #[test]
     fn durable_reminder_dedupe_is_session_local() {
         let session_a = crate::agent_sessions::open_or_create(None);
         let session_b = crate::agent_sessions::open_or_create(None);
