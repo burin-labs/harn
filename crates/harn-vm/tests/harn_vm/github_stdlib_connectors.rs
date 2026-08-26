@@ -177,6 +177,7 @@ pipeline main(harness: Harness, task: unknown) {
     assert_eq(type_of(error), "dict", "connector error value")
     assert_eq(error.error, "connector_error", "connector error family")
     assert_eq(error.kind, "method_not_found", "connector error kind")
+    assert_eq(error.category, "not_found", "connector error category")
     assert_eq(error.message, "missing.method", "connector error message")
     harness.stdio.log("typed connector error")
     return
