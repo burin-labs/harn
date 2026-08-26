@@ -23,7 +23,13 @@
           "aot_embedded": true
         }
       },
-      "accepted_growth": []
+      "accepted_growth": [
+        {
+          "against_baseline_sha": "14aad890335fd4a9a0084007cab0383ede96205d",
+          "bytes": 9871936,
+          "reason": "Bound the v0.10.118 release projection from the exact-main benchmark, observed release-version delta, and 512 KiB variance; remove after the released baseline refresh."
+        }
+      ]
     }
   ]
 }
