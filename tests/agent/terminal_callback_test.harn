@@ -88,15 +88,6 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
         "adaptive budget decisions should record the terminal rescue extension",
       )
-      // Both callbacks declare `ttl_turns: 1`, and expiry REMOVES the reminder
-      // from the transcript rather than marking it spent, so neither directive
-      // is still there to count once the loop returns. The property this case
-      // exists to protect is not "a reminder survives to the end" — it is that
-      // callback feedback travels as a corrective DIRECTIVE and never as a
-      // synthetic user turn. Both halves of that are still observable after
-      // expiry, from opposite directions.
-      //
-      // Forward: the injection happened, once per callback, with its own kind.
       const feedback_kinds = captured.events.filter({ event -> event.type == "feedback_injected" })
         .map({ event -> agent_event_value(event, agent_feedback_injected_event_schema()).kind })
         .to_list()
@@ -108,25 +99,32 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         contains(feedback_kinds, "terminal_callback"),
         "terminal callback feedback should be injected under its own kind",
       )
-      // Reverse: it went down the directive path, not the message path. Only
-      // `prefill_assistant` becomes a real transcript turn; everything else is
-      // a reminder. If either callback ever regressed to `inject_message`, the
-      // text would be a durable user turn and would still be sitting here.
-      const transcript_messages = json_stringify(result?.transcript?.messages ?? [])
-      // Control for the two absence checks below: an empty or wrongly-keyed
-      // haystack would satisfy them without proving anything.
+      let post_turn_directives = 0
+      let terminal_directives = 0
+      for message in result?.transcript?.messages ?? [] {
+        const content = to_string(message?.content)
+        if contains(content, "Keep going until the done sentinel is present.") {
+          post_turn_directives = post_turn_directives + 1
+          assert(
+            contains(content, "<context-directives>")
+              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
+            "post-turn callback feedback must retain directive role and lifetime metadata",
+          )
+        }
+        if contains(content, "Terminal callback granted a bounded rescue turn.") {
+          terminal_directives = terminal_directives + 1
+          assert(
+            contains(content, "<context-directives>")
+              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
+            "terminal callback feedback must retain directive role and lifetime metadata",
+          )
+        }
+      }
       assert(
-        contains(transcript_messages, "Continue once, then finish."),
-        "transcript messages must be readable here or the absence assertions are vacuous",
+        post_turn_directives >= 2,
+        "repeated post-turn feedback must commit a fresh finite directive for each served turn",
       )
-      assert(
-        !contains(transcript_messages, "Keep going until the done sentinel is present."),
-        "post-turn callback feedback must be a directive, never a synthetic user turn",
-      )
-      assert(
-        !contains(transcript_messages, "Terminal callback granted a bounded rescue turn."),
-        "terminal callback feedback must be a directive, never a synthetic user turn",
-      )
+      assert_eq(terminal_directives, 1, "terminal feedback must be committed once")
     },
   )
 }

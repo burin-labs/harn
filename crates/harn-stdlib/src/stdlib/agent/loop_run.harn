@@ -1453,7 +1453,3 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
   }
   return unwrap(run)
 }
-// Critique of the specific assistant turn just vetoed; a fresh
-// veto carries a fresh critique.
-// Critique of the step just vetoed, whose assistant turn was
-// popped above; each new veto injects its own.

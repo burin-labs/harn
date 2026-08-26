@@ -2376,7 +2376,10 @@ break.
 Rendering is provider-neutral. Every route receives one
 `<context-directives>` envelope in its own trailing user message. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
-order; internal tags, dedupe keys, and runtime signatures are not rendered.
+order. Finite directives render `ttl_turns="N"`; they apply only to the N
+assistant turns immediately after the message where they first appear, and a
+later historical copy does not renew that lifetime. Internal tags, dedupe keys,
+and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
 `role_hint` values remain accepted for replay compatibility but do not control
 placement or voice.

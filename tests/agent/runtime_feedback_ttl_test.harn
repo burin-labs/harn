@@ -196,9 +196,11 @@ pipeline test_explicit_reminder_keeps_durability(harness: Harness, task: unknown
  * injector by hand would have stayed green throughout the incident.
  *
  * Falsifier: drop the `1` at either `__post_turn_verdict_result` injection and
- * this counts one directive per remaining turn instead of one in total.
+ * the durable directive loses its `ttl_turns="1"` contract. Counting raw text
+ * across requests is not a valid lifetime measurement because append-only
+ * history deliberately re-sends earlier messages at the same indices.
  */
-pipeline test_post_turn_callback_directive_reaches_only_one_turn(harness: Harness, task: unknown) {
+pipeline test_post_turn_callback_directive_is_active_for_one_turn(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -226,18 +228,105 @@ pipeline test_post_turn_callback_directive_reaches_only_one_turn(harness: Harnes
       }
       const result = agent_loop(harness, "Do the work, then finish.", nil, opts)
       assert_eq(result.status, "done")
-      let carried = 0
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) >= 3, "the test needs later turns to distinguish active from historical")
+      let active_at_tail = 0
+      let historical = 0
       for call in harness.llm.mock_calls() {
-        if contains(json_stringify(call.messages), "RUN_VERIFY_NEXT") {
-          carried = carried + 1
+        let directive_index = -1
+        let index = 0
+        for message in call.messages {
+          if contains(to_string(message?.content), "RUN_VERIFY_NEXT") {
+            directive_index = index
+            assert(
+              contains(to_string(message.content), "<context-directives>"),
+              "callback feedback must keep the typed directive envelope",
+            )
+            assert(
+              contains(
+                to_string(message.content),
+                "<directive authority=\"corrective\" ttl_turns=\"1\">",
+              ),
+              "the model-facing callback directive must carry its one-turn lifetime",
+            )
+          }
+          index = index + 1
+        }
+        if directive_index == len(call.messages) - 1 {
+          active_at_tail = active_at_tail + 1
+        } else if directive_index >= 0 {
+          historical = historical + 1
         }
       }
-      // Exactly one is also the control: a zero here would mean the directive
-      // never reached a prompt and the expiry claim proved nothing.
       assert_eq(
-        carried,
+        active_at_tail,
         1,
-        "one post-turn directive must reach exactly one model turn, not every turn after it",
+        "one post-turn directive must be the active trailing instruction for exactly one turn",
+      )
+      assert(
+        historical >= 1,
+        "a later turn must observe the same bytes as history or prefix preservation was not tested",
+      )
+      let committed = 0
+      for message in result?.transcript?.messages ?? [] {
+        if contains(to_string(message?.content), "RUN_VERIFY_NEXT") {
+          committed = committed + 1
+        }
+      }
+      assert_eq(committed, 1, "the callback directive must be committed once, not chanted anew")
+    },
+  )
+}
+
+/**
+ * Repeating the same still-true verdict is a new finite directive, not the old
+ * directive's historical copy. This reaches the durable commit boundary that
+ * the by-hand primitive test above deliberately does not exercise.
+ */
+pipeline test_post_turn_callback_reinjection_renews_same_feedback(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("first pass"),
+      llm_text("second pass"),
+      llm_text("third pass"),
+      llm_text("finished ##DONE##"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: "post-turn-reinjection-" + harness.random.uuid(),
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        post_turn_callback: { info ->
+          if info?.iteration <= 2 {
+            return "SAME_STILL_TRUE_VERDICT"
+          }
+          return nil
+        },
+      }
+      const result = agent_loop(harness, "Do the work, then finish.", nil, opts)
+      assert_eq(result.status, "done")
+      let active_at_tail = 0
+      for call in harness.llm.mock_calls() {
+        const messages = call.messages
+        if len(messages) > 0
+          && contains(to_string(messages[len(messages) - 1]?.content), "SAME_STILL_TRUE_VERDICT") {
+          active_at_tail = active_at_tail + 1
+        }
+      }
+      let committed = 0
+      for message in result?.transcript?.messages ?? [] {
+        if contains(to_string(message?.content), "SAME_STILL_TRUE_VERDICT") {
+          committed = committed + 1
+        }
+      }
+      assert(committed >= 2, "the callback must repeat the same still-true verdict")
+      assert_eq(
+        active_at_tail,
+        committed,
+        "each same-text callback firing must renew the one-turn directive at the prompt tail",
       )
     },
   )

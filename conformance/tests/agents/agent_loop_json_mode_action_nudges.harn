@@ -117,7 +117,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("fenced.status=" + r.status)
       harness.stdio.println(
         "fenced.nudge="
-          + to_string(injected_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(injected_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "fenced.vocab_json="
@@ -156,7 +156,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("missing.status=" + r.status)
       harness.stdio.println(
         "missing.nudge="
-          + to_string(injected_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(injected_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "missing.vocab_json=" + to_string(injected_in(calls, 1, "Emit the call now: ```tool")),

@@ -342,15 +342,18 @@ reminders and runtime feedback:
 2. whitespace-normalized duplicate bodies collapse by authority, then recency;
 3. survivors are ordered `contract`, `corrective`, then `advisory`;
 4. every survivor renders as `<directive authority="...">...</directive>` in
-   one `<context-directives>` envelope;
+   one `<context-directives>` envelope; finite directives also render their
+   `ttl_turns` contract on that element;
 5. the envelope becomes one new trailing user turn and never edits an existing
    message.
 
 This slot and register are identical for Anthropic, OpenAI, Gemini, and local
 routes. The system string remains byte-stable as directives change. Diagnostic
-identity—source, tags, dedupe key, and runtime feedback kind—stays in typed
-events and is never copied into the model-visible envelope. `role_hint` remains
-readable on historical transcripts but does not create a second rendering path.
+identity such as source, tags, dedupe key, and runtime feedback kind stays in
+typed events and is never copied into the model-visible envelope. The lifetime
+is the exception because a durable historical message must tell the model when
+its instruction stopped applying. `role_hint` remains readable on historical
+transcripts but does not create a second rendering path.
 
 ## Append-only placement
 
@@ -377,25 +380,30 @@ it. Later turns re-send those exact bytes at the same index:
   sanctioned prefix break, and it is already evented.
 
 Two consequences follow. A delivered directive stays visible until compaction
-because withdrawing it would rewrite history. Write directives that stay true,
-or issue a later correction. Directives are ordinary transcript messages, so a
-transcript contains one `user` turn per distinct directive emission. Code that
-counts messages or scans for text should filter by role.
+because withdrawing it would rewrite history. A finite directive carries
+`ttl_turns="N"` in its model-facing element; it applies only to the N assistant
+turns immediately after the message where it first appears. Seeing that message
+later in history does not renew the lifetime. A directive without a finite TTL
+stays active until a later correction or compaction. Directives are ordinary
+transcript messages, so a transcript contains one `user` turn per distinct
+directive emission. Code that counts messages or scans for text should filter
+by role and directive lifetime.
 
 `ttl_turns`, `preserve_on_compact`, and `dedupe_key` still govern the pending
-queue and compaction. They decide whether a directive is *re-issued*, not
-whether an already-delivered one is withdrawn.
+queue and compaction. TTL also travels with the delivered directive so its
+meaning survives append-only history; expiry removes it from the pending queue
+without rewriting the earlier message.
 
 ## Compaction interaction
 
 The pending queue lives in transcript events while a delivered directive is a
-durable message. TTL governs the queue, so it decides
-how long a directive keeps being *re-issued*, not how long a delivered one
-stays visible. Normal agent-session post-turn processing decrements finite
-`ttl_turns`. `ttl_turns: 1` expires at
-the next post-turn boundary and emits an expiry lifecycle event when an
-EventLog is active. Compaction is what removes a delivered directive from the
-model's view, and it is the one sanctioned prefix break.
+durable message. Normal agent-session post-turn processing decrements finite
+`ttl_turns`. `ttl_turns: 1` applies to the assistant turn immediately after the
+directive message, expires at the next post-turn boundary, and emits an expiry
+lifecycle event when an EventLog is active. The earlier message remains in
+history with the finite lifetime written into its directive element. Compaction
+is what removes that historical message from the model's view, and it is the
+one sanctioned prefix break.
 
 `transcript_compact(...)` applies reminder lifecycle processing before it
 rebuilds the transcript:

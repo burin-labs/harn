@@ -374,7 +374,7 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(
     exposure = "harness.agent.inject_feedback",
     effects = ["state.write@arg0"],
-    sig = "agent_inject_feedback(session_id: string, kind: string, content: string, ttl_turns: int?) -> nil",
+    sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host"
 )]
 fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -403,20 +403,10 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
             ))
         }
     };
-    // Omitted or nil is the durable contract this exposure has always had.
-    // Pipeline authors outside the stdlib face the same lifetime question its
-    // own call sites do, so they get the same way to answer it.
-    let ttl_turns = match args.get(3) {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(turns)) => Some(*turns),
-        Some(_) => {
-            return Err(VmError::Runtime(
-                "agent_inject_feedback(session_id, kind, content, ttl_turns): ttl_turns must be an int or nil"
-                    .into(),
-            ))
-        }
-    };
-    inject_agent_feedback(&session_id, &kind, &content, ttl_turns).map_err(VmError::Runtime)?;
+    // This public compatibility surface remains durable. The stdlib's internal
+    // session helper owns the optional lifetime declaration used by audited
+    // agent-loop call sites.
+    inject_agent_feedback(&session_id, &kind, &content, None).map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 

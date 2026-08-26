@@ -21,6 +21,8 @@
 //! prefix deliberately and is already evented.
 
 use super::reminders::RenderedReminder;
+use super::reminders::DIRECTIVE_IDS_KEY;
+use std::collections::HashSet;
 
 /// Concatenate every text fragment a message's `content` carries, whether it
 /// is a bare string or an array of typed content blocks.
@@ -34,6 +36,16 @@ fn message_text(message: &serde_json::Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
+}
+
+fn committed_reminder_ids(messages: &[serde_json::Value]) -> HashSet<&str> {
+    messages
+        .iter()
+        .filter_map(|message| message.get(DIRECTIVE_IDS_KEY))
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
 }
 
 /// Drop the directives already committed to `messages`, preserving the order
@@ -51,13 +63,23 @@ pub(crate) fn uncommitted_directives(
     // contain strings such as `</directive>`. Compare the complete rendered
     // bytes instead of parsing those bytes with the model-facing XML sentinel.
     // This also keeps durable messages as the only commitment authority.
-    let message_texts: Vec<String> = messages.iter().map(message_text).collect();
+    let committed_ids = committed_reminder_ids(messages);
+    let legacy_message_texts: Vec<String> = messages
+        .iter()
+        .filter(|message| message.get(DIRECTIVE_IDS_KEY).is_none())
+        .map(message_text)
+        .collect();
     rendered
         .iter()
-        .filter(|reminder| match reminder {
-            RenderedReminder::SystemText(text) => {
-                !message_texts.iter().any(|message| message.contains(text))
-            }
+        .filter(|reminder| match reminder.reminder_id() {
+            Some(id) if committed_ids.contains(id) => false,
+            Some(_) => !legacy_message_texts
+                .iter()
+                .any(|message| message.contains(reminder.text())),
+            None => !messages
+                .iter()
+                .map(message_text)
+                .any(|message| message.contains(reminder.text())),
         })
         .cloned()
         .collect()
@@ -68,15 +90,13 @@ mod tests {
     use super::*;
 
     fn directive(body: &str) -> RenderedReminder {
-        RenderedReminder::SystemText(format!(
+        RenderedReminder::untracked(format!(
             "<directive authority=\"contract\">\n{body}\n</directive>"
         ))
     }
 
     fn directive_text(reminder: &RenderedReminder) -> String {
-        match reminder {
-            RenderedReminder::SystemText(text) => text.clone(),
-        }
+        reminder.text().to_string()
     }
 
     fn user(content: &str) -> serde_json::Value {
@@ -103,6 +123,39 @@ mod tests {
         ))];
         let out = uncommitted_directives(&history, &[new.clone()]);
         assert_eq!(out, vec![new]);
+    }
+
+    #[test]
+    fn a_decremented_ttl_does_not_reissue_the_same_reminder() {
+        let pending = RenderedReminder::tracked(
+            "reminder-1",
+            "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify now\n</directive>",
+        );
+        let mut committed = serde_json::json!({
+            "role": "user",
+            "content": "<context-directives>\nheader\n<directive authority=\"corrective\" ttl_turns=\"2\">\nverify now\n</directive>\n</context-directives>",
+        });
+        committed[DIRECTIVE_IDS_KEY] = serde_json::json!(["reminder-1"]);
+        let history = vec![committed];
+        assert!(uncommitted_directives(&history, &[pending]).is_empty());
+    }
+
+    #[test]
+    fn a_new_same_body_reminder_is_committed_again() {
+        let pending = RenderedReminder::tracked(
+            "reminder-2",
+            "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify now\n</directive>",
+        );
+        let mut committed = serde_json::json!({
+            "role": "user",
+            "content": "<context-directives>\nheader\n<directive authority=\"corrective\" ttl_turns=\"1\">\nverify now\n</directive>\n</context-directives>",
+        });
+        committed[DIRECTIVE_IDS_KEY] = serde_json::json!(["reminder-1"]);
+        let history = vec![committed];
+        assert_eq!(
+            uncommitted_directives(&history, &[pending.clone()]),
+            vec![pending]
+        );
     }
 
     /// Directive bodies carry arbitrary user and tool text, so commitment

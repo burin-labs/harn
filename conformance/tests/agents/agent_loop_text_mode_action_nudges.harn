@@ -124,7 +124,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("fenced.status=" + r.status)
       harness.stdio.println(
         "fenced.nudge="
-          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "fenced.no_missing="
@@ -159,7 +159,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("missing.status=" + r.status)
       harness.stdio.println(
         "missing.nudge="
-          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "wrapped a tool call")),
@@ -194,7 +194,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("multilingual.status=" + r.status)
       harness.stdio.println(
         "multilingual.nudge="
-          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "multilingual.not_fenced="
@@ -293,11 +293,11 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "streak.none_after_progress="
-          + to_string(!injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+          + to_string(!injected_kind_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       let streak_fired = false
       for i in range(2, len(calls)) {
-        if injected_kind_in(calls, i, "<directive authority=\"corrective\">") {
+        if injected_kind_in(calls, i, "<directive authority=\"corrective\"") {
           streak_fired = true
         }
       }

@@ -275,7 +275,7 @@ pub(super) fn host_agent_session_totals_builtin(
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string, ttl_turns: int?) -> nil",
+    sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string, ttl_turns?: int|nil) -> nil",
     category = "agent.host",
     runtime_only = true
 )]
@@ -291,10 +291,11 @@ fn host_agent_session_inject_feedback_builtin(
     // spent after one turn says so.
     let ttl_turns = match args.get(3) {
         None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(turns)) => Some(*turns),
+        Some(VmValue::Int(turns)) if *turns > 0 => Some(*turns),
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "__host_agent_session_inject_feedback: ttl_turns must be an int or nil, got {}",
+                "__host_agent_session_inject_feedback: ttl_turns must be a positive int or nil, \
+                 got {}",
                 other.display()
             )))
         }

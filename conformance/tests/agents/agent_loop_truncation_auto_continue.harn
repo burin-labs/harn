@@ -99,7 +99,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.status)
       const retry_messages = json_stringify(calls[3].messages)
       const retry_directives = calls[3].messages[len(calls[3].messages) - 1].content
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       require !contains(retry_messages, "parse_guidance"),
         "truncation fallback omits its internal feedback kind"
     },
@@ -133,7 +133,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(len(calls))
       const retry_messages = json_stringify(calls[1].messages)
       const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
-      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\""))
       require !contains(retry_messages, "parse_guidance"),
         "malformed-call guidance omits its internal feedback kind"
     },

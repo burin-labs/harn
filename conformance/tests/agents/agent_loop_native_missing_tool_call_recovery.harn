@@ -78,7 +78,7 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println("status=" + result.status)
       harness.stdio.println(
-        "nudge=" + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
+        "nudge=" + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\"")),
       )
       harness.stdio.println(
         "native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")),
