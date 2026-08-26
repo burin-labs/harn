@@ -1013,7 +1013,9 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "enabled"
+          "effort",
+          "enabled",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
         "batch_api": false,

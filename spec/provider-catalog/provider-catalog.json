@@ -7046,10 +7046,15 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high",
+          "max"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -7071,6 +7076,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "deepseek",
@@ -7126,10 +7132,15 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high",
+          "max"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -7151,6 +7162,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "deepseek",
@@ -26817,9 +26829,11 @@
       "label": "DeepSeek V4 Flash",
       "family": "deepseek",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -26836,9 +26850,11 @@
       "label": "DeepSeek V4 Pro",
       "family": "deepseek",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",

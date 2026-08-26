@@ -210,7 +210,7 @@
 #                     reasoning fields are private trace, not committed answer.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
-#                     openrouter, enabled, minimax, or zai.
+#                     openrouter, enabled, minimax, or thinking_type.
 #   reasoning_excluded_portable_options:
 #                     caller-selected generation options that this route
 #                     accepts with reasoning off but rejects while reasoning
@@ -554,7 +554,7 @@ batch_operational_notes = [
 top_k_supported = false
 
 [provider_defaults.zai]
-reasoning_wire_format = "zai"
+reasoning_wire_format = "thinking_type"
 
 [provider_defaults.baseten]
 top_k_supported = false
@@ -6039,7 +6039,11 @@ model_match = "deepseek-v4-pro*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "high", "max"]
+reasoning_disable_supported = true
+reasoning_wire_format = "thinking_type"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -6055,7 +6059,11 @@ model_match = "deepseek-v4-flash*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "high", "max"]
+reasoning_disable_supported = true
+reasoning_wire_format = "thinking_type"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
