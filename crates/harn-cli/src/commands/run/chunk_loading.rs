@@ -126,6 +126,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
             Some(manifest) => package::ensure_cached_dependencies_materialized(
                 Path::new(path),
                 manifest.package_import_aliases(),
+                manifest.package_lock_digest.as_deref(),
             ),
             None => Ok(false),
         };
@@ -207,8 +208,21 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // sandboxes are common in CI environments. Surface the failure as a
     // single-line warning when explicitly requested via the audit hook;
     // otherwise stay quiet to avoid bloating happy-path output.
-    if let Some(lookup) = &lookup {
-        if let Err(err) = lookup.store(&chunk) {
+    if project_context == ProjectContextMode::Project {
+        let mut store = harn_vm::bytecode_cache::prepare_entry_store(Path::new(path), &source);
+        if let Some(manifest) = store.manifest.as_mut() {
+            match package::reachable_dependency_lock_digest(
+                Path::new(path),
+                manifest.package_import_aliases(),
+            ) {
+                Ok(digest) => manifest.package_lock_digest = digest,
+                Err(error) => {
+                    stderr.push_str(&format!("error: {error}\n"));
+                    return Err(ChunkLoadFailure::PackageMaterialization);
+                }
+            }
+        }
+        if let Err(err) = store.store(&chunk) {
             if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
                 eprintln!("[harn] bytecode cache write skipped: {err}");
             }
@@ -454,6 +468,28 @@ fixture_dep = { path = "./vendor/replacement" }
         };
         assert_eq!(error, ChunkLoadFailure::PackageMaterialization);
         assert!(stderr.contains("harn.lock"), "stderr:\n{stderr}");
+
+        crate::package::install_packages_in(
+            &crate::package::PackageWorkspace::from_manifest_dir(project.path()),
+            false,
+            None,
+            false,
+        )
+        .expect("update lock to replacement dependency");
+        stderr.clear();
+        let mut replacement_timing = RunTiming::default();
+        compile_or_load_chunk_with_timing(
+            &path,
+            &mut stderr,
+            Some(&mut replacement_timing),
+            ProjectContextMode::Project,
+        )
+        .expect("compile against replacement authority");
+        assert!(stderr.is_empty(), "stderr:\n{stderr}");
+        assert!(
+            !replacement_timing.cache_hit,
+            "a valid new lock must still invalidate the old cached generation"
+        );
         harn_vm::reset_thread_local_state();
     }
 }

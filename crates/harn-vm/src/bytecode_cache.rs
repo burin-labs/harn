@@ -62,6 +62,7 @@ use crate::module_source::{self, ModuleSource};
 
 mod graph;
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
+pub use graph::prepare_entry_store;
 use graph::relative_path_label;
 
 /// Header magic for all bytecode-cache artifact families.

@@ -126,13 +126,14 @@ pub(crate) fn ensure_reachable_dependencies_materialized(
 /// Revalidate the package authority carried by a bytecode-cache manifest.
 ///
 /// `false` means the cached graph imports an alias the current manifest no
-/// longer declares, so the caller must discard the hit and run normal
-/// parse/typecheck diagnostics. Declared aliases retain the ordinary lock and
-/// generation checks; a stale revision remains a setup failure rather than
-/// executing the generation captured by an older cache entry.
+/// longer declares or was compiled against another valid lock generation, so
+/// the caller must discard the hit and run normal parse/typecheck diagnostics.
+/// Declared aliases retain the ordinary lock checks; a stale revision remains
+/// a setup failure rather than executing an older generation.
 pub(crate) fn ensure_cached_dependencies_materialized(
     anchor: &Path,
     package_aliases: &[String],
+    recorded_lock_digest: Option<&str>,
 ) -> Result<bool, PackageError> {
     if package_aliases.is_empty() {
         return Ok(true);
@@ -148,7 +149,32 @@ pub(crate) fn ensure_cached_dependencies_materialized(
         return Ok(false);
     }
     ensure_dependencies_materialized(anchor)?;
-    Ok(true)
+    Ok(
+        reachable_dependency_lock_digest(anchor, package_aliases)?.as_deref()
+            == recorded_lock_digest,
+    )
+}
+
+/// Digest of the installed lock generation that owns reachable package
+/// aliases. This is persisted beside an entry cache manifest after setup.
+pub(crate) fn reachable_dependency_lock_digest(
+    anchor: &Path,
+    package_aliases: &[String],
+) -> Result<Option<String>, PackageError> {
+    if package_aliases.is_empty() {
+        return Ok(None);
+    }
+    let Some((manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
+        return Ok(None);
+    };
+    if package_aliases
+        .iter()
+        .any(|alias| !manifest.dependencies.contains_key(alias))
+    {
+        return Ok(None);
+    }
+    Ok(dependency_package_snapshot(&manifest, &manifest_dir)?
+        .map(|snapshot| snapshot.lock_digest().to_string()))
 }
 
 pub(crate) fn ensure_dependencies_materialized_in(

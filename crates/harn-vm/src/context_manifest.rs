@@ -131,6 +131,9 @@ pub struct ContextManifest {
     /// this projection to revalidate manifest/lock authority without parsing
     /// or rebuilding the graph.
     pub package_import_aliases: Vec<String>,
+    /// Digest of the package lock whose generation resolved those aliases.
+    /// `None` when the graph imports no packages.
+    pub package_lock_digest: Option<String>,
     /// When this capture began, in [`module_source::stat_identity`]'s units and
     /// epoch. Every recorded stat was taken after this instant, which is what
     /// makes an older mtime provably un-reproducible by a later write.
@@ -171,6 +174,7 @@ impl ContextManifest {
             unresolved: Vec::new(),
             unreadable: Vec::new(),
             package_import_aliases: Vec::new(),
+            package_lock_digest: None,
         }
     }
 
