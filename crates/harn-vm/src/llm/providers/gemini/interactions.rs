@@ -588,8 +588,8 @@ fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
     if opts.thinking.is_enabled() {
         config.insert("thinking_summaries".to_string(), json!("auto"));
     }
-    if let Some(tool_choice) = tool_choice_mode(opts.tool_choice.as_ref()) {
-        config.insert("tool_choice".to_string(), json!(tool_choice));
+    if let Some(tool_choice) = tool_choice_config(opts.tool_choice.as_ref()) {
+        config.insert("tool_choice".to_string(), tool_choice);
     }
     (!config.is_empty()).then_some(config)
 }
@@ -630,11 +630,23 @@ pub(crate) fn thinking_level(
     }
 }
 
-/// Interactions accepts only the three lowercase modes; it has no allowed-name
-/// pin, so a request for one specific function narrows to "must call a tool".
-pub(crate) fn tool_choice_mode(tool_choice: Option<&Value>) -> Option<&'static str> {
+/// Project Harn's portable tool choice onto the Interactions configuration.
+///
+/// A named choice uses Google's allowlist form so the model cannot call a
+/// different tool. Scalar modes remain scalar because that is the shortest
+/// native representation.
+fn tool_choice_config(tool_choice: Option<&Value>) -> Option<Value> {
     let choice = tool_choice?;
-    Some(match choice {
+    if let Some(name) = named_tool_choice(choice) {
+        return Some(json!({
+            "allowed_tools": {
+                "mode": "any",
+                "tools": [name],
+            }
+        }));
+    }
+
+    Some(json!(match choice {
         Value::String(value) => match value.as_str() {
             "none" => "none",
             "required" | "any" => "any",
@@ -646,7 +658,32 @@ pub(crate) fn tool_choice_mode(tool_choice: Option<&Value>) -> Option<&'static s
             _ => "auto",
         },
         _ => "auto",
-    })
+    }))
+}
+
+fn named_tool_choice(choice: &Value) -> Option<&str> {
+    match choice {
+        Value::String(value)
+            if !value.is_empty()
+                && !matches!(value.as_str(), "auto" | "none" | "any" | "required") =>
+        {
+            Some(value)
+        }
+        Value::Object(object)
+            if matches!(
+                object.get("type").and_then(Value::as_str),
+                Some("function" | "tool")
+            ) =>
+        {
+            object
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .or_else(|| object.get("name"))
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+        }
+        _ => None,
+    }
 }
 
 fn response_format(opts: &LlmRequestPayload) -> Option<Value> {

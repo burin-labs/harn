@@ -192,17 +192,24 @@ fn state_is_not_stored_unless_the_caller_asked_for_it() {
 }
 
 #[test]
-fn tools_are_flattened_and_tool_choice_narrows_to_a_mode() {
+fn tools_are_flattened_and_tool_choice_preserves_constraints() {
     let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
-    payload.native_tools = Some(vec![json!({
-        "name": "set_light",
-        "description": "Sets brightness.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"brightness": {"type": "integer"}},
-            "required": ["brightness"],
-        },
-    })]);
+    payload.native_tools = Some(vec![
+        json!({
+            "name": "set_light",
+            "description": "Sets brightness.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"brightness": {"type": "integer"}},
+                "required": ["brightness"],
+            },
+        }),
+        json!({
+            "name": "read_light",
+            "description": "Reads brightness.",
+            "input_schema": {"type": "object"},
+        }),
+    ]);
     payload.tool_choice = Some(json!({"type": "function", "function": {"name": "set_light"}}));
     let body = GeminiInteractions::build_request_body(&payload);
 
@@ -216,12 +223,24 @@ fn tools_are_flattened_and_tool_choice_narrows_to_a_mode() {
         body["tools"][0].get("functionDeclarations").is_none(),
         "Interactions takes flat function tools, not the generateContent envelope"
     );
-    // Interactions has no allowed-name pin, so a named choice narrows to "any".
-    assert_eq!(body["generation_config"]["tool_choice"], "any");
+    assert_eq!(body["tools"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        body["generation_config"]["tool_choice"],
+        json!({"allowed_tools": {"mode": "any", "tools": ["set_light"]}})
+    );
+
+    let mut bare_name = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    bare_name.native_tools = payload.native_tools;
+    bare_name.tool_choice = Some(json!("set_light"));
+    assert_eq!(
+        GeminiInteractions::build_request_body(&bare_name)["generation_config"]["tool_choice"],
+        json!({"allowed_tools": {"mode": "any", "tools": ["set_light"]}})
+    );
 
     for (choice, expected) in [
         (json!("none"), "none"),
         (json!("required"), "any"),
+        (json!("any"), "any"),
         (json!("auto"), "auto"),
     ] {
         let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
