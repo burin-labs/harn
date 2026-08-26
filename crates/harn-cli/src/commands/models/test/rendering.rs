@@ -75,7 +75,7 @@ mod tests {
     use crate::env_guard::ScopedEnvVar;
 
     #[tokio::test]
-    async fn renderer_distinguishes_unavailable_and_zero_model_test_costs() {
+    async fn renderer_preserves_unavailable_zero_and_sub_dollar_model_test_costs() {
         let envelope = serde_json::json!({
             "ok": true,
             "result": {
@@ -137,5 +137,35 @@ mod tests {
         let zero_value: serde_json::Value =
             serde_json::from_str(&zero_json.stdout).expect("models-test zero-cost JSON result");
         assert_eq!(zero_value["estimated_cost_usd"].as_f64(), Some(0.0));
+
+        let paid_envelope = serde_json::json!({
+            "ok": true,
+            "result": {
+                "model_id": "provider-model",
+                "provider": "provider",
+                "latency_ms": 10,
+                "input_tokens": 89,
+                "output_tokens": 32,
+                "estimated_cost_usd": 0.000747,
+            },
+        });
+        let _paid_payload = ScopedEnvVar::set(
+            TEST_RESULT_ENV,
+            &serde_json::to_string(&paid_envelope).expect("models-test paid envelope json"),
+        );
+
+        let paid_human = dispatch::run_embedded_script("models/test", Vec::new(), false).await;
+        assert_eq!(paid_human.exit_code, 0, "stderr={}", paid_human.stderr);
+        assert!(
+            paid_human.stdout.contains("estimated_cost_usd=0.000747"),
+            "stdout={}",
+            paid_human.stdout
+        );
+
+        let paid_json = dispatch::run_embedded_script("models/test", Vec::new(), true).await;
+        assert_eq!(paid_json.exit_code, 0, "stderr={}", paid_json.stderr);
+        let paid_value: serde_json::Value =
+            serde_json::from_str(&paid_json.stdout).expect("models-test paid JSON result");
+        assert_eq!(paid_value["estimated_cost_usd"].as_f64(), Some(0.000747));
     }
 }
