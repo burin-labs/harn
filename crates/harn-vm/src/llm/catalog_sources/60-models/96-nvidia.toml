@@ -96,23 +96,6 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
 
-[models."nvidia/minimax-m2.7"]
-name = "MiniMax M2.7 (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "minimaxai/minimax-m2.7"
-context_window = 196608
-logical_model = "minimax-m2.7"
-equivalence_group = "minimax-m2.7"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
-deprecated = true
-deprecation_note = "NVIDIA retired the free endpoint; the model remains available through partner or self-hosted deployments."
-tier = "frontier"
-open_weight = true
-strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
-
 [models."nvidia/kimi-k2.6"]
 name = "Kimi K2.6 (NVIDIA NIM)"
 provider = "nvidia"
@@ -128,23 +111,6 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
-
-[models."nvidia/mistral-medium-3.5-128b"]
-name = "Mistral Medium 3.5 128B (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "mistralai/mistral-medium-3.5-128b"
-context_window = 262144
-logical_model = "mistral-medium-3.5-128b"
-equivalence_group = "mistral-medium-3.5-128b"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming"]
-deprecated = true
-deprecation_note = "Absent from NVIDIA's hosted model discovery on 2026-08-22."
-architecture = { parameter_count_b = 128.0, source_url = "https://build.nvidia.com/models", last_verified = "2026-06-20" }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use"]
 
 [models."nvidia/openai/gpt-oss-120b"]
 name = "GPT-OSS 120B (NVIDIA NIM)"
@@ -175,27 +141,6 @@ architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe =
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
-
-# 2026-08-15 reachability sweep: NIM retired `z-ai/glm-5.1` (HTTP 410, end of
-# life 2026-07-02) and now serves GLM-5.2 on this endpoint. The row moves to the
-# served build rather than being deleted, so the NVIDIA GLM route keeps working.
-[models."nvidia/z-ai/glm-5.2"]
-name = "GLM 5.2 (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "z-ai/glm-5.2"
-context_window = 202752
-logical_model = "glm-5.2"
-equivalence_group = "glm-5.2"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
-deprecated = true
-deprecation_note = "Absent from NVIDIA's hosted model discovery on 2026-08-22. Use glm-5.3 on Z.AI or OpenRouter."
-superseded_by = "glm-5.3"
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
 [models."nvidia/step-3.7-flash"]
 name = "Step 3.7 Flash (NVIDIA NIM)"
