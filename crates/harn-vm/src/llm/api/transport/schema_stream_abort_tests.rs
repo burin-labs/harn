@@ -49,6 +49,38 @@ fn build_strict_payload(schema: serde_json::Value) -> crate::llm::api::LlmReques
     crate::llm::api::LlmRequestPayload::from(&opts)
 }
 
+#[test]
+fn explicit_output_schema_owns_the_structured_request_contract() {
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-test".to_string();
+    opts.output_schema = Some(schema_with_int_age());
+    opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema: serde_json::json!({"type": "object"}),
+        strict: true,
+    };
+
+    let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+    let validation_schema = payload
+        .output_schema
+        .as_ref()
+        .expect("structured output keeps a stream-validation schema");
+    assert_eq!(
+        validation_schema["properties"]["age"]["type"], "integer",
+        "the explicit schema must remain the stream-validation contract"
+    );
+    assert_eq!(
+        payload.output_format.schema(),
+        Some(validation_schema),
+        "the provider request must use the same caller-selected schema"
+    );
+
+    let data = crate::stdlib::json_to_vm_value(&serde_json::json!({"age": "twenty"}));
+    assert!(
+        !crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
+        "post-stream validation must retain the explicit integer constraint"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn stream_validation_uses_the_schema_sent_to_the_provider() {
     reset_agent_trace_state();
