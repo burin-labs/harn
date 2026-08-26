@@ -726,13 +726,12 @@ fi
 source_only_targets="$tmp_root/source-only-targets.txt"
 make -C "$repo_root" -n \
   sync-language-spec check-language-spec \
-  check-source-file-lengths update-source-file-length-baseline \
+  check-source-file-lengths \
   > "$source_only_targets"
 for expected in \
   './scripts/harn_bin.sh --no-build -- run scripts/sync_language_spec.harn' \
   './scripts/harn_bin.sh --no-build -- run scripts/sync_language_spec.harn -- --check' \
-  './scripts/harn_bin.sh --no-build -- run scripts/check_source_file_lengths.harn' \
-  './scripts/harn_bin.sh --no-build -- run scripts/check_source_file_lengths.harn -- --update'
+  './scripts/harn_bin.sh --no-build -- run scripts/check_source_file_lengths.harn'
 do
   if ! grep -Fq "$expected" "$source_only_targets"; then
     echo "source-only Make target can still trigger an implicit build: $expected" >&2
@@ -740,6 +739,11 @@ do
     exit 1
   fi
 done
+
+if grep -Fq 'update-source-file-length-baseline' "$repo_root/Makefile"; then
+  echo "obsolete mutable source-length updater remains in the Make contract" >&2
+  exit 1
+fi
 
 unset HARN_BIN HARN_BIN_NO_BUILD
 missing_harn_target="$tmp_root/missing harn target"
