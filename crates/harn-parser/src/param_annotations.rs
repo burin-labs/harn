@@ -11,7 +11,7 @@
 //! elsewhere would let the error and the migration disagree about what needs
 //! a type, so there is exactly one.
 
-use crate::ast::{Node, SNode, TypedParam};
+use crate::ast::{Node, SNode, TypeExpr, TypedParam};
 use harn_lexer::Span;
 
 /// The declaration form that owns a parameter list.
@@ -71,6 +71,27 @@ pub struct UnannotatedParam {
     pub is_rest: bool,
 }
 
+/// One parameter from a declaration form governed by this module.
+///
+/// Migration audits use the complete ordered list before and after a rewrite.
+/// Keeping that projection beside [`requires_annotation`] prevents a fixer
+/// from rebuilding the declaration walk and silently missing a form the
+/// checker rejects.
+#[derive(Debug, Clone)]
+pub struct DeclaredParam {
+    pub kind: DeclarationKind,
+    pub owner: String,
+    pub index: usize,
+    pub name: String,
+    pub type_expr: Option<TypeExpr>,
+    /// The checker-owned decision for this parameter in the source as parsed.
+    pub requires_annotation: bool,
+    owner_span: Span,
+    span: Span,
+    has_default: bool,
+    is_rest: bool,
+}
+
 /// Whether this parameter must carry an explicit type.
 ///
 /// A default value does not exempt a parameter: `options = nil` still leaves
@@ -99,6 +120,29 @@ fn is_self_receiver(kind: DeclarationKind, index: usize, param: &TypedParam) -> 
 /// it owns. That is what lets one pass tell a method apart from a free
 /// function without keeping a parallel copy of the AST's child structure.
 pub fn walk_unannotated_params(program: &[SNode], visit: &mut impl FnMut(UnannotatedParam)) {
+    walk_declared_params(program, &mut |param| {
+        if !param.requires_annotation {
+            return;
+        }
+        visit(UnannotatedParam {
+            kind: param.kind,
+            owner: param.owner,
+            owner_span: param.owner_span,
+            index: param.index,
+            name: param.name,
+            span: param.span,
+            has_default: param.has_default,
+            is_rest: param.is_rest,
+        });
+    });
+}
+
+/// Visit every declared parameter governed by the explicit-annotation rule.
+///
+/// The order is stable across annotation-only rewrites, so migration code can
+/// audit the corresponding post-rewrite parameter without inventing a second
+/// declaration identity scheme.
+pub fn walk_declared_params(program: &[SNode], visit: &mut impl FnMut(DeclaredParam)) {
     let mut method_spans: std::collections::HashSet<(usize, usize)> =
         std::collections::HashSet::new();
     crate::visit::walk_program(program, &mut |node| match &node.node {
@@ -109,7 +153,7 @@ pub fn walk_unannotated_params(program: &[SNode], visit: &mut impl FnMut(Unannot
         }
         Node::InterfaceDecl { methods, .. } => {
             for method in methods {
-                report(
+                report_declared(
                     DeclarationKind::InterfaceMethod,
                     &method.name,
                     method.span,
@@ -131,16 +175,23 @@ pub fn walk_unannotated_params(program: &[SNode], visit: &mut impl FnMut(Unannot
             } else {
                 DeclarationKind::Function
             };
-            report(kind, name, node.span, params, visit);
+            report_declared(kind, name, node.span, params, visit);
         }
         Node::Pipeline { name, params, .. } => {
-            report(DeclarationKind::Pipeline, name, node.span, params, visit);
+            report_declared(DeclarationKind::Pipeline, name, node.span, params, visit);
         }
         Node::ToolDecl { name, params, .. } => {
-            report(DeclarationKind::Tool, name, node.span, params, visit);
+            report_declared(DeclarationKind::Tool, name, node.span, params, visit);
         }
         _ => {}
     });
+}
+
+/// Collect the complete ordered parameter projection used by migration audits.
+pub fn declared_params(program: &[SNode]) -> Vec<DeclaredParam> {
+    let mut found = Vec::new();
+    walk_declared_params(program, &mut |param| found.push(param));
+    found
 }
 
 /// Collect the same list [`walk_unannotated_params`] visits.
@@ -150,26 +201,26 @@ pub fn unannotated_params(program: &[SNode]) -> Vec<UnannotatedParam> {
     found
 }
 
-fn report(
+fn report_declared(
     kind: DeclarationKind,
     owner: &str,
     owner_span: Span,
     params: &[TypedParam],
-    visit: &mut impl FnMut(UnannotatedParam),
+    visit: &mut impl FnMut(DeclaredParam),
 ) {
     for (index, param) in params.iter().enumerate() {
-        if requires_annotation(kind, index, param) {
-            visit(UnannotatedParam {
-                kind,
-                owner: owner.to_string(),
-                owner_span,
-                index,
-                name: param.name.clone(),
-                span: param.span,
-                has_default: param.default_value.is_some(),
-                is_rest: param.rest,
-            });
-        }
+        visit(DeclaredParam {
+            kind,
+            owner: owner.to_string(),
+            index,
+            name: param.name.clone(),
+            type_expr: param.type_expr.clone(),
+            requires_annotation: requires_annotation(kind, index, param),
+            owner_span,
+            span: param.span,
+            has_default: param.default_value.is_some(),
+            is_rest: param.rest,
+        });
     }
 }
 

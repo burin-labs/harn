@@ -31,6 +31,7 @@ fn checkout_boundary_errors(steps: list) -> list<string> {
 
 fn refresh_order_errors(
   command: string,
+  implicit_any: string,
   migration: string,
   safe_repairs: string,
   caller_refresh: string,
@@ -38,6 +39,9 @@ fn refresh_order_errors(
   refresh_sentinel: string,
 ) -> list<string> {
   let errors: list<string> = []
+  if command.index_of(implicit_any) >= command.index_of(migration) {
+    errors = errors + ["implicit-any compatibility must precede target capability migrations"]
+  }
   if command.index_of(migration) >= command.index_of(caller_refresh) {
     errors = errors + ["target capability migrations must precede the caller refresh"]
   }
@@ -157,12 +161,16 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     errors = errors + ["refresh success sentinel must be unique per run attempt"]
   }
   const command = to_string(run?.run ?? "")
+  const implicit_any =
+    "harn fix --apply --safety behavior-preserving --preserve-implicit-any --json ."
   const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
   const safe_repairs = "harn fix --apply --safety behavior-preserving ."
   const caller_refresh = "eval \"$HARN_BUMP_REFRESH_COMMAND\""
   const format_migration = "eval \"$HARN_BUMP_FORMAT_COMMAND\""
   const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
   const refresh_pipeline = "$"
+    + "{refresh_implicit_any}"
+    + "$"
     + "{refresh_migrations}"
     + "$"
     + "{refresh_behavior_preserving}"
@@ -173,6 +181,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
     + "$"
     + "{refresh_complete}"
   for required in [
+    implicit_any,
     migration,
     safe_repairs,
     caller_refresh,
@@ -190,6 +199,7 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   errors = errors
     + refresh_order_errors(
       command,
+      implicit_any,
       migration,
       safe_repairs,
       caller_refresh,

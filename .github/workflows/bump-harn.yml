@@ -244,20 +244,24 @@ jobs:
           # skew: runtimes with BumpApplyOutcome.ok return refresh_failed
           # directly; older runtimes reach validation, whose first operation
           # fails unless refresh completed successfully.
-          # The target runtime owns its capability migration registry. Apply
-          # that deterministic codemod before the caller-owned refresh so a
-          # runtime bump can carry source compatibility forward in the same
-          # signed PR. Normalize only behavior-preserving fallout after the
-          # migration has settled. After caller-owned generation, apply the
-          # target formatter unconditionally before strict validation. This
-          # callback is reached only after a real version change; the
-          # already-current path remains mutation-free.
+          # First preserve the old unchecked parameter contract as explicit
+          # `any`, with a machine-readable census that fails on unresolved or
+          # narrowed sites. The target runtime then owns its capability
+          # migration registry. Apply that deterministic codemod before the
+          # caller-owned refresh so a runtime bump can carry source
+          # compatibility forward in the same signed PR. Normalize only
+          # behavior-preserving fallout after the migration has settled. After
+          # caller-owned generation, apply the target formatter unconditionally
+          # before strict validation. This callback is reached only after a real
+          # version change; the already-current path remains mutation-free.
           #
           # The behavior-preserving pass is separable because it rewrites
           # caller-owned source under a safety contract the caller may not be
           # willing to take unattended. Capability migrations are not gated:
           # they are what keeps a bump compiling. Formatting is likewise an
           # unconditional version migration, not an optional repair pass.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_implicit_any='set -euo pipefail; harn fix --apply --safety behavior-preserving --preserve-implicit-any --json .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_migrations='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
@@ -275,7 +279,7 @@ jobs:
             refresh_behavior_preserving=''
             echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."
           fi
-          export HARN_BUMP_REFRESH="${refresh_migrations}${refresh_behavior_preserving}${refresh_caller}${refresh_format}${refresh_complete}"
+          export HARN_BUMP_REFRESH="${refresh_implicit_any}${refresh_migrations}${refresh_behavior_preserving}${refresh_caller}${refresh_format}${refresh_complete}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
