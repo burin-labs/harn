@@ -161,22 +161,14 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
         ));
     }
 
-    let early_hook_report = refresh_hook_runtime_before_shared_install(
+    let hook_report = install_binaries_and_refresh_hook_runtime(
         verification,
         &target,
         &staged_binary,
-        &install_dir.join(harn_binary_name()),
-    )?;
-    install_binaries(staging.path(), &install_dir)?;
-
-    let hook_report = match early_hook_report {
-        Some(report) => report,
-        None => refresh_hook_runtime(verification, &target, &staged_binary).map_err(|error| {
-            format!(
-                "harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"
-            )
-        })?,
-    };
+        staging.path(),
+        &install_dir,
+    )
+    .map_err(|error| error.message)?;
     print_hook_runtime_outcome(&hook_report);
 
     println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
@@ -304,38 +296,22 @@ fn run_blocking_json(args: UpgradeArgs) -> i32 {
         );
     }
 
-    let early_hook_report = match refresh_hook_runtime_before_shared_install(
+    let hook_report = match install_binaries_and_refresh_hook_runtime(
         verification,
         &target,
         &staged_binary,
-        &install_dir.join(harn_binary_name()),
+        staging.path(),
+        &install_dir,
     ) {
         Ok(report) => report,
         Err(error) => {
-            return emit_upgrade_error_with(&report, "hook_runtime_refresh_failed", error);
+            report.installed = error.installed;
+            return emit_upgrade_error_with(&report, error.code, error.message);
         }
     };
-    if let Some(hook_report) = early_hook_report.clone() {
-        report.hook_runtime = Some(hook_report);
-    }
-    if let Err(error) = install_binaries(staging.path(), &install_dir) {
-        return emit_upgrade_error_with(&report, "install_failed", error);
-    }
-
     report.installed = true;
-    let hook_refresh = match early_hook_report {
-        Some(hook_report) => Ok(hook_report),
-        None => refresh_hook_runtime(verification, &target, &staged_binary),
-    };
-    match hook_refresh {
-        Ok(hook_report) => {
-            print_hook_runtime_outcome(&hook_report);
-            report.hook_runtime = Some(hook_report);
-        }
-        Err(error) => {
-            return emit_upgrade_error_with(&report, "hook_runtime_refresh_failed", error);
-        }
-    }
+    print_hook_runtime_outcome(&hook_report);
+    report.hook_runtime = Some(hook_report);
     emit_upgrade_ok(report);
     0
 }
@@ -550,69 +526,146 @@ fn validate_git_sha(sha: &str) -> Result<(), String> {
     }
 }
 
-fn refresh_hook_runtime(
-    verification: ChecksumVerification,
-    target: &str,
-    candidate: &Path,
-) -> Result<hook_runtime::HookRuntimeRefreshReport, String> {
-    let runtime_path = hook_runtime::enrolled_runtime_path()?;
-    refresh_hook_runtime_at(
-        runtime_path.as_deref(),
-        verification,
-        target,
-        candidate,
-        fetch_release_source_revision,
-    )
+#[derive(Debug)]
+struct HookRuntimeInstallFailure {
+    installed: bool,
+    code: &'static str,
+    message: String,
 }
 
-fn refresh_hook_runtime_before_shared_install(
+impl HookRuntimeInstallFailure {
+    fn before_install(message: String) -> Self {
+        Self {
+            installed: false,
+            code: "hook_runtime_refresh_failed",
+            message,
+        }
+    }
+
+    fn after_install(message: String) -> Self {
+        Self {
+            installed: true,
+            code: "hook_runtime_refresh_failed",
+            message,
+        }
+    }
+
+    fn install(message: String) -> Self {
+        Self {
+            installed: false,
+            code: "install_failed",
+            message,
+        }
+    }
+}
+
+fn install_binaries_and_refresh_hook_runtime(
     verification: ChecksumVerification,
     target: &str,
     candidate: &Path,
-    install_destination: &Path,
-) -> Result<Option<hook_runtime::HookRuntimeRefreshReport>, String> {
+    staging: &Path,
+    install_dir: &Path,
+) -> Result<hook_runtime::HookRuntimeRefreshReport, HookRuntimeInstallFailure> {
     let runtime_path = hook_runtime::configured_runtime_path();
-    refresh_hook_runtime_before_shared_install_at(
+    install_binaries_and_refresh_hook_runtime_at(
         runtime_path.as_deref(),
         verification,
         target,
         candidate,
-        install_destination,
+        staging,
+        install_dir,
         fetch_release_source_revision,
+        || {},
     )
 }
 
-fn refresh_hook_runtime_before_shared_install_at(
+fn install_binaries_and_refresh_hook_runtime_at(
     runtime_path: Option<&Path>,
     verification: ChecksumVerification,
     target: &str,
     candidate: &Path,
-    install_destination: &Path,
+    staging: &Path,
+    install_dir: &Path,
     resolve_source_revision: impl FnOnce(&str) -> Result<String, String>,
-) -> Result<Option<hook_runtime::HookRuntimeRefreshReport>, String> {
-    let Some(runtime_path) = runtime_path else {
-        return Ok(None);
+    after_main_install: impl FnOnce(),
+) -> Result<hook_runtime::HookRuntimeRefreshReport, HookRuntimeInstallFailure> {
+    let install_destination = install_dir.join(harn_binary_name());
+    let shared_install = runtime_path
+        .is_some_and(|runtime_path| paths_refer_to_same_file(runtime_path, &install_destination));
+    let enrollment = runtime_path
+        .map(hook_runtime::runtime_is_enrolled)
+        .transpose();
+    let mut after_main_install = Some(after_main_install);
+    let mut install = || {
+        install_binaries(staging, install_dir).map_err(HookRuntimeInstallFailure::install)?;
+        after_main_install
+            .take()
+            .expect("main-install boundary is called once")();
+        Ok(())
     };
-    if !paths_refer_to_same_file(runtime_path, install_destination) {
-        return Ok(None);
-    }
-    if !hook_runtime::runtime_is_enrolled(runtime_path)? {
-        return Ok(None);
-    }
+
+    let enrolled = match enrollment {
+        Ok(Some(enrolled)) => enrolled,
+        Ok(None) => false,
+        Err(error) if shared_install => {
+            return Err(HookRuntimeInstallFailure::before_install(error));
+        }
+        Err(error) => {
+            install()?;
+            return Err(HookRuntimeInstallFailure::after_install(format!(
+                "harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"
+            )));
+        }
+    };
+
     if !matches!(verification, ChecksumVerification::Verified) {
-        return Err(
-            "refusing an unverified upgrade because the current executable is the enrolled standalone hook runtime"
-                .to_string(),
-        );
+        if shared_install && enrolled {
+            return Err(HookRuntimeInstallFailure::before_install(
+                "refusing an unverified upgrade because the current executable is the enrolled standalone hook runtime"
+                    .to_string(),
+            ));
+        }
+        install()?;
+        return Ok(if enrolled {
+            hook_runtime::HookRuntimeRefreshReport::skipped_unverified()
+        } else {
+            hook_runtime::HookRuntimeRefreshReport::not_enrolled()
+        });
     }
-    refresh_hook_runtime_at(
-        Some(runtime_path),
-        verification,
-        target,
-        candidate,
-        resolve_source_revision,
-    )
-    .map(Some)
+
+    let Some(runtime_path) = runtime_path.filter(|_| enrolled) else {
+        install()?;
+        return Ok(hook_runtime::HookRuntimeRefreshReport::not_enrolled());
+    };
+    let release = hook_runtime::HookRuntimeRelease {
+        version: target.to_string(),
+        source_revision: resolve_source_revision(target)
+            .map_err(HookRuntimeInstallFailure::before_install)?,
+    };
+    let Some(transaction) =
+        hook_runtime::HookRuntimeRefreshTransaction::acquire_if_enrolled(runtime_path)
+            .map_err(HookRuntimeInstallFailure::before_install)?
+    else {
+        install()?;
+        return Ok(hook_runtime::HookRuntimeRefreshReport::not_enrolled());
+    };
+
+    if shared_install {
+        let report = transaction
+            .refresh(candidate, &release)
+            .map_err(HookRuntimeInstallFailure::before_install)?;
+        install()?;
+        Ok(report)
+    } else {
+        install()?;
+        transaction
+            .refresh(candidate, &release)
+            .map_err(|error| {
+                HookRuntimeInstallFailure::after_install(format!(
+                    "harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"
+                ))
+            })
+    }
 }
 
 fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
@@ -622,26 +675,6 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
             .ok()
             .zip(right.canonicalize().ok())
             .is_some_and(|(left, right)| left == right)
-}
-
-fn refresh_hook_runtime_at(
-    runtime_path: Option<&Path>,
-    verification: ChecksumVerification,
-    target: &str,
-    candidate: &Path,
-    resolve_source_revision: impl FnOnce(&str) -> Result<String, String>,
-) -> Result<hook_runtime::HookRuntimeRefreshReport, String> {
-    let Some(runtime_path) = runtime_path else {
-        return Ok(hook_runtime::HookRuntimeRefreshReport::not_enrolled());
-    };
-    if !matches!(verification, ChecksumVerification::Verified) {
-        return Ok(hook_runtime::HookRuntimeRefreshReport::skipped_unverified());
-    }
-    let release = hook_runtime::HookRuntimeRelease {
-        version: target.to_string(),
-        source_revision: resolve_source_revision(target)?,
-    };
-    hook_runtime::refresh_runtime_if_enrolled(runtime_path, candidate, &release)
 }
 
 fn print_hook_runtime_outcome(report: &hook_runtime::HookRuntimeRefreshReport) {
@@ -906,6 +939,7 @@ fn next_upgrade_counter() -> u64 {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::sync::{mpsc, Arc, Barrier};
 
     use super::*;
 
@@ -993,22 +1027,32 @@ mod tests {
     #[test]
     fn unverified_upgrade_does_not_resolve_or_mutate_enrolled_runtime() {
         let root = tempfile::tempdir().expect("temp dir");
-        let runtime = root.path().join("harn");
-        let candidate = root.path().join("candidate");
+        let hook_dir = root.path().join("hook");
+        let install_dir = root.path().join("install");
+        let staging = tempfile::tempdir().expect("staging");
+        fs::create_dir_all(&hook_dir).expect("hook dir");
+        fs::create_dir_all(&install_dir).expect("install dir");
+        let runtime = hook_dir.join(harn_binary_name());
+        let installed = install_dir.join(harn_binary_name());
+        let candidate = staging.path().join(harn_binary_name());
         fs::write(&runtime, b"old-runtime").expect("runtime");
+        fs::write(&installed, b"old-main").expect("installed");
         fs::write(&candidate, b"new-runtime").expect("candidate");
         fs::write(
-            root.path().join("harn.standalone-v1"),
+            hook_dir.join(format!("{}.standalone-v1", harn_binary_name())),
             b"harn-run-standalone-v1\n",
         )
         .expect("marker");
 
-        let report = refresh_hook_runtime_at(
+        let report = install_binaries_and_refresh_hook_runtime_at(
             Some(&runtime),
             ChecksumVerification::Unavailable(404),
             "v1.2.3",
             &candidate,
+            staging.path(),
+            &install_dir,
             |_| panic!("unverified bytes must not resolve source provenance"),
+            || {},
         )
         .expect("unverified refresh is a typed skip");
         assert_eq!(
@@ -1016,15 +1060,17 @@ mod tests {
             hook_runtime::HookRuntimeRefreshStatus::SkippedUnverified
         );
         assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
-        assert!(!root.path().join("provenance-v1").exists());
-        assert!(!root.path().join(".upgrade.lock").exists());
+        assert_eq!(fs::read(&installed).expect("installed"), b"new-runtime");
+        assert!(!hook_dir.join("provenance-v1").exists());
+        assert!(!hook_dir.join(".upgrade.lock").exists());
     }
 
     #[test]
     fn unverified_self_upgrade_of_enrolled_runtime_is_refused_before_mutation() {
         let root = tempfile::tempdir().expect("temp dir");
-        let runtime = root.path().join("harn");
-        let candidate = root.path().join("candidate");
+        let staging = tempfile::tempdir().expect("staging");
+        let runtime = root.path().join(harn_binary_name());
+        let candidate = staging.path().join(harn_binary_name());
         fs::write(&runtime, b"old-runtime").expect("runtime");
         fs::write(&candidate, b"new-runtime").expect("candidate");
         fs::write(
@@ -1033,16 +1079,22 @@ mod tests {
         )
         .expect("marker");
 
-        let error = refresh_hook_runtime_before_shared_install_at(
+        let error = install_binaries_and_refresh_hook_runtime_at(
             Some(&runtime),
             ChecksumVerification::Unavailable(0),
             "v1.2.3",
             &candidate,
-            &runtime,
+            staging.path(),
+            root.path(),
             |_| panic!("unverified bytes must not resolve source provenance"),
+            || {},
         )
         .expect_err("unverified shared install");
-        assert!(error.contains("refusing an unverified upgrade"), "{error}");
+        assert!(
+            error.message.contains("refusing an unverified upgrade"),
+            "{}",
+            error.message
+        );
         assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
         assert!(!root.path().join("provenance-v1").exists());
         assert!(!root.path().join(".upgrade.lock").exists());
@@ -1051,54 +1103,73 @@ mod tests {
     #[test]
     fn unverified_self_upgrade_without_enrollment_remains_an_ordinary_install() {
         let root = tempfile::tempdir().expect("temp dir");
-        let runtime = root.path().join("harn");
-        let candidate = root.path().join("candidate");
+        let staging = tempfile::tempdir().expect("staging");
+        let runtime = root.path().join(harn_binary_name());
+        let candidate = staging.path().join(harn_binary_name());
         fs::write(&runtime, b"old-runtime").expect("runtime");
         fs::write(&candidate, b"new-runtime").expect("candidate");
 
-        let report = refresh_hook_runtime_before_shared_install_at(
+        let report = install_binaries_and_refresh_hook_runtime_at(
             Some(&runtime),
             ChecksumVerification::Unavailable(0),
             "v1.2.3",
             &candidate,
-            &runtime,
+            staging.path(),
+            root.path(),
             |_| panic!("unenrolled bytes must not resolve source provenance"),
+            || {},
         )
         .expect("unenrolled shared destination");
-        assert!(report.is_none());
-        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+        assert_eq!(
+            report.status,
+            hook_runtime::HookRuntimeRefreshStatus::NotEnrolled
+        );
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"new-runtime");
         assert!(!root.path().join(".upgrade.lock").exists());
     }
 
     #[test]
-    fn unrelated_hook_cache_is_not_read_before_the_primary_install() {
+    fn unrelated_hook_cache_error_is_deferred_until_after_primary_install() {
         let root = tempfile::tempdir().expect("temp dir");
-        let runtime = root.path().join("hook-harn");
-        let install_destination = root.path().join("installed-harn");
-        let candidate = root.path().join("candidate");
+        let hook_dir = root.path().join("hook");
+        let install_dir = root.path().join("install");
+        let staging = tempfile::tempdir().expect("staging");
+        fs::create_dir_all(&hook_dir).expect("hook dir");
+        fs::create_dir_all(&install_dir).expect("install dir");
+        let runtime = hook_dir.join(harn_binary_name());
+        let install_destination = install_dir.join(harn_binary_name());
+        let candidate = staging.path().join(harn_binary_name());
         fs::write(&runtime, b"old-hook").expect("runtime");
         fs::write(&install_destination, b"old-main").expect("main");
         fs::write(&candidate, b"new-runtime").expect("candidate");
-        fs::create_dir(root.path().join("hook-harn.standalone-v1"))
+        fs::create_dir(hook_dir.join(format!("{}.standalone-v1", harn_binary_name())))
             .expect("unreadable marker shape");
 
-        let report = refresh_hook_runtime_before_shared_install_at(
+        let error = install_binaries_and_refresh_hook_runtime_at(
             Some(&runtime),
             ChecksumVerification::Verified,
             "v1.2.3",
             &candidate,
-            &install_destination,
+            staging.path(),
+            &install_dir,
             |_| panic!("unrelated cache must not resolve source provenance"),
+            || {},
         )
-        .expect("unrelated cache is deferred");
-        assert!(report.is_none());
+        .expect_err("unrelated cache error is reported after install");
+        assert!(error.installed);
+        assert_eq!(
+            fs::read(&install_destination).expect("installed"),
+            b"new-runtime"
+        );
+        assert_eq!(fs::read(&runtime).expect("hook"), b"old-hook");
     }
 
     #[test]
     fn verified_self_upgrade_publishes_hook_pair_before_main_install() {
         let root = tempfile::tempdir().expect("temp dir");
-        let runtime = root.path().join("harn");
-        let candidate = root.path().join("candidate");
+        let staging = tempfile::tempdir().expect("staging");
+        let runtime = root.path().join(harn_binary_name());
+        let candidate = staging.path().join(harn_binary_name());
         fs::write(&runtime, b"old-runtime").expect("runtime");
         fs::write(&candidate, b"new-runtime").expect("candidate");
         fs::write(
@@ -1107,16 +1178,17 @@ mod tests {
         )
         .expect("marker");
 
-        let report = refresh_hook_runtime_before_shared_install_at(
+        let report = install_binaries_and_refresh_hook_runtime_at(
             Some(&runtime),
             ChecksumVerification::Verified,
             "v1.2.3",
             &candidate,
-            &runtime,
+            staging.path(),
+            root.path(),
             |_| Ok(SHA_A.to_string()),
+            || {},
         )
-        .expect("verified shared install")
-        .expect("early hook refresh");
+        .expect("verified shared install");
         assert_eq!(
             report.status,
             hook_runtime::HookRuntimeRefreshStatus::Refreshed
@@ -1136,6 +1208,94 @@ mod tests {
         fs::write(&executable, b"runtime").expect("runtime");
         symlink(&executable, &alias).expect("symlink");
         assert!(paths_refer_to_same_file(&alias, &executable));
+    }
+
+    #[test]
+    fn concurrent_upgrades_keep_main_and_hook_on_one_release() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let install_dir = root.path().join("install");
+        let hook_dir = root.path().join("hook");
+        fs::create_dir_all(&install_dir).expect("install dir");
+        fs::create_dir_all(&hook_dir).expect("hook dir");
+        let installed = install_dir.join(harn_binary_name());
+        let hook = hook_dir.join(harn_binary_name());
+        let marker = hook_dir.join(format!("{}.standalone-v1", harn_binary_name()));
+        fs::write(&installed, b"runtime-old").expect("installed runtime");
+        fs::write(&hook, b"runtime-old").expect("hook runtime");
+        fs::write(&marker, b"harn-run-standalone-v1\n").expect("marker");
+
+        let staging_a = tempfile::tempdir().expect("staging a");
+        let staging_b = tempfile::tempdir().expect("staging b");
+        fs::write(staging_a.path().join(harn_binary_name()), b"runtime-a").expect("candidate a");
+        fs::write(staging_b.path().join(harn_binary_name()), b"runtime-b").expect("candidate b");
+
+        let started = Arc::new(Barrier::new(2));
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let started_a = Arc::clone(&started);
+            let install_dir_a = install_dir.clone();
+            let hook_a = hook.clone();
+            let first = scope.spawn(move || {
+                install_binaries_and_refresh_hook_runtime_at(
+                    Some(&hook_a),
+                    ChecksumVerification::Verified,
+                    "v1.2.3",
+                    &staging_a.path().join(harn_binary_name()),
+                    staging_a.path(),
+                    &install_dir_a,
+                    |_| Ok(SHA_A.to_string()),
+                    || {
+                        started_a.wait();
+                        attempted_rx.recv().expect("upgrade b attempted");
+                    },
+                )
+                .expect("upgrade a");
+            });
+            let started_b = Arc::clone(&started);
+            let install_dir_b = install_dir.clone();
+            let hook_b = hook.clone();
+            let second = scope.spawn(move || {
+                started_b.wait();
+                attempted_tx.send(()).expect("signal attempted upgrade");
+                install_binaries_and_refresh_hook_runtime_at(
+                    Some(&hook_b),
+                    ChecksumVerification::Verified,
+                    "v1.2.4",
+                    &staging_b.path().join(harn_binary_name()),
+                    staging_b.path(),
+                    &install_dir_b,
+                    |_| Ok(SHA_B.to_string()),
+                    || {},
+                )
+                .expect("upgrade b");
+            });
+            first.join().expect("upgrade a");
+            second.join().expect("upgrade b");
+        });
+
+        assert_eq!(fs::read(&installed).expect("installed"), b"runtime-b");
+        assert_eq!(fs::read(&hook).expect("hook"), b"runtime-b");
+        assert_eq!(
+            fs::read(&marker).expect("marker"),
+            b"harn-run-standalone-v1\n"
+        );
+        assert!(hook_runtime::runtime_is_enrolled(&hook).expect("marker"));
+        let digest = file_sha256_hex(&hook).expect("hook digest");
+        let provenance: serde_json::Value = serde_json::from_slice(
+            &fs::read(
+                hook_dir
+                    .join("provenance-v1")
+                    .join(format!("{digest}.json")),
+            )
+            .expect("matching installed provenance"),
+        )
+        .expect("typed provenance");
+        assert_eq!(provenance["schema_version"], 1);
+        assert_eq!(provenance["capability"], "harn-run-standalone-v1");
+        assert_eq!(provenance["version"], "v1.2.4");
+        assert_eq!(provenance["source_revision"], SHA_B);
+        assert_eq!(provenance["binary_name"], harn_binary_name());
+        assert_eq!(provenance["binary_sha256"], digest);
     }
 
     #[test]

@@ -104,17 +104,6 @@ fn non_empty_path(value: Option<&OsStr>) -> Option<PathBuf> {
     value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
-pub(super) fn enrolled_runtime_path() -> Result<Option<PathBuf>, String> {
-    let Some(runtime_path) = configured_runtime_path() else {
-        return Ok(None);
-    };
-    if runtime_is_enrolled(&runtime_path)? {
-        Ok(Some(runtime_path))
-    } else {
-        Ok(None)
-    }
-}
-
 pub(super) fn runtime_is_enrolled(runtime_path: &Path) -> Result<bool, String> {
     marker_enrolls(&marker_path(runtime_path))
 }
@@ -145,91 +134,133 @@ fn marker_enrolls(path: &Path) -> Result<bool, String> {
     ))
 }
 
-pub(super) fn refresh_runtime_if_enrolled(
+#[cfg(test)]
+fn refresh_runtime_if_enrolled(
     runtime_path: &Path,
     candidate: &Path,
     release: &HookRuntimeRelease,
 ) -> Result<HookRuntimeRefreshReport, String> {
-    if !marker_enrolls(&marker_path(runtime_path))? {
+    let Some(transaction) = HookRuntimeRefreshTransaction::acquire_if_enrolled(runtime_path)?
+    else {
         return Ok(HookRuntimeRefreshReport::not_enrolled());
+    };
+    transaction.refresh(candidate, release)
+}
+
+/// Exclusive mutation authority for one enrolled hook runtime.
+///
+/// The caller keeps this value alive across the ordinary CLI install and the
+/// hook replacement so concurrent upgrades cannot commit different releases
+/// to those two paths.
+pub(super) struct HookRuntimeRefreshTransaction {
+    runtime_path: PathBuf,
+    _lock: fs::File,
+}
+
+impl HookRuntimeRefreshTransaction {
+    pub(super) fn acquire_if_enrolled(runtime_path: &Path) -> Result<Option<Self>, String> {
+        if !marker_enrolls(&marker_path(runtime_path))? {
+            return Ok(None);
+        }
+        let parent = runtime_path
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", runtime_path.display()))?;
+        let lock_path = parent.join(UPGRADE_LOCK);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|error| format!("failed to open {}: {error}", lock_path.display()))?;
+        harn_flock::lock_with_deadline(
+            &lock,
+            &lock_path,
+            harn_flock::LockMode::Exclusive,
+            UPGRADE_LOCK_TIMEOUT,
+        )
+        .map_err(|error| format!("failed to serialize hook runtime refresh: {error}"))?;
+
+        // Enrollment is mutable user intent. Re-read it under the writer lock so
+        // a queued upgrade cannot recreate a runtime after it was unenrolled.
+        if !marker_enrolls(&marker_path(runtime_path))? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            runtime_path: runtime_path.to_path_buf(),
+            _lock: lock,
+        }))
     }
-    refresh(runtime_path, candidate, release)
+
+    pub(super) fn refresh(
+        &self,
+        candidate: &Path,
+        release: &HookRuntimeRelease,
+    ) -> Result<HookRuntimeRefreshReport, String> {
+        self.refresh_with_boundary(candidate, release, || Ok(()))
+    }
+
+    fn refresh_with_boundary(
+        &self,
+        candidate: &Path,
+        release: &HookRuntimeRelease,
+        before_binary_replace: impl FnOnce() -> Result<(), String>,
+    ) -> Result<HookRuntimeRefreshReport, String> {
+        validate_release(release)?;
+        if !marker_enrolls(&marker_path(&self.runtime_path))? {
+            return Ok(HookRuntimeRefreshReport::not_enrolled());
+        }
+
+        let digest = super::file_sha256_hex(candidate)?;
+        let binary_name = self
+            .runtime_path
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("harn"))
+            .to_string_lossy();
+        let provenance = HookRuntimeProvenance {
+            schema_version: PROVENANCE_SCHEMA_VERSION,
+            capability: CAPABILITY.to_string(),
+            version: release.version.clone(),
+            source_revision: release.source_revision.clone(),
+            binary_name: binary_name.to_string(),
+            binary_sha256: digest.clone(),
+        };
+        let provenance_path = provenance_path(&self.runtime_path, &digest)?;
+        publish_provenance(&provenance_path, &provenance)?;
+        before_binary_replace()?;
+        if !marker_enrolls(&marker_path(&self.runtime_path))? {
+            return Ok(HookRuntimeRefreshReport::not_enrolled());
+        }
+        super::atomic_replace(candidate, &self.runtime_path)?;
+
+        let installed = read_installed_provenance(&self.runtime_path)?;
+        if installed != provenance {
+            return Err(format!(
+                "hook runtime read-back did not match {}",
+                provenance_path.display()
+            ));
+        }
+        Ok(HookRuntimeRefreshReport {
+            status: HookRuntimeRefreshStatus::Refreshed,
+            binary_sha256: Some(digest),
+            version: Some(release.version.clone()),
+            source_revision: Some(release.source_revision.clone()),
+        })
+    }
 }
 
-fn refresh(
-    runtime_path: &Path,
-    candidate: &Path,
-    release: &HookRuntimeRelease,
-) -> Result<HookRuntimeRefreshReport, String> {
-    refresh_with_boundary(runtime_path, candidate, release, || Ok(()))
-}
-
+#[cfg(test)]
 fn refresh_with_boundary(
     runtime_path: &Path,
     candidate: &Path,
     release: &HookRuntimeRelease,
     before_binary_replace: impl FnOnce() -> Result<(), String>,
 ) -> Result<HookRuntimeRefreshReport, String> {
-    validate_release(release)?;
-    let parent = runtime_path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", runtime_path.display()))?;
-    let lock_path = parent.join(UPGRADE_LOCK);
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|error| format!("failed to open {}: {error}", lock_path.display()))?;
-    harn_flock::lock_with_deadline(
-        &lock,
-        &lock_path,
-        harn_flock::LockMode::Exclusive,
-        UPGRADE_LOCK_TIMEOUT,
-    )
-    .map_err(|error| format!("failed to serialize hook runtime refresh: {error}"))?;
-
-    // Enrollment is mutable user intent. Re-read it under the writer lock so
-    // a queued upgrade cannot recreate a runtime after it was unenrolled.
-    if !marker_enrolls(&marker_path(runtime_path))? {
+    let Some(transaction) = HookRuntimeRefreshTransaction::acquire_if_enrolled(runtime_path)?
+    else {
         return Ok(HookRuntimeRefreshReport::not_enrolled());
-    }
-
-    let digest = super::file_sha256_hex(candidate)?;
-    let binary_name = runtime_path
-        .file_name()
-        .unwrap_or_else(|| OsStr::new("harn"))
-        .to_string_lossy();
-    let provenance = HookRuntimeProvenance {
-        schema_version: PROVENANCE_SCHEMA_VERSION,
-        capability: CAPABILITY.to_string(),
-        version: release.version.clone(),
-        source_revision: release.source_revision.clone(),
-        binary_name: binary_name.to_string(),
-        binary_sha256: digest.clone(),
     };
-    let provenance_path = provenance_path(runtime_path, &digest)?;
-    publish_provenance(&provenance_path, &provenance)?;
-    before_binary_replace()?;
-    if !marker_enrolls(&marker_path(runtime_path))? {
-        return Ok(HookRuntimeRefreshReport::not_enrolled());
-    }
-    super::atomic_replace(candidate, runtime_path)?;
-
-    let installed = read_installed_provenance(runtime_path)?;
-    if installed != provenance {
-        return Err(format!(
-            "hook runtime read-back did not match {}",
-            provenance_path.display()
-        ));
-    }
-    Ok(HookRuntimeRefreshReport {
-        status: HookRuntimeRefreshStatus::Refreshed,
-        binary_sha256: Some(digest),
-        version: Some(release.version.clone()),
-        source_revision: Some(release.source_revision.clone()),
-    })
+    transaction.refresh_with_boundary(candidate, release, before_binary_replace)
 }
 
 fn validate_release(release: &HookRuntimeRelease) -> Result<(), String> {
