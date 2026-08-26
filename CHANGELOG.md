@@ -9,6 +9,325 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.117
+
+### Breaking
+
+- Tenant-scoped secrets now keep their source namespace. For example,
+  `github/webhook-secret` resolves as
+  `harn.tenant.acme.github/webhook-secret` for tenant `acme`, instead of
+  `harn.tenant.acme/webhook-secret`. Move existing tenant secrets to the new
+  namespace before starting a tenant worker or multi-tenant listener.
+- **Session-store reads now report a missing store (#7105).** The public read
+  functions and `harness.agent` read methods return `SessionStoreRead<T>`.
+  Results are either `{state: "absent"}` or `{state: "present", value}`. Check `state`
+  before using `value`. Reads remain read-only; append an event or start a
+  session when you intend to create the store.
+- Prepared-run executors now declare a concrete `Error` type. Executor failures
+  retain that value in `ExecutionOutcome::ExecutorFailed`; Harn-owned lease and
+  receipt failures use the separate `ExecutionOutcome::AuthorityFailed` variant.
+- Tool-call durations in run records and reports are now optional. A number is a
+  real measurement, including `0` for work completed in under one millisecond.
+  Missing timing data is now `null` instead of a misleading `0`.
+- Commit agent-loop directives as durable messages so later turns keep the same
+  provider prompt prefix. The `reminders.append_only` option and
+  `HARN_REMINDERS_APPEND_ONLY` switch are removed because this is now the only
+  placement policy.
+- The public Rust lexer and parser APIs no longer expose the unreachable HITL
+  token and AST variants (`AskUser`, `RequestApproval`, `DualControl`,
+  `EscalateTo`, `HitlExpr`, `HitlKind`, and `HitlArg`). Embedders should model
+  human interaction through the typed `harness.interaction.*` capability surface.
+  The unreachable `HARN-CAP-002` and `HARN-CAP-003` diagnostics, including their
+  public `Code` variants, are retired with that syntax.
+- The type checker now preserves narrowing through `const` condition aliases.
+  Functions can declare checked type predicates with `value is T` or the
+  one-sided `implies value is T` form. Invalid contracts report `HARN-TYP-029`.
+- MCP and other served exports now project resolved return types as canonical
+  JSON Schemas, including imported aliases, structs, enums, optionals,
+  collections, unions, and generic instantiations. Enum results now cross the
+  export boundary as `{enum, variant, fields}` objects instead of display strings,
+  so generated SDKs can consume them without parsing Harn source or prose. MCP
+  scalar, list, and nullable top-level results now use a `{result: value}`
+  structured-content envelope; record and enum results remain direct objects.
+- Ordinary `harn run` invocations no longer register manifest triggers or mutate
+  their durable lifecycle state. Pass `--project-triggers` when an entrypoint must
+  dispatch through project triggers; `--eager-project-handlers` implies it.
+  In-process entrypoint runs now own an isolated trigger-registry scope, so one
+  run's manifest bindings cannot remain visible to a later run on the same host.
+- Removed the `HARN-LLM-002` diagnostic code (`Code::DeprecatedLlmOption`,
+  "LLM option key is deprecated") and its catalog entry. Nothing in the workspace
+  ever emitted it — its only references were its own declaration and a
+  repair-template mapping — and a sweep of `burin-code` found no references
+  there either, so the code advertised a diagnostic Harn could not produce.
+
+  This is a breaking change to the published `harn-parser` crate: `Code` is a
+  public enum, so code that constructs or matches `Code::DeprecatedLlmOption`
+  no longer compiles. Removed pre-launch deliberately, while the compatibility
+  promise costs nothing. Reviving it is a revert.
+
+  Removed options are reported by `HARN-LNT-050` (`removed-llm-options`), which
+  is unaffected.
+
+### Added
+
+- Hosted workers can now bind jobs and package connectors to an active tenant
+  with `--tenant ID`. Cross-tenant secret reads are denied, while workers without
+  the option keep the existing single-tenant behavior.
+- Agent-loop provider calls now record their current stage. Use
+  `harn usage --group-by stage` to compare work, verification, repair, wrap-up,
+  and compaction calls. Calls without a known stage appear as `unattributed`
+  instead of a misleading zero.
+- **Prompt-prefix stability check (#7214).** `harn trace prefix-stability
+  <transcript-dir>` now finds changed messages, system prompts, and ordered tool
+  lists in captured provider requests. It exits with status 1 when prior prompt
+  content changes.
+- The playground experiment now covers the background command handle lifecycle.
+  A task profile can declare a foreground budget, after which a slow command
+  returns a handle instead of an exit status and `wait_command` resolves it to
+  the real outcome. Adds a slow-verifier task shape plus tests pinning that a
+  backgrounded command's terminal result, including a failing one, reaches the
+  tool registry the agent loop is given.
+- **Catalog validation rejects migration pointers that lead onto deprecated
+  models (#7298).** A `superseded_by` naming a row that is itself deprecated
+  now warns, alongside the existing warning for a target that does not resolve
+  at all. The existing check only asked whether the target *existed*, and a
+  pointer that resolves looks healthy right up until you follow it — so a
+  migration target could quietly rot behind a later deprecation and keep
+  directing callers onto a dead route. #7295 fixed the Claude Opus rows where
+  this had already happened; this makes the condition a standing check rather
+  than something that has to be noticed by hand.
+- **Standalone script execution.** `harn run --standalone` now skips ambient
+  project configuration, skills, handlers, state roots, and manifest-derived
+  authority while retaining explicit imports and CLI capability limits (#7301).
+- Added the current Cerebras Gemma 4 31B route to the model catalog with its pricing and supported features.
+
+### Changed
+
+- Self-hosted model routes now ask the running server whether its loaded chat
+  template supports native tools. Harn caches that answer per endpoint and model,
+  uses it ahead of catalog guesses, and falls back to fenced-JSON tools with a
+  clear diagnostic when the server cannot answer.
+- Make provider usage-accounting audit state explicit and expiring, and refuse to
+  generate a catalog when any OpenAI-SSE provider silently falls out of the
+  verified-or-unverified registry.
+- Agent loops no longer run the missing-tool-call classifier before an existing
+  completion contract. Native final answers and completion-judge candidates now
+  go straight to their completion owner. Classifier prompts that remain put
+  stable instructions and tool data before the changing assistant text, which
+  lets providers reuse their prompt prefix.
+
+  `missing_tool_call_classifier` now accepts one `Harness` argument instead of
+  separate agent and LLM handles. This lets its prompt use Harn's shared prompt
+  renderer.
+- Remove explicitly unused inputs from Harn's own pipelines and offer an explicit
+  surface-changing repair for bare `@test` inputs while preserving host
+  entrypoints and slots owned by callers, fixtures, tables, public APIs, and
+  extended pipelines. Conformance-baseline updates now fail closed when diagnostic
+  collection itself fails, preserving the last reviewed baseline.
+  Native PowerShell syntax checks now distinguish a syntax error from a parser
+  startup or runtime failure.
+- Editor completion, hover, highlighting, and rename checks now read Harn's typed
+  builtin registry. Removed ambient builtins are no longer suggested, and
+  `harness.<capability>.` completion now lists the capability's real methods.
+- Agent option types now have one source of truth. The public
+  `std/agent/options` module re-exports the canonical types instead of keeping a
+  second copy in sync.
+- **Positive assertions now use native Harn truthiness (#7251).** The fixer
+  removes redundant `?? false` fallbacks from exact positive `assert` arguments,
+  and the type checker preserves the same post-assert narrowing as `assert(x)`.
+- **Run child interpreters on runtime workers by default (#7101).** `spawn`,
+  every `parallel` form, and `pool.submit` now use multiple cores without an
+  opt-in. Worker, managed-daemon, circuit-breaker, cancellation, event-sink,
+  and pool state follow the typed VM execution tree across runtime threads.
+  Managed daemons expose `harness.agent.managed_daemon_wait` for completion-aware,
+  queue-drained snapshots instead of caller-owned polling loops.
+  `workflow.receive(target, timeout_ms?)` provides the same explicit mailbox
+  synchronization boundary for durable workflow messages while retaining its
+  nonblocking default. Workflow waits and durable timestamps now honor the
+  active `HarnessClock`, with event-driven in-process wakeups and durable-state
+  polling only for cross-process producers.
+  DES test-bench runs retain bit-exact source-order scheduling.
+  Embedding hosts that deliberately require creating-thread execution can set
+  `HARN_VM_SUBTASK_PLACEMENT=current_thread`.
+- **Source gate receipts now prove the exact clean commit and Harn binary
+  (#7267).** The combined conformance and audit gate rejects stale source,
+  mismatched PR heads, and explicit binaries without build proof. Local and
+  hosted runs emit the same machine-readable receipt.
+- **Groq cache usage is now counted.** Harn records Groq prompt-cache hits in
+  completion accounting (#7320).
+- Unified worker subtask capture and whole-crate thread-local auditing under one typed manifest, so new VM thread-local state must declare its worker propagation policy.
+- The `deprecated_llm_options` lint rule is now `removed-llm-options`, and its
+  repair template `llm/migrate-deprecated-option` is now
+  `llm/migrate-removed-option` (`HARN-LNT-050` itself is unchanged). Every key
+  the rule reports was removed outright and is rejected by the runtime, so
+  "deprecated" — which normally means *still works, warns* — described neither
+  its severity nor its effect. The new rule id is also kebab-case, matching
+  every other built-in rule.
+
+  `disable_rules = ["deprecated_llm_options"]` keeps working; the old spelling is
+  still accepted for disabling. Diagnostics report the new id. Tooling that
+  matches on the repair id needs the new spelling.
+
+### Deprecated
+
+- **`groq/compound` and `groq/compound-mini` are deprecated ahead of Groq's
+  2026-09-21 decommission (#7279).** Groq announced both Compound systems by
+  developer email on 2026-08-24 and 2026-08-25; after 2026-09-21 the routes
+  stop being served. Harn's catalog carried them as active rows, so both still
+  appeared in the provider catalog's routing routes, stayed in the
+  complementary-reviewer candidate pool, and reported
+  `deprecation.status = "active"` to every consumer of the generated JSON,
+  TypeScript, and Swift projections. Both rows now declare the deprecation,
+  the decommission date, and a `superseded_by` migration target —
+  `groq/openai/gpt-oss-120b` for Compound and `groq/openai/gpt-oss-20b` for
+  Compound Mini, matching the replacements Groq names for its other retired
+  routes — which drops them from the routing surface while keeping the rows
+  addressable, so callers still resolve context, rate limits, and a migration
+  target instead of an unknown-model error while the systems keep serving.
+  Groq's public deprecations page had not published the entry when this landed
+  — its documented process emails first and updates the page afterwards — so
+  the note cites the announcement itself rather than a page that currently
+  still lists both as production systems.
+
+### Fixed
+
+- **Headless connector credentials now have an actionable setup path (#6691).**
+  Keyring diagnostics prove write, read, and cleanup instead of checking only
+  reachability. Failed API-key storage names manifest-declared environment
+  variables that can supply the same secret without exposing its value.
+- `harn package verify` now rejects connector service metadata unless
+  `connector_contract.version` is 2. Lowering or removing the version can no
+  longer silently disable v2 connector tool projection.
+- Hosted `@job` workers now install the connectors declared by their package.
+  Connector calls use the worker's event log and secret providers, so stored
+  credentials reach scheduled, queued, and one-shot jobs without entering logs
+  or run records. Missing connectors, failed initialization, and missing
+  credentials remain separate errors.
+- **Find-references follows ModuleGraph resolution (#7076).** A local
+  `run` and an imported `run` are no longer collapsed by a word match.
+  The LSP, call hierarchy, and `harn graph --json` share the inverse of
+  `definition_of`. The graph envelope now includes `graph.references`
+  and an `indexed` object that names the files that were walked.
+- Module caches now notice when an imported module changes between runs that
+  share one cache. Harn no longer reuses code built against an older imported
+  interface, and each run checks a shared module graph only once.
+- Enable llama.cpp streamed usage and cache accounting so token totals and cache hits reach run receipts.
+- Read llama.cpp timing data from real chat completion responses and streams.
+  Provider telemetry now keeps the full prompt size while reporting cached and
+  uncached prompt work separately.
+- Unknown `HARN_*` startup errors now point calling tools to the supported
+  `HARN_EXT_<NAME>` namespace for their own settings.
+- Agent loops no longer repeat system prompt fragments when the primary system text is blank.
+- **Composition snippets reject a harness call at validation time.** A snippet
+  that called `harness.interaction.ask_user(...)` used to pass validation and
+  fail later against the null harness, while the removed bare spelling
+  `ask_user(...)` produced a clear error immediately. Both now produce the same
+  validation error, which says that composition snippets run without harness
+  capabilities and reach the outside only through a manifest binding (#7224).
+- **Generated documentation no longer tells you to call eight removed runtime
+  APIs (#7243).** `docs/llm/harn-triggers-quickref.md` named `eval_pack_run`
+  and the five `webhook_intake_*` builtins, and the diagnostic explanations
+  behind `docs/src/diagnostics.md` named `channel_select` and
+  `lifecycle_receipts_snapshot`, months after all eight moved onto typed
+  `harness.*` handles. `make check-docs-symbols` could not catch them because
+  it skips generated pages by design — editing a projection is the wrong fix,
+  since the next regeneration overwrites it — so they are corrected at their
+  Rust sources and the pages regenerated. The trigger quickref's webhook-intake
+  example was a fragment that could never have run: it is now a real script
+  whose fence is type-checked rather than only parsed, so a future rename
+  breaks the build instead of the reader. The gate now also scans the
+  diagnostic explanations themselves, which are the markdown source behind the
+  generated catalog, so those two cannot come back.
+- Keep long-running cleanup and pre-PR secret-scan checks active when pipelines use typed Harness capability calls.
+- **Generated catalogs no longer trigger redundant Harn rebuilds (#7259).**
+  Multi-format catalog commands now reuse one resolved executable and publish
+  their outputs only after every projection succeeds. Expected build-mode
+  recovery also avoids recomputing the complete freshness fingerprint.
+- Documentation checks now trace stale generated API references back to the
+  registered source or generator, without reporting the same defect twice.
+- Generated connector projects now pass strict package verification without
+  requiring authors to repair the starter template's input types first.
+- Fleet bump callers now pin the reusable workflow and its orchestration checkout
+  to one exact commit while independently selecting the target runtime. The
+  driver emits typed receipt fields through GitHub Actions' string wire format,
+  and release smoke verifies it with the exact candidate binary before publication.
+- **`make test-one` can select an integration test, and refuses a selector that
+  cannot match (#7278).** The runner takes the owning integration-test binary
+  through `HARN_TEST_ONE_BINARY`, and resolves the requested target from the
+  package manifest before running: a test name the requested target does not
+  define is now refused up front, naming the request and the package's real
+  targets, instead of running a filter that matches nothing. The post-release
+  development bump asked a library-only runner for a test defined in an
+  integration-test binary, so its grammar-fitness gate could never pass.
+- Lint rules that identify a call by the builtin it names now report the same way
+  whether source calls the ambient global or the typed
+  `harness.<capability>.<method>` that replaced it. `HARN-LNT-007`
+  (mcp-tool-annotations), `HARN-LNT-010` (persona-hook-target), and
+  `HARN-LNT-026` (prompt-injection-risk) previously stopped reporting once a call
+  site adopted the spelling `HARN-LNT-071` asks for.
+- Mark Claude Opus 4.6, 4.7, and 4.8 as active while recommending Opus 5 as the
+  upgrade from every older Opus model.
+- Allow batch downloads to handle providers that return only an output file or only an error file.
+- Ignore unrecognized host shells when Harn chooses an implicit command shell.
+  Command-risk scans now report the dialect, its source, and why analysis failed.
+- Sign the automated post-release development-version commit with the release
+  bot's GitHub identity so required-signature repositories can open the follow-up
+  pull request.
+- Imported Harn functions now retain their declaration names in runtime parameter diagnostics.
+- Structured-output validation now uses the provider-compatible schema Harn sent
+  to the model. A streamed response is no longer rejected for a strict-schema
+  keyword that the provider does not support.
+- Runtime feedback about a turn that has already ended no longer persists for the
+  rest of the session. Corrective directives raised by the post-turn and terminal
+  callbacks, the malformed-call and missing-call detectors, the background-command
+  digest, the exhausted-await notice, the structural and step judges, and the
+  required-tools check are now spent by the turn that reads them, so a single
+  injection can no longer be re-served on every later turn demanding an action the
+  model already took. Guidance whose re-injection is capped, such as
+  `stall_diagnostics`, stays durable and is unaffected.
+- **Model test cost reporting.** `harn models test` now reports an unavailable
+  price as `null`, instead of reporting it as zero (#7328).
+- Gemini Interactions streams now fail with a typed stream error when they end
+  before their completion event. Harn no longer treats partial streamed output as
+  a completed response.
+- Harn now records a provider's invalid request as `invalid_request`, even when
+  the response includes quota metadata. Terminal dispatch records keep that
+  result as a provider error instead of a usage-limit event.
+- **Reasoning calls now reject unsupported generation settings before they reach a
+  provider (#7334).** Harn keeps the requested setting intact and returns a clear
+  invalid-request error instead of sending a request the provider will reject.
+- **Gemini Interactions now rejects unsupported frequency and presence penalties before sending a request (#7335).**
+- **Provider error receipts retain usage reported before an empty-completion
+  retry is exhausted (#7336).** Run summaries and usage limits now include
+  billed attempts instead of treating them as unknown.
+- **Removed retired Groq Llama routes from the built-in catalog (#7343).** New catalog selections now use active Groq routes.
+- **Provider error accounting now keeps reported usage.** Empty or
+  unproductive completions retain their measured tokens, cache facts, and
+  provider cost through retries, terminal receipts, metrics, and traces
+  (#7348).
+- **Made generated provider projections self-trigger from catalog edits (#7355).**
+  The artifact registry now carries transitive dependencies, so local drift
+  warnings route catalog changes to every consuming generator before CI.
+- **Embedded Harn prompt assets now keep identical bytes on every platform
+  (#7373).** Git checks `.harn.prompt` source out with LF line endings, so
+  Windows builds preserve the same reviewed prompt content as macOS and Linux.
+- `HARN-LNT-029` (untyped-dict-access) and `HARN-OWN-004`
+  (boundary-value-unvalidated) now report the same way whether source reads a
+  boundary result from the ambient global or from the typed
+  `harness.<capability>.<method>` that replaced it. Both previously stopped
+  reporting once a call site adopted the spelling `HARN-LNT-071` asks for.
+
+  The two rules also now read one shared list of boundary sources. They had kept
+  separate hand-maintained copies that disagreed on six names, so `mcp_call` was
+  linted but not type-checked, while `connector_call`, `host_tool_call`,
+  `http_download`, `http_stream_info`, and `llm_call_safe` were type-checked but
+  not linted. Each rule now covers the union, which can surface findings on code
+  that previously passed one gate but not the other.
+- `removed-llm-options` (`HARN-LNT-050`) now reports removed LLM option keys
+  on calls written in the typed `harness.llm.*` spelling, not only on the ambient
+  `llm_call`-family globals. A call site that adopted the spelling
+  `HARN-LNT-071` asks for previously stopped being checked without any signal.
+
 ## v0.10.116
 
 ### Breaking
