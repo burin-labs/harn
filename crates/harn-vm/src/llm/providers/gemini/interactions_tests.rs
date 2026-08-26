@@ -288,11 +288,23 @@ fn thinking_maps_onto_the_level_ladder_and_requests_summaries() {
 
 #[test]
 fn structured_output_uses_response_format() {
+    let payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    assert!(
+        GeminiInteractions::build_request_body(&payload)
+            .get("response_format")
+            .is_none(),
+        "plain text must not acquire a structured-output constraint"
+    );
+
     let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
     payload.output_format = OutputFormat::JsonObject;
     assert_eq!(
         GeminiInteractions::build_request_body(&payload)["response_format"],
-        json!({"type": "object"})
+        json!({
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": {"type": "object"},
+        })
     );
 
     let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
@@ -305,10 +317,15 @@ fn structured_output_uses_response_format() {
         strict: true,
     };
     let body = GeminiInteractions::build_request_body(&payload);
-    assert_eq!(body["response_format"]["type"], "object");
+    assert_eq!(body["response_format"]["type"], "text");
+    assert_eq!(body["response_format"]["mime_type"], "application/json");
     assert_eq!(
-        body["response_format"]["properties"]["city"]["type"],
+        body["response_format"]["schema"]["properties"]["city"]["type"],
         "string"
+    );
+    assert!(
+        body["response_format"].get("properties").is_none(),
+        "the retired bare-schema shape must not survive beside the current contract"
     );
 }
 
