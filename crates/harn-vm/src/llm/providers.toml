@@ -64,7 +64,6 @@ unverified = [
   "local",
   "mistral",
   "mlx",
-  "moonshot",
   "nebius",
   "nvidia",
   "parasail",
@@ -124,6 +123,14 @@ checked_on = "2026-08-26"
 sources = [
   "https://platform.minimax.io/docs/api-reference/text-post",
   "https://platform.minimax.io/docs/api-reference/text-prompt-caching",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "moonshot"
+checked_on = "2026-08-26"
+sources = [
+  "https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api",
+  "https://platform.kimi.ai/docs/guide/use-context-caching-feature-of-kimi-api",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -495,6 +502,8 @@ path = "/models"
 # OpenAI-compatible `/v1/chat/completions` endpoint so the shared
 # openai_chat_completions wire format Just Works.
 [providers.moonshot]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.moonshot.ai/v1"
 base_url_env = "MOONSHOT_BASE_URL"
 region_env = "MOONSHOT_REGION"
