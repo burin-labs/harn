@@ -1586,23 +1586,30 @@ jobs:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
-          # The build writes to ./target regardless of the ambient
-          # CARGO_TARGET_DIR this workflow exports, and the budget step above
-          # reads it from there. Name the same path explicitly: resolving it
-          # through CARGO_TARGET_DIR looked in the toolchain cache, failed with
-          # `harn binary not found`, and — under `set -e` plus
-          # `continue-on-error` — silently skipped `cargo bloat` entirely, so a
-          # blocked release shipped no attribution at all.
-          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
-          # `|| true` because this invocation is here for the cargo-bloat report,
-          # not to gate: the fuse and the growth signal already ran in their own
-          # steps, and this step is reached precisely when one of them failed.
-          # Without it, `set -e` would abandon the `--filter deserialize` report
-          # below exactly when the attribution is most needed.
-          "$harn_bin" run scripts/check_binary_size.harn -- \
-            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" || true
-          cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
-            | tee "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
+          # Cargo diagnostics belong in the trusted workflow shell. Launching
+          # cargo-bloat through the Harn sandbox blocks compiler wrappers such
+          # as sccache and silently loses the primary crate attribution.
+          run_bloat_report() {
+            local report="$1"
+            shift
+            local staged="${report}.tmp"
+            rm -f "$report" "$staged"
+            if cargo bloat --release -p harn-cli --bin harn \
+              --target "$HARN_RELEASE_TARGET" "$@" | tee "$staged" && \
+                test -s "$staged"; then
+              mv "$staged" "$report"
+            else
+              rm -f "$staged"
+              return 1
+            fi
+          }
+
+          # Attribution is diagnostic, not a second gate. Attempt both views
+          # independently, and publish a report only after its command succeeds.
+          run_bloat_report "$BINARY_SIZE_REPORT_DIR/cargo-bloat-crates.txt" \
+            --crates -n 40 || true
+          run_bloat_report "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt" \
+            --filter deserialize -n 100 || true
 
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'

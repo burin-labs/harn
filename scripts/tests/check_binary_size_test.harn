@@ -695,7 +695,15 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, measured_target)
   assert_eq(bloat.if, diagnostics)
   assert_eq(bloat["continue-on-error"], true)
+  assert(bloat.run?.contains("cargo-bloat-crates.txt"))
   assert(bloat.run?.contains("cargo-bloat-deserialize.txt"))
+  assert_eq(bloat.run?.contains("check_binary_size.harn"), false)
+  assert(bloat.run?.contains("run_bloat_report"))
+  assert(bloat.run?.contains("test -s \"$staged\""))
+  assert(bloat.run?.contains("mv \"$staged\" \"$report\""))
+  assert(bloat.run?.contains("rm -f \"$staged\""))
+  assert(bloat.run?.contains("--crates -n 40 || true"))
+  assert(bloat.run?.contains("--filter deserialize -n 100 || true"))
   assert_eq(
     release_workflow_step(steps, "Check the distribution fuse").if,
     "matrix.target == 'x86_64-unknown-linux-gnu'",
