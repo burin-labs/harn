@@ -206,6 +206,56 @@ fn current_generation_matches_lock(
     Ok(true)
 }
 
+/// Whether the active immutable generation already supplies every entry in a
+/// demand-selected lock. Extra packages are harmless for this read-only reuse
+/// check: the reachable graph still controls what can be imported, while a
+/// full install continues to require exact whole-lock authority above.
+pub(crate) fn current_generation_satisfies_lock_subset(
+    ctx: &ManifestContext,
+    requested: &LockFile,
+) -> Result<bool, PackageError> {
+    let snapshot = match PackageSnapshot::acquire(&ctx.dir) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => return Ok(false),
+        Err(harn_modules::package_snapshot::PackageSnapshotError::Io { source, .. })
+            if source.kind() == io::ErrorKind::NotFound =>
+        {
+            return Ok(false);
+        }
+        Err(error) => return Err(PackageError::Lockfile(error.to_string())),
+    };
+    let materialized = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+        PackageError::Lockfile(format!(
+            "{} is missing from the active package generation",
+            snapshot.lock_path().display()
+        ))
+    })?;
+    for entry in &requested.packages {
+        let Some(installed) = materialized.find(&entry.name) else {
+            return Ok(false);
+        };
+        if !installed.same_resolution(entry) {
+            return Ok(false);
+        }
+        let directory = snapshot.packages_root().join(&entry.name);
+        let file = snapshot
+            .packages_root()
+            .join(format!("{}.harn", entry.name));
+        if entry.source.starts_with("path+") {
+            if !directory.exists() && !file.exists() {
+                return Ok(false);
+            }
+        } else if entry
+            .content_hash
+            .as_deref()
+            .is_none_or(|hash| !directory.is_dir() || !materialized_hash_matches(&directory, hash))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) fn current_package_snapshot(
     ctx: &ManifestContext,
 ) -> Result<harn_modules::package_snapshot::PackageSnapshot, PackageError> {

@@ -22,6 +22,13 @@ fn graph_classifies_only_reachable_nonlocal_imports_as_package_aliases() {
         graph.package_import_aliases(),
         ["direct_dep".to_string(), "transitive_dep".to_string()]
     );
+    let imports = graph.package_imports();
+    assert!(imports.iter().any(|import| {
+        import.alias == "direct_dep" && import.importer.file_name().unwrap() == "entry.harn"
+    }));
+    assert!(imports.iter().any(|import| {
+        import.alias == "transitive_dep" && import.importer.file_name().unwrap() == "relative.harn"
+    }));
 }
 
 #[test]

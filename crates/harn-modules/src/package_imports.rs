@@ -7,6 +7,17 @@ use crate::package_execution::{PackageExecutionError, PackageExecutionGuard};
 use crate::package_snapshot::PackageSnapshot;
 use crate::ModuleGraph;
 
+/// A package-shaped import together with the module that declares it.
+///
+/// Keeping the importer is what lets package authority validate the import
+/// against its owning manifest instead of flattening root and transitive
+/// dependency declarations into one ambiguous alias set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageImport {
+    pub importer: PathBuf,
+    pub alias: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct PackageManifest {
     #[serde(default)]
@@ -29,26 +40,44 @@ pub(super) enum LocalResolution {
 }
 
 impl ModuleGraph {
+    /// Package-shaped imports in the reachable graph, retaining their owner.
+    pub fn package_imports(&self) -> Vec<PackageImport> {
+        let mut imports = self
+            .modules
+            .iter()
+            .flat_map(|(file, module)| {
+                module.imports.iter().filter_map(move |import| {
+                    if !matches!(
+                        resolve_local_import(file, &import.raw_path),
+                        LocalResolution::NotPackage
+                    ) {
+                        return None;
+                    }
+                    Some(PackageImport {
+                        importer: file.clone(),
+                        alias: package_alias_from_import(&import.raw_path)?,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        imports.sort_by(|left, right| {
+            left.importer
+                .cmp(&right.importer)
+                .then_with(|| left.alias.cmp(&right.alias))
+        });
+        imports.dedup();
+        imports
+    }
+
     /// Package aliases named by imports in the reachable graph. The local
     /// resolver remains the semantic owner of classification, so a sibling
     /// file and the standard library cannot accidentally be reclassified as a
     /// package merely because they share a dependency's name.
     pub fn package_import_aliases(&self) -> Vec<String> {
         let mut aliases = self
-            .modules
-            .iter()
-            .flat_map(|(file, module)| {
-                module.imports.iter().filter_map(move |import| {
-                    if matches!(
-                        resolve_local_import(file, &import.raw_path),
-                        LocalResolution::NotPackage
-                    ) {
-                        package_alias_from_import(&import.raw_path)
-                    } else {
-                        None
-                    }
-                })
-            })
+            .package_imports()
+            .into_iter()
+            .map(|import| import.alias)
             .collect::<Vec<_>>();
         aliases.sort();
         aliases.dedup();

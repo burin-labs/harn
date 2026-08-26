@@ -214,6 +214,16 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     if project_context == ProjectContextMode::Project {
         let mut store = harn_vm::bytecode_cache::prepare_entry_store(Path::new(path), &source);
         if let Some(manifest) = store.manifest.as_mut() {
+            match package::declared_package_import_aliases(
+                Path::new(path),
+                manifest.package_import_aliases(),
+            ) {
+                Ok(aliases) => manifest.package_import_aliases = aliases,
+                Err(error) => {
+                    stderr.push_str(&format!("error: {error}\n"));
+                    return Err(ChunkLoadFailure::PackageMaterialization);
+                }
+            }
             match package::reachable_dependency_lock_digest(
                 Path::new(path),
                 manifest.package_import_aliases(),
@@ -497,6 +507,70 @@ fixture_dep = { path = "./vendor/replacement" }
             replacement_chunk.link_table.is_none(),
             "rejected package authority must discard the old module link table"
         );
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[test]
+    fn cache_miss_rejects_a_package_import_removed_from_the_manifest() {
+        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
+        harn_vm::reset_thread_local_state();
+        let project = tempfile::tempdir().expect("temp project");
+        let cache = tempfile::tempdir().expect("private cache");
+        let _cache_enabled = ScopedEnvVar::set(harn_vm::bytecode_cache::CACHE_ENABLED_ENV, "0");
+        let dependency = project.path().join("vendor/fixture_dep");
+        std::fs::create_dir_all(&dependency).expect("create dependency");
+        std::fs::write(
+            dependency.join("harn.toml"),
+            "[package]\nname = \"fixture_dep\"\n",
+        )
+        .expect("write dependency manifest");
+        std::fs::write(
+            dependency.join("value.harn"),
+            "pub fn package_value() -> int { return 42 }\n",
+        )
+        .expect("write dependency source");
+        let manifest = project.path().join("harn.toml");
+        std::fs::write(
+            &manifest,
+            r#"
+[package]
+name = "removed-alias-fixture"
+
+[dependencies]
+fixture_dep = { path = "./vendor/fixture_dep" }
+"#,
+        )
+        .expect("write manifest");
+        crate::package::install_packages_in(
+            &crate::package::PackageWorkspace::for_test(project.path(), cache.path()),
+            false,
+            None,
+            false,
+        )
+        .expect("install dependency");
+        let entry = project.path().join("main.harn");
+        std::fs::write(
+            &entry,
+            "import { package_value } from \"fixture_dep/value\"\n\npipeline main() { return package_value() }\n",
+        )
+        .expect("write entry");
+        std::fs::write(&manifest, "[package]\nname = \"removed-alias-fixture\"\n")
+            .expect("remove dependency declaration while retaining its generation");
+
+        let mut stderr = String::new();
+        let result = compile_or_load_chunk_with_timing(
+            &entry.to_string_lossy(),
+            &mut stderr,
+            None,
+            ProjectContextMode::Project,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ChunkLoadFailure::PackageMaterialization)
+        ));
+        assert!(stderr.contains("fixture_dep"), "stderr:\n{stderr}");
+        assert!(stderr.contains("dependencies"), "stderr:\n{stderr}");
         harn_vm::reset_thread_local_state();
     }
 }

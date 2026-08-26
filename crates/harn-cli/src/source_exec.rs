@@ -921,14 +921,26 @@ connector = { harn = "./connector.harn" }
         std::fs::create_dir_all(&dependency).expect("create dependency");
         std::fs::write(
             dependency.join("harn.toml"),
-            "[package]\nname = \"fixture_dep\"\n",
+            "[package]\nname = \"fixture_dep\"\n\n[dependencies]\ntransitive_dep = { path = \"../transitive_dep\" }\n",
         )
         .expect("write dependency manifest");
         std::fs::write(
             dependency.join("value.harn"),
-            "pub fn package_value() -> int { return 42 }\n",
+            "import { transitive_value } from \"transitive_dep/value\"\n\npub fn package_value() -> int { return transitive_value() }\n",
         )
         .expect("write dependency module");
+        let transitive = project.path().join("vendor/transitive_dep");
+        std::fs::create_dir_all(&transitive).expect("create transitive dependency");
+        std::fs::write(
+            transitive.join("harn.toml"),
+            "[package]\nname = \"transitive_dep\"\n",
+        )
+        .expect("write transitive manifest");
+        std::fs::write(
+            transitive.join("value.harn"),
+            "pub fn transitive_value() -> int { return 42 }\n",
+        )
+        .expect("write transitive module");
         std::fs::write(
             project.path().join("connector.harn"),
             r#"
@@ -949,6 +961,47 @@ pub fn call(_harness: Harness, _method, _args) { return package_value() }
             false,
         )
         .expect("install initial generation");
+        let installed_generation =
+            harn_modules::package_snapshot::PackageSnapshot::acquire(project.path())
+                .expect("acquire installed generation")
+                .expect("installed generation")
+                .generation()
+                .to_string();
+        let root_config =
+            crate::package::try_load_root_provider_connectors(&project.path().join("main.harn"))
+                .expect("load root connector metadata")
+                .configs
+                .into_iter()
+                .next()
+                .expect("root connector config");
+        crate::package::ensure_provider_connector_dependencies(&root_config)
+            .expect("reuse a full generation for a reachable subset");
+        let reused_generation =
+            harn_modules::package_snapshot::PackageSnapshot::acquire(project.path())
+                .expect("reacquire installed generation")
+                .expect("reused generation")
+                .generation()
+                .to_string();
+        assert_eq!(
+            reused_generation, installed_generation,
+            "selective preparation must not republish an already-sufficient generation"
+        );
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "root-harn-provider-fixture"
+
+[dependencies]
+fixture_dep = { path = "./vendor/fixture_dep" }
+unrelated = { path = "./vendor/unrelated" }
+
+[[providers]]
+id = "root_dep"
+connector = { harn = "./connector.harn" }
+"#,
+        )
+        .expect("add an unrelated dependency without changing the lock");
         std::fs::remove_dir_all(project.path().join(".harn")).expect("remove initial generation");
         let entry = project.path().join("main.harn");
         std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
