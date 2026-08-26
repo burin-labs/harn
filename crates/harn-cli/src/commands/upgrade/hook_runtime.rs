@@ -93,14 +93,14 @@ fn runtime_path_from_environment(
     windows: bool,
 ) -> Option<PathBuf> {
     let binary_name = if windows { "harn.exe" } else { "harn" };
-    non_blank_path(override_path).or_else(|| {
-        non_blank_path(xdg_cache_home)
+    non_empty_path(override_path).or_else(|| {
+        non_empty_path(xdg_cache_home)
             .map(|root| root.join("harn/hook-bin").join(binary_name))
             .or_else(|| home.map(|root| root.join(".cache/harn/hook-bin").join(binary_name)))
     })
 }
 
-fn non_blank_path(value: Option<&OsStr>) -> Option<PathBuf> {
+fn non_empty_path(value: Option<&OsStr>) -> Option<PathBuf> {
     value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
@@ -116,11 +116,12 @@ pub(super) fn enrolled_runtime_path() -> Result<Option<PathBuf>, String> {
 }
 
 fn marker_path(runtime_path: &Path) -> PathBuf {
-    let name = runtime_path
+    let mut name = runtime_path
         .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or("harn");
-    runtime_path.with_file_name(format!("{name}.standalone-v1"))
+        .unwrap_or_else(|| OsStr::new("harn"))
+        .to_os_string();
+    name.push(".standalone-v1");
+    runtime_path.with_file_name(name)
 }
 
 fn marker_enrolls(path: &Path) -> Result<bool, String> {
@@ -194,8 +195,8 @@ fn refresh_with_boundary(
     let digest = super::file_sha256_hex(candidate)?;
     let binary_name = runtime_path
         .file_name()
-        .and_then(OsStr::to_str)
-        .ok_or_else(|| format!("{} has no UTF-8 file name", runtime_path.display()))?;
+        .unwrap_or_else(|| OsStr::new("harn"))
+        .to_string_lossy();
     let provenance = HookRuntimeProvenance {
         schema_version: PROVENANCE_SCHEMA_VERSION,
         capability: CAPABILITY.to_string(),
@@ -207,6 +208,9 @@ fn refresh_with_boundary(
     let provenance_path = provenance_path(runtime_path, &digest)?;
     publish_provenance(&provenance_path, &provenance)?;
     before_binary_replace()?;
+    if !marker_enrolls(&marker_path(runtime_path))? {
+        return Ok(HookRuntimeRefreshReport::not_enrolled());
+    }
     super::atomic_replace(candidate, runtime_path)?;
 
     let installed = read_installed_provenance(runtime_path)?;
@@ -389,6 +393,22 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn marker_path_preserves_non_utf8_runtime_names() {
+        use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+
+        let runtime_name = std::ffi::OsString::from_vec(b"harn-\xff".to_vec());
+        let runtime = Path::new("/cache").join(runtime_name);
+        assert_eq!(
+            marker_path(&runtime)
+                .file_name()
+                .expect("marker name")
+                .as_bytes(),
+            b"harn-\xff.standalone-v1"
+        );
+    }
+
     #[test]
     fn absent_or_malformed_marker_never_mutates_the_hook_cache() {
         for marker in [
@@ -467,6 +487,22 @@ mod tests {
             staged.is_file(),
             "new immutable provenance is safely unused"
         );
+    }
+
+    #[test]
+    fn unenrollment_at_the_replace_boundary_keeps_the_prior_runtime() {
+        let (_root, runtime) = enrolled_fixture();
+        let candidate = runtime.with_file_name("candidate");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        let marker = marker_path(&runtime);
+        let report =
+            refresh_with_boundary(&runtime, &candidate, &release("v1.2.3", SOURCE_A), || {
+                fs::remove_file(&marker).map_err(|error| error.to_string())?;
+                Ok(())
+            })
+            .expect("unenrollment is a clean stop");
+        assert_eq!(report.status, HookRuntimeRefreshStatus::NotEnrolled);
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
     }
 
     #[test]
