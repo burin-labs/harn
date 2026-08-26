@@ -750,6 +750,9 @@ pub struct Capabilities {
     pub reasoning_required_for_tools: bool,
     pub reasoning_text_promotable: bool,
     pub reasoning_wire_format: Option<String>,
+    /// Portable generation options that this route permits normally but fixes
+    /// to provider-owned values while reasoning is enabled.
+    pub reasoning_excluded_portable_options: Vec<super::PortableOption>,
     pub seed_supported: bool,
     pub top_k_supported: bool,
     pub temperature_supported: bool,
@@ -884,6 +887,7 @@ impl Default for Capabilities {
             reasoning_required_for_tools: false,
             reasoning_text_promotable: false,
             reasoning_wire_format: None,
+            reasoning_excluded_portable_options: Vec::new(),
             seed_supported: true,
             top_k_supported: true,
             temperature_supported: true,

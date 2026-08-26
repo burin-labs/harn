@@ -366,6 +366,12 @@ pub struct ProviderRule {
     /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
     #[serde(default)]
     pub reasoning_wire_format: Option<String>,
+    /// Caller-selected portable generation options this route rejects only
+    /// while reasoning is enabled. The normal `*_supported` fields remain the
+    /// route-wide contract; this list captures providers that permit a knob on
+    /// ordinary calls but fix it to a server default for reasoning calls.
+    #[serde(default)]
+    pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -626,6 +632,7 @@ impl ProviderRule {
             reasoning_required_for_tools,
             reasoning_text_promotable,
             reasoning_wire_format,
+            reasoning_excluded_portable_options,
             seed_supported,
             top_k_supported,
             temperature_supported,
@@ -767,6 +774,10 @@ impl ProviderRule {
             reasoning_text_promotable,
         );
         fill_opt(&mut self.reasoning_wire_format, reasoning_wire_format);
+        fill_opt(
+            &mut self.reasoning_excluded_portable_options,
+            reasoning_excluded_portable_options,
+        );
         fill_opt(&mut self.seed_supported, seed_supported);
         fill_opt(&mut self.top_k_supported, top_k_supported);
         fill_opt(&mut self.temperature_supported, temperature_supported);
@@ -1157,6 +1168,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         reasoning_required_for_tools: None,
         reasoning_text_promotable: None,
         reasoning_wire_format: None,
+        reasoning_excluded_portable_options: None,
         seed_supported: None,
         top_k_supported: None,
         temperature_supported: None,
@@ -1365,6 +1377,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .reasoning_wire_format
             .clone()
             .or_else(|| defaults.reasoning_wire_format.clone()),
+        reasoning_excluded_portable_options: rule
+            .reasoning_excluded_portable_options
+            .clone()
+            .unwrap_or_default(),
         seed_supported: rule
             .seed_supported
             .or(defaults.seed_supported)
