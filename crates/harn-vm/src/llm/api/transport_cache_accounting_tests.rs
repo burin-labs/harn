@@ -4,7 +4,7 @@ use super::{
 };
 
 /// OpenAI-compatible success response whose `usage` block reports cached
-/// prompt tokens, the shape undeclared providers like fireworks return.
+/// prompt tokens, as an undeclared provider may return.
 fn spawn_openai_cached_usage_stub() -> LlmStub {
     spawn_llm_stub("OpenAI-compatible cached-usage stub", |stream| {
         use std::io::{Read, Write};
@@ -108,15 +108,10 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
             Some(false)
         );
 
-        // Absent: the provider block never declared either way. The parsed
-        // values survive and the declaration reads as undeclared.
-        assert_eq!(
-            crate::llm_config::provider_config("fireworks")
-                .and_then(|provider| provider.cache_usage_accounting),
-            None
-        );
-        let undeclared =
-            call("fireworks", "accounts/fireworks/models/stub", None).await;
+        // Absent: the test provider never declares either way. The parsed
+        // values survive and the declaration reads as undeclared. A dedicated
+        // provider keeps this transport contract independent of catalog rows.
+        let undeclared = call("undeclared-cache", "cached-model", None).await;
         assert_eq!(undeclared.cache_read_tokens, 150);
         assert!(undeclared.cache_supported);
         assert_eq!(undeclared.telemetry.cache_accounting_declared, None);
