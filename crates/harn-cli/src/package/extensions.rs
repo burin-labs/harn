@@ -347,11 +347,29 @@ pub async fn install_manifest_hooks_with_initialization(
             Some(module_name),
         )?;
         if initialization.is_on_dispatch() {
+            let preparation_anchor = module_path.clone();
+            let callable = harn_vm::LazyVmCallable::new(module_path, function_name)
+                .with_preparation(move || {
+                    let preparation_anchor = preparation_anchor.clone();
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let graph =
+                                harn_modules::build(std::slice::from_ref(&preparation_anchor));
+                            ensure_reachable_dependencies_materialized(&preparation_anchor, &graph)
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        })
+                        .await
+                        .map_err(|error| {
+                            format!("hook dependency preparation task failed: {error}")
+                        })?
+                    }
+                });
             harn_vm::orchestration::register_vm_hook_lazy(
                 hook.event,
                 hook.pattern.clone(),
                 hook.handler.clone(),
-                harn_vm::LazyVmCallable::new(module_path, function_name),
+                callable,
             );
             continue;
         }

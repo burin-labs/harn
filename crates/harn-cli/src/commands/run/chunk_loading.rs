@@ -302,16 +302,7 @@ pub(super) fn typecheck_with_imports(
     let checker = match project_context {
         ProjectContextMode::Project => {
             let mut graph = harn_modules::build(&[path.to_path_buf()]);
-            let declared_dependencies = package::load_nearest_manifest(path)
-                .into_result()?
-                .map(|(manifest, _)| manifest.dependencies)
-                .unwrap_or_default();
-            if graph
-                .package_import_aliases()
-                .iter()
-                .any(|alias| declared_dependencies.contains_key(alias))
-            {
-                package::ensure_dependencies_materialized(path)?;
+            if package::ensure_reachable_dependencies_materialized(path, &graph)? {
                 graph = harn_modules::build(&[path.to_path_buf()]);
             }
             crate::typecheck_imports::checker_with_resolved_graph(

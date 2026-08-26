@@ -463,6 +463,8 @@ struct ProjectConnectorState {
     context: Option<harn_vm::ConnectorCtx>,
     clients: BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>,
     initialized_project_providers: BTreeSet<harn_vm::ProviderId>,
+    terminal_error: Option<harn_vm::ClientError>,
+    provider_errors: BTreeMap<harn_vm::ProviderId, harn_vm::ClientError>,
 }
 
 impl ProjectConnectorResolver {
@@ -491,17 +493,33 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
     ) -> Result<Option<Arc<dyn harn_vm::ConnectorClient>>, harn_vm::ClientError> {
         let provider = harn_vm::ProviderId::from(provider);
         let mut state = self.state.lock().await;
+        if let Some(error) = &state.terminal_error {
+            return Err(error.clone());
+        }
+        if let Some(error) = state.provider_errors.get(&provider) {
+            return Err(error.clone());
+        }
         if state.connectors.is_none() {
             let anchor = self.anchor.clone();
-            let connectors =
-                tokio::task::spawn_blocking(move || package::try_load_provider_connectors(&anchor))
-                    .await
-                    .map_err(|error| {
-                        harn_vm::ClientError::Other(format!(
-                            "project connector metadata task failed: {error}"
-                        ))
-                    })?
-                    .map_err(|error| harn_vm::ClientError::Other(error.to_string()))?;
+            let connectors = match tokio::task::spawn_blocking(move || {
+                package::try_load_provider_connectors(&anchor)
+            })
+            .await
+            {
+                Ok(Ok(connectors)) => connectors,
+                Ok(Err(error)) => {
+                    let error = harn_vm::ClientError::Other(error.to_string());
+                    state.terminal_error = Some(error.clone());
+                    return Err(error);
+                }
+                Err(error) => {
+                    let error = harn_vm::ClientError::Other(format!(
+                        "project connector metadata task failed: {error}"
+                    ));
+                    state.terminal_error = Some(error.clone());
+                    return Err(error);
+                }
+            };
             state.connectors = Some(connectors);
         }
 
@@ -518,28 +536,51 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
         let needs_project_initialization =
             config.is_some() && !state.initialized_project_providers.contains(&provider);
         if state.context.is_none() {
-            let context = connector_context_for_event_log(self.event_log.clone())
-                .await
-                .map_err(harn_vm::ClientError::Other)?;
+            let context = match connector_context_for_event_log(self.event_log.clone()).await {
+                Ok(context) => context,
+                Err(error) => {
+                    let error = harn_vm::ClientError::Other(error);
+                    state.terminal_error = Some(error.clone());
+                    return Err(error);
+                }
+            };
             let registry = harn_vm::ConnectorRegistry::default();
-            state.clients = initialized_registry_clients(&registry, context.clone())
-                .await
-                .map_err(harn_vm::ClientError::Other)?;
+            state.clients = match initialized_registry_clients(&registry, context.clone()).await {
+                Ok(clients) => clients,
+                Err(error) => {
+                    let error = harn_vm::ClientError::Other(error);
+                    state.terminal_error = Some(error.clone());
+                    return Err(error);
+                }
+            };
             state.context = Some(context);
         }
 
         if needs_project_initialization {
             let config = config.as_ref().expect("project connector config");
             let mut registry = harn_vm::ConnectorRegistry::empty();
-            register_provider_connector(&mut registry, config)
-                .await
-                .map_err(harn_vm::ClientError::Other)?;
-            let mut initialized = initialized_registry_clients(
+            if let Err(error) = register_provider_connector(&mut registry, config).await {
+                let error = harn_vm::ClientError::Other(error);
+                state
+                    .provider_errors
+                    .insert(provider.clone(), error.clone());
+                return Err(error);
+            }
+            let mut initialized = match initialized_registry_clients(
                 &registry,
                 state.context.as_ref().expect("connector context").clone(),
             )
             .await
-            .map_err(harn_vm::ClientError::Other)?;
+            {
+                Ok(initialized) => initialized,
+                Err(error) => {
+                    let error = harn_vm::ClientError::Other(error);
+                    state
+                        .provider_errors
+                        .insert(provider.clone(), error.clone());
+                    return Err(error);
+                }
+            };
             if let Some(client) = initialized.remove(&provider) {
                 state.clients.insert(provider.clone(), client);
             }
@@ -676,6 +717,52 @@ pub fn call(_harness: Harness, method, _args) { return method }
         assert!(state
             .initialized_project_providers
             .contains(&harn_vm::ProviderId::from("concurrent_valid")));
+    }
+
+    #[tokio::test]
+    async fn project_connector_resolver_caches_a_provider_initialization_failure() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "failed-connector-fixture"
+
+[[providers]]
+id = "failed_provider"
+connector = { harn = "./connector.harn" }
+"#,
+        )
+        .expect("write manifest");
+        let connector = project.path().join("connector.harn");
+        std::fs::write(&connector, "fn broken(").expect("write broken connector");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let resolver = ProjectConnectorResolver::new(&entry);
+
+        let first = match resolver.resolve("failed_provider").await {
+            Err(error) => error,
+            Ok(_) => panic!("broken provider must fail"),
+        };
+        std::fs::write(
+            connector,
+            r#"
+pub fn provider_id() { return "failed_provider" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "RecoveredPayload" }
+pub fn call(_harness: Harness, method, _args) { return method }
+"#,
+        )
+        .expect("repair connector after terminal failure");
+        let second = match resolver.resolve("failed_provider").await {
+            Err(error) => error,
+            Ok(_) => panic!("one resolver must retain its terminal provider failure"),
+        };
+
+        assert_eq!(first, second);
+        let state = resolver.state.lock().await;
+        assert_eq!(state.provider_errors.len(), 1);
+        assert!(state.initialized_project_providers.is_empty());
     }
 
     #[test]

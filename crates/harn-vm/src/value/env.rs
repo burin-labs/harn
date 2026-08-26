@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use crate::chunk::CompiledFunctionRef;
@@ -66,12 +68,47 @@ impl VmCallable {
 
 /// Module/export coordinates for a callable whose import graph should not be
 /// instantiated until it is actually invoked.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LazyVmCallable {
     pub(crate) module_path: PathBuf,
     pub(crate) function_name: String,
     package_execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    preparation: Option<Arc<LazyVmCallablePreparation>>,
 }
+
+type LazyVmCallablePreparationFuture =
+    Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>;
+
+struct LazyVmCallablePreparation {
+    run: Arc<dyn Fn() -> LazyVmCallablePreparationFuture + Send + Sync>,
+    result: tokio::sync::OnceCell<Result<(), String>>,
+}
+
+impl std::fmt::Debug for LazyVmCallable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyVmCallable")
+            .field("module_path", &self.module_path)
+            .field("function_name", &self.function_name)
+            .field("package_execution_guard", &self.package_execution_guard)
+            .field("has_preparation", &self.preparation.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for LazyVmCallable {
+    fn eq(&self, other: &Self) -> bool {
+        self.module_path == other.module_path
+            && self.function_name == other.function_name
+            && self.package_execution_guard == other.package_execution_guard
+            && match (&self.preparation, &other.preparation) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl Eq for LazyVmCallable {}
 
 impl LazyVmCallable {
     pub fn new(module_path: PathBuf, function_name: impl Into<String>) -> Self {
@@ -79,7 +116,35 @@ impl LazyVmCallable {
             module_path,
             function_name: function_name.into(),
             package_execution_guard: None,
+            preparation: None,
         }
+    }
+
+    /// Attach one demand-boundary preparation step shared by every clone of
+    /// this callable. Both success and failure are cached, so concurrent first
+    /// use cannot repeat setup or its external effects.
+    pub fn with_preparation<F, Fut>(mut self, preparation: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        self.preparation = Some(Arc::new(LazyVmCallablePreparation {
+            run: Arc::new(move || Box::pin(preparation())),
+            result: tokio::sync::OnceCell::new(),
+        }));
+        self
+    }
+
+    pub(crate) async fn prepare(&self) -> Result<(), VmError> {
+        let Some(preparation) = &self.preparation else {
+            return Ok(());
+        };
+        preparation
+            .result
+            .get_or_init(|| (preparation.run)())
+            .await
+            .clone()
+            .map_err(VmError::Runtime)
     }
 
     pub fn with_package_execution_guard(

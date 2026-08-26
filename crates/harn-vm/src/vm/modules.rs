@@ -272,6 +272,7 @@ impl Vm {
         match callable {
             crate::value::VmCallable::Eager(closure) => Ok(Arc::clone(closure)),
             crate::value::VmCallable::Lazy(lazy) => {
+                lazy.prepare().await?;
                 let (cache_key, module_path) = self.lazy_callable_module_path(lazy);
                 let next_guard = lazy
                     .package_execution_guard_handle()

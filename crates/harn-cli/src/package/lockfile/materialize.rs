@@ -99,6 +99,30 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageErro
     ensure_dependencies_materialized_in(&workspace, anchor)
 }
 
+/// Materialize the nearest manifest's dependencies only when the already-built
+/// reachable module graph names one of its declared package aliases.
+///
+/// This is the shared policy seam for entrypoints and deferred handlers. The
+/// caller owns graph construction because it may need to reuse or rebuild that
+/// graph after this function publishes a package generation.
+pub(crate) fn ensure_reachable_dependencies_materialized(
+    anchor: &Path,
+    graph: &harn_modules::ModuleGraph,
+) -> Result<bool, PackageError> {
+    let declared_dependencies = load_nearest_manifest(anchor)
+        .into_result()?
+        .map(|(manifest, _)| manifest.dependencies)
+        .unwrap_or_default();
+    let needs_dependencies = graph
+        .package_import_aliases()
+        .iter()
+        .any(|alias| declared_dependencies.contains_key(alias));
+    if needs_dependencies {
+        ensure_dependencies_materialized(anchor)?;
+    }
+    Ok(needs_dependencies)
+}
+
 pub(crate) fn ensure_dependencies_materialized_in(
     workspace: &PackageWorkspace,
     anchor: &Path,
