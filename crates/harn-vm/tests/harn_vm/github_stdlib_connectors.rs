@@ -164,3 +164,29 @@ pipeline main(harness: Harness, task: unknown) {
     assert_eq!(calls[8].1["pull_number"], 7);
     assert_eq!(calls[10].1["state"], "closed");
 }
+
+#[test]
+fn connector_call_exposes_typed_client_failure_to_harn() {
+    let client = Arc::new(RecordingClient::default());
+    let output = run_with_github_client(
+        r#"
+pipeline main(harness: Harness, task: unknown) {
+  try {
+    harness.net.connector_call("github", "missing.method", {})
+  } catch (error) {
+    assert_eq(type_of(error), "dict", "connector error value")
+    assert_eq(error.error, "connector_error", "connector error family")
+    assert_eq(error.kind, "method_not_found", "connector error kind")
+    assert_eq(error.message, "missing.method", "connector error message")
+    harness.stdio.log("typed connector error")
+    return
+  }
+  throw "connector call unexpectedly succeeded"
+}
+"#,
+        client,
+    )
+    .expect("Harn source should catch the connector failure");
+
+    assert!(output.contains("[harn] typed connector error"));
+}
