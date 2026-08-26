@@ -481,6 +481,20 @@ pub fn scope_llm_runtime_overrides_with_provider_endpoints<F: Future>(
     scope_ambient(scope, inner)
 }
 
+/// Run one entrypoint future with an execution-owned trigger registry.
+///
+/// The registry is swapped around every poll with the rest of the ambient
+/// execution scope. Manifest reconciliation and dynamic registrations made by
+/// the entrypoint therefore cannot leak into a later in-process run, while the
+/// caller's exact registry is restored when the future yields or completes.
+pub fn scope_fresh_trigger_registry<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_trigger_registry(crate::triggers::registry::runtime::fresh_trigger_registry());
+    scope_ambient(scope, inner)
+}
+
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
     /// execution scope. See the module docs.
@@ -596,12 +610,54 @@ mod tests {
         current_llm_render_context, LlmRenderContext, LlmRenderContextGuard,
     };
     use std::future::pending;
+    use std::sync::Arc;
 
     fn policy_named(tool: &str) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: vec![tool.to_string()],
             ..Default::default()
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fresh_trigger_registry_scope_survives_task_migration() {
+        let stable = scope_fresh_trigger_registry(async {
+            let owner = crate::triggers::registry::active_trigger_registry();
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            Arc::ptr_eq(
+                &owner,
+                &crate::triggers::registry::active_trigger_registry(),
+            )
+        })
+        .await;
+
+        assert!(stable, "one logical run must retain one trigger registry");
+    }
+
+    #[tokio::test]
+    async fn fresh_trigger_registry_scopes_are_isolated_and_restore_the_caller() {
+        let caller = crate::triggers::registry::active_trigger_registry();
+        let (alpha, beta) = tokio::join!(
+            scope_fresh_trigger_registry(async {
+                let owner = crate::triggers::registry::active_trigger_registry();
+                tokio::task::yield_now().await;
+                owner
+            }),
+            scope_fresh_trigger_registry(async {
+                let owner = crate::triggers::registry::active_trigger_registry();
+                tokio::task::yield_now().await;
+                owner
+            }),
+        );
+
+        assert!(!Arc::ptr_eq(&alpha, &beta));
+        assert!(!Arc::ptr_eq(&alpha, &caller));
+        assert!(!Arc::ptr_eq(&beta, &caller));
+        assert!(Arc::ptr_eq(
+            &caller,
+            &crate::triggers::registry::active_trigger_registry(),
+        ));
     }
 
     #[tokio::test]

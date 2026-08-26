@@ -104,7 +104,9 @@ Embedded callers select the same contract with
 `ProjectRuntimeMode::EagerHandlers` for fail-fast handler initialization; the
 default `Project` mode keeps hooks active without reconciling durable trigger
 state. The JSON execution API has the matching `execute_run_json_with_options`
-entrypoint.
+entrypoint. Every in-process entrypoint owns a poll-scoped trigger registry;
+manifest bindings created by one run are discarded at its boundary while the
+embedding caller's prior registry is restored unchanged.
 
 Use `--standalone` for latency-sensitive utilities and policy scripts that must
 behave the same regardless of their containing directory. Relative and standard

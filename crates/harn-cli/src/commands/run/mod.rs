@@ -758,6 +758,10 @@ fn entry_source_dir(path: &str) -> std::path::PathBuf {
 // the intentional reborrow pattern here.
 #[allow(clippy::needless_option_as_deref)]
 async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
+    harn_vm::orchestration::scope_fresh_trigger_registry(execute_run_inner_isolated(inputs)).await
+}
+
+async fn execute_run_inner_isolated(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let mut inputs = inputs;
     let json_session = inputs.json.take();
     let Some(json_session) = json_session else {
