@@ -2,7 +2,7 @@
 //! building the harness it executes against, and the staged error type that
 //! reports where execution stopped.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
 use crate::*;
@@ -409,8 +409,18 @@ async fn initialized_connector_clients(
     provider_connectors: &[package::ResolvedProviderConnectorConfig],
 ) -> Result<BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>, String> {
     let registry = build_connector_registry(provider_connectors).await?;
+    initialized_registry_clients(&registry, connector_context().await?).await
+}
+
+async fn connector_context() -> Result<harn_vm::ConnectorCtx, String> {
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
+    connector_context_for_event_log(event_log).await
+}
+
+async fn connector_context_for_event_log(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+) -> Result<harn_vm::ConnectorCtx, String> {
     let secrets: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(
         harn_vm::secrets::configured_secret_chain()
             .map_err(|error| format!("failed to configure secret providers: {error}"))?,
@@ -421,13 +431,19 @@ async fn initialized_connector_clients(
             .await
             .map_err(|error| error.to_string())?,
     );
-    let context = harn_vm::ConnectorCtx {
+    Ok(harn_vm::ConnectorCtx {
         event_log,
         secrets,
         inbox,
         metrics,
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
-    };
+    })
+}
+
+async fn initialized_registry_clients(
+    registry: &harn_vm::ConnectorRegistry,
+    context: harn_vm::ConnectorCtx,
+) -> Result<BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>, String> {
     registry
         .init_all(context)
         .await
@@ -437,8 +453,16 @@ async fn initialized_connector_clients(
 
 struct ProjectConnectorResolver {
     anchor: PathBuf,
-    clients:
-        tokio::sync::OnceCell<BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>>,
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    state: tokio::sync::Mutex<ProjectConnectorState>,
+}
+
+#[derive(Default)]
+struct ProjectConnectorState {
+    connectors: Option<package::ResolvedProviderConnectors>,
+    context: Option<harn_vm::ConnectorCtx>,
+    clients: BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>,
+    initialized_project_providers: BTreeSet<harn_vm::ProviderId>,
 }
 
 impl ProjectConnectorResolver {
@@ -452,7 +476,9 @@ impl ProjectConnectorResolver {
         };
         Self {
             anchor: absolute.canonicalize().unwrap_or(absolute),
-            clients: tokio::sync::OnceCell::new(),
+            event_log: harn_vm::event_log::active_event_log()
+                .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64)),
+            state: tokio::sync::Mutex::new(ProjectConnectorState::default()),
         }
     }
 }
@@ -463,23 +489,70 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
         &self,
         provider: &str,
     ) -> Result<Option<Arc<dyn harn_vm::ConnectorClient>>, harn_vm::ClientError> {
-        let clients = self
-            .clients
-            .get_or_try_init(|| async {
-                let connectors = package::try_load_provider_connectors(&self.anchor)
-                    .map_err(|error| error.to_string())?;
-                initialized_connector_clients(&connectors.configs).await
+        let provider = harn_vm::ProviderId::from(provider);
+        let mut state = self.state.lock().await;
+        if state.connectors.is_none() {
+            let anchor = self.anchor.clone();
+            let connectors =
+                tokio::task::spawn_blocking(move || package::try_load_provider_connectors(&anchor))
+                    .await
+                    .map_err(|error| {
+                        harn_vm::ClientError::Other(format!(
+                            "project connector metadata task failed: {error}"
+                        ))
+                    })?
+                    .map_err(|error| harn_vm::ClientError::Other(error.to_string()))?;
+            state.connectors = Some(connectors);
+        }
+
+        let config = state
+            .connectors
+            .as_ref()
+            .and_then(|connectors| {
+                connectors
+                    .configs
+                    .iter()
+                    .find(|config| config.id == provider)
             })
+            .cloned();
+        let needs_project_initialization =
+            config.is_some() && !state.initialized_project_providers.contains(&provider);
+        if state.context.is_none() {
+            let context = connector_context_for_event_log(self.event_log.clone())
+                .await
+                .map_err(harn_vm::ClientError::Other)?;
+            let registry = harn_vm::ConnectorRegistry::default();
+            state.clients = initialized_registry_clients(&registry, context.clone())
+                .await
+                .map_err(harn_vm::ClientError::Other)?;
+            state.context = Some(context);
+        }
+
+        if needs_project_initialization {
+            let config = config.as_ref().expect("project connector config");
+            let mut registry = harn_vm::ConnectorRegistry::empty();
+            register_provider_connector(&mut registry, config)
+                .await
+                .map_err(harn_vm::ClientError::Other)?;
+            let mut initialized = initialized_registry_clients(
+                &registry,
+                state.context.as_ref().expect("connector context").clone(),
+            )
             .await
             .map_err(harn_vm::ClientError::Other)?;
-        Ok(clients.get(&harn_vm::ProviderId::from(provider)).cloned())
+            if let Some(client) = initialized.remove(&provider) {
+                state.clients.insert(provider.clone(), client);
+            }
+            state.initialized_project_providers.insert(provider.clone());
+        }
+        Ok(state.clients.get(&provider).cloned())
     }
 }
 
 /// Build an empty connector projection for a VM and defer the core registry,
 /// project packages, manifest connector modules, and credential binding until
-/// the first connector call. The resolver is shared by the VM tree and
-/// initializes at most once even when concurrent tasks race on first use.
+/// the first connector call. The resolver is shared by the VM tree, prepares
+/// metadata once, and initializes each named project provider at most once.
 pub(crate) fn project_connector_clients(anchor: &Path) -> harn_vm::VmConnectorClients {
     harn_vm::VmConnectorClients::new(
         BTreeMap::new(),
@@ -492,18 +565,26 @@ pub(crate) async fn build_connector_registry(
 ) -> Result<harn_vm::ConnectorRegistry, String> {
     let mut registry = harn_vm::ConnectorRegistry::default();
     for config in provider_connectors {
-        if let Some(connector) = package::load_provider_connector(config)
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            registry.remove(&config.id);
-            registry
-                .register(connector)
-                .map_err(|error| error.to_string())?;
-        }
-        registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
+        register_provider_connector(&mut registry, config).await?;
     }
     Ok(registry)
+}
+
+async fn register_provider_connector(
+    registry: &mut harn_vm::ConnectorRegistry,
+    config: &package::ResolvedProviderConnectorConfig,
+) -> Result<(), String> {
+    if let Some(connector) = package::load_provider_connector(config)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        registry.remove(&config.id);
+        registry
+            .register(connector)
+            .map_err(|error| error.to_string())?;
+    }
+    registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
+    Ok(())
 }
 
 pub(crate) fn default_harness() -> Result<harn_vm::Harness, String> {
@@ -531,8 +612,71 @@ pub(crate) fn default_harness_for_secret_namespace(
 
 #[cfg(test)]
 mod tests {
-    use super::{default_harness_for_secret_namespace, should_install_default_connector_clients};
+    use super::{
+        default_harness_for_secret_namespace, should_install_default_connector_clients,
+        ProjectConnectorResolver,
+    };
+    use harn_vm::ConnectorClientResolver;
     use std::path::Path;
+    use std::sync::Arc;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn project_connector_resolver_initializes_one_provider_once_across_tasks() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "concurrent-connector-fixture"
+
+[[providers]]
+id = "concurrent_valid"
+connector = { harn = "./connector.harn" }
+"#,
+        )
+        .expect("write manifest");
+        std::fs::write(
+            project.path().join("connector.harn"),
+            r#"
+pub fn provider_id() { return "concurrent_valid" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "ConcurrentValidPayload" }
+pub fn call(_harness: Harness, method, _args) { return method }
+"#,
+        )
+        .expect("write connector");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let resolver = Arc::new(ProjectConnectorResolver::new(&entry));
+
+        let tasks = (0..8)
+            .map(|_| {
+                let resolver = resolver.clone();
+                tokio::spawn(async move {
+                    let client = resolver
+                        .resolve("concurrent_valid")
+                        .await
+                        .expect("resolve")
+                        .expect("client");
+                    client
+                        .call("ping", serde_json::Value::Null)
+                        .await
+                        .expect("call")
+                })
+            })
+            .collect::<Vec<_>>();
+        for task in tasks {
+            assert_eq!(
+                task.await.expect("task"),
+                serde_json::Value::String("ping".to_string())
+            );
+        }
+        let state = resolver.state.lock().await;
+        assert_eq!(state.initialized_project_providers.len(), 1);
+        assert!(state
+            .initialized_project_providers
+            .contains(&harn_vm::ProviderId::from("concurrent_valid")));
+    }
 
     #[test]
     fn conformance_skips_connector_clients_unless_fixture_uses_connectors() {

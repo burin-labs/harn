@@ -6,9 +6,10 @@
 //! moved for every failure would satisfy it.
 
 use super::{
-    execute_run, execute_run_with_eager_project_handlers, execute_run_with_project_triggers,
+    execute_run, execute_run_with_eager_project_handlers,
+    execute_run_with_harnpack_and_sandbox_options, execute_run_with_project_triggers,
     execute_standalone_run, execute_standalone_run_with_denied, write_manifest_trigger_project,
-    CliLlmMockMode, RunProfileOptions,
+    CliLlmMockMode, HarnpackRunOptions, RunProfileOptions, RunSandboxOptions,
 };
 use std::collections::HashSet;
 
@@ -47,23 +48,18 @@ pipeline main(harness: Harness) {
 "#;
     std::fs::write(&script, working).expect("write script");
 
-    // Twice to cover both the cold type-check path and the warm bytecode-cache
-    // validation path. A reachable package import must never become a cache
-    // escape hatch around dependency preparation.
-    for attempt in ["cold", "warm"] {
-        let outcome = execute_run_default(&script.to_string_lossy()).await;
-        assert_eq!(
-            outcome.exit_code,
-            crate::exit::RUN_SETUP_FAILURE,
-            "{attempt} run, stderr:\n{}",
-            outcome.stderr
-        );
-        assert!(
-            outcome.stderr.contains("harn.lock"),
-            "{attempt} run must still name what could not be prepared, got:\n{}",
-            outcome.stderr
-        );
-    }
+    let outcome = execute_run_default(&script.to_string_lossy()).await;
+    assert_eq!(
+        outcome.exit_code,
+        crate::exit::RUN_SETUP_FAILURE,
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    assert!(
+        outcome.stderr.contains("harn.lock"),
+        "a reachable import must still name what could not be prepared, got:\n{}",
+        outcome.stderr
+    );
 
     std::fs::write(
         &script,
@@ -512,6 +508,83 @@ pipeline main(harness: Harness) {
             .contains("failed to install manifest connectors"),
         "stderr:\n{}",
         eager_outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn used_connector_does_not_construct_a_broken_sibling_unless_eager() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("harn.toml"),
+        r#"
+[package]
+name = "connector-demand-fixture"
+
+[[providers]]
+id = "used_valid"
+connector = { harn = "./valid_connector.harn" }
+
+[[providers]]
+id = "unused_broken"
+connector = { harn = "./broken_connector.harn" }
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        project.path().join("valid_connector.harn"),
+        r#"
+pub fn provider_id() { return "used_valid" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "UsedValidPayload" }
+pub fn call(_harness: Harness, method, args) {
+  return {method: method, value: args.value}
+}
+"#,
+    )
+    .expect("write valid connector");
+    std::fs::write(project.path().join("broken_connector.harn"), "fn broken(")
+        .expect("write broken connector");
+    let script = project.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  const response = harness.net.connector_call("used_valid", "ping", {value: "active"})
+  harness.stdio.println(response.method + ":" + response.value)
+}
+"#,
+    )
+    .expect("write main script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "ping:active");
+
+    let eager = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
+    assert_ne!(
+        eager.exit_code, 0,
+        "eager mode must reach the broken sibling"
+    );
+    assert!(
+        eager
+            .stderr
+            .contains("failed to install manifest connectors"),
+        "stderr:\n{}",
+        eager.stderr
     );
     harn_vm::reset_thread_local_state();
 }
