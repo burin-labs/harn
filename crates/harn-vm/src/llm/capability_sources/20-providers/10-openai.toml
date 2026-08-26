@@ -112,6 +112,14 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# GPT-5.4 accepts an explicit temperature when reasoning is off, but fixes
+# that value while effort-based reasoning is active. Keep this conditional
+# rather than marking temperature unsupported for every request.
+[[provider.openai]]
+model_match = ["gpt-5.4*", "openai/gpt-5.4*"]
+extends = true
+reasoning_excluded_portable_options = ["temperature"]
+
 # gpt-5.4+ exposes native `tool_search` on the Responses API. gpt-5.x
 # reasoning models reject the legacy `max_tokens` request field on
 # `/v1/chat/completions` and require `max_completion_tokens` instead.

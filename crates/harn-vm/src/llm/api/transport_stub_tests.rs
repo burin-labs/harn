@@ -285,7 +285,7 @@ mod managed_supply_tests;
 mod cache_accounting_tests;
 
 #[test]
-fn capability_admission_rejects_before_transport_egress() {
+fn reasoning_scoped_capability_admission_rejects_before_transport_egress() {
     let _guard = env_guard();
     let _allow_llm_transport = allow_stubbed_llm_transport();
     let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -297,15 +297,18 @@ fn capability_admission_rejects_before_transport_egress() {
     crate::llm::capabilities::set_user_overrides_toml(
         r#"
 [[provider.admission-sentinel]]
-model_match = "unsupported-temperature"
-temperature_supported = false
+model_match = "reasoning-temperature"
+reasoning_excluded_portable_options = ["temperature"]
 "#,
     )
     .expect("capability overlay");
 
     let mut opts = base_opts("admission-sentinel");
-    opts.model = "unsupported-temperature".to_string();
+    opts.model = "reasoning-temperature".to_string();
     opts.temperature = Some(0.2);
+    opts.thinking = crate::llm::api::ThinkingConfig::Effort {
+        level: crate::llm::api::ReasoningEffort::Low,
+    };
     opts.portable_option_intent
         .insert(crate::llm::capabilities::PortableOption::Temperature);
 
@@ -335,7 +338,7 @@ temperature_supported = false
     );
     assert_eq!(
         fields.get("model").map(crate::value::VmValue::display),
-        Some("unsupported-temperature".to_string())
+        Some("reasoning-temperature".to_string())
     );
     assert_eq!(
         request_count.load(std::sync::atomic::Ordering::SeqCst),

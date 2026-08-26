@@ -302,6 +302,15 @@ pub(crate) fn capabilities_to_vm_value(
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("reasoning_excluded_portable_options"),
+        string_list_to_vm_value(
+            caps.reasoning_excluded_portable_options
+                .iter()
+                .map(|option| option.name().to_string())
+                .collect(),
+        ),
+    );
+    dict.insert(
         crate::value::intern_key("seed_supported"),
         VmValue::Bool(caps.seed_supported),
     );

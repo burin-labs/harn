@@ -35,6 +35,9 @@ pub struct ProviderCapabilityMatrixRow {
     /// provider defaults rather than the printed per-rule values.
     pub extends: bool,
     pub thinking: Vec<String>,
+    /// Caller-selected generation options this rule accepts normally but
+    /// rejects while reasoning is enabled.
+    pub reasoning_excluded_portable_options: Vec<String>,
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
@@ -316,6 +319,13 @@ fn rule_to_matrix_row(
         version_min: rule.version_min.clone(),
         extends: rule.extends,
         thinking: rule_thinking_modes(rule),
+        reasoning_excluded_portable_options: rule
+            .reasoning_excluded_portable_options
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|option| option.name().to_string())
+            .collect(),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),

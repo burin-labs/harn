@@ -35,6 +35,25 @@ fn test_provider_capabilities_exposes_tools_for_text_only_models() {
 }
 
 #[test]
+fn provider_capabilities_exposes_reasoning_scoped_generation_limits() {
+    crate::llm::capabilities::clear_user_overrides();
+    let result = provider_capabilities_value(&[
+        VmValue::String(arcstr::ArcStr::from("openai")),
+        VmValue::String(arcstr::ArcStr::from("gpt-5.4")),
+    ])
+    .expect("builtin returned error");
+    let dict = result.as_dict().expect("expected dict");
+
+    match dict.get("reasoning_excluded_portable_options") {
+        Some(VmValue::List(options)) => assert_eq!(
+            options.iter().map(VmValue::display).collect::<Vec<_>>(),
+            ["temperature"]
+        ),
+        other => panic!("expected reasoning exclusion list, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
     crate::llm::capabilities::clear_user_overrides();
 

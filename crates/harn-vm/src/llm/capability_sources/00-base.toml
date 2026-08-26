@@ -207,6 +207,13 @@
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
 #                     openrouter, enabled, minimax, or zai.
+#   reasoning_excluded_portable_options:
+#                     caller-selected generation options that this route
+#                     accepts with reasoning off but rejects while reasoning
+#                     is enabled. Values are portable option names such as
+#                     temperature or top_p. Harn rejects the incompatible
+#                     combination before transport; it never drops the
+#                     caller's requested value.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 #   preferred_tool_format:

@@ -76,18 +76,19 @@ pub(crate) fn generate_markdown(
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |\n",
+        "| Provider | Model pattern | Version min | Thinking | Reasoning excludes | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |\n",
     );
     out.push_str(
-        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|\n",
+        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|\n",
     );
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
             escape_md(&row.provider),
             escape_md(&row.model),
             markdown_cell(&version_min_cell(row)),
             markdown_cell(&thinking_cell(row)),
+            markdown_cell(&reasoning_exclusions_cell(row)),
             yes_no(row.vision),
             yes_no(row.audio),
             yes_no(row.pdf),
@@ -386,6 +387,14 @@ fn thinking_cell(row: &ProviderCapabilityMatrixRow) -> String {
     }
 }
 
+fn reasoning_exclusions_cell(row: &ProviderCapabilityMatrixRow) -> String {
+    if row.reasoning_excluded_portable_options.is_empty() {
+        "none".to_string()
+    } else {
+        row.reasoning_excluded_portable_options.join(",")
+    }
+}
+
 fn provider_model_cell(row: &ProviderCapabilityMatrixRow) -> String {
     if row
         .model
@@ -540,9 +549,16 @@ mod tests {
         assert!(markdown.contains("Source of truth"));
         assert!(markdown.contains("harn provider catalog matrix"));
         assert!(markdown.contains(
-            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
+            "| Provider | Model pattern | Version min | Thinking | Reasoning excludes | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
         ));
+        let gpt_54 = rows
+            .iter()
+            .find(|row| row.provider == "openai" && row.model == "gpt-5.4* | openai/gpt-5.4*")
+            .expect("OpenAI GPT-5.4 conditional capability row");
+        assert_eq!(gpt_54.reasoning_excluded_portable_options, ["temperature"]);
         assert!(markdown.contains("`>=4.8; extends`"));
+        assert!(markdown
+            .contains("`gpt-5.4* \\| openai/gpt-5.4*` | `any; extends` | no | `temperature`"));
         assert!(markdown.contains("Tool-format recommendations by catalog model"));
     }
 
