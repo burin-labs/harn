@@ -1067,7 +1067,12 @@ async fn execute_live_probe_case(
             );
         }
     };
-    helpers::apply_live_transport_mode(provider, model, mode, &mut body);
+    helpers::apply_stream_transport_fields(
+        provider,
+        model,
+        mode == ToolProbeMode::Streaming,
+        &mut body,
+    );
     let client = if mode == ToolProbeMode::Streaming {
         crate::llm::streaming_client_for_base_url(&base_url)
     } else {
@@ -1428,6 +1433,9 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 #[cfg(test)]
 #[path = "tool_conformance_summary_tests.rs"]
 mod summary_tests;
+#[cfg(test)]
+#[path = "tool_conformance_request_tests.rs"]
+mod request_tests;
 #[cfg(test)]
 #[path = "tool_conformance_tests.rs"]
 mod tests;

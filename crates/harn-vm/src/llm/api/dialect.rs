@@ -153,6 +153,29 @@ impl DialectContract {
         }
     }
 
+    /// Add the streaming transport fields after the provider-specific body is
+    /// built. Live transport and offline request audits share this projection
+    /// so a dry-run body cannot hide a terminal-usage request the live call
+    /// will send.
+    pub(crate) fn apply_stream_transport_fields(
+        self,
+        body: &mut serde_json::Value,
+        provider: &str,
+        endpoint: &str,
+        streaming: bool,
+    ) {
+        // GenerateContent chooses SSE with `:streamGenerateContent`; its body
+        // is identical to a normal request. The generic transport never owns
+        // that endpoint, and an audit must not invent an OpenAI-style field.
+        if !streaming || self.stream_protocol() == StreamProtocol::GeminiJson {
+            return;
+        }
+        body["stream"] = serde_json::json!(true);
+        if self.requests_stream_usage(provider, endpoint) {
+            body["stream_options"] = serde_json::json!({"include_usage": true});
+        }
+    }
+
     /// Whether a finish-reason frame is only content-terminal and the parser
     /// must continue through the provider's trailing accounting frame.
     pub(crate) fn awaits_stream_usage(self, provider: &str) -> bool {

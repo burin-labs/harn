@@ -288,6 +288,9 @@ mod managed_supply_tests;
 #[path = "transport_cache_accounting_tests.rs"]
 mod cache_accounting_tests;
 
+#[path = "transport_probe_tests.rs"]
+mod probe_tests;
+
 #[test]
 fn reasoning_scoped_capability_admission_rejects_before_transport_egress() {
     let _guard = env_guard();
