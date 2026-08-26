@@ -3076,7 +3076,7 @@ logical_model = "mistral-medium-3.5-128b"
 equivalence_group = "mistral-medium-3.5-128b"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
 architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT", source_url = "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04", last_verified = "2026-06-20" }
 tier = "frontier"
 open_weight = true

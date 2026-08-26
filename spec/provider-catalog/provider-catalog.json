@@ -11552,7 +11552,7 @@
       "pricing": {
         "input_per_mtok": 1.5,
         "output_per_mtok": 7.5,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.15,
         "cache_write_per_mtok": null
       },
       "deprecation": {
