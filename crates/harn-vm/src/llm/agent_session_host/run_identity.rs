@@ -237,6 +237,13 @@ mod tests {
         assert_eq!(json["session_id"], "session-1");
         assert_eq!(json["run_id"], "run-1");
         assert_eq!(json["task"], "ship it");
+        assert_eq!(
+            json["recap"],
+            serde_json::json!({
+                "state": "unavailable",
+                "reason": "admission_terminal",
+            })
+        );
         assert_eq!(json["approval_required"], true);
         assert_eq!(json["reviewers"][0], "oncall");
     }

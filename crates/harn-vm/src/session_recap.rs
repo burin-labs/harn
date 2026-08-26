@@ -603,7 +603,7 @@ impl<'a> RecapProjector<'a> {
         };
         let text = self.policy.redact_string(&text).into_owned();
         match role.as_deref() {
-            Some("user") => {
+            Some("user") if visibility.as_deref().is_none_or(|value| value == "public") => {
                 self.turns[turn_index].recap.prompts.push(RecapTextFact {
                     text,
                     source_event_id: event.event_id,

@@ -176,7 +176,7 @@ fn progress() -> AppendEvent {
             "internal",
             "",
             json!({
-                "message": "Implemented the projector with synthetic-sensitive-marker",
+                "message": "Implemented the projector with Bearer recap-progress-token",
                 "entries": [{"content": "Add deterministic tests", "status": "in_progress"}],
                 "replace": true,
                 "metadata": {"private_reasoning": "must never surface"},
@@ -227,6 +227,26 @@ async fn create_session(store: &dyn SessionStore, id: &str) {
 async fn append_fixture(store: &dyn SessionStore, id: &str) {
     for event in [
         user("Implement durable recaps"),
+        identified(
+            SessionEventKind::Message,
+            transcript(
+                "message",
+                "user",
+                "private",
+                "private injected user-role context",
+                json!({}),
+            ),
+        ),
+        identified(
+            SessionEventKind::Message,
+            transcript(
+                "message",
+                "user",
+                "internal",
+                "internal injected user-role context",
+                json!({}),
+            ),
+        ),
         checkpoint(0, "iteration_start"),
         assistant("I implemented the projection.", "public"),
         assistant("private chain of thought", "private"),
@@ -257,12 +277,12 @@ async fn recap_projects_non_vacuous_typed_turn_facts_without_private_content() {
         .expect("query recap")
         .expect("session exists");
 
-    assert_eq!(recap.coverage.scanned, 15);
+    assert_eq!(recap.coverage.scanned, 17);
     assert_eq!(recap.coverage.matched, 14);
     assert_eq!(recap.coverage.pending, 0);
     assert_eq!(recap.coverage.unassigned, 0);
     assert!(!recap.coverage.truncated);
-    assert_eq!(recap.source.events.len(), 15);
+    assert_eq!(recap.source.events.len(), 17);
     assert!(recap.content_hash.starts_with("sha256:"));
     assert!(recap.projection_hash.starts_with("sha256:"));
 
@@ -304,9 +324,11 @@ async fn recap_projects_non_vacuous_typed_turn_facts_without_private_content() {
     );
 
     let rendered = serde_json::to_string(&recap).expect("serialize recap");
+    assert!(!rendered.contains("private injected user-role context"));
+    assert!(!rendered.contains("internal injected user-role context"));
     assert!(!rendered.contains("private chain of thought"));
     assert!(!rendered.contains("must never surface"));
-    assert!(!rendered.contains("synthetic-sensitive-marker"));
+    assert!(!rendered.contains("Bearer recap-progress-token"));
     assert!(!rendered.contains(&terminal_secret()));
     assert!(!rendered.contains("Bearer hidden-token"));
     assert!(rendered.contains("[redacted]"));
@@ -408,7 +430,7 @@ async fn bounded_query_reports_pending_rows_and_an_exact_next_cursor() {
     .expect("query bounded recap")
     .expect("bounded session exists");
     assert_eq!(recap.coverage.scanned, 3);
-    assert_eq!(recap.coverage.pending, 12);
+    assert_eq!(recap.coverage.pending, 14);
     assert!(recap.coverage.truncated);
     assert_eq!(recap.cursor.last_event_id, Some(3));
     assert_eq!(recap.cursor.next_event_id, Some(4));

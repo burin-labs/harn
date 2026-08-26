@@ -65,7 +65,11 @@ pub type AgentRecapToolExchange = {
   sourceEventIds: list<int>,
 }
 
-pub type AgentRecapPlanStepStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled"
+pub type AgentRecapPlanStepStatus = "pending" \
+  | "in_progress" \
+  | "completed" \
+  | "blocked" \
+  | "cancelled"
 
 pub type AgentRecapPlanStep = {id: string, content: string, status: AgentRecapPlanStepStatus}
 
