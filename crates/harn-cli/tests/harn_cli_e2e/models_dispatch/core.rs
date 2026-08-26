@@ -195,7 +195,7 @@ fn models_test_mock_human_line_shape_is_stable() {
         "first_token_ms=",
         "input_tokens=",
         "output_tokens=",
-        "estimated_cost_usd=0",
+        "estimated_cost_usd=unavailable",
     ] {
         assert!(
             harn.stdout.contains(fragment),
@@ -227,13 +227,7 @@ fn models_test_mock_json_shape_is_stable() {
     );
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    for key in [
-        "model_id",
-        "provider",
-        "input_tokens",
-        "output_tokens",
-        "estimated_cost_usd",
-    ] {
+    for key in ["model_id", "provider", "input_tokens", "output_tokens"] {
         assert!(!harn_value[key].is_null(), "missing models test {key}");
     }
     let latency_key = "latency_ms";
@@ -242,7 +236,11 @@ fn models_test_mock_json_shape_is_stable() {
         "harn {latency_key} should be integer; got: {}",
         harn_value[latency_key]
     );
-    assert_eq!(harn_value["estimated_cost_usd"].as_f64(), Some(0.0));
+    assert!(
+        harn_value["estimated_cost_usd"].is_null(),
+        "mock model has no catalog price; got: {}",
+        harn_value["estimated_cost_usd"]
+    );
 }
 
 #[test]
