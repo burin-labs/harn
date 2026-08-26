@@ -132,7 +132,10 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         };
         match cache_is_authorized {
             Ok(true) => {}
-            Ok(false) => candidate.chunk = None,
+            Ok(false) => {
+                candidate.chunk = None;
+                candidate.link_table = None;
+            }
             Err(error) => {
                 stderr.push_str(&format!("error: {error}\n"));
                 return Err(ChunkLoadFailure::PackageMaterialization);
@@ -478,7 +481,7 @@ fixture_dep = { path = "./vendor/replacement" }
         .expect("update lock to replacement dependency");
         stderr.clear();
         let mut replacement_timing = RunTiming::default();
-        compile_or_load_chunk_with_timing(
+        let replacement_chunk = compile_or_load_chunk_with_timing(
             &path,
             &mut stderr,
             Some(&mut replacement_timing),
@@ -489,6 +492,10 @@ fixture_dep = { path = "./vendor/replacement" }
         assert!(
             !replacement_timing.cache_hit,
             "a valid new lock must still invalidate the old cached generation"
+        );
+        assert!(
+            replacement_chunk.link_table.is_none(),
+            "rejected package authority must discard the old module link table"
         );
         harn_vm::reset_thread_local_state();
     }

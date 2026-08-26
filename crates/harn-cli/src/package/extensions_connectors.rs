@@ -146,3 +146,16 @@ pub async fn load_provider_connector(
         }
     }
 }
+
+/// Materialize only dependencies imported by one Harn connector module.
+/// Built-in and invalid declarations have no source graph to prepare.
+pub fn ensure_provider_connector_dependencies(
+    config: &ResolvedProviderConnectorConfig,
+) -> Result<(), PackageError> {
+    let ResolvedProviderConnectorKind::Harn { module } = &config.connector else {
+        return Ok(());
+    };
+    let module_path = harn_vm::resolve_module_import_path(&config.manifest_dir, module);
+    let graph = harn_modules::build(std::slice::from_ref(&module_path));
+    ensure_reachable_dependencies_materialized(&module_path, &graph).map(|_| ())
+}

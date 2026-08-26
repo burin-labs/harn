@@ -55,8 +55,8 @@ pub(crate) use extensions_connectors::{
     dedupe_provider_connectors, installed_package_provider_connectors,
 };
 pub use extensions_connectors::{
-    load_provider_connector, try_load_provider_connectors, try_load_root_provider_connectors,
-    ResolvedProviderConnectors,
+    ensure_provider_connector_dependencies, load_provider_connector, try_load_provider_connectors,
+    try_load_root_provider_connectors, ResolvedProviderConnectors,
 };
 pub(crate) use generations::*;
 pub(crate) use git_cwd::Cwd;

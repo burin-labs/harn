@@ -661,6 +661,13 @@ async fn register_provider_connector(
             .map_err(|error| error.to_string())?,
         package::ResolvedProviderConnectorKind::Harn { .. }
         | package::ResolvedProviderConnectorKind::Invalid(_) => {
+            let preparation = config.clone();
+            tokio::task::spawn_blocking(move || {
+                package::ensure_provider_connector_dependencies(&preparation)
+            })
+            .await
+            .map_err(|error| format!("connector dependency preparation task failed: {error}"))?
+            .map_err(|error| error.to_string())?;
             if let Some(connector) = package::load_provider_connector(config)
                 .await
                 .map_err(|error| error.to_string())?
@@ -890,6 +897,76 @@ connector = { rust = "builtin" }
             !project.path().join("harn.lock").exists(),
             "root provider resolution must not materialize dependencies"
         );
+    }
+
+    #[tokio::test]
+    async fn root_harn_provider_prepares_only_its_reachable_dependency() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "root-harn-provider-fixture"
+
+[dependencies]
+fixture_dep = { path = "./vendor/fixture_dep" }
+
+[[providers]]
+id = "root_dep"
+connector = { harn = "./connector.harn" }
+"#,
+        )
+        .expect("write manifest");
+        let dependency = project.path().join("vendor/fixture_dep");
+        std::fs::create_dir_all(&dependency).expect("create dependency");
+        std::fs::write(
+            dependency.join("harn.toml"),
+            "[package]\nname = \"fixture_dep\"\n",
+        )
+        .expect("write dependency manifest");
+        std::fs::write(
+            dependency.join("value.harn"),
+            "pub fn package_value() -> int { return 42 }\n",
+        )
+        .expect("write dependency module");
+        std::fs::write(
+            project.path().join("connector.harn"),
+            r#"
+import { package_value } from "fixture_dep/value"
+
+pub fn provider_id() { return "root_dep" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "RootDependencyPayload" }
+pub fn call(_harness: Harness, _method, _args) { return package_value() }
+"#,
+        )
+        .expect("write connector");
+        let cache = tempfile::tempdir().expect("package cache");
+        crate::package::install_packages_in(
+            &crate::package::PackageWorkspace::for_test(project.path(), cache.path()),
+            false,
+            None,
+            false,
+        )
+        .expect("install initial generation");
+        std::fs::remove_dir_all(project.path().join(".harn")).expect("remove initial generation");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let resolver = ProjectConnectorResolver::new(&entry);
+
+        let client = resolver
+            .resolve("root_dep")
+            .await
+            .expect("prepare root Harn connector dependency")
+            .expect("root Harn connector client");
+        assert_eq!(
+            client
+                .call("value", serde_json::Value::Null)
+                .await
+                .expect("call connector"),
+            serde_json::json!(42)
+        );
+        assert!(project.path().join(".harn/package-current.toml").is_file());
     }
 
     #[test]
