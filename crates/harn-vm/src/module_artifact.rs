@@ -587,7 +587,7 @@ fn compile_module_artifact_with_options(
         compiler.add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
         compiler.prepare_module_context(program);
         let func_chunk = compiler
-            .compile_fn_body(type_params, params, body, module_source_file.clone())
+            .compile_named_fn_body(name, type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
         functions.insert(name.clone(), func_chunk.freeze_for_cache());
     }

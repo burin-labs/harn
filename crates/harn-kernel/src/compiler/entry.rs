@@ -101,4 +101,18 @@ impl Compiler {
             has_runtime_type_checks,
         })
     }
+
+    /// Compile a declared module function and retain its stable diagnostic name.
+    pub fn compile_named_fn_body(
+        &mut self,
+        name: &str,
+        type_params: &[harn_parser::TypeParam],
+        params: &[TypedParam],
+        body: &[SNode],
+        source_file: Option<String>,
+    ) -> Result<CompiledFunction, CompileError> {
+        let mut function = self.compile_fn_body(type_params, params, body, source_file)?;
+        function.name = name.to_string();
+        Ok(function)
+    }
 }

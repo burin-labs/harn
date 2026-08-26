@@ -27,6 +27,7 @@ mod demo_cli;
 mod eval_prompt_cli;
 mod flow_ship_cli;
 mod harnpack_run;
+mod imported_parameter_diagnostic;
 mod llm_mock_cli;
 #[cfg(unix)]
 mod orchestrator_http;
