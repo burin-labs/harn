@@ -44,7 +44,7 @@ capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 # automatic/QC/eval placement.
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
 tier = "frontier"
-open_weight = false
+open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
@@ -86,6 +86,42 @@ strengths = ["speed", "coding", "agentic", "long_context", "tool_use", "reasonin
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
 # ---------- DeepInfra — open-weight OpenAI-compatible host --------------------
+[models."deepinfra/moonshotai/Kimi-K3"]
+name = "Kimi K3 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "moonshotai/Kimi-K3"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# DeepInfra's authenticated model inventory and live usage receipts agreed on
+# this rate on 2026-08-26.
+pricing = { input_per_mtok = 2.85, output_per_mtok = 14.25, cache_read_per_mtok = 0.285 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."deepinfra/Qwen/Qwen3.8-2.4T-A95B"]
+name = "Qwen3.8 2.4T A95B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.8-2.4T-A95B"
+logical_model = "qwen3.8-2.4t-a95b"
+equivalence_group = "qwen3.8-2.4t-a95b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# DeepInfra's authenticated model inventory and live usage receipts agreed on
+# this rate and context window on 2026-08-26.
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
 [models."deepinfra/deepseek-ai/DeepSeek-V4-Pro"]
 name = "DeepSeek V4 Pro (DeepInfra)"
 provider = "deepinfra"

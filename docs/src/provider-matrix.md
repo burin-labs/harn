@@ -72,6 +72,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `dashscope` | `dashscope/qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `deepinfra` | `*kimi-k3*` | `any` | `enabled,effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `deepinfra` | `*qwen3.8*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `*deepseek*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `*glm-5.2*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `deepinfra` | `*glm-5*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -256,11 +258,13 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `sambanova` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `siliconflow` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `Qwen/Qwen3.6-Plus` | `any; extends` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `Qwen/Qwen3.8-2.4T-A95B` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `Qwen/Qwen3.7-Max` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `qwen/qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `qwen/qwen3-coder*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `qwen/*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `together` | `moonshotai/kimi-k3` | `any` | `enabled,effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `openai/gpt-oss-*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -335,10 +339,12 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepinfra` | `deepinfra/Qwen/Qwen3.6-27B` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5. |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5. |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/Qwen/Qwen3.8-2.4T-A95B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/moonshotai/Kimi-K3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68. |
 | `deepinfra` | `deepinfra/zai-org/GLM-4.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/zai-org/GLM-5.2` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-08-15 live probe: native channel emits 38 duplicate tool_calls for one intent under tool_choice=required (deterministic 4/4, sync + streaming); tool_choice=auto is clean. Host-specific to DeepInfra's GLM-5.2 deployment — GLM-5.1/GLM-4.7/DeepSeek on the same host and GLM-5.2 on five other hosts each return a single call. Fenced JSON text-channel tools dispatch correctly. |
@@ -513,12 +519,14 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `Qwen/Qwen3.6-Plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `Qwen/Qwen3.8-2.4T-A95B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | catalog note: Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants. |
 | `together` | `moonshotai/Kimi-K2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `moonshotai/Kimi-K3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `together/nvidia/nemotron-3-ultra-550b-a55b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `zai-org/GLM-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{"city":"string"}` instead of the real argument; tool_choice=auto was clean in every run. |
