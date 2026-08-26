@@ -339,6 +339,15 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.stop_supported),
     );
     dict.insert(
+        crate::value::intern_key("advanced_generation_options"),
+        VmValue::List(std::sync::Arc::new(
+            caps.advanced_generation_options
+                .iter()
+                .map(|option| VmValue::String(arcstr::ArcStr::from(option.name())))
+                .collect(),
+        )),
+    );
+    dict.insert(
         crate::value::intern_key("allowed_tool_choice_modes"),
         VmValue::List(std::sync::Arc::new(
             caps.allowed_tool_choice_modes

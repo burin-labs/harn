@@ -8,6 +8,7 @@
 # ChatGPT-era GPT models use Markdown prompt sections and native JSON output.
 [[provider.openai]]
 model_match = "gpt-4o*"
+advanced_generation_options = ["logprobs", "logit_bias", "prediction"]
 native_tools = true
 preferred_tool_format = "native"
 vision = true
@@ -44,6 +45,7 @@ thinking_block_style = "none"
 # Placed before the generic `gpt-*` version rows so it wins the first-match.
 [[provider.openai]]
 model_match = "gpt-*codex*"
+advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
 # Codex reasoning routes reject caller-set sampling controls. The agent loop
@@ -78,6 +80,7 @@ thinking_block_style = "reasoning_summary"
 # version rule so Harn rejects an invalid effort before spending an API call.
 [[provider.openai]]
 model_match = "gpt-5.6*"
+advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -126,6 +129,7 @@ reasoning_excluded_portable_options = ["temperature"]
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 4]
+advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -157,6 +161,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 1]
+advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -176,6 +181,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 0]
+advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true

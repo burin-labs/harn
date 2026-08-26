@@ -962,6 +962,20 @@ fn tool_choice_already_anthropic_object_is_preserved() {
 }
 
 #[test]
+fn typed_parallel_tool_calls_owns_anthropics_disable_flag() {
+    let mut payload = base_payload();
+    payload.tool_choice = Some(serde_json::json!({
+        "type": "auto",
+        "disable_parallel_tool_use": false,
+    }));
+    payload.parallel_tool_calls = Some(false);
+
+    let body = AnthropicProvider::build_request_body(&payload);
+    assert_eq!(body["tool_choice"]["type"], "auto");
+    assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+}
+
+#[test]
 fn tool_choice_null_leaves_field_unset() {
     let mut payload = base_payload();
     payload.tool_choice = Some(serde_json::Value::Null);

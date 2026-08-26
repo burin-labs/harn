@@ -176,9 +176,9 @@ impl GeminiProvider {
         // No capability flag exists for logprobs (mirroring openai_compat,
         // which gates on the payload field alone); Gemini generationConfig
         // spells the pair responseLogprobs (enable) + logprobs (top-K count).
-        if opts.logprobs {
+        if let Some(logprobs) = opts.logprobs {
             generation_config.insert("responseLogprobs".to_string(), serde_json::json!(true));
-            if let Some(top_logprobs) = opts.top_logprobs.filter(|value| *value > 0) {
+            if let Some(top_logprobs) = logprobs.top {
                 generation_config.insert("logprobs".to_string(), serde_json::json!(top_logprobs));
             }
         }
@@ -634,12 +634,18 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
-            logprobs: false,
-            top_logprobs: None,
+            logprobs: None,
+            logit_bias: Vec::new(),
+            min_p: None,
+            repetition_penalty: None,
+            prediction: None,
+            verbosity: None,
+            mirostat: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            parallel_tool_calls: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,
@@ -698,12 +704,18 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
-            logprobs: false,
-            top_logprobs: None,
+            logprobs: None,
+            logit_bias: Vec::new(),
+            min_p: None,
+            repetition_penalty: None,
+            prediction: None,
+            verbosity: None,
+            mirostat: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            parallel_tool_calls: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,
@@ -768,12 +780,18 @@ mod tests {
             temperature: None,
             top_p: None,
             top_k: None,
-            logprobs: false,
-            top_logprobs: None,
+            logprobs: None,
+            logit_bias: Vec::new(),
+            min_p: None,
+            repetition_penalty: None,
+            prediction: None,
+            verbosity: None,
+            mirostat: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            parallel_tool_calls: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,
@@ -881,8 +899,7 @@ mod tests {
         payload.seed = Some(42);
         payload.frequency_penalty = Some(0.5);
         payload.presence_penalty = Some(-0.25);
-        payload.logprobs = true;
-        payload.top_logprobs = Some(3);
+        payload.logprobs = Some(crate::llm::api::LogprobsConfig { top: Some(3) });
 
         let body = GeminiProvider::build_request_body(&payload);
         let config = &body["generationConfig"];

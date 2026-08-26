@@ -1,0 +1,25 @@
+import { detokenize, tokenize, unsafe_token_ref } from "std/llm/tokenizer"
+
+pipeline test(harness: Harness, task: unknown) {
+  const text = "hello, 世界"
+  const tokens = tokenize(text, "gpt-4o")
+  assert(len(tokens) > 0, "exact tokenization returns tokens")
+  for token in tokens {
+    assert_eq(token._type, "llm_token")
+    assert_eq(token.tokenizer, "tiktoken:o200k_base")
+    assert(token.id >= 0, "token IDs are non-negative")
+  }
+  assert_eq(detokenize(tokens), text)
+  const first = tokens[0]
+  if first == nil {
+    throw "exact tokenization unexpectedly returned no tokens"
+  }
+  const scoped = unsafe_token_ref(first.id, "tiktoken:o200k_base")
+  assert_eq(scoped.id, first.id)
+  assert_eq(scoped.tokenizer, "tiktoken:o200k_base")
+  const approximate = try {
+    tokenize("hello", "claude-sonnet-4-20250514")
+  }
+  assert(is_err(approximate), "approximate token counters cannot mint TokenRefs")
+  harness.stdio.println("llm_tokenizer_refs tests passed")
+}

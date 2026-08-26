@@ -1,0 +1,89 @@
+// @harn-entrypoint-category llm.stdlib
+/**
+ * One token in an exact model vocabulary. The tokenizer identity is part of
+ * the value so an integer from one vocabulary cannot silently reach another.
+ * `text` is nil when one token is only a fragment of a UTF-8 character.
+ */
+pub type TokenRef = {
+  _type: "llm_token",
+  id: int,
+  tokenizer: string,
+  bytes: list<int>,
+  text: string?,
+}
+
+/** A bounded bias attached to one exact token. */
+pub type TokenBias = {token: TokenRef, bias: float}
+
+/**
+ * Tokenize text with the exact vocabulary Harn owns for `model`.
+ * Approximate token counters cannot create TokenRef values.
+ *
+ * @effects: []
+ * @errors: ["The model has no exact local tokenizer"]
+ */
+pub fn tokenize(text: string, model: string) -> list<TokenRef> {
+  const raw_tokens: list<dict> = tiktoken_encode_tokens(text, model)
+  let tokens: list<TokenRef> = []
+  for raw in raw_tokens {
+    const id = to_int(raw?.id)
+    const tokenizer = raw?.tokenizer
+    if raw?._type != "llm_token" || id == nil || id < 0 || type_of(tokenizer) != "string" {
+      throw "tokenize: host tokenizer returned an invalid token reference"
+    }
+    let bytes: list<int> = []
+    for value in raw?.bytes ?? [] {
+      const byte = to_int(value)
+      if byte == nil || byte < 0 || byte > 255 {
+        throw "tokenize: host tokenizer returned an invalid token byte"
+      }
+      bytes = bytes + [byte]
+    }
+    let token_text: string? = nil
+    if raw?.text != nil {
+      if type_of(raw?.text) != "string" {
+        throw "tokenize: host tokenizer returned invalid token text"
+      }
+      token_text = to_string(raw?.text)
+    }
+    const token: TokenRef = {
+      _type: "llm_token",
+      id: id,
+      tokenizer: to_string(tokenizer),
+      bytes: bytes,
+      text: token_text,
+    }
+    tokens = tokens + [token]
+  }
+  return tokens
+}
+
+/**
+ * Decode an ordered token sequence. Every token must carry the same exact
+ * tokenizer identity.
+ *
+ * @effects: []
+ * @errors: ["The sequence mixes vocabularies or is not valid UTF-8"]
+ */
+pub fn detokenize(tokens: list<TokenRef>) -> string {
+  return tiktoken_decode_tokens(tokens)
+}
+
+/**
+ * Construct a token reference when an integration already has an exact token
+ * ID. This operation cannot prove that the ID belongs to the named tokenizer;
+ * prefer `tokenize` whenever text is available. The tokenizer identity is
+ * still mandatory and is checked against the final LLM route.
+ *
+ * @effects: []
+ * @errors: ["id must be non-negative", "tokenizer must name an exact vocabulary"]
+ */
+pub fn unsafe_token_ref(id: int, tokenizer: string) -> TokenRef {
+  if id < 0 {
+    throw "unsafe_token_ref: id must be non-negative"
+  }
+  if !starts_with(tokenizer, "tiktoken:") {
+    throw "unsafe_token_ref: tokenizer must be an exact `tiktoken:<encoder>` identity"
+  }
+  return {_type: "llm_token", id: id, tokenizer: tokenizer, bytes: [], text: nil}
+}

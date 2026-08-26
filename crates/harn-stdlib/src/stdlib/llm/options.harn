@@ -1,5 +1,6 @@
 // @harn-entrypoint-category llm.stdlib
 import { pick_keys } from "std/collections"
+import { TokenBias } from "std/llm/tokenizer"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -77,6 +78,15 @@ pub type SystemReplacement = {mode: "replace", content: string}
  */
 pub type OutputSpec = "text" | "json" | dict
 
+/** Log probabilities plus an optional count of alternatives per output token. */
+pub type Logprobs = bool | {top?: int}
+
+/** Provider-assisted predicted output used to accelerate a mostly-known response. */
+pub type PredictedOutput = {content: string}
+
+/** Ollama-style Mirostat adaptive-surprisal sampling. */
+pub type Mirostat = {version: 1 | 2, target_entropy?: float, learning_rate?: float}
+
 /**
  * The public `llm_call` options surface — one spelling per option, no
  * synonyms. The runtime registry (`__llm_call_option_registry()`, backed by
@@ -113,13 +123,19 @@ pub type LlmCallOptions = {
   temperature?: float,
   top_p?: float,
   top_k?: int,
-  logprobs?: bool,
-  top_logprobs?: int,
+  logprobs?: Logprobs,
+  logit_bias?: list<TokenBias>,
+  min_p?: float,
+  repetition_penalty?: float,
+  prediction?: PredictedOutput,
+  verbosity?: "low" | "medium" | "high",
+  mirostat?: Mirostat,
   stop?: list<string>,
   stop_at_tool_call?: bool,
   seed?: int,
   frequency_penalty?: float,
   presence_penalty?: float,
+  parallel_tool_calls?: bool,
   // Output contract (wrapper-plane retry knobs alongside).
   output?: OutputSpec,
   schema_retries?: int,

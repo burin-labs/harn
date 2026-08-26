@@ -901,6 +901,8 @@ pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<()
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&TIKTOKEN_COUNT_TOKENS_IMPL_DEF);
     vm.register_builtin_def(&TIKTOKEN_TOKENIZER_INFO_IMPL_DEF);
+    vm.register_builtin_def(&TIKTOKEN_ENCODE_TOKENS_IMPL_DEF);
+    vm.register_builtin_def(&TIKTOKEN_DECODE_TOKENS_IMPL_DEF);
     vm.register_builtin_def(&LLM_COST_IMPL_DEF);
     vm.register_builtin_def(&LLM_PRICING_BUILTIN_DEF);
     vm.register_builtin_def(&LLM_FORMAT_USD_BUILTIN_DEF);
@@ -991,6 +993,113 @@ fn tiktoken_tokenizer_info_impl(args: &[VmValue], _out: &mut String) -> Result<V
         &model,
         super::token_count::tokenizer_info_for_model(&model),
     ))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tiktoken_encode_tokens(text: string, model: string) -> list<{_type: \"llm_token\", id: int, tokenizer: string, bytes: list<int>, text: string?}>",
+    category = "llm.tokenizer"
+)]
+fn tiktoken_encode_tokens_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(VmValue::display).unwrap_or_default();
+    let model = args.get(1).map(VmValue::display).unwrap_or_default();
+    if model.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "tiktoken_encode_tokens: model is required".to_string(),
+        ));
+    }
+    let tokens = super::token_count::tokenize_exact(&text, &model)
+        .map_err(|error| VmError::Runtime(format!("tiktoken_encode_tokens: {error}")))?;
+    Ok(VmValue::List(std::sync::Arc::new(
+        tokens
+            .into_iter()
+            .map(|token| {
+                let mut value = BTreeMap::new();
+                value.put_str("_type", "llm_token");
+                value.insert("id".to_string(), VmValue::Int(i64::from(token.id)));
+                value.put_str("tokenizer", &token.tokenizer);
+                value.insert(
+                    "bytes".to_string(),
+                    VmValue::List(std::sync::Arc::new(
+                        token
+                            .bytes
+                            .iter()
+                            .map(|byte| VmValue::Int(i64::from(*byte)))
+                            .collect(),
+                    )),
+                );
+                value.insert(
+                    "text".to_string(),
+                    String::from_utf8(token.bytes)
+                        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+                        .unwrap_or(VmValue::Nil),
+                );
+                VmValue::dict(value)
+            })
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tiktoken_decode_tokens(tokens: list<{_type: \"llm_token\", id: int, tokenizer: string, bytes: list<int>, text: string?}>) -> string",
+    category = "llm.tokenizer"
+)]
+fn tiktoken_decode_tokens_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::List(tokens)) = args.first() else {
+        return Err(VmError::Runtime(
+            "tiktoken_decode_tokens: tokens must be a list of TokenRef records".to_string(),
+        ));
+    };
+    if tokens.is_empty() {
+        return Ok(VmValue::String(arcstr::ArcStr::from("")));
+    }
+    let mut identity: Option<String> = None;
+    let mut ids = Vec::with_capacity(tokens.len());
+    for (index, token) in tokens.iter().enumerate() {
+        let VmValue::Dict(token) = token else {
+            return Err(VmError::Runtime(format!(
+                "tiktoken_decode_tokens: token at index {index} is not a TokenRef record"
+            )));
+        };
+        let token_identity = token
+            .get("tokenizer")
+            .map(VmValue::display)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "tiktoken_decode_tokens: token at index {index} has no tokenizer identity"
+                ))
+            })?;
+        if identity
+            .as_ref()
+            .is_some_and(|expected| expected != &token_identity)
+        {
+            return Err(VmError::Runtime(format!(
+                "tiktoken_decode_tokens: token at index {index} uses `{token_identity}`, but the sequence uses `{}`",
+                identity.as_deref().unwrap_or_default()
+            )));
+        }
+        identity.get_or_insert(token_identity);
+        let id = match token.get("id") {
+            Some(VmValue::Int(id)) => u32::try_from(*id).map_err(|_| {
+                VmError::Runtime(format!(
+                    "tiktoken_decode_tokens: token at index {index} has an out-of-range id"
+                ))
+            })?,
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "tiktoken_decode_tokens: token at index {index} has no integer id"
+                )))
+            }
+        };
+        ids.push(id);
+    }
+    let text = super::token_count::detokenize_exact(identity.as_deref().unwrap_or_default(), &ids)
+        .map_err(|error| VmError::Runtime(format!("tiktoken_decode_tokens: {error}")))?;
+    Ok(VmValue::String(arcstr::ArcStr::from(text)))
 }
 
 fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetail) -> VmValue {
@@ -1313,6 +1422,17 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
         info.encoder
             .map(|encoder| VmValue::String(arcstr::ArcStr::from(encoder)))
             .unwrap_or(VmValue::Nil),
+    );
+    result.insert(
+        "identity".to_string(),
+        if info.exact {
+            super::token_count::exact_tokenizer_identity_for_model(model)
+                .ok()
+                .map(|identity| VmValue::String(arcstr::ArcStr::from(identity)))
+                .unwrap_or(VmValue::Nil)
+        } else {
+            VmValue::Nil
+        },
     );
     VmValue::dict(result)
 }

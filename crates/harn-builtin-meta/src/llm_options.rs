@@ -29,7 +29,8 @@
 //!   top-level keys.
 
 use crate::{
-    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_FLOAT, TY_INT, TY_LIST, TY_STRING,
+    ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_DICT, TY_FLOAT, TY_INT, TY_LIST, TY_NIL,
+    TY_STRING,
 };
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
@@ -39,6 +40,36 @@ const TY_LIST_OR_DICT: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 const TY_NUM_OR_DICT: Ty = Ty::Union(&[TY_FLOAT, TY_INT, TY_DICT]);
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
+const TY_STRING_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_NIL]);
+const LIST_INT_ARGS: &[Ty] = &[TY_INT];
+const LIST_INT: Ty = Ty::Apply("list", LIST_INT_ARGS);
+
+const TOKEN_REF: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("_type", Ty::LitString("llm_token")),
+    ShapeFieldDescriptor::new("id", TY_INT),
+    ShapeFieldDescriptor::new("tokenizer", TY_STRING),
+    ShapeFieldDescriptor::new("bytes", LIST_INT),
+    ShapeFieldDescriptor::new("text", TY_STRING_OR_NIL),
+]);
+const TOKEN_BIAS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("token", TOKEN_REF),
+    ShapeFieldDescriptor::new("bias", TY_FLOAT),
+]);
+const TOKEN_BIAS_ARGS: &[Ty] = &[TOKEN_BIAS];
+const TOKEN_BIAS_LIST: Ty = Ty::Apply("list", TOKEN_BIAS_ARGS);
+const LOGPROBS_CONFIG: Ty = Ty::Shape(&[ShapeFieldDescriptor::optional("top", TY_INT)]);
+const LOGPROBS: Ty = Ty::Union(&[TY_BOOL, LOGPROBS_CONFIG]);
+const PREDICTED_OUTPUT: Ty = Ty::Shape(&[ShapeFieldDescriptor::new("content", TY_STRING)]);
+const MIROSTAT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("version", Ty::Union(&[Ty::LitInt(1), Ty::LitInt(2)])),
+    ShapeFieldDescriptor::optional("target_entropy", TY_FLOAT),
+    ShapeFieldDescriptor::optional("learning_rate", TY_FLOAT),
+]);
+const VERBOSITY: Ty = Ty::Union(&[
+    Ty::LitString("low"),
+    Ty::LitString("medium"),
+    Ty::LitString("high"),
+]);
 
 const SYSTEM_REPLACEMENT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("mode", Ty::LitString("replace")),
@@ -81,13 +112,19 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("temperature", TY_FLOAT),
     ShapeFieldDescriptor::optional("top_p", TY_FLOAT),
     ShapeFieldDescriptor::optional("top_k", TY_INT),
-    ShapeFieldDescriptor::optional("logprobs", TY_BOOL),
-    ShapeFieldDescriptor::optional("top_logprobs", TY_INT),
+    ShapeFieldDescriptor::optional("logprobs", LOGPROBS),
+    ShapeFieldDescriptor::optional("logit_bias", TOKEN_BIAS_LIST),
+    ShapeFieldDescriptor::optional("min_p", TY_FLOAT),
+    ShapeFieldDescriptor::optional("repetition_penalty", TY_FLOAT),
+    ShapeFieldDescriptor::optional("prediction", PREDICTED_OUTPUT),
+    ShapeFieldDescriptor::optional("verbosity", VERBOSITY),
+    ShapeFieldDescriptor::optional("mirostat", MIROSTAT),
     ShapeFieldDescriptor::optional("stop", TY_STRING_OR_LIST),
     ShapeFieldDescriptor::optional("stop_at_tool_call", TY_BOOL),
     ShapeFieldDescriptor::optional("seed", TY_INT),
     ShapeFieldDescriptor::optional("frequency_penalty", TY_FLOAT),
     ShapeFieldDescriptor::optional("presence_penalty", TY_FLOAT),
+    ShapeFieldDescriptor::optional("parallel_tool_calls", TY_BOOL),
     // --- Output contract (one key; see OutputSpec in std/llm/options) ---
     ShapeFieldDescriptor::optional("output", TY_ANY),
     ShapeFieldDescriptor::optional("schema_retries", TY_INT),
@@ -171,6 +208,10 @@ const fn removed(key: &'static str, fix: &'static str) -> RemovedLlmOption {
 /// key. Provider names are listed individually so the error for
 /// `{openai: {...}}` names the exact `provider_options` rewrite.
 pub const LLM_REMOVED_OPTIONS: &[RemovedLlmOption] = &[
+    removed(
+        "top_logprobs",
+        "use `logprobs: {top: <count>}` so enabling and the requested count are one value",
+    ),
     // Output contract: one `output` key.
     removed(
         "schema",

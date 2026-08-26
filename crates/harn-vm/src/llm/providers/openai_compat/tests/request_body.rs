@@ -2,7 +2,7 @@
 //! parts, structured-output directives, and chat-template options.
 
 use super::fixtures::base_request_payload;
-use crate::llm::api::ThinkingConfig;
+use crate::llm::api::{LogprobsConfig, ThinkingConfig, TokenBias, Verbosity};
 use crate::llm::provider::LlmProvider;
 use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
@@ -24,23 +24,42 @@ fn fast_tier_injects_service_tier_for_openai() {
 }
 
 #[test]
-fn build_request_body_clamps_sampling_ranges_before_send() {
+fn build_request_body_preserves_admitted_sampling_values() {
     let mut payload = base_request_payload();
     payload.provider = "openai".to_string();
     payload.model = "gpt-4o".to_string();
-    payload.temperature = Some(99.0);
-    payload.top_p = Some(5000.0);
+    payload.temperature = Some(2.0);
+    payload.top_p = Some(1.0);
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["temperature"], json!(2.0));
     assert_eq!(body["top_p"], json!(1.0));
+}
 
-    payload.temperature = Some(f64::NEG_INFINITY);
-    payload.top_p = Some(f64::NAN);
-    let non_finite_body = OpenAiCompatibleProvider::build_request_body(&payload);
-    assert_eq!(non_finite_body["temperature"], json!(1.0));
-    assert_eq!(non_finite_body["top_p"], json!(1.0));
+#[test]
+fn openai_builder_projects_typed_advanced_generation_controls() {
+    let mut payload = base_request_payload();
+    payload.provider = "openai".to_string();
+    payload.model = "gpt-4o".to_string();
+    payload.logprobs = Some(LogprobsConfig { top: Some(4) });
+    payload.logit_bias = vec![TokenBias {
+        token_id: 24912,
+        tokenizer: "tiktoken:o200k_base".to_string(),
+        bias: -12.5,
+    }];
+    payload.prediction = Some("known suffix".to_string());
+    payload.verbosity = Some(Verbosity::Low);
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(body["logprobs"], true);
+    assert_eq!(body["top_logprobs"], 4);
+    assert_eq!(body["logit_bias"]["24912"], -12.5);
+    assert_eq!(
+        body["prediction"],
+        json!({"type": "content", "content": "known suffix"})
+    );
+    assert_eq!(body["verbosity"], "low");
 }
 
 #[test]

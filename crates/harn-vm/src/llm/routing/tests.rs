@@ -593,6 +593,36 @@ fn model_ladder_step_accepts_scalar_overrides() {
 }
 
 #[test]
+fn fallback_link_revalidates_tokenizer_scoped_bias_before_auth_or_network() {
+    let policy = linear_failover_policy(
+        "tokenizer-fallback".to_string(),
+        vec![ChainLink {
+            provider: "openai".to_string(),
+            model: "gpt-4".to_string(),
+            timeout_ms: None,
+            label: Some("fallback".to_string()),
+            region: None,
+            overrides: None,
+        }],
+        false,
+    );
+    let mut base = policy_base_opts();
+    base.logit_bias.push(crate::llm::api::TokenBias {
+        token_id: 24912,
+        tokenizer: "tiktoken:o200k_base".to_string(),
+        bias: -1.0,
+    });
+    base.portable_option_intent
+        .insert(crate::llm::capabilities::PortableOption::LogitBias);
+
+    let error = auth::link_options_with_auth(&base, &policy, &policy.chain[0])
+        .expect_err("the fallback changes from o200k_base to cl100k_base");
+    assert_eq!(error.category, "invalid_request");
+    assert!(error.message.contains("tiktoken:o200k_base"));
+    assert!(error.message.contains("tiktoken:cl100k_base"));
+}
+
+#[test]
 fn model_ladder_step_rejects_invalid_speed_override() {
     let step = dict(&[
         ("model", VmValue::String(arcstr::ArcStr::from("m"))),

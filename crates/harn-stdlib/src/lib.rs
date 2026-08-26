@@ -197,6 +197,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/caller" => "stdlib/llm/caller.harn",
     "harness/policy" => "stdlib/harness/policy.harn",
     "llm/budget" => "stdlib/llm/budget.harn",
+    "llm/tokenizer" => "stdlib/llm/tokenizer.harn",
     "llm/economics" => "stdlib/llm/economics.harn",
     "llm/prompts" => "stdlib/llm/prompts.harn",
     "llm/defaults" => "stdlib/llm/defaults.harn",

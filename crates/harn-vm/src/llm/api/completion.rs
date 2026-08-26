@@ -51,10 +51,52 @@ pub(crate) async fn vm_call_completion_full(
     let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
 
     match completion_endpoint.as_deref() {
-        Some("/api/generate") => vm_call_completion_ollama(opts, prefix, suffix).await,
-        Some(_) => vm_call_completion_openai_style(opts, prefix, suffix).await,
+        Some("/api/generate") => {
+            reject_completion_options(
+                opts,
+                &[
+                    ("logprobs", opts.logprobs.is_some()),
+                    ("logit_bias", !opts.logit_bias.is_empty()),
+                    ("prediction", opts.prediction.is_some()),
+                    ("verbosity", opts.verbosity.is_some()),
+                    ("parallel_tool_calls", opts.parallel_tool_calls.is_some()),
+                ],
+                "Ollama generate",
+            )?;
+            vm_call_completion_ollama(opts, prefix, suffix).await
+        }
+        Some(_) => {
+            reject_completion_options(
+                opts,
+                &[
+                    ("min_p", opts.min_p.is_some()),
+                    ("repetition_penalty", opts.repetition_penalty.is_some()),
+                    ("prediction", opts.prediction.is_some()),
+                    ("verbosity", opts.verbosity.is_some()),
+                    ("mirostat", opts.mirostat.is_some()),
+                    ("parallel_tool_calls", opts.parallel_tool_calls.is_some()),
+                ],
+                "OpenAI-compatible completions",
+            )?;
+            vm_call_completion_openai_style(opts, prefix, suffix).await
+        }
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
     }
+}
+
+fn reject_completion_options(
+    opts: &LlmCallOptions,
+    options: &[(&str, bool)],
+    surface: &str,
+) -> Result<(), VmError> {
+    if let Some((option, _)) = options.iter().find(|(_, selected)| *selected) {
+        return Err(crate::llm::call::invalid_request_error(
+            format!("option `{option}` is not representable by {surface}"),
+            &opts.provider,
+            &opts.model,
+        ));
+    }
+    Ok(())
 }
 
 async fn vm_call_completion_openai_style(
@@ -90,8 +132,16 @@ async fn vm_call_completion_openai_style(
     if let Some(top_p) = opts.top_p {
         body["top_p"] = serde_json::json!(top_p);
     }
-    if opts.logprobs {
-        body["logprobs"] = serde_json::json!(opts.top_logprobs.unwrap_or(0).max(0));
+    if let Some(logprobs) = opts.logprobs {
+        body["logprobs"] = serde_json::json!(logprobs.top.unwrap_or(0));
+    }
+    if !opts.logit_bias.is_empty() {
+        body["logit_bias"] = serde_json::Value::Object(
+            opts.logit_bias
+                .iter()
+                .map(|entry| (entry.token_id.to_string(), serde_json::json!(entry.bias)))
+                .collect(),
+        );
     }
     if let Some(stop) = &opts.stop {
         body["stop"] = serde_json::json!(stop);
@@ -194,6 +244,26 @@ async fn vm_call_completion_ollama(
     }
     if let Some(top_k) = opts.top_k {
         options.insert("top_k".to_string(), serde_json::json!(top_k));
+    }
+    if let Some(min_p) = opts.min_p {
+        options.insert("min_p".to_string(), serde_json::json!(min_p));
+    }
+    if let Some(repetition_penalty) = opts.repetition_penalty {
+        options.insert(
+            "repeat_penalty".to_string(),
+            serde_json::json!(repetition_penalty),
+        );
+    }
+    if let Some(mirostat) = opts.mirostat {
+        options.insert("mirostat".to_string(), serde_json::json!(mirostat.version));
+        options.insert(
+            "mirostat_tau".to_string(),
+            serde_json::json!(mirostat.target_entropy),
+        );
+        options.insert(
+            "mirostat_eta".to_string(),
+            serde_json::json!(mirostat.learning_rate),
+        );
     }
     if let Some(seed) = opts.seed {
         options.insert("seed".to_string(), serde_json::json!(seed));

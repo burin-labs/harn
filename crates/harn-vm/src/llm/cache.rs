@@ -302,6 +302,25 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     identity.insert("top_k", serde_json::json!(top_k));
     identity.insert("frequency_penalty", json_float_or_null(frequency_penalty));
     identity.insert("presence_penalty", json_float_or_null(presence_penalty));
+    for key in [
+        "logprobs",
+        "logit_bias",
+        "min_p",
+        "repetition_penalty",
+        "prediction",
+        "verbosity",
+        "mirostat",
+        "parallel_tool_calls",
+    ] {
+        identity.insert(
+            key,
+            options
+                .as_ref()
+                .and_then(|options| options.get(key))
+                .map(super::helpers::vm_value_to_json)
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
     if !thinking.is_disabled() {
         identity.insert(
             "thinking",

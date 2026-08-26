@@ -241,10 +241,18 @@ pub(crate) struct LlmMockCall {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub top_k: Option<i64>,
+    pub logprobs: Option<crate::llm::api::LogprobsConfig>,
+    pub logit_bias: Vec<crate::llm::api::TokenBias>,
+    pub min_p: Option<f64>,
+    pub repetition_penalty: Option<f64>,
+    pub prediction: Option<String>,
+    pub verbosity: Option<crate::llm::api::Verbosity>,
+    pub mirostat: Option<crate::llm::api::MirostatConfig>,
     pub stop: Option<Vec<String>>,
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    pub parallel_tool_calls: Option<bool>,
     pub previous_response_id: Option<String>,
     pub store: Option<bool>,
     pub background: Option<bool>,
@@ -596,10 +604,18 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
             temperature: request.temperature,
             top_p: request.top_p,
             top_k: request.top_k,
+            logprobs: request.logprobs,
+            logit_bias: request.logit_bias.clone(),
+            min_p: request.min_p,
+            repetition_penalty: request.repetition_penalty,
+            prediction: request.prediction.clone(),
+            verbosity: request.verbosity,
+            mirostat: request.mirostat,
             stop: request.stop.clone(),
             seed: request.seed,
             frequency_penalty: request.frequency_penalty,
             presence_penalty: request.presence_penalty,
+            parallel_tool_calls: request.parallel_tool_calls,
             previous_response_id: request.previous_response_id.clone(),
             store: request.store,
             background: request.background,
@@ -970,6 +986,30 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
             request.insert("model".to_string(), serde_json::json!(result.model));
             if call.api_mode != "chat_completions" {
                 request.insert("api_mode".to_string(), serde_json::json!(call.api_mode));
+            }
+            if call.logprobs.is_some() {
+                request.insert("logprobs".to_string(), serde_json::json!(call.logprobs));
+            }
+            if !call.logit_bias.is_empty() {
+                request.insert("logit_bias".to_string(), serde_json::json!(call.logit_bias));
+            }
+            for (key, value) in [
+                ("min_p", serde_json::json!(call.min_p)),
+                (
+                    "repetition_penalty",
+                    serde_json::json!(call.repetition_penalty),
+                ),
+                ("prediction", serde_json::json!(call.prediction)),
+                ("verbosity", serde_json::json!(call.verbosity)),
+                ("mirostat", serde_json::json!(call.mirostat)),
+                (
+                    "parallel_tool_calls",
+                    serde_json::json!(call.parallel_tool_calls),
+                ),
+            ] {
+                if !value.is_null() {
+                    request.insert(key.to_string(), value);
+                }
             }
             if call.provider_tools.is_some() {
                 request.insert(

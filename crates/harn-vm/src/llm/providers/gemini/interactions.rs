@@ -567,8 +567,11 @@ fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
     if let Some(seed) = opts.seed {
         config.insert("seed".to_string(), json!(seed));
     }
-    if opts.logprobs {
+    if let Some(logprobs) = opts.logprobs {
         config.insert("response_logprobs".to_string(), json!(true));
+        if let Some(top) = logprobs.top {
+            config.insert("logprobs".to_string(), json!(top));
+        }
     }
     // Interactions replaces `generationConfig.thinkingConfig.thinkingBudget`
     // with a coarse level and has no "off" rung. The floor comes from the

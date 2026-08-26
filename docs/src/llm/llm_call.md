@@ -332,24 +332,39 @@ preserving tools and ordinary conversation history.
 | `temperature` | float | Sampling temperature. |
 | `top_p` | float | Nucleus-sampling cutoff. |
 | `top_k` | int | Top-k sampling cutoff where supported. |
-| `logprobs` | bool | Request token log probabilities. |
-| `top_logprobs` | int | Number of alternative token probabilities. |
+| `logprobs` | bool \| `{top?: int}` | Request token log probabilities and optionally `0..=20` alternatives per token. |
+| `logit_bias` | `list<TokenBias>` | Bias exact, tokenizer-scoped token references by `-100..=100`. See [Exact token references](./tokenizer.md). |
+| `min_p` | float | Minimum probability cutoff in `0..=1` where supported. |
+| `repetition_penalty` | float | Positive repetition multiplier where supported. |
+| `prediction` | `{content: string}` | Non-empty predicted output for providers that can accelerate a mostly-known response. |
+| `verbosity` | `"low" \| "medium" \| "high"` | Provider-native response detail level. |
+| `mirostat` | `{version: 1 \| 2, target_entropy?: float, learning_rate?: float}` | Ollama Mirostat sampling. Defaults are `5.0` and `0.1`; learning rate is within `(0, 1]`. |
 | `stop` | string \| list | Stop sequence or sequences. |
 | `stop_at_tool_call` | bool | End the call after the first tool call. |
 | `seed` | int | Reproducibility seed where supported. |
 | `frequency_penalty` | float | Frequency penalty where supported. |
 | `presence_penalty` | float | Presence penalty where supported. |
+| `parallel_tool_calls` | bool | Permit or forbid multiple native tool calls in one model turn. Requires at least one native tool. |
 
 Harn admits caller-selected `temperature`, `top_p`, `top_k`, `seed`,
-`frequency_penalty`, `presence_penalty`, and `stop` against the resolved
+`frequency_penalty`, `presence_penalty`, `stop`, and the advanced controls
+above against the resolved
 provider/model route before transport. An explicit catalog denial throws a
 terminal `invalid_request` error; the option is never silently removed from the
-wire request. Unknown custom generation routes remain open-world. Catalog or
-provider defaults are not caller intent and do not trigger admission.
+wire request. New advanced controls require an authored lowering, including on
+custom routes. Catalog or provider defaults are not caller intent and do not
+trigger admission.
 
 Routing applies the same check to every attempted link after that link's model
 and option overrides are resolved. Run `harn provider catalog matrix` to inspect
 the declared route surface before choosing portable options.
+
+The registry records model facts, not merely fields present in a provider's
+schema. Current Gemini 3.5 and 3.6 routes reject `logprobs`, and Groq documents
+its `logprobs` and `logit_bias` fields as unsupported by every deployed model.
+Harn rejects those options before credential lookup. Cerebras accepts
+`logprobs` and `prediction` individually but not together. That combination is
+also rejected locally.
 
 #### Output contract and recovery
 
@@ -499,6 +514,12 @@ const result = harness.llm.call("hello", nil, {
   provider_options: {ollama: {num_ctx: 32768}},
 })
 ```
+
+Provider-native spellings of first-class generation controls are rejected in
+this escape hatch. For example, `provider_options.ollama.repeat_penalty` must
+become top-level `repetition_penalty`, and OpenAI `top_logprobs` must become
+`logprobs: {top: ...}`. This keeps capability admission, cache identity,
+routing, and replay on one typed path.
 
 Model roles are ordinary defaults and compose with the same routing path:
 

@@ -120,17 +120,8 @@ impl OpenAiResponsesProvider {
         if let Some(top_p) = opts.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
-        if let Some(ref stop) = opts.stop {
-            body["stop"] = serde_json::json!(stop);
-        }
-        if let Some(seed) = opts.seed {
-            body["seed"] = serde_json::json!(seed);
-        }
-        if let Some(fp) = opts.frequency_penalty {
-            body["frequency_penalty"] = serde_json::json!(fp);
-        }
-        if let Some(pp) = opts.presence_penalty {
-            body["presence_penalty"] = serde_json::json!(pp);
+        if let Some(logprobs) = opts.logprobs {
+            body["top_logprobs"] = serde_json::json!(logprobs.top.unwrap_or(0));
         }
         if let Some(ref previous_response_id) = opts.previous_response_id {
             body["previous_response_id"] = serde_json::json!(previous_response_id);
@@ -186,10 +177,19 @@ impl OpenAiResponsesProvider {
                 });
             }
         }
+        if let Some(verbosity) = opts.verbosity {
+            if body.get("text").is_none() {
+                body["text"] = serde_json::json!({});
+            }
+            body["text"]["verbosity"] = serde_json::json!(verbosity.as_str());
+        }
 
         let tools = responses_tools(opts);
         if !tools.is_empty() {
             body["tools"] = serde_json::Value::Array(tools);
+            if let Some(parallel) = opts.parallel_tool_calls {
+                body["parallel_tool_calls"] = serde_json::json!(parallel);
+            }
         }
 
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
@@ -765,11 +765,25 @@ mod tests {
         opts.model = "gpt-5.6-terra".to_string();
         opts.api_mode = LlmApiMode::Responses;
         opts.temperature = Some(0.0);
+        opts.logprobs = Some(crate::llm::api::LogprobsConfig { top: Some(3) });
+        opts.verbosity = Some(crate::llm::api::Verbosity::Low);
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Look up a value",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        })]);
+        opts.parallel_tool_calls = Some(false);
         let payload = LlmRequestPayload::from(&opts);
 
         let body = OpenAiResponsesProvider::build_request_body(&payload);
 
         assert_eq!(body["temperature"], serde_json::json!(0.0));
+        assert_eq!(body["top_logprobs"], 3);
+        assert_eq!(body["text"]["verbosity"], "low");
+        assert_eq!(body["parallel_tool_calls"], false);
     }
 
     #[test]

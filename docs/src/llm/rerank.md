@@ -108,8 +108,7 @@ import { self_certainty } from "std/llm/rerank"
 
 const response = harness.llm.call("Write a short release note.", nil, {
   provider: "openai",
-  logprobs: true,
-  top_logprobs: 3,
+  logprobs: {top: 3},
   stream: false,
 })
 

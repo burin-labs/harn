@@ -50,6 +50,16 @@ pub(super) fn link_options_with_auth(
     link: &ChainLink,
 ) -> Result<LlmCallOptions, RoutingErrorSnapshot> {
     let mut opts = link_options(base, policy, link);
+    if let Err(error) = crate::llm::helpers::validate_options(&opts) {
+        return Err(RoutingErrorSnapshot {
+            category: "invalid_request".to_string(),
+            code: Some("unsupported_option".to_string()),
+            reason: Some("route_capability_mismatch".to_string()),
+            attempt_count: Some(0),
+            message: error.to_string(),
+            status: None,
+        });
+    }
     match crate::llm::resolve_api_key(&link.provider) {
         Ok(key) => {
             opts.api_key = key;

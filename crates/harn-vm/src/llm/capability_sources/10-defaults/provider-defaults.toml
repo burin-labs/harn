@@ -1,4 +1,5 @@
 [provider_defaults.anthropic]
+supports_parallel_tool_calls = true
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 file_upload_wire_format = "anthropic"
@@ -32,6 +33,8 @@ cache_breakpoint_style = "top_level"
 reasoning_round_trip = "echo_signed"
 
 [provider_defaults.openai]
+advanced_generation_options = ["logprobs", "logit_bias"]
+supports_parallel_tool_calls = true
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
@@ -68,6 +71,8 @@ batch_operational_notes = [
 ]
 
 [provider_defaults.azure_openai]
+advanced_generation_options = ["logprobs", "logit_bias"]
+supports_parallel_tool_calls = true
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
@@ -115,12 +120,16 @@ batch_cancellation = "unknown"
 reasoning_wire_format = "enabled"
 
 [provider_defaults.ollama]
+advanced_generation_options = ["min_p", "repetition_penalty", "mirostat"]
+supports_parallel_tool_calls = false
 message_wire_format = "ollama"
 image_url_input_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 
 [provider_defaults.gemini]
+advanced_generation_options = []
+supports_parallel_tool_calls = false
 message_wire_format = "gemini"
 # Live synchronous traffic defaults to the legacy `:generateContent` endpoint.
 # `gemini_interactions` is the second family Harn can speak (see
@@ -146,6 +155,8 @@ batch_operational_notes = [
 ]
 
 [provider_defaults.mistral]
+advanced_generation_options = ["prediction"]
+supports_parallel_tool_calls = true
 batch_wire_format = "mistral"
 batch_input_mode = "jsonl_or_inline"
 batch_discount_percent = 50
@@ -180,6 +191,10 @@ batch_operational_notes = [
 top_k_supported = false
 
 [provider_defaults.groq]
+advanced_generation_options = []
+supports_parallel_tool_calls = true
+frequency_penalty_supported = false
+presence_penalty_supported = false
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
@@ -187,6 +202,10 @@ batch_turnaround_hours = 24
 batch_result_ordering = "custom_id_rejoin"
 batch_partial_failure = "per_request"
 batch_cancellation = "unknown"
+
+[provider_defaults.cerebras]
+advanced_generation_options = ["logprobs", "logit_bias", "prediction"]
+supports_parallel_tool_calls = true
 
 [provider_defaults.fireworks]
 batch_wire_format = "fireworks"
