@@ -1087,59 +1087,54 @@ pub(crate) fn manifest_module_source_path(
     exports: &HashMap<String, String>,
     module_name: Option<&str>,
 ) -> Result<PathBuf, PackageError> {
+    let path = manifest_module_path(manifest_dir, package_name, exports, module_name);
+    if path.exists() {
+        return Ok(path);
+    }
     match module_name {
-        None => {
-            let path = manifest_dir.join("lib.harn");
-            if path.exists() {
-                Ok(path)
-            } else {
-                Err(format!(
-                    "no lib.harn found next to manifest in {}",
-                    manifest_dir.display()
-                )
-                .into())
-            }
-        }
+        None => Err(format!(
+            "no lib.harn found next to manifest in {}",
+            manifest_dir.display()
+        )
+        .into()),
+        Some(module_name) if package_name.is_some_and(|pkg| pkg == module_name) => Err(format!(
+            "module '{}' resolves to local lib.harn, but {} is missing",
+            module_name,
+            path.display()
+        )
+        .into()),
+        Some(module_name) if exports.contains_key(module_name) => Err(format!(
+            "export '{}' resolves to {}, but that path does not exist",
+            module_name,
+            path.display()
+        )
+        .into()),
+        Some(module_name) => Err(format!(
+            "module '{}' could not be resolved from {}",
+            module_name,
+            manifest_dir.display()
+        )
+        .into()),
+    }
+}
+
+/// Resolve a manifest module's lexical path without touching the filesystem.
+/// Lazy handlers use this to defer source existence and parsing to dispatch.
+pub(crate) fn manifest_module_path(
+    manifest_dir: &Path,
+    package_name: Option<&str>,
+    exports: &HashMap<String, String>,
+    module_name: Option<&str>,
+) -> PathBuf {
+    match module_name {
+        None => manifest_dir.join("lib.harn"),
         Some(module_name) if package_name.is_some_and(|pkg| pkg == module_name) => {
-            let path = manifest_dir.join("lib.harn");
-            if path.exists() {
-                Ok(path)
-            } else {
-                Err(format!(
-                    "module '{}' resolves to local lib.harn, but {} is missing",
-                    module_name,
-                    path.display()
-                )
-                .into())
-            }
+            manifest_dir.join("lib.harn")
         }
         Some(module_name) if exports.contains_key(module_name) => {
-            let rel_path = exports.get(module_name).expect("checked export key exists");
-            let path = manifest_dir.join(rel_path);
-            if path.exists() {
-                Ok(path)
-            } else {
-                Err(format!(
-                    "export '{}' resolves to {}, but that path does not exist",
-                    module_name,
-                    path.display()
-                )
-                .into())
-            }
+            manifest_dir.join(exports.get(module_name).expect("checked export key exists"))
         }
-        Some(module_name) => {
-            let path = harn_vm::resolve_module_import_path(manifest_dir, module_name);
-            if path.exists() {
-                Ok(path)
-            } else {
-                Err(format!(
-                    "module '{}' could not be resolved from {}",
-                    module_name,
-                    manifest_dir.display()
-                )
-                .into())
-            }
-        }
+        Some(module_name) => harn_vm::resolve_module_import_path(manifest_dir, module_name),
     }
 }
 

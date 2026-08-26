@@ -219,12 +219,21 @@ pub async fn install_manifest_hooks_with_initialization(
             )
             .into());
         };
-        let module_path = crate::package::manifest_module_source_path(
-            &hook.manifest_dir,
-            hook.package_name.as_deref(),
-            &hook.exports,
-            Some(module_name),
-        )?;
+        let module_path = if initialization.is_on_dispatch() {
+            crate::package::manifest_module_path(
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )
+        } else {
+            crate::package::manifest_module_source_path(
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )?
+        };
         if initialization.is_on_dispatch() {
             let preparation_anchor = module_path.clone();
             let callable = harn_vm::LazyVmCallable::new(module_path, function_name)

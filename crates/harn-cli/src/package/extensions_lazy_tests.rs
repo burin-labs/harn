@@ -345,6 +345,50 @@ async fn lazy_broken_hook_fails_closed_when_its_event_dispatches() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn lazy_missing_hook_module_fails_only_when_its_event_dispatches() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        "pub fn handle(ctx) { return ctx }",
+    );
+    std::fs::remove_file(tmp.path().join("lib.harn")).expect("remove hook module");
+    let extensions = load_runtime_extensions(&harn_file);
+    let eager_error = install_manifest_hooks_with_initialization(
+        &mut test_vm(),
+        &extensions,
+        ManifestHandlerInitialization::Eager,
+    )
+    .await
+    .expect_err("eager validation must reject the missing hook module");
+    assert!(eager_error.to_string().contains("does not exist"));
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("an unused missing hook module must stay deferred");
+
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+    let dispatch_error = harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect_err("a matching missing policy hook must stop dispatch");
+    assert!(
+        dispatch_error.to_string().contains("lib.harn"),
+        "unexpected dispatch error: {dispatch_error}"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn lazy_hook_materializes_a_reachable_dependency_only_when_it_dispatches() {
     harn_vm::reset_thread_local_state();
     let tmp = tempfile::tempdir().unwrap();
