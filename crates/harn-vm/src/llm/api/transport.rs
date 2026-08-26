@@ -427,140 +427,103 @@ async fn vm_call_llm_api_with_body_inner(
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             tx
         };
-        let max_attempts = if stream_protocol == StreamProtocol::OllamaNdjson {
-            2
-        } else {
-            1
-        };
+        // Observed calls own every recovery. Retrying here would hide a native
+        // response from the canonical provider-attempt ledger before the
+        // observer can retain its measured usage.
+        let attempt = 0;
         let unload_grace = if stream_protocol == StreamProtocol::OllamaNdjson {
             crate::llm::api::ollama_unload_grace_duration_from_env()
         } else {
             Duration::ZERO
         };
         let mut ollama_warmup_gate = false;
-        for attempt in 0..max_attempts {
-            crate::llm::agent_observe::persist_raw_provider_request(
+        crate::llm::agent_observe::persist_raw_provider_request(
+            raw_capture_context.as_ref(),
+            provider,
+            model,
+            dialect.wire().as_str(),
+            Some(attempt),
+            &body,
+        );
+        let response = send_stream_request_with_ollama_warmup(
+            req,
+            provider,
+            model,
+            stream_protocol,
+            unload_grace,
+            &mut ollama_warmup_gate,
+        )
+        .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let headers = response.headers().clone();
+            let content_type = response_content_type(&response);
+            let body = response.text().await.unwrap_or_default();
+            crate::llm::agent_observe::persist_raw_provider_response(
                 raw_capture_context.as_ref(),
                 provider,
                 model,
-                dialect.wire().as_str(),
+                "stream-error",
                 Some(attempt),
+                status.as_u16(),
+                content_type.as_deref(),
                 &body,
             );
-            let req = client
-                .post(resolved.url())
-                .header("Content-Type", "application/json")
-                .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
-                .json(&body);
-            let mut req = resolved.apply_headers(req, &opts.api_key);
-            if stream_protocol == StreamProtocol::AnthropicSse
-                && !opts.anthropic_beta_features.is_empty()
-            {
-                req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
-            }
-            let response = send_stream_request_with_ollama_warmup(
-                req,
+            return Err(super::provider_http_error(
+                Some(dialect),
                 provider,
-                model,
-                stream_protocol,
-                unload_grace,
-                &mut ollama_warmup_gate,
-            )
-            .await?;
-            if !response.status().is_success() {
-                let status = response.status();
-                let headers = response.headers().clone();
-                let content_type = response_content_type(&response);
-                let body = response.text().await.unwrap_or_default();
-                crate::llm::agent_observe::persist_raw_provider_response(
-                    raw_capture_context.as_ref(),
+                status,
+                &headers,
+                &body,
+            ));
+        }
+        let provider_request_id = response
+            .headers()
+            .get("x-generation-id")
+            .or_else(|| response.headers().get("x-request-id"))
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        // The outer observer creates a new transport attempt for each retry.
+        // This watcher therefore belongs to this one physical request.
+        let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
+        let deadline_policy = liveness::StreamDeadlinePolicy::from_payload(opts);
+        match stream_protocol {
+            StreamProtocol::AnthropicSse | StreamProtocol::OpenAiSse => {
+                return vm_call_llm_api_sse_from_response(
+                    response,
                     provider,
                     model,
-                    "stream-error",
-                    Some(attempt),
-                    status.as_u16(),
-                    content_type.as_deref(),
-                    &body,
-                );
-                return Err(super::provider_http_error(
-                    Some(dialect),
-                    provider,
-                    status,
-                    &headers,
-                    &body,
-                ));
+                    dialect,
+                    tx,
+                    opts.session_id.as_deref(),
+                    schema_watch,
+                    tools_offered,
+                    deadline_policy,
+                    RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
+                    provider_request_id.as_deref(),
+                    request_origin,
+                )
+                .await;
             }
-            let provider_request_id = response
-                .headers()
-                .get("x-generation-id")
-                .or_else(|| response.headers().get("x-request-id"))
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            // Build a fresh schema watch per attempt so an Ollama-retry
-            // restart doesn't see chunks from the previous run.
-            let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
-            let deadline_policy = liveness::StreamDeadlinePolicy::from_payload(opts);
-            match stream_protocol {
-                StreamProtocol::AnthropicSse | StreamProtocol::OpenAiSse => {
-                    return vm_call_llm_api_sse_from_response(
-                        response,
-                        provider,
-                        model,
-                        dialect,
-                        tx,
-                        opts.session_id.as_deref(),
-                        schema_watch,
-                        tools_offered,
-                        deadline_policy,
-                        RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
-                        provider_request_id.as_deref(),
-                        request_origin,
-                    )
-                    .await;
-                }
-                StreamProtocol::OllamaNdjson => {}
-                StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
-                    unreachable!("Gemini streaming is owned by the Gemini provider transport")
-                }
-            }
-            match vm_call_llm_api_ndjson_from_response(
-                response,
-                provider,
-                model,
-                tx.clone(),
-                unload_grace,
-                &mut ollama_warmup_gate,
-                schema_watch,
-                deadline_policy,
-                RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
-                request_origin,
-            )
-            .await
-            {
-                // A `done_reason == "length"` truncation returns Ok with an
-                // empty body and `stop_reason: Some("length")`, bypassing the
-                // retry guard below. A deterministic token-cap cut would just
-                // re-truncate on every retry. Only the genuine empty-content
-                // parser bug (done_reason stop/absent) is retried.
-                Ok(result) => return Ok(result),
-                Err(err)
-                    if stream_protocol == StreamProtocol::OllamaNdjson
-                        && attempt + 1 < max_attempts
-                        && is_ollama_empty_content_parser_bug(&err) =>
-                {
-                    crate::events::log_warn(
-                        "llm",
-                        &format!(
-                            "ollama model {model} returned empty content with eval_count; retrying once"
-                        ),
-                    );
-                    continue;
-                }
-                Err(err) => return Err(err),
+            StreamProtocol::OllamaNdjson => {}
+            StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
+                unreachable!("Gemini streaming is owned by the Gemini provider transport")
             }
         }
-        unreachable!("streaming LLM attempt loop exhausted without returning");
+        return vm_call_llm_api_ndjson_from_response(
+            response,
+            provider,
+            model,
+            tx.clone(),
+            unload_grace,
+            &mut ollama_warmup_gate,
+            schema_watch,
+            deadline_policy,
+            RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
+            request_origin,
+        )
+        .await;
     }
 
     crate::llm::agent_observe::persist_raw_provider_request(
@@ -631,10 +594,7 @@ async fn vm_call_llm_api_with_body_inner(
     dialect.parse_response(&json, opts, tools_offered)
 }
 
-use ndjson::{
-    emit_ollama_warmup_progress, is_ollama_empty_content_parser_bug,
-    vm_call_llm_api_ndjson_from_response,
-};
+use ndjson::{emit_ollama_warmup_progress, vm_call_llm_api_ndjson_from_response};
 use sse::{
     non_stream_send_error, send_stream_request_with_ollama_warmup,
     vm_call_llm_api_sse_from_response,

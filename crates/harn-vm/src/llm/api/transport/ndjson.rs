@@ -331,23 +331,3 @@ pub(super) fn emit_ollama_warmup_progress(model: &str) {
     }
     crate::events::log_info("llm", &message);
 }
-
-pub(super) fn is_ollama_empty_content_parser_bug(err: &VmError) -> bool {
-    match err {
-        VmError::Thrown(VmValue::Dict(fields)) => {
-            fields
-                .get("completion_kind")
-                .is_some_and(|value| value.display() == "empty_generation")
-                && fields.get("message").is_some_and(|value| {
-                    value
-                        .display()
-                        .contains("[ollama_empty_content_parser_bug]")
-                })
-        }
-        VmError::Thrown(VmValue::String(message)) => {
-            message.contains("[ollama_empty_content_parser_bug]")
-        }
-        VmError::Runtime(message) => message.contains("[ollama_empty_content_parser_bug]"),
-        _ => false,
-    }
-}
