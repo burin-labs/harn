@@ -837,10 +837,26 @@ fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
             return Err(format!("failed to chmod staged binary: {error}"));
         }
     }
+    if let Err(error) = fs::File::open(&temp_in_dest).and_then(|file| file.sync_all()) {
+        let _ = fs::remove_file(&temp_in_dest);
+        return Err(format!("failed to sync staged binary: {error}"));
+    }
     if let Err(error) = fs::rename(&temp_in_dest, dest) {
         let _ = fs::remove_file(&temp_in_dest);
         return Err(format!("failed to replace {}: {error}", dest.display()));
     }
+    sync_parent_directory(parent)
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> Result<(), String> {
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("failed to sync {}: {error}", parent.display()))
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -875,7 +891,7 @@ fn atomic_symlink(target_name: &str, dest: &Path) -> Result<(), String> {
         let _ = fs::remove_file(&temp_in_dest);
         return Err(format!("failed to replace {}: {error}", dest.display()));
     }
-    Ok(())
+    sync_parent_directory(parent)
 }
 
 fn next_upgrade_counter() -> u64 {

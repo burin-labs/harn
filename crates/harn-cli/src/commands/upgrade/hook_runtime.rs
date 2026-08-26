@@ -289,7 +289,7 @@ fn publish_provenance(path: &Path, provenance: &HookRuntimeProvenance) -> Result
         .and_then(|()| staged.as_file().sync_all())
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
     match staged.persist_noclobber(path) {
-        Ok(_) => sync_parent_directory(parent),
+        Ok(_) => super::sync_parent_directory(parent),
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
             let existing = read_provenance(path)?;
             if existing == *provenance {
@@ -307,18 +307,6 @@ fn publish_provenance(path: &Path, provenance: &HookRuntimeProvenance) -> Result
             error.error
         )),
     }
-}
-
-#[cfg(unix)]
-fn sync_parent_directory(parent: &Path) -> Result<(), String> {
-    fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("failed to sync {}: {error}", parent.display()))
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_parent: &Path) -> Result<(), String> {
-    Ok(())
 }
 
 fn read_provenance(path: &Path) -> Result<HookRuntimeProvenance, String> {
