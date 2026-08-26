@@ -319,6 +319,19 @@ fn resolve_targets(args: &FixArgs) -> Result<Vec<PathBuf>, String> {
     Ok(targets)
 }
 
+fn require_complete_implicit_any_migration(
+    report: &implicit_any_compatibility::ImplicitAnyMigrationReport,
+) -> Result<(), FixRunError> {
+    if report.is_complete() {
+        Ok(())
+    } else {
+        Err(FixRunError::PartialFailure(format!(
+            "implicit-any compatibility migration incomplete: pending={}, unresolved={}, changed-semantics={}",
+            report.pending_count, report.unresolved_count, report.changed_semantics_count
+        )))
+    }
+}
+
 pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     let targets = resolve_targets(args)?;
     if args.preserve_implicit_any {
@@ -363,12 +376,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
                 println!("  {}::{name}: {}", finding.file, finding.reason);
             }
         }
-        if !report.is_complete() {
-            return Err(FixRunError::PartialFailure(format!(
-                "implicit-any compatibility migration incomplete: pending={}, unresolved={}, changed-semantics={}",
-                report.pending_count, report.unresolved_count, report.changed_semantics_count
-            )));
-        }
+        require_complete_implicit_any_migration(&report)?;
         return Ok(());
     }
     if args.apply {
