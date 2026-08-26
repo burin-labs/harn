@@ -256,6 +256,11 @@ fn ensure_dependency_requests_materialized(
     let Some(ctx) = governing_manifest_context(anchor)? else {
         return Err("package imports require a governing harn.toml".into());
     };
+    // Lock authority and the generation pointer are one transaction. A full
+    // install saves its replacement lock before publishing its generation, so
+    // a demand initializer must not derive from the old lock and then publish
+    // after that install completes.
+    let _install_lock = acquire_package_install_lock(&ctx)?;
     let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
         format!(
             "{} is missing; run `harn install`",
@@ -265,7 +270,6 @@ fn ensure_dependency_requests_materialized(
     let runtime_lock = lock_for_materialization(&workspace, &ctx, lock)?;
     let reachable_lock = dependency_closure_lock(&workspace, &ctx, &runtime_lock, requested)?;
     let digest = harn_modules::package_snapshot::package_lock_digest(&reachable_lock.encode()?);
-    let _install_lock = acquire_package_install_lock(&ctx)?;
     if current_generation_satisfies_lock_subset(&ctx, &reachable_lock)? {
         return Ok(digest);
     }
@@ -290,6 +294,26 @@ pub(crate) fn ensure_dependency_alias_materialized_for_test(
     anchor: &Path,
     alias: &str,
 ) -> Result<String, PackageError> {
+    dependency_request_for_test(anchor, alias)
+        .and_then(|request| ensure_dependency_requests_materialized(anchor, vec![request]))
+}
+
+#[cfg(test)]
+pub(crate) fn ensure_dependency_alias_materialized_after_barrier_for_test(
+    anchor: &Path,
+    alias: &str,
+    ready: &std::sync::Barrier,
+) -> Result<String, PackageError> {
+    let request = dependency_request_for_test(anchor, alias)?;
+    ready.wait();
+    ensure_dependency_requests_materialized(anchor, vec![request])
+}
+
+#[cfg(test)]
+fn dependency_request_for_test(
+    anchor: &Path,
+    alias: &str,
+) -> Result<ReachableDependency, PackageError> {
     let Some(ctx) = governing_manifest_context(anchor)? else {
         return Err("test dependency requires a governing harn.toml".into());
     };
@@ -299,14 +323,11 @@ pub(crate) fn ensure_dependency_alias_materialized_for_test(
         .get(alias)
         .cloned()
         .ok_or_else(|| format!("test dependency {alias} is not declared"))?;
-    ensure_dependency_requests_materialized(
-        anchor,
-        vec![ReachableDependency {
-            alias: alias.to_string(),
-            dependency,
-            manifest_dir: ctx.dir,
-        }],
-    )
+    Ok(ReachableDependency {
+        alias: alias.to_string(),
+        dependency,
+        manifest_dir: ctx.dir,
+    })
 }
 
 fn cumulative_demand_lock(

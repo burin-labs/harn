@@ -174,6 +174,78 @@ beta = {{ path = "./vendor/beta" }}
 }
 
 #[test]
+fn demand_cannot_republish_lock_authority_replaced_by_an_install() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    for (name, value) in [("old", 1), ("new", 2)] {
+        let dependency = root.join("vendor").join(name);
+        fs::create_dir_all(&dependency).unwrap();
+        fs::write(dependency.join(MANIFEST), "[package]\nname = \"dep\"\n").unwrap();
+        fs::write(
+            dependency.join("lib.harn"),
+            format!("pub fn value() {{ {value} }}\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        root.join(MANIFEST),
+        "[package]\nname = \"authority-fixture\"\n\n[dependencies]\ndep = { path = \"./vendor/old\" }\n",
+    )
+    .unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let entry = root.join("main.harn");
+    fs::write(&entry, "pipeline main() {}\n").unwrap();
+
+    let ctx = workspace.env().load_manifest_context().unwrap();
+    let install_lock = acquire_package_install_lock(&ctx).unwrap();
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let demand = {
+        let ready = ready.clone();
+        std::thread::spawn(move || {
+            ensure_dependency_alias_materialized_after_barrier_for_test(&entry, "dep", &ready)
+        })
+    };
+    ready.wait();
+    // On the pre-fix path the demand has no lock yet and can derive the old
+    // authority while it waits. Give that short read path a deterministic
+    // scheduling window before simulating the locked portion of an install.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    fs::write(
+        root.join(MANIFEST),
+        "[package]\nname = \"authority-fixture\"\n\n[dependencies]\ndep = { path = \"./vendor/new\" }\n",
+    )
+    .unwrap();
+    let mut replacement = LockFile::load(&ctx.lock_path()).unwrap().unwrap();
+    replacement.packages[0].source = path_source_uri(&root.join("vendor/new")).unwrap();
+    fs::write(ctx.lock_path(), replacement.encode().unwrap()).unwrap();
+    publish_package_generation_locked(&ctx, &replacement, true, |packages| {
+        materialize_path_dependency(&root.join("vendor/new"), packages, "dep")?;
+        Ok(1)
+    })
+    .unwrap();
+    drop(install_lock);
+
+    let error = demand
+        .join()
+        .unwrap()
+        .expect_err("stale demand authority must be rejected after the install");
+    assert!(error.to_string().contains("out of date"));
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .unwrap();
+    let active = LockFile::load(snapshot.lock_path()).unwrap().unwrap();
+    assert!(active.packages[0].source.ends_with("/vendor/new"));
+    assert!(
+        fs::read_to_string(snapshot.packages_root().join("dep/lib.harn"))
+            .unwrap()
+            .contains('2')
+    );
+}
+
+#[test]
 fn materialization_rejects_lock_alias_path_traversal_before_removing_paths() {
     let tmp = tempfile::tempdir().unwrap();
     let dep = tmp.path().join("dep");
