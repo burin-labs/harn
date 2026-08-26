@@ -363,10 +363,26 @@ pub fn inject_reminder(
     id: &str,
     reminder: crate::llm::helpers::SystemReminder,
 ) -> Result<ReminderInjectionReport, String> {
+    inject_reminder_with_policy(id, reminder, false)
+}
+
+pub(crate) fn inject_provider_reminder(
+    id: &str,
+    reminder: crate::llm::helpers::SystemReminder,
+) -> Result<ReminderInjectionReport, String> {
+    inject_reminder_with_policy(id, reminder, true)
+}
+
+fn inject_reminder_with_policy(
+    id: &str,
+    reminder: crate::llm::helpers::SystemReminder,
+    retain_unchanged_nonexpiring: bool,
+) -> Result<ReminderInjectionReport, String> {
     let reminder_id = reminder.id.clone();
     let dedupe_key = reminder.dedupe_key.clone();
     let mut deduped_reminder_ids = Vec::new();
-    SESSIONS.with(|s| {
+    let mut retained_reminder_id = None;
+    let injected = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
             return Err(format!(
@@ -389,6 +405,19 @@ pub fn inject_reminder(
                 .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
                 .unwrap_or_default(),
         };
+        if retain_unchanged_nonexpiring
+            && reminder.preserve_on_compact
+            && reminder.ttl_turns.is_none()
+        {
+            if let Some(existing) = events
+                .iter()
+                .filter_map(crate::llm::helpers::reminder_from_event)
+                .find(|existing| same_provider_reminder(existing, &reminder))
+            {
+                retained_reminder_id = Some(existing.id);
+                return Ok(false);
+            }
+        }
         if let Some(expected_key) = dedupe_key.as_deref() {
             events.retain(|event| {
                 let Some(existing) = crate::llm::helpers::reminder_from_event(event) else {
@@ -410,8 +439,16 @@ pub fn inject_reminder(
         );
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_reminder")?;
         state.touch();
-        Ok(())
+        Ok(true)
     })?;
+
+    if !injected {
+        return Ok(ReminderInjectionReport {
+            reminder_id: retained_reminder_id.unwrap_or(reminder_id),
+            deduped_count: 0,
+            injected: false,
+        });
+    }
 
     if !deduped_reminder_ids.is_empty() {
         let dropped_count = deduped_reminder_ids.len();
@@ -439,7 +476,31 @@ pub fn inject_reminder(
     Ok(ReminderInjectionReport {
         reminder_id,
         deduped_count: deduped_reminder_ids.len(),
+        injected: true,
     })
+}
+
+fn same_provider_reminder(
+    existing: &crate::llm::helpers::SystemReminder,
+    candidate: &crate::llm::helpers::SystemReminder,
+) -> bool {
+    let Some(dedupe_key) = candidate.dedupe_key.as_deref() else {
+        return false;
+    };
+    let existing_tags: std::collections::BTreeSet<&str> =
+        existing.tags.iter().map(String::as_str).collect();
+    let candidate_tags: std::collections::BTreeSet<&str> =
+        candidate.tags.iter().map(String::as_str).collect();
+    existing.dedupe_key.as_deref() == Some(dedupe_key)
+        && existing_tags == candidate_tags
+        && existing.ttl_turns == candidate.ttl_turns
+        && existing.preserve_on_compact == candidate.preserve_on_compact
+        && existing.propagate == candidate.propagate
+        && existing.role_hint == candidate.role_hint
+        && existing.authority == candidate.authority
+        && existing.source == candidate.source
+        && existing.body == candidate.body
+        && existing.originating_agent_id == candidate.originating_agent_id
 }
 
 /// Stop future projection of a live session reminder.
