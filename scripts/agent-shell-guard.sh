@@ -41,19 +41,22 @@ resolve_harn() {
     printf 'project\t%s\n' "$HARN_BIN"
     return
   fi
-  local repo_root candidate debug_fallback="" hook_harn marker capability="" marker_extra="" has_marker_extra=0
+  local repo_root candidate debug_fallback="" hook_harn marker capability="" marker_extra="" has_marker_extra=0 capability_terminated=0
   repo_root="$(cd "$script_dir/.." && pwd -P)"
   hook_harn="${AGENT_SHELL_GUARD_HARN_BIN:-${XDG_CACHE_HOME:-${HOME:-}/.cache}/harn/hook-bin/harn}"
   marker="${hook_harn}.standalone-v1"
   if [[ -x "$hook_harn" && -f "$marker" ]]; then
     {
-      IFS= read -r capability || true
+      if IFS= read -r capability; then
+        capability_terminated=1
+      fi
       if IFS= read -r marker_extra || [[ -n "$marker_extra" ]]; then
         has_marker_extra=1
       fi
     } <"$marker"
     if [[ ( "$capability" == "harn-run-standalone-v1" \
-          || "$capability" == $'harn-run-standalone-v1\r' ) \
+          || ( "$capability" == $'harn-run-standalone-v1\r' \
+            && "$capability_terminated" -eq 1 ) ) \
         && "$has_marker_extra" -eq 0 ]]; then
       printf 'standalone\t%s\n' "$hook_harn"
       return

@@ -287,6 +287,20 @@ if [[ "$crlf_marker_resolved" != *'HOOK-ARG=--standalone'* ]]; then
   exit 1
 fi
 
+printf '%s\r' 'harn-run-standalone-v1' >"$order_root/hook-bin/harn.standalone-v1"
+bare_cr_marker_resolved="$(
+  printf '%s' '{}' \
+    | env -u HARN_BIN \
+      AGENT_SHELL_GUARD_HARN_BIN="$order_root/hook-bin/harn" \
+      "$order_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$bare_cr_marker_resolved" != *RELEASE-INTERPRETER-RAN* ]] \
+  || [[ "$bare_cr_marker_resolved" == *HOOK-ARG=* ]]; then
+  echo "bare-CR standalone attestation displaced the project fallback" >&2
+  printf '%s\n' "$bare_cr_marker_resolved" >&2
+  exit 1
+fi
+
 printf '%s\n%s\n' 'harn-run-standalone-v1' 'unexpected-extra' \
   >"$order_root/hook-bin/harn.standalone-v1"
 extra_marker_resolved="$(
