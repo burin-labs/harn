@@ -273,10 +273,8 @@ pub(super) fn empty_completion_retry_reason(err: &VmError) -> Option<Unproductiv
 /// reported them. `empty_generation_error` carries this field on every throw
 /// that reached a usage block.
 pub(super) fn thrown_output_tokens(err: &VmError) -> Option<i64> {
-    if let VmError::Thrown(crate::value::VmValue::Dict(fields)) = err {
-        if let Some(crate::value::VmValue::Int(tokens)) = fields.get("output_tokens") {
-            return Some(*tokens);
-        }
+    if let Some(receipt) = crate::llm::usage::ProviderUsageReceipt::from_error(err) {
+        return receipt.output_tokens();
     }
     // The same failure reaches some boundaries flattened to a message, which
     // names the count too. `empty_completion_retry_reason` already reads both
@@ -344,6 +342,13 @@ pub(super) fn is_billed_noncommittal_throw(err: &VmError) -> bool {
         VmError::CategorizedError { message, .. } => message.as_str(),
         VmError::Runtime(s) => s.as_str(),
         VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            if d.get("completion_kind")
+                .map(crate::value::VmValue::display)
+                .as_deref()
+                == Some("billed_noncommittal")
+            {
+                return true;
+            }
             return d
                 .get("message")
                 .map(|v| v.display())

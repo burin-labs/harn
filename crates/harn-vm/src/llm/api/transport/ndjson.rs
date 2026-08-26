@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::usage::ProviderUsageReceipt;
 
 /// Consume an NDJSON streaming response, forwarding text deltas to `delta_tx`
 /// while accumulating the full result.
@@ -121,6 +122,8 @@ where
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
     let mut output_tokens: i64 = 0;
+    let mut reported_input_tokens: Option<i64> = None;
+    let mut reported_output_tokens: Option<i64> = None;
     let mut result_model = model.to_string();
 
     let mut thinking_text = String::new();
@@ -191,9 +194,11 @@ where
         if json["done"].as_bool() == Some(true) {
             if let Some(n) = json["prompt_eval_count"].as_i64() {
                 input_tokens = n;
+                reported_input_tokens = Some(n);
             }
             if let Some(n) = json["eval_count"].as_i64() {
                 output_tokens = n;
+                reported_output_tokens = Some(n);
             }
             // Capture Ollama's `done_reason` so length-truncation is visible on
             // the most-used local chat path. Without this the agent never learns
@@ -233,9 +238,20 @@ where
         && output_tokens > 0
         && done_reason.as_deref() != Some("length")
     {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"
-        )))));
+        return Err(empty_generation_error(
+            provider,
+            model,
+            ProviderUsageReceipt::new(
+                reported_input_tokens,
+                reported_output_tokens,
+                telemetry.provider_cost_usd,
+                false,
+            )
+            .with_cache(0, 0, telemetry.cache_accounting_declared, false),
+            format!(
+                "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"
+            ),
+        ));
     }
 
     // Written after the loop: the done frame replaces `telemetry` wholesale via
@@ -318,6 +334,16 @@ pub(super) fn emit_ollama_warmup_progress(model: &str) {
 
 pub(super) fn is_ollama_empty_content_parser_bug(err: &VmError) -> bool {
     match err {
+        VmError::Thrown(VmValue::Dict(fields)) => {
+            fields
+                .get("completion_kind")
+                .is_some_and(|value| value.display() == "empty_generation")
+                && fields.get("message").is_some_and(|value| {
+                    value
+                        .display()
+                        .contains("[ollama_empty_content_parser_bug]")
+                })
+        }
         VmError::Thrown(VmValue::String(message)) => {
             message.contains("[ollama_empty_content_parser_bug]")
         }
