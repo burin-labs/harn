@@ -59,7 +59,6 @@ unverified = [
   "flexai",
   "friendli",
   "github_models",
-  "groq",
   "huggingface",
   "hunyuan",
   "hyperbolic",
@@ -89,6 +88,14 @@ provider = "deepseek"
 checked_on = "2026-08-25"
 sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "groq"
+checked_on = "2026-08-25"
+sources = [
+  "https://console.groq.com/docs/prompt-caching",
+  "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -292,6 +299,7 @@ path = "/models"
 # on Llama 3.1 8B, ~594 tok/s on Llama 4 Scout. Useful executor target
 # when sub-100ms TTFT matters more than raw quality.
 [providers.groq]
+cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://api.groq.com/openai/v1"
 base_url_env = "GROQ_BASE_URL"
