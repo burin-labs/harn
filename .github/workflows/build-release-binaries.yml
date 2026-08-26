@@ -1581,28 +1581,62 @@ jobs:
       - name: Generate cargo-bloat report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_fuse.outcome == 'failure' || steps.binary_size_growth.outcome == 'failure')
         shell: bash
-        continue-on-error: true
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           # The build writes to ./target regardless of the ambient
           # CARGO_TARGET_DIR this workflow exports, and the budget step above
-          # reads it from there. Name the same path explicitly: resolving it
-          # through CARGO_TARGET_DIR looked in the toolchain cache, failed with
-          # `harn binary not found`, and — under `set -e` plus
-          # `continue-on-error` — silently skipped `cargo bloat` entirely, so a
-          # blocked release shipped no attribution at all.
+          # reads it from there. Name the same path explicitly.
           harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
-          # `|| true` because this invocation is here for the cargo-bloat report,
-          # not to gate: the fuse and the growth signal already ran in their own
-          # steps, and this step is reached precisely when one of them failed.
-          # Without it, `set -e` would abandon the `--filter deserialize` report
-          # below exactly when the attribution is most needed.
-          "$harn_bin" run scripts/check_binary_size.harn -- \
-            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" || true
+          mkdir -p "$BINARY_SIZE_REPORT_DIR"
+
+          # cargo-bloat performs an analysis build. Restore the exact binary
+          # measured by the hard gates before packaging continues.
+          restore_dir="$(mktemp -d "${RUNNER_TEMP}/harn-binary-size.XXXXXX")"
+          cp -p "$harn_bin" "$restore_dir/harn"
+          cleanup_bloat() {
+            status=$?
+            trap - EXIT
+            if ! cp -p "$restore_dir/harn" "$harn_bin" \
+              || ! cmp -s "$restore_dir/harn" "$harn_bin"; then
+              echo "::error::cargo-bloat changed the measured Harn binary and the exact backup could not be restored"
+              rm -rf "$restore_dir"
+              exit 1
+            fi
+            rm -rf "$restore_dir"
+            exit "$status"
+          }
+          trap cleanup_bloat EXIT
+
+          crates_report="$BINARY_SIZE_REPORT_DIR/cargo-bloat-crates.txt"
+          filtered_report="$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
+
+          # Attribution is best-effort, but both views are useful when a size
+          # gate fails. Record each status instead of letting the first failure
+          # prevent the second command from running.
+          set +e
+          cargo bloat --release --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
+            > "$crates_report" 2>&1
+          crates_status=$?
           cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
-            | tee "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
+            > "$filtered_report" 2>&1
+          filtered_status=$?
+          set -e
+
+          if [[ ! -s "$crates_report" ]]; then
+            echo "cargo-bloat crate attribution produced no output (exit $crates_status)" > "$crates_report"
+          fi
+          if [[ ! -s "$filtered_report" ]]; then
+            echo "cargo-bloat deserialize attribution produced no output (exit $filtered_status)" > "$filtered_report"
+          fi
+          cat "$crates_report"
+          cat "$filtered_report"
+
+          if (( crates_status != 0 || filtered_status != 0 )); then
+            echo "::warning::cargo-bloat attribution was incomplete: crates=$crates_status deserialize=$filtered_status"
+          fi
 
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
