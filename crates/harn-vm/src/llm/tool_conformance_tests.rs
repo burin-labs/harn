@@ -1361,36 +1361,42 @@ fn report_satisfies_tool_probe_when_text_fallback_passes() {
 
 #[test]
 fn summary_requires_every_repeated_native_case_to_pass() {
-    let summary = summarize_cases(&[
-        probe_case(
-            ToolProbeMode::NonStreaming,
-            true,
-            ToolProbeClassification::StructuredNativeToolCall,
-        ),
-        probe_case(
-            ToolProbeMode::NonStreaming,
-            false,
-            ToolProbeClassification::ProseOnlyNonTool,
-        ),
-    ]);
+    let summary = summarize_cases(
+        &[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::StructuredNativeToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                false,
+                ToolProbeClassification::ProseOnlyNonTool,
+            ),
+        ],
+        ToolProbeFormat::Native,
+    );
     assert_eq!(summary.native, ToolProbeStatus::Fail);
     assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
 }
 
 #[test]
 fn summary_requires_every_repeated_text_case_to_pass() {
-    let summary = summarize_cases(&[
-        probe_case(
-            ToolProbeMode::NonStreaming,
-            true,
-            ToolProbeClassification::ParseableHarnTextToolCall,
-        ),
-        probe_case(
-            ToolProbeMode::NonStreaming,
-            false,
-            ToolProbeClassification::MalformedJsonArguments,
-        ),
-    ]);
+    let summary = summarize_cases(
+        &[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::ParseableHarnTextToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                false,
+                ToolProbeClassification::MalformedJsonArguments,
+            ),
+        ],
+        ToolProbeFormat::Native,
+    );
     assert_eq!(summary.native, ToolProbeStatus::Fail);
     assert_eq!(summary.text, ToolProbeStatus::Fail);
     assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
@@ -1398,20 +1404,40 @@ fn summary_requires_every_repeated_text_case_to_pass() {
 
 #[test]
 fn summary_preserves_nonstreaming_text_fallback_when_streaming_fails() {
-    let summary = summarize_cases(&[
-        probe_case(
-            ToolProbeMode::NonStreaming,
-            true,
-            ToolProbeClassification::ParseableHarnTextToolCall,
-        ),
-        probe_case(
-            ToolProbeMode::Streaming,
-            false,
-            ToolProbeClassification::ProseOnlyNonTool,
-        ),
-    ]);
+    let summary = summarize_cases(
+        &[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::ParseableHarnTextToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::Streaming,
+                false,
+                ToolProbeClassification::ProseOnlyNonTool,
+            ),
+        ],
+        ToolProbeFormat::Native,
+    );
     assert_eq!(summary.native, ToolProbeStatus::Fail);
     assert_eq!(summary.streaming_native, ToolProbeStatus::Fail);
+    assert_eq!(summary.text, ToolProbeStatus::Pass);
+    assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Text);
+}
+
+#[test]
+fn summary_keeps_untried_native_modes_unknown_for_a_text_probe() {
+    let summary = summarize_cases(
+        &[probe_case(
+            ToolProbeMode::Streaming,
+            true,
+            ToolProbeClassification::ParseableHarnTextToolCall,
+        )],
+        ToolProbeFormat::Text,
+    );
+
+    assert_eq!(summary.native, ToolProbeStatus::Unknown);
+    assert_eq!(summary.streaming_native, ToolProbeStatus::Unknown);
     assert_eq!(summary.text, ToolProbeStatus::Pass);
     assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Text);
 }
