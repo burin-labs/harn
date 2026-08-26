@@ -197,11 +197,7 @@ impl StreamLiveness {
     }
 
     pub(super) fn premature_eof(&self, expected: &str) -> VmError {
-        self.failure(
-            ProviderStreamFailureReason::PrematureEof,
-            None,
-            format!("stream ended before {expected}"),
-        )
+        premature_eof(&self.provider, self.phase(), self.partial_output, expected)
     }
 
     fn failure(
@@ -219,6 +215,28 @@ impl StreamLiveness {
             detail,
         }))
     }
+}
+
+/// Build the typed failure for a provider stream that ended before its
+/// protocol terminal event.
+///
+/// Custom provider readers use this instead of recreating a string error, so
+/// retries, transcripts, and host projections retain the same liveness facts
+/// as the shared SSE and NDJSON readers.
+pub(crate) fn premature_eof(
+    provider: impl Into<String>,
+    phase: ProviderStreamPhase,
+    partial: bool,
+    expected: &str,
+) -> VmError {
+    VmError::ProviderStreamFailure(Box::new(ProviderStreamFailure {
+        provider: provider.into(),
+        phase,
+        reason: ProviderStreamFailureReason::PrematureEof,
+        deadline: None,
+        partial,
+        detail: format!("stream ended before {expected}"),
+    }))
 }
 
 fn elapsed_since(earlier_ms: i64, later_ms: i64) -> Duration {
