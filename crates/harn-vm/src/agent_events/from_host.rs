@@ -105,7 +105,10 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("code_librarian_query_nl_fallback", ASSISTANT),
     host_event("budget_exhausted", ASSISTANT),
     host_event("budget_circuit_breaker", ASSISTANT),
-    host_event("progress_reported", None),
+    // Progress is user-facing product state. Journal it as an internal audit
+    // event so reconnect/restart can project it without adding a provider-visible
+    // message.
+    host_event("progress_reported", ASSISTANT),
     host_event("tool_search_query", ASSISTANT),
     host_event("tool_search_result", TOOL),
     host_event("skill_narrow", ASSISTANT),

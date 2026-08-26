@@ -57,6 +57,10 @@ impl JournalState {
         &self.config.run_id
     }
 
+    pub(crate) fn store(&self) -> SqliteSessionStore {
+        self.config.store.clone()
+    }
+
     pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
         self.pending
             .front()
@@ -327,7 +331,7 @@ fn event_kind_for_transcript(event: &serde_json::Value, message_default: bool) -
     match json_string(event, "kind").as_deref() {
         Some("tool_result") => SessionEventKind::ToolResult,
         Some("tool_call") => SessionEventKind::ToolCall,
-        Some("plan") => SessionEventKind::Plan,
+        Some("plan" | "plan_document") => SessionEventKind::Plan,
         Some("compaction") => SessionEventKind::Compaction,
         Some("system_reminder") => SessionEventKind::SystemReminder,
         Some("reminder") => SessionEventKind::Reminder,
@@ -893,6 +897,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn plan_document_event_uses_the_canonical_plan_kind() {
+        let event = append_event_for_mutation(
+            &mapping_config(),
+            TranscriptMutation::AuditEventAdded {
+                transcript_event: serde_json::json!({
+                    "id": "plan-event",
+                    "kind": "plan_document",
+                    "role": "tool",
+                    "visibility": "public",
+                    "text": "",
+                    "metadata": {
+                        "plan_document": {
+                            "_type": "plan_document",
+                            "schema_version": "harn.plan_document.v1"
+                        }
+                    }
+                }),
+            },
+        )
+        .expect("map plan document");
+
+        assert_eq!(event.kind, SessionEventKind::Plan);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn generic_agent_loop_persists_canonical_transcript_lifecycle() {
         crate::agent_sessions::reset_session_store();
@@ -909,7 +938,14 @@ mod tests {
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
-  harness.llm.mock_enqueue({{text: "", tool_calls: [{{id: "live-call", name: "noop", arguments: {{}}}}]}})
+  harness.llm.mock_enqueue({{text: "", tool_calls: [{{
+    id: "live-call",
+    name: "agent_progress",
+    arguments: {{
+      message: "Finished the durable projection.",
+      entries: [{{content: "Project recap facts", status: "completed"}}],
+    }},
+  }}]}})
   harness.llm.mock_enqueue({{text: "##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
@@ -932,12 +968,17 @@ pipeline main(harness: Harness, task: unknown) {{
       root: {root_literal},
       session_id: "live-journal-agent-loop",
       tools: tools,
+      progress_tool: {{}},
       tool_format: "native",
       loop_until_done: true,
       max_iterations: 4,
     }},
   )
   harness.stdio.println(result.status)
+  harness.stdio.println(result.recap.state)
+  harness.stdio.println(result.recap.snapshot.coverage.scanned)
+  harness.stdio.println(result.recap.snapshot.coverage.matched)
+  harness.stdio.println(result.recap.snapshot.projectionHash)
 }}
 "###,
         );
@@ -952,6 +993,19 @@ pipeline main(harness: Harness, task: unknown) {{
             })
             .await;
         assert!(output.lines().any(|line| line.ends_with("done")));
+        let output_lines = output.lines().collect::<Vec<_>>();
+        assert!(output_lines.contains(&"available"));
+        assert!(
+            output_lines
+                .iter()
+                .filter_map(|line| line.parse::<usize>().ok())
+                .any(|count| count > 0),
+            "terminal AgentResult must expose a non-vacuous recap: {output}"
+        );
+        assert!(
+            output_lines.iter().any(|line| line.starts_with("sha256:")),
+            "terminal AgentResult must expose the recap projection hash: {output}"
+        );
 
         let session_id = "live-journal-agent-loop";
         let store = session_store::open_canonical_agent_session(
@@ -1001,6 +1055,24 @@ pipeline main(harness: Harness, task: unknown) {{
                 && event.payload["transcript_event"]["kind"] == "tool_call"
                 && event.headers.get("tool_call_id") == Some(tool_call_id)
         }));
+        let progress = events
+            .iter()
+            .find(|event| {
+                matches!(
+                    &event.kind,
+                    SessionEventKind::Custom { custom_type }
+                        if custom_type == "progress_reported"
+                )
+            })
+            .expect("progress report must be durable");
+        assert_eq!(
+            progress.payload["transcript_event"]["metadata"]["message"],
+            "Finished the durable projection."
+        );
+        assert_eq!(
+            progress.payload["transcript_event"]["visibility"], "internal",
+            "durable progress must not become provider-visible history"
+        );
         assert!(events.iter().any(|event| {
             event.kind == SessionEventKind::ToolResult
                 && event.headers.get("tool_call_id") == Some(tool_call_id)
@@ -1030,6 +1102,12 @@ pipeline main(harness: Harness, task: unknown) {{
             projected.tool_recordings[0].duration_ms.is_some(),
             "the live terminal tool update must retain its measured duration"
         );
+
+        let hydrated = hydrate_events(events);
+        assert!(hydrated.messages.iter().all(|message| {
+            message.get("content").and_then(serde_json::Value::as_str)
+                != Some("Finished the durable projection.")
+        }));
 
         crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();

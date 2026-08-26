@@ -140,6 +140,7 @@ pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
 pub mod session_bundle;
+pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
 pub(crate) mod shared_state;

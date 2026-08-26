@@ -107,6 +107,14 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(object, "private_reasoning", serde_json::Value::Null);
     insert_missing(object, "thinking_summary", serde_json::Value::Null);
     insert_missing(object, "transcript", transcript);
+    insert_missing(
+        object,
+        "recap",
+        serde_json::to_value(crate::session_recap::SessionRecapAvailability::unavailable(
+            crate::session_recap::SessionRecapUnavailableReason::AdmissionTerminal,
+        ))
+        .expect("recap availability contract must serialize"),
+    );
     insert_missing(object, "trace", serde_json::Value::Null);
     insert_missing(object, "tokens_used", serde_json::json!(0));
     insert_missing(object, "cost_usd", serde_json::json!(0.0));

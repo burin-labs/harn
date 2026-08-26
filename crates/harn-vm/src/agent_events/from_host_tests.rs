@@ -232,6 +232,14 @@ fn from_host_progress_reported_defaults_replace_true() {
 }
 
 #[test]
+fn progress_reported_uses_the_durable_internal_journal_policy() {
+    assert_eq!(
+        AgentEvent::host_transcript_role("progress_reported").map(|role| role.as_str()),
+        Some("assistant"),
+    );
+}
+
+#[test]
 fn from_host_verdict_deserializes_complete_payload() {
     // The loop always emits a normalized (complete) verdict payload; the
     // typed path deserializes it 1:1.

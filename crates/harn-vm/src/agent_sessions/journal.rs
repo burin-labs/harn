@@ -81,3 +81,18 @@ pub(crate) fn active_run_id(id: &str) -> Option<String> {
             .map(|journal| journal.run_id().to_string())
     })
 }
+
+/// Canonical store owned by the live journal for a terminal read-back.
+///
+/// The clone is another handle to the same SQLite store, not a second source of
+/// truth. Callers use it only after flushing queued mutations.
+pub(crate) fn journal_store(id: &str) -> Option<harn_session_store::SqliteSessionStore> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .try_borrow()
+            .ok()?
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::store)
+    })
+}
