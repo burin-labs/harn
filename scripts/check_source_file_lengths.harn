@@ -6,6 +6,8 @@ const LEGACY_INVENTORY_PATH = "scripts/source-file-length-legacy.json"
 
 const LEGACY_INVENTORY_VERSION = 1
 
+const HISTORICAL_BASELINE_DIR = "scripts/source-file-length-baseline"
+
 const SKIP_DIR_NAMES = [
   ".burin",
   ".git",
@@ -30,7 +32,7 @@ pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
 
 pub type SourceCount = {path: string, lines: int}
 
-pub type BaseSourceCount = {path: string, lines?: int, error?: string}
+pub type BaseSourceCount = {path: string, approved: bool, lines?: int, error?: string}
 
 pub type SourceLengthFindingKind = "invalid_legacy_inventory" \
   | "legacy_path_missing" \
@@ -332,6 +334,18 @@ pub fn evaluate_inventory(
       continue
     }
     const base = base_by_path[path]
+    if base != nil && !base.approved {
+      findings = findings.appending(
+        {
+          kind: "invalid_legacy_inventory",
+          path: path,
+          actual: source.lines,
+          ceiling: max_lines,
+          message: to_string(base.error ?? "source was not approved legacy debt at the base"),
+        },
+      )
+      continue
+    }
     if base == nil || base.lines == nil {
       findings = findings.appending(
         {
@@ -515,23 +529,89 @@ fn base_source_inventory(
   root: string,
   revision: string,
   legacy_paths: list<string>,
+  base_legacy_paths: list<string>,
 ) -> list<BaseSourceCount> {
   const renamed: dict<string, string> = renamed_base_paths(process, root, revision)
   let sources: list<BaseSourceCount> = []
   for path in legacy_paths {
     const base_path = to_string(renamed[path] ?? path)
+    if !base_legacy_paths.contains(base_path) {
+      sources = sources.appending(
+        {
+          path: path,
+          approved: false,
+          error: "comparison-base policy did not approve legacy source " + base_path,
+        },
+      )
+      continue
+    }
     const result = process.run(
       {program: "git", args: ["-C", root, "cat-file", "blob", revision + ":" + base_path]},
     )
     if result.success {
-      sources = sources.appending({path: path, lines: logical_line_count(result.stdout)})
+      sources = sources.appending(
+        {path: path, approved: true, lines: logical_line_count(result.stdout)},
+      )
     } else {
       sources = sources.appending(
-        {path: path, error: git_failure(result, "read " + path + " at " + revision)},
+        {
+          path: path,
+          approved: true,
+          error: git_failure(result, "read " + base_path + " at " + revision),
+        },
       )
     }
   }
   return sources
+}
+
+/** Read the policy format owned by the comparison revision. */
+fn base_legacy_inventory(process: HarnessProcess, root: string, revision: string) -> dict {
+  const current = process.run(
+    {
+      program: "git",
+      args: ["-C", root, "cat-file", "blob", revision + ":" + LEGACY_INVENTORY_PATH],
+    },
+  )
+  if current.success {
+    return parse_legacy_inventory(current.stdout)
+  }
+  // The first cutover must compare against the historical shard layout. This
+  // decodes base history only; current policy has one owner above.
+  const historical = process.run(
+    {
+      program: "git",
+      args: ["-C", root, "ls-tree", "-r", "--name-only", revision, "--", HISTORICAL_BASELINE_DIR],
+    },
+  )
+  if !historical.success {
+    return {
+      ok: false,
+      paths: [],
+      error: git_failure(historical, "read comparison-base legacy policy"),
+    }
+  }
+  const prefix = HISTORICAL_BASELINE_DIR + "/"
+  const suffix = ".lines"
+  let paths: list<string> = []
+  for line in historical.stdout.lines() {
+    const shard = normalize_source_path(line.trim())
+    if shard.starts_with(prefix) && shard.ends_with(suffix) {
+      const path = shard.substring(prefix.len(), shard.len() - suffix.len())
+      if !legacy_path_shape_valid(path) {
+        return {ok: false, paths: [], error: "invalid historical legacy source path: " + path}
+      }
+      paths = paths.appending(path)
+    }
+  }
+  if paths.count == 0 {
+    return {
+      ok: false,
+      paths: [],
+      error: "comparison base has neither the legacy inventory nor historical count shards",
+    }
+  }
+  return {ok: true, paths: paths.sorted(), error: ""}
 }
 
 /** Map a current renamed path to its comparison-base path. */
@@ -659,6 +739,11 @@ pub fn check_source_file_lengths(
     requested_comparison,
     requested_base_ref,
   )
+  const base_inventory = if base.ok {
+    base_legacy_inventory(harness.process, resolved_root, base.revision)
+  } else {
+    {ok: false, paths: [], error: base.error}
+  }
   let findings: list<SourceLengthFinding> = []
   if !inventory.ok {
     findings = findings.appending(
@@ -675,12 +760,23 @@ pub fn check_source_file_lengths(
       },
     )
   }
-  if inventory.ok && base.ok {
+  if base.ok && !base_inventory.ok {
+    findings = findings.appending(
+      {kind: "base_unavailable", path: LEGACY_INVENTORY_PATH, message: base_inventory.error},
+    )
+  }
+  if inventory.ok && base.ok && base_inventory.ok {
     findings = findings
       + evaluate_inventory(
         sources,
         inventory.paths,
-        base_source_inventory(harness.process, resolved_root, base.revision, inventory.paths),
+        base_source_inventory(
+          harness.process,
+          resolved_root,
+          base.revision,
+          inventory.paths,
+          base_inventory.paths,
+        ),
       )
   }
   // Reuses the inventory walk that just ran, so the reconciliation costs one

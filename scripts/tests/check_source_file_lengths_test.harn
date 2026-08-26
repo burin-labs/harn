@@ -109,7 +109,7 @@ pipeline test_strict_merge_base_ceiling_accepts_shrink_and_rejects_any_growth(
 ) {
   const path = "crates/example/src/large.rs"
   const legacy = [path]
-  const base = [{path: path, lines: 1800}]
+  const base = [{path: path, approved: true, lines: 1800}]
   assert_eq(evaluate_inventory([{path: path, lines: 1790}], legacy, base), [])
   const one_line_growth = evaluate_inventory([{path: path, lines: 1801}], legacy, base)
   assert_eq(finding_kinds(one_line_growth), ["growth"])
@@ -123,7 +123,7 @@ pipeline test_independent_shrinks_need_no_policy_edit_and_combined_growth_fails(
 ) {
   const path = "crates/example/src/large.rs"
   const legacy = [path]
-  const base = [{path: path, lines: 1800}]
+  const base = [{path: path, approved: true, lines: 1800}]
   assert_eq(evaluate_inventory([{path: path, lines: 1795}], legacy, base), [])
   assert_eq(evaluate_inventory([{path: path, lines: 1790}], legacy, base), [])
   assert_eq(
@@ -141,7 +141,21 @@ pipeline test_new_oversized_and_invented_legacy_exemptions_fail(harness: Harness
   )
   assert_eq(
     finding_kinds(
-      evaluate_inventory([{path: added, lines: 1501}], [added], [{path: added, lines: 1500}]),
+      evaluate_inventory(
+        [{path: added, lines: 1501}],
+        [added],
+        [{path: added, approved: false, lines: 1700}],
+      ),
+    ),
+    ["invalid_legacy_inventory"],
+  )
+  assert_eq(
+    finding_kinds(
+      evaluate_inventory(
+        [{path: added, lines: 1501}],
+        [added],
+        [{path: added, approved: true, lines: 1500}],
+      ),
     ),
     ["invalid_legacy_inventory"],
   )
@@ -154,12 +168,16 @@ pipeline test_renamed_deleted_and_repaid_legacy_paths_are_explicit(
 ) {
   const old = "crates/example/src/old.rs"
   assert_eq(
-    finding_kinds(evaluate_inventory([], [old], [{path: old, lines: 1700}])),
+    finding_kinds(evaluate_inventory([], [old], [{path: old, approved: true, lines: 1700}])),
     ["legacy_path_missing"],
   )
   assert_eq(
     finding_kinds(
-      evaluate_inventory([{path: old, lines: 1500}], [old], [{path: old, lines: 1700}]),
+      evaluate_inventory(
+        [{path: old, lines: 1500}],
+        [old],
+        [{path: old, approved: true, lines: 1700}],
+      ),
     ),
     ["obsolete_legacy_path"],
   )
@@ -284,8 +302,14 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       const new_path = "crates/example/src/renamed policy [v2].rs"
       init_repo(harness.process, root)
       write_source(harness, root, old_path, 1502)
-      write_inventory(harness, root, [old_path])
+      write_text(
+        harness,
+        root,
+        "scripts/source-file-length-baseline/" + old_path + ".lines",
+        "1502\n",
+      )
       const base = commit_all(harness.process, root, "base")
+      git_ok(harness.process, root, ["rm", "-q", "-r", "scripts/source-file-length-baseline"])
       git_ok(harness.process, root, ["mv", old_path, new_path])
       write_inventory(harness, root, [new_path])
       commit_all(harness.process, root, "rename")
@@ -294,6 +318,31 @@ pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceilin
       const report = check_source_file_lengths(harness, root, "merge-base", base)
       assert_eq(finding_kinds(report.findings), ["growth"])
       assert_eq(report.findings[0]?.ceiling, 1502)
+    },
+  )
+}
+
+@test
+pipeline test_rename_cannot_promote_excluded_source_into_legacy_policy(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const old_path = "spec/protocol-artifacts/generated.rs"
+      const new_path = "crates/example/src/generated.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, old_path, 1502)
+      write_inventory(harness, root, [])
+      const base = commit_all(harness.process, root, "excluded base")
+      mkdirs(harness, dirname(path_join(root, new_path)) ?? root)
+      git_ok(harness.process, root, ["mv", old_path, new_path])
+      write_inventory(harness, root, [new_path])
+      commit_all(harness.process, root, "promote excluded source")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains(old_path) ?? false, true)
     },
   )
 }
