@@ -578,6 +578,49 @@ fn base_source_inventory(
       )
       continue
     }
+    if base_source.path != source.path {
+      const current_path_at_base = process.run(
+        {
+          program: "git",
+          args: [
+            "-C",
+            root,
+            "--literal-pathspecs",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            revision,
+            "--",
+            source.path,
+          ],
+        },
+      )
+      if !current_path_at_base.success {
+        sources = sources.appending(
+          {
+            path: source.path,
+            approved: false,
+            error: git_failure(
+              current_path_at_base,
+              "verify rename destination at " + revision,
+            ),
+          },
+        )
+        continue
+      }
+      if current_path_at_base.stdout.trim() != "" {
+        sources = sources.appending(
+          {
+            path: source.path,
+            approved: false,
+            error:
+              "legacy identity cannot be reassigned onto a path that existed at the comparison base: "
+              + source.path,
+          },
+        )
+        continue
+      }
+    }
     const base_path = base_source.path
     const result = process.run(
       {program: "git", args: ["-C", root, "cat-file", "blob", revision + ":" + base_path]},

@@ -380,6 +380,55 @@ pipeline test_rename_cannot_promote_excluded_source_into_legacy_policy(
 }
 
 @test
+pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const smaller = "crates/example/src/smaller.rs"
+      const larger = "crates/example/src/larger.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, smaller, 1600)
+      write_source(harness, root, larger, 2000)
+      write_inventory(harness, root, [larger, smaller])
+      const base = commit_all(harness.process, root, "two ceilings")
+      write_source(harness, root, smaller, 1900)
+      git_ok(harness.process, root, ["rm", larger])
+      let identities: dict<string, string> = {}
+      identities[smaller] = larger
+      write_inventory(harness, root, [smaller], identities)
+      commit_all(harness.process, root, "attempt identity transfer")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("existed") ?? false, true)
+    },
+  )
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const identity_path = "crates/example/src/original.rs"
+      const legacy_path = "crates/example/src/renamed.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, identity_path, 1400)
+      write_source(harness, root, legacy_path, 2000)
+      let base_ids: dict<string, string> = {}
+      base_ids[legacy_path] = identity_path
+      write_inventory(harness, root, [legacy_path], base_ids)
+      const base = commit_all(harness.process, root, "identity path reintroduced below cap")
+      write_source(harness, root, identity_path, 1900)
+      git_ok(harness.process, root, ["rm", legacy_path])
+      write_inventory(harness, root, [identity_path])
+      commit_all(harness.process, root, "attempt identity return")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("existed") ?? false, true)
+    },
+  )
+}
+
+@test
 pipeline test_stable_identity_survives_repeated_low_similarity_renames(
   harness: Harness,
   task: unknown,
