@@ -299,6 +299,13 @@ id = "sambanova/MiniMax-M2.7"
 provider = "sambanova"
 tool_format = "text"
 
+# M3 traffic was unavailable during the 2026-08-26 audit. Keep the proven
+# SambaNova MiniMax family format until a route-specific fidelity sweep passes.
+[aliases."sambanova-minimax-m3"]
+id = "sambanova/MiniMax-M3"
+provider = "sambanova"
+tool_format = "text"
+
 # gpt-oss (Harmony) native channel is a footgun on the SambaNova pay-per-token
 # route (empty tool_calls / reasoning-channel-only); the route is pinned to TEXT
 # in 37-sambanova.toml, so this alias pins `text` to match (a `native` pin would

@@ -32,7 +32,6 @@ unverified = [
   "nebius",
   "parasail",
   "qianfan",
-  "sambanova",
   "siliconflow",
   "tgi",
   "vercel_ai_gateway",
@@ -143,6 +142,15 @@ checked_on = "2026-08-25"
 fields = ["cache", "stream"]
 sources = [
   "https://openrouter.ai/docs/cookbook/administration/usage-accounting",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "sambanova"
+checked_on = "2026-08-26"
+fields = ["cache", "stream"]
+sources = [
+  "https://github.com/sambanova/sambanova-python/blob/main/src/sambanova/types/chat/completion_create_params.py",
+  "https://github.com/sambanova/sambanova-python/blob/main/src/sambanova/types/chat/chat_completion_stream_response.py",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -591,6 +599,8 @@ path = "/models"
 # different model mix. Catalog rows use a `sambanova/<wire-id>` prefix +
 # `wire_model` so they don't collide with other hosts of the same weights.
 [providers.sambanova]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.sambanova.ai/v1"
 base_url_env = "SAMBANOVA_BASE_URL"
 auth_style = "bearer"

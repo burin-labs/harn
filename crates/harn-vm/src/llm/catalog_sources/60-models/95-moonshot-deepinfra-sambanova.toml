@@ -317,6 +317,22 @@ open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
+[models."sambanova/MiniMax-M3"]
+name = "MiniMax M3 (SambaNova)"
+provider = "sambanova"
+wire_model = "MiniMax-M3"
+logical_model = "minimax-m3"
+equivalence_group = "minimax-m3"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.0, cache_write_per_mtok = 0.0 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
 [models."sambanova/gpt-oss-120b"]
 name = "GPT-OSS 120B (SambaNova)"
 provider = "sambanova"
