@@ -1001,7 +1001,12 @@ pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result
                 ttl.as_str(),
             )
         } else {
-            crate::llm::capabilities::admit_portable_option(&opts.provider, &opts.model, *option)
+            crate::llm::capabilities::admit_portable_option_for_thinking(
+                &opts.provider,
+                &opts.model,
+                &opts.thinking,
+                *option,
+            )
         };
         admitted.map_err(|error| {
             crate::llm::call::invalid_request_error(error.to_string(), &opts.provider, &opts.model)

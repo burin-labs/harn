@@ -66,6 +66,7 @@ mod rule_tests;
 mod runtime_probe;
 mod tool_format;
 
+pub(crate) use admission::admit_portable_option_for_thinking;
 pub(crate) use lookup::should_use_responses_transport;
 pub(crate) use overrides::swap_user_overrides;
 

@@ -22,6 +22,11 @@ fn openai_gpt_54_supports_tool_search() {
     assert!(!caps.prefers_role_developer);
     assert!(!caps.prefers_xml_tools);
     assert_eq!(caps.thinking_block_style, "reasoning_summary");
+    assert_eq!(
+        caps.reasoning_excluded_portable_options,
+        vec![PortableOption::Temperature],
+        "GPT-5.4 only fixes temperature while reasoning is active"
+    );
 }
 
 #[test]
