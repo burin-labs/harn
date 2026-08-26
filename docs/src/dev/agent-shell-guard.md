@@ -73,7 +73,7 @@ The repository already carries both host adapters:
 - Claude Code reads `.claude/settings.json`. Open `/hooks` to inspect or disable
   the active hook.
 
-Both adapters call `scripts/agent-shell-guard.sh`. That small adapter locates an
+Both adapters call `scripts/agent-shell-guard.sh`. That small adapter selects an
 existing Harn executable and passes the host payload to
 `scripts/agent_shell_guard.harn`, which owns every decision. The adapter never
 starts a build. Its empty builtin allow list denies registered non-core
@@ -83,12 +83,28 @@ Platform-specific temporary roots and generated-root configuration live in the
 typed, data-only `scripts/agent_shell_guard_policy.harn` module; the evaluator
 contains no second path list.
 
-The adapter loads project trigger and hook handler code only if a handler runs.
-A top-level handler initialization failure therefore cannot disable command
-checks. Harn still parses `harn.toml` and validates handler declarations. If
-that validation fails, or no Harn executable is available, the adapter allows
-the command so a broken project or fresh checkout cannot lock the agent out of
-setup.
+The adapter prefers a hook-owned release binary at
+`$AGENT_SHELL_GUARD_HARN_BIN`, or the default Harn cache location, only when the
+adjacent `.standalone-v1` file contains `harn-run-standalone-v1`. That runtime
+uses `harn run --standalone`, so ambient handlers, packages, skills, and cache
+authority cannot delay a command-policy decision. An explicit executable
+`HARN_BIN` retains the project-aware invocation for compatibility with older
+Harn releases. Without either path, the adapter falls back to an existing
+repository or installed executable without building one.
+
+The project-aware fallback loads project trigger and hook handler code only if
+a handler runs. A top-level handler initialization failure therefore cannot
+disable command checks. Harn still parses `harn.toml` and validates handler
+declarations.
+
+The adapter bounds policy execution below the host hook deadline. It first
+sends TERM, then KILL after a short grace so an interpreter descendant cannot
+keep the hook pipe open. Exit statuses 124, 137, and 143 deny the command
+because the policy timed out or was interrupted before proving it safe. A
+missing interpreter or another runtime failure remains fail-open so a broken
+local installation cannot lock the agent out of recovery. Policy output is
+published only after a successful interpreter exit; partial output from a crash
+or timeout is discarded instead of becoming a malformed host decision.
 
 See the current [Codex hooks reference](https://developers.openai.com/codex/config-advanced#hooks)
 and [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) for the
@@ -112,8 +128,9 @@ harn test scripts/tests/agent_shell_guard_test.harn
 ```
 
 If the adapter stays silent unexpectedly, confirm that `harn` is installed or
-set `HARN_BIN` to an existing executable. Then repeat the probe with diagnostics
-enabled:
+set `HARN_BIN` to an existing executable. For the standalone path, also confirm
+that the adjacent marker contains the exact attestation shown above. Then repeat
+the probe with diagnostics enabled:
 
 ```bash
 printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cargo test"}}' \
