@@ -366,8 +366,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `groq` | `groq/compound-mini` | `none` | `unsupported` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `groq/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `groq/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `groq` | `llama-3.1-8b-instant` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `groq` | `llama-3.3-70b-versatile` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `qwen/qwen3.6-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `huggingface` | `Qwen/Qwen3-Coder-480B-A35B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `inception` | `mercury-2` | `native` | `unknown` | - | - | - | - | - | catalog note: Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet. |

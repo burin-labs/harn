@@ -42,7 +42,7 @@ steps = [
   { provider = "gemini", model = "gemini-2.5-flash" },
   { provider = "openrouter", model = "google/gemini-2.5-flash" },
   { provider = "deepseek", model = "deepseek-v4-flash" },
-  { provider = "groq", model = "llama-3.3-70b" },
+  { provider = "groq", model = "qwen/qwen3.6-27b" },
   { provider = "cerebras", model = "gpt-oss-120b" },
   { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8" },
   { provider = "ollama", model = "llama3.2" },

@@ -332,8 +332,7 @@ mod tests {
     #[test]
     fn groq_projection_is_closed_and_requests_terminal_usage() {
         let value = serde_json::to_value(
-            hosted_openai_request("groq", "llama-3.3-70b-versatile", request(true))
-                .expect("Groq request"),
+            hosted_openai_request("groq", "qwen/qwen3.6-27b", request(true)).expect("Groq request"),
         )
         .expect("JSON");
         assert_eq!(value["stream_options"]["include_usage"], true);
@@ -378,11 +377,11 @@ mod tests {
     #[test]
     fn hosted_projection_preserves_same_id_model() {
         let value = serde_json::to_value(
-            hosted_openai_request("groq", "llama-3.3-70b-versatile", request(false))
+            hosted_openai_request("groq", "qwen/qwen3.6-27b", request(false))
                 .expect("Groq request"),
         )
         .expect("JSON");
-        assert_eq!(value["model"], "llama-3.3-70b-versatile");
+        assert_eq!(value["model"], "qwen/qwen3.6-27b");
     }
 
     #[test]
