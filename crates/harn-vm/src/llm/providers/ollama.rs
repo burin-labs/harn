@@ -57,26 +57,31 @@ impl OllamaProvider {
             "model": wire_model,
             "messages": msgs,
         });
-        if opts.max_tokens > 0 {
-            body["max_tokens"] = serde_json::json!(opts.max_tokens);
-        }
         if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(temp);
+            body["options"]["temperature"] = serde_json::json!(temp);
         }
         if let Some(top_p) = opts.top_p {
-            body["top_p"] = serde_json::json!(top_p);
+            body["options"]["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(top_k) = opts.top_k {
+            body["options"]["top_k"] = serde_json::json!(top_k);
+        }
+        if let Some(min_p) = opts.min_p {
+            body["options"]["min_p"] = serde_json::json!(min_p);
+        }
+        if let Some(repetition_penalty) = opts.repetition_penalty {
+            body["options"]["repeat_penalty"] = serde_json::json!(repetition_penalty);
+        }
+        if let Some(mirostat) = opts.mirostat {
+            body["options"]["mirostat"] = serde_json::json!(mirostat.version);
+            body["options"]["mirostat_tau"] = serde_json::json!(mirostat.target_entropy);
+            body["options"]["mirostat_eta"] = serde_json::json!(mirostat.learning_rate);
         }
         if let Some(ref stop) = opts.stop {
-            body["stop"] = serde_json::json!(stop);
+            body["options"]["stop"] = serde_json::json!(stop);
         }
         if let Some(seed) = opts.seed {
-            body["seed"] = serde_json::json!(seed);
-        }
-        if let Some(fp) = opts.frequency_penalty {
-            body["frequency_penalty"] = serde_json::json!(fp);
-        }
-        if let Some(pp) = opts.presence_penalty {
-            body["presence_penalty"] = serde_json::json!(pp);
+            body["options"]["seed"] = serde_json::json!(seed);
         }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
@@ -580,12 +585,18 @@ mod tests {
             temperature: Some(0.0),
             top_p: None,
             top_k: None,
-            logprobs: false,
-            top_logprobs: None,
+            logprobs: None,
+            logit_bias: Vec::new(),
+            min_p: None,
+            repetition_penalty: None,
+            prediction: None,
+            verbosity: None,
+            mirostat: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            parallel_tool_calls: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::JsonSchema {
                 schema: serde_json::json!({"type": "object"}),
@@ -619,6 +630,30 @@ mod tests {
             done_sentinel: None,
             done_sentinel_form: None,
         }
+    }
+
+    #[test]
+    fn sampling_controls_use_ollamas_native_options_object() {
+        let mut payload = base_payload();
+        payload.top_k = Some(30);
+        payload.min_p = Some(0.12);
+        payload.repetition_penalty = Some(1.2);
+        payload.mirostat = Some(crate::llm::api::MirostatConfig {
+            version: 2,
+            target_entropy: 6.0,
+            learning_rate: 0.2,
+        });
+
+        let body = OllamaProvider::build_request_body(&payload);
+        assert_eq!(body["options"]["temperature"], 0.0);
+        assert_eq!(body["options"]["top_k"], 30);
+        assert_eq!(body["options"]["min_p"], 0.12);
+        assert_eq!(body["options"]["repeat_penalty"], 1.2);
+        assert_eq!(body["options"]["mirostat"], 2);
+        assert_eq!(body["options"]["mirostat_tau"], 6.0);
+        assert_eq!(body["options"]["mirostat_eta"], 0.2);
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("repeat_penalty").is_none());
     }
 
     #[test]

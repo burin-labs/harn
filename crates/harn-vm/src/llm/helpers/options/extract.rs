@@ -1,44 +1,9 @@
 use super::*;
 use super::{
-    defaults::*, json::*, output::*, reminders::*, routing::*, system_prompt::*, thinking::*,
-    tool_search::*,
+    defaults::*, generation::*, json::*, output::*, reminders::*, routing::*, system_prompt::*,
+    thinking::*, tool_search::*,
 };
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
-
-/// Resolve an outbound call after refreshing runtime-owned capabilities.
-pub(crate) async fn prepare_llm_options(
-    args: &[VmValue],
-) -> Result<crate::llm::api::LlmCallOptions, VmError> {
-    match extract_llm_options(args) {
-        Ok(initial) => {
-            let (provider, model) =
-                crate::llm::managed_supply::logical_route(&initial.provider, &initial.model)?;
-            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
-                extract_llm_options(args)
-            } else {
-                Ok(initial)
-            }
-        }
-        Err(initial_error) => {
-            // A stale conservative row can reject an explicit native request
-            // before full extraction finishes. Resolve the ordinary call hint,
-            // measure it, then let the canonical extractor decide again.
-            let mut options = crate::llm::cost_route::merge_context_options(
-                args.get(2).and_then(VmValue::as_dict).cloned(),
-            );
-            apply_model_role_defaults(&mut options);
-            apply_active_step_defaults(&mut options);
-            let provider = vm_resolve_provider(&options);
-            let model = vm_resolve_model(&options, &provider);
-            let (provider, model) = crate::llm::managed_supply::logical_route(&provider, &model)?;
-            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
-                extract_llm_options(args)
-            } else {
-                Err(initial_error)
-            }
-        }
-    }
-}
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
@@ -193,16 +158,6 @@ pub(crate) fn extract_llm_options(
     } else {
         crate::llm::inferred_provider_selection_source(&provider)
     };
-    let api_key = if routing_policy
-        .as_ref()
-        .is_some_and(|policy| policy.chain.len() > 1)
-        || !route_fallbacks.is_empty()
-        || !fallback_chain.is_empty()
-    {
-        String::new()
-    } else {
-        resolve_api_key_for_selection(&provider, selection_source)?
-    };
     let caps = crate::llm::capabilities::lookup(&capability_provider, &capability_model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
@@ -272,14 +227,80 @@ pub(crate) fn extract_llm_options(
     let temperature = opt_float(&options, "temperature").or_else(|| default_float("temperature"));
     let top_p = opt_float(&options, "top_p").or_else(|| default_float("top_p"));
     let top_k = opt_int(&options, "top_k").or_else(|| default_int("top_k"));
-    let logprobs = opt_bool(&options, "logprobs");
-    let top_logprobs = opt_int(&options, "top_logprobs");
+    let logprobs = parse_logprobs(options.as_ref())?;
+    let logit_bias = parse_logit_bias(options.as_ref(), &capability_provider, &capability_model)?;
+    let min_p = opt_float(&options, "min_p");
+    let repetition_penalty = opt_float(&options, "repetition_penalty");
+    let prediction = parse_prediction(options.as_ref())?;
+    let verbosity = parse_verbosity(options.as_ref())?;
+    let mirostat = parse_mirostat(options.as_ref())?;
     let stop = opt_str_list(&options, "stop");
     let seed = opt_int(&options, "seed");
     let frequency_penalty =
         opt_float(&options, "frequency_penalty").or_else(|| default_float("frequency_penalty"));
     let presence_penalty =
         opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
+    let parallel_tool_calls = match options
+        .as_ref()
+        .and_then(|options| options.get("parallel_tool_calls"))
+    {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Bool(value)) => Some(*value),
+        Some(value) => {
+            return Err(generation_option_error(
+                "parallel_tool_calls",
+                format!("expected bool, got {}", value.type_name()),
+            ))
+        }
+    };
+    validate_generation_ranges(
+        max_tokens,
+        temperature,
+        top_p,
+        top_k,
+        min_p,
+        repetition_penalty,
+        frequency_penalty,
+        presence_penalty,
+    )?;
+    for (option, selected) in [
+        (
+            crate::llm::capabilities::PortableOption::Logprobs,
+            logprobs.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::LogitBias,
+            !logit_bias.is_empty(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::MinP,
+            min_p.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::RepetitionPenalty,
+            repetition_penalty.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::Prediction,
+            prediction.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::Verbosity,
+            verbosity.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::Mirostat,
+            mirostat.is_some(),
+        ),
+        (
+            crate::llm::capabilities::PortableOption::ParallelToolCalls,
+            parallel_tool_calls.is_some(),
+        ),
+    ] {
+        if selected {
+            portable_option_intent.insert(option);
+        }
+    }
     let timeout = resolve_timeout_secs(opt_int(&options, "timeout_ms"));
     let idle_timeout = opt_int(&options, "idle_timeout_ms").map(|ms| {
         if ms <= 0 {
@@ -321,6 +342,9 @@ pub(crate) fn extract_llm_options(
              `cache: false` or omit `prompt_cache_ttl`.",
         ))));
     }
+    let stream_explicit = options
+        .as_ref()
+        .is_some_and(|options| options.contains_key("stream"));
     let stream = options
         .as_ref()
         .and_then(|o| o.get("stream"))
@@ -332,6 +356,13 @@ pub(crate) fn extract_llm_options(
                 .map(|v| v != "0" && v.to_lowercase() != "false")
                 .unwrap_or(true)
         });
+    let stream = normalize_generation_stream(
+        stream,
+        stream_explicit,
+        &capability_provider,
+        &capability_model,
+        logprobs.is_some(),
+    )?;
     let thinking = resolve_thinking_config(
         options.as_ref(),
         &model_defaults,
@@ -735,14 +766,33 @@ pub(crate) fn extract_llm_options(
             &capability_model,
         ));
     }
+    if parallel_tool_calls.is_some()
+        && native_tools.as_ref().is_none_or(Vec::is_empty)
+        && provider_tools.is_empty()
+    {
+        return Err(generation_option_error(
+            "parallel_tool_calls",
+            "requires at least one provider-native tool",
+        ));
+    }
 
-    let provider_overrides = options
+    let selected_provider_overrides = options
         .as_ref()
         .and_then(|o| o.get("provider_options"))
         .and_then(|v| v.as_dict())
         .and_then(|namespaced| namespaced.get(provider.as_str()))
-        .and_then(|v| v.as_dict())
-        .map(vm_value_dict_to_json);
+        .and_then(|v| v.as_dict());
+    if let Some(overrides) = selected_provider_overrides {
+        if let Some(path) = first_class_generation_wire_path(overrides) {
+            return Err(generation_option_error(
+                "provider_options",
+                format!(
+                    "`{path}` is owned by Harn's typed generation options and cannot bypass validation under `provider_options.{provider}`"
+                ),
+            ));
+        }
+    }
+    let provider_overrides = selected_provider_overrides.map(vm_value_dict_to_json);
     let previous_response_id =
         opt_str(&options, "previous_response_id").filter(|value| !value.trim().is_empty());
     let store = opt_responses_store_field(options.as_ref())?;
@@ -843,7 +893,7 @@ pub(crate) fn extract_llm_options(
     let mut opts = LlmCallOptions {
         provider,
         model,
-        api_key,
+        api_key: String::new(),
         api_mode,
         route_policy,
         fallback_chain,
@@ -874,11 +924,17 @@ pub(crate) fn extract_llm_options(
         top_p,
         top_k,
         logprobs,
-        top_logprobs,
+        logit_bias,
+        min_p,
+        repetition_penalty,
+        prediction,
+        verbosity,
+        mirostat,
         stop,
         seed,
         frequency_penalty,
         presence_penalty,
+        parallel_tool_calls,
         portable_option_intent,
         fast,
         output_format,
@@ -931,6 +987,15 @@ pub(crate) fn extract_llm_options(
 
     if enforce_capability_gates {
         validate_options(&opts)?;
+    }
+    if opts
+        .routing_policy
+        .as_ref()
+        .is_none_or(|policy| policy.chain.len() <= 1)
+        && opts.route_fallbacks.is_empty()
+        && opts.fallback_chain.is_empty()
+    {
+        opts.api_key = resolve_api_key_for_selection(&opts.provider, selection_source)?;
     }
     Ok(opts)
 }
@@ -985,35 +1050,6 @@ pub(crate) fn opt_str_list(
         }
         _ => None,
     }
-}
-
-/// Reject caller-selected portable options that the resolved route cannot
-/// represent. Catalog-owned model defaults are not caller intent and are not
-/// present in `portable_option_intent`.
-pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
-    for option in &opts.portable_option_intent {
-        let admitted = if *option == crate::llm::capabilities::PortableOption::PromptCacheTtl {
-            let ttl = opts
-                .prompt_cache_ttl
-                .expect("prompt-cache TTL intent has a parsed value");
-            crate::llm::capabilities::admit_prompt_cache_ttl(
-                &opts.provider,
-                &opts.model,
-                ttl.as_str(),
-            )
-        } else {
-            crate::llm::capabilities::admit_portable_option_for_thinking(
-                &opts.provider,
-                &opts.model,
-                &opts.thinking,
-                *option,
-            )
-        };
-        admitted.map_err(|error| {
-            crate::llm::call::invalid_request_error(error.to_string(), &opts.provider, &opts.model)
-        })?;
-    }
-    Ok(())
 }
 
 /// Provider stop-sequence count cap. OpenAI and Anthropic both reject more than

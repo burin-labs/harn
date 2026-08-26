@@ -1,5 +1,14 @@
 use tiktoken_rs::tokenizer::{get_tokenizer, Tokenizer};
 
+const TIKTOKEN_IDENTITY_PREFIX: &str = "tiktoken:";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExactToken {
+    pub(crate) id: u32,
+    pub(crate) tokenizer: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TokenCountSource {
     TiktokenExact,
@@ -76,6 +85,60 @@ pub(crate) fn tiktoken_count_text(text: &str, model: &str) -> Result<TokenCountE
     })
 }
 
+pub(crate) fn exact_tokenizer_identity_for_model(model: &str) -> Result<String, String> {
+    let info = tokenizer_info_for_model(model);
+    if !info.exact {
+        return Err(format!(
+            "model `{model}` has no exact local tokenizer; `{}` is only a token-count estimate",
+            info.source.as_str()
+        ));
+    }
+    let encoder = info
+        .encoder
+        .ok_or_else(|| format!("model `{model}` has no exact local tokenizer"))?;
+    Ok(format!("{TIKTOKEN_IDENTITY_PREFIX}{encoder}"))
+}
+
+pub(crate) fn tokenize_exact(text: &str, model: &str) -> Result<Vec<ExactToken>, String> {
+    let info = tokenizer_info_for_model(model);
+    if !info.exact {
+        return Err(format!(
+            "model `{model}` has no exact local tokenizer; approximate token counts cannot create token references"
+        ));
+    }
+    let tokenizer = info
+        .tokenizer
+        .ok_or_else(|| format!("model `{model}` has no exact local tokenizer"))?;
+    let identity = format!("{TIKTOKEN_IDENTITY_PREFIX}{}", encoder_name(tokenizer));
+    let bpe = tiktoken_rs::bpe_for_tokenizer(tokenizer)
+        .map_err(|error| format!("failed to load tokenizer `{identity}`: {error}"))?;
+    bpe.encode_with_special_tokens(text)
+        .into_iter()
+        .map(|id| {
+            let bytes = bpe
+                .decode_bytes(&[id])
+                .map_err(|error| format!("failed to decode token {id}: {error}"))?;
+            Ok(ExactToken {
+                id,
+                tokenizer: identity.clone(),
+                bytes,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn detokenize_exact(tokenizer: &str, ids: &[u32]) -> Result<String, String> {
+    let tokenizer_kind = tokenizer_from_identity(tokenizer).ok_or_else(|| {
+        format!(
+            "unknown tokenizer identity `{tokenizer}`; expected `{TIKTOKEN_IDENTITY_PREFIX}<encoder>`"
+        )
+    })?;
+    let bpe = tiktoken_rs::bpe_for_tokenizer(tokenizer_kind)
+        .map_err(|error| format!("failed to load tokenizer `{tokenizer}`: {error}"))?;
+    bpe.decode(ids)
+        .map_err(|error| format!("tokens are not valid UTF-8 text: {error}"))
+}
+
 pub(crate) fn estimate_text_tokens(text: &str, model: Option<&str>) -> TokenCountEstimate {
     if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
         if let Ok(count) = tiktoken_count_text(text, model) {
@@ -132,6 +195,19 @@ fn encoder_name(tokenizer: Tokenizer) -> &'static str {
         Tokenizer::R50kBase => "r50k_base",
         Tokenizer::P50kEdit => "p50k_edit",
         Tokenizer::Gpt2 => "gpt2",
+    }
+}
+
+fn tokenizer_from_identity(identity: &str) -> Option<Tokenizer> {
+    match identity.strip_prefix(TIKTOKEN_IDENTITY_PREFIX)? {
+        "o200k_harmony" => Some(Tokenizer::O200kHarmony),
+        "o200k_base" => Some(Tokenizer::O200kBase),
+        "cl100k_base" => Some(Tokenizer::Cl100kBase),
+        "p50k_base" => Some(Tokenizer::P50kBase),
+        "r50k_base" => Some(Tokenizer::R50kBase),
+        "p50k_edit" => Some(Tokenizer::P50kEdit),
+        "gpt2" => Some(Tokenizer::Gpt2),
+        _ => None,
     }
 }
 
@@ -212,5 +288,26 @@ mod tests {
         assert_eq!(estimate.tokens, 3);
         assert_eq!(estimate.info.source, TokenCountSource::Heuristic);
         assert_eq!(estimate.info.encoder, None);
+    }
+
+    #[test]
+    fn exact_tokens_round_trip_with_stable_tokenizer_identity() {
+        let tokens = tokenize_exact("hello, 世界", "gpt-4o").expect("exact tokenization");
+        assert!(!tokens.is_empty());
+        assert!(tokens
+            .iter()
+            .all(|token| token.tokenizer == "tiktoken:o200k_base"));
+        let ids = tokens.iter().map(|token| token.id).collect::<Vec<_>>();
+        assert_eq!(
+            detokenize_exact("tiktoken:o200k_base", &ids).expect("exact decoding"),
+            "hello, 世界"
+        );
+    }
+
+    #[test]
+    fn approximations_cannot_mint_token_references() {
+        let error = tokenize_exact("hello", "claude-sonnet-4-20250514")
+            .expect_err("Claude token counting is approximate");
+        assert!(error.contains("cannot create token references"));
     }
 }

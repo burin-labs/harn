@@ -12,6 +12,10 @@ see [Coming from elsewhere](./sota-comparison.md).
 **LLM call.** One request to a language model. Smallest unit. Produced by
 `harness.llm.call`.
 
+**Token reference.** One token ID paired with its exact tokenizer vocabulary.
+Harn's `TokenRef` prevents a bare integer from crossing into a model that gives
+that integer another meaning. See [Exact token references](../llm/tokenizer.md).
+
 **Tool call.** The model's request to invoke a named tool, with arguments. Lives
 inside an iteration; an iteration can contain several. Executed by
 `agent_dispatch_tool_call` or by `agent_loop` automatically.
@@ -247,6 +251,7 @@ conversational-unit noun.
 | Concept | Reference page |
 |---|---|
 | `harness.llm.call`, `harness.llm.call_structured`, `harness.llm.completion` | [LLM calls](../llm/llm_call.md) |
+| `TokenRef`, `tokenize`, `detokenize`, `logit_bias` | [Exact token references](../llm/tokenizer.md) |
 | `agent_loop`, `AgentSpec`, profiles, `done_judge` | [Agent loops](../llm/agent_loop.md) |
 | Tools, Tool Vault, MCP server tools | [LLM tools](../llm/tools.md) |
 | Sessions, fork, reset, compact, snapshot | [Sessions](../sessions.md) |

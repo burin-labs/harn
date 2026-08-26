@@ -171,6 +171,43 @@ impl serde::Serialize for PromptCacheTtl {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct LogprobsConfig {
+    pub top: Option<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub(crate) struct TokenBias {
+    pub token_id: u32,
+    pub tokenizer: String,
+    pub bias: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Verbosity {
+    Low,
+    Medium,
+    High,
+}
+
+impl Verbosity {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub(crate) struct MirostatConfig {
+    pub version: u8,
+    pub target_entropy: f64,
+    pub learning_rate: f64,
+}
+
 /// Provider API surface for a call. OpenAI-compatible providers default to
 /// chat completions; the native OpenAI Responses path is explicit because it
 /// has different request, tool, and transcript semantics.
@@ -436,12 +473,18 @@ pub(crate) struct LlmCallOptions {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub top_k: Option<i64>,
-    pub logprobs: bool,
-    pub top_logprobs: Option<i64>,
+    pub logprobs: Option<LogprobsConfig>,
+    pub logit_bias: Vec<TokenBias>,
+    pub min_p: Option<f64>,
+    pub repetition_penalty: Option<f64>,
+    pub prediction: Option<String>,
+    pub verbosity: Option<Verbosity>,
+    pub mirostat: Option<MirostatConfig>,
     pub stop: Option<Vec<String>>,
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    pub parallel_tool_calls: Option<bool>,
     /// Portable generation options selected by a caller, context, preset, or
     /// routing step. Catalog-owned model defaults are intentionally absent:
     /// they may mirror a provider's fixed server value without requiring a
@@ -584,12 +627,18 @@ impl Default for LlmCallOptions {
             temperature: None,
             top_p: None,
             top_k: None,
-            logprobs: false,
-            top_logprobs: None,
+            logprobs: None,
+            logit_bias: Vec::new(),
+            min_p: None,
+            repetition_penalty: None,
+            prediction: None,
+            verbosity: None,
+            mirostat: None,
             stop: None,
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            parallel_tool_calls: None,
             portable_option_intent: std::collections::BTreeSet::new(),
             fast: false,
             output_format: OutputFormat::default(),
@@ -767,12 +816,18 @@ pub(crate) struct LlmRequestPayload {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub top_k: Option<i64>,
-    pub logprobs: bool,
-    pub top_logprobs: Option<i64>,
+    pub logprobs: Option<LogprobsConfig>,
+    pub logit_bias: Vec<TokenBias>,
+    pub min_p: Option<f64>,
+    pub repetition_penalty: Option<f64>,
+    pub prediction: Option<String>,
+    pub verbosity: Option<Verbosity>,
+    pub mirostat: Option<MirostatConfig>,
     pub stop: Option<Vec<String>>,
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    pub parallel_tool_calls: Option<bool>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -922,11 +977,17 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             top_p: opts.top_p,
             top_k: opts.top_k,
             logprobs: opts.logprobs,
-            top_logprobs: opts.top_logprobs,
+            logit_bias: opts.logit_bias.clone(),
+            min_p: opts.min_p,
+            repetition_penalty: opts.repetition_penalty,
+            prediction: opts.prediction.clone(),
+            verbosity: opts.verbosity,
+            mirostat: opts.mirostat,
             stop: opts.stop.clone(),
             seed: opts.seed,
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
+            parallel_tool_calls: opts.parallel_tool_calls,
             fast: opts.fast,
             output_format,
             output_schema,

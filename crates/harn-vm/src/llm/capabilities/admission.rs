@@ -1,5 +1,63 @@
 use super::overrides::current_user_overrides;
-use super::rule::declared_portable_option_support;
+use super::rule::resolved_rule_and_defaults;
+
+/// Return authored support without treating unknown custom routes as capable.
+fn declared_portable_option_support(
+    user: Option<&super::model::CapabilitiesFile>,
+    builtin: &super::model::CapabilitiesFile,
+    provider: &str,
+    model: &str,
+    option: PortableOption,
+) -> (Option<bool>, Option<Vec<String>>) {
+    let (rule, defaults) = resolved_rule_and_defaults(user, builtin, provider, model);
+    let rule = rule.as_ref();
+    let supported = match option {
+        PortableOption::Temperature => rule
+            .and_then(|rule| rule.temperature_supported)
+            .or(defaults.temperature_supported),
+        PortableOption::TopP => rule
+            .and_then(|rule| rule.top_p_supported)
+            .or(defaults.top_p_supported),
+        PortableOption::TopK => rule
+            .and_then(|rule| rule.top_k_supported)
+            .or(defaults.top_k_supported),
+        PortableOption::Seed => rule
+            .and_then(|rule| rule.seed_supported)
+            .or(defaults.seed_supported),
+        PortableOption::FrequencyPenalty => rule
+            .and_then(|rule| rule.frequency_penalty_supported)
+            .or(defaults.frequency_penalty_supported),
+        PortableOption::PresencePenalty => rule
+            .and_then(|rule| rule.presence_penalty_supported)
+            .or(defaults.presence_penalty_supported),
+        PortableOption::Stop => rule
+            .and_then(|rule| rule.stop_supported)
+            .or(defaults.stop_supported),
+        PortableOption::Logprobs
+        | PortableOption::LogitBias
+        | PortableOption::MinP
+        | PortableOption::RepetitionPenalty
+        | PortableOption::Prediction
+        | PortableOption::Verbosity
+        | PortableOption::Mirostat => Some(
+            rule.and_then(|rule| rule.advanced_generation_options.as_ref())
+                .or(defaults.advanced_generation_options.as_ref())
+                .is_some_and(|options| options.contains(&option)),
+        ),
+        PortableOption::ParallelToolCalls => rule
+            .and_then(|rule| rule.supports_parallel_tool_calls)
+            .or(defaults.supports_parallel_tool_calls),
+        PortableOption::Cache | PortableOption::PromptCacheTtl => {
+            rule.and_then(|rule| rule.prompt_caching)
+        }
+    };
+    let values = (option == PortableOption::PromptCacheTtl).then(|| {
+        rule.and_then(|rule| rule.prompt_cache_ttls.clone())
+            .or_else(|| defaults.prompt_cache_ttls.clone())
+            .unwrap_or_default()
+    });
+    (supported, values)
+}
 
 /// Portable generation options whose availability is declared by the
 /// provider capability registry.
@@ -17,6 +75,14 @@ pub enum PortableOption {
     FrequencyPenalty,
     PresencePenalty,
     Stop,
+    Logprobs,
+    LogitBias,
+    MinP,
+    RepetitionPenalty,
+    Prediction,
+    Verbosity,
+    Mirostat,
+    ParallelToolCalls,
     Cache,
     PromptCacheTtl,
 }
@@ -35,7 +101,7 @@ impl PortableOption {
         Self::Stop,
     ];
 
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 17] = [
         Self::Temperature,
         Self::TopP,
         Self::TopK,
@@ -43,6 +109,14 @@ impl PortableOption {
         Self::FrequencyPenalty,
         Self::PresencePenalty,
         Self::Stop,
+        Self::Logprobs,
+        Self::LogitBias,
+        Self::MinP,
+        Self::RepetitionPenalty,
+        Self::Prediction,
+        Self::Verbosity,
+        Self::Mirostat,
+        Self::ParallelToolCalls,
         Self::Cache,
         Self::PromptCacheTtl,
     ];
@@ -56,6 +130,14 @@ impl PortableOption {
             Self::FrequencyPenalty => "frequency_penalty",
             Self::PresencePenalty => "presence_penalty",
             Self::Stop => "stop",
+            Self::Logprobs => "logprobs",
+            Self::LogitBias => "logit_bias",
+            Self::MinP => "min_p",
+            Self::RepetitionPenalty => "repetition_penalty",
+            Self::Prediction => "prediction",
+            Self::Verbosity => "verbosity",
+            Self::Mirostat => "mirostat",
+            Self::ParallelToolCalls => "parallel_tool_calls",
             Self::Cache => "cache",
             Self::PromptCacheTtl => "prompt_cache_ttl",
         }
@@ -149,7 +231,18 @@ pub(crate) fn admit_portable_option_for_thinking(
         && super::lookup::lookup(provider, model)
             .reasoning_excluded_portable_options
             .contains(&option);
-    let requires_authored_support = option == PortableOption::Cache;
+    let requires_authored_support = matches!(
+        option,
+        PortableOption::Cache
+            | PortableOption::Logprobs
+            | PortableOption::LogitBias
+            | PortableOption::MinP
+            | PortableOption::RepetitionPenalty
+            | PortableOption::Prediction
+            | PortableOption::Verbosity
+            | PortableOption::Mirostat
+            | PortableOption::ParallelToolCalls
+    );
     if !rejected_while_reasoning
         && (supported == Some(true) || (supported.is_none() && !requires_authored_support))
     {
@@ -270,5 +363,41 @@ prompt_cache_ttls = ["5m", "1h"]
             .expect_err("unknown custom routes have no sound TTL lowering");
         assert_eq!(unknown.option, PortableOption::PromptCacheTtl);
         clear_user_overrides();
+    }
+
+    #[test]
+    fn advanced_generation_controls_require_an_authored_wire_lowering() {
+        for option in [PortableOption::Logprobs, PortableOption::LogitBias] {
+            admit_portable_option("openai", "gpt-4o", option)
+                .expect("OpenAI Chat has an authored lowering");
+        }
+        admit_portable_option("ollama", "qwen3", PortableOption::Mirostat)
+            .expect("Ollama has a native Mirostat lowering");
+        admit_portable_option(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            PortableOption::ParallelToolCalls,
+        )
+        .expect("Anthropic has a typed disable_parallel_tool_use lowering");
+
+        for (provider, model, option) in [
+            ("gemini", "gemini-3.6-flash", PortableOption::Logprobs),
+            ("groq", "llama-3.3-70b-versatile", PortableOption::Logprobs),
+            (
+                "anthropic",
+                "claude-sonnet-4-20250514",
+                PortableOption::LogitBias,
+            ),
+            ("gemini", "gemini-2.5-flash", PortableOption::LogitBias),
+            (
+                "gemini",
+                "gemini-2.5-flash",
+                PortableOption::ParallelToolCalls,
+            ),
+            ("my-proxy", "custom-model", PortableOption::Mirostat),
+        ] {
+            admit_portable_option(provider, model, option)
+                .expect_err("an unowned wire projection must be rejected");
+        }
     }
 }

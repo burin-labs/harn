@@ -13,6 +13,7 @@
 mod defaults;
 mod directive_placement;
 mod extract;
+mod generation;
 mod json;
 mod output;
 mod reminders;
@@ -67,10 +68,43 @@ pub(super) use super::{
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).
-pub(crate) use extract::{extract_llm_options, prepare_llm_options, validate_options};
+pub(crate) use extract::extract_llm_options;
+pub(crate) use generation::validate_options;
 pub(crate) use json::{expects_structured_output, extract_json};
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
     system_prompt_metadata,
 };
 pub(crate) use thinking::{resolve_catalog_thinking_config, resolve_thinking_config};
+
+/// Resolve an outbound call after refreshing runtime-owned capabilities.
+pub(crate) async fn prepare_llm_options(
+    args: &[VmValue],
+) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+    match extract_llm_options(args) {
+        Ok(initial) => {
+            let (provider, model) =
+                crate::llm::managed_supply::logical_route(&initial.provider, &initial.model)?;
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+                extract_llm_options(args)
+            } else {
+                Ok(initial)
+            }
+        }
+        Err(initial_error) => {
+            let mut options = crate::llm::cost_route::merge_context_options(
+                args.get(2).and_then(VmValue::as_dict).cloned(),
+            );
+            defaults::apply_model_role_defaults(&mut options);
+            defaults::apply_active_step_defaults(&mut options);
+            let provider = vm_resolve_provider(&options);
+            let model = vm_resolve_model(&options, &provider);
+            let (provider, model) = crate::llm::managed_supply::logical_route(&provider, &model)?;
+            if crate::llm::capabilities::ensure_runtime_probe(&provider, &model).await {
+                extract_llm_options(args)
+            } else {
+                Err(initial_error)
+            }
+        }
+    }
+}

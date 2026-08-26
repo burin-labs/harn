@@ -131,6 +131,7 @@
 
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
+  - [Exact token references](./llm/tokenizer.md)
   - [LLM handler helpers](./llm/handlers.md)
   - [LLM reranking](./llm/rerank.md)
   - [Agent loops](./llm/agent_loop.md)

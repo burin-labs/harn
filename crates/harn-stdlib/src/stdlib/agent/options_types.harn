@@ -4,6 +4,9 @@
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
+import { Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
+import { TokenBias } from "std/llm/tokenizer"
+
 /** Failure streak that can terminate or pause an adaptive iteration budget. */
 pub type ConsecutiveFailureBudget = {max: int, kinds?: list<string>, paused_for_ms?: int}
 
@@ -241,8 +244,14 @@ pub type AgentModelSpec = {
   seed?: int,
   frequency_penalty?: float,
   presence_penalty?: float,
-  logprobs?: bool,
-  top_logprobs?: int,
+  logprobs?: Logprobs,
+  logit_bias?: list<TokenBias>,
+  min_p?: float,
+  repetition_penalty?: float,
+  prediction?: PredictedOutput,
+  verbosity?: "low" | "medium" | "high",
+  mirostat?: Mirostat,
+  parallel_tool_calls?: bool,
   stop_at_tool_call?: bool,
   output?: "text" | "json" | dict,
   schema_retries?: int,

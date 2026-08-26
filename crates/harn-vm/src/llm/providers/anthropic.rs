@@ -620,6 +620,14 @@ impl AnthropicProvider {
                 body["tool_choice"] = normalized;
             }
         }
+        if body.get("tools").is_some() {
+            if let Some(parallel) = opts.parallel_tool_calls {
+                if body.get("tool_choice").is_none() {
+                    body["tool_choice"] = serde_json::json!({"type": "auto"});
+                }
+                body["tool_choice"]["disable_parallel_tool_use"] = serde_json::json!(!parallel);
+            }
+        }
         match &opts.output_format {
             crate::llm::api::OutputFormat::Text => {}
             crate::llm::api::OutputFormat::JsonObject => {

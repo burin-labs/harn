@@ -386,6 +386,8 @@ pub struct ProviderRule {
     /// field before dispatch (xAI's Grok models reject it with HTTP 400).
     #[serde(default)]
     pub stop_supported: Option<bool>,
+    #[serde(default)]
+    pub advanced_generation_options: Option<Vec<super::PortableOption>>,
     /// Accepted provider-native `tool_choice` modes. Empty means unrestricted
     /// or unknown. Use this for routes whose native tools work, but whose API
     /// rejects forced/specified tool choices.
@@ -638,6 +640,7 @@ impl ProviderRule {
             frequency_penalty_supported,
             presence_penalty_supported,
             stop_supported,
+            advanced_generation_options,
             allowed_tool_choice_modes,
             requires_tool_result_adjacency,
             supports_parallel_tool_calls,
@@ -789,6 +792,10 @@ impl ProviderRule {
             presence_penalty_supported,
         );
         fill_opt(&mut self.stop_supported, stop_supported);
+        fill_opt(
+            &mut self.advanced_generation_options,
+            advanced_generation_options,
+        );
         fill_opt(
             &mut self.allowed_tool_choice_modes,
             allowed_tool_choice_modes,
@@ -964,53 +971,15 @@ fn resolve_rule_chain(
     (resolution, effective_defaults)
 }
 
-/// Return the authored support fact for one caller-portable option without
-/// collapsing an unknown custom route into the permissive defaults used by
-/// adapter projections. Generation admission rejects an explicit `false`;
-/// cache admission also requires an authored `true` because cache lowering is
-/// provider-specific. The TTL value list accompanies its prompt-cache fact.
-pub(super) fn declared_portable_option_support(
+pub(super) fn resolved_rule_and_defaults(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     provider: &str,
     model: &str,
-    option: super::PortableOption,
-) -> (Option<bool>, Option<Vec<String>>) {
+) -> (Option<ProviderRule>, ProviderDefaults) {
     let model = crate::llm_config::capability_model_id(provider, model);
     let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, &model);
-    let rule = resolution.merged.as_ref();
-    let supported = match option {
-        super::PortableOption::Temperature => rule
-            .and_then(|rule| rule.temperature_supported)
-            .or(defaults.temperature_supported),
-        super::PortableOption::TopP => rule
-            .and_then(|rule| rule.top_p_supported)
-            .or(defaults.top_p_supported),
-        super::PortableOption::TopK => rule
-            .and_then(|rule| rule.top_k_supported)
-            .or(defaults.top_k_supported),
-        super::PortableOption::Seed => rule
-            .and_then(|rule| rule.seed_supported)
-            .or(defaults.seed_supported),
-        super::PortableOption::FrequencyPenalty => rule
-            .and_then(|rule| rule.frequency_penalty_supported)
-            .or(defaults.frequency_penalty_supported),
-        super::PortableOption::PresencePenalty => rule
-            .and_then(|rule| rule.presence_penalty_supported)
-            .or(defaults.presence_penalty_supported),
-        super::PortableOption::Stop => rule
-            .and_then(|rule| rule.stop_supported)
-            .or(defaults.stop_supported),
-        super::PortableOption::Cache | super::PortableOption::PromptCacheTtl => {
-            rule.and_then(|rule| rule.prompt_caching)
-        }
-    };
-    let supported_values = (option == super::PortableOption::PromptCacheTtl).then(|| {
-        rule.and_then(|rule| rule.prompt_cache_ttls.clone())
-            .or_else(|| defaults.prompt_cache_ttls.clone())
-            .unwrap_or_default()
-    });
-    (supported, supported_values)
+    (resolution.merged, defaults)
 }
 
 pub(super) fn first_matching_rule(
@@ -1174,6 +1143,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         frequency_penalty_supported: None,
         presence_penalty_supported: None,
         stop_supported: None,
+        advanced_generation_options: None,
         allowed_tool_choice_modes: None,
         requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
@@ -1407,9 +1377,17 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .stop_supported
             .or(defaults.stop_supported)
             .unwrap_or(true),
+        advanced_generation_options: rule
+            .advanced_generation_options
+            .clone()
+            .or(defaults.advanced_generation_options.clone())
+            .unwrap_or_default(),
         allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
         requires_tool_result_adjacency: rule.requires_tool_result_adjacency.unwrap_or(false),
-        supports_parallel_tool_calls: rule.supports_parallel_tool_calls.unwrap_or(true),
+        supports_parallel_tool_calls: rule
+            .supports_parallel_tool_calls
+            .or(defaults.supports_parallel_tool_calls)
+            .unwrap_or(true),
         tools_exclude_response_format: rule.tools_exclude_response_format.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),

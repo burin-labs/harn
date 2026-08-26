@@ -138,6 +138,7 @@ reasoning_none_supported = false
 
 [[provider.gemini]]
 model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*"]
+advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"
 live_endpoint_family = "gemini_interactions"
@@ -164,6 +165,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "gemini-3.5-flash-lite"
+advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"
 live_endpoint_family = "gemini_interactions"
@@ -190,6 +192,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "models/gemini-3.5-flash-lite"
+advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"
 live_endpoint_family = "gemini_interactions"

@@ -655,6 +655,8 @@ accepts these fields:
 | `image_url_input_supported` | bool | Image content may reference remote URLs. Set false for routes that require base64 images. |
 | `file_upload_wire_format` | string | Upload API family used by `files.upload`: `anthropic` or `gemini`. |
 | `temperature_supported`, `top_p_supported`, `top_k_supported`, `seed_supported`, `frequency_penalty_supported`, `presence_penalty_supported`, `stop_supported` | bool | Portable generation-option admission facts. An authored `false` rejects caller intent before provider transport; an unknown custom generation route remains open-world. |
+| `advanced_generation_options` | list of strings | Authored wire lowerings for `logprobs`, `logit_bias`, `min_p`, `repetition_penalty`, `prediction`, `verbosity`, and `mirostat`. Absence rejects caller intent, including on custom routes. |
+| `supports_parallel_tool_calls` | bool | Whether `parallel_tool_calls` has a provider-native lowering. Absence rejects caller intent, including on custom routes. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
 Harn resolves `message_wire_format` and `live_endpoint_family` once per call.

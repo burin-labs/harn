@@ -213,19 +213,42 @@ impl OpenAiCompatibleProvider {
             body[token_limit_field] = serde_json::json!(opts.max_tokens);
         }
         if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(clamp_temperature(temp));
+            body["temperature"] = serde_json::json!(temp);
         }
         if let Some(top_p) = opts.top_p {
-            body["top_p"] = serde_json::json!(clamp_probability(top_p));
+            body["top_p"] = serde_json::json!(top_p);
         }
         if let Some(top_k) = opts.top_k {
             body["top_k"] = serde_json::json!(top_k);
         }
-        if opts.logprobs {
+        if let Some(logprobs) = opts.logprobs {
             body["logprobs"] = serde_json::json!(true);
-            if let Some(top_logprobs) = opts.top_logprobs.filter(|value| *value > 0) {
+            if let Some(top_logprobs) = logprobs.top {
                 body["top_logprobs"] = serde_json::json!(top_logprobs);
             }
+        }
+        if !opts.logit_bias.is_empty() {
+            body["logit_bias"] = serde_json::Value::Object(
+                opts.logit_bias
+                    .iter()
+                    .map(|entry| (entry.token_id.to_string(), serde_json::json!(entry.bias)))
+                    .collect(),
+            );
+        }
+        if let Some(min_p) = opts.min_p {
+            body["min_p"] = serde_json::json!(min_p);
+        }
+        if let Some(repetition_penalty) = opts.repetition_penalty {
+            body["repetition_penalty"] = serde_json::json!(repetition_penalty);
+        }
+        if let Some(prediction) = &opts.prediction {
+            body["prediction"] = serde_json::json!({
+                "type": "content",
+                "content": prediction,
+            });
+        }
+        if let Some(verbosity) = opts.verbosity {
+            body["verbosity"] = serde_json::json!(verbosity.as_str());
         }
         if let Some(stop) = opts.stop.as_ref() {
             body["stop"] = serde_json::json!(stop);
@@ -375,6 +398,11 @@ impl OpenAiCompatibleProvider {
         if has_native_tools && !caps.supports_parallel_tool_calls {
             body["parallel_tool_calls"] = serde_json::json!(false);
         }
+        if has_native_tools {
+            if let Some(parallel) = opts.parallel_tool_calls {
+                body["parallel_tool_calls"] = serde_json::json!(parallel);
+            }
+        }
         if let Some(ref tc) = opts.tool_choice {
             if let Some(tool_choice) =
                 normalize_tool_choice_for_capabilities(tc, &caps, has_native_tools)
@@ -457,20 +485,6 @@ impl OpenAiCompatibleProvider {
             crate::llm::api::vm_call_llm_api_with_body(request, delta_tx, body, dialect).await?;
         Ok(result)
     }
-}
-
-fn clamp_temperature(value: f64) -> f64 {
-    if !value.is_finite() {
-        return 1.0;
-    }
-    value.clamp(0.0, 2.0)
-}
-
-fn clamp_probability(value: f64) -> f64 {
-    if !value.is_finite() {
-        return 1.0;
-    }
-    value.clamp(0.0, 1.0)
 }
 
 fn chat_template_options_field(caps: &crate::llm::capabilities::Capabilities) -> &str {

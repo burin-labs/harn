@@ -212,6 +212,13 @@ pub struct ProviderDefaults {
     pub presence_penalty_supported: Option<bool>,
     #[serde(default)]
     pub stop_supported: Option<bool>,
+    /// First-class generation controls with provider-specific wire lowering.
+    /// Unlike the legacy scalar booleans, this closed vocabulary scales as
+    /// options are added without multiplying nullable capability fields.
+    #[serde(default)]
+    pub advanced_generation_options: Option<Vec<super::PortableOption>>,
+    #[serde(default)]
+    pub supports_parallel_tool_calls: Option<bool>,
 }
 
 /// Copies `src` into `dst` when `src` is set (last-writer-wins overlay).
@@ -298,6 +305,14 @@ macro_rules! merge_provider_defaults {
             &$src.presence_penalty_supported,
         );
         $op(&mut $dst.stop_supported, &$src.stop_supported);
+        $op(
+            &mut $dst.advanced_generation_options,
+            &$src.advanced_generation_options,
+        );
+        $op(
+            &mut $dst.supports_parallel_tool_calls,
+            &$src.supports_parallel_tool_calls,
+        );
     }};
 }
 
@@ -343,6 +358,8 @@ impl ProviderDefaults {
             || self.frequency_penalty_supported.is_some()
             || self.presence_penalty_supported.is_some()
             || self.stop_supported.is_some()
+            || self.advanced_generation_options.is_some()
+            || self.supports_parallel_tool_calls.is_some()
     }
 }
 
@@ -760,6 +777,7 @@ pub struct Capabilities {
     pub frequency_penalty_supported: bool,
     pub presence_penalty_supported: bool,
     pub stop_supported: bool,
+    pub advanced_generation_options: Vec<super::PortableOption>,
     pub allowed_tool_choice_modes: Vec<String>,
     pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
@@ -895,6 +913,7 @@ impl Default for Capabilities {
             frequency_penalty_supported: true,
             presence_penalty_supported: true,
             stop_supported: true,
+            advanced_generation_options: Vec::new(),
             allowed_tool_choice_modes: Vec::new(),
             requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,

@@ -849,6 +849,8 @@
     "testbench_is_active",
     "throw_error",
     "tiktoken_count_tokens",
+    "tiktoken_decode_tokens",
+    "tiktoken_encode_tokens",
     "tiktoken_tokenizer_info",
     "timer_end",
     "timer_start",
