@@ -13,12 +13,14 @@ pipeline default(harness: Harness) {
       while harness.runtime.atomic_get(gate) < 1 {
         harness.runtime.yield_now()
       }
-      harness.runtime.atomic_set(gate, 2)
     }
     return n
   } as stream
   harness.stdio.println(type_of(results))
   for result in results {
     harness.stdio.println(result)
+    if result == 10 {
+      harness.runtime.atomic_set(gate, 2)
+    }
   }
 }
