@@ -218,8 +218,9 @@ fn provider_http_error_value(
 ) -> VmError {
     use crate::value::VmDictExt;
 
-    let category = crate::value::error_category_for_http_status(status.as_u16()).unwrap_or(
-        match classified.reason {
+    let category = category_owned_by_llm_reason(classified.reason)
+        .or_else(|| crate::value::error_category_for_http_status(status.as_u16()))
+        .unwrap_or(match classified.reason {
             LlmErrorReason::RateLimit => ErrorCategory::RateLimit,
             LlmErrorReason::ServerError => ErrorCategory::ServerError,
             LlmErrorReason::NetworkError => ErrorCategory::TransientNetwork,
@@ -227,8 +228,7 @@ fn provider_http_error_value(
             LlmErrorReason::AuthFailure => ErrorCategory::Auth,
             LlmErrorReason::ModelUnavailable => ErrorCategory::NotFound,
             _ => ErrorCategory::Generic,
-        },
-    );
+        });
     let mut fields = std::collections::BTreeMap::new();
     fields.put_str("category", category.as_str());
     fields.put_str("kind", classified.kind.as_str());
@@ -254,6 +254,14 @@ fn provider_http_error_value(
         fields.insert("provider_quota".to_string(), VmValue::dict(snapshot));
     }
     VmError::Thrown(VmValue::dict(fields))
+}
+
+/// Reasons that name an error category independently of the HTTP status.
+fn category_owned_by_llm_reason(reason: LlmErrorReason) -> Option<ErrorCategory> {
+    match reason {
+        LlmErrorReason::InvalidRequest => Some(ErrorCategory::InvalidRequest),
+        _ => None,
+    }
 }
 
 /// Classify a drained non-success response while retaining structured quota
@@ -369,7 +377,12 @@ fn stream_error_thrown(
     use crate::value::VmDictExt;
 
     let mut fields = std::collections::BTreeMap::new();
-    fields.put_str("category", ErrorCategory::Generic.as_str());
+    fields.put_str(
+        "category",
+        category_owned_by_llm_reason(reason)
+            .unwrap_or(ErrorCategory::Generic)
+            .as_str(),
+    );
     fields.put_str("kind", kind.as_str());
     fields.put_str("reason", reason.as_str());
     fields.put_str("message", message);
@@ -566,6 +579,7 @@ pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmE
         }
         ErrorCategory::TransientNetwork => (LlmErrorKind::Transient, LlmErrorReason::NetworkError),
         ErrorCategory::Auth => (LlmErrorKind::Terminal, LlmErrorReason::AuthFailure),
+        ErrorCategory::InvalidRequest => (LlmErrorKind::Terminal, LlmErrorReason::InvalidRequest),
         ErrorCategory::NotFound => (LlmErrorKind::Terminal, LlmErrorReason::ModelUnavailable),
         _ => (LlmErrorKind::Terminal, LlmErrorReason::Unknown),
     };
@@ -1415,6 +1429,30 @@ mod tests {
             crate::value::error_to_category(&error),
             ErrorCategory::Overloaded,
             "the typed envelope must retain the status-owned overload signal"
+        );
+    }
+
+    #[test]
+    fn invalid_request_http_envelope_keeps_its_category_with_quota_metadata() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-limit-tokens", "200000".parse().unwrap());
+        headers.insert("x-ratelimit-remaining-tokens", "16751".parse().unwrap());
+        let error = provider_http_error(
+            None,
+            "test",
+            reqwest::StatusCode::BAD_REQUEST,
+            &headers,
+            r#"{"error":{"type":"invalid_request_error","message":"unsupported parameter"}}"#,
+        );
+
+        assert_eq!(
+            crate::value::error_to_category(&error).as_str(),
+            "invalid_request",
+            "quota metadata must not erase the terminal request-error category"
+        );
+        assert_eq!(
+            classify_llm_error(crate::value::error_to_category(&error), &error.to_string()).reason,
+            LlmErrorReason::InvalidRequest,
         );
     }
 }

@@ -107,6 +107,7 @@ fn infer_mock_error_category(
                 return ErrorCategory::ServerError;
             }
             "auth_failure" => return ErrorCategory::Auth,
+            "invalid_request" => return ErrorCategory::InvalidRequest,
             "model_unavailable" => return ErrorCategory::NotFound,
             _ => {}
         }

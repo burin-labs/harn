@@ -202,6 +202,10 @@ fn tool_call_error_category_from_internal_is_decided_for_every_internal_category
         // Genuinely bridge/engine-side or unclassified.
         (Internal::Auth, ToolCallErrorCategory::HostBridgeError),
         (
+            Internal::InvalidRequest,
+            ToolCallErrorCategory::HostBridgeError,
+        ),
+        (
             Internal::ChannelClosed,
             ToolCallErrorCategory::HostBridgeError,
         ),

@@ -967,7 +967,7 @@ pub(crate) async fn observed_llm_call(
                         &call_id,
                         opts,
                         &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
                     );
                     if let Some(b) = bridge {
                         b.send_call_end(
@@ -1306,7 +1306,7 @@ pub(crate) async fn observed_llm_call(
                         &call_id,
                         opts,
                         &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
                     );
                     return Err(surfaced_error.unwrap_or(error));
                 }
