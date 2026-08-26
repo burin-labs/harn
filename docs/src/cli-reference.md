@@ -48,6 +48,7 @@ harn run --resume .harn/workers/worker_...json
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
+| `--project-triggers` | Register manifest triggers and reconcile their durable state for this run |
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
@@ -82,13 +83,30 @@ records a receipt on the protected operation and never relaxes the generic
 
 ### Project handler startup
 
-`harn run` parses and validates project trigger and hook declarations, exports,
-and callable signatures before it runs the entry script. It initializes each
-handler module and its imports only when an event dispatches to that handler.
-This keeps unrelated project code off the startup path.
+`harn run` installs project hooks by default so policy remains fail-closed, but
+does not register manifest triggers or reconcile their durable state unless the
+run passes `--project-triggers`. Trigger-oriented commands continue to register
+the triggers they operate. This makes durable project side effects explicit for
+ordinary entrypoint runs.
+
+With `--project-triggers`, Harn parses and validates project trigger and hook
+declarations, exports, and callable signatures before it runs the entry script.
+It initializes each handler module and its imports only when an event dispatches
+to that handler. This keeps unrelated project code off the startup path.
 
 Use `--eager-project-handlers` to diagnose failures in top-level handler module
-initialization. It restores fail-fast initialization for every project handler.
+initialization. It restores fail-fast initialization for every project handler
+and implies `--project-triggers`.
+
+Embedded callers select the same contract with
+`commands::run::RunExecutionOptions::project_runtime`. Use
+`ProjectRuntimeMode::WithTriggers` for lazy trigger dispatch or
+`ProjectRuntimeMode::EagerHandlers` for fail-fast handler initialization; the
+default `Project` mode keeps hooks active without reconciling durable trigger
+state. The JSON execution API has the matching `execute_run_json_with_options`
+entrypoint. Every in-process entrypoint owns a poll-scoped trigger registry;
+manifest bindings created by one run are discarded at its boundary while the
+embedding caller's prior registry is restored unchanged.
 
 Use `--standalone` for latency-sensitive utilities and policy scripts that must
 behave the same regardless of their containing directory. Relative and standard
@@ -97,7 +115,7 @@ and sandbox roots still apply. Standalone mode does not load a surrounding
 `harn.toml`, project skills, project handlers, project state roots, or
 manifest-derived trusted-host authority. It conflicts with commands whose
 meaning requires project state, including `--eager-project-handlers`,
-`--resume`, and `--as-job`.
+`--project-triggers`, `--resume`, and `--as-job`.
 
 ### Environment policies and grants
 

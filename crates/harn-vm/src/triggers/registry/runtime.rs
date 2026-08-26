@@ -8,12 +8,20 @@ use super::TriggerRegistry;
 #[derive(Default)]
 pub(crate) struct TriggerRegistryRuntime {
     registry: parking_lot::Mutex<TriggerRegistry>,
+    aggregation: parking_lot::Mutex<crate::triggers::aggregation::AggregationRegistry>,
     background_tasks: parking_lot::Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
     background_completions:
         parking_lot::Mutex<BTreeMap<String, (i64, tokio::sync::watch::Receiver<bool>)>>,
 }
 
 impl TriggerRegistryRuntime {
+    pub(crate) fn with_aggregation<T>(
+        &self,
+        write: impl FnOnce(&mut crate::triggers::aggregation::AggregationRegistry) -> T,
+    ) -> T {
+        write(&mut self.aggregation.lock())
+    }
+
     pub(crate) fn replace_background_task(
         &self,
         id: String,

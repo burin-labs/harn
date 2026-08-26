@@ -19,10 +19,11 @@
 //! - `expire_action`: `fire_partial` (default) flushes the partial batch
 //!   when the window elapses; `discard` drops it silently.
 //!
-//! State lives in a per-process thread-local registry keyed by binding key
-//! (id@version) and partition key. The buffer is capped at
-//! [`MAX_BUFFER_EVENTS`] to keep a stuck handler from running the runtime
-//! out of memory; overflow drops the oldest entries with a structured
+//! State lives in the active trigger runtime keyed by binding key (id@version)
+//! and partition key. Entrypoints swap that runtime on every future poll, so
+//! interleaved runs cannot consume one another's partial batches. The buffer
+//! is capped at [`MAX_BUFFER_EVENTS`] to keep a stuck handler from running the
+//! runtime out of memory; overflow drops the oldest entries with a structured
 //! warning (`triggers.aggregation.buffer_overflow`).
 //!
 //! Window expiration is driven by two complementary mechanisms:
@@ -42,7 +43,6 @@
 //! `emit_channel`, so the implicit sweep covers the common case without
 //! adding a background timer that would complicate replay determinism.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -145,23 +145,17 @@ pub struct ExpiredFlush {
 }
 
 #[derive(Default)]
-struct AggregationRegistry {
+pub(crate) struct AggregationRegistry {
     /// (binding_key, partition_key) → buffer. partition_key is the
     /// stringified JSON value at `key_path`, or "" when `key_path` is None.
     buffers: BTreeMap<String, BTreeMap<String, AggregationBuffer>>,
 }
 
-thread_local! {
-    static REGISTRY: RefCell<AggregationRegistry> =
-        RefCell::new(AggregationRegistry::default());
-}
-
 /// Reset all aggregation state. Called from the per-test reset hook so
 /// buffers do not leak between tests.
 pub fn clear_aggregation_state() {
-    REGISTRY.with(|slot| {
-        *slot.borrow_mut() = AggregationRegistry::default();
-    });
+    let owner = super::registry::active_trigger_registry();
+    owner.with_aggregation(|registry| *registry = AggregationRegistry::default());
 }
 
 /// Drop any buffers owned by `binding_key`. Called when a trigger binding
@@ -171,8 +165,8 @@ pub fn clear_aggregation_state() {
 /// discarded, matching the existing trigger drain contract that
 /// in-flight events stop on terminate).
 pub fn drop_binding_aggregation(binding_key: &str) -> Vec<TriggerEvent> {
-    REGISTRY.with(|slot| {
-        let mut registry = slot.borrow_mut();
+    let owner = super::registry::active_trigger_registry();
+    owner.with_aggregation(|registry| {
         registry
             .buffers
             .remove(binding_key)
@@ -198,8 +192,8 @@ pub fn accumulate(
     let count = config.count;
     let expire_action = config.expire_action;
 
-    REGISTRY.with(|slot| {
-        let mut registry = slot.borrow_mut();
+    let owner = super::registry::active_trigger_registry();
+    owner.with_aggregation(|registry| {
         let partitions = registry.buffers.entry(binding_key.to_string()).or_default();
         let buffer = partitions
             .entry(partition_key_owned.clone())
@@ -253,8 +247,8 @@ pub fn accumulate(
 /// Idempotent: calling repeatedly returns successive expirations only.
 pub fn drain_expired_aggregations() -> Vec<ExpiredFlush> {
     let now_ms = clock::now_ms();
-    REGISTRY.with(|slot| {
-        let mut registry = slot.borrow_mut();
+    let owner = super::registry::active_trigger_registry();
+    owner.with_aggregation(|registry| {
         let mut expired = Vec::new();
         let mut empty_bindings = Vec::new();
         for (binding_key, partitions) in registry.buffers.iter_mut() {
@@ -511,6 +505,51 @@ mod tests {
         // Re-accumulating after drop starts fresh.
         let outcome = accumulate("t1@v1", &cfg(2), None, mk_event("c"));
         assert!(matches!(outcome, AccumulateOutcome::Buffered));
+        clear_aggregation_state();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_trigger_scopes_isolate_batches_and_restore_the_caller() {
+        clear_aggregation_state();
+        let config = cfg(2);
+        assert!(matches!(
+            accumulate("shared@v1", &config, None, mk_event("caller")),
+            AccumulateOutcome::Buffered
+        ));
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let alpha_barrier = std::sync::Arc::clone(&barrier);
+        let alpha_config = config.clone();
+        let alpha = tokio::spawn(crate::orchestration::scope_fresh_trigger_registry(
+            async move {
+                let outcome = accumulate("shared@v1", &alpha_config, None, mk_event("alpha"));
+                alpha_barrier.wait().await;
+                tokio::task::yield_now().await;
+                (outcome, drop_binding_aggregation("shared@v1"))
+            },
+        ));
+        let beta = tokio::spawn(crate::orchestration::scope_fresh_trigger_registry(
+            async move {
+                barrier.wait().await;
+                tokio::task::yield_now().await;
+                let outcome = accumulate("shared@v1", &config, None, mk_event("beta"));
+                (outcome, drop_binding_aggregation("shared@v1"))
+            },
+        ));
+        let (alpha, beta) = tokio::join!(alpha, beta);
+        let alpha = alpha.expect("alpha scope task");
+        let beta = beta.expect("beta scope task");
+
+        assert!(matches!(alpha.0, AccumulateOutcome::Buffered));
+        assert_eq!(alpha.1.len(), 1);
+        assert_eq!(alpha.1[0].dedupe_key, "alpha");
+        assert!(matches!(beta.0, AccumulateOutcome::Buffered));
+        assert_eq!(beta.1.len(), 1);
+        assert_eq!(beta.1[0].dedupe_key, "beta");
+
+        let caller = drop_binding_aggregation("shared@v1");
+        assert_eq!(caller.len(), 1);
+        assert_eq!(caller[0].dedupe_key, "caller");
         clear_aggregation_state();
     }
 }

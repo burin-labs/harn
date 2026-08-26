@@ -22,6 +22,13 @@ fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
         panic!("expected run command");
     };
     assert!(!args.eager_project_handlers);
+    assert!(!args.project_triggers);
+
+    let cli = Cli::parse_from(["harn", "run", "--project-triggers", "main.harn"]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.project_triggers);
 
     let cli = Cli::parse_from(["harn", "run", "--eager-project-handlers", "main.harn"]);
     let Command::Run(args) = cli.command.unwrap() else {
@@ -34,6 +41,16 @@ fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
             .kind(),
         clap::error::ErrorKind::UnknownArgument
     );
+}
+
+#[test]
+fn test_time_run_can_register_project_triggers_explicitly() {
+    let cli = Cli::parse_from(["harn", "time", "run", "--project-triggers", "main.harn"]);
+    let Command::Time(args) = cli.command.unwrap() else {
+        panic!("expected time command");
+    };
+    let TimeCommand::Run(args) = args.command;
+    assert!(args.project_triggers);
 }
 
 #[test]
@@ -50,6 +67,19 @@ fn test_run_standalone_is_explicit_and_conflicts_with_project_handlers() {
             "run",
             "--standalone",
             "--eager-project-handlers",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--standalone",
+            "--project-triggers",
             "main.harn",
         ])
         .unwrap_err()

@@ -785,12 +785,6 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/triggers/aggregation.rs"
-statics = ["REGISTRY"]
-category = "runtime_registry"
-plan = "arc_registry_scope"
-
-[[thread_local]]
 path = "src/triggers/dispatcher/state.rs"
 statics = ["ACTIVE_DISPATCHER_STATE", "ACTIVE_DISPATCH_CONTEXT", "ACTIVE_DISPATCH_WAIT_LEASE", "TEST_INBOX_DEQUEUED_SIGNAL"]
 category = "runtime_registry"

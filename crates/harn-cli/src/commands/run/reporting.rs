@@ -53,8 +53,7 @@ pub struct RunAuxOptions {
 #[derive(Clone, Debug, Default)]
 pub struct RunControlOptions {
     pub timeout: Option<Duration>,
-    pub eager_project_handlers: bool,
-    pub project_context: super::ProjectContextMode,
+    pub project_runtime: super::ProjectRuntimeMode,
 }
 
 #[derive(Clone, Debug)]
@@ -141,11 +140,14 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
         timeout: args.timeout,
-        eager_project_handlers: args.eager_project_handlers,
-        project_context: if args.standalone {
-            super::ProjectContextMode::Standalone
+        project_runtime: if args.standalone {
+            super::ProjectRuntimeMode::Standalone
+        } else if args.eager_project_handlers {
+            super::ProjectRuntimeMode::EagerHandlers
+        } else if args.project_triggers {
+            super::ProjectRuntimeMode::WithTriggers
         } else {
-            super::ProjectContextMode::Project
+            super::ProjectRuntimeMode::Project
         },
     }
 }

@@ -26,10 +26,16 @@ pub(crate) struct RunArgs {
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
     /// Load every project trigger and hook handler before the entry script runs.
-    /// By default, declarations are validated at startup and handler modules load
-    /// only when their trigger or hook fires.
+    /// Hooks are validated by default; trigger declarations are validated only
+    /// with `--project-triggers`. This option implies trigger registration.
     #[arg(long = "eager-project-handlers")]
     pub eager_project_handlers: bool,
+    /// Register the project's manifest triggers for this run.
+    ///
+    /// Trigger registration reconciles durable project state, so ordinary
+    /// entrypoint runs leave it disabled unless explicitly requested.
+    #[arg(long = "project-triggers")]
+    pub project_triggers: bool,
     /// Run without inheriting ambient project configuration.
     ///
     /// Standalone runs do not load a surrounding `harn.toml`, project skills,
@@ -39,6 +45,7 @@ pub(crate) struct RunArgs {
         long,
         conflicts_with_all = [
             "eager_project_handlers",
+            "project_triggers",
             "resume",
             "as_job",
             "explain_cost",
