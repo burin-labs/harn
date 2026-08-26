@@ -9,16 +9,17 @@ import { agent_loop } from "std/agent/loop"
  * parsers keyed on declaration order keep working.
  *
  * To assert real concurrency (vs serial) we count peak in-flight tool
- * handlers via atomics - the handler bumps the counter, yields a few
- * times so siblings can arrive, then decrements. The invariant is genuine
- * overlap bounded by the configured cap; an executor need not start every
- * short-lived branch before the first one completes.
+ * handlers via atomics. Each handler waits at a shared gate until the
+ * configured number of siblings has arrived, so overlap is deterministic
+ * instead of depending on cooperative-yield scheduling. The invariant is
+ * genuine overlap bounded by the configured cap.
  */
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn fanout_tools(runtime: HarnessRuntime, state: dict) {
+fn fanout_tools(runtime: HarnessRuntime, state: dict, release_at: int) {
   const r = tool_registry()
+  const release_gate = runtime.channel(nil, release_at)
   return tool_define(
     r,
     "fanout_echo",
@@ -29,11 +30,14 @@ fn fanout_tools(runtime: HarnessRuntime, state: dict) {
         if now > runtime.atomic_get(state.peak) {
           runtime.atomic_set(state.peak, now)
         }
-        let spins = 0
-        while spins < 20 {
-          runtime.yield_now()
-          spins = spins + 1
+        if now == release_at {
+          let releases = 0
+          while releases < release_at {
+            runtime.send(release_gate, true)
+            releases = releases + 1
+          }
         }
+        runtime.receive(release_gate)
         runtime.atomic_add(state.in_flight, -1)
         return "echoed:" + to_string(args?.msg ?? "")
       },
@@ -72,7 +76,7 @@ fn run(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -113,7 +117,7 @@ fn run_without_middleware(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -166,7 +170,7 @@ fn run_with_audit(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -230,7 +234,7 @@ fn run_prefetch(harness: Harness, state: dict, prefetch: bool) {
     nil,
     {
       provider: "mock",
-      tools: fanout_tools(harness.runtime, state),
+      tools: fanout_tools(harness.runtime, state, 2),
       tool_format: "native",
       max_iterations: 3,
       loop_until_done: true,
