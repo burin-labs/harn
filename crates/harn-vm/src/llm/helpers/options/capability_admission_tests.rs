@@ -62,3 +62,56 @@ fn portable_generation_denials_share_one_typed_admission_gate() {
 
     crate::llm::capabilities::clear_user_overrides();
 }
+
+#[test]
+fn reasoning_scoped_generation_denial_preserves_the_non_reasoning_route() {
+    crate::llm::capabilities::set_user_overrides_toml(concat!(
+        "[[provider.local]]\n",
+        "model_match = \"conditional-generation\"\n",
+        "thinking_modes = [\"effort\"]\n",
+        "reasoning_none_supported = true\n",
+        "reasoning_excluded_portable_options = [\"temperature\"]\n",
+    ))
+    .expect("conditional generation capability fixture");
+
+    let options = |effort: Option<&str>| {
+        let mut options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("local")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("conditional-generation")),
+            ),
+            (crate::value::intern_key("temperature"), VmValue::Float(0.2)),
+        ]);
+        if let Some(effort) = effort {
+            options.insert(
+                crate::value::intern_key("effort"),
+                VmValue::String(arcstr::ArcStr::from(effort)),
+            );
+        }
+        options
+    };
+    let extract = |options| {
+        extract_llm_options(&[
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::Nil,
+            VmValue::dict(options),
+        ])
+    };
+
+    extract(options(None)).expect("temperature remains valid with reasoning disabled");
+    extract(options(Some("none"))).expect("effort none keeps reasoning disabled");
+    let error = extract(options(Some("low")))
+        .expect_err("temperature must be rejected when reasoning is enabled");
+
+    crate::llm::capabilities::clear_user_overrides();
+    assert!(
+        error
+            .to_string()
+            .contains("option `temperature` is not supported while reasoning is enabled"),
+        "unexpected conditional-admission error: {error}"
+    );
+}
