@@ -41,17 +41,27 @@ impl MetricsRegistry {
             accounting_labels.clone(),
             certainty.unpriced_calls as f64,
         );
+        self.ensure_counter(
+            "harn_llm_unpriced_requests_total",
+            accounting_labels.clone(),
+        );
         self.increment_counter(
             "harn_llm_usage_unknown_requests_total",
-            accounting_labels,
+            accounting_labels.clone(),
             certainty.usage_unknown_calls as f64,
         );
+        self.ensure_counter("harn_llm_usage_unknown_requests_total", accounting_labels);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metrics_keep_sub_microdollar_cost_precision() {
+        assert_eq!(super::super::prometheus_float(0.0000117), "0.0000117");
+    }
 
     #[test]
     fn call_metrics_preserve_physical_request_spend_certainty() {

@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 
+use super::usage::{summarize_usage_cost_certainty, UsageCostCertainty};
+
 /// A single LLM call trace entry.
 #[derive(Debug, Clone)]
 pub struct LlmTraceEntry {
@@ -14,6 +16,19 @@ pub struct LlmTraceEntry {
     /// lost or recomputed differently by reporting consumers.
     pub usage: super::usage::LlmUsage,
     pub duration_ms: u64,
+}
+
+/// Canonical aggregate of the current thread's completed LLM trace.
+///
+/// The trace owns this reduction so terminal receipts, workflow accounting,
+/// and CLI summaries cannot each add tokens and price certainty differently.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LlmTraceUsageSummary {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub duration_ms: i64,
+    pub call_count: i64,
+    pub cost: UsageCostCertainty,
 }
 
 thread_local! {
@@ -38,18 +53,30 @@ pub fn peek_trace() -> Vec<LlmTraceEntry> {
 
 /// Summarize trace usage without consuming entries.
 pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
+    let summary = peek_trace_usage_summary();
+    (
+        summary.input_tokens,
+        summary.output_tokens,
+        summary.duration_ms,
+        summary.call_count,
+    )
+}
+
+/// Summarize trace usage and its pricing certainty without consuming entries.
+pub fn peek_trace_usage_summary() -> LlmTraceUsageSummary {
     LLM_TRACE.with(|v| {
         let entries = v.borrow();
-        let mut input = 0i64;
-        let mut output = 0i64;
-        let mut duration = 0i64;
-        let count = entries.len() as i64;
+        let mut summary = LlmTraceUsageSummary {
+            call_count: entries.len() as i64,
+            ..LlmTraceUsageSummary::default()
+        };
         for e in entries.iter() {
-            input += e.usage.input_tokens;
-            output += e.usage.output_tokens;
-            duration += e.duration_ms as i64;
+            summary.input_tokens += e.usage.input_tokens;
+            summary.output_tokens += e.usage.output_tokens;
+            summary.duration_ms += e.duration_ms as i64;
         }
-        (input, output, duration, count)
+        summary.cost = summarize_usage_cost_certainty(entries.iter().map(|entry| &entry.usage));
+        summary
     })
 }
 

@@ -464,7 +464,8 @@ pub(crate) use self::provider_auth::{
 pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
-    take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+    peek_trace_usage_summary, take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+    LlmTraceUsageSummary,
 };
 
 /// Fully wipe the process-global rate-limiter registry (config-derived

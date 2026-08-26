@@ -722,6 +722,9 @@ pub(super) struct ProviderCallErrorObservation<'a> {
     pub(super) classified: &'a super::api::LlmErrorInfo,
     pub(super) message: &'a str,
     pub(super) stream_failure: Option<&'a crate::value::ProviderStreamFailure>,
+    /// Usage from a completed response that the caller must still surface as
+    /// terminally unusable. Transport and parser failures pass `None`.
+    pub(super) usage: Option<&'a crate::llm::usage::LlmUsage>,
     pub(super) retryable: bool,
     pub(super) failover_eligible: bool,
     pub(super) attempt_count: Option<usize>,
@@ -740,6 +743,7 @@ pub(super) fn append_provider_call_error_observability(
         classified,
         message,
         stream_failure,
+        usage,
         retryable,
         failover_eligible,
         attempt_count,
@@ -763,11 +767,14 @@ pub(super) fn append_provider_call_error_observability(
         ("message".to_string(), serde_json::json!(message)),
         ("retryable".to_string(), serde_json::json!(retryable)),
     ]);
-    // Error responses have no authoritative usage object. Their economic
-    // effect therefore remains explicitly unknown in the durable receipt;
-    // callers may add a provider-side billed receipt later, but must never
-    // reinterpret this missing ledger as zero.
-    crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
+    if let Some(usage) = usage {
+        usage.project_onto_fields(&mut fields);
+    } else {
+        // A thrown completion may have reached a billable provider boundary
+        // without yielding a trustworthy ledger. Preserve that uncertainty
+        // explicitly instead of presenting a free retry.
+        crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
+    }
     if let Some(stage) = opts
         .call_stage
         .as_deref()
@@ -837,6 +844,7 @@ mod stream_failure_observability_tests {
             classified: &classified,
             message: "idle deadline elapsed",
             stream_failure: Some(&failure),
+            usage: None,
             retryable: true,
             failover_eligible: false,
             attempt_count: None,
