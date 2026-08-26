@@ -119,6 +119,7 @@ struct OffthreadLlmError {
     message: String,
     category: Option<ErrorCategory>,
     stream_failure: Option<Box<crate::value::ProviderStreamFailure>>,
+    thrown: Option<VmValue>,
 }
 
 impl OffthreadLlmError {
@@ -128,15 +129,23 @@ impl OffthreadLlmError {
                 message: failure.to_string(),
                 category: Some(failure.category()),
                 stream_failure: Some(failure),
+                thrown: None,
             },
             VmError::CategorizedError { message, category } => Self {
                 message,
                 category: Some(category),
                 stream_failure: None,
+                thrown: None,
             },
             VmError::Thrown(VmValue::String(message)) => {
                 Self::from_display_message(message.to_string())
             }
+            VmError::Thrown(value) => Self {
+                message: value.display(),
+                category: None,
+                stream_failure: None,
+                thrown: Some(value),
+            },
             other => Self::from_display_message(other.to_string()),
         }
     }
@@ -147,12 +156,14 @@ impl OffthreadLlmError {
                 message: stripped.to_string(),
                 category: Some(category),
                 stream_failure: None,
+                thrown: None,
             };
         }
         Self {
             message,
             category: None,
             stream_failure: None,
+            thrown: None,
         }
     }
 
@@ -165,7 +176,10 @@ impl OffthreadLlmError {
                 message: self.message,
                 category,
             },
-            None => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(self.message))),
+            None => self.thrown.map_or_else(
+                || VmError::Thrown(VmValue::String(arcstr::ArcStr::from(self.message))),
+                VmError::Thrown,
+            ),
         }
     }
 }

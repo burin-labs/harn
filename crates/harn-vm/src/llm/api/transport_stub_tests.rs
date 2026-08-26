@@ -676,6 +676,13 @@ fn ollama_empty_content_done_frame_retries_once() {
         assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert_eq!(result.text, "retried");
         assert_eq!(deltas.join(""), "retried");
+        assert_eq!(result.attempts.total, 2);
+        assert_eq!(result.attempts.empty_completion, 1);
+        let usage = result.usage();
+        assert_eq!(usage.provider_call_count, 2);
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 4);
+        assert_eq!(usage.usage_unknown_calls, 0);
     });
 }
 

@@ -8,6 +8,7 @@ use super::{
     vm_call_llm_full, vm_call_llm_full_streaming, LlmRequestPayload, OutputFormat, ThinkingConfig,
 };
 use crate::llm::env_guard;
+use crate::value::VmValue;
 
 #[test]
 fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
@@ -156,6 +157,32 @@ fn offthread_error_preserves_schema_stream_abort_category() {
     assert_eq!(parsed.model, "mistralai/devstral-small");
     assert_eq!(parsed.path, "$");
     assert_eq!(parsed.chunks_consumed, 1);
+}
+
+#[test]
+fn offthread_error_preserves_structured_completion_receipt() {
+    let expected = crate::llm::api::empty_generation_error(
+        "ollama",
+        "stub-model",
+        crate::llm::usage::ProviderUsageReceipt::new(Some(5), Some(3), None, false),
+        "the provider committed no visible content".to_string(),
+    );
+
+    let actual = super::OffthreadLlmError::from_vm_error(expected).into_vm_error();
+    let VmValue::Dict(fields) = actual.thrown_value() else {
+        panic!("structured completion error must survive the off-thread bridge: {actual:?}");
+    };
+    assert_eq!(
+        fields.get("code").map(VmValue::display).as_deref(),
+        Some("empty_generation")
+    );
+    let receipt = crate::llm::usage::ProviderUsageReceipt::from_error(&actual)
+        .expect("provider receipt must survive the off-thread bridge");
+    let VmValue::Dict(usage) = receipt.to_vm_value() else {
+        panic!("provider usage receipt must stay structured");
+    };
+    assert_eq!(usage.get("input_tokens").and_then(VmValue::as_int), Some(5));
+    assert_eq!(receipt.output_tokens(), Some(3));
 }
 
 #[test]

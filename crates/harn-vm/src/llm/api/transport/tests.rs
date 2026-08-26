@@ -157,9 +157,13 @@ async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
             .contains("[ollama_empty_content_parser_bug]"),
         "err was: {err}"
     );
-    assert!(
-        super::is_ollama_empty_content_parser_bug(&err),
-        "typed empty-completion error must preserve the native retry decision"
+    let VmValue::Dict(error_fields) = err.thrown_value() else {
+        panic!("empty completion must remain a structured terminal error: {err:?}");
+    };
+    assert_eq!(
+        error_fields.get("reason").map(VmValue::display).as_deref(),
+        Some("empty_generation"),
+        "the canonical observer owns this retry decision"
     );
     let receipt = ProviderUsageReceipt::from_error(&err)
         .expect("token-bearing parser error must retain provider usage");
