@@ -974,9 +974,11 @@ jobs:
           - kind: conformance
             name: Run Harn conformance tests
             step_name: conformance tests
+            fetch_depth: 1
           - kind: audit
             name: Check Harn sources and generated files
             step_name: source and generated-file checks
+            fetch_depth: 0
     # Hang backstop, not a performance budget. The per-test performance ratchet
     # still owns performance regressions.
     timeout-minutes: 65
@@ -986,9 +988,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The changelog-history audit runs in audit-scripts; this lane only
-          # needs the checked-out tree and the exact producer artifact.
-          fetch-depth: 1
+          # The source-length ratchet compares legacy debt to the PR merge base
+          # or integrated commit's first parent. Keep history local; the script
+          # never performs a network fetch itself.
+          fetch-depth: ${{ matrix.fetch_depth }}
           # Persisted credentials leave an `include.path` in .git/config pointing
           # at $RUNNER_TEMP, which the Harn sandbox cannot read — and git refuses
           # to parse an unreadable include, exiting 128 for every invocation. The
@@ -1042,6 +1045,8 @@ jobs:
           AUDIT_GATES_CONCURRENCY: "4"
           HARN_CONFORMANCE_JOBS: "4"
           HARN_EXT_GATE_RECEIPT: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
+          HARN_EXT_SOURCE_LENGTH_COMPARISON: ${{ github.event_name == 'pull_request' && 'merge-base' || 'first-parent' }}
+          HARN_EXT_SOURCE_LENGTH_BASE_REF: ${{ github.event.pull_request.base.sha || '' }}
           TREE_SITTER_PARSER_PREFLIGHTED: ${{ matrix.kind == 'audit' && 'true' || 'false' }}
         run: |
           args=(--phase "${{ matrix.kind }}")
