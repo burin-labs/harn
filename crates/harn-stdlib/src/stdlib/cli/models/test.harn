@@ -45,8 +45,8 @@ fn __round_sig(value: any, digits: int) -> float {
   if f == 0.0 {
     return 0.0
   }
-  const scale = pow(10, digits - 1 - floor(log10(abs(f))))
-  return round(f * scale) / scale
+  const places = digits - 1 - floor(log10(abs(f)))
+  return to_float(round(f, places)) ?? 0.0
 }
 
 fn __format_cost(value: any) -> string {
