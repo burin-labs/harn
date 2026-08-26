@@ -25,6 +25,20 @@ source "$repo_root/scripts/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$repo_root/scripts/lib/harn_bin.sh"
 
+# Cargo publishes relinked binaries atomically. Mirror that behavior because
+# Linux may reject a direct write to a recently run executable with ETXTBSY.
+replace_executable_with_marker() {
+  local executable="$1"
+  local marker="$2"
+  local replacement=""
+
+  replacement="$(mktemp "${executable}.replacement.XXXXXX")"
+  cp "$executable" "$replacement"
+  printf '\n%s\n' "$marker" >> "$replacement"
+  chmod +x "$replacement"
+  mv "$replacement" "$executable"
+}
+
 tmp_root=$(mktemp -d)
 cleanup() {
   rm -rf "$tmp_root"
@@ -867,13 +881,7 @@ git -C "$cargo_fixture" config --system --unset core.excludesFile
 # snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn.
 cargo_fixture_cargo_checker="$(harn_cargo_freshness_checker_path "$cargo_fixture_bin")"
 cargo_fixture_proof_checker="$(harn_binary_freshness_checker_path "$cargo_fixture_bin")"
-# Cargo publishes relinked binaries atomically. Do the same here: an in-place
-# append can race a just-finished verifier process and fail with ETXTBSY.
-cargo_fixture_relinked_checker="$(mktemp "${cargo_fixture_cargo_checker}.relink.XXXXXX")"
-cp "$cargo_fixture_cargo_checker" "$cargo_fixture_relinked_checker"
-printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_relinked_checker"
-chmod +x "$cargo_fixture_relinked_checker"
-mv "$cargo_fixture_relinked_checker" "$cargo_fixture_cargo_checker"
+replace_executable_with_marker "$cargo_fixture_cargo_checker" legitimate-cargo-relink
 (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
@@ -1221,7 +1229,7 @@ done
 # The producer-owned checker snapshot is itself part of the proof. Exercise
 # that terminal falsifier last: restoring bytes cannot restore filesystem
 # identity, and no later assertion should pretend the receipt is valid again.
-printf '\nunproven-proof-replacement\n' >> "$cargo_fixture_proof_checker"
+replace_executable_with_marker "$cargo_fixture_proof_checker" unproven-proof-replacement
 if (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
