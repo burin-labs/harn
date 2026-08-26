@@ -59,35 +59,33 @@ warning and falls back to syntax highlighting.
 
 ## Installing
 
-### From a registry
-
-Search for **Harn Language** in the VS Code Marketplace. Cursor and other
-VS Code forks resolve extensions through [Open VSX](https://open-vsx.org),
-where the same extension is published — or install the VSIX directly, below.
-
-### From a VSIX
-
-Every tagged Harn release attaches a packaged `harn-lang.vsix` as a build
-artifact of the `Publish VS Code extension` workflow. To install it:
-
-1. Download `harn-lang.vsix`.
-2. In VS Code or Cursor, open the Extensions view.
-3. From the `...` menu choose **Install from VSIX...** and pick the file.
-
-Or from a terminal:
+### From source
 
 ```sh
-code --install-extension harn-lang.vsix     # VS Code
-cursor --install-extension harn-lang.vsix   # Cursor
+git clone https://github.com/burin-labs/harn.git
+cd harn/editors/vscode
+npm ci
+npm run compile
+npx @vscode/vsce package --out harn-lang.vsix
+code --install-extension harn-lang.vsix
 ```
 
-### From source
+For Cursor, replace the last command with:
+
+```sh
+cursor --install-extension harn-lang.vsix
+```
+
+You can also choose **Extensions: Install from VSIX...** from the editor's
+command palette. See the [editor setup guide](https://harnlang.com/editor-setup.html#format-on-save)
+for explicit format-on-save settings and a verification step.
+
+### Work on the extension
 
 ```sh
 cd editors/vscode
 npm ci
 npm run compile
-npx @vscode/vsce package --out harn-lang.vsix
 ```
 
 ## Contributing
