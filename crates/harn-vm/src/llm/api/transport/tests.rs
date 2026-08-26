@@ -81,7 +81,7 @@ fn stream_usage_requested_for_openai_compatible_endpoints() {
     let anthropic = DialectContract::new(WireDialect::Anthropic, None);
     assert!(openai.requests_stream_usage("openai", "/chat/completions"));
     assert!(openai.requests_stream_usage("openrouter", "/chat/completions"));
-    assert!(!openai.requests_stream_usage("together", "/chat/completions"));
+    assert!(openai.requests_stream_usage("together", "/chat/completions"));
     assert!(ollama.requests_stream_usage("ollama", "/v1/chat/completions"));
     assert!(!ollama.requests_stream_usage("ollama", "/api/chat"));
     assert!(!anthropic.requests_stream_usage("anthropic", "/messages"));
