@@ -80,7 +80,7 @@ pub enum SessionRecapUnavailableReason {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionRecapAvailability {
     Available {
-        snapshot: SessionRecapSnapshot,
+        snapshot: Box<SessionRecapSnapshot>,
     },
     Unavailable {
         reason: SessionRecapUnavailableReason,
@@ -89,7 +89,9 @@ pub enum SessionRecapAvailability {
 
 impl SessionRecapAvailability {
     pub fn available(snapshot: SessionRecapSnapshot) -> Self {
-        Self::Available { snapshot }
+        Self::Available {
+            snapshot: Box::new(snapshot),
+        }
     }
 
     pub fn unavailable(reason: SessionRecapUnavailableReason) -> Self {
@@ -849,9 +851,6 @@ impl<'a> RecapProjector<'a> {
                 for tool in &mut iteration.tools {
                     if tool.call_observed && tool.result_observed {
                         // Preserve the result-owned completed/failed state.
-                    } else if has_terminal || tool.call_observed || tool.result_observed {
-                        tool.state = RecapToolState::Incomplete;
-                        incomplete = true;
                     } else {
                         tool.state = RecapToolState::Incomplete;
                         incomplete = true;

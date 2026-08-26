@@ -560,3 +560,33 @@ fn terminal_availability_keeps_each_unavailable_cause_explicit() {
         json!({"state": "unavailable", "reason": "admission_terminal"})
     );
 }
+
+#[test]
+fn terminal_available_snapshot_round_trips_without_wire_indirection() {
+    let snapshot = SessionRecapSnapshot {
+        schema_version: SESSION_RECAP_SCHEMA_VERSION,
+        session_id: "session-wire".to_string(),
+        query: SessionRecapQuery::for_session("session-wire"),
+        cursor: SessionRecapCursor::default(),
+        coverage: SessionRecapCoverage::default(),
+        source: SessionRecapSource::default(),
+        content_hash: "sha256:content".to_string(),
+        projection_hash: "sha256:projection".to_string(),
+        turns: Vec::new(),
+    };
+    let wire = serde_json::to_value(SessionRecapAvailability::available(snapshot.clone()))
+        .expect("serialize available recap");
+
+    assert_eq!(wire["state"], json!("available"));
+    assert_eq!(wire["snapshot"]["sessionId"], json!("session-wire"));
+    assert!(wire.get("box").is_none());
+
+    let decoded: SessionRecapAvailability =
+        serde_json::from_value(wire).expect("deserialize available recap");
+    assert_eq!(
+        decoded,
+        SessionRecapAvailability::Available {
+            snapshot: Box::new(snapshot),
+        }
+    );
+}
