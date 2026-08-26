@@ -18,6 +18,7 @@
 //   - a registry entry flagged make_all = true whose check is missing from
 //     the all: recipe (so `make all` would not catch it);
 //   - a source-owned declared output file that does not exist on disk;
+//   - an artifact dependency that is unknown, self-referential, or cyclic;
 //   - a check-* Makefile target missing from the [preflight.dispatch] table,
 //     or a dispatch entry naming a nonexistent target / an invalid tier (so
 //     `make check-drift` / `check-drift-binary`, derived from that table,
@@ -31,6 +32,8 @@
 // drift guard.
 //
 // Pure validation logic lives in the pub fns; main does the filesystem reads.
+import { generated_artifact_dependency_errors } from "./generated_artifacts_schema.harn"
+
 const REGISTRY = "scripts/generated_artifacts.toml"
 
 const MAKEFILE = "Makefile"
@@ -470,6 +473,7 @@ pub fn validate(request: GeneratedRegistryValidationRequest) -> list {
       },
     )
   errors = errors + exempt_hygiene_errors(exempt, registered_checks)
+  errors = errors + generated_artifact_dependency_errors(artifacts)
   return errors
 }
 

@@ -115,6 +115,24 @@ pipeline test_drift_warnings_language_spec_glob(harness: Harness, task: unknown)
 }
 
 @test
+pipeline test_drift_warnings_inherit_upstream_sources_and_outputs(harness: Harness, task: unknown) {
+  const artifacts = [
+    {
+      id: "catalog",
+      gen: "gen-catalog",
+      sources: ["catalog/sources/"],
+      outputs: ["generated/catalog.json"],
+    },
+    {id: "matrix", gen: "gen-matrix", depends_on: ["catalog"], outputs: ["docs/matrix.md"]},
+    {id: "guide", gen: "gen-guide", depends_on: ["matrix"], outputs: ["docs/guide.md"]},
+  ]
+  const source_warnings = drift_warnings(artifacts, ["catalog/sources/model.toml"])
+  const output_warnings = drift_warnings(artifacts, ["generated/catalog.json"])
+  assert_eq(source_warnings.map({ warning -> warning.id }), ["catalog", "matrix", "guide"])
+  assert_eq(output_warnings.map({ warning -> warning.id }), ["matrix", "guide"])
+}
+
+@test
 pipeline test_format_warning_names_make_target(harness: Harness, task: unknown) {
   const lines = format_warning(
     {id: "highlight", gen: "gen-highlight", output_display: "docs/theme/"},
@@ -136,4 +154,68 @@ pipeline test_real_registry_highlight_source_warns(harness: Harness, task: unkno
   assert_eq(ids.contains("tree-sitter-keywords"), true)
   assert_eq(ids.contains("docs-workflow-quickstart"), false)
   assert_eq(ids.contains("receipt-structs"), false)
+}
+
+@test
+pipeline test_real_registry_model_catalog_source_routes_every_projection(
+  harness: Harness,
+  task: unknown,
+) {
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const warnings = drift_warnings(
+    registry.artifact ?? [],
+    ["crates/harn-vm/src/llm/catalog_sources/60-models/90-hosted-gemma-cohere-xai-groq.toml"],
+  )
+  const ids = warnings.map({ w -> w.id })
+  // Positive controls prove the staged catalog source reached the real
+  // registry before checking the projection that this regression protects.
+  assert_eq(ids.contains("provider-catalog"), true)
+  assert_eq(ids.contains("provider-support"), true)
+  assert_eq(ids.contains("provider-matrix"), true)
+}
+
+@test
+pipeline test_real_registry_provider_support_owned_inputs_route_support(
+  harness: Harness,
+  task: unknown,
+) {
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const support = (registry.artifact ?? []).find({ artifact -> artifact?.id == "provider-support" })
+  const owned_sources = [
+    "crates/harn-cli/data/provider_support_notes.toml",
+    "crates/harn-cli/src/commands/provider_support.rs",
+  ]
+  // The support entry owns exactly its generator-specific inputs. Catalog
+  // sources arrive only through `depends_on`, so there is no parallel list.
+  assert_eq(support?.sources, owned_sources)
+  for source in owned_sources {
+    const ids = drift_warnings(registry.artifact ?? [], [source]).map({ warning -> warning.id })
+    assert_eq(ids.contains("provider-support"), true)
+    assert_eq(ids.contains("provider-catalog"), false)
+    assert_eq(ids.contains("provider-matrix"), false)
+  }
+}
+
+@test
+pipeline test_real_registry_provider_matrix_owned_input_routes_matrix(
+  harness: Harness,
+  task: unknown,
+) {
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const matrix = (registry.artifact ?? []).find({ artifact -> artifact?.id == "provider-matrix" })
+  const source = "crates/harn-cli/src/commands/check/provider_matrix.rs"
+  assert_eq(matrix?.sources, [source])
+  const ids = drift_warnings(registry.artifact ?? [], [source]).map({ warning -> warning.id })
+  assert_eq(ids.contains("provider-matrix"), true)
+  assert_eq(ids.contains("provider-catalog"), false)
+  assert_eq(ids.contains("provider-support"), false)
 }

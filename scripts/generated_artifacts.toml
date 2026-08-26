@@ -25,6 +25,11 @@
 #   4. Run `make check-generated-registry` — it fails until the registry
 #      and the consumers agree.
 #
+# When one generated artifact consumes another, declare
+# `depends_on = ["upstream-id"]`. Registry readers inherit that artifact's
+# authoritative sources and generated outputs. Do not repeat the upstream
+# source list in the dependent entry.
+#
 # A `check-*` Makefile target that is NOT a generated-artifact drift guard
 # (a behavioural validator, a perf soak, a LOC ratchet, the registry
 # auditor itself) belongs in `[meta].exempt_checks` instead of an
@@ -481,15 +486,12 @@ make_all = true
 
 [[artifact]]
 id = "provider-matrix"
-description = "Provider/model capability matrix doc generated from capabilities.toml."
+description = "Provider/model capability matrix doc generated from the authoritative provider catalog and capability registry."
 gen = "gen-provider-matrix"
 check = "check-provider-matrix"
 outputs = ["docs/src/provider-matrix.md"]
-sources = [
-  "crates/harn-cli/src/commands/provider_matrix.rs",
-  "crates/harn-vm/src/llm/capability_sources/",
-  "crates/harn-vm/src/llm/capabilities.toml",
-]
+sources = ["crates/harn-cli/src/commands/check/provider_matrix.rs"]
+depends_on = ["provider-catalog"]
 ci = true
 make_all = true
 
@@ -500,12 +502,10 @@ gen = "gen-provider-support"
 check = "check-provider-support"
 outputs = ["docs/src/provider-support.md", "docs/provider-support.json"]
 sources = [
-  "crates/harn-cli/src/cli/providers.rs",
-  "crates/harn-vm/src/llm/catalog_sources/",
-  "crates/harn-vm/src/llm/capability_sources/",
-  "crates/harn-vm/src/llm/providers.toml",
-  "crates/harn-vm/src/llm/capabilities.toml",
+  "crates/harn-cli/data/provider_support_notes.toml",
+  "crates/harn-cli/src/commands/provider_support.rs",
 ]
+depends_on = ["provider-catalog"]
 ci = true
 make_all = true
 

@@ -1,4 +1,4 @@
-// The shape of scripts/generated_artifacts.toml.
+// The shape and dependency semantics of scripts/generated_artifacts.toml.
 //
 // Five scripts read that registry and none of them validated it, so each
 // carried its own assumption about the shape and a malformed entry surfaced
@@ -6,7 +6,8 @@
 // the one place that says what the file has to look like; readers import it
 // rather than restating it.
 //
-// It describes the fields the readers actually use, with
+// It describes the fields the readers actually use and resolves transitive
+// artifact inputs once for every consumer. The schemas keep
 // `additional_properties: true` throughout, so adding a field to the registry
 // does not require editing this file — only removing or retyping one does.
 import "std/schema"
@@ -31,9 +32,100 @@ pub fn generated_artifact_schema() {
       check: schema_field(schema_string(), false),
       outputs: schema_field(schema_list(schema_string()), false),
       sources: schema_field(schema_list(schema_string()), false),
+      depends_on: schema_field(schema_list(schema_string()), false),
     },
     {additional_properties: true},
   )
+}
+
+/** The registry artifact named `id`, or `nil` when the edge is invalid. */
+fn artifact_by_id(artifacts: list, id: string) {
+  return artifacts.find({ artifact -> artifact?.id == id })
+}
+
+/**
+ * Every direct and inherited input path for one generated artifact.
+ *
+ * `depends_on` is the artifact graph's only transitive edge. A dependent reads
+ * both the upstream artifact's authoritative sources and its generated
+ * outputs, so consumers never repeat an upstream source list. The registry
+ * audit rejects unknown edges and cycles; `seen` still makes this reader
+ * terminate safely while reporting those errors elsewhere.
+ */
+pub fn generated_artifact_inputs(artifacts: list, id: string) -> list<string> {
+  let inputs: list<string> = []
+  let queue: list<string> = [id]
+  let seen: list<string> = []
+  let index = 0
+  while index < queue.count {
+    const current_id = queue[index] ?? ""
+    index = index + 1
+    if seen.contains(current_id) {
+      continue
+    }
+    seen = seen + [current_id]
+    const artifact = artifact_by_id(artifacts, current_id)
+    if artifact == nil {
+      continue
+    }
+    for source in artifact?.sources ?? [] {
+      if !inputs.contains(source) {
+        inputs = inputs + [source]
+      }
+    }
+    if current_id != id {
+      for output in artifact?.outputs ?? [] {
+        if !inputs.contains(output) {
+          inputs = inputs + [output]
+        }
+      }
+    }
+    for dependency in artifact?.depends_on ?? [] {
+      if !seen.contains(dependency) && !queue.contains(dependency) {
+        queue = queue + [dependency]
+      }
+    }
+  }
+  return inputs
+}
+
+/** Unknown, self-referential, and cyclic artifact dependency edges. */
+pub fn generated_artifact_dependency_errors(artifacts: list) -> list<string> {
+  const ids = artifacts.map({ artifact -> artifact?.id ?? "<missing id>" })
+  let errors: list<string> = []
+  for artifact in artifacts {
+    const id = artifact?.id ?? "<missing id>"
+    for dependency in artifact?.depends_on ?? [] {
+      if dependency == id {
+        errors = errors + ["[${id}] depends_on must not reference itself"]
+      } else if !ids.contains(dependency) {
+        errors = errors + ["[${id}] depends_on references unknown artifact `${dependency}`"]
+      }
+    }
+  }
+  let remaining = ids
+  while remaining.count > 0 {
+    let ready: list<string> = []
+    for id in remaining {
+      const artifact = artifact_by_id(artifacts, id)
+      const blocked = (artifact?.depends_on ?? []).any(
+        { dependency -> dependency != id && remaining.contains(dependency) },
+      )
+      if !blocked {
+        ready = ready + [id]
+      }
+    }
+    if ready.count == 0 {
+      errors = errors
+        + [
+          "generated-artifact dependency graph contains a cycle; unresolved artifacts: "
+            + remaining.sorted().join(", "),
+        ]
+      break
+    }
+    remaining = remaining.filter({ id -> !ready.contains(id) }).to_list()
+  }
+  return errors
 }
 
 /** The whole registry document. */

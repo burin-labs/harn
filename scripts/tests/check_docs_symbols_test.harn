@@ -379,6 +379,19 @@ pipeline test_source_and_projection_collapse_to_the_source(harness: Harness, tas
 }
 
 @test
+pipeline test_generated_owner_inherits_upstream_artifact_inputs(harness: Harness, task: unknown) {
+  const registry = {
+    artifact: [
+      {id: "catalog", outputs: ["generated/catalog.json"], sources: ["catalog/sources/"]},
+      {id: "matrix", gen: "gen-matrix", outputs: ["docs/matrix.md"], depends_on: ["catalog"]},
+    ],
+  }
+  const owner = generated_owners(registry).find({ candidate -> candidate.id == "matrix" })
+  assert_eq(owner?.sources.contains("catalog/sources/"), true)
+  assert_eq(owner?.sources.contains("generated/catalog.json"), true)
+}
+
+@test
 pipeline test_projection_only_finding_names_registered_generator_once(
   harness: Harness,
   task: unknown,
