@@ -551,7 +551,14 @@ mod tests {
         assert!(markdown.contains(
             "| Provider | Model pattern | Version min | Thinking | Reasoning excludes | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
         ));
+        let gpt_54 = rows
+            .iter()
+            .find(|row| row.provider == "openai" && row.model == "gpt-5.4* | openai/gpt-5.4*")
+            .expect("OpenAI GPT-5.4 conditional capability row");
+        assert_eq!(gpt_54.reasoning_excluded_portable_options, ["temperature"]);
         assert!(markdown.contains("`>=4.8; extends`"));
+        assert!(markdown
+            .contains("`gpt-5.4* \\| openai/gpt-5.4*` | `any; extends` | no | `temperature`"));
         assert!(markdown.contains("Tool-format recommendations by catalog model"));
     }
 
