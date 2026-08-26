@@ -16,7 +16,27 @@ pub struct ResolvedProviderConnectors {
 pub fn try_load_provider_connectors(
     anchor: &Path,
 ) -> Result<ResolvedProviderConnectors, PackageError> {
-    ensure_dependencies_materialized(anchor)?;
+    try_load_provider_connectors_with_packages(anchor, true)
+}
+
+/// Resolve only connector declarations owned by the nearest root manifest.
+///
+/// Root declarations take precedence over package contributions, so a call to
+/// one of them must not validate or materialize unrelated dependencies merely
+/// to rediscover that precedence.
+pub fn try_load_root_provider_connectors(
+    anchor: &Path,
+) -> Result<ResolvedProviderConnectors, PackageError> {
+    try_load_provider_connectors_with_packages(anchor, false)
+}
+
+fn try_load_provider_connectors_with_packages(
+    anchor: &Path,
+    include_packages: bool,
+) -> Result<ResolvedProviderConnectors, PackageError> {
+    if include_packages {
+        ensure_dependencies_materialized(anchor)?;
+    }
     let Some((manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(ResolvedProviderConnectors {
             configs: Vec::new(),
@@ -24,7 +44,11 @@ pub fn try_load_provider_connectors(
         });
     };
     let mut providers = resolved_provider_connectors_from_manifest(&manifest, &manifest_dir);
-    let package_snapshot = dependency_package_snapshot(&manifest, &manifest_dir)?.map(Arc::new);
+    let package_snapshot = if include_packages {
+        dependency_package_snapshot(&manifest, &manifest_dir)?.map(Arc::new)
+    } else {
+        None
+    };
     if let Some(snapshot) = package_snapshot.as_ref() {
         providers.extend(installed_package_provider_connectors(
             snapshot,

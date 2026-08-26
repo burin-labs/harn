@@ -459,11 +459,13 @@ struct ProjectConnectorResolver {
 
 #[derive(Default)]
 struct ProjectConnectorState {
-    connectors: Option<package::ResolvedProviderConnectors>,
+    root_connectors: Option<package::ResolvedProviderConnectors>,
+    package_connectors: Option<package::ResolvedProviderConnectors>,
     context: Option<harn_vm::ConnectorCtx>,
     clients: BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>,
     initialized_project_providers: BTreeSet<harn_vm::ProviderId>,
     terminal_error: Option<harn_vm::ClientError>,
+    package_error: Option<harn_vm::ClientError>,
     provider_errors: BTreeMap<harn_vm::ProviderId, harn_vm::ClientError>,
 }
 
@@ -499,10 +501,10 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
         if let Some(error) = state.provider_errors.get(&provider) {
             return Err(error.clone());
         }
-        if state.connectors.is_none() {
+        if state.root_connectors.is_none() {
             let anchor = self.anchor.clone();
             let connectors = match tokio::task::spawn_blocking(move || {
-                package::try_load_provider_connectors(&anchor)
+                package::try_load_root_provider_connectors(&anchor)
             })
             .await
             {
@@ -520,11 +522,11 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                     return Err(error);
                 }
             };
-            state.connectors = Some(connectors);
+            state.root_connectors = Some(connectors);
         }
 
-        let config = state
-            .connectors
+        let mut config = state
+            .root_connectors
             .as_ref()
             .and_then(|connectors| {
                 connectors
@@ -533,6 +535,44 @@ impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
                     .find(|config| config.id == provider)
             })
             .cloned();
+        if config.is_none() {
+            if let Some(error) = &state.package_error {
+                return Err(error.clone());
+            }
+            if state.package_connectors.is_none() {
+                let anchor = self.anchor.clone();
+                let connectors = match tokio::task::spawn_blocking(move || {
+                    package::try_load_provider_connectors(&anchor)
+                })
+                .await
+                {
+                    Ok(Ok(connectors)) => connectors,
+                    Ok(Err(error)) => {
+                        let error = harn_vm::ClientError::Other(error.to_string());
+                        state.package_error = Some(error.clone());
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        let error = harn_vm::ClientError::Other(format!(
+                            "project package connector metadata task failed: {error}"
+                        ));
+                        state.package_error = Some(error.clone());
+                        return Err(error);
+                    }
+                };
+                state.package_connectors = Some(connectors);
+            }
+            config = state
+                .package_connectors
+                .as_ref()
+                .and_then(|connectors| {
+                    connectors
+                        .configs
+                        .iter()
+                        .find(|config| config.id == provider)
+                })
+                .cloned();
+        }
         let needs_project_initialization =
             config.is_some() && !state.initialized_project_providers.contains(&provider);
         if state.context.is_none() {
@@ -807,6 +847,48 @@ required_secrets = ["webhook/signing-secret"]
         assert_eq!(
             registry.declared_secrets_for(&config.id),
             harn_vm::declared_secret_ids(["webhook/signing-secret"])
+        );
+    }
+
+    #[tokio::test]
+    async fn root_provider_does_not_prepare_an_unrelated_broken_dependency() {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::write(
+            project.path().join("harn.toml"),
+            r#"
+[package]
+name = "root-provider-precedence-fixture"
+
+[dependencies]
+missing = { git = "https://example.invalid/missing.git" }
+
+[[providers]]
+id = "webhook"
+connector = { rust = "builtin" }
+"#,
+        )
+        .expect("write manifest");
+        let entry = project.path().join("main.harn");
+        std::fs::write(&entry, "pipeline main() {}\n").expect("write entry");
+        let resolver = ProjectConnectorResolver::new(&entry);
+
+        let package_error = match resolver.resolve("missing_package_provider").await {
+            Err(error) => error,
+            Ok(_) => panic!("a package lookup must still validate dependencies"),
+        };
+        assert!(package_error.to_string().contains("harn.lock"));
+
+        assert!(
+            resolver
+                .resolve("webhook")
+                .await
+                .expect("root provider must bypass the failed package layer")
+                .is_some(),
+            "the configured built-in provider must remain available"
+        );
+        assert!(
+            !project.path().join("harn.lock").exists(),
+            "root provider resolution must not materialize dependencies"
         );
     }
 

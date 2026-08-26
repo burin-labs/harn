@@ -123,6 +123,34 @@ pub(crate) fn ensure_reachable_dependencies_materialized(
     Ok(needs_dependencies)
 }
 
+/// Revalidate the package authority carried by a bytecode-cache manifest.
+///
+/// `false` means the cached graph imports an alias the current manifest no
+/// longer declares, so the caller must discard the hit and run normal
+/// parse/typecheck diagnostics. Declared aliases retain the ordinary lock and
+/// generation checks; a stale revision remains a setup failure rather than
+/// executing the generation captured by an older cache entry.
+pub(crate) fn ensure_cached_dependencies_materialized(
+    anchor: &Path,
+    package_aliases: &[String],
+) -> Result<bool, PackageError> {
+    if package_aliases.is_empty() {
+        return Ok(true);
+    }
+    let declared_dependencies = load_nearest_manifest(anchor)
+        .into_result()?
+        .map(|(manifest, _)| manifest.dependencies)
+        .unwrap_or_default();
+    if package_aliases
+        .iter()
+        .any(|alias| !declared_dependencies.contains_key(alias))
+    {
+        return Ok(false);
+    }
+    ensure_dependencies_materialized(anchor)?;
+    Ok(true)
+}
+
 pub(crate) fn ensure_dependencies_materialized_in(
     workspace: &PackageWorkspace,
     anchor: &Path,

@@ -89,10 +89,11 @@ run passes `--project-triggers`. Trigger-oriented commands continue to register
 the triggers they operate. This makes durable project side effects explicit for
 ordinary entrypoint runs.
 
-With `--project-triggers`, Harn parses and validates project trigger and hook
-declarations, exports, and callable signatures before it runs the entry script.
-It initializes each handler module and its imports only when an event dispatches
-to that handler. This keeps unrelated project code off the startup path.
+With `--project-triggers`, Harn validates project trigger and hook declaration
+shapes before it runs the entry script. Handler exports, callable signatures,
+module initialization, and imports are resolved when an event dispatches to
+that handler. A matching policy hook that cannot be resolved fails closed; an
+unrelated broken handler stays off the startup path.
 
 Use `--eager-project-handlers` to diagnose failures in top-level handler module
 initialization. It restores fail-fast initialization for every project handler
