@@ -426,6 +426,26 @@ pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
       assert_eq(report.findings[0]?.message?.contains("existed") ?? false, true)
     },
   )
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const original = "crates/example/src/original.rs"
+      const added = "crates/example/src/added.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, original, 2000)
+      write_inventory(harness, root, [original])
+      const base = commit_all(harness.process, root, "one ceiling")
+      write_source(harness, root, original, 1400)
+      write_source(harness, root, added, 1900)
+      let identities: dict<string, string> = {}
+      identities[added] = original
+      write_inventory(harness, root, [added], identities)
+      commit_all(harness.process, root, "attempt identity copy")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("still exists") ?? false, true)
+    },
+  )
 }
 
 @test

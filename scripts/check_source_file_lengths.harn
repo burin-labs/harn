@@ -558,6 +558,7 @@ fn base_source_inventory(
   revision: string,
   legacy_sources: list<LegacySource>,
   base_legacy_sources: list<LegacySource>,
+  current_source_paths: list<string>,
 ) -> list<BaseSourceCount> {
   let base_by_id: dict<string, LegacySource> = {}
   for source in base_legacy_sources {
@@ -579,6 +580,18 @@ fn base_source_inventory(
       continue
     }
     if base_source.path != source.path {
+      if current_source_paths.contains(base_source.path) {
+        sources = sources.appending(
+          {
+            path: source.path,
+            approved: false,
+            error:
+              "legacy identity cannot move while its comparison-base path still exists at HEAD: "
+              + base_source.path,
+          },
+        )
+        continue
+      }
       const current_path_at_base = process.run(
         {
           program: "git",
@@ -815,6 +828,7 @@ pub fn check_source_file_lengths(
           base.revision,
           inventory.sources,
           base_inventory.sources,
+          sources.map({ source -> source.path }).to_list(),
         ),
       )
   }
