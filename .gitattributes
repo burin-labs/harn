@@ -13,6 +13,11 @@ tests/smoke/*.harn eol=lf
 tests/smoke/harn.toml eol=lf
 scripts/release_smoke.sh eol=lf
 
+# Harn prompt source is embedded with include_str! in shipped binaries and its
+# exact bytes are part of reviewed prompt identities. Keep those bytes stable
+# when Git checks the repository out on Windows.
+*.harn.prompt text eol=lf
+
 # Session-bundle contract fixtures are compared byte-for-byte against the
 # `serde_json::to_string_pretty` output (LF newlines), so they must check
 # out with LF on every platform — autocrlf on Windows would otherwise
