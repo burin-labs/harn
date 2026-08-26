@@ -12887,6 +12887,85 @@
       ]
     },
     {
+      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "name": "Nemotron 3.5 Lightning 30B A3B (NVIDIA NIM)",
+      "display_name": "Nemotron 3.5 Lightning 30B A3B",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "nemotron-3.5-lightning-30b-a3b",
+      "equivalence_group": "nemotron-3.5-lightning-30b-a3b",
+      "served_variant": "nvidia-nim",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 30.0,
+        "active_parameter_count_b": 3.0,
+        "moe": true,
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b/modelcard",
+        "last_verified": "2026-08-26"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "reasoning",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
       "id": "nvidia/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (NVIDIA NIM)",
       "display_name": "GPT-OSS 120B",
@@ -27951,6 +28030,24 @@
       "base_url": "https://integrate.api.nvidia.com/v1",
       "secret_env": "NVIDIA_API_KEY",
       "label": "Nemotron 3 Ultra 550B A55B (NVIDIA NIM)",
+      "family": "nvidia",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "secret_env": "NVIDIA_API_KEY",
+      "label": "Nemotron 3.5 Lightning 30B A3B (NVIDIA NIM)",
       "family": "nvidia",
       "capabilities": [
         "native_tools",
