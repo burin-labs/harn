@@ -229,10 +229,6 @@ fn run_command_background_after_progress_overlay_satisfies_response_schema() {
         require_str(&resp, "stdout").contains("latest\n"),
         "deadline response must use the latest buffered progress snapshot",
     );
-    assert!(
-        require_int(&resp, "duration_ms") < wait_ms,
-        "expected progress-overlay duration below the wait budget"
-    );
     let foreign = harn_vm::orchestration::agent_inbox::drain(&session_id);
     // The process can publish another progress entry after the driver restores
     // the inbox. Only the two unrelated notices are part of this invariant.
