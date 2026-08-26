@@ -152,9 +152,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `nvidia` | `*nemotron-3*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `nvidia` | `*deepseek-v4*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nvidia` | `*minimax-m3*` | `any` | `adaptive` | `none` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `nvidia` | `*minimax-m2.7*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nvidia` | `*kimi-k2.6*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `nvidia` | `*glm-5*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nvidia` | `*step-3.7-flash*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `nvidia` | `*mistral*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `nvidia` | `*gemma-4*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -402,9 +400,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `moonshot` | `moonshot/kimi-k3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode. |
 | `nvidia` | `nvidia/deepseek-v4-flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/minimax-m3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/mistral-medium-3.5-128b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-nano-30b-a3b` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke: NVIDIA NIM Nemotron 3 Nano completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred. |
 | `nvidia` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -412,7 +408,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `nvidia` | `nvidia/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/z-ai/glm-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. NVIDIA z-ai/glm-5.2 verified on tool_choice=auto (sync + streaming) and required. |
 | `ollama` | `devstral-small-2:24b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
