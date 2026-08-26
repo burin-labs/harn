@@ -366,10 +366,8 @@ pub struct ProviderRule {
     /// transports. Known values are `openrouter`, `enabled`, and `minimax`.
     #[serde(default)]
     pub reasoning_wire_format: Option<String>,
-    /// Caller-selected portable generation options this route rejects only
-    /// while reasoning is enabled. The normal `*_supported` fields remain the
-    /// route-wide contract; this list captures providers that permit a knob on
-    /// ordinary calls but fix it to a server default for reasoning calls.
+    /// Caller-selected portable generation options this route permits normally
+    /// but rejects while reasoning is enabled; `*_supported` remains route-wide.
     #[serde(default)]
     pub reasoning_excluded_portable_options: Option<Vec<super::PortableOption>>,
     #[serde(default)]
