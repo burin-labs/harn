@@ -98,6 +98,8 @@ updater serializes concurrent refreshes, publishes digest-keyed release and
 source provenance, and atomically replaces the executable. An absent or
 malformed marker never enrolls or mutates the cache. `--no-verify` and legacy
 releases without a checksum manifest leave the existing hook runtime untouched.
+If the upgrade command itself is running from that enrolled path, an unverified
+self-upgrade is refused before either executable changes.
 The hook itself never checks for updates, accesses the network, or hashes the
 installed binary during command evaluation.
 

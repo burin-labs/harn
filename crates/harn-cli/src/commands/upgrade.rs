@@ -161,11 +161,22 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
         ));
     }
 
+    let early_hook_report = refresh_hook_runtime_before_shared_install(
+        verification,
+        &target,
+        &staged_binary,
+        &install_dir.join(harn_binary_name()),
+    )?;
     install_binaries(staging.path(), &install_dir)?;
 
-    let hook_report = refresh_hook_runtime(verification, &target, &staged_binary).map_err(
-        |error| format!("harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"),
-    )?;
+    let hook_report = match early_hook_report {
+        Some(report) => report,
+        None => refresh_hook_runtime(verification, &target, &staged_binary).map_err(|error| {
+            format!(
+                "harn {target} was installed, but its enrolled hook runtime was not refreshed: {error}"
+            )
+        })?,
+    };
     print_hook_runtime_outcome(&hook_report);
 
     println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
@@ -293,12 +304,30 @@ fn run_blocking_json(args: UpgradeArgs) -> i32 {
         );
     }
 
+    let early_hook_report = match refresh_hook_runtime_before_shared_install(
+        verification,
+        &target,
+        &staged_binary,
+        &install_dir.join(harn_binary_name()),
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            return emit_upgrade_error_with(&report, "hook_runtime_refresh_failed", error);
+        }
+    };
+    if let Some(hook_report) = early_hook_report.clone() {
+        report.hook_runtime = Some(hook_report);
+    }
     if let Err(error) = install_binaries(staging.path(), &install_dir) {
         return emit_upgrade_error_with(&report, "install_failed", error);
     }
 
     report.installed = true;
-    match refresh_hook_runtime(verification, &target, &staged_binary) {
+    let hook_refresh = match early_hook_report {
+        Some(hook_report) => Ok(hook_report),
+        None => refresh_hook_runtime(verification, &target, &staged_binary),
+    };
+    match hook_refresh {
         Ok(hook_report) => {
             print_hook_runtime_outcome(&hook_report);
             report.hook_runtime = Some(hook_report);
@@ -536,6 +565,62 @@ fn refresh_hook_runtime(
     )
 }
 
+fn refresh_hook_runtime_before_shared_install(
+    verification: ChecksumVerification,
+    target: &str,
+    candidate: &Path,
+    install_destination: &Path,
+) -> Result<Option<hook_runtime::HookRuntimeRefreshReport>, String> {
+    let runtime_path = hook_runtime::enrolled_runtime_path()?;
+    refresh_hook_runtime_before_shared_install_at(
+        runtime_path.as_deref(),
+        verification,
+        target,
+        candidate,
+        install_destination,
+        fetch_release_source_revision,
+    )
+}
+
+fn refresh_hook_runtime_before_shared_install_at(
+    runtime_path: Option<&Path>,
+    verification: ChecksumVerification,
+    target: &str,
+    candidate: &Path,
+    install_destination: &Path,
+    resolve_source_revision: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<Option<hook_runtime::HookRuntimeRefreshReport>, String> {
+    let Some(runtime_path) = runtime_path else {
+        return Ok(None);
+    };
+    if !paths_refer_to_same_file(runtime_path, install_destination) {
+        return Ok(None);
+    }
+    if !matches!(verification, ChecksumVerification::Verified) {
+        return Err(
+            "refusing an unverified upgrade because the current executable is the enrolled standalone hook runtime"
+                .to_string(),
+        );
+    }
+    refresh_hook_runtime_at(
+        Some(runtime_path),
+        verification,
+        target,
+        candidate,
+        resolve_source_revision,
+    )
+    .map(Some)
+}
+
+fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
+    left == right
+        || left
+            .canonicalize()
+            .ok()
+            .zip(right.canonicalize().ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
 fn refresh_hook_runtime_at(
     runtime_path: Option<&Path>,
     verification: ChecksumVerification,
@@ -562,7 +647,7 @@ fn print_hook_runtime_outcome(report: &hook_runtime::HookRuntimeRefreshReport) {
     match report.status {
         HookRuntimeRefreshStatus::NotEnrolled => {}
         HookRuntimeRefreshStatus::Refreshed => {
-            eprintln!("Refreshed enrolled standalone hook runtime.")
+            eprintln!("Refreshed enrolled standalone hook runtime.");
         }
         HookRuntimeRefreshStatus::SkippedUnverified => eprintln!(
             "warning: enrolled standalone hook runtime was not refreshed because the archive was not checksum-verified"
@@ -914,6 +999,78 @@ mod tests {
         assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
         assert!(!root.path().join("provenance-v1").exists());
         assert!(!root.path().join(".upgrade.lock").exists());
+    }
+
+    #[test]
+    fn unverified_self_upgrade_of_enrolled_runtime_is_refused_before_mutation() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root.path().join("harn");
+        let candidate = root.path().join("candidate");
+        fs::write(&runtime, b"old-runtime").expect("runtime");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        fs::write(
+            root.path().join("harn.standalone-v1"),
+            b"harn-run-standalone-v1\n",
+        )
+        .expect("marker");
+
+        let error = refresh_hook_runtime_before_shared_install_at(
+            Some(&runtime),
+            ChecksumVerification::Unavailable(0),
+            "v1.2.3",
+            &candidate,
+            &runtime,
+            |_| panic!("unverified bytes must not resolve source provenance"),
+        )
+        .expect_err("unverified shared install");
+        assert!(error.contains("refusing an unverified upgrade"), "{error}");
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+        assert!(!root.path().join("provenance-v1").exists());
+        assert!(!root.path().join(".upgrade.lock").exists());
+    }
+
+    #[test]
+    fn verified_self_upgrade_publishes_hook_pair_before_main_install() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root.path().join("harn");
+        let candidate = root.path().join("candidate");
+        fs::write(&runtime, b"old-runtime").expect("runtime");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        fs::write(
+            root.path().join("harn.standalone-v1"),
+            b"harn-run-standalone-v1\n",
+        )
+        .expect("marker");
+
+        let report = refresh_hook_runtime_before_shared_install_at(
+            Some(&runtime),
+            ChecksumVerification::Verified,
+            "v1.2.3",
+            &candidate,
+            &runtime,
+            |_| Ok(SHA_A.to_string()),
+        )
+        .expect("verified shared install")
+        .expect("early hook refresh");
+        assert_eq!(
+            report.status,
+            hook_runtime::HookRuntimeRefreshStatus::Refreshed
+        );
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"new-runtime");
+        assert!(root.path().join("provenance-v1").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shared_install_detection_resolves_symlink_aliases() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("temp dir");
+        let executable = root.path().join("installed-harn");
+        let alias = root.path().join("hook-harn");
+        fs::write(&executable, b"runtime").expect("runtime");
+        symlink(&executable, &alias).expect("symlink");
+        assert!(paths_refer_to_same_file(&alias, &executable));
     }
 
     #[test]

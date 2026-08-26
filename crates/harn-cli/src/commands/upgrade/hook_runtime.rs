@@ -19,7 +19,7 @@ const CAPABILITY: &str = "harn-run-standalone-v1";
 const PROVENANCE_SCHEMA_VERSION: u32 = 1;
 const PROVENANCE_DIR: &str = "provenance-v1";
 const UPGRADE_LOCK: &str = ".upgrade.lock";
-const UPGRADE_LOCK_TIMEOUT: Duration = Duration::from_secs(60);
+const UPGRADE_LOCK_TIMEOUT: Duration = Duration::from_mins(1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct HookRuntimeRelease {
@@ -101,10 +101,7 @@ fn runtime_path_from_environment(
 }
 
 fn non_blank_path(value: Option<&OsStr>) -> Option<PathBuf> {
-    value
-        .and_then(OsStr::to_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
+    value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 pub(super) fn enrolled_runtime_path() -> Result<Option<PathBuf>, String> {
@@ -127,7 +124,7 @@ fn marker_path(runtime_path: &Path) -> PathBuf {
 }
 
 fn marker_enrolls(path: &Path) -> Result<bool, String> {
-    let marker = match fs::read_to_string(path) {
+    let marker = match fs::read(path) {
         Ok(marker) => marker,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => {
@@ -138,8 +135,8 @@ fn marker_enrolls(path: &Path) -> Result<bool, String> {
         }
     };
     Ok(matches!(
-        marker.as_str(),
-        CAPABILITY | "harn-run-standalone-v1\n" | "harn-run-standalone-v1\r\n"
+        marker.as_slice(),
+        b"harn-run-standalone-v1" | b"harn-run-standalone-v1\n" | b"harn-run-standalone-v1\r\n"
     ))
 }
 
@@ -394,14 +391,23 @@ mod tests {
             ),
             Some(PathBuf::from("/custom/harn"))
         );
+        assert_eq!(
+            runtime_path_from_environment(Some(OsStr::new("")), None, Some(home), false),
+            Some(PathBuf::from("/users/example/.cache/harn/hook-bin/harn"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(Some(OsStr::new("  ")), None, Some(home), false),
+            Some(PathBuf::from("  "))
+        );
     }
 
     #[test]
     fn absent_or_malformed_marker_never_mutates_the_hook_cache() {
         for marker in [
             None,
-            Some("wrong\n"),
-            Some("harn-run-standalone-v1\nextra\n"),
+            Some(b"wrong\n".as_slice()),
+            Some(b"harn-run-standalone-v1\nextra\n".as_slice()),
+            Some(b"harn-run-standalone-v1\xff".as_slice()),
         ] {
             let root = tempfile::tempdir().expect("temp dir");
             let runtime = root.path().join("harn");
