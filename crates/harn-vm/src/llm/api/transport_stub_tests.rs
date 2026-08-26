@@ -12,6 +12,8 @@ use super::{
 };
 use crate::llm::env_guard;
 
+#[path = "transport_stub_tests/gemini_generate_content.rs"]
+mod gemini_generate_content;
 mod terminal_usage;
 
 /// Cooperative accept: blocks the stub thread on a real
