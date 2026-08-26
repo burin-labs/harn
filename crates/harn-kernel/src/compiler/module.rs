@@ -175,13 +175,13 @@ impl Compiler {
                     let mut compiler = Compiler::with_options(self.options);
                     compiler.prepare_module_context(program);
                     compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
-                    let mut function =
-                        compiler.compile_fn_body(type_params, params, body, source_file.clone())?;
-                    // `compile_fn_body` is also used for anonymous nested
-                    // closures, so it intentionally leaves the display name
-                    // empty. A module function is an exported artifact
-                    // callable and must carry its stable declaration name.
-                    function.name = name.clone();
+                    let function = compiler.compile_named_fn_body(
+                        name,
+                        type_params,
+                        params,
+                        body,
+                        source_file.clone(),
+                    )?;
                     functions.insert(name.clone(), function);
                 }
                 _ => {}
