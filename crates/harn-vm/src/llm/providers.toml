@@ -65,7 +65,6 @@ unverified = [
   "mistral",
   "mlx",
   "nebius",
-  "nvidia",
   "parasail",
   "qianfan",
   "sambanova",
@@ -131,6 +130,14 @@ checked_on = "2026-08-26"
 sources = [
   "https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api",
   "https://platform.kimi.ai/docs/guide/use-context-caching-feature-of-kimi-api",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "nvidia"
+checked_on = "2026-08-26"
+sources = [
+  "https://docs.nvidia.com/aiperf/dev/reference/per-request-speculative-decoding-acceptance",
+  "https://docs.nvidia.com/dynamo/dev/reference/observability/metrics-catalog",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -210,13 +217,12 @@ method = "GET"
 path = "/auth/key"
 
 [providers.huggingface]
+stream_usage_accounting = true
 base_url = "https://router.huggingface.co/v1"
 auth_style = "bearer"
 auth_env = ["HF_TOKEN", "HUGGINGFACE_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-cost_per_1k_in = 0.0002
-cost_per_1k_out = 0.0006
 latency_p50_ms = 2400
 
 [providers.huggingface.healthcheck]
@@ -605,6 +611,8 @@ path = "/models"
 # because common examples set it to the host root, while the OpenAI-compatible
 # API lives under /v1.
 [providers.nvidia]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://integrate.api.nvidia.com/v1"
 base_url_env = "NVIDIA_NIM_BASE_URL"
 auth_style = "bearer"
