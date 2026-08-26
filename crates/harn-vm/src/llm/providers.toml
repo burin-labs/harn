@@ -5792,23 +5792,6 @@ strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 # (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
 # listing carries only `glm-5p2`, which stays catalogued above.
 
-[models."accounts/fireworks/models/kimi-k2p5"]
-name = "Kimi K2.5 (Fireworks)"
-provider = "fireworks"
-context_window = 262144
-logical_model = "moonshot-kimi-k2.5"
-equivalence_group = "moonshot-kimi-k2.5"
-served_variant = "fireworks"
-wire_model = "accounts/fireworks/models/kimi-k2p5"
-api_dialect = "openai_chat"
-capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
-deprecated = true
-deprecation_note = "Fireworks still lists Kimi K2.5, but Kimi K2.6 and K2.7 Code are the active routes."
-superseded_by = "accounts/fireworks/models/kimi-k2p6"
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
-
 # --- source: 60-models/99-vercel-ai-gateway.toml ---
 # Curated Vercel AI Gateway routes used by Harn's provider probes and Burin's
 # model picker. Catalog keys are provider-qualified to avoid colliding with

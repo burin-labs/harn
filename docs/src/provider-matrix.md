@@ -347,7 +347,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/glm-5p2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming. |
 | `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `fireworks` | `accounts/fireworks/models/kimi-k2p5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/minimax-m3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run). |
