@@ -572,8 +572,7 @@ fn base_source_inventory(
         {
           path: source.path,
           approved: false,
-          error:
-            "comparison-base policy did not approve legacy identity " + source.id
+          error: "comparison-base policy did not approve legacy identity " + source.id
             + "; after a rename, map the current path to its prior identity in legacy_path_identities",
         },
       )
@@ -585,8 +584,7 @@ fn base_source_inventory(
           {
             path: source.path,
             approved: false,
-            error:
-              "legacy identity cannot move while its comparison-base path still exists at HEAD: "
+            error: "legacy identity cannot move while its comparison-base path still exists at HEAD: "
               + base_source.path,
           },
         )
@@ -613,10 +611,7 @@ fn base_source_inventory(
           {
             path: source.path,
             approved: false,
-            error: git_failure(
-              current_path_at_base,
-              "verify rename destination at " + revision,
-            ),
+            error: git_failure(current_path_at_base, "verify rename destination at " + revision),
           },
         )
         continue
@@ -626,8 +621,7 @@ fn base_source_inventory(
           {
             path: source.path,
             approved: false,
-            error:
-              "legacy identity cannot be reassigned onto a path that existed at the comparison base: "
+            error: "legacy identity cannot be reassigned onto a path that existed at the comparison base: "
               + source.path,
           },
         )

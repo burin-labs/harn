@@ -47,7 +47,8 @@ fn write_inventory(
     "scripts/source-file-length-legacy.json",
     json_stringify_pretty(
       {version: 1, legacy_path_identities: identities, legacy_oversized_paths: paths},
-    ) + "\n",
+    )
+      + "\n",
   )
   return nil
 }
@@ -100,23 +101,33 @@ pipeline test_legacy_inventory_is_stable_sorted_policy_not_measurement(
   )
   assert_eq(renamed.sources, [{id: "a.rs", path: "b.rs"}])
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"b.rs\",\"a.rs\"]}").ok,
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"b.rs\",\"a.rs\"]}",
+    ).ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"a.rs\"]}").ok,
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"a.rs\"]}",
+    ).ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"../escape.rs\"]}").ok,
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"../escape.rs\"]}",
+    ).ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\"]}").ok,
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\"]}",
+    ).ok,
     false,
   )
   assert_eq(
-    parse_legacy_inventory("{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}").ok,
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}",
+    ).ok,
     false,
   )
   assert_eq(parse_legacy_inventory("not json").ok, false)
