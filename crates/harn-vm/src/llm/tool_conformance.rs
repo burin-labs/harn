@@ -861,7 +861,7 @@ fn report_from_cases(
     expected_value: String,
     cases: Vec<ToolConformanceCase>,
 ) -> ToolConformanceReport {
-    let summary = summarize_cases(&cases);
+    let summary = summarize_cases(&cases, tool_format);
     ToolConformanceReport {
         schema_version: TOOL_CONFORMANCE_SCHEMA_VERSION,
         provider,
@@ -877,9 +877,13 @@ fn report_from_cases(
     }
 }
 
-fn summarize_cases(cases: &[ToolConformanceCase]) -> ToolCallingConformanceSummary {
-    let native = summarize_native_mode(cases, ToolProbeMode::NonStreaming);
-    let streaming_native = summarize_native_mode(cases, ToolProbeMode::Streaming);
+fn summarize_cases(
+    cases: &[ToolConformanceCase],
+    tool_format: ToolProbeFormat,
+) -> ToolCallingConformanceSummary {
+    let native = summarize_requested_native_mode(cases, tool_format, ToolProbeMode::NonStreaming);
+    let streaming_native =
+        summarize_requested_native_mode(cases, tool_format, ToolProbeMode::Streaming);
     let text = summarize_text_mode(cases);
 
     let fallback_mode =
@@ -904,6 +908,17 @@ fn summarize_cases(cases: &[ToolConformanceCase]) -> ToolCallingConformanceSumma
         fallback_mode,
         failure_reason,
     }
+}
+
+fn summarize_requested_native_mode(
+    cases: &[ToolConformanceCase],
+    tool_format: ToolProbeFormat,
+    mode: ToolProbeMode,
+) -> ToolProbeStatus {
+    if tool_format != ToolProbeFormat::Native {
+        return ToolProbeStatus::Unknown;
+    }
+    summarize_native_mode(cases, mode)
 }
 
 fn summarize_native_mode(cases: &[ToolConformanceCase], mode: ToolProbeMode) -> ToolProbeStatus {
@@ -1410,6 +1425,9 @@ fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
+#[cfg(test)]
+#[path = "tool_conformance_summary_tests.rs"]
+mod summary_tests;
 #[cfg(test)]
 #[path = "tool_conformance_tests.rs"]
 mod tests;
