@@ -176,13 +176,12 @@ method = "GET"
 path = "/auth/key"
 
 [providers.huggingface]
+stream_usage_accounting = true
 base_url = "https://router.huggingface.co/v1"
 auth_style = "bearer"
 auth_env = ["HF_TOKEN", "HUGGINGFACE_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-cost_per_1k_in = 0.0002
-cost_per_1k_out = 0.0006
 latency_p50_ms = 2400
 
 [providers.huggingface.healthcheck]
