@@ -20,7 +20,6 @@ unverified = [
   "cloudflare_ai_gateway",
   "cohere",
   "dashscope",
-  "fireworks",
   "flexai",
   "friendli",
   "github_models",
@@ -59,6 +58,14 @@ provider = "deepseek"
 checked_on = "2026-08-25"
 sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "fireworks"
+checked_on = "2026-08-26"
+sources = [
+  "https://docs.fireworks.ai/api-reference/post-chatcompletions",
+  "https://docs.fireworks.ai/guides/prompt-caching",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -347,6 +354,7 @@ method = "GET"
 path = "/models"
 
 [providers.fireworks]
+cache_usage_accounting = true
 base_url = "https://api.fireworks.ai/inference/v1"
 base_url_env = "FIREWORKS_BASE_URL"
 auth_style = "bearer"
