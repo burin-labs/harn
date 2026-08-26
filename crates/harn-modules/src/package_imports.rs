@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::package_execution::{PackageExecutionError, PackageExecutionGuard};
 use crate::package_snapshot::PackageSnapshot;
+use crate::ModuleGraph;
 
 #[derive(Debug, Default, Deserialize)]
 struct PackageManifest {
@@ -25,6 +26,34 @@ pub(super) enum LocalResolution {
     Rejected,
     /// Not a stdlib or relative import; only packages can resolve it.
     NotPackage,
+}
+
+impl ModuleGraph {
+    /// Package aliases named by imports in the reachable graph. The local
+    /// resolver remains the semantic owner of classification, so a sibling
+    /// file and the standard library cannot accidentally be reclassified as a
+    /// package merely because they share a dependency's name.
+    pub fn package_import_aliases(&self) -> Vec<String> {
+        let mut aliases = self
+            .modules
+            .iter()
+            .flat_map(|(file, module)| {
+                module.imports.iter().filter_map(move |import| {
+                    if matches!(
+                        resolve_local_import(file, &import.raw_path),
+                        LocalResolution::NotPackage
+                    ) {
+                        package_alias_from_import(&import.raw_path)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        aliases.sort();
+        aliases.dedup();
+        aliases
+    }
 }
 
 /// Resolve everything that does not require a package snapshot.

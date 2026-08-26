@@ -1,7 +1,5 @@
 //! Connector traits and shared helpers for inbound event-source providers.
-//!
-//! Runtime connector contracts live here alongside their event, secret, and trigger dependencies.
-
+//! Runtime contracts live here beside their event, secret, and trigger dependencies.
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
