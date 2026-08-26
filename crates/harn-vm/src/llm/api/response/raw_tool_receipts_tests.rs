@@ -2,6 +2,42 @@ use super::parse_llm_response;
 use crate::llm::capabilities::WireDialect;
 
 #[test]
+fn deepinfra_estimated_cost_becomes_the_public_usage_cost() {
+    let response = serde_json::json!({
+        "id": "chatcmpl-deepinfra-receipt",
+        "model": "moonshotai/Kimi-K3",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": { "role": "assistant", "content": "ok" }
+        }],
+        "usage": {
+            "prompt_tokens": 91,
+            "completion_tokens": 1,
+            "total_tokens": 92,
+            "estimated_cost": 0.0002736
+        }
+    });
+
+    let result = parse_llm_response(
+        &response,
+        "deepinfra",
+        "moonshotai/Kimi-K3",
+        WireDialect::OpenAiCompat,
+        false,
+    )
+    .expect("DeepInfra response parses");
+
+    assert_eq!(result.telemetry.provider_cost_usd, Some(0.0002736));
+    let usage = result.usage();
+    assert_eq!(usage.input_tokens, 91);
+    assert_eq!(usage.output_tokens, 1);
+    assert_eq!(usage.cost_usd, Some(0.0002736));
+    assert_eq!(usage.known_cost_usd, 0.0002736);
+    assert_eq!(usage.unpriced_calls, 0);
+}
+
+#[test]
 fn openai_parser_preserves_harmony_wrapper_before_normalizing() {
     let response = serde_json::json!({
         "choices": [{
