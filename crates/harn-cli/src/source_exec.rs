@@ -2,6 +2,7 @@
 //! building the harness it executes against, and the staged error type that
 //! reports where execution stopped.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 
 use crate::*;
@@ -337,7 +338,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             let _connector_clients =
                 if should_install_default_connector_clients(source, source_path) {
                     Some(
-                        install_connector_clients(&extensions.provider_connectors)
+                        install_connector_clients_for_vm(&mut vm, &extensions.provider_connectors)
                             .await
                             .map_err(|error| {
                                 ExecError::new(
@@ -395,9 +396,18 @@ pub(crate) fn declared_connector_secrets(
     harn_vm::declared_secret_ids(setup.required_secrets.iter().map(String::as_str))
 }
 
-pub(crate) async fn install_connector_clients(
+pub(crate) async fn install_connector_clients_for_vm(
+    vm: &mut harn_vm::Vm,
     provider_connectors: &[package::ResolvedProviderConnectorConfig],
 ) -> Result<harn_vm::ActiveConnectorClientsGuard, String> {
+    let clients = initialized_connector_clients(provider_connectors).await?;
+    vm.set_connector_clients(harn_vm::VmConnectorClients::new(clients.clone(), None));
+    Ok(harn_vm::scope_active_connector_clients(clients))
+}
+
+async fn initialized_connector_clients(
+    provider_connectors: &[package::ResolvedProviderConnectorConfig],
+) -> Result<BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>, String> {
     let registry = build_connector_registry(provider_connectors).await?;
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
@@ -422,8 +432,59 @@ pub(crate) async fn install_connector_clients(
         .init_all(context)
         .await
         .map_err(|error| error.to_string())?;
-    let clients = registry.client_map().await;
-    Ok(harn_vm::scope_active_connector_clients(clients))
+    Ok(registry.client_map().await)
+}
+
+struct ProjectConnectorResolver {
+    anchor: PathBuf,
+    clients:
+        tokio::sync::OnceCell<BTreeMap<harn_vm::ProviderId, Arc<dyn harn_vm::ConnectorClient>>>,
+}
+
+impl ProjectConnectorResolver {
+    fn new(anchor: &Path) -> Self {
+        let absolute = if anchor.is_absolute() {
+            anchor.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(anchor))
+                .unwrap_or_else(|_| anchor.to_path_buf())
+        };
+        Self {
+            anchor: absolute.canonicalize().unwrap_or(absolute),
+            clients: tokio::sync::OnceCell::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl harn_vm::ConnectorClientResolver for ProjectConnectorResolver {
+    async fn resolve(
+        &self,
+        provider: &str,
+    ) -> Result<Option<Arc<dyn harn_vm::ConnectorClient>>, harn_vm::ClientError> {
+        let clients = self
+            .clients
+            .get_or_try_init(|| async {
+                let connectors = package::try_load_provider_connectors(&self.anchor)
+                    .map_err(|error| error.to_string())?;
+                initialized_connector_clients(&connectors.configs).await
+            })
+            .await
+            .map_err(harn_vm::ClientError::Other)?;
+        Ok(clients.get(&harn_vm::ProviderId::from(provider)).cloned())
+    }
+}
+
+/// Build an empty connector projection for a VM and defer the core registry,
+/// project packages, manifest connector modules, and credential binding until
+/// the first connector call. The resolver is shared by the VM tree and
+/// initializes at most once even when concurrent tasks race on first use.
+pub(crate) fn project_connector_clients(anchor: &Path) -> harn_vm::VmConnectorClients {
+    harn_vm::VmConnectorClients::new(
+        BTreeMap::new(),
+        Some(Arc::new(ProjectConnectorResolver::new(anchor))),
+    )
 }
 
 pub(crate) async fn build_connector_registry(

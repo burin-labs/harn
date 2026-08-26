@@ -18,7 +18,7 @@ struct PackageManifest {
 /// `std/` import that names no real stdlib module resolves to nothing and must
 /// NOT fall through to package resolution, or a package could shadow the
 /// standard library.
-enum LocalResolution {
+pub(super) enum LocalResolution {
     /// Resolved without touching installed packages.
     Resolved(PathBuf),
     /// Owned by the stdlib namespace but not a real module. Resolution ends.
@@ -31,7 +31,7 @@ enum LocalResolution {
 ///
 /// Sole owner of the stdlib and relative-path import rules, so the lazy and
 /// pre-acquired entry points below cannot drift apart on what counts as local.
-fn resolve_local_import(current_file: &Path, import_path: &str) -> LocalResolution {
+pub(super) fn resolve_local_import(current_file: &Path, import_path: &str) -> LocalResolution {
     if let Some(module) = import_path
         .strip_prefix("std/")
         .or_else(|| (import_path == "observability").then_some("observability"))
@@ -273,6 +273,11 @@ fn safe_package_relative_path(raw: &str) -> Option<PathBuf> {
         }
     }
     saw_component.then_some(out)
+}
+
+pub(super) fn package_alias_from_import(raw: &str) -> Option<String> {
+    let path = safe_package_relative_path(raw)?;
+    package_name_from_relative_path(&path).map(ToString::to_string)
 }
 
 fn package_name_from_relative_path(path: &Path) -> Option<&str> {

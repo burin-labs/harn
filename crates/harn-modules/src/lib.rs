@@ -495,6 +495,32 @@ fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
 }
 
 impl ModuleGraph {
+    /// Package aliases named by imports in the reachable graph. The local
+    /// resolver remains the semantic owner of classification, so a sibling
+    /// file and the standard library cannot accidentally be reclassified as a
+    /// package merely because they share a dependency's name.
+    pub fn package_import_aliases(&self) -> Vec<String> {
+        let mut aliases = self
+            .modules
+            .iter()
+            .flat_map(|(file, module)| {
+                module.imports.iter().filter_map(move |import| {
+                    if matches!(
+                        crate::package_imports::resolve_local_import(file, &import.raw_path),
+                        crate::package_imports::LocalResolution::NotPackage
+                    ) {
+                        crate::package_imports::package_alias_from_import(&import.raw_path)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        aliases.sort();
+        aliases.dedup();
+        aliases
+    }
+
     /// Sorted list of every module path discovered by [`build`]. Includes
     /// `<std>/<name>` virtual paths for stdlib modules reached transitively.
     /// Callers that want only real-disk modules can filter for paths whose

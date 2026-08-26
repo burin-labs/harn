@@ -22,7 +22,62 @@ pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), Package
 /// Load the nearest project manifest plus any installed package manifests and
 /// merge the root project's runtime extensions.
 pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
+    try_load_runtime_extensions_with_packages(anchor, true)
+}
+
+/// Load only runtime declarations owned by the nearest project manifest.
+///
+/// Installed dependency packages are deliberately left untouched. Ordinary
+/// entrypoints can register root policy and configuration without verifying,
+/// parsing, or initializing every package connector they never call. A
+/// package-aware consumer must resolve the dependency layer explicitly at its
+/// first package import, connector call, or eager handler request.
+pub fn try_load_root_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
+    try_load_runtime_extensions_with_packages(anchor, false)
+}
+
+/// Connector declarations plus the generation lease that keeps their module
+/// paths stable while clients initialize.
+pub struct ResolvedProviderConnectors {
+    pub configs: Vec<ResolvedProviderConnectorConfig>,
+    _package_snapshot: Option<Arc<harn_modules::package_snapshot::PackageSnapshot>>,
+}
+
+/// Materialize and resolve only the connector declarations reachable through
+/// the nearest project. This is the narrow demand boundary used by connector
+/// calls: unrelated persona, trigger, and hook graphs cannot delay or break a
+/// script merely because it uses one connector.
+pub fn try_load_provider_connectors(
+    anchor: &Path,
+) -> Result<ResolvedProviderConnectors, PackageError> {
     ensure_dependencies_materialized(anchor)?;
+    let Some((manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
+        return Ok(ResolvedProviderConnectors {
+            configs: Vec::new(),
+            _package_snapshot: None,
+        });
+    };
+    let mut providers = resolved_provider_connectors_from_manifest(&manifest, &manifest_dir);
+    let package_snapshot = dependency_package_snapshot(&manifest, &manifest_dir)?.map(Arc::new);
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        providers.extend(installed_package_provider_connectors(
+            snapshot,
+            snapshot.packages_root(),
+        )?);
+    }
+    Ok(ResolvedProviderConnectors {
+        configs: dedupe_provider_connectors(providers),
+        _package_snapshot: package_snapshot,
+    })
+}
+
+fn try_load_runtime_extensions_with_packages(
+    anchor: &Path,
+    include_packages: bool,
+) -> Result<RuntimeExtensions, PackageError> {
+    if include_packages {
+        ensure_dependencies_materialized(anchor)?;
+    }
     let Some((root_manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(RuntimeExtensions::default());
     };
@@ -45,8 +100,11 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
-    let package_snapshot =
-        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new);
+    let package_snapshot = if include_packages {
+        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new)
+    } else {
+        None
+    };
     if let Some(snapshot) = package_snapshot.as_ref() {
         provider_connectors.extend(installed_package_provider_connectors(
             snapshot,
@@ -55,13 +113,18 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     }
     provider_connectors = dedupe_provider_connectors(provider_connectors);
     let root_manifest_path = manifest_dir.join(MANIFEST);
-    let runtime_personas = resolve_runtime_personas(
-        root_manifest.clone(),
-        root_manifest_path.clone(),
-        manifest_dir.clone(),
-        package_snapshot.clone(),
-    )?;
-    triggers.extend(installed_persona_trigger_configs(&runtime_personas)?);
+    let runtime_personas = if include_packages {
+        let personas = resolve_runtime_personas(
+            root_manifest.clone(),
+            root_manifest_path.clone(),
+            manifest_dir.clone(),
+            package_snapshot.clone(),
+        )?;
+        triggers.extend(installed_persona_trigger_configs(&personas)?);
+        personas
+    } else {
+        Vec::new()
+    };
 
     Ok(RuntimeExtensions {
         root_manifest_path: Some(root_manifest_path),
@@ -244,7 +307,9 @@ pub async fn install_manifest_hooks(
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ManifestHandlerInitialization {
-    /// Validate the handler contract now and initialize its module on first use.
+    /// Resolve and validate the handler when its matching event first fires.
+    /// A resolution failure aborts that dispatch; policy hooks therefore stay
+    /// fail closed without making unrelated entrypoints parse unused modules.
     #[default]
     OnDispatch,
     /// Validate and initialize every handler module during installation.
@@ -258,7 +323,6 @@ impl ManifestHandlerInitialization {
 }
 
 /// Install manifest hooks with an explicit module-initialization policy.
-/// Declarations, exports, and callable signatures are validated in both modes.
 pub async fn install_manifest_hooks_with_initialization(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
@@ -282,6 +346,15 @@ pub async fn install_manifest_hooks_with_initialization(
             &hook.exports,
             Some(module_name),
         )?;
+        if initialization.is_on_dispatch() {
+            harn_vm::orchestration::register_vm_hook_lazy(
+                hook.event,
+                hook.pattern.clone(),
+                hook.handler.clone(),
+                harn_vm::LazyVmCallable::new(module_path, function_name),
+            );
+            continue;
+        }
         let signatures =
             cached_module_callable_signatures(&mut module_signatures, &module_path, None)?;
         if signatures
@@ -292,15 +365,6 @@ pub async fn install_manifest_hooks_with_initialization(
                 "hook handler '{function_name}' is not exported by module '{module_name}'"
             )
             .into());
-        }
-        if initialization.is_on_dispatch() {
-            harn_vm::orchestration::register_vm_hook_lazy(
-                hook.event,
-                hook.pattern.clone(),
-                hook.handler.clone(),
-                harn_vm::LazyVmCallable::new(module_path, function_name),
-            );
-            continue;
         }
         let cache_key = (
             hook.manifest_dir.clone(),

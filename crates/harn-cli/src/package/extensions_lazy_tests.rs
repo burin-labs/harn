@@ -271,37 +271,75 @@ pub fn should_handle(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn eager_and_lazy_hook_installation_reject_missing_and_private_handlers() {
+async fn lazy_hook_installation_defers_missing_and_private_handlers() {
     for (case, module_source) in [
         ("missing", "pub fn other(ctx) { return ctx }"),
         ("private", "fn handle(ctx) { return ctx }"),
     ] {
+        harn_vm::reset_thread_local_state();
         let tmp = tempfile::tempdir().unwrap();
         let harn_file = write_local_hook_project(tmp.path(), "handlers::handle", module_source);
         let extensions = load_runtime_extensions(&harn_file);
         assert_eq!(extensions.hooks.len(), 1, "{case} hook fixture must load");
 
-        for initialization in [
-            ManifestHandlerInitialization::Eager,
+        install_manifest_hooks_with_initialization(
+            &mut test_vm(),
+            &extensions,
             ManifestHandlerInitialization::OnDispatch,
-        ] {
-            let result = install_manifest_hooks_with_initialization(
-                &mut test_vm(),
-                &extensions,
-                initialization,
-            )
-            .await;
-            assert!(
-                result.is_err(),
-                "{case} handler unexpectedly installed in {initialization:?} mode"
-            );
-            let error = result.unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("hook handler 'handle' is not exported by module 'handlers'"),
-                "{case} handler must be rejected in {initialization:?} mode: {error}"
-            );
-        }
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{case} unused handler initialized eagerly: {error}"));
+
+        let error = install_manifest_hooks_with_initialization(
+            &mut test_vm(),
+            &extensions,
+            ManifestHandlerInitialization::Eager,
+        )
+        .await
+        .expect_err("eager validation must reject the broken handler");
+        assert!(
+            error
+                .to_string()
+                .contains("hook handler 'handle' is not exported by module 'handlers'"),
+            "{case} handler must be rejected in eager mode: {error}"
+        );
+        harn_vm::reset_thread_local_state();
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_broken_hook_fails_closed_when_its_event_dispatches() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        "pub fn other(ctx) { return ctx }",
+    );
+    let extensions = load_runtime_extensions(&harn_file);
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("lazy hook registration");
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+
+    let error = harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect_err("a matching unresolved policy hook must stop dispatch");
+    assert!(
+        error
+            .to_string()
+            .contains("function 'handle' is not exported by module"),
+        "unexpected dispatch error: {error}"
+    );
+    harn_vm::reset_thread_local_state();
 }

@@ -42,7 +42,8 @@ pub mod webhook;
 pub use a2a_push::A2aPushConnector;
 pub use active_clients::{
     active_connector_client, clear_active_connector_clients, install_active_connector_clients,
-    scope_active_connector_clients, ActiveConnectorClientsGuard,
+    scope_active_connector_clients, ActiveConnectorClientsGuard, ConnectorClientResolver,
+    VmConnectorClients,
 };
 pub use cron::{CatchupMode, CronConnector};
 pub use effect_policy::{

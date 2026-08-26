@@ -39,16 +39,17 @@ missing = { git = "https://example.invalid/missing.git" }
     .expect("write manifest");
     let script = project.path().join("main.harn");
     let working = r#"
+import "missing"
+
 pipeline main(harness: Harness) {
   harness.stdio.println("target-ran")
 }
 "#;
     std::fs::write(&script, working).expect("write script");
 
-    // Twice, because two owners can report this failure and they must agree.
-    // A cold run materializes packages inside the type check; a warm run hits
-    // the bytecode cache, skips the type check entirely, and reaches the same
-    // failure while installing the manifest runtime instead.
+    // Twice to cover both the cold type-check path and the warm bytecode-cache
+    // validation path. A reachable package import must never become a cache
+    // escape hatch around dependency preparation.
     for attempt in ["cold", "warm"] {
         let outcome = execute_run_default(&script.to_string_lossy()).await;
         assert_eq!(
@@ -64,6 +65,15 @@ pipeline main(harness: Harness) {
         );
     }
 
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println("target-ran")
+}
+"#,
+    )
+    .expect("write standalone control");
     let standalone = execute_standalone_run(&script.to_string_lossy()).await;
     assert_eq!(
         standalone.exit_code, 0,
@@ -96,6 +106,58 @@ pipeline main(harness: Harness) {
         crate::exit::PROGRAM_FAILURE,
         "stderr:\n{}",
         outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn unused_dependency_does_not_materialize_for_relative_or_std_imports() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("harn.toml"),
+        r#"
+[package]
+name = "unused-dependency-fixture"
+
+[dependencies]
+missing = { git = "https://example.invalid/missing.git" }
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        project.path().join("value.harn"),
+        "pub fn imported_value() -> int { return 42 }\n",
+    )
+    .expect("write relative module");
+    let script = project.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import "std/runtime"
+import { imported_value } from "./value"
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(imported_value())
+}
+"#,
+    )
+    .expect("write main script");
+
+    let outcome = execute_run_default(&script.to_string_lossy()).await;
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "42");
+    assert!(
+        !project.path().join("harn.lock").exists(),
+        "an unreachable dependency must not be materialized"
+    );
+
+    let eager = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
+    assert_eq!(eager.exit_code, crate::exit::RUN_SETUP_FAILURE);
+    assert!(
+        eager.stderr.contains("harn.lock"),
+        "stderr:\n{}",
+        eager.stderr
     );
     harn_vm::reset_thread_local_state();
 }
@@ -347,7 +409,7 @@ pub fn on_tick(_event) -> dict {
 }
 
 #[tokio::test]
-async fn standalone_run_ignores_broken_project_handlers() {
+async fn unrelated_entrypoints_ignore_broken_project_handlers_unless_eager() {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     std::fs::write(
@@ -379,9 +441,17 @@ pipeline main(harness: Harness) {
     .expect("write main script");
 
     let project_outcome = execute_run_default(&script.to_string_lossy()).await;
-    assert_ne!(
+    assert_eq!(
         project_outcome.exit_code, 0,
-        "project handler must be reached"
+        "stderr:\n{}",
+        project_outcome.stderr
+    );
+    assert_eq!(project_outcome.stdout.trim(), "standalone-ran");
+
+    let eager_outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
+    assert_ne!(
+        eager_outcome.exit_code, 0,
+        "eager validation must reach the broken handler"
     );
 
     let standalone_outcome = execute_standalone_run(&script.to_string_lossy()).await;
@@ -391,6 +461,58 @@ pipeline main(harness: Harness) {
         standalone_outcome.stderr
     );
     assert_eq!(standalone_outcome.stdout.trim(), "standalone-ran");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn unrelated_entrypoints_do_not_construct_broken_connectors_unless_eager() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("harn.toml"),
+        r#"
+[package]
+name = "broken-project-connector-fixture"
+
+[[providers]]
+id = "unused_broken"
+connector = { harn = "./broken_connector.harn" }
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(project.path().join("broken_connector.harn"), "fn broken(")
+        .expect("write broken connector");
+    let script = project.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println("unrelated-ran")
+}
+"#,
+    )
+    .expect("write main script");
+
+    let project_outcome = execute_run_default(&script.to_string_lossy()).await;
+    assert_eq!(
+        project_outcome.exit_code, 0,
+        "stderr:\n{}",
+        project_outcome.stderr
+    );
+    assert_eq!(project_outcome.stdout.trim(), "unrelated-ran");
+
+    let eager_outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
+    assert_ne!(
+        eager_outcome.exit_code, 0,
+        "eager mode must construct the connector"
+    );
+    assert!(
+        eager_outcome
+            .stderr
+            .contains("failed to install manifest connectors"),
+        "stderr:\n{}",
+        eager_outcome.stderr
+    );
     harn_vm::reset_thread_local_state();
 }
 
