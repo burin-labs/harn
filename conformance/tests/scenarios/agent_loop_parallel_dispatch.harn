@@ -9,15 +9,18 @@ import { agent_loop } from "std/agent/loop"
  * parsers keyed on declaration order keep working.
  *
  * To assert real concurrency (vs serial) we count peak in-flight tool
- * handlers via atomics - the handler bumps the counter, yields a few
- * times so siblings can arrive, then decrements. The invariant is genuine
- * overlap bounded by the configured cap; an executor need not start every
- * short-lived branch before the first one completes.
+ * handlers via atomics. Each configured batch waits on a channel until every
+ * admitted handler has arrived, so overlap does not depend on scheduler timing.
+ * The invariant is genuine overlap bounded by the configured cap.
  */
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn fanout_tools(runtime: HarnessRuntime, state: dict) {
+fn fanout_tools(runtime: HarnessRuntime, state: dict, barrier_size: int) {
+  let release_gates = []
+  for _i in 0 to barrier_size exclusive {
+    release_gates = release_gates.appending(runtime.channel(nil, 1))
+  }
   const r = tool_registry()
   return tool_define(
     r,
@@ -29,10 +32,15 @@ fn fanout_tools(runtime: HarnessRuntime, state: dict) {
         if now > runtime.atomic_get(state.peak) {
           runtime.atomic_set(state.peak, now)
         }
-        let spins = 0
-        while spins < 20 {
-          runtime.yield_now()
-          spins = spins + 1
+        if barrier_size > 1 {
+          const arrival_index = runtime.atomic_add(state.arrived, 1)
+          const slot = arrival_index % barrier_size
+          if slot + 1 == barrier_size {
+            for gate in release_gates {
+              runtime.send(gate, true)
+            }
+          }
+          runtime.receive(release_gates[slot])
         }
         runtime.atomic_add(state.in_flight, -1)
         return "echoed:" + to_string(args?.msg ?? "")
@@ -46,6 +54,7 @@ fn fanout_tools(runtime: HarnessRuntime, state: dict) {
 fn run(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
+  harness.runtime.atomic_set(state.arrived, 0)
   harness.runtime.atomic_set(state.observed, 0)
   return with_llm_script(
     harness.llm,
@@ -72,7 +81,7 @@ fn run(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -93,6 +102,7 @@ fn run(harness: Harness, state: dict, cap: int) {
 fn run_without_middleware(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
+  harness.runtime.atomic_set(state.arrived, 0)
   return with_llm_script(
     harness.llm,
     [
@@ -113,7 +123,7 @@ fn run_without_middleware(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -129,6 +139,7 @@ fn run_without_middleware(harness: Harness, state: dict, cap: int) {
 fn run_with_audit(harness: Harness, state: dict, cap: int) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
+  harness.runtime.atomic_set(state.arrived, 0)
   harness.runtime.atomic_set(state.observed, 0)
   harness.runtime.atomic_set(state.audit_receipt_count, 0)
   harness.runtime.atomic_set(state.audit_emit_order_bitmask, 0)
@@ -166,7 +177,7 @@ fn run_with_audit(harness: Harness, state: dict, cap: int) {
         nil,
         {
           provider: "mock",
-          tools: fanout_tools(harness.runtime, state),
+          tools: fanout_tools(harness.runtime, state, cap),
           tool_format: "native",
           max_iterations: 3,
           loop_until_done: true,
@@ -192,6 +203,7 @@ fn run_with_audit(harness: Harness, state: dict, cap: int) {
 fn run_prefetch(harness: Harness, state: dict, prefetch: bool) {
   harness.runtime.atomic_set(state.in_flight, 0)
   harness.runtime.atomic_set(state.peak, 0)
+  harness.runtime.atomic_set(state.arrived, 0)
   harness.runtime.atomic_set(state.prefetch_audit_finished, 0)
   harness.runtime.atomic_set(state.prefetch_second_turn_before_audit, 0)
   harness.runtime.atomic_set(state.prefetch_llm_turns, 0)
@@ -230,7 +242,7 @@ fn run_prefetch(harness: Harness, state: dict, prefetch: bool) {
     nil,
     {
       provider: "mock",
-      tools: fanout_tools(harness.runtime, state),
+      tools: fanout_tools(harness.runtime, state, 2),
       tool_format: "native",
       max_iterations: 3,
       loop_until_done: true,
@@ -256,6 +268,7 @@ pipeline default(harness: Harness) {
   const state = {
     in_flight: harness.runtime.atomic(0),
     peak: harness.runtime.atomic(0),
+    arrived: harness.runtime.atomic(0),
     observed: harness.runtime.atomic(0),
     audit_receipt_count: harness.runtime.atomic(0),
     audit_emit_order_bitmask: harness.runtime.atomic(0),
