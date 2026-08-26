@@ -4815,6 +4815,85 @@
       ]
     },
     {
+      "id": "gemma-4-31b",
+      "name": "Gemma 4 31B (Cerebras)",
+      "display_name": "Gemma 4 31B",
+      "provider": "cerebras",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "gemma-4-31b",
+      "equivalence_group": "gemma-4-31b",
+      "served_variant": "cerebras-wafer-scale",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.99,
+        "output_per_mtok": 1.49,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "vision",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "gpt-oss-120b",
       "name": "GPT-OSS 120B (Cerebras)",
       "display_name": "GPT-OSS 120B",
@@ -26214,6 +26293,25 @@
         "structured_output_mode:delimited",
         "text_tools",
         "tools"
+      ]
+    },
+    {
+      "provider": "cerebras",
+      "model": "gemma-4-31b",
+      "base_url": "https://api.cerebras.ai/v1",
+      "secret_env": "CEREBRAS_API_KEY",
+      "label": "Gemma 4 31B (Cerebras)",
+      "family": "gemma",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {

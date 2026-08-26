@@ -461,6 +461,40 @@ fn capability_tags_include_structured_capability_flags() {
 }
 
 #[test]
+fn cerebras_gemma_4_catalog_row_preserves_public_route_metadata() {
+    let model = model_catalog_entry("gemma-4-31b")
+        .expect("Cerebras Gemma 4's public serverless route must be catalogued");
+
+    assert_eq!(model.provider, "cerebras");
+    assert_eq!(model.context_window, 131_072);
+    assert_eq!(
+        model.capabilities,
+        vec![
+            "streaming".to_string(),
+            "tools".to_string(),
+            "vision".to_string(),
+            "thinking".to_string(),
+            "structured_output".to_string(),
+        ]
+    );
+    let pricing = model
+        .pricing
+        .expect("Cerebras Gemma 4's public token rates must be catalogued");
+    assert_eq!(pricing.input_per_mtok, 0.99);
+    assert_eq!(pricing.output_per_mtok, 1.49);
+
+    let capabilities = crate::llm::capabilities::lookup("cerebras", "gemma-4-31b");
+    assert!(capabilities.native_tools);
+    assert!(capabilities.vision_supported);
+    assert_eq!(capabilities.structured_output.as_deref(), Some("native"));
+    assert_eq!(
+        capabilities.preferred_tool_format.as_deref(),
+        Some("native")
+    );
+    assert_eq!(capabilities.thinking_modes, vec!["enabled"]);
+}
+
+#[test]
 fn test_external_config_overlays_default_catalog() {
     let mut config = default_config();
     let mut overlay = ProvidersConfig {

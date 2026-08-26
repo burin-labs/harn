@@ -563,6 +563,20 @@ mod tests {
     }
 
     #[test]
+    fn markdown_projects_cerebras_gemma_4_capability_and_catalog_rows() {
+        let rows = harn_vm::llm::capabilities::matrix_rows();
+        let catalog = harn_vm::provider_catalog::artifact();
+        let markdown = generate_markdown(&rows, &catalog);
+
+        assert!(markdown.contains(
+            "| `cerebras` | `gemma-4-31b` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native`"
+        ));
+        assert!(markdown.contains(
+            "| `cerebras` | `gemma-4-31b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected`"
+        ));
+    }
+
+    #[test]
     fn markdown_includes_empirical_and_unknown_model_rows() {
         let rows = harn_vm::llm::capabilities::matrix_rows();
         let mut catalog = harn_vm::provider_catalog::artifact();
