@@ -15,31 +15,64 @@ tree-sitter grammar) see [Editor integration](./editor-integration.md).
 
 ## VS Code
 
-The richest experience is the bundled extension in `editors/vscode/`, which
-wires up the LSP and DAP clients, syntax highlighting, snippets, and the
-`Harn: Run Pipeline` / `Harn: Format File` commands automatically.
+The bundled extension in `editors/vscode/` adds syntax highlighting, snippets,
+the language server, the debugger, and Harn commands. Install it from source
+until a registry release is available.
 
-Once it is published you will be able to install it from the Marketplace or
-Open VSX by searching for **Harn Language**. Until then, build and install it
-locally:
+### Install the extension from source
+
+Install the [Harn toolchain](./getting-started.md#install-harn) first. Then clone
+the Harn repository, build a VSIX package, and install it:
 
 ```bash
-cd editors/vscode && npm install && npm run compile && npx @vscode/vsce package
+git clone https://github.com/burin-labs/harn.git
+cd harn/editors/vscode
+npm ci
+npm run compile
+npx @vscode/vsce package --out harn-lang.vsix
+code --install-extension harn-lang.vsix
 ```
 
-Then run **Extensions: Install from VSIX…** from the command palette and pick
-the generated `harn-lang-0.1.0.vsix`.
+You can instead run **Extensions: Install from VSIX...** from the command
+palette and select `harn-lang.vsix`.
 
 The extension starts `harn-lsp` from your `PATH` by default. Set `harn.lspPath`
 in your settings if the binary lives somewhere else.
 
+### Format on save
+
+The extension formats `.harn` files and applies Harn autofixes when you save.
+It doesn't change save behavior for other languages. To make those settings
+explicit or restore them after a workspace override, add this block to your VS
+Code `settings.json`:
+
+```json
+{
+  "[harn]": {
+    "editor.defaultFormatter": "burin-labs.harn-lang",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.harn": "always"
+    }
+  }
+}
+```
+
+Open a `.harn` file and run **Format Document With...** once. Select **Harn
+Language** if VS Code asks you to choose a formatter. Change the file's spacing
+and save it. The extension should reformat the file. If Harn reports an
+autofix, saving should apply it.
+
+If formatting does not run, open **View: Output**, select **Harn Language
+Server**, and confirm that `harn-lsp` started. Set `harn.lspPath` to the full
+binary path when VS Code cannot find it through `PATH`.
+
 ### Cursor and other VS Code forks
 
-Cursor resolves extensions through [Open VSX](https://open-vsx.org) rather than
-the VS Code Marketplace. Once published, search for **Harn Language** there;
-until then, package the VSIX with the command above and install it with
-`cursor --install-extension harn-lang-0.1.0.vsix`, or use **Extensions: Install
-from VSIX…** from the command palette.
+Build the VSIX with the commands above. Install it with
+`cursor --install-extension harn-lang.vsix`, or use **Extensions: Install from
+VSIX...** from the command palette. The same format-on-save settings work in
+Cursor.
 
 ### `.harn.prompt` files
 

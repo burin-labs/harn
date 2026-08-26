@@ -1,21 +1,36 @@
 # Language basics
 
-This reference covers the core syntax and semantics of Harn. For a runnable
-program, start with an explicit entrypoint:
+This reference covers Harn's core syntax and semantics. A top-level function
+named `main` is a file entrypoint. `main` isn't a reserved keyword, but Harn
+calls this function automatically when the file has no named pipeline. Its
+only parameter must be named `harness` and have type `Harness`:
 
-```harn title="hello.harn"
+```harn,check title="hello.harn"
 fn main(harness: Harness) {
   harness.stdio.println("Hello from Harn")
 }
 ```
 
-Top-level statements are also useful for short scripts and experiments. The
-explicit entrypoint is easier to reuse, test, and compose.
+Run the file from its directory:
+
+```bash
+harn run hello.harn
+```
+
+It prints:
+
+```text
+Hello from Harn
+```
+
+Files can also use top-level statements or named pipelines. Harn's entrypoint
+rules for both forms follow.
 
 ## Implicit pipeline
 
-Harn files can contain top-level code without a `pipeline` block. The
-runtime wraps it in an implicit pipeline automatically:
+When a file has no named pipeline, Harn executes its top-level statements in
+source order. This is the implicit pipeline. If the file also declares a
+top-level `main`, Harn calls it after those statements.
 
 ```harn
 const x = 1 + 2
@@ -27,12 +42,15 @@ fn double(n) {
 harness.stdio.log(double(5))
 ```
 
-This is convenient for scripts, experiments, and small programs.
+Use top-level statements for short scripts and experiments. Use `main` when you
+want a clear callable boundary without declaring a pipeline.
 
 ## Pipelines
 
 For larger programs, organize code into named pipelines. The runtime
 executes the pipeline named `default`, or the first one declared.
+When a file declares any pipeline, Harn uses this rule instead of calling a
+top-level `main`.
 
 ```harn,check title="pipelines.harn"
 pipeline default(harness: Harness) {

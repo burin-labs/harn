@@ -10,14 +10,8 @@ The `editors/vscode/` directory contains a VS Code extension that bundles
 syntax highlighting (via tree-sitter) and automatic LSP/DAP client
 configuration.
 
-Install from the extension directory:
-
-```bash
-cd editors/vscode && npm install && npm run build
-```
-
-Then use **Extensions: Install from VSIX** or symlink into
-`~/.vscode/extensions/`.
+Follow [Editor setup](./editor-setup.md#install-the-extension-from-source) to
+build and install the current VSIX package.
 
 The extension contributes:
 
@@ -25,10 +19,9 @@ The extension contributes:
 - A `Harn: Format File` command (terminal `harn fmt`)
 - A `Harn: Apply All Autofixes` command — invokes the LSP's bulk
   `source.fixAll.harn` code action against the current document
-- Language-scoped defaults that turn on `editor.formatOnSave` and
-  `editor.codeActionsOnSave: { "source.fixAll.harn": "always" }` for
-  `[harn]` files. Override either in user settings if you don't want
-  autoformat-on-save or autofix-on-save.
+- Language-scoped format-on-save and autofix-on-save defaults. See
+  [Format on save](./editor-setup.md#format-on-save) for the exact settings and
+  a verification step.
 
 ## Language server (LSP)
 
@@ -186,5 +179,6 @@ discard binding, `var` to `let`, boolean-comparison and `let`-then-`return`
 simplification, and removal of redundant clones, unused imports, unnecessary
 casts, and unnecessary parentheses.
 
-The same fixes show up in the LSP, both as per-diagnostic quick-fixes and as a
-bulk `source.fixAll.harn` code action you can wire to `editor.codeActionsOnSave`.
+The same fixes show up in the LSP as per-diagnostic quick fixes and as a bulk
+`source.fixAll.harn` code action. [Format on save](./editor-setup.md#format-on-save)
+shows how to run that action when you save.

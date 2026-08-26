@@ -1050,15 +1050,20 @@ with a list pattern produces a runtime error. For example,
 
 ### Program entry
 
-1. All top-level nodes are scanned. Pipeline declarations are registered by name.
-   Import declarations are processed (loaded and evaluated).
-2. The entry pipeline is selected: the pipeline named `"default"` if it exists,
-   otherwise the first pipeline in the file.
-3. The entry pipeline's body is executed.
+1. All top-level nodes are scanned. Pipeline declarations are registered by
+   name. Import declarations are processed (loaded and evaluated).
+2. If the file declares a pipeline, the pipeline named `"default"` is selected.
+   If there is no `"default"` pipeline, the first pipeline is selected.
+3. The selected pipeline's body is executed. A file with any pipeline does not
+   auto-call a top-level function named `main`.
+4. If the file declares no pipeline, its top-level statements execute in source
+   order as an implicit entry point (script mode).
+5. After those statements, a top-level `fn main(harness: Harness)` is called
+   automatically with the runtime's root `Harness` value when present.
 
-If no pipeline is found in the file, all top-level statements are compiled
-and executed directly as an implicit entry point (script mode). This allows
-simple scripts to work without wrapping code in a pipeline block.
+`main` is an ordinary identifier, not a reserved keyword. At the top level it
+has this entrypoint role. The type checker requires one `Harness` parameter
+named `harness` or `_harness`, with no default or rest marker.
 
 ### Pipeline parameters
 
