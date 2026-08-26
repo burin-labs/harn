@@ -23,23 +23,19 @@ pub(super) fn generate_content_url(base_url: &str, model: &str, stream: bool) ->
 #[derive(Debug, Default)]
 struct GenerateContentStream {
     envelope: Value,
-    emitted_text: String,
 }
 
 impl GenerateContentStream {
     fn new() -> Self {
         Self {
             envelope: Value::Object(Map::new()),
-            emitted_text: String::new(),
         }
     }
 
-    /// Merge one response chunk and return only text not already emitted.
+    /// Merge one append-only response chunk and return its visible text.
     fn push(&mut self, frame: &Value) -> Option<String> {
+        let delta = visible_text(frame);
         merge_response(&mut self.envelope, frame);
-        let text = visible_text(&self.envelope);
-        let delta = stream_suffix(&self.emitted_text, &text);
-        self.emitted_text = text;
         (!delta.is_empty()).then_some(delta)
     }
 
@@ -239,7 +235,7 @@ fn merge_text_part(existing: &mut Value, incoming: &Value, text: &str) {
         .to_string();
     existing.insert(
         "text".to_string(),
-        Value::String(merged_text(&current, text)),
+        Value::String(format!("{current}{text}")),
     );
     for (key, value) in incoming.as_object().into_iter().flatten() {
         if key != "text" {
@@ -287,23 +283,6 @@ fn visible_text(envelope: &Value) -> String {
         .collect()
 }
 
-fn merged_text(current: &str, incoming: &str) -> String {
-    if incoming.starts_with(current) {
-        incoming.to_string()
-    } else if current.ends_with(incoming) {
-        current.to_string()
-    } else {
-        format!("{current}{incoming}")
-    }
-}
-
-fn stream_suffix(previous: &str, current: &str) -> String {
-    current
-        .strip_prefix(previous)
-        .unwrap_or(current)
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +292,20 @@ mod tests {
 
     fn dialect() -> DialectContract {
         DialectContract::new(WireDialect::Gemini, None)
+    }
+
+    async fn assembled_text_and_deltas(wire: &str) -> (String, Vec<String>) {
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+        let envelope = consume_generate_content_sse(wire.as_bytes(), Some(delta_tx), dialect())
+            .await
+            .expect("stream parses");
+        let result = parse_response(
+            &envelope,
+            &gemini_payload("gemini-2.5-flash", ThinkingConfig::Disabled),
+        )
+        .expect("assembled response parses");
+        let deltas = std::iter::from_fn(|| delta_rx.try_recv().ok()).collect();
+        (result.text, deltas)
     }
 
     #[test]
@@ -332,7 +325,7 @@ mod tests {
         let wire = concat!(
             r#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hel"}]}}]}"#,
             "\n\n",
-            r#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hello"},{"functionCall":{"name":"echo","args":{"value":"marker"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}"#,
+            r#"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"lo"},{"functionCall":{"name":"echo","args":{"value":"marker"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}"#,
             "\n",
         );
         let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -353,6 +346,35 @@ mod tests {
         assert_eq!(result.tool_calls[0]["arguments"]["value"], "marker");
         assert_eq!(delta_rx.recv().await.as_deref(), Some("hel"));
         assert_eq!(delta_rx.recv().await.as_deref(), Some("lo"));
+    }
+
+    #[tokio::test]
+    async fn appends_repeated_identical_text_chunks() {
+        let wire = concat!(
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"ha"}]}}]}"#,
+            "\n\n",
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"ha"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2}}"#,
+            "\n",
+        );
+        let (text, deltas) = assembled_text_and_deltas(wire).await;
+
+        assert_eq!(text, "haha");
+        assert_eq!(deltas, ["ha", "ha"]);
+    }
+
+    #[tokio::test]
+    async fn text_chunks_that_share_a_prefix_remain_append_only() {
+        let wire = concat!(
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"ha"}]}}]}"#,
+            "\n\n",
+            r#"data: {"candidates":[{"content":{"parts":[{"text":"haha"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3}}"#,
+            "\n",
+        );
+        let (text, deltas) = assembled_text_and_deltas(wire).await;
+
+        assert_eq!(text, "hahaha");
+        assert_ne!(text, "haha", "chunks are not cumulative snapshots");
+        assert_eq!(deltas, ["ha", "haha"]);
     }
 
     #[tokio::test]

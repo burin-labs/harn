@@ -7,7 +7,6 @@ crates/harn-vm/src/llm/api/transport/sse_read_error_tests.rs:131 # test fixture:
 crates/harn-vm/src/llm/code_mode.rs:318 # test fixture: fake connector Harn script (returns JSON text), not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:339 # test fixture: code-mode composition Harn script, not model-facing prose
 crates/harn-vm/src/llm/mock_tests.rs:210 # test fixture: capability-scoped mock call script, not model-facing prose
-crates/harn-vm/src/llm/providers/gemini/generate_content_stream.rs:335 # test fixture: Gemini GenerateContent SSE wire JSON, not model-facing prose
-crates/harn-vm/src/llm/providers/gemini/generate_content_stream.rs:335 # test fixture: Gemini GenerateContent SSE wire JSON, not model-facing prose
+crates/harn-vm/src/llm/providers/gemini/generate_content_stream.rs:328 # test fixture: Gemini GenerateContent SSE wire JSON, not model-facing prose
 crates/harn-vm/src/llm/mock_tests.rs:225 # test fixture: isolated alpha mock queue script, not model-facing prose
 crates/harn-vm/src/llm/mock_tests.rs:237 # test fixture: isolated beta mock queue script, not model-facing prose
