@@ -1343,11 +1343,7 @@ fn prometheus_float(value: f64) -> String {
     if value.fract() == 0.0 {
         format!("{value:.0}")
     } else {
-        let rendered = format!("{value:.6}");
-        rendered
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
+        value.to_string()
     }
 }
 

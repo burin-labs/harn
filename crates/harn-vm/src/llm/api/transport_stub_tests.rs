@@ -12,6 +12,8 @@ use super::{
 };
 use crate::llm::env_guard;
 
+mod terminal_usage;
+
 /// Cooperative accept: blocks the stub thread on a real
 /// `accept()` call until a client connects, then returns the
 /// stream. Shutdown wakes the thread by self-connecting to the
