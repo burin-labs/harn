@@ -28,7 +28,7 @@ pub(crate) mod openai_compat;
 #[cfg(test)]
 mod openai_compat_tests;
 pub(crate) mod openai_responses;
-mod schema_compat;
+pub(crate) mod schema_compat;
 #[cfg(test)]
 mod storage_metadata_egress_tests;
 pub(crate) mod vertex;

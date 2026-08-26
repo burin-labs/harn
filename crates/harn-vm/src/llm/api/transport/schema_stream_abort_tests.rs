@@ -36,6 +36,135 @@ fn build_payload(schema: serde_json::Value) -> crate::llm::api::LlmRequestPayloa
     crate::llm::api::LlmRequestPayload::from(&opts)
 }
 
+fn build_strict_payload(schema: serde_json::Value) -> crate::llm::api::LlmRequestPayload {
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-test".to_string();
+    opts.output_schema = Some(schema.clone());
+    opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema,
+        strict: true,
+    };
+    opts.schema_stream_abort = true;
+    opts.session_id = None;
+    crate::llm::api::LlmRequestPayload::from(&opts)
+}
+
+#[test]
+fn explicit_output_schema_owns_the_structured_request_contract() {
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-test".to_string();
+    opts.output_schema = Some(schema_with_int_age());
+    opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema: serde_json::json!({"type": "object"}),
+        strict: true,
+    };
+
+    let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+    let validation_schema = payload
+        .output_schema
+        .as_ref()
+        .expect("structured output keeps a stream-validation schema");
+    assert_eq!(
+        validation_schema["properties"]["age"]["type"], "integer",
+        "the explicit schema must remain the stream-validation contract"
+    );
+    assert_eq!(
+        payload.output_format.schema(),
+        Some(validation_schema),
+        "the provider request must use the same caller-selected schema"
+    );
+
+    let data = crate::stdlib::json_to_vm_value(&serde_json::json!({"age": "twenty"}));
+    assert!(
+        !crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
+        "post-stream validation must retain the explicit integer constraint"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_validation_uses_the_schema_sent_to_the_provider() {
+    reset_agent_trace_state();
+
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+            "detail": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+    });
+    let payload = build_strict_payload(schema);
+    let validation_schema = payload
+        .output_schema
+        .as_ref()
+        .expect("strict output keeps a validation schema");
+    assert!(
+        validation_schema["properties"]["detail"]
+            .get("maxLength")
+            .is_none(),
+        "local validation must use the provider-compatible schema"
+    );
+    let wire_body = crate::llm::providers::OpenAiCompatibleProvider::build_request_body(&payload);
+    assert_eq!(
+        wire_body["response_format"]["json_schema"]["schema"], *validation_schema,
+        "stream validation and the provider request must share one schema"
+    );
+
+    let watch = StreamSchemaWatch::from_payload(&payload).expect("schema is canonicalizable");
+    let detail = "x".repeat(242);
+    let frame = serde_json::json!({
+        "choices": [{"delta": {"content": format!("{{\"detail\":\"{detail}\"}}")}}]
+    });
+    let body = format!("data: {frame}\n\ndata: [DONE]\n\n");
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let reader = tokio::io::BufReader::new(body.as_bytes());
+    consume_sse_lines(
+        reader,
+        "openai",
+        "gpt-test",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        Some(watch),
+        false,
+    )
+    .await
+    .expect("a response valid against the wire schema must survive streaming");
+
+    assert!(
+        !peek_agent_trace()
+            .iter()
+            .any(|event| matches!(event, AgentTraceEvent::SchemaStreamAborted { .. })),
+        "a provider-compatible response must not emit a schema abort"
+    );
+    reset_agent_trace_state();
+}
+
+#[test]
+fn post_stream_validation_uses_the_schema_sent_to_the_provider() {
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+            "detail": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+    });
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-test".to_string();
+    opts.output_schema = Some(schema.clone());
+    opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema,
+        strict: true,
+    };
+    let data = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "detail": "x".repeat(242)
+    }));
+
+    assert!(
+        crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
+        "post-stream validation must use the schema sent to the provider"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn openai_stream_aborts_on_impossible_property_type() {
     reset_agent_trace_state();

@@ -835,6 +835,7 @@ mod tests {
             }),
             strict: true,
         };
+        opts.output_schema = opts.output_format.schema().cloned();
         opts.provider_tools = vec![serde_json::json!({
             "type": "web_search_preview"
         })];
@@ -942,6 +943,7 @@ mod tests {
             schema: closed_discriminated_union_schema("oneOf", "const"),
             strict: true,
         };
+        opts.output_schema = opts.output_format.schema().cloned();
         let payload = LlmRequestPayload::from(&opts);
 
         let body = OpenAiResponsesProvider::build_request_body(&payload);
