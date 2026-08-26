@@ -1,5 +1,6 @@
 import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
 import "std/triggers"
+import { atomic_raise_max } from "../_common"
 
 /**
  * Verifies the SpawnToPool trigger handler (#1889) composes triggers with
@@ -24,9 +25,7 @@ pipeline test(harness: Harness, task: unknown) {
   const task_factory = { _event ->
     return { ->
       let now = harness.runtime.atomic_add(inflight, 1) + 1
-      if now > harness.runtime.atomic_get(peak) {
-        harness.runtime.atomic_set(peak, now)
-      }
+      atomic_raise_max(harness.runtime, peak, now)
       harness.runtime.receive(gate)
       harness.runtime.atomic_add(inflight, -1)
       harness.runtime.atomic_add(completed, 1)
