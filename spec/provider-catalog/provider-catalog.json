@@ -1451,6 +1451,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],

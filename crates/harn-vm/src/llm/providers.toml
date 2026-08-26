@@ -77,7 +77,6 @@ unverified = [
   "vercel_ai_gateway",
   "vllm",
   "volcengine_ark",
-  "xai",
   "zai",
 ]
 
@@ -133,6 +132,14 @@ provider = "openrouter"
 checked_on = "2026-08-25"
 sources = [
   "https://openrouter.ai/docs/cookbook/administration/usage-accounting",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "xai"
+checked_on = "2026-08-26"
+sources = [
+  "https://docs.x.ai/developers/cost-tracking",
+  "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing",
 ]
 
 [providers.anthropic]
@@ -274,6 +281,8 @@ method = "GET"
 path = "/models"
 
 [providers.xai]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.x.ai/v1"
 base_url_env = "XAI_BASE_URL"
 auth_style = "bearer"
