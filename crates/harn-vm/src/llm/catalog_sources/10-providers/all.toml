@@ -31,7 +31,6 @@ unverified = [
   "mistral",
   "mlx",
   "nebius",
-  "nvidia",
   "parasail",
   "qianfan",
   "sambanova",
@@ -97,6 +96,14 @@ checked_on = "2026-08-26"
 sources = [
   "https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api",
   "https://platform.kimi.ai/docs/guide/use-context-caching-feature-of-kimi-api",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "nvidia"
+checked_on = "2026-08-26"
+sources = [
+  "https://docs.nvidia.com/aiperf/dev/reference/per-request-speculative-decoding-acceptance",
+  "https://docs.nvidia.com/dynamo/dev/reference/observability/metrics-catalog",
 ]
 
 [[usage_accounting_audit.verified]]
@@ -570,6 +577,8 @@ path = "/models"
 # because common examples set it to the host root, while the OpenAI-compatible
 # API lives under /v1.
 [providers.nvidia]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://integrate.api.nvidia.com/v1"
 base_url_env = "NVIDIA_NIM_BASE_URL"
 auth_style = "bearer"

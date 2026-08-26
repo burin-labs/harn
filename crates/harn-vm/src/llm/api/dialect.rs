@@ -306,4 +306,11 @@ mod tests {
     fn llamacpp_requests_its_trailing_usage_frame() {
         assert!(DialectContract::provider_reports_stream_usage("llamacpp"));
     }
+
+    #[test]
+    fn nvidia_requests_and_awaits_its_trailing_usage_frame() {
+        let contract = DialectContract::new(WireDialect::OpenAiCompat, None);
+        assert!(contract.requests_stream_usage("nvidia", "/chat/completions"));
+        assert!(contract.awaits_stream_usage("nvidia"));
+    }
 }
