@@ -694,8 +694,25 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   // attribute itself with cargo-bloat missing.
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, measured_target)
   assert_eq(bloat.if, diagnostics)
-  assert_eq(bloat["continue-on-error"], true)
+  assert_eq(bloat["continue-on-error"], nil)
+  assert(!bloat.run?.contains("run scripts/check_binary_size.harn"))
+  assert(bloat.run?.contains("cargo bloat --release --crates"))
+  assert(bloat.run?.contains("cargo-bloat-crates.txt"))
   assert(bloat.run?.contains("cargo-bloat-deserialize.txt"))
+  assert(bloat.run?.contains("crates_status=$?"))
+  assert(bloat.run?.contains("filtered_status=$?"))
+  assert(
+    bloat.run?.index_of("crates_status=$?")
+      < bloat.run?.index_of("cargo bloat --release -p harn-cli"),
+  )
+  assert(
+    bloat.run?.index_of("filtered_status=$?")
+      < bloat.run?.index_of("if (( crates_status != 0 || filtered_status != 0 ))"),
+  )
+  assert(bloat.run?.contains("cmp -s \"$restore_dir/harn\" \"$harn_bin\""))
+  assert(bloat.run?.contains("trap - EXIT"))
+  assert(bloat.run?.contains("::warning::cargo-bloat attribution was incomplete"))
+  assert_eq(bloat.run?.split("exit 1").count, 2)
   assert_eq(
     release_workflow_step(steps, "Check the distribution fuse").if,
     "matrix.target == 'x86_64-unknown-linux-gnu'",
