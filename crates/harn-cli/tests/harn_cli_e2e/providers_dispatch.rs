@@ -138,6 +138,59 @@ fn provider_catalog_available_only_includes_local_provider_family() {
     }
 }
 
+#[test]
+fn provider_effort_probe_plan_resolves_provider_wire_model_ladder() {
+    let harn = run(
+        &[
+            "provider",
+            "effort-probe",
+            "--model",
+            "deepinfra:openai/gpt-oss-120b",
+            "--effort",
+            "low",
+            "--plan",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    let report = parse_json(&harn.stdout, "effort-probe plan");
+    assert_eq!(report["total_calls"], 1);
+    assert_eq!(report["plan"][0]["provider"], "deepinfra");
+    assert_eq!(report["plan"][0]["model"], "openai/gpt-oss-120b");
+    assert_eq!(
+        report["plan"][0]["declared"],
+        serde_json::json!(["low", "medium", "high"])
+    );
+}
+
+#[test]
+fn provider_effort_probe_reports_only_requested_declared_rungs_as_rejected() {
+    let harn = run(
+        &[
+            "provider",
+            "effort-probe",
+            "--model",
+            "deepinfra:openai/gpt-oss-120b",
+            "--effort",
+            "max",
+            "--gated",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
+    let report = parse_json(&harn.stdout, "gated effort-probe");
+    let route = &report["routes"][0];
+    assert_eq!(route["gated_locally"], serde_json::json!(["max"]));
+    assert_eq!(route["declared_but_rejected"], serde_json::json!([]));
+    assert_eq!(route["accepted_but_undeclared"], serde_json::json!([]));
+    assert_eq!(route["unusable"], true);
+    assert_eq!(report["drifting_routes"], 0);
+}
+
 // ─── provider probe ──────────────────────────────────────────────────────
 
 /// Mock provider always reports ready, so this exit code is
