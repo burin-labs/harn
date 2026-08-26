@@ -236,6 +236,81 @@ pipeline main(harness: Harness) {
 }
 
 #[tokio::test]
+async fn in_process_runs_cannot_complete_a_prior_runs_partial_trigger_batch() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    std::fs::write(
+        project.path().join("harn.toml"),
+        "[package]\nname = \"batch-scope-fixture\"\n",
+    )
+    .expect("write manifest");
+
+    let source = r#"
+import "std/triggers"
+
+fn handle_batch(harness: Harness, event: dict) {
+  const _ = harness.channels.append(
+    "batch.scope.fired",
+    {batch_size: len(event.batch)},
+  )
+}
+
+pipeline main(harness: Harness) {
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "same-binding",
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.scope.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 2, window: "1h"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "batch-scope-fixture",
+    },
+  )
+  const _ = harness.channels.append("batch.scope.input", {source: "one-run"})
+  const inputs = harness.channels.events("batch.scope.input")
+  const firings = harness.channels.events("batch.scope.fired")
+  harness.stdio.println(
+    "inputs:" + to_string(len(inputs))
+      + ",firings:" + to_string(len(firings)),
+  )
+  if len(firings) > 0 {
+    harness.stdio.println("batch-size:" + to_string(firings[0].payload.batch_size))
+  }
+}
+"#;
+    let first_path = project.path().join("first.harn");
+    let second_path = project.path().join("second.harn");
+    std::fs::write(&first_path, source).expect("write first run");
+    std::fs::write(&second_path, source).expect("write second run");
+
+    let first = execute_run_default(&first_path.to_string_lossy()).await;
+    assert_eq!(first.exit_code, 0, "stderr:\n{}", first.stderr);
+    assert_eq!(
+        first.stdout.trim(),
+        "inputs:1,firings:0",
+        "run A must emit one matching event and leave the batch below threshold"
+    );
+
+    let second = execute_run_default(&second_path.to_string_lossy()).await;
+    assert_eq!(second.exit_code, 0, "stderr:\n{}", second.stderr);
+    assert_eq!(
+        second.stdout.trim(),
+        "inputs:2,firings:0",
+        "the later run must not dispatch a batch containing the first run's event"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
 async fn project_trigger_opt_in_initializes_and_fires_used_handler() {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
