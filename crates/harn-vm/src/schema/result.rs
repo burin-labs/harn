@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
-use crate::value::VmValue;
+use crate::value::{SchemaValidationReasonKind, VmValue};
 
 #[derive(Debug, Clone)]
 pub(super) struct ValidationResult {
@@ -14,6 +14,7 @@ pub(super) struct ValidationIssue {
     pub(super) path: String,
     pub(super) message: String,
     pub(super) code: &'static str,
+    pub(super) kind: SchemaValidationReasonKind,
 }
 
 impl ValidationIssue {
@@ -22,11 +23,43 @@ impl ValidationIssue {
             path: path.into(),
             message: message.into(),
             code: "schema.validation",
+            kind: SchemaValidationReasonKind::InvalidSchema,
         }
     }
 
     pub(super) fn schema(path: &str, message: impl Into<String>) -> Self {
-        Self::new(location_label(path), message)
+        Self {
+            path: location_label(path),
+            message: message.into(),
+            code: "schema.validation",
+            kind: SchemaValidationReasonKind::ConstraintViolation,
+        }
+    }
+
+    pub(super) fn wrong_type(path: &str, message: impl Into<String>) -> Self {
+        Self {
+            kind: SchemaValidationReasonKind::WrongType,
+            ..Self::schema(path, message)
+        }
+    }
+
+    pub(super) fn json_schema(path: &str, keyword: &str, message: impl Into<String>) -> Self {
+        let kind = match keyword {
+            "type" => SchemaValidationReasonKind::WrongType,
+            "required" => SchemaValidationReasonKind::MissingRequired,
+            "additionalProperties" | "unevaluatedProperties" => {
+                SchemaValidationReasonKind::UnexpectedProperty
+            }
+            "maxLength" => SchemaValidationReasonKind::MaxLength,
+            "minLength" => SchemaValidationReasonKind::MinLength,
+            _ => SchemaValidationReasonKind::ConstraintViolation,
+        };
+        Self {
+            path: location_label(path),
+            message: message.into(),
+            code: "schema.validation",
+            kind,
+        }
     }
 
     pub(super) fn render(&self) -> String {

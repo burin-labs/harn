@@ -144,6 +144,7 @@ fn offthread_error_preserves_schema_stream_abort_category() {
     let abort = super::SchemaStreamAbort {
         provider: "openrouter".to_string(),
         model: "mistralai/devstral-small".to_string(),
+        reason_kind: crate::value::SchemaValidationReasonKind::InvalidJson,
         reason: "expected JSON value, got '`'".to_string(),
         path: "$".to_string(),
         chunks_consumed: 1,
@@ -155,6 +156,10 @@ fn offthread_error_preserves_schema_stream_abort_category() {
 
     assert_eq!(parsed.provider, "openrouter");
     assert_eq!(parsed.model, "mistralai/devstral-small");
+    assert_eq!(
+        parsed.reason_kind,
+        crate::value::SchemaValidationReasonKind::InvalidJson
+    );
     assert_eq!(parsed.path, "$");
     assert_eq!(parsed.chunks_consumed, 1);
 }

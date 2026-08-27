@@ -30,7 +30,7 @@ pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,
     ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
-    ProviderStreamPhase, VmError,
+    ProviderStreamPhase, SchemaStreamAbort, SchemaValidationReasonKind, VmError,
 };
 pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,

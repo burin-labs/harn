@@ -17,7 +17,9 @@
 use crate::llm::trace::{emit_agent_event, AgentTraceEvent};
 use crate::stdlib::json_stream::{JsonStreamStatus, StreamSchemaValidator};
 use crate::value::VmDictExt;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{VmError, VmValue};
+
+pub(crate) use crate::value::SchemaStreamAbort;
 
 use super::options::LlmRequestPayload;
 
@@ -36,18 +38,6 @@ pub(crate) struct StreamSchemaWatch {
     /// Once the abort fires we surface it exactly once; further deltas
     /// are dropped without re-emitting events or recounting metrics.
     fired: bool,
-}
-
-/// Information surfaced when the streaming abort fires. The transport
-/// converts this into a `VmError::CategorizedError` via [`Self::into_vm_error`]
-/// so the schema-retry loop can pattern-match on category.
-#[derive(Clone, Debug)]
-pub(crate) struct SchemaStreamAbort {
-    pub provider: String,
-    pub model: String,
-    pub reason: String,
-    pub path: String,
-    pub chunks_consumed: usize,
 }
 
 impl StreamSchemaWatch {
@@ -89,10 +79,16 @@ impl StreamSchemaWatch {
             return None;
         }
         self.chunks_consumed += 1;
-        if let JsonStreamStatus::Invalid { reason, path } = self.validator.feed(delta) {
+        if let JsonStreamStatus::Invalid {
+            reason_kind,
+            reason,
+            path,
+        } = self.validator.feed(delta)
+        {
             let abort = SchemaStreamAbort {
                 provider: self.provider.clone(),
                 model: self.model.clone(),
+                reason_kind: *reason_kind,
                 reason: reason.clone(),
                 path: path.clone(),
                 chunks_consumed: self.chunks_consumed,
@@ -101,6 +97,7 @@ impl StreamSchemaWatch {
             emit_agent_event(AgentTraceEvent::SchemaStreamAborted {
                 provider: abort.provider.clone(),
                 model: abort.model.clone(),
+                reason_kind: abort.reason_kind.as_str().to_string(),
                 reason: abort.reason.clone(),
                 path: abort.path.clone(),
                 chunks_consumed: abort.chunks_consumed,
@@ -115,68 +112,16 @@ impl StreamSchemaWatch {
 }
 
 impl SchemaStreamAbort {
-    /// Convert the abort into the categorized VmError the schema-retry
-    /// loop catches. The message is human-readable; structured fields
-    /// (provider, model, path, reason, chunks_consumed) are recovered by
-    /// re-parsing in [`Self::from_vm_error`].
+    /// Convert the abort into the typed VM error the schema-retry loop catches.
     pub(crate) fn into_vm_error(self) -> VmError {
-        VmError::CategorizedError {
-            message: format!(
-                "schema_stream_aborted at {path}: {reason} \
-                 (provider={provider} model={model} chunks_consumed={chunks})",
-                path = self.path,
-                reason = self.reason,
-                provider = self.provider,
-                model = self.model,
-                chunks = self.chunks_consumed,
-            ),
-            category: ErrorCategory::SchemaStreamAborted,
-        }
+        VmError::SchemaStreamAbort(Box::new(self))
     }
 }
 
-/// Recognize a `SchemaStreamAborted` error and rebuild the structured
-/// fields from its message. Returns `None` for any other error. Lets the
-/// schema-retry loop drive its corrective nudge from the same `path` /
-/// `reason` the transport saw, without piping a second sidecar value
-/// through every retry plumb.
+/// Read a typed schema-stream abort without reconstructing it from display
+/// text. The retry loop uses the exact validator fields carried by `VmError`.
 pub(crate) fn parse_schema_stream_abort(err: &VmError) -> Option<SchemaStreamAbort> {
-    let VmError::CategorizedError { message, category } = err else {
-        return None;
-    };
-    if !matches!(category, ErrorCategory::SchemaStreamAborted) {
-        return None;
-    }
-    parse_abort_message(message)
-}
-
-fn parse_abort_message(message: &str) -> Option<SchemaStreamAbort> {
-    // Format: "schema_stream_aborted at <path>: <reason> (provider=... model=... chunks_consumed=...)"
-    let body = message.strip_prefix("schema_stream_aborted at ")?;
-    let (path_part, rest) = body.split_once(": ")?;
-    let (reason_part, meta_part) = rest.rsplit_once(" (provider=")?;
-    let meta = meta_part.trim_end_matches(')');
-    let mut provider = String::new();
-    let mut model = String::new();
-    let mut chunks_consumed: usize = 0;
-    for entry in meta.split_whitespace() {
-        if let Some(value) = entry.strip_prefix("model=") {
-            model = value.to_string();
-        } else if let Some(value) = entry.strip_prefix("chunks_consumed=") {
-            chunks_consumed = value.parse().unwrap_or(0);
-        } else {
-            // Leading "provider=..." chunk; `split_once` left the value
-            // here without its key prefix.
-            provider = entry.to_string();
-        }
-    }
-    Some(SchemaStreamAbort {
-        provider,
-        model,
-        reason: reason_part.to_string(),
-        path: path_part.to_string(),
-        chunks_consumed,
-    })
+    err.schema_stream_abort().cloned()
 }
 
 /// Build the empty `LlmResult` stand-in used when the schema-retry loop
@@ -185,6 +130,7 @@ fn parse_abort_message(message: &str) -> Option<SchemaStreamAbort> {
 /// callers (e.g. `llm_call_safe`) still expect a dict envelope.
 pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     let mut meta = std::collections::BTreeMap::new();
+    meta.put_str("reason_kind", abort.reason_kind.as_str());
     meta.put_str("reason", abort.reason.as_str());
     meta.put_str("path", abort.path.as_str());
     meta.insert(
@@ -207,12 +153,14 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::ErrorCategory;
 
     #[test]
     fn parses_round_trip_message() {
         let original = SchemaStreamAbort {
             provider: "openai".to_string(),
             model: "gpt-test".to_string(),
+            reason_kind: crate::value::SchemaValidationReasonKind::WrongType,
             reason: "expected type 'int', got JSON string".to_string(),
             path: "$.age".to_string(),
             chunks_consumed: 3,

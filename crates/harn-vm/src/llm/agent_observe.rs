@@ -388,7 +388,6 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         || lower.contains("delivered no content")
         || lower.contains("eof")
 }
-
 /// Whether an LLM-call failure is a transport-level *network* failure
 /// (connection refused/reset, DNS failure, dropped link, request timeout).
 /// Feeds the per-route circuit breaker together with
@@ -416,7 +415,6 @@ pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
         crate::llm::api::LlmErrorReason::NetworkError | crate::llm::api::LlmErrorReason::Timeout
     )
 }
-
 /// Whether an LLM-call failure says the provider itself is shedding load
 /// (HTTP 529 / 503, Anthropic `overloaded_error`). Distinct from a 429 — the
 /// client hasn't exceeded a quota — and from a generic 500/502, which is a
@@ -963,6 +961,7 @@ pub(crate) async fn observed_llm_call(
                         classified: &classified,
                         message: &message,
                         stream_failure: None,
+                        schema_failure: None,
                         usage: Some(&usage),
                         retryable: false,
                         failover_eligible: true,
@@ -1261,6 +1260,7 @@ pub(crate) async fn observed_llm_call(
                     classified: &classified,
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
+                    schema_failure: error.schema_stream_abort(),
                     usage: terminal_usage.as_ref().or(error_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,

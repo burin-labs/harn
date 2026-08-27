@@ -13,8 +13,14 @@ use serde_json::error::Category;
 
 use crate::schema;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmResourceHandle, VmValue};
+use crate::value::{SchemaValidationReasonKind, VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
+
+mod stream_schema;
+pub(crate) use stream_schema::StreamSchemaValidator;
+
+#[cfg(test)]
+mod path_tests;
 
 #[derive(Clone)]
 struct JsonStreamValidator {
@@ -29,113 +35,11 @@ struct JsonStreamValidator {
 pub(crate) enum JsonStreamStatus {
     Pending,
     Valid,
-    Invalid { reason: String, path: String },
-}
-
-/// Send-safe Rust API for the incremental JSON validator. Mirrors the
-/// `std/json/stream` script builtin but uses `serde_json::Value` as the
-/// schema storage so the LLM streaming transport can hold it across
-/// off-thread awaits without depending on VM heap identity.
-///
-/// The canonicalized schema is rebuilt per feed inside [`Self::feed`];
-/// canonicalization is a cheap tree walk so callers pay nothing
-/// observable for the indirection.
-pub(crate) struct StreamSchemaValidator {
-    schema_json: serde_json::Value,
-    buffer: String,
-    // Boxed so the scanner's footprint stays off the stack frame of every
-    // future that holds this validator by value. The LLM streaming transport
-    // carries a `StreamSchemaValidator` across off-thread awaits and inlines
-    // into large async dispatch frames (e.g. `host_agent_dispatch_tool_call`),
-    // which sit right at Clippy's `large_stack_frames` threshold; keeping the
-    // scan state on the heap stops fence-tracking fields from tipping them
-    // over. Auto-deref makes the `self.scan.*` call sites unchanged.
-    scan: Box<JsonStreamScan>,
-    status: JsonStreamStatus,
-}
-
-impl StreamSchemaValidator {
-    /// Build a validator from a JSON Schema-shaped `serde_json::Value`.
-    /// Returns the canonicalization error string on malformed schemas;
-    /// callers typically log and skip rather than aborting the request.
-    pub(crate) fn from_json_schema(schema: &serde_json::Value) -> Result<Self, String> {
-        let schema_vm = schema::json_to_vm_value(schema);
-        // Validate that the schema canonicalizes; we don't keep the
-        // VmValue around because the streaming transport stores a JSON copy,
-        // but failing here gives callers an early malformed-schema signal.
-        schema::schema_from_json_schema_value(&schema_vm).map_err(|err| err.to_string())?;
-        Ok(Self {
-            schema_json: schema.clone(),
-            buffer: String::new(),
-            scan: Box::new(JsonStreamScan::default()),
-            status: JsonStreamStatus::Pending,
-        })
-    }
-
-    /// Feed a text chunk into the validator. The returned status is the
-    /// validator's *new* status after consuming `chunk` — `Pending` while
-    /// the JSON is incomplete, `Valid` once a complete and schema-conforming
-    /// document is in the buffer, `Invalid` the first time the partial
-    /// content cannot conceivably satisfy the schema.
-    pub(crate) fn feed(&mut self, chunk: &str) -> &JsonStreamStatus {
-        if matches!(self.status, JsonStreamStatus::Invalid { .. }) {
-            return &self.status;
-        }
-        if let Err(err) = self.scan.feed(chunk) {
-            self.buffer.push_str(chunk);
-            self.status = JsonStreamStatus::Invalid {
-                reason: err,
-                path: "$".to_string(),
-            };
-            return &self.status;
-        }
-        self.buffer.push_str(chunk);
-
-        // Operate on the fenced-out JSON body so a markdown code fence
-        // around the JSON (` ```json ... ``` `) never reaches the parser or
-        // the early-invalid type checks; it only affects framing, not schema
-        // validation.
-        let json = self.scan.json_slice(&self.buffer);
-        if json.trim().is_empty() {
-            self.status = JsonStreamStatus::Pending;
-            return &self.status;
-        }
-
-        let schema_vm = schema::json_to_vm_value(&self.schema_json);
-        // `from_json_schema` validates that the schema canonicalizes at
-        // construction, so this call cannot fail by the time we get
-        // here. Fall back to the raw VmValue defensively rather than
-        // panicking — the early-invalid + parse-and-validate paths will
-        // simply produce a less-precise diagnostic instead of misbehaving.
-        let canonical = match schema::schema_from_json_schema_value(&schema_vm) {
-            Ok(c) => c,
-            Err(_) => schema_vm,
-        };
-
-        if let Some(invalid) = early_invalid(json, &canonical) {
-            self.status = JsonStreamStatus::Invalid {
-                reason: invalid.reason,
-                path: invalid.path,
-            };
-            return &self.status;
-        }
-
-        if self.scan.complete || self.scan.root_scalar {
-            self.status = match parse_complete_buffer(json, &canonical) {
-                ParseOutcome::Valid => {
-                    self.scan.complete = true;
-                    JsonStreamStatus::Valid
-                }
-                ParseOutcome::Pending => JsonStreamStatus::Pending,
-                ParseOutcome::Invalid { reason, path } => {
-                    JsonStreamStatus::Invalid { reason, path }
-                }
-            };
-        } else {
-            self.status = JsonStreamStatus::Pending;
-        }
-        &self.status
-    }
+    Invalid {
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -201,6 +105,7 @@ enum TrailFence {
 
 #[derive(Clone, Debug)]
 struct EarlyInvalid {
+    reason_kind: SchemaValidationReasonKind,
     reason: String,
     path: String,
 }
@@ -382,14 +287,18 @@ impl JsonStreamValidator {
         let text = match std::str::from_utf8(chunk) {
             Ok(text) => text,
             Err(error) => {
-                self.invalidate(format!("chunk is not valid UTF-8: {error}"), "$");
+                self.invalidate(
+                    SchemaValidationReasonKind::InvalidJson,
+                    format!("chunk is not valid UTF-8: {error}"),
+                    "$",
+                );
                 return;
             }
         };
 
         if let Err(error) = self.scan.feed(text) {
             self.buffer.push_str(text);
-            self.invalidate(error, "$");
+            self.invalidate(SchemaValidationReasonKind::InvalidJson, error, "$");
             return;
         }
         self.buffer.push_str(text);
@@ -404,7 +313,7 @@ impl JsonStreamValidator {
         }
 
         if let Some(invalid) = early_invalid(json, &self.schema) {
-            self.invalidate(invalid.reason, invalid.path);
+            self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
             return;
         }
 
@@ -421,8 +330,10 @@ impl JsonStreamValidator {
         match serde_json::from_str::<serde_json::Value>(&json) {
             Ok(json) => {
                 let value = schema::json_to_vm_value(&json);
-                match schema_validation_error(&value, &self.schema, "$") {
-                    Some(invalid) => self.invalidate(invalid.reason, invalid.path),
+                match schema_validation_error(&value, &self.schema, "") {
+                    Some(invalid) => {
+                        self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
+                    }
                     None => {
                         self.status = JsonStreamStatus::Valid;
                         self.value = Some(value);
@@ -434,12 +345,22 @@ impl JsonStreamValidator {
                 self.status = JsonStreamStatus::Pending;
                 self.value = None;
             }
-            Err(error) => self.invalidate(format!("JSON parse error: {error}"), "$"),
+            Err(error) => self.invalidate(
+                SchemaValidationReasonKind::InvalidJson,
+                format!("JSON parse error: {error}"),
+                "$",
+            ),
         }
     }
 
-    fn invalidate(&mut self, reason: String, path: impl Into<String>) {
+    fn invalidate(
+        &mut self,
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: impl Into<String>,
+    ) {
         self.status = JsonStreamStatus::Invalid {
+            reason_kind,
             reason,
             path: path.into(),
         };
@@ -481,11 +402,19 @@ impl JsonStreamValidator {
             // unrecoverable stream rather than "nothing arrived", so surface
             // Invalid instead of a permanent Pending.
             if self.scan.lead_fence == LeadFence::SkipLine && !self.buffer.trim().is_empty() {
-                self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
+                self.invalidate(
+                    SchemaValidationReasonKind::InvalidJson,
+                    "incomplete JSON document at end of stream".to_string(),
+                    "$",
+                );
             }
             return;
         }
-        self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
+        self.invalidate(
+            SchemaValidationReasonKind::InvalidJson,
+            "incomplete JSON document at end of stream".to_string(),
+            "$",
+        );
     }
 }
 
@@ -495,15 +424,20 @@ impl JsonStreamValidator {
 enum ParseOutcome {
     Valid,
     Pending,
-    Invalid { reason: String, path: String },
+    Invalid {
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: String,
+    },
 }
 
 fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
     match serde_json::from_str::<serde_json::Value>(buffer) {
         Ok(json) => {
             let value = schema::json_to_vm_value(&json);
-            match schema_validation_error(&value, schema, "$") {
+            match schema_validation_error(&value, schema, "") {
                 Some(invalid) => ParseOutcome::Invalid {
+                    reason_kind: invalid.reason_kind,
                     reason: invalid.reason,
                     path: invalid.path,
                 },
@@ -512,6 +446,7 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
         }
         Err(error) if error.classify() == Category::Eof => ParseOutcome::Pending,
         Err(error) => ParseOutcome::Invalid {
+            reason_kind: SchemaValidationReasonKind::InvalidJson,
             reason: format!("JSON parse error: {error}"),
             path: "$".to_string(),
         },
@@ -895,8 +830,16 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
     match status {
         JsonStreamStatus::Pending => VmValue::enum_variant("JsonStreamStatus", "Pending", vec![]),
         JsonStreamStatus::Valid => VmValue::enum_variant("JsonStreamStatus", "Valid", vec![]),
-        JsonStreamStatus::Invalid { reason, path } => {
+        JsonStreamStatus::Invalid {
+            reason_kind,
+            reason,
+            path,
+        } => {
             let payload = BTreeMap::from([
+                (
+                    "reason_kind".to_string(),
+                    VmValue::String(arcstr::ArcStr::from(reason_kind.as_str())),
+                ),
                 (
                     "reason".to_string(),
                     VmValue::String(arcstr::ArcStr::from(reason.as_str())),
@@ -925,8 +868,13 @@ fn verdict_value(status: &JsonStreamStatus) -> VmValue {
         JsonStreamStatus::Valid => {
             dict.put_str("verdict", "valid");
         }
-        JsonStreamStatus::Invalid { reason, path } => {
+        JsonStreamStatus::Invalid {
+            reason_kind,
+            reason,
+            path,
+        } => {
             dict.put_str("verdict", "invalid");
+            dict.put_str("reason_kind", reason_kind.as_str());
             dict.put_str("reason", reason.as_str());
             dict.put_str("path", path.as_str());
         }
@@ -1040,6 +988,7 @@ fn invalid_type_start(
         None
     } else {
         Some(EarlyInvalid {
+            reason_kind: SchemaValidationReasonKind::WrongType,
             reason: format!(
                 "expected type '{expected}', got JSON {}",
                 token_label(first)
@@ -1049,22 +998,36 @@ fn invalid_type_start(
     }
 }
 
-fn schema_validation_error(value: &VmValue, schema: &VmValue, path: &str) -> Option<EarlyInvalid> {
-    match schema::schema_result_value(value, schema, false) {
-        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
-            let reason = enum_variant
-                .fields
-                .first()
-                .and_then(VmValue::as_dict)
-                .and_then(|payload| payload.get("message"))
-                .map(VmValue::display)
-                .unwrap_or_else(|| "schema validation failed".to_string());
-            Some(EarlyInvalid {
-                reason,
-                path: path.to_string(),
-            })
+fn schema_validation_error(
+    value: &VmValue,
+    schema: &VmValue,
+    path_prefix: &str,
+) -> Option<EarlyInvalid> {
+    schema::first_schema_validation_issue(value, schema)
+        .map(|issue| project_schema_validation_issue(issue, path_prefix))
+}
+
+fn project_schema_validation_issue(
+    issue: schema::SchemaValidationIssue,
+    path_prefix: &str,
+) -> EarlyInvalid {
+    let path = if path_prefix.is_empty() {
+        if issue.path == "root" {
+            "$".to_string()
+        } else {
+            issue.path
         }
-        _ => None,
+    } else if issue.path == "root" {
+        path_prefix.to_string()
+    } else if issue.path.starts_with('[') {
+        format!("{path_prefix}{}", issue.path)
+    } else {
+        format!("{path_prefix}.{}", issue.path)
+    };
+    EarlyInvalid {
+        reason_kind: issue.kind,
+        reason: issue.detail,
+        path,
     }
 }
 
@@ -1411,6 +1374,13 @@ mod tests {
             invalid_map.get("verdict").map(VmValue::display).as_deref(),
             Some("invalid")
         );
+        assert_eq!(
+            invalid_map
+                .get("reason_kind")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("wrong_type")
+        );
         assert!(invalid_map.contains_key("reason"));
         assert!(invalid_map.contains_key("path"));
     }
@@ -1605,15 +1575,13 @@ mod tests {
         // surface as Invalid, not be masked by the fence handling.
         let status = feed_chunks(&object_a_int_schema(), &["```json\n{\"a\":\"oops\"}\n```"]);
         match status {
-            JsonStreamStatus::Invalid { path, reason } => {
-                // The violation is on property `a` (an int that arrived as a
-                // string); `early_invalid` pins it to `$.a`, but accept the
-                // coarser `$` from the post-parse path too — the point is the
-                // schema failure is surfaced, not masked by fence handling.
-                assert!(
-                    path == "$.a" || path == "$",
-                    "unexpected path {path:?} (reason {reason:?})"
-                );
+            JsonStreamStatus::Invalid {
+                reason_kind,
+                path,
+                reason,
+            } => {
+                assert_eq!(reason_kind, SchemaValidationReasonKind::WrongType);
+                assert_eq!(path, "$.a", "unexpected path (reason {reason:?})");
             }
             other => panic!("expected Invalid for schema-violating fenced value, got {other:?}"),
         }

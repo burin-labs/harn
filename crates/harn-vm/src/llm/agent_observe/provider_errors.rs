@@ -727,6 +727,7 @@ pub(super) struct ProviderCallErrorObservation<'a> {
     pub(super) classified: &'a super::api::LlmErrorInfo,
     pub(super) message: &'a str,
     pub(super) stream_failure: Option<&'a crate::value::ProviderStreamFailure>,
+    pub(super) schema_failure: Option<&'a crate::value::SchemaStreamAbort>,
     /// Usage from a completed response that the caller must still surface as
     /// terminally unusable. Transport and parser failures pass `None`.
     pub(super) usage: Option<&'a crate::llm::usage::LlmUsage>,
@@ -748,6 +749,7 @@ pub(super) fn append_provider_call_error_observability(
         classified,
         message,
         stream_failure,
+        schema_failure,
         usage,
         retryable,
         failover_eligible,
@@ -815,6 +817,17 @@ pub(super) fn append_provider_call_error_observability(
         );
         fields.insert("partial".to_string(), serde_json::json!(failure.partial));
     }
+    if let Some(failure) = schema_failure {
+        fields.insert(
+            "schema_failure".to_string(),
+            serde_json::json!({
+                "kind": failure.reason_kind.as_str(),
+                "detail": failure.reason,
+                "path": failure.path,
+                "chunks_consumed": failure.chunks_consumed,
+            }),
+        );
+    }
     append_llm_observability_entry("provider_call_error", fields);
 }
 
@@ -849,6 +862,7 @@ mod stream_failure_observability_tests {
             classified: &classified,
             message: "idle deadline elapsed",
             stream_failure: Some(&failure),
+            schema_failure: None,
             usage: None,
             retryable: true,
             failover_eligible: false,
@@ -867,5 +881,57 @@ mod stream_failure_observability_tests {
         assert_eq!(receipt["phase"], "streaming");
         assert_eq!(receipt["deadline"], "idle");
         assert_eq!(receipt["partial"], true);
+    }
+
+    #[test]
+    fn provider_error_receipt_projects_typed_schema_failure() {
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+        let opts = crate::llm::api::options::base_opts("openai");
+        let category = crate::value::ErrorCategory::SchemaStreamAborted;
+        let failure = crate::value::SchemaStreamAbort {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+            reason_kind: crate::value::SchemaValidationReasonKind::MaxLength,
+            reason: "at root: string is longer than 5 characters".to_string(),
+            path: "$.detail".to_string(),
+            chunks_consumed: 3,
+        };
+        let classified =
+            crate::llm::api::classify_llm_error(category.clone(), &failure.to_string());
+
+        append_provider_call_error_observability(ProviderCallErrorObservation {
+            iteration: 1,
+            call_id: "call-schema-abort",
+            attempt: 1,
+            status: "error",
+            opts: &opts,
+            category: &category,
+            classified: &classified,
+            message: &failure.to_string(),
+            stream_failure: None,
+            schema_failure: Some(&failure),
+            usage: None,
+            retryable: false,
+            failover_eligible: false,
+            attempt_count: None,
+        });
+        pop_llm_transcript_dir();
+
+        let receipt: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("provider error receipt")
+                .trim(),
+        )
+        .expect("valid provider error receipt");
+        assert_eq!(receipt["type"], "provider_call_error");
+        assert_eq!(receipt["category"], "schema_stream_aborted");
+        assert_eq!(receipt["schema_failure"]["kind"], "max_length");
+        assert_eq!(
+            receipt["schema_failure"]["detail"],
+            "at root: string is longer than 5 characters"
+        );
+        assert_eq!(receipt["schema_failure"]["path"], "$.detail");
+        assert_eq!(receipt["schema_failure"]["chunks_consumed"], 3);
     }
 }

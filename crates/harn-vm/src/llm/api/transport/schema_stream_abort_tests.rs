@@ -15,7 +15,7 @@ use crate::llm::api::DialectContract;
 use crate::llm::api::StreamSchemaWatch;
 use crate::llm::capabilities::WireDialect;
 use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
-use crate::value::ErrorCategory;
+use crate::value::{ErrorCategory, VmValue};
 use crate::{install_active_metrics_registry, MetricsRegistry};
 use std::sync::Arc;
 
@@ -47,6 +47,30 @@ fn build_strict_payload(schema: serde_json::Value) -> crate::llm::api::LlmReques
     opts.schema_stream_abort = true;
     opts.session_id = None;
     crate::llm::api::LlmRequestPayload::from(&opts)
+}
+
+fn assert_schema_failure(err: &VmError, kind: &str, path: &str, detail_fragment: &str) {
+    let VmValue::Dict(caught) = err.thrown_value() else {
+        panic!("schema abort must lower to a structured caught value: {err:?}");
+    };
+    let Some(VmValue::Dict(cause)) = caught.get("schema_failure") else {
+        panic!("caught schema abort must retain its typed cause: {caught:?}");
+    };
+    assert_eq!(
+        cause.get("kind").map(VmValue::display).as_deref(),
+        Some(kind)
+    );
+    assert_eq!(
+        cause.get("path").map(VmValue::display).as_deref(),
+        Some(path)
+    );
+    assert!(
+        cause
+            .get("detail")
+            .map(VmValue::display)
+            .is_some_and(|detail| detail.contains(detail_fragment)),
+        "schema cause must retain the validator detail: {cause:?}"
+    );
 }
 
 #[test]
@@ -197,16 +221,16 @@ async fn openai_stream_aborts_on_impossible_property_type() {
     .await
     .expect_err("schema abort must surface as error");
 
-    match &err {
-        VmError::CategorizedError { category, message } => {
-            assert_eq!(*category, ErrorCategory::SchemaStreamAborted);
-            assert!(
-                message.contains("$.age"),
-                "abort message should include JSON path; got: {message}"
-            );
-        }
-        other => panic!("expected CategorizedError; got {other:?}"),
-    }
+    assert_schema_failure(&err, "wrong_type", "$.age", "expected type 'int'");
+
+    assert_eq!(
+        crate::value::error_to_category(&err),
+        ErrorCategory::SchemaStreamAborted
+    );
+    assert!(
+        err.to_string().contains("$.age"),
+        "abort message should include JSON path; got: {err}"
+    );
 
     let events = peek_agent_trace();
     let aborts: Vec<_> = events
@@ -215,12 +239,14 @@ async fn openai_stream_aborts_on_impossible_property_type() {
             AgentTraceEvent::SchemaStreamAborted {
                 provider,
                 model,
+                reason_kind,
                 reason,
                 path,
                 chunks_consumed,
             } => Some((
                 provider.clone(),
                 model.clone(),
+                reason_kind.clone(),
                 reason.clone(),
                 path.clone(),
                 *chunks_consumed,
@@ -233,9 +259,10 @@ async fn openai_stream_aborts_on_impossible_property_type() {
         1,
         "expected exactly one SchemaStreamAborted event; got {events:#?}"
     );
-    let (provider, model, _reason, path, chunks) = &aborts[0];
+    let (provider, model, reason_kind, _reason, path, chunks) = &aborts[0];
     assert_eq!(provider, "openai");
     assert_eq!(model, "gpt-test");
+    assert_eq!(reason_kind, "wrong_type");
     assert_eq!(path, "$.age");
     assert!(*chunks >= 1);
 
@@ -254,6 +281,39 @@ async fn openai_stream_aborts_on_impossible_property_type() {
 
     reset_agent_trace_state();
     crate::clear_active_metrics_registry();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_abort_cause_distinguishes_missing_required_from_wrong_type() {
+    reset_agent_trace_state();
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["detail"],
+        "properties": {"detail": {"type": "string"}}
+    });
+    let payload = build_payload(schema);
+    let watch = StreamSchemaWatch::from_payload(&payload).expect("schema is canonicalizable");
+    let frame = serde_json::json!({
+        "choices": [{"delta": {"content": "{}"}}]
+    });
+    let body = format!("data: {frame}\n\ndata: [DONE]\n\n");
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let reader = tokio::io::BufReader::new(body.as_bytes());
+    let err = consume_sse_lines(
+        reader,
+        "openai",
+        "gpt-test",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        Some(watch),
+        false,
+    )
+    .await
+    .expect_err("missing required property must abort the stream");
+
+    assert_schema_failure(&err, "missing_required", "$", "required");
+    reset_agent_trace_state();
 }
 
 #[tokio::test(flavor = "current_thread")]

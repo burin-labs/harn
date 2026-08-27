@@ -19,8 +19,10 @@ type JsonStreamValidator = {
 /**
  * Create an incremental validator for UTF-8 JSON string or bytes chunks.
  * `feed(chunk)` returns JsonStreamStatus.Pending, JsonStreamStatus.Valid, or
- * JsonStreamStatus.Invalid({reason, path}). `value()` returns the parsed JSON
- * value after Valid and nil otherwise. `partial()` returns the best-effort
+ * JsonStreamStatus.Invalid({reason_kind, reason, path}). `reason_kind` is a
+ * stable machine-readable class; `reason` keeps the exact validator detail.
+ * `value()` returns the parsed JSON value after Valid and nil otherwise.
+ * `partial()` returns the best-effort
  * partially-filled value from the bytes seen so far (Vercel `streamObject` /
  * Instructor `Partial[T]`): the frontier's open string/containers are closed
  * and any half-typed trailing member is dropped, so it grows monotonically as

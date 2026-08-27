@@ -166,6 +166,7 @@ pub enum AgentTraceEvent {
     SchemaStreamAborted {
         provider: String,
         model: String,
+        reason_kind: String,
         reason: String,
         path: String,
         chunks_consumed: usize,
