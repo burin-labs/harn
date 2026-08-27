@@ -170,6 +170,21 @@ fn __valid_tool_format(value: string?) {
 }
 
 /**
+ * Read the effective route capabilities. A self-hosted runtime probe needs
+ * network authority; hosted and restricted runs fall back to the cached
+ * catalog without losing their capability facts.
+ */
+fn __tool_format_capabilities(llm: HarnessLlm, provider: string, model: string) {
+  const probed = try {
+    llm.probe_provider_capabilities(provider, model)
+  }
+  if !is_err(probed) {
+    return unwrap(probed)
+  }
+  return llm.provider_capabilities(provider, model)
+}
+
+/**
  * True when a (already-validated) tool_format rides the TEXT channel — the
  * assistant's visible content — rather than the provider's native tool-calling
  * channel. Both `text` (tagged/heredoc) and `json` (fenced-JSON) are
@@ -504,7 +519,7 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options: dict? = nil) {
     let parity = nil
     if pair != nil {
       const caps = try {
-        llm.provider_capabilities(pair.provider, pair.model)
+        __tool_format_capabilities(llm, pair.provider, pair.model)
       }
       if !is_err(caps) {
         const resolved_caps = unwrap(caps)
@@ -574,7 +589,7 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options: dict? = nil) {
   const pair = route.pair
   if pair != nil {
     const caps = try {
-      llm.provider_capabilities(pair.provider, pair.model)
+      __tool_format_capabilities(llm, pair.provider, pair.model)
     }
     if !is_err(caps) {
       const preferred = __valid_tool_format(unwrap(caps)?.preferred_tool_format)
