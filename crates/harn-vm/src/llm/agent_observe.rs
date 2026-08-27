@@ -342,7 +342,6 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
     use crate::value::{classify_error_message, ErrorCategory};
     let msg = match err {
         VmError::ProviderStreamFailure(failure) => return failure.category().is_transient(),
-        VmError::SchemaStreamAbort(abort) => return abort.category().is_transient(),
         VmError::CategorizedError { category, message } => {
             let llm_info = crate::llm::api::classify_llm_error(category.clone(), message);
             return if llm_info.reason == crate::llm::api::LlmErrorReason::Unknown {
@@ -389,7 +388,6 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         || lower.contains("delivered no content")
         || lower.contains("eof")
 }
-
 /// Whether an LLM-call failure is a transport-level *network* failure
 /// (connection refused/reset, DNS failure, dropped link, request timeout).
 /// Feeds the per-route circuit breaker together with
@@ -404,7 +402,6 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
 pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
     let (category, message) = match err {
         VmError::ProviderStreamFailure(failure) => (failure.category(), failure.to_string()),
-        VmError::SchemaStreamAbort(abort) => (abort.category(), abort.to_string()),
         VmError::CategorizedError { category, message } => (category.clone(), message.clone()),
         VmError::Thrown(crate::value::VmValue::String(s)) => {
             (crate::value::classify_error_message(s), s.to_string())
@@ -418,7 +415,6 @@ pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
         crate::llm::api::LlmErrorReason::NetworkError | crate::llm::api::LlmErrorReason::Timeout
     )
 }
-
 /// Whether an LLM-call failure says the provider itself is shedding load
 /// (HTTP 529 / 503, Anthropic `overloaded_error`). Distinct from a 429 — the
 /// client hasn't exceeded a quota — and from a generic 500/502, which is a

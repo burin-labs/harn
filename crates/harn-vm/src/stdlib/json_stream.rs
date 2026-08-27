@@ -16,6 +16,9 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{SchemaValidationReasonKind, VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
+mod stream_schema;
+pub(crate) use stream_schema::StreamSchemaValidator;
+
 #[derive(Clone)]
 struct JsonStreamValidator {
     schema: VmValue,
@@ -34,120 +37,6 @@ pub(crate) enum JsonStreamStatus {
         reason: String,
         path: String,
     },
-}
-
-/// Send-safe Rust API for the incremental JSON validator. Mirrors the
-/// `std/json/stream` script builtin but uses `serde_json::Value` as the
-/// schema storage so the LLM streaming transport can hold it across
-/// off-thread awaits without depending on VM heap identity.
-///
-/// The canonicalized schema is rebuilt per feed inside [`Self::feed`];
-/// canonicalization is a cheap tree walk so callers pay nothing
-/// observable for the indirection.
-pub(crate) struct StreamSchemaValidator {
-    schema_json: serde_json::Value,
-    buffer: String,
-    // Boxed so the scanner's footprint stays off the stack frame of every
-    // future that holds this validator by value. The LLM streaming transport
-    // carries a `StreamSchemaValidator` across off-thread awaits and inlines
-    // into large async dispatch frames (e.g. `host_agent_dispatch_tool_call`),
-    // which sit right at Clippy's `large_stack_frames` threshold; keeping the
-    // scan state on the heap stops fence-tracking fields from tipping them
-    // over. Auto-deref makes the `self.scan.*` call sites unchanged.
-    scan: Box<JsonStreamScan>,
-    status: JsonStreamStatus,
-}
-
-impl StreamSchemaValidator {
-    /// Build a validator from a JSON Schema-shaped `serde_json::Value`.
-    /// Returns the canonicalization error string on malformed schemas;
-    /// callers typically log and skip rather than aborting the request.
-    pub(crate) fn from_json_schema(schema: &serde_json::Value) -> Result<Self, String> {
-        let schema_vm = schema::json_to_vm_value(schema);
-        // Validate that the schema canonicalizes; we don't keep the
-        // VmValue around because the streaming transport stores a JSON copy,
-        // but failing here gives callers an early malformed-schema signal.
-        schema::schema_from_json_schema_value(&schema_vm).map_err(|err| err.to_string())?;
-        Ok(Self {
-            schema_json: schema.clone(),
-            buffer: String::new(),
-            scan: Box::new(JsonStreamScan::default()),
-            status: JsonStreamStatus::Pending,
-        })
-    }
-
-    /// Feed a text chunk into the validator. The returned status is the
-    /// validator's *new* status after consuming `chunk` — `Pending` while
-    /// the JSON is incomplete, `Valid` once a complete and schema-conforming
-    /// document is in the buffer, `Invalid` the first time the partial
-    /// content cannot conceivably satisfy the schema.
-    pub(crate) fn feed(&mut self, chunk: &str) -> &JsonStreamStatus {
-        if matches!(self.status, JsonStreamStatus::Invalid { .. }) {
-            return &self.status;
-        }
-        if let Err(err) = self.scan.feed(chunk) {
-            self.buffer.push_str(chunk);
-            self.status = JsonStreamStatus::Invalid {
-                reason_kind: SchemaValidationReasonKind::InvalidJson,
-                reason: err,
-                path: "$".to_string(),
-            };
-            return &self.status;
-        }
-        self.buffer.push_str(chunk);
-
-        // Operate on the fenced-out JSON body so a markdown code fence
-        // around the JSON (` ```json ... ``` `) never reaches the parser or
-        // the early-invalid type checks; it only affects framing, not schema
-        // validation.
-        let json = self.scan.json_slice(&self.buffer);
-        if json.trim().is_empty() {
-            self.status = JsonStreamStatus::Pending;
-            return &self.status;
-        }
-
-        let schema_vm = schema::json_to_vm_value(&self.schema_json);
-        // `from_json_schema` validates that the schema canonicalizes at
-        // construction, so this call cannot fail by the time we get
-        // here. Fall back to the raw VmValue defensively rather than
-        // panicking — the early-invalid + parse-and-validate paths will
-        // simply produce a less-precise diagnostic instead of misbehaving.
-        let canonical = match schema::schema_from_json_schema_value(&schema_vm) {
-            Ok(c) => c,
-            Err(_) => schema_vm,
-        };
-
-        if let Some(invalid) = early_invalid(json, &canonical) {
-            self.status = JsonStreamStatus::Invalid {
-                reason_kind: invalid.reason_kind,
-                reason: invalid.reason,
-                path: invalid.path,
-            };
-            return &self.status;
-        }
-
-        if self.scan.complete || self.scan.root_scalar {
-            self.status = match parse_complete_buffer(json, &canonical) {
-                ParseOutcome::Valid => {
-                    self.scan.complete = true;
-                    JsonStreamStatus::Valid
-                }
-                ParseOutcome::Pending => JsonStreamStatus::Pending,
-                ParseOutcome::Invalid {
-                    reason_kind,
-                    reason,
-                    path,
-                } => JsonStreamStatus::Invalid {
-                    reason_kind,
-                    reason,
-                    path,
-                },
-            };
-        } else {
-            self.status = JsonStreamStatus::Pending;
-        }
-        &self.status
-    }
 }
 
 #[derive(Clone, Debug, Default)]
