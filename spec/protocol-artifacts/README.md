@@ -31,6 +31,8 @@ profile (`agentclientprotocol/agent-client-protocol schema v0.12.2`).
 (`2026-07-28`).
 - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving
 `ToolCallReceipt` schema for audited tool calls.
+- `schemas/session-recap-v1.schema.json`: closed write contract for Harn's
+deterministic session recap availability and snapshot types.
 - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative
 plan-document schema with revisions, comments, and resolution receipts.
 - `harn-protocol.ts`: TypeScript definitions for ACP session updates,

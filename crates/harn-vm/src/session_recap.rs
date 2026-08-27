@@ -5,7 +5,8 @@
 //! source of truth; this module groups those facts by the existing `run_id`,
 //! `turn_id`, and `loop_checkpoint` iteration boundaries.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoredEvent, MAX_READ_BATCH};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ use crate::agent_sessions::event_facts as facts;
 use crate::redact::{current_policy, RedactionPolicy};
 
 pub const SESSION_RECAP_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_RECAP_QUERY_METHOD: &str = "harn.session_recap.query";
+pub const SESSION_RECAP_SCHEMA_ARTIFACT: &str = "schemas/session-recap-v1.schema.json";
 pub const DEFAULT_RECAP_SOURCE_LIMIT: usize = 4_096;
 pub const MAX_RECAP_SOURCE_LIMIT: usize = 32_768;
 
@@ -60,6 +63,10 @@ pub struct SessionRecapSnapshot {
     pub content_hash: String,
     pub projection_hash: String,
     pub turns: Vec<PromptTurnRecap>,
+    /// Explicit forward-compatible wire data. Unknown fields outside this map
+    /// are not part of schema v1 and must not be written back by consumers.
+    #[serde(default)]
+    pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
 /// Why a terminal result could not carry a deterministic recap snapshot.
@@ -392,8 +399,27 @@ pub async fn query_session_recap(
         content_hash,
         projection_hash,
         turns,
+        extensions: BTreeMap::new(),
     }))
 }
+
+/// Query the canonical store rooted at a project without inventing a second
+/// persistence path. `None` means either the store or the named session does
+/// not exist; an existing empty session returns an empty snapshot.
+pub async fn query_persisted_session_recap(
+    project_root: &Path,
+    query: SessionRecapQuery,
+) -> Result<Option<SessionRecapSnapshot>, SessionRecapError> {
+    let Some(store) = crate::stdlib::session_store::open_existing_canonical_store(project_root)
+        .map_err(|error| SessionRecapError(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+    query_session_recap(&store, query).await
+}
+
+mod schema;
+pub use schema::session_recap_json_schema;
 
 async fn read_source_events(
     store: &dyn SessionStore,

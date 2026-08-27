@@ -59,6 +59,7 @@ def main() -> int:
         ("MCPInputRequiredResult", fixture["mcpInputRequiredResult"], hp.MCPInputRequiredResult),
         ("MCPUnsupportedProtocolVersionError", fixture["mcpUnsupportedProtocolVersionError"], hp.MCPUnsupportedProtocolVersionError),
         ("ToolCallReceipt", fixture["toolCallReceipt"], hp.ToolCallReceipt),
+        ("HarnSessionRecapAvailability", fixture["sessionRecapAvailability"], hp.HarnSessionRecapAvailability),
     ]
     for label, payload, cls in cases:
         instance = cls.from_wire(payload)

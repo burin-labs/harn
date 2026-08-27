@@ -1630,3 +1630,70 @@ export interface HarnSessionTimelineUpdate {
   cursor: HarnSessionTimelineCursor
   node: HarnSessionTimelineNode
 }
+
+export const HARN_SESSION_RECAP_QUERY_METHOD = "harn.session_recap.query" as const
+export const HARN_SESSION_RECAP_SCHEMA_VERSION = 1 as const
+
+export type HarnSessionRecapCompletionState = "open" | "complete" | "incomplete" | "unassigned"
+export type HarnSessionRecapToolState = "open" | "completed" | "failed" | "incomplete"
+export type HarnSessionRecapPlanStepStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled"
+export type HarnSessionRecapPlanEventKind = "created" | "updated"
+export type HarnSessionRecapProgressStatus = "pending" | "in_progress" | "completed"
+export type HarnSessionRecapProgressPriority = "high" | "medium" | "low"
+export type HarnSessionRecapUnavailableReason = "journal_unavailable" | "session_missing" | "projection_failed" | "admission_terminal"
+
+export interface HarnSessionRecapQuery {
+  sessionId: string
+  runId: string | null
+  turnId: string | null
+  fromEventId: number | null
+  limit: number | null
+}
+export interface HarnSessionRecapCursor { lastEventId: number | null; nextEventId: number | null }
+export interface HarnSessionRecapCoverage { scanned: number; matched: number; pending: number; unassigned: number; truncated: boolean }
+export interface HarnSessionRecapSourceEvent { eventId: number; recordHash: string }
+export interface HarnSessionRecapSource { firstEventId: number | null; lastEventId: number | null; events: HarnSessionRecapSourceEvent[] }
+export interface HarnSessionRecapTextFact { text: string; sourceEventId: number }
+export interface HarnSessionRecapVerificationFact { schema: string; status: string; verifiedPaths: string[]; sourceEventId: number }
+export interface HarnSessionRecapToolExchange {
+  toolCallId: string
+  toolName: string | null
+  state: HarnSessionRecapToolState
+  callObserved: boolean
+  resultObserved: boolean
+  input: ACPValue | null
+  output: ACPValue | null
+  verification: HarnSessionRecapVerificationFact | null
+  sourceEventIds: number[]
+}
+export interface HarnSessionRecapPlanStep { id: string; content: string; status: HarnSessionRecapPlanStepStatus }
+export interface HarnSessionRecapPlanEventFact { kind: HarnSessionRecapPlanEventKind; eventId: string; inputRevisionId: string | null }
+export interface HarnSessionRecapPlanFact {
+  documentId: string; revisionId: string; title: string; summary: string
+  steps: HarnSessionRecapPlanStep[]; event: HarnSessionRecapPlanEventFact | null; sourceEventId: number
+}
+export interface HarnSessionRecapProgressEntry { content: string; status: HarnSessionRecapProgressStatus; priority: HarnSessionRecapProgressPriority | null }
+export interface HarnSessionRecapProgressFact { message: string | null; entries: HarnSessionRecapProgressEntry[]; replace: boolean; sourceEventId: number }
+export interface HarnSessionRecapTerminalFact {
+  state: HarnSessionRecapCompletionState; finalStatus: string | null; stopReason: string | null
+  kind: string | null; owner: string | null; reason: string | null; sourceEventId: number
+}
+export interface HarnSessionRecapIteration {
+  iteration: number | null; state: HarnSessionRecapCompletionState
+  assistantText: HarnSessionRecapTextFact[]; tools: HarnSessionRecapToolExchange[]
+  plans: HarnSessionRecapPlanFact[]; progress: HarnSessionRecapProgressFact[]; sourceEventIds: number[]
+}
+export interface HarnSessionPromptTurnRecap {
+  turnId: string; runId: string; state: HarnSessionRecapCompletionState
+  prompts: HarnSessionRecapTextFact[]; iterations: HarnSessionRecapIteration[]
+  terminal: HarnSessionRecapTerminalFact | null; sourceEventIds: number[]
+}
+export interface HarnSessionRecapSnapshot {
+  schemaVersion: number; sessionId: string; query: HarnSessionRecapQuery
+  cursor: HarnSessionRecapCursor; coverage: HarnSessionRecapCoverage; source: HarnSessionRecapSource
+  contentHash: string; projectionHash: string; turns: HarnSessionPromptTurnRecap[]
+  extensions: Record<string, ACPValue>
+}
+export type HarnSessionRecapAvailability =
+  | { state: "available"; snapshot: HarnSessionRecapSnapshot }
+  | { state: "unavailable"; reason: HarnSessionRecapUnavailableReason }

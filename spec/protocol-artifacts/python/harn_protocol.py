@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union
 
 __all__ = [
     "HARN_PROTOCOL_ARTIFACT_VERSION",
+    "HARN_SESSION_RECAP_QUERY_METHOD",
+    "HARN_SESSION_RECAP_SCHEMA_VERSION",
     "HARN_AGENT_EVENT_METHOD",
     "HARN_PROVIDER_CATALOG_METHOD",
     "ACP_SCHEMA_COMPATIBILITY",
@@ -131,6 +133,31 @@ __all__ = [
     "HarnSessionTimelineCoverage",
     "HarnSessionTimelineSnapshot",
     "HarnSessionTimelineUpdate",
+    "HarnSessionRecapCompletionState",
+    "HarnSessionRecapToolState",
+    "HarnSessionRecapPlanStepStatus",
+    "HarnSessionRecapPlanEventKind",
+    "HarnSessionRecapProgressStatus",
+    "HarnSessionRecapProgressPriority",
+    "HarnSessionRecapUnavailableReason",
+    "HarnSessionRecapQuery",
+    "HarnSessionRecapCursor",
+    "HarnSessionRecapCoverage",
+    "HarnSessionRecapSourceEvent",
+    "HarnSessionRecapSource",
+    "HarnSessionRecapTextFact",
+    "HarnSessionRecapVerificationFact",
+    "HarnSessionRecapToolExchange",
+    "HarnSessionRecapPlanStep",
+    "HarnSessionRecapPlanEventFact",
+    "HarnSessionRecapPlanFact",
+    "HarnSessionRecapProgressEntry",
+    "HarnSessionRecapProgressFact",
+    "HarnSessionRecapTerminalFact",
+    "HarnSessionRecapIteration",
+    "HarnSessionPromptTurnRecap",
+    "HarnSessionRecapSnapshot",
+    "HarnSessionRecapAvailability",
     "is_request",
     "is_response",
     "is_notification",
@@ -1364,3 +1391,104 @@ class MCPPrompt(_HarnDataclass):
     title: Optional[str] = None
     description: Optional[str] = None
     arguments: Optional[List[JsonObject]] = None
+
+
+HARN_SESSION_RECAP_QUERY_METHOD: str = "harn.session_recap.query"
+HARN_SESSION_RECAP_SCHEMA_VERSION: int = 1
+
+class HarnSessionRecapCompletionState(str, Enum):
+    OPEN = "open"
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    UNASSIGNED = "unassigned"
+class HarnSessionRecapToolState(str, Enum):
+    OPEN = "open"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    INCOMPLETE = "incomplete"
+class HarnSessionRecapPlanStepStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+class HarnSessionRecapPlanEventKind(str, Enum):
+    CREATED = "created"
+    UPDATED = "updated"
+class HarnSessionRecapProgressStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+class HarnSessionRecapProgressPriority(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+class HarnSessionRecapUnavailableReason(str, Enum):
+    JOURNAL_UNAVAILABLE = "journal_unavailable"
+    SESSION_MISSING = "session_missing"
+    PROJECTION_FAILED = "projection_failed"
+    ADMISSION_TERMINAL = "admission_terminal"
+
+@dataclass
+class HarnSessionRecapQuery(_HarnDataclass):
+    sessionId: str; runId: Optional[str]; turnId: Optional[str]; fromEventId: Optional[int]; limit: Optional[int]
+@dataclass
+class HarnSessionRecapCursor(_HarnDataclass):
+    lastEventId: Optional[int]; nextEventId: Optional[int]
+@dataclass
+class HarnSessionRecapCoverage(_HarnDataclass):
+    scanned: int; matched: int; pending: int; unassigned: int; truncated: bool
+@dataclass
+class HarnSessionRecapSourceEvent(_HarnDataclass):
+    eventId: int; recordHash: str
+@dataclass
+class HarnSessionRecapSource(_HarnDataclass):
+    firstEventId: Optional[int]; lastEventId: Optional[int]; events: List[HarnSessionRecapSourceEvent]
+@dataclass
+class HarnSessionRecapTextFact(_HarnDataclass):
+    text: str; sourceEventId: int
+@dataclass
+class HarnSessionRecapVerificationFact(_HarnDataclass):
+    schema: str; status: str; verifiedPaths: List[str]; sourceEventId: int
+@dataclass
+class HarnSessionRecapToolExchange(_HarnDataclass):
+    toolCallId: str; toolName: Optional[str]; state: HarnSessionRecapToolState; callObserved: bool
+    resultObserved: bool; input: Optional[JsonValue]; output: Optional[JsonValue]
+    verification: Optional[HarnSessionRecapVerificationFact]; sourceEventIds: List[int]
+@dataclass
+class HarnSessionRecapPlanStep(_HarnDataclass):
+    id: str; content: str; status: HarnSessionRecapPlanStepStatus
+@dataclass
+class HarnSessionRecapPlanEventFact(_HarnDataclass):
+    kind: HarnSessionRecapPlanEventKind; eventId: str; inputRevisionId: Optional[str]
+@dataclass
+class HarnSessionRecapPlanFact(_HarnDataclass):
+    documentId: str; revisionId: str; title: str; summary: str; steps: List[HarnSessionRecapPlanStep]
+    event: Optional[HarnSessionRecapPlanEventFact]; sourceEventId: int
+@dataclass
+class HarnSessionRecapProgressEntry(_HarnDataclass):
+    content: str; status: HarnSessionRecapProgressStatus; priority: Optional[HarnSessionRecapProgressPriority]
+@dataclass
+class HarnSessionRecapProgressFact(_HarnDataclass):
+    message: Optional[str]; entries: List[HarnSessionRecapProgressEntry]; replace: bool; sourceEventId: int
+@dataclass
+class HarnSessionRecapTerminalFact(_HarnDataclass):
+    state: HarnSessionRecapCompletionState; finalStatus: Optional[str]; stopReason: Optional[str]
+    kind: Optional[str]; owner: Optional[str]; reason: Optional[str]; sourceEventId: int
+@dataclass
+class HarnSessionRecapIteration(_HarnDataclass):
+    iteration: Optional[int]; state: HarnSessionRecapCompletionState; assistantText: List[HarnSessionRecapTextFact]
+    tools: List[HarnSessionRecapToolExchange]; plans: List[HarnSessionRecapPlanFact]
+    progress: List[HarnSessionRecapProgressFact]; sourceEventIds: List[int]
+@dataclass
+class HarnSessionPromptTurnRecap(_HarnDataclass):
+    turnId: str; runId: str; state: HarnSessionRecapCompletionState; prompts: List[HarnSessionRecapTextFact]
+    iterations: List[HarnSessionRecapIteration]; terminal: Optional[HarnSessionRecapTerminalFact]; sourceEventIds: List[int]
+@dataclass
+class HarnSessionRecapSnapshot(_HarnDataclass):
+    schemaVersion: int; sessionId: str; query: HarnSessionRecapQuery; cursor: HarnSessionRecapCursor
+    coverage: HarnSessionRecapCoverage; source: HarnSessionRecapSource; contentHash: str; projectionHash: str
+    turns: List[HarnSessionPromptTurnRecap]; extensions: Dict[str, JsonValue]
+@dataclass
+class HarnSessionRecapAvailability(_HarnDataclass):
+    state: str; snapshot: Optional[HarnSessionRecapSnapshot] = None; reason: Optional[HarnSessionRecapUnavailableReason] = None

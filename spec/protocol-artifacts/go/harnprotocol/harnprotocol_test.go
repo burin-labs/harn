@@ -336,6 +336,28 @@ func TestRoundTripFixture(t *testing.T) {
 		}
 		assertRoundTrip(t, "ToolCallReceipt", raw, out)
 	})
+
+	t.Run("HarnSessionRecapAvailability", func(t *testing.T) {
+		raw, ok := fixture["sessionRecapAvailability"]
+		if !ok {
+			t.Fatal("fixture missing sessionRecapAvailability")
+		}
+		var availability HarnSessionRecapAvailability
+		if err := json.Unmarshal(raw, &availability); err != nil {
+			t.Fatalf("decode session recap: %v", err)
+		}
+		if availability.Snapshot == nil || len(availability.Snapshot.Turns) != 1 {
+			t.Fatalf("expected one non-vacuous recap turn, got %#v", availability.Snapshot)
+		}
+		if len(availability.Snapshot.Extensions) != 1 {
+			t.Fatalf("expected recap extension to survive decode, got %#v", availability.Snapshot.Extensions)
+		}
+		out, err := json.Marshal(availability)
+		if err != nil {
+			t.Fatalf("encode session recap: %v", err)
+		}
+		assertRoundTrip(t, "HarnSessionRecapAvailability", raw, out)
+	})
 }
 
 func mustString(t *testing.T, fixture map[string]json.RawMessage, key string) string {

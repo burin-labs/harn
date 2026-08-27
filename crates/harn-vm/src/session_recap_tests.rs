@@ -573,6 +573,7 @@ fn terminal_available_snapshot_round_trips_without_wire_indirection() {
         content_hash: "sha256:content".to_string(),
         projection_hash: "sha256:projection".to_string(),
         turns: Vec::new(),
+        extensions: BTreeMap::new(),
     };
     let wire = serde_json::to_value(SessionRecapAvailability::available(snapshot.clone()))
         .expect("serialize available recap");

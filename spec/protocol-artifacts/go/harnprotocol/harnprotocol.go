@@ -1234,3 +1234,137 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 	_, hasMethod := envelope["method"]
 	return !hasID && hasMethod
 }
+
+const HarnSessionRecapQueryMethod = "harn.session_recap.query"
+const HarnSessionRecapSchemaVersion uint32 = 1
+
+type HarnSessionRecapCompletionState string
+type HarnSessionRecapToolState string
+type HarnSessionRecapPlanStepStatus string
+type HarnSessionRecapPlanEventKind string
+type HarnSessionRecapProgressStatus string
+type HarnSessionRecapProgressPriority string
+type HarnSessionRecapUnavailableReason string
+
+type HarnSessionRecapQuery struct {
+	SessionID   string  `json:"sessionId"`
+	RunID       *string `json:"runId"`
+	TurnID      *string `json:"turnId"`
+	FromEventID *uint64 `json:"fromEventId"`
+	Limit       *uint64 `json:"limit"`
+}
+type HarnSessionRecapCursor struct {
+	LastEventID *uint64 `json:"lastEventId"`
+	NextEventID *uint64 `json:"nextEventId"`
+}
+type HarnSessionRecapCoverage struct {
+	Scanned    uint64 `json:"scanned"`
+	Matched    uint64 `json:"matched"`
+	Pending    uint64 `json:"pending"`
+	Unassigned uint64 `json:"unassigned"`
+	Truncated  bool   `json:"truncated"`
+}
+type HarnSessionRecapSourceEvent struct {
+	EventID    uint64 `json:"eventId"`
+	RecordHash string `json:"recordHash"`
+}
+type HarnSessionRecapSource struct {
+	FirstEventID *uint64                       `json:"firstEventId"`
+	LastEventID  *uint64                       `json:"lastEventId"`
+	Events       []HarnSessionRecapSourceEvent `json:"events"`
+}
+type HarnSessionRecapTextFact struct {
+	Text          string `json:"text"`
+	SourceEventID uint64 `json:"sourceEventId"`
+}
+type HarnSessionRecapVerificationFact struct {
+	Schema        string   `json:"schema"`
+	Status        string   `json:"status"`
+	VerifiedPaths []string `json:"verifiedPaths"`
+	SourceEventID uint64   `json:"sourceEventId"`
+}
+type HarnSessionRecapToolExchange struct {
+	ToolCallID     string                            `json:"toolCallId"`
+	ToolName       *string                           `json:"toolName"`
+	State          HarnSessionRecapToolState         `json:"state"`
+	CallObserved   bool                              `json:"callObserved"`
+	ResultObserved bool                              `json:"resultObserved"`
+	Input          JSONValue                         `json:"input"`
+	Output         JSONValue                         `json:"output"`
+	Verification   *HarnSessionRecapVerificationFact `json:"verification"`
+	SourceEventIDs []uint64                          `json:"sourceEventIds"`
+}
+type HarnSessionRecapPlanStep struct {
+	ID      string                         `json:"id"`
+	Content string                         `json:"content"`
+	Status  HarnSessionRecapPlanStepStatus `json:"status"`
+}
+type HarnSessionRecapPlanEventFact struct {
+	Kind            HarnSessionRecapPlanEventKind `json:"kind"`
+	EventID         string                        `json:"eventId"`
+	InputRevisionID *string                       `json:"inputRevisionId"`
+}
+type HarnSessionRecapPlanFact struct {
+	DocumentID    string                         `json:"documentId"`
+	RevisionID    string                         `json:"revisionId"`
+	Title         string                         `json:"title"`
+	Summary       string                         `json:"summary"`
+	Steps         []HarnSessionRecapPlanStep     `json:"steps"`
+	Event         *HarnSessionRecapPlanEventFact `json:"event"`
+	SourceEventID uint64                         `json:"sourceEventId"`
+}
+type HarnSessionRecapProgressEntry struct {
+	Content  string                            `json:"content"`
+	Status   HarnSessionRecapProgressStatus    `json:"status"`
+	Priority *HarnSessionRecapProgressPriority `json:"priority"`
+}
+type HarnSessionRecapProgressFact struct {
+	Message       *string                         `json:"message"`
+	Entries       []HarnSessionRecapProgressEntry `json:"entries"`
+	Replace       bool                            `json:"replace"`
+	SourceEventID uint64                          `json:"sourceEventId"`
+}
+type HarnSessionRecapTerminalFact struct {
+	State         HarnSessionRecapCompletionState `json:"state"`
+	FinalStatus   *string                         `json:"finalStatus"`
+	StopReason    *string                         `json:"stopReason"`
+	Kind          *string                         `json:"kind"`
+	Owner         *string                         `json:"owner"`
+	Reason        *string                         `json:"reason"`
+	SourceEventID uint64                          `json:"sourceEventId"`
+}
+type HarnSessionRecapIteration struct {
+	Iteration      *int64                          `json:"iteration"`
+	State          HarnSessionRecapCompletionState `json:"state"`
+	AssistantText  []HarnSessionRecapTextFact      `json:"assistantText"`
+	Tools          []HarnSessionRecapToolExchange  `json:"tools"`
+	Plans          []HarnSessionRecapPlanFact      `json:"plans"`
+	Progress       []HarnSessionRecapProgressFact  `json:"progress"`
+	SourceEventIDs []uint64                        `json:"sourceEventIds"`
+}
+type HarnSessionPromptTurnRecap struct {
+	TurnID         string                          `json:"turnId"`
+	RunID          string                          `json:"runId"`
+	State          HarnSessionRecapCompletionState `json:"state"`
+	Prompts        []HarnSessionRecapTextFact      `json:"prompts"`
+	Iterations     []HarnSessionRecapIteration     `json:"iterations"`
+	Terminal       *HarnSessionRecapTerminalFact   `json:"terminal"`
+	SourceEventIDs []uint64                        `json:"sourceEventIds"`
+}
+type HarnSessionRecapSnapshot struct {
+	SchemaVersion  uint32                       `json:"schemaVersion"`
+	SessionID      string                       `json:"sessionId"`
+	Query          HarnSessionRecapQuery        `json:"query"`
+	Cursor         HarnSessionRecapCursor       `json:"cursor"`
+	Coverage       HarnSessionRecapCoverage     `json:"coverage"`
+	Source         HarnSessionRecapSource       `json:"source"`
+	ContentHash    string                       `json:"contentHash"`
+	ProjectionHash string                       `json:"projectionHash"`
+	Turns          []HarnSessionPromptTurnRecap `json:"turns"`
+	Extensions     JSONObject                   `json:"extensions"`
+}
+type HarnSessionRecapAvailability struct {
+	State    string                             `json:"state"`
+	Snapshot *HarnSessionRecapSnapshot          `json:"snapshot,omitempty"`
+	Reason   *HarnSessionRecapUnavailableReason `json:"reason,omitempty"`
+}

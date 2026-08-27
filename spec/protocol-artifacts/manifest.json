@@ -188,6 +188,7 @@
       "initialize",
       "authenticate",
       "_harn/providerCatalog",
+      "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
       "harn.session_timeline.subscribe",
@@ -259,6 +260,7 @@
       "initialize",
       "authenticate",
       "_harn/providerCatalog",
+      "harn.session_recap.query",
       "harn.session_timeline.query",
       "harn.session_view.query",
       "harn.session_timeline.subscribe",
@@ -373,6 +375,9 @@
     ],
     "harnAgentEventMethod": "_harn/agentEvent",
     "harnProviderCatalogMethod": "_harn/providerCatalog",
+    "harnSessionRecapMethods": [
+      "harn.session_recap.query"
+    ],
     "harnSessionTimelineMethods": [
       "harn.session_timeline.query",
       "harn.session_timeline.subscribe",
@@ -898,6 +903,15 @@
         "source": "crates/harn-vm/src/llm/receipts.rs"
       },
       "source": "crates/harn-vm/src/llm/receipts.rs"
+    },
+    {
+      "artifact": "schemas/session-recap-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::session_recap",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/session_recap.rs"
     },
     {
       "artifact": "schemas/plan-document-v1.schema.json",

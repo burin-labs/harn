@@ -3,6 +3,7 @@ use harn_serve::adapters::acp::HARN_PROVIDER_CATALOG_METHOD;
 pub(super) use harn_serve::MCP_PROTOCOL_VERSION;
 pub(super) use harn_vm::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE;
 use harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD;
+use harn_vm::session_recap::SESSION_RECAP_QUERY_METHOD;
 use harn_vm::session_timeline::{
     SESSION_TIMELINE_QUERY_METHOD, SESSION_TIMELINE_SUBSCRIBE_METHOD,
     SESSION_TIMELINE_UNSUBSCRIBE_METHOD, SESSION_TIMELINE_UPDATE_METHOD,
@@ -58,6 +59,7 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",
     HARN_PROVIDER_CATALOG_METHOD,
+    SESSION_RECAP_QUERY_METHOD,
     SESSION_TIMELINE_QUERY_METHOD,
     SESSION_VIEW_QUERY_METHOD,
     SESSION_TIMELINE_SUBSCRIBE_METHOD,
@@ -135,6 +137,8 @@ pub(super) const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
     SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
     SESSION_TIMELINE_UPDATE_METHOD,
 ];
+
+pub(super) const HARN_SESSION_RECAP_METHODS: &[&str] = &[SESSION_RECAP_QUERY_METHOD];
 
 pub(super) const ACP_AGENT_NOTIFICATIONS: &[&str] =
     &["session/message", "session/update", "terminal/output"];

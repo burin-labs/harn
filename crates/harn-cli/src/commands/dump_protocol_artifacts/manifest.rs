@@ -86,6 +86,15 @@ pub(super) fn generate_manifest_for_version(
     }));
     schemas.push(json!({
         "protocol": "harn",
+        "source": "crates/harn-vm/src/session_recap.rs",
+        "artifact": harn_vm::session_recap::SESSION_RECAP_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::session_recap",
+            "schema_version": harn_vm::session_recap::SESSION_RECAP_SCHEMA_VERSION,
+        },
+    }));
+    schemas.push(json!({
+        "protocol": "harn",
         "source": "crates/harn-vm/src/llm/plan/document.rs",
         "artifact": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT,
         "provenance": {
@@ -141,6 +150,7 @@ pub(super) fn generate_manifest_for_version(
             "sessionUpdateVariants": all_acp_session_updates(),
             "harnSessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
             "harnSessionTimelineMethods": HARN_SESSION_TIMELINE_METHODS,
+            "harnSessionRecapMethods": HARN_SESSION_RECAP_METHODS,
             "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
             "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
             "harnAgentEventKinds": HARN_AGENT_EVENT_KINDS,
@@ -277,6 +287,8 @@ pub(super) fn generate_readme() -> String {
            (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
+         - `schemas/session-recap-v1.schema.json`: closed write contract for Harn's\n\
+           deterministic session recap availability and snapshot types.\n\
          - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\
            plan-document schema with revisions, comments, and resolution receipts.\n\
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
@@ -516,6 +528,7 @@ pub(super) fn generate_round_trip_fixture_for_version(
         }
     });
 
+    let session_recap_availability = super::session_recap::session_recap_round_trip_fixture()?;
     let fixture = json!({
         "artifactVersion": artifact_version,
         "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
@@ -535,6 +548,7 @@ pub(super) fn generate_round_trip_fixture_for_version(
         "mcpInputRequiredResult": mcp_input_required_result,
         "mcpUnsupportedProtocolVersionError": mcp_unsupported_version_error,
         "toolCallReceipt": tool_call_receipt,
+        "sessionRecapAvailability": session_recap_availability,
     });
 
     serde_json::to_string_pretty(&fixture)

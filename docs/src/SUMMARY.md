@@ -202,6 +202,7 @@
 - [Skill provenance](./skill-provenance.md)
 - [Skill activation evidence](./skill-activation-evidence.md)
 - [Sessions](./sessions.md)
+- [Session recap reference](./session-recaps.md)
 - [Workspace anchor cache contract](./agents/cache_contract.md)
 - [Session bundles](./session-bundles.md)
 - [Agent state](./agent-state.md)

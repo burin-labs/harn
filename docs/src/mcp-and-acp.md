@@ -665,6 +665,7 @@ The ACP server supports these JSON-RPC methods:
 | `harn.session_add_root` | Mount an additional root into the live session |
 | `harn.session_reanchor` | Replace the live session's primary workspace anchor |
 | `harn.session_view.query` | Return the stable `harn.session_view.v1` projection for a live or persisted session |
+| `harn.session_recap.query` | Return the deterministic prompt-turn recap for a persisted session |
 | `harn.session_timeline.query` | Return the Harn-owned redacted session timeline snapshot |
 | `harn.session_timeline.subscribe` | Subscribe to newly appended timeline events |
 | `harn.session_timeline.unsubscribe` | Stop a timeline subscription |

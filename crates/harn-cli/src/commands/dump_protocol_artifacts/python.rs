@@ -8,6 +8,7 @@ use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
 use super::constants::*;
+use super::session_recap::append_python_session_recap_types;
 use super::support::*;
 use super::values::*;
 
@@ -245,6 +246,7 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_str_enum("MCPLoggingLevel", MCP_LOGGING_LEVELS));
 
     out.push_str(PYTHON_TYPE_DEFINITIONS);
+    append_python_session_recap_types(&mut out);
     out
 }
 
@@ -849,6 +851,8 @@ class MCPPrompt(_HarnDataclass):
 pub(super) fn python_public_names() -> Vec<String> {
     let names = [
         "HARN_PROTOCOL_ARTIFACT_VERSION",
+        "HARN_SESSION_RECAP_QUERY_METHOD",
+        "HARN_SESSION_RECAP_SCHEMA_VERSION",
         "HARN_AGENT_EVENT_METHOD",
         "HARN_PROVIDER_CATALOG_METHOD",
         "ACP_SCHEMA_COMPATIBILITY",
@@ -963,6 +967,31 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HarnSessionTimelineCoverage",
         "HarnSessionTimelineSnapshot",
         "HarnSessionTimelineUpdate",
+        "HarnSessionRecapCompletionState",
+        "HarnSessionRecapToolState",
+        "HarnSessionRecapPlanStepStatus",
+        "HarnSessionRecapPlanEventKind",
+        "HarnSessionRecapProgressStatus",
+        "HarnSessionRecapProgressPriority",
+        "HarnSessionRecapUnavailableReason",
+        "HarnSessionRecapQuery",
+        "HarnSessionRecapCursor",
+        "HarnSessionRecapCoverage",
+        "HarnSessionRecapSourceEvent",
+        "HarnSessionRecapSource",
+        "HarnSessionRecapTextFact",
+        "HarnSessionRecapVerificationFact",
+        "HarnSessionRecapToolExchange",
+        "HarnSessionRecapPlanStep",
+        "HarnSessionRecapPlanEventFact",
+        "HarnSessionRecapPlanFact",
+        "HarnSessionRecapProgressEntry",
+        "HarnSessionRecapProgressFact",
+        "HarnSessionRecapTerminalFact",
+        "HarnSessionRecapIteration",
+        "HarnSessionPromptTurnRecap",
+        "HarnSessionRecapSnapshot",
+        "HarnSessionRecapAvailability",
         "is_request",
         "is_response",
         "is_notification",

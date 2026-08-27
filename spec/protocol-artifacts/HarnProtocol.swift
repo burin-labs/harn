@@ -987,6 +987,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case authenticate = "authenticate"
     case harnProviderCatalog = "_harn/providerCatalog"
+    case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
@@ -1057,6 +1058,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "initialize",
         "authenticate",
         "_harn/providerCatalog",
+        "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
         "harn.session_timeline.subscribe",
@@ -1138,6 +1140,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case authenticate = "authenticate"
     case harnProviderCatalog = "_harn/providerCatalog"
+    case harnSessionRecapQuery = "harn.session_recap.query"
     case harnSessionTimelineQuery = "harn.session_timeline.query"
     case harnSessionViewQuery = "harn.session_view.query"
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
@@ -1209,6 +1212,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "initialize",
         "authenticate",
         "_harn/providerCatalog",
+        "harn.session_recap.query",
         "harn.session_timeline.query",
         "harn.session_view.query",
         "harn.session_timeline.subscribe",
@@ -3011,4 +3015,63 @@ public struct HarnSessionTimelineUpdate: Codable, Sendable, Equatable {
     public var schemaVersion: UInt32
     public var cursor: HarnSessionTimelineCursor
     public var node: HarnSessionTimelineNode
+}
+
+public enum HarnSessionRecapProtocol {
+    public static let queryMethod = "harn.session_recap.query"
+    public static let schemaVersion = 1
+}
+public enum HarnSessionRecapCompletionState: String, Codable, Sendable, Equatable { case open, complete, incomplete, unassigned }
+public enum HarnSessionRecapToolState: String, Codable, Sendable, Equatable { case open, completed, failed, incomplete }
+public enum HarnSessionRecapPlanStepStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed, blocked, cancelled }
+public enum HarnSessionRecapPlanEventKind: String, Codable, Sendable, Equatable { case created, updated }
+public enum HarnSessionRecapProgressStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed }
+public enum HarnSessionRecapProgressPriority: String, Codable, Sendable, Equatable { case high, medium, low }
+public enum HarnSessionRecapUnavailableReason: String, Codable, Sendable, Equatable { case journalUnavailable = "journal_unavailable", sessionMissing = "session_missing", projectionFailed = "projection_failed", admissionTerminal = "admission_terminal" }
+public enum HarnSessionRecapAvailabilityState: String, Codable, Sendable, Equatable { case available, unavailable }
+
+public struct HarnSessionRecapQuery: Codable, Sendable, Equatable { public var sessionId: String; public var runId: String?; public var turnId: String?; public var fromEventId: Int?; public var limit: Int? }
+public struct HarnSessionRecapCursor: Codable, Sendable, Equatable { public var lastEventId: Int?; public var nextEventId: Int? }
+public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable { public var scanned: Int; public var matched: Int; public var pending: Int; public var unassigned: Int; public var truncated: Bool }
+public struct HarnSessionRecapSourceEvent: Codable, Sendable, Equatable { public var eventId: Int; public var recordHash: String }
+public struct HarnSessionRecapSource: Codable, Sendable, Equatable { public var firstEventId: Int?; public var lastEventId: Int?; public var events: [HarnSessionRecapSourceEvent] }
+public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable { public var text: String; public var sourceEventId: Int }
+public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: String; public var verifiedPaths: [String]; public var sourceEventId: Int }
+public struct HarnSessionRecapToolExchange: Codable, Sendable, Equatable {
+    public var toolCallId: String; public var toolName: String?; public var state: HarnSessionRecapToolState
+    public var callObserved: Bool; public var resultObserved: Bool; public var input: HarnACPValue?; public var output: HarnACPValue?
+    public var verification: HarnSessionRecapVerificationFact?; public var sourceEventIds: [Int]
+}
+public struct HarnSessionRecapPlanStep: Codable, Sendable, Equatable { public var id: String; public var content: String; public var status: HarnSessionRecapPlanStepStatus }
+public struct HarnSessionRecapPlanEventFact: Codable, Sendable, Equatable { public var kind: HarnSessionRecapPlanEventKind; public var eventId: String; public var inputRevisionId: String? }
+public struct HarnSessionRecapPlanFact: Codable, Sendable, Equatable {
+    public var documentId: String; public var revisionId: String; public var title: String; public var summary: String
+    public var steps: [HarnSessionRecapPlanStep]; public var event: HarnSessionRecapPlanEventFact?; public var sourceEventId: Int
+}
+public struct HarnSessionRecapProgressEntry: Codable, Sendable, Equatable { public var content: String; public var status: HarnSessionRecapProgressStatus; public var priority: HarnSessionRecapProgressPriority? }
+public struct HarnSessionRecapProgressFact: Codable, Sendable, Equatable { public var message: String?; public var entries: [HarnSessionRecapProgressEntry]; public var replace: Bool; public var sourceEventId: Int }
+public struct HarnSessionRecapTerminalFact: Codable, Sendable, Equatable {
+    public var state: HarnSessionRecapCompletionState; public var finalStatus: String?; public var stopReason: String?
+    public var kind: String?; public var owner: String?; public var reason: String?; public var sourceEventId: Int
+}
+public struct HarnSessionRecapIteration: Codable, Sendable, Equatable {
+    public var iteration: Int?; public var state: HarnSessionRecapCompletionState
+    public var assistantText: [HarnSessionRecapTextFact]; public var tools: [HarnSessionRecapToolExchange]
+    public var plans: [HarnSessionRecapPlanFact]; public var progress: [HarnSessionRecapProgressFact]; public var sourceEventIds: [Int]
+}
+public struct HarnSessionPromptTurnRecap: Codable, Sendable, Equatable {
+    public var turnId: String; public var runId: String; public var state: HarnSessionRecapCompletionState
+    public var prompts: [HarnSessionRecapTextFact]; public var iterations: [HarnSessionRecapIteration]
+    public var terminal: HarnSessionRecapTerminalFact?; public var sourceEventIds: [Int]
+}
+public struct HarnSessionRecapSnapshot: Codable, Sendable, Equatable {
+    public var schemaVersion: Int; public var sessionId: String; public var query: HarnSessionRecapQuery
+    public var cursor: HarnSessionRecapCursor; public var coverage: HarnSessionRecapCoverage; public var source: HarnSessionRecapSource
+    public var contentHash: String; public var projectionHash: String; public var turns: [HarnSessionPromptTurnRecap]
+    public var extensions: [String: HarnACPValue]
+}
+public struct HarnSessionRecapAvailability: Codable, Sendable, Equatable {
+    public var state: HarnSessionRecapAvailabilityState
+    public var snapshot: HarnSessionRecapSnapshot?
+    public var reason: HarnSessionRecapUnavailableReason?
 }
