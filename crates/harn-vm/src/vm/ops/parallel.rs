@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::value::{DeadlockError, VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
+use crate::wait_for_graph::VmWaitForGraph;
 
 use super::super::CallArgs;
 use crate::vm::subtask;
@@ -54,6 +55,12 @@ impl Drop for ParallelCancelGuard {
     }
 }
 
+fn retain_lower_pre_cleanup_error(selected: &mut (usize, VmError), observed: (usize, VmError)) {
+    if observed.0 < selected.0 {
+        *selected = observed;
+    }
+}
+
 /// Run `futures` concurrently, capped to at most `cap` in-flight tasks
 /// at any moment (or unlimited when `cap` is `None`). Results come back
 /// in source order so callers can index by original position. A single
@@ -67,6 +74,8 @@ impl Drop for ParallelCancelGuard {
 async fn run_capped_ordered<F, T>(
     futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
+    wait_for_graph: Arc<VmWaitForGraph>,
+    task_ids: Vec<String>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
@@ -81,23 +90,41 @@ where
     }
     let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
     let slot = cap.unwrap_or(total).max(1).min(total);
-    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>)> =
-        futures.into_iter().enumerate().collect();
-    let mut join_set: tokio::task::JoinSet<(usize, T)> = tokio::task::JoinSet::new();
+    assert_eq!(total, task_ids.len(), "parallel task metadata drift");
+    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>, String)> = futures
+        .into_iter()
+        .zip(task_ids)
+        .enumerate()
+        .map(|(index, (future, task_id))| (index, future, task_id))
+        .collect();
+    let mut join_set = tokio::task::JoinSet::new();
 
-    while join_set.len() < slot {
-        let Some((i, fut)) = pending.pop_front() else {
+    let mut admitted = Vec::with_capacity(slot);
+    while admitted.len() < slot {
+        let Some((index, future, task_id)) = pending.pop_front() else {
             break;
         };
-        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
+        admitted.push((index, future, wait_for_graph.register_task(task_id)));
+    }
+    for (index, future, activity) in admitted {
+        subtask::spawn_into(
+            &mut join_set,
+            future.map_output(move |value| (index, value, activity)),
+        );
     }
 
     while let Some(joined) = join_set.join_next().await {
-        let (index, value) = joined.map_err(|e| VmError::Runtime(format!("{error_label}: {e}")))?;
+        let (index, value, completed_activity) =
+            joined.map_err(|e| VmError::Runtime(format!("{error_label}: {e}")))?;
         results[index] = Some(value);
-        if let Some((i, fut)) = pending.pop_front() {
-            subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
+        if let Some((next_index, future, task_id)) = pending.pop_front() {
+            let next_activity = wait_for_graph.register_task(task_id);
+            subtask::spawn_into(
+                &mut join_set,
+                future.map_output(move |value| (next_index, value, next_activity)),
+            );
         }
+        drop(completed_activity);
     }
 
     Ok(results
@@ -118,12 +145,11 @@ where
 ///
 /// Error identity: aborting on the first completion-order failure would
 /// report a nondeterministic branch when several siblings fail near-
-/// simultaneously. While draining, any additional branch errors that had
-/// already completed before the abort landed are folded in, and the error
-/// from the LOWEST SOURCE INDEX among them is reported — the same
-/// first-by-source-order convention `scope { }` exit uses. Branches whose
-/// abort wins the race never surface an error, so a strictly-later failure
-/// cannot mask an earlier branch that was still running.
+/// simultaneously. Errors already waiting in the join set are snapshotted
+/// before cleanup, and the LOWEST SOURCE INDEX among them is reported — the
+/// same first-by-source-order convention `scope { }` exit uses. Results that
+/// arrive after cleanup begins are ignored because cooperative cancellation
+/// can turn an otherwise-runnable sibling into a synthetic host-cancel error.
 ///
 /// On failure, buffered print output from sibling branches is discarded
 /// (deterministic: the construct contributes only its error), matching how
@@ -131,6 +157,8 @@ where
 async fn run_capped_ordered_fail_fast<F, T>(
     futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
+    wait_for_graph: Arc<VmWaitForGraph>,
+    task_ids: Vec<String>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
@@ -145,32 +173,44 @@ where
     }
     let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
     let slot = cap.unwrap_or(total).max(1).min(total);
-    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>)> =
-        futures.into_iter().enumerate().collect();
-    let mut join_set: tokio::task::JoinSet<(usize, Result<T, VmError>)> =
-        tokio::task::JoinSet::new();
+    assert_eq!(total, task_ids.len(), "parallel task metadata drift");
+    let mut pending: VecDeque<(usize, subtask::PreparedSubtask<F>, String)> = futures
+        .into_iter()
+        .zip(task_ids)
+        .enumerate()
+        .map(|(index, (future, task_id))| (index, future, task_id))
+        .collect();
+    let mut join_set = tokio::task::JoinSet::new();
 
-    while join_set.len() < slot {
-        let Some((i, fut)) = pending.pop_front() else {
+    let mut admitted = Vec::with_capacity(slot);
+    while admitted.len() < slot {
+        let Some((index, future, task_id)) = pending.pop_front() else {
             break;
         };
-        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
+        admitted.push((index, future, wait_for_graph.register_task(task_id)));
+    }
+    for (index, future, activity) in admitted {
+        subtask::spawn_into(
+            &mut join_set,
+            future.map_output(move |value| (index, value, activity)),
+        );
     }
 
-    // Lowest-source-index error observed so far, if any.
-    let mut first_error: Option<(usize, VmError)> = None;
     while let Some(joined) = join_set.join_next().await {
         let observed = match joined {
-            Ok((index, Ok(value))) => {
+            Ok((index, Ok(value), completed_activity)) => {
                 results[index] = Some(value);
-                if first_error.is_none() {
-                    if let Some((i, fut)) = pending.pop_front() {
-                        subtask::spawn_into(&mut join_set, fut.map_output(move |value| (i, value)));
-                    }
+                if let Some((next_index, future, task_id)) = pending.pop_front() {
+                    let next_activity = wait_for_graph.register_task(task_id);
+                    subtask::spawn_into(
+                        &mut join_set,
+                        future.map_output(move |value| (next_index, value, next_activity)),
+                    );
                 }
+                drop(completed_activity);
                 continue;
             }
-            Ok((index, Err(error))) => (index, error),
+            Ok((index, Err(error), _activity)) => (index, error),
             Err(join_error) => {
                 if join_error.is_cancelled() {
                     // A sibling this loop aborted below; already accounted for.
@@ -185,26 +225,143 @@ where
                 )
             }
         };
-        if first_error
-            .as_ref()
-            .is_none_or(|(best, _)| observed.0 < *best)
-        {
-            first_error = Some(observed);
+        let mut first_error = observed;
+
+        // Snapshot only errors that reached the join set before cleanup began.
+        // Once cancellation is requested, sibling failures can be artifacts of
+        // that cleanup and must not replace the initiating semantic error.
+        while let Some(joined) = join_set.try_join_next() {
+            let candidate = match joined {
+                Ok((index, Err(error), _activity)) => Some((index, error)),
+                Ok((_index, Ok(_value), _activity)) => None,
+                Err(join_error) if join_error.is_cancelled() => None,
+                Err(join_error) => Some((
+                    usize::MAX,
+                    VmError::Runtime(format!("{error_label}: {join_error}")),
+                )),
+            };
+            if let Some(candidate) = candidate {
+                retain_lower_pre_cleanup_error(&mut first_error, candidate);
+            }
         }
-        // Fail fast: kill in-flight siblings and stop scheduling queued
-        // branches, then keep draining `join_next` so every aborted task is
-        // joined before this returns.
         cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Give cooperatively-cancelled branches one scheduler turn to unwind
+        // before hard-aborting anything that remains. Their cleanup results
+        // are drained below but cannot replace the initiating error.
+        tokio::task::yield_now().await;
         join_set.abort_all();
         pending.clear();
+        while join_set.join_next().await.is_some() {}
+        return Err(first_error.1);
     }
 
-    match first_error {
-        Some((_, error)) => Err(error),
-        None => Ok(results
-            .into_iter()
-            .map(|slot| slot.expect("run_capped_ordered_fail_fast: missing result slot"))
-            .collect()),
+    Ok(results
+        .into_iter()
+        .map(|slot| slot.expect("run_capped_ordered_fail_fast: missing result slot"))
+        .collect())
+}
+
+#[cfg(test)]
+mod scheduler_tests {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use super::*;
+    use crate::value::{VmChannelCloseState, VmChannelHandle};
+    use crate::wait_for_graph::{channel_target, VmWaitForGraph};
+
+    type Branch = Pin<Box<dyn Future<Output = Result<(), VmError>> + Send>>;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn admitted_lower_index_remains_visible_when_higher_index_starts_first() {
+        let graph = Arc::new(VmWaitForGraph::new());
+        let _root_activity = graph.register_task("root");
+        let _root_wait = graph
+            .wait_for_tasks("root", ["child:0".to_string(), "child:1".to_string()])
+            .expect("scheduled children can still make progress");
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let channel = VmChannelHandle {
+            name: Arc::from("empty"),
+            sender: Arc::new(sender),
+            receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
+            close: Arc::new(VmChannelCloseState::open()),
+        };
+        let target = channel_target(&channel);
+        let (release_first, first_released) = tokio::sync::oneshot::channel();
+
+        let first: Branch = Box::pin(async move {
+            first_released
+                .await
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
+            Ok(())
+        });
+        let second_graph = Arc::clone(&graph);
+        let second: Branch = Box::pin(async move {
+            let _started_activity = second_graph.register_task("child:1");
+            let wait = second_graph.wait_for_channel_receive("child:1", vec![target]);
+            let _ = release_first.send(());
+            let _wait = wait?;
+            Ok(())
+        });
+        let registry = crate::stdlib::pool::new_pool_registry();
+        let futures = vec![
+            subtask::prepare(Arc::clone(&registry), first),
+            subtask::prepare(registry, second),
+        ];
+
+        run_capped_ordered_fail_fast(
+            futures,
+            None,
+            Arc::clone(&graph),
+            vec!["child:0".to_string(), "child:1".to_string()],
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            "test parallel error",
+        )
+        .await
+        .expect("the admitted lower-index branch is runnable even before its body starts");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fail_fast_keeps_initiating_deadlock_over_cleanup_cancellation() {
+        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lower_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lower_token = Arc::clone(&cancel_token);
+        let lower_signal = Arc::clone(&lower_started);
+        let lower: Branch = Box::pin(async move {
+            lower_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
+                std::hint::spin_loop();
+            }
+            Err(crate::vm::Vm::cancelled_error())
+        });
+        let higher_signal = Arc::clone(&lower_started);
+        let higher: Branch = Box::pin(async move {
+            while !higher_signal.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+            Err(VmError::Deadlock(Box::new(DeadlockError::wait_for_graph(
+                "channel",
+                "empty",
+                "initiating semantic error",
+            ))))
+        });
+        let registry = crate::stdlib::pool::new_pool_registry();
+        let graph = Arc::new(VmWaitForGraph::new());
+        let error = run_capped_ordered_fail_fast(
+            vec![
+                subtask::prepare(Arc::clone(&registry), lower),
+                subtask::prepare(registry, higher),
+            ],
+            None,
+            graph,
+            vec!["child:0".to_string(), "child:1".to_string()],
+            cancel_token,
+            "test parallel error",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("HARN-ORC-012"));
     }
 }
 
@@ -323,12 +480,18 @@ impl super::super::Vm {
             }
             let _wait = self
                 .wait_for_graph
-                .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
+                .wait_for_tasks(&self.runtime_context.task_id, task_ids.clone())?;
             // Fail fast: the first branch error aborts in-flight siblings and
             // skips queued branches; only the settle form drains everything.
-            let joined =
-                run_capped_ordered_fail_fast(futures, cap, cancel_token, "Parallel task error")
-                    .await?;
+            let joined = run_capped_ordered_fail_fast(
+                futures,
+                cap,
+                Arc::clone(&self.wait_for_graph),
+                task_ids,
+                cancel_token,
+                "Parallel task error",
+            )
+            .await?;
             let mut results = Vec::with_capacity(count);
             for (val, task_output) in joined {
                 self.output.push_str(&task_output);
@@ -382,12 +545,18 @@ impl super::super::Vm {
                 }
                 let _wait = self
                     .wait_for_graph
-                    .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
+                    .wait_for_tasks(&self.runtime_context.task_id, task_ids.clone())?;
                 // Fail fast, matching `parallel`: use `parallel settle` when
                 // every branch must run regardless of failures.
-                let joined =
-                    run_capped_ordered_fail_fast(futures, cap, cancel_token, "Parallel map error")
-                        .await?;
+                let joined = run_capped_ordered_fail_fast(
+                    futures,
+                    cap,
+                    Arc::clone(&self.wait_for_graph),
+                    task_ids,
+                    cancel_token,
+                    "Parallel map error",
+                )
+                .await?;
                 let mut results = Vec::with_capacity(len);
                 for (val, task_output) in joined {
                     self.output.push_str(&task_output);
@@ -497,9 +666,16 @@ impl super::super::Vm {
                 }
                 let _wait = self
                     .wait_for_graph
-                    .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
-                let joined =
-                    run_capped_ordered(futures, cap, cancel_token, "Parallel settle error").await?;
+                    .wait_for_tasks(&self.runtime_context.task_id, task_ids.clone())?;
+                let joined = run_capped_ordered(
+                    futures,
+                    cap,
+                    Arc::clone(&self.wait_for_graph),
+                    task_ids,
+                    cancel_token,
+                    "Parallel settle error",
+                )
+                .await?;
                 let mut results = Vec::with_capacity(len);
                 let mut succeeded = 0i64;
                 let mut failed = 0i64;
