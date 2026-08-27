@@ -539,6 +539,12 @@ fn is_structured_sse_error_frame(
     }
 }
 
+fn choices_are_empty(json: &serde_json::Value) -> bool {
+    json.get("choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty)
+}
+
 /// Pure SSE-line consumer used by the response wrapper and by tests
 /// that drive canned byte streams without standing up a full
 /// `reqwest::Response`. The Anthropic / OpenAI branches and the
@@ -740,6 +746,18 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 })
             })
         };
+        // Parse token counters once at their typed seam. A total-only receipt
+        // is valid and remains distinguishable from fabricated components;
+        // any malformed or negative recognized counter invalidates the whole
+        // token receipt.
+        let usage_receipt = json
+            .get("usage")
+            .and_then(ProviderUsageReceipt::from_openai_usage_tokens);
+        let terminal_usage_receipt = awaits_stream_usage
+            && choices_are_empty(&json)
+            && usage_receipt
+                .as_ref()
+                .is_some_and(ProviderUsageReceipt::has_any_reported_token_count);
 
         if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             match json["type"].as_str() {
@@ -1117,11 +1135,17 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
 
             served_fast |= crate::llm::serving_tiers::served_fast(model, &json);
             if let Some(usage) = json.get("usage") {
-                if let Some(n) = usage["prompt_tokens"].as_i64() {
+                if let Some(n) = usage_receipt
+                    .as_ref()
+                    .and_then(ProviderUsageReceipt::input_tokens)
+                {
                     input_tokens = n;
                     reported_input_tokens = Some(n);
                 }
-                if let Some(n) = usage["completion_tokens"].as_i64() {
+                if let Some(n) = usage_receipt
+                    .as_ref()
+                    .and_then(ProviderUsageReceipt::output_tokens)
+                {
                     output_tokens = n;
                     reported_output_tokens = Some(n);
                 }
@@ -1144,6 +1168,15 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 // below still lets this frame's own value win.
                 let carried_fingerprint = telemetry.serving_fingerprint.take();
                 telemetry = ProviderTelemetry::from_openai_response(&json, request_id);
+                if let Some(receipt) = usage_receipt.as_ref() {
+                    telemetry.server_prompt_tokens = receipt.input_tokens();
+                    telemetry.server_output_tokens = receipt.output_tokens();
+                    telemetry.server_total_tokens = receipt.reported_total_tokens();
+                } else {
+                    telemetry.server_prompt_tokens = None;
+                    telemetry.server_output_tokens = None;
+                    telemetry.server_total_tokens = None;
+                }
                 if telemetry.serving_fingerprint.is_none() {
                     telemetry.serving_fingerprint = carried_fingerprint;
                 }
@@ -1155,7 +1188,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         // A finish_reason ends content, not necessarily accounting. Providers
         // with a declared stream-usage contract and managed gateways append
         // their authoritative receipt in later empty-choices frames.
-        if managed_receipt_frame || (terminal_frame && !managed_transport && !awaits_stream_usage) {
+        if managed_receipt_frame
+            || terminal_usage_receipt
+            || (terminal_frame && !managed_transport && !awaits_stream_usage)
+        {
             break;
         }
     }
@@ -1293,6 +1329,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_reported_total(telemetry.server_total_tokens)
     .with_cache(
         cache_read_tokens,
         cache_write_tokens,

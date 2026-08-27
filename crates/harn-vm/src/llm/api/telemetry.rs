@@ -130,6 +130,12 @@ pub struct ProviderTelemetry {
     /// Tokens the server reports it generated (Ollama `eval_count`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_output_tokens: Option<i64>,
+    /// Total tokens reported directly by the provider when it does not expose
+    /// a prompt/completion breakdown. Keep this separate from the component
+    /// counters so a total-only receipt remains observable without inventing
+    /// either component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_total_tokens: Option<i64>,
     /// Client-side wall clock around the HTTP request. Includes network and
     /// streaming latency the server-side counters omit. Recorded for every
     /// call regardless of provider.
@@ -234,6 +240,7 @@ impl ProviderTelemetry {
             server_uncached_prompt_tokens,
             server_cached_prompt_tokens,
             server_output_tokens,
+            server_total_tokens,
             client_wall_ms,
             client_first_frame_ms,
             runtime_context_length,
@@ -258,6 +265,7 @@ impl ProviderTelemetry {
             && server_uncached_prompt_tokens.is_none()
             && server_cached_prompt_tokens.is_none()
             && server_output_tokens.is_none()
+            && server_total_tokens.is_none()
             && client_wall_ms.is_none()
             && client_first_frame_ms.is_none()
             && runtime_context_length.is_none()
@@ -310,11 +318,17 @@ impl ProviderTelemetry {
         telemetry.server_prompt_tokens = usage
             .get("prompt_tokens")
             .or_else(|| usage.get("input_tokens"))
-            .and_then(serde_json::Value::as_i64);
+            .and_then(serde_json::Value::as_i64)
+            .filter(|tokens| *tokens >= 0);
         telemetry.server_output_tokens = usage
             .get("completion_tokens")
             .or_else(|| usage.get("output_tokens"))
-            .and_then(serde_json::Value::as_i64);
+            .and_then(serde_json::Value::as_i64)
+            .filter(|tokens| *tokens >= 0);
+        telemetry.server_total_tokens = usage
+            .get("total_tokens")
+            .and_then(serde_json::Value::as_i64)
+            .filter(|tokens| *tokens >= 0);
         if let Some(timings) = response
             .get("timings")
             .filter(|value| value.is_object())
@@ -524,6 +538,7 @@ impl ProviderTelemetry {
             self.server_cached_prompt_tokens,
         );
         insert_opt_i64(&mut dict, "server_output_tokens", self.server_output_tokens);
+        insert_opt_i64(&mut dict, "server_total_tokens", self.server_total_tokens);
         insert_opt_u64(&mut dict, "client_wall_ms", self.client_wall_ms);
         insert_opt_u64(
             &mut dict,
@@ -964,6 +979,7 @@ mod tests {
             server_uncached_prompt_tokens: Some(2),
             server_cached_prompt_tokens: Some(2),
             server_output_tokens: Some(5),
+            server_total_tokens: Some(9),
             client_wall_ms: Some(2_000),
             client_first_frame_ms: Some(1_500),
             runtime_context_length: Some(8_192),
@@ -1008,7 +1024,7 @@ mod tests {
         // silently excused from the check above.
         assert_eq!(
             encoded.len(),
-            23,
+            24,
             "every ProviderTelemetry field must be populated for the census to \
              cover it; update this count when the struct gains a field"
         );

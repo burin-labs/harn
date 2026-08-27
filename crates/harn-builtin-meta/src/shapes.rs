@@ -445,6 +445,7 @@ pub const LLM_PROVIDER_ATTEMPTS: Ty = Ty::Shape(&[
 pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("input_tokens", TY_INT),
     ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::optional("reported_total_tokens", TY_INT),
     ShapeFieldDescriptor::new("cost_usd", TY_FLOAT_OR_NIL),
     ShapeFieldDescriptor::new("known_cost_usd", TY_FLOAT),
     ShapeFieldDescriptor::new("provider_call_count", TY_INT),

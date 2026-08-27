@@ -318,6 +318,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -378,6 +380,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
       "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
@@ -563,6 +566,7 @@
         "method": "GET",
         "url": "https://huggingface.co/api/whoami-v2"
       },
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -785,6 +789,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -903,6 +909,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -966,6 +974,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1447,6 +1457,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],

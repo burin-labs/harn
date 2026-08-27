@@ -231,6 +231,7 @@ fn scorecard_aggregates_saved_probe_telemetry_without_guessing_missing_usage() {
     fast.usage = Some(ToolProbeUsage {
         input_tokens: Some(100),
         output_tokens: Some(20),
+        reported_total_tokens: None,
         cost_usd: Some(0.0012),
         accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
     });
@@ -244,6 +245,7 @@ fn scorecard_aggregates_saved_probe_telemetry_without_guessing_missing_usage() {
     throttled.usage = Some(ToolProbeUsage {
         input_tokens: Some(40),
         output_tokens: None,
+        reported_total_tokens: None,
         cost_usd: None,
         accounting_status: crate::llm::usage::UsageAccountingStatus::Unknown,
     });

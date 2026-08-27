@@ -152,6 +152,150 @@ async fn together_reads_trailing_usage_after_finish_reason() {
 }
 
 #[tokio::test]
+async fn minimax_usage_receipt_completes_without_done_sentinel() {
+    let body = concat!(
+        "data: {\"id\":\"req-live\",\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n",
+        "data: {\"id\":\"req-live\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"id\":\"req-live\",\"choices\":[],\"usage\":{\"prompt_tokens\":44,\"completion_tokens\":1,\"total_tokens\":45}}\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "minimax",
+        "MiniMax-M2",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("terminal usage receipt must complete the stream");
+    assert_eq!(result.text, "pong");
+    assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+    assert_eq!(result.input_tokens, 44);
+    assert_eq!(result.output_tokens, 1);
+}
+
+#[tokio::test]
+async fn total_only_usage_receipt_retains_the_measured_total_without_inventing_components() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n",
+        "data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"choices\":[],\"usage\":{\"total_tokens\":45}}\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "minimax",
+        "MiniMax-M2",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("a measured total-only receipt must complete the stream");
+
+    assert_eq!(result.text, "pong");
+    assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+    assert_eq!((result.input_tokens, result.output_tokens), (0, 0));
+    assert_eq!(result.telemetry.server_total_tokens, Some(45));
+    let usage = result.usage();
+    assert_eq!(usage.reported_total_tokens, Some(45));
+    assert_eq!(
+        usage.accounting_status,
+        crate::llm::usage::UsageAccountingStatus::Reported
+    );
+    assert_eq!(usage.unpriced_calls, 1);
+}
+
+#[tokio::test]
+async fn observed_zero_total_is_still_a_terminal_usage_receipt() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n",
+        "data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"choices\":[],\"usage\":{\"total_tokens\":0}}\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "minimax",
+        "MiniMax-M2",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("an observed zero is measured and must complete the stream");
+
+    assert_eq!(result.telemetry.server_total_tokens, Some(0));
+    let usage = result.usage();
+    assert_eq!(usage.reported_total_tokens, Some(0));
+    assert_eq!(
+        usage.accounting_status,
+        crate::llm::usage::UsageAccountingStatus::Reported
+    );
+}
+
+#[tokio::test]
+async fn negative_usage_counter_cannot_complete_a_stream_without_done() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n",
+        "data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":-1,\"total_tokens\":45}}\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "minimax",
+        "MiniMax-M2",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("a negative usage counter must not turn EOF into success");
+    let failure = err
+        .provider_stream_failure()
+        .expect("typed provider stream failure");
+    assert_eq!(failure.reason, ProviderStreamFailureReason::PrematureEof);
+    assert!(failure.partial);
+}
+
+#[tokio::test]
+async fn empty_usage_frame_without_a_counter_is_not_terminal() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n",
+        "data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"choices\":[],\"usage\":{}}\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "minimax",
+        "MiniMax-M2",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("an unmeasured usage frame must not turn EOF into success");
+    let failure = err
+        .provider_stream_failure()
+        .expect("typed provider stream failure");
+    assert_eq!(failure.reason, ProviderStreamFailureReason::PrematureEof);
+    assert!(failure.partial);
+}
+
+#[tokio::test]
 async fn openrouter_reads_trailing_usage_and_exact_cost_after_finish_reason() {
     let body = concat!(
         "data: {\"id\":\"gen-live\",\"model\":\"qwen/test\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",

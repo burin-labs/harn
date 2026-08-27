@@ -314,6 +314,7 @@ mod telemetry_tests {
         let usage = LlmUsage {
             input_tokens: 100,
             output_tokens: 20,
+            reported_total_tokens: Some(120),
             cost_usd: Some(0.0123),
             cache_read_tokens: 40,
             cache_write_tokens: 8,
@@ -334,6 +335,7 @@ mod telemetry_tests {
 
         assert_eq!(payload["input_tokens"], json!(100));
         assert_eq!(payload["output_tokens"], json!(20));
+        assert_eq!(payload["reported_total_tokens"], json!(120));
         assert_eq!(payload["cache_read_tokens"], json!(40));
         assert_eq!(payload["cache_write_tokens"], json!(8));
         assert_eq!(payload["known_cost_usd"], json!(0.0123));
