@@ -768,7 +768,15 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
 }
 
 async fn check_ollama() -> DoctorCheck {
-    if which::which("ollama").is_err() {
+    let binary = which::which("ollama").ok();
+    check_ollama_at(binary.as_deref()).await
+}
+
+/// Inspect the already-resolved Ollama executable. Resolving once at the
+/// boundary avoids a lookup/use race, and the explicit `None` path lets tests
+/// prove missing-tool behavior without mutating process-global `PATH`.
+async fn check_ollama_at(binary: Option<&Path>) -> DoctorCheck {
+    let Some(binary) = binary else {
         return DoctorCheck {
             id: "ollama".to_string(),
             status: DoctorStatus::Skip,
@@ -776,8 +784,8 @@ async fn check_ollama() -> DoctorCheck {
             detail: "ollama not installed; see https://ollama.com".to_string(),
             ..Default::default()
         };
-    }
-    let output = tokio::process::Command::new("ollama")
+    };
+    let output = tokio::process::Command::new(binary)
         .arg("list")
         .output()
         .await;
@@ -1656,9 +1664,10 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 mod tests {
     use super::{
         build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
-        check_ollama, check_platform_capabilities, find_nearest_manifest, format_trigger_metrics,
-        read_manifest, stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport,
-        DoctorStatus, HardwareSnapshot, SandboxProfile, TargetInfo, DOCTOR_SCHEMA_VERSION,
+        check_ollama_at, check_platform_capabilities, find_nearest_manifest,
+        format_trigger_metrics, read_manifest, stdlib_capability_matrix, target_doctor_checks,
+        DoctorCheck, DoctorReport, DoctorStatus, HardwareSnapshot, SandboxProfile, TargetInfo,
+        DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
@@ -1894,18 +1903,7 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn ollama_check_skips_when_binary_missing() {
-        // Force `which` to fail by clearing PATH for the duration of this
-        // assertion. We restore it immediately on return; the global env
-        // mutation is bracketed and the test is single-threaded.
-        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
-        let prev = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-        let result = check_ollama().await;
-        if let Some(prev) = prev {
-            std::env::set_var("PATH", prev);
-        } else {
-            std::env::remove_var("PATH");
-        }
+        let result = check_ollama_at(None).await;
         assert_eq!(result.status, DoctorStatus::Skip);
         assert!(
             result.detail.contains("not installed") || result.detail.contains("not callable"),
