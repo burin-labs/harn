@@ -479,6 +479,23 @@ pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result
             &opts.model,
         ));
     }
+    if opts.provider.eq_ignore_ascii_case("anthropic")
+        && matches!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Enabled { .. }
+        )
+        && !crate::llm::providers::anthropic::model_requires_adaptive_thinking(&opts.model)
+        && opts
+            .tool_choice
+            .as_ref()
+            .is_some_and(crate::llm::providers::anthropic::tool_choice_forces_tool_use)
+    {
+        return Err(crate::llm::call::invalid_request_error(
+            "Anthropic cannot combine forced tool choice with manual thinking; use `tool_choice: \"auto\"`, disable thinking, or use adaptive thinking",
+            &opts.provider,
+            &opts.model,
+        ));
+    }
     if opts.logprobs.is_some()
         && opts.stream
         && opts.provider.eq_ignore_ascii_case("gemini")
@@ -707,5 +724,29 @@ mod tests {
             .insert(crate::llm::capabilities::PortableOption::Prediction);
         let error = validate_options(&options).expect_err("combination is provider-invalid");
         assert!(format!("{error:?}").contains("choose one"));
+    }
+
+    #[test]
+    fn anthropic_rejects_forced_tool_choice_with_manual_thinking() {
+        let options = crate::llm::api::LlmCallOptions {
+            provider: "anthropic".to_string(),
+            model: "claude-haiku-4-5-20251001".to_string(),
+            thinking: crate::llm::api::ThinkingConfig::Enabled {
+                budget_tokens: Some(1024),
+            },
+            tool_choice: Some(serde_json::json!("required")),
+            ..Default::default()
+        };
+
+        let error = validate_options(&options).expect_err("combination is provider-invalid");
+        assert!(format!("{error:?}").contains("manual thinking"));
+
+        let mut automatic = options.clone();
+        automatic.tool_choice = Some(serde_json::json!("auto"));
+        validate_options(&automatic).expect("automatic tool choice remains valid");
+
+        let mut adaptive = options;
+        adaptive.thinking = crate::llm::api::ThinkingConfig::Adaptive;
+        validate_options(&adaptive).expect("adaptive thinking permits forced tool choice");
     }
 }
