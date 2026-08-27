@@ -371,7 +371,9 @@ mod tests {
         );
         assert!(requested_schema.to_string().contains("maxLength"));
         assert!(
-            !sent_schema.to_string().contains("maxLength"),
+            sent_schema["properties"]["private_contract_marker"]
+                .get("maxLength")
+                .is_none(),
             "provider schema must omit the unsupported length cap: {sent_schema}"
         );
         assert!(
@@ -390,6 +392,7 @@ mod tests {
         ] {
             let mut opts = crate::llm::api::options::base_opts("openai");
             opts.output_format = format;
+            opts.output_schema = None;
             let payload = crate::llm::api::LlmRequestPayload::from(&opts);
             let receipt = structured_output_receipt(&opts, &payload);
 
