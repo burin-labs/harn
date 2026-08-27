@@ -206,7 +206,7 @@
 #                     reasoning fields are private trace, not committed answer.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
-#                     openrouter, enabled, minimax, or zai.
+#                     openrouter, enabled, minimax, or thinking_type.
 #   reasoning_excluded_portable_options:
 #                     caller-selected generation options that this route
 #                     accepts with reasoning off but rejects while reasoning

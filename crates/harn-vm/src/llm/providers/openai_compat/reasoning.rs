@@ -1,9 +1,10 @@
 //! Per-dialect reasoning/thinking request shapes.
 //!
 //! OpenAI-compatible servers disagree on how a reasoning directive is spelled:
-//! OpenRouter takes a `reasoning` object, MiniMax and Z.AI take `thinking`,
-//! and several routes accept only a subset of the directives. The capability
-//! row picks the dialect; these builders produce its body.
+//! OpenRouter takes a `reasoning` object, while DeepSeek, MiniMax, and Z.AI
+//! take provider-specific `thinking` objects. Several routes accept only a
+//! subset of the directives. The capability row picks the dialect; these
+//! builders produce its body.
 
 use crate::llm::api::ThinkingConfig;
 
@@ -96,7 +97,7 @@ pub(super) fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde
     }
 }
 
-pub(super) fn zai_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+pub(super) fn typed_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
         ThinkingConfig::Disabled
         | ThinkingConfig::Effort {

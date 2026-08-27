@@ -36,7 +36,7 @@ use self::messages::{
 };
 use self::reasoning::{
     enabled_reasoning_config, is_openrouter_reasoning_disable, minimax_thinking_config,
-    model_declares_reasoning, openrouter_reasoning_config, zai_thinking_config,
+    model_declares_reasoning, openrouter_reasoning_config, typed_thinking_config,
 };
 use self::streaming::canonicalizing_delta_tx;
 use self::tools::{normalize_tool_choice_for_capabilities, provider_request_tools};
@@ -302,8 +302,8 @@ impl OpenAiCompatibleProvider {
                     }
                 }
             }
-            Some("zai") => {
-                if let Some(thinking) = zai_thinking_config(&opts.thinking) {
+            Some("thinking_type") => {
+                if let Some(thinking) = typed_thinking_config(&opts.thinking) {
                     body["thinking"] = thinking;
                 }
             }

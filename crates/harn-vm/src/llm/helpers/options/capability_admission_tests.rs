@@ -156,3 +156,50 @@ fn gemini_interactions_penalties_fail_before_request_construction() {
     extract_with_options(gemini_interactions_options())
         .expect("an Interactions call without penalties remains admissible");
 }
+
+#[test]
+fn deepseek_v4_admits_only_its_documented_reasoning_efforts() {
+    let _deepseek_key = ScopedEnvVar::set("DEEPSEEK_API_KEY", "test-key");
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        for raw in ["low", "high", "max"] {
+            let options = crate::value::DictMap::from_iter([
+                (
+                    crate::value::intern_key("provider"),
+                    VmValue::String(arcstr::ArcStr::from("deepseek")),
+                ),
+                (
+                    crate::value::intern_key("model"),
+                    VmValue::String(arcstr::ArcStr::from(model)),
+                ),
+                (
+                    crate::value::intern_key("effort"),
+                    VmValue::String(arcstr::ArcStr::from(raw)),
+                ),
+            ]);
+
+            extract_with_options(options).expect("documented DeepSeek effort should be admitted");
+        }
+    }
+
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("deepseek")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("deepseek-v4-flash")),
+        ),
+        (
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from("medium")),
+        ),
+    ]);
+    let err = extract_with_options(options).expect_err("undocumented effort must stay rejected");
+
+    assert!(
+        err.to_string()
+            .contains("supported reasoning_effort values: low, high, max"),
+        "unexpected error: {err}"
+    );
+}

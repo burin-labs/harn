@@ -226,7 +226,7 @@ batch_operational_notes = [
 top_k_supported = false
 
 [provider_defaults.zai]
-reasoning_wire_format = "zai"
+reasoning_wire_format = "thinking_type"
 
 [provider_defaults.baseten]
 top_k_supported = false

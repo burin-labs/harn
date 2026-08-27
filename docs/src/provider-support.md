@@ -76,7 +76,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | No | none | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `high` | `not_recorded` |
-| `DeepSeek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
+| `DeepSeek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |

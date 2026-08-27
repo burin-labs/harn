@@ -227,6 +227,44 @@ fn zai_glm52_none_effort_is_explicitly_supported() {
 }
 
 #[test]
+fn deepseek_v4_uses_documented_thinking_and_effort_fields() {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        for (thinking, expected_type, expected_effort) in [
+            (ThinkingConfig::Disabled, "disabled", None),
+            (
+                ThinkingConfig::Enabled {
+                    budget_tokens: None,
+                },
+                "enabled",
+                None,
+            ),
+            (
+                ThinkingConfig::Effort {
+                    level: ReasoningEffort::High,
+                },
+                "enabled",
+                Some("high"),
+            ),
+        ] {
+            let mut payload = base_request_payload();
+            payload.provider = "deepseek".to_string();
+            payload.model = model.to_string();
+            payload.thinking = thinking;
+
+            let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+            assert_eq!(body["thinking"], json!({"type": expected_type}));
+            assert_eq!(
+                body.get("reasoning_effort")
+                    .and_then(serde_json::Value::as_str),
+                expected_effort
+            );
+            assert!(body.get("reasoning").is_none());
+        }
+    }
+}
+
+#[test]
 fn minimax_m3_uses_adaptive_thinking_and_completion_tokens() {
     let mut payload = base_request_payload();
     payload.provider = "minimax".to_string();
