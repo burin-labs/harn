@@ -37,6 +37,42 @@ fn served_tool_names(
         .collect()
 }
 
+/// Fingerprint the caller's output contract and its provider-compatible
+/// projection without retaining either schema in the default transcript.
+///
+/// `LlmRequestPayload` is the single request boundary that owns provider
+/// compatibility projection. Reading the sent hash from it keeps this receipt
+/// aligned with streaming validation and provider serialization instead of
+/// reconstructing provider policy in observability code.
+pub(super) fn structured_output_receipt(
+    opts: &super::super::api::LlmCallOptions,
+    payload: &super::super::api::LlmRequestPayload,
+) -> serde_json::Value {
+    let (mode, strict, requested_schema, sent_schema) = match &opts.output_format {
+        super::super::api::OutputFormat::Text => ("text", None, None, None),
+        super::super::api::OutputFormat::JsonObject => ("json_object", None, None, None),
+        super::super::api::OutputFormat::JsonSchema { schema, strict } => (
+            "json_schema",
+            Some(*strict),
+            Some(opts.output_schema.as_ref().unwrap_or(schema)),
+            payload.output_schema.as_ref(),
+        ),
+    };
+    let hash = |schema: Option<&serde_json::Value>| {
+        schema
+            .map(stable_redacted_json_hash)
+            .map_or(serde_json::Value::Null, serde_json::Value::String)
+    };
+
+    serde_json::json!({
+        "schema": "harn.llm.structured_output_receipt.v1",
+        "mode": mode,
+        "strict": strict,
+        "requested_schema_content_hash": hash(requested_schema),
+        "sent_schema_content_hash": hash(sent_schema),
+    })
+}
+
 pub(super) fn served_context_receipt(
     payload: &super::super::api::LlmRequestPayload,
     manifest: &crate::llm::prompt::ContextAssemblyManifest,
@@ -280,6 +316,91 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn provider_request_receipts_distinguish_requested_and_sent_output_schemas() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-output-schema-receipt");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let requested_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "private_contract_marker": {"type": "string", "maxLength": 5}
+            },
+            "required": ["private_contract_marker"],
+            "additionalProperties": false
+        });
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-luna".to_string();
+        opts.output_schema = Some(requested_schema.clone());
+        opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: requested_schema.clone(),
+            strict: true,
+        };
+
+        let payload =
+            super::super::dump_llm_request(1, "call-output-schema-receipt", "none", &opts)
+                .expect("valid request");
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let request = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_request")
+            .expect("provider_call_request event");
+        let receipt = &request["structured_output"];
+        let sent_schema = payload.output_schema.expect("sent output schema");
+
+        assert_eq!(receipt["mode"], serde_json::json!("json_schema"));
+        assert_eq!(receipt["strict"], serde_json::json!(true));
+        assert_eq!(
+            receipt["requested_schema_content_hash"],
+            serde_json::json!(stable_redacted_json_hash(&requested_schema))
+        );
+        assert_eq!(
+            receipt["sent_schema_content_hash"],
+            serde_json::json!(stable_redacted_json_hash(&sent_schema))
+        );
+        assert_ne!(
+            receipt["requested_schema_content_hash"], receipt["sent_schema_content_hash"],
+            "the control schema must exercise provider compatibility projection"
+        );
+        assert!(requested_schema.to_string().contains("maxLength"));
+        assert!(
+            sent_schema["properties"]["private_contract_marker"]
+                .get("maxLength")
+                .is_none(),
+            "provider schema must omit the unsupported length cap: {sent_schema}"
+        );
+        assert!(
+            !request.to_string().contains("private_contract_marker"),
+            "default request events must retain schema hashes, not schema contents"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn schema_free_output_modes_do_not_invent_schema_hashes_or_strictness() {
+        for (format, expected_mode) in [
+            (crate::llm::api::OutputFormat::Text, "text"),
+            (crate::llm::api::OutputFormat::JsonObject, "json_object"),
+        ] {
+            let mut opts = crate::llm::api::options::base_opts("openai");
+            opts.output_format = format;
+            let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+            let receipt = structured_output_receipt(&opts, &payload);
+
+            assert_eq!(receipt["mode"], serde_json::json!(expected_mode));
+            assert!(receipt["strict"].is_null());
+            assert!(receipt["requested_schema_content_hash"].is_null());
+            assert!(receipt["sent_schema_content_hash"].is_null());
+        }
     }
 
     /// Every per-call `served_context` hash must resolve to retained bytes

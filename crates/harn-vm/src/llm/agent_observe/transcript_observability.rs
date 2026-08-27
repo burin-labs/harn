@@ -492,6 +492,7 @@ pub(super) fn dump_llm_request(
         "tool_format": tool_format,
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": payload.messages.len(),
+        "structured_output": served_context_receipts::structured_output_receipt(opts, &payload),
         "served_context": served_context_receipts::served_context_receipt(
             &payload,
             &served_manifest,
