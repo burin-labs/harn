@@ -925,21 +925,16 @@ impl LlmCallOptions {
         Some((self.output_schema.as_ref().unwrap_or(schema), *strict))
     }
 
-    /// Return the provider-compatible schema that local response validation
-    /// must enforce. This is deliberately the same projection payload creation
-    /// records for the wire request; the original schema still owns retry
-    /// guidance and transcript context.
-    pub(crate) fn validation_output_schema(&self) -> Option<serde_json::Value> {
-        let Some((schema, strict)) = self.structured_output_schema() else {
-            return self.output_schema.clone();
-        };
-        Some(project_output_schema_for_provider(
-            &self.provider,
-            &self.model,
-            strict,
-            schema,
-            false,
-        ))
+    /// Return the caller-selected contract for completed-response validation.
+    ///
+    /// [`LlmRequestPayload`] owns the weaker provider projection used on the
+    /// wire and by the mid-stream viability check. Once the provider has
+    /// completed the response, validation must restore every caller rule so a
+    /// compatibility transform cannot silently weaken the local contract.
+    pub(crate) fn caller_output_schema(&self) -> Option<&serde_json::Value> {
+        self.structured_output_schema()
+            .map(|(schema, _strict)| schema)
+            .or(self.output_schema.as_ref())
     }
 }
 

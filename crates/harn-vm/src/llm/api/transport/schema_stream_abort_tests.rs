@@ -140,7 +140,7 @@ async fn stream_validation_uses_the_schema_sent_to_the_provider() {
 }
 
 #[test]
-fn post_stream_validation_uses_the_schema_sent_to_the_provider() {
+fn post_stream_validation_restores_the_caller_schema() {
     let schema = serde_json::json!({
         "type": "object",
         "required": ["detail"],
@@ -160,8 +160,8 @@ fn post_stream_validation_uses_the_schema_sent_to_the_provider() {
     }));
 
     assert!(
-        crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
-        "post-stream validation must use the schema sent to the provider"
+        !crate::llm::call::compute_validation_errors(&data, &opts).is_empty(),
+        "completed-response validation must restore the caller's length rule"
     );
 }
 
