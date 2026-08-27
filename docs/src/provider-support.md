@@ -82,7 +82,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
 | `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.6-27b` | `native` | yes | yes | `native` / `native_json` | none | yes | Yes (50%) | none | `high` | `not_recorded` |
+| `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.6-27b` | `native` | yes | yes | `native` / `native_json` | `toggle` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |

@@ -9744,7 +9744,9 @@
         "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "toggle"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
@@ -9775,6 +9777,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "thinking",
         "structured_output",
         "batch"
       ],
@@ -27432,6 +27435,7 @@
         "structured_output",
         "structured_output_mode:native_json",
         "text_tools",
+        "thinking",
         "tools"
       ]
     },

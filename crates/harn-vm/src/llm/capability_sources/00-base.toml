@@ -153,7 +153,7 @@
 #   thinking_block_style:
 #                     preferred transcript thinking style: none, thinking_blocks,
 #                     reasoning_summary, inline.
-#   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
+#   thinking_modes  : supported script-facing modes: toggle, enabled, adaptive, effort.
 #   interleaved_thinking_supported:
 #                     whether `thinking` can opt Anthropic Messages API
 #                     requests into the interleaved-thinking beta header.
