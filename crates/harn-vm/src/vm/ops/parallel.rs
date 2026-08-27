@@ -261,110 +261,6 @@ where
         .collect())
 }
 
-#[cfg(test)]
-mod scheduler_tests {
-    use std::future::Future;
-    use std::pin::Pin;
-
-    use super::*;
-    use crate::value::{VmChannelCloseState, VmChannelHandle};
-    use crate::wait_for_graph::{channel_target, VmWaitForGraph};
-
-    type Branch = Pin<Box<dyn Future<Output = Result<(), VmError>> + Send>>;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn admitted_lower_index_remains_visible_when_higher_index_starts_first() {
-        let graph = Arc::new(VmWaitForGraph::new());
-        let _root_activity = graph.register_task("root");
-        let _root_wait = graph
-            .wait_for_tasks("root", ["child:0".to_string(), "child:1".to_string()])
-            .expect("scheduled children can still make progress");
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        let channel = VmChannelHandle {
-            name: Arc::from("empty"),
-            sender: Arc::new(sender),
-            receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
-            close: Arc::new(VmChannelCloseState::open()),
-        };
-        let target = channel_target(&channel);
-        let (release_first, first_released) = tokio::sync::oneshot::channel();
-
-        let first: Branch = Box::pin(async move {
-            first_released
-                .await
-                .map_err(|error| VmError::Runtime(error.to_string()))?;
-            Ok(())
-        });
-        let second_graph = Arc::clone(&graph);
-        let second: Branch = Box::pin(async move {
-            let _started_activity = second_graph.register_task("child:1");
-            let wait = second_graph.wait_for_channel_receive("child:1", vec![target]);
-            let _ = release_first.send(());
-            let _wait = wait?;
-            Ok(())
-        });
-        let registry = crate::stdlib::pool::new_pool_registry();
-        let futures = vec![
-            subtask::prepare(Arc::clone(&registry), first),
-            subtask::prepare(registry, second),
-        ];
-
-        run_capped_ordered_fail_fast(
-            futures,
-            None,
-            Arc::clone(&graph),
-            vec!["child:0".to_string(), "child:1".to_string()],
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            "test parallel error",
-        )
-        .await
-        .expect("the admitted lower-index branch is runnable even before its body starts");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn fail_fast_keeps_initiating_deadlock_over_cleanup_cancellation() {
-        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let lower_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let lower_token = Arc::clone(&cancel_token);
-        let lower_signal = Arc::clone(&lower_started);
-        let lower: Branch = Box::pin(async move {
-            lower_signal.store(true, std::sync::atomic::Ordering::SeqCst);
-            while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
-                std::hint::spin_loop();
-            }
-            Err(crate::vm::Vm::cancelled_error())
-        });
-        let higher_signal = Arc::clone(&lower_started);
-        let higher: Branch = Box::pin(async move {
-            while !higher_signal.load(std::sync::atomic::Ordering::SeqCst) {
-                tokio::task::yield_now().await;
-            }
-            Err(VmError::Deadlock(Box::new(DeadlockError::wait_for_graph(
-                "channel",
-                "empty",
-                "initiating semantic error",
-            ))))
-        });
-        let registry = crate::stdlib::pool::new_pool_registry();
-        let graph = Arc::new(VmWaitForGraph::new());
-        let error = run_capped_ordered_fail_fast(
-            vec![
-                subtask::prepare(Arc::clone(&registry), lower),
-                subtask::prepare(registry, higher),
-            ],
-            None,
-            graph,
-            vec!["child:0".to_string(), "child:1".to_string()],
-            cancel_token,
-            "test parallel error",
-        )
-        .await
-        .unwrap_err();
-
-        assert!(error.to_string().contains("HARN-ORC-012"));
-    }
-}
-
 async fn stream_capped_unordered<F, T>(
     futures: Vec<subtask::PreparedSubtask<F>>,
     cap: Option<usize>,
@@ -885,5 +781,109 @@ impl super::super::Vm {
 
     pub(super) fn execute_deadline_end(&mut self) {
         self.deadlines.pop();
+    }
+}
+
+#[cfg(test)]
+mod scheduler_tests {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use super::*;
+    use crate::value::{VmChannelCloseState, VmChannelHandle};
+    use crate::wait_for_graph::{channel_target, VmWaitForGraph};
+
+    type Branch = Pin<Box<dyn Future<Output = Result<(), VmError>> + Send>>;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn admitted_lower_index_remains_visible_when_higher_index_starts_first() {
+        let graph = Arc::new(VmWaitForGraph::new());
+        let _root_activity = graph.register_task("root");
+        let _root_wait = graph
+            .wait_for_tasks("root", ["child:0".to_string(), "child:1".to_string()])
+            .expect("scheduled children can still make progress");
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let channel = VmChannelHandle {
+            name: Arc::from("empty"),
+            sender: Arc::new(sender),
+            receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
+            close: Arc::new(VmChannelCloseState::open()),
+        };
+        let target = channel_target(&channel);
+        let (release_first, first_released) = tokio::sync::oneshot::channel();
+
+        let first: Branch = Box::pin(async move {
+            first_released
+                .await
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
+            Ok(())
+        });
+        let second_graph = Arc::clone(&graph);
+        let second: Branch = Box::pin(async move {
+            let _started_activity = second_graph.register_task("child:1");
+            let wait = second_graph.wait_for_channel_receive("child:1", vec![target]);
+            let _ = release_first.send(());
+            let _wait = wait?;
+            Ok(())
+        });
+        let registry = crate::stdlib::pool::new_pool_registry();
+        let futures = vec![
+            subtask::prepare(Arc::clone(&registry), first),
+            subtask::prepare(registry, second),
+        ];
+
+        run_capped_ordered_fail_fast(
+            futures,
+            None,
+            Arc::clone(&graph),
+            vec!["child:0".to_string(), "child:1".to_string()],
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            "test parallel error",
+        )
+        .await
+        .expect("the admitted lower-index branch is runnable even before its body starts");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fail_fast_keeps_initiating_deadlock_over_cleanup_cancellation() {
+        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lower_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lower_token = Arc::clone(&cancel_token);
+        let lower_signal = Arc::clone(&lower_started);
+        let lower: Branch = Box::pin(async move {
+            lower_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            while !lower_token.load(std::sync::atomic::Ordering::SeqCst) {
+                std::hint::spin_loop();
+            }
+            Err(crate::vm::Vm::cancelled_error())
+        });
+        let higher_signal = Arc::clone(&lower_started);
+        let higher: Branch = Box::pin(async move {
+            while !higher_signal.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+            Err(VmError::Deadlock(Box::new(DeadlockError::wait_for_graph(
+                "channel",
+                "empty",
+                "initiating semantic error",
+            ))))
+        });
+        let registry = crate::stdlib::pool::new_pool_registry();
+        let graph = Arc::new(VmWaitForGraph::new());
+        let error = run_capped_ordered_fail_fast(
+            vec![
+                subtask::prepare(Arc::clone(&registry), lower),
+                subtask::prepare(registry, higher),
+            ],
+            None,
+            graph,
+            vec!["child:0".to_string(), "child:1".to_string()],
+            cancel_token,
+            "test parallel error",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("HARN-ORC-012"));
     }
 }
