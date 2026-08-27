@@ -502,6 +502,7 @@ fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
     assert_eq!(model.provider, "groq");
     assert_eq!(model.context_window, 131_042);
     assert_eq!(model.wire_model.as_deref(), Some("qwen/qwen3.8-27b"));
+    assert_eq!(model.open_weight, Some(true));
     for capability in ["tools", "vision", "streaming", "thinking"] {
         assert!(
             model.capabilities.iter().any(|value| value == capability),

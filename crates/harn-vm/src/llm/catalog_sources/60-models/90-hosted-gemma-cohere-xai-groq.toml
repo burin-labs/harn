@@ -218,6 +218,7 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # tools-plus-JSON rejection were verified against the live route on 2026-08-26.
 pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00 }
 tier = "mid"
+open_weight = true
 strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]
 
 # Cohere and xAI first-party routes. Both are OpenAI-compatible enough for

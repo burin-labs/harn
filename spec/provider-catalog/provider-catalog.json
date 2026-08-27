@@ -9868,6 +9868,7 @@
       "family": "qwen",
       "lineage": "qwen3",
       "tier": "mid",
+      "open_weight": true,
       "strengths": [
         "speed",
         "coding",
