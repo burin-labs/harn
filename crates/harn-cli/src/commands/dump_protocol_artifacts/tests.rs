@@ -38,6 +38,7 @@ use super::*;
 mod generated_rust_binding;
 
 mod external_action_roundtrip;
+mod session_recap;
 
 fn protocol_source() -> ProtocolArtifactSource {
     ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
@@ -885,6 +886,9 @@ fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
         }
         "harn_vm::session_timeline::SESSION_TIMELINE_UNSUBSCRIBE_METHOD" => {
             Some(SESSION_TIMELINE_UNSUBSCRIBE_METHOD.to_string())
+        }
+        "harn_vm::session_recap::SESSION_RECAP_QUERY_METHOD" => {
+            Some(harn_vm::session_recap::SESSION_RECAP_QUERY_METHOD.to_string())
         }
         "harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD" => {
             Some(SESSION_VIEW_QUERY_METHOD.to_string())

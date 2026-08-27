@@ -308,7 +308,7 @@ async fn recap_projects_non_vacuous_typed_turn_facts_without_private_content() {
             .as_ref()
             .expect("typed verification")
             .status,
-        "passed"
+        RecapVerificationStatus::Passed
     );
     assert_eq!(iteration.plans.len(), 1);
     assert_eq!(iteration.progress.len(), 1);
@@ -527,6 +527,64 @@ async fn changing_one_source_payload_changes_both_projected_hashes() {
     assert_ne!(original.projection_hash, projected.projection_hash);
 }
 
+#[tokio::test]
+async fn decorative_extensions_do_not_change_the_base_projection_hash() {
+    let store = MemorySessionStore::default();
+    create_session(&store, "extension-boundary").await;
+    append_fixture(&store, "extension-boundary").await;
+    let mut recap =
+        query_session_recap(&store, SessionRecapQuery::for_session("extension-boundary"))
+            .await
+            .expect("query recap")
+            .expect("session exists");
+
+    let base_hash = recap_projection_hash(
+        &recap.session_id,
+        &recap.query,
+        &recap.cursor,
+        &recap.coverage,
+        &recap.content_hash,
+        &recap.turns,
+    );
+    assert_eq!(recap.projection_hash, base_hash);
+    recap.extensions.insert(
+        "example.harn.dev/enrichment".to_string(),
+        json!({"summary": "decorative", "sourceProjectionHash": base_hash}),
+    );
+
+    assert_eq!(
+        recap_projection_hash(
+            &recap.session_id,
+            &recap.query,
+            &recap.cursor,
+            &recap.coverage,
+            &recap.content_hash,
+            &recap.turns,
+        ),
+        recap.projection_hash,
+        "decorative extensions are outside the base projection hash"
+    );
+    assert_eq!(
+        recap.extensions["example.harn.dev/enrichment"]["sourceProjectionHash"],
+        recap.projection_hash,
+        "the extension carries its own explicit binding to the base projection"
+    );
+    let incorrectly_extension_bound = sha256_canonical(&json!({
+        "schema_version": SESSION_RECAP_SCHEMA_VERSION,
+        "session_id": &recap.session_id,
+        "query": &recap.query,
+        "cursor": &recap.cursor,
+        "coverage": &recap.coverage,
+        "content_hash": &recap.content_hash,
+        "turns": &recap.turns,
+        "extensions": &recap.extensions,
+    }));
+    assert_ne!(
+        incorrectly_extension_bound, recap.projection_hash,
+        "the non-empty extension would change a hash that incorrectly included it"
+    );
+}
+
 #[test]
 fn terminal_availability_keeps_each_unavailable_cause_explicit() {
     let reasons = [
@@ -573,6 +631,7 @@ fn terminal_available_snapshot_round_trips_without_wire_indirection() {
         content_hash: "sha256:content".to_string(),
         projection_hash: "sha256:projection".to_string(),
         turns: Vec::new(),
+        extensions: BTreeMap::new(),
     };
     let wire = serde_json::to_value(SessionRecapAvailability::available(snapshot.clone()))
         .expect("serialize available recap");
@@ -582,11 +641,18 @@ fn terminal_available_snapshot_round_trips_without_wire_indirection() {
     assert!(wire.get("box").is_none());
 
     let decoded: SessionRecapAvailability =
-        serde_json::from_value(wire).expect("deserialize available recap");
+        serde_json::from_value(wire.clone()).expect("deserialize available recap");
     assert_eq!(
         decoded,
         SessionRecapAvailability::Available {
             snapshot: Box::new(snapshot),
         }
+    );
+
+    let mut unknown = wire;
+    unknown["snapshot"]["futureTopLevel"] = json!(true);
+    assert!(
+        serde_json::from_value::<SessionRecapAvailability>(unknown).is_err(),
+        "the owning runtime contract must reject unknown snapshot fields before write-back"
     );
 }

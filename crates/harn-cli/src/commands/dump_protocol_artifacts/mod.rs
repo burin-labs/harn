@@ -17,6 +17,7 @@ mod constants;
 mod external_action;
 mod external_action_types;
 mod manifest;
+mod session_recap;
 mod support;
 mod values;
 
@@ -195,6 +196,11 @@ fn generate_artifacts(
             PLAN_DOCUMENT_SCHEMA_ARTIFACT,
             serde_json::to_string_pretty(&harn_vm::llm::plan::plan_document_json_schema())
                 .map_err(|error| format!("failed to encode plan document schema: {error}"))?,
+        ),
+        Artifact::new(
+            harn_vm::session_recap::SESSION_RECAP_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&harn_vm::session_recap::session_recap_json_schema())
+                .map_err(|error| format!("failed to encode session recap schema: {error}"))?,
         ),
     ];
 

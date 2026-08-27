@@ -1483,6 +1483,7 @@ mod modes;
 mod oauth_redirect;
 mod prompt_errors;
 mod runtime_overrides;
+mod session_recap;
 mod session_restore;
 mod sessions;
 #[cfg(feature = "hostlib")]

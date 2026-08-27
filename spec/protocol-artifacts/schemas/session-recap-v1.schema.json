@@ -1,0 +1,640 @@
+{
+  "$defs": {
+    "completionState": {
+      "enum": [
+        "open",
+        "complete",
+        "incomplete",
+        "unassigned"
+      ]
+    },
+    "coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pending": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scanned": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "unassigned": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scanned",
+        "matched",
+        "pending",
+        "unassigned",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "cursor": {
+      "additionalProperties": false,
+      "properties": {
+        "lastEventId": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "nextEventId": {
+          "$ref": "#/$defs/nullableInteger"
+        }
+      },
+      "required": [
+        "lastEventId",
+        "nextEventId"
+      ],
+      "type": "object"
+    },
+    "iteration": {
+      "additionalProperties": false,
+      "properties": {
+        "assistantText": {
+          "items": {
+            "$ref": "#/$defs/textFact"
+          },
+          "type": "array"
+        },
+        "iteration": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "plans": {
+          "items": {
+            "$ref": "#/$defs/planFact"
+          },
+          "type": "array"
+        },
+        "progress": {
+          "items": {
+            "$ref": "#/$defs/progressFact"
+          },
+          "type": "array"
+        },
+        "sourceEventIds": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/completionState"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/toolExchange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "iteration",
+        "state",
+        "assistantText",
+        "tools",
+        "plans",
+        "progress",
+        "sourceEventIds"
+      ],
+      "type": "object"
+    },
+    "nullableInteger": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "inputRevisionId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "kind": {
+          "enum": [
+            "created",
+            "updated"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "eventId",
+        "inputRevisionId"
+      ],
+      "type": "object"
+    },
+    "planFact": {
+      "additionalProperties": false,
+      "properties": {
+        "documentId": {
+          "type": "string"
+        },
+        "event": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/planEvent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revisionId": {
+          "type": "string"
+        },
+        "sourceEventId": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/planStep"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "documentId",
+        "revisionId",
+        "title",
+        "summary",
+        "steps",
+        "event",
+        "sourceEventId"
+      ],
+      "type": "object"
+    },
+    "planStep": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "blocked",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "content",
+        "status"
+      ],
+      "type": "object"
+    },
+    "progressEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "priority": {
+          "oneOf": [
+            {
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ]
+        }
+      },
+      "required": [
+        "content",
+        "status",
+        "priority"
+      ],
+      "type": "object"
+    },
+    "progressFact": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/progressEntry"
+          },
+          "type": "array"
+        },
+        "message": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "replace": {
+          "type": "boolean"
+        },
+        "sourceEventId": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message",
+        "entries",
+        "replace",
+        "sourceEventId"
+      ],
+      "type": "object"
+    },
+    "query": {
+      "additionalProperties": false,
+      "properties": {
+        "fromEventId": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "limit": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "runId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sessionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "turnId": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "required": [
+        "sessionId",
+        "runId",
+        "turnId",
+        "fromEventId",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "contentHash": {
+          "pattern": "^sha256:",
+          "type": "string"
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "cursor": {
+          "$ref": "#/$defs/cursor"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "projectionHash": {
+          "pattern": "^sha256:",
+          "type": "string"
+        },
+        "query": {
+          "$ref": "#/$defs/query"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "sessionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/turn"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "query",
+        "cursor",
+        "coverage",
+        "source",
+        "contentHash",
+        "projectionHash",
+        "turns",
+        "extensions"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/sourceEvent"
+          },
+          "type": "array"
+        },
+        "firstEventId": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "lastEventId": {
+          "$ref": "#/$defs/nullableInteger"
+        }
+      },
+      "required": [
+        "firstEventId",
+        "lastEventId",
+        "events"
+      ],
+      "type": "object"
+    },
+    "sourceEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recordHash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eventId",
+        "recordHash"
+      ],
+      "type": "object"
+    },
+    "terminalFact": {
+      "additionalProperties": false,
+      "properties": {
+        "finalStatus": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "kind": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "owner": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sourceEventId": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/completionState"
+        },
+        "stopReason": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "required": [
+        "state",
+        "finalStatus",
+        "stopReason",
+        "kind",
+        "owner",
+        "reason",
+        "sourceEventId"
+      ],
+      "type": "object"
+    },
+    "textFact": {
+      "additionalProperties": false,
+      "properties": {
+        "sourceEventId": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "sourceEventId"
+      ],
+      "type": "object"
+    },
+    "toolExchange": {
+      "additionalProperties": false,
+      "properties": {
+        "callObserved": {
+          "type": "boolean"
+        },
+        "input": {},
+        "output": {},
+        "resultObserved": {
+          "type": "boolean"
+        },
+        "sourceEventIds": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "completed",
+            "failed",
+            "incomplete"
+          ]
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "verification": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/verification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "toolCallId",
+        "toolName",
+        "state",
+        "callObserved",
+        "resultObserved",
+        "input",
+        "output",
+        "verification",
+        "sourceEventIds"
+      ],
+      "type": "object"
+    },
+    "turn": {
+      "additionalProperties": false,
+      "properties": {
+        "iterations": {
+          "items": {
+            "$ref": "#/$defs/iteration"
+          },
+          "type": "array"
+        },
+        "prompts": {
+          "items": {
+            "$ref": "#/$defs/textFact"
+          },
+          "type": "array"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sourceEventIds": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/completionState"
+        },
+        "terminal": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/terminalFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turnId",
+        "runId",
+        "state",
+        "prompts",
+        "iterations",
+        "terminal",
+        "sourceEventIds"
+      ],
+      "type": "object"
+    },
+    "verification": {
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "type": "string"
+        },
+        "sourceEventId": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "const": "passed"
+        },
+        "verifiedPaths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema",
+        "status",
+        "verifiedPaths",
+        "sourceEventId"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/session-recap-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "state": {
+          "const": "available"
+        }
+      },
+      "required": [
+        "state",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "journal_unavailable",
+            "session_missing",
+            "projection_failed",
+            "admission_terminal"
+          ]
+        },
+        "state": {
+          "const": "unavailable"
+        }
+      },
+      "required": [
+        "state",
+        "reason"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Harn session recap availability"
+}

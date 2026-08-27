@@ -262,6 +262,196 @@
     "id": 19,
     "jsonrpc": "2.0"
   },
+  "sessionRecapAvailability": {
+    "snapshot": {
+      "contentHash": "sha256:fixture-content",
+      "coverage": {
+        "matched": 9,
+        "pending": 1,
+        "scanned": 9,
+        "truncated": true,
+        "unassigned": 0
+      },
+      "cursor": {
+        "lastEventId": 9,
+        "nextEventId": 10
+      },
+      "extensions": {
+        "example.harn.dev/recap": {
+          "label": "fixture"
+        }
+      },
+      "projectionHash": "sha256:fixture-projection",
+      "query": {
+        "fromEventId": 1,
+        "limit": 32,
+        "runId": "run-recap-fixture",
+        "sessionId": "session-recap-fixture",
+        "turnId": "turn-recap-fixture"
+      },
+      "schemaVersion": 1,
+      "sessionId": "session-recap-fixture",
+      "source": {
+        "events": [
+          {
+            "eventId": 1,
+            "recordHash": "sha256:fixture-1"
+          },
+          {
+            "eventId": 2,
+            "recordHash": "sha256:fixture-2"
+          },
+          {
+            "eventId": 3,
+            "recordHash": "sha256:fixture-3"
+          },
+          {
+            "eventId": 4,
+            "recordHash": "sha256:fixture-4"
+          },
+          {
+            "eventId": 5,
+            "recordHash": "sha256:fixture-5"
+          },
+          {
+            "eventId": 6,
+            "recordHash": "sha256:fixture-6"
+          },
+          {
+            "eventId": 7,
+            "recordHash": "sha256:fixture-7"
+          },
+          {
+            "eventId": 8,
+            "recordHash": "sha256:fixture-8"
+          },
+          {
+            "eventId": 9,
+            "recordHash": "sha256:fixture-9"
+          }
+        ],
+        "firstEventId": 1,
+        "lastEventId": 9
+      },
+      "turns": [
+        {
+          "iterations": [
+            {
+              "assistantText": [
+                {
+                  "sourceEventId": 3,
+                  "text": "I found and fixed the cause."
+                }
+              ],
+              "iteration": 0,
+              "plans": [
+                {
+                  "documentId": "plan-recap-fixture",
+                  "event": {
+                    "eventId": "plan-event-recap-fixture",
+                    "inputRevisionId": "revision-before-recap-fixture",
+                    "kind": "updated"
+                  },
+                  "revisionId": "revision-recap-fixture",
+                  "sourceEventId": 6,
+                  "steps": [
+                    {
+                      "content": "Run the regression",
+                      "id": "step-recap-fixture",
+                      "status": "completed"
+                    }
+                  ],
+                  "summary": "Fix and verify the owning seam",
+                  "title": "Repair the incident"
+                }
+              ],
+              "progress": [
+                {
+                  "entries": [
+                    {
+                      "content": "Verify the canonical path",
+                      "priority": "high",
+                      "status": "completed"
+                    }
+                  ],
+                  "message": "Regression is green",
+                  "replace": true,
+                  "sourceEventId": 7
+                }
+              ],
+              "sourceEventIds": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "state": "complete",
+              "tools": [
+                {
+                  "callObserved": true,
+                  "input": {
+                    "path": "src/lib.rs"
+                  },
+                  "output": {
+                    "changed": true
+                  },
+                  "resultObserved": true,
+                  "sourceEventIds": [
+                    4,
+                    5
+                  ],
+                  "state": "completed",
+                  "toolCallId": "tool-recap-fixture",
+                  "toolName": "write_file",
+                  "verification": {
+                    "schema": "harn.agent_tool_postcondition.v1",
+                    "sourceEventId": 5,
+                    "status": "passed",
+                    "verifiedPaths": [
+                      "src/lib.rs"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "prompts": [
+            {
+              "sourceEventId": 1,
+              "text": "Investigate the incident"
+            }
+          ],
+          "runId": "run-recap-fixture",
+          "sourceEventIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9
+          ],
+          "state": "complete",
+          "terminal": {
+            "finalStatus": "done",
+            "kind": "natural",
+            "owner": "agent",
+            "reason": "verified",
+            "sourceEventId": 9,
+            "state": "complete",
+            "stopReason": "completed"
+          },
+          "turnId": "turn-recap-fixture"
+        }
+      ]
+    },
+    "state": "available"
+  },
   "toolCallReceipt": {
     "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",
     "audit": {

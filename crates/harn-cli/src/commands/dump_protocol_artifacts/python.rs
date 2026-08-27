@@ -8,6 +8,7 @@ use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
 use super::constants::*;
+use super::session_recap::append_python_session_recap_types;
 use super::support::*;
 use super::values::*;
 
@@ -26,8 +27,8 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str("Mirrors the TypeScript and Swift artifacts generated alongside this\n");
     out.push_str("module. Field names match the wire JSON (camelCase) so dataclass\n");
     out.push_str("instances round-trip through ``json.dumps(asdict(obj))`` without a\n");
-    out.push_str("custom encoder. Optional fields default to ``None`` and are stripped\n");
-    out.push_str("by :func:`to_wire`.\n");
+    out.push_str("custom encoder. Generic optional fields default to ``None`` and are\n");
+    out.push_str("stripped by :func:`to_wire`; closed recap shapes preserve required nulls.\n");
     out.push_str("\"\"\"\n\n");
     out.push_str("from __future__ import annotations\n\n");
     out.push_str("from dataclasses import asdict, dataclass, field, fields, is_dataclass\n");
@@ -245,6 +246,7 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_str_enum("MCPLoggingLevel", MCP_LOGGING_LEVELS));
 
     out.push_str(PYTHON_TYPE_DEFINITIONS);
+    append_python_session_recap_types(&mut out);
     out
 }
 
@@ -849,6 +851,8 @@ class MCPPrompt(_HarnDataclass):
 pub(super) fn python_public_names() -> Vec<String> {
     let names = [
         "HARN_PROTOCOL_ARTIFACT_VERSION",
+        "HARN_SESSION_RECAP_QUERY_METHOD",
+        "HARN_SESSION_RECAP_SCHEMA_VERSION",
         "HARN_AGENT_EVENT_METHOD",
         "HARN_PROVIDER_CATALOG_METHOD",
         "ACP_SCHEMA_COMPATIBILITY",
@@ -963,6 +967,33 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HarnSessionTimelineCoverage",
         "HarnSessionTimelineSnapshot",
         "HarnSessionTimelineUpdate",
+        "HarnSessionRecapCompletionState",
+        "HarnSessionRecapToolState",
+        "HarnSessionRecapPlanStepStatus",
+        "HarnSessionRecapPlanEventKind",
+        "HarnSessionRecapProgressStatus",
+        "HarnSessionRecapProgressPriority",
+        "HarnSessionRecapVerificationStatus",
+        "HarnSessionRecapUnavailableReason",
+        "HarnSessionRecapAvailabilityState",
+        "HarnSessionRecapQuery",
+        "HarnSessionRecapCursor",
+        "HarnSessionRecapCoverage",
+        "HarnSessionRecapSourceEvent",
+        "HarnSessionRecapSource",
+        "HarnSessionRecapTextFact",
+        "HarnSessionRecapVerificationFact",
+        "HarnSessionRecapToolExchange",
+        "HarnSessionRecapPlanStep",
+        "HarnSessionRecapPlanEventFact",
+        "HarnSessionRecapPlanFact",
+        "HarnSessionRecapProgressEntry",
+        "HarnSessionRecapProgressFact",
+        "HarnSessionRecapTerminalFact",
+        "HarnSessionRecapIteration",
+        "HarnSessionPromptTurnRecap",
+        "HarnSessionRecapSnapshot",
+        "HarnSessionRecapAvailability",
         "is_request",
         "is_response",
         "is_notification",

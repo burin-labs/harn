@@ -80,6 +80,59 @@ impl AcpServer {
         }
     }
 
+    pub(super) async fn handle_session_recap_query(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let query = match parse_session_recap_query(params) {
+            Ok(query) if !query.session_id.trim().is_empty() => query,
+            Ok(_) => {
+                self.send_error(id, -32602, "session recap query requires sessionId");
+                return;
+            }
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        let Some(project_root) = self
+            .sessions
+            .get(&query.session_id)
+            .map(|session| session.project_root.clone())
+        else {
+            self.send_response(
+                id,
+                serde_json::to_value(
+                    harn_vm::session_recap::SessionRecapAvailability::unavailable(
+                        harn_vm::session_recap::SessionRecapUnavailableReason::SessionMissing,
+                    ),
+                )
+                .expect("missing-session recap availability serializes"),
+            );
+            return;
+        };
+        match harn_vm::session_recap::query_persisted_session_recap(&project_root, query).await {
+            Ok(Some(snapshot)) => self.send_response(
+                id,
+                serde_json::to_value(harn_vm::session_recap::SessionRecapAvailability::available(
+                    snapshot,
+                ))
+                .expect("session recap availability serializes"),
+            ),
+            Ok(None) => self.send_response(
+                id,
+                serde_json::to_value(
+                    harn_vm::session_recap::SessionRecapAvailability::unavailable(
+                        harn_vm::session_recap::SessionRecapUnavailableReason::SessionMissing,
+                    ),
+                )
+                .expect("missing-session recap availability serializes"),
+            ),
+            Err(error) => self.send_error(id, -32000, &format!("session recap query: {error}")),
+        }
+    }
+
     pub(super) async fn handle_session_view_query(
         &self,
         id: &serde_json::Value,

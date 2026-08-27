@@ -231,6 +231,25 @@ fn parse_session_timeline_query(
     Ok(query)
 }
 
+fn parse_session_recap_query(
+    params: &serde_json::Value,
+) -> Result<harn_vm::session_recap::SessionRecapQuery, String> {
+    let source = params.get("query").unwrap_or(params);
+    let mut query: harn_vm::session_recap::SessionRecapQuery =
+        serde_json::from_value(source.clone())
+            .map_err(|error| format!("invalid session recap query: {error}"))?;
+    if query.session_id.is_empty() {
+        query.session_id = session_id_param(params).unwrap_or_default();
+    }
+    if query.run_id.is_none() {
+        query.run_id = string_param(params, "runId", "run_id");
+    }
+    if query.turn_id.is_none() {
+        query.turn_id = string_param(params, "turnId", "turn_id");
+    }
+    Ok(query)
+}
+
 fn harn_meta(params: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
     params
         .get("_harn")

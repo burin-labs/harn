@@ -7,7 +7,11 @@
 // produce minimal envelopes equivalent to the Rust adapters.
 package harnprotocol
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
 
 // ArtifactVersion pins the Harn release that generated this binding.
 const ArtifactVersion = "0.10.119-dev"
@@ -1233,4 +1237,337 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 	_, hasID := envelope["id"]
 	_, hasMethod := envelope["method"]
 	return !hasID && hasMethod
+}
+
+const HarnSessionRecapQueryMethod = "harn.session_recap.query"
+const HarnSessionRecapSchemaVersion uint32 = 1
+
+type HarnSessionRecapCompletionState string
+type HarnSessionRecapToolState string
+type HarnSessionRecapPlanStepStatus string
+type HarnSessionRecapPlanEventKind string
+type HarnSessionRecapProgressStatus string
+type HarnSessionRecapProgressPriority string
+type HarnSessionRecapVerificationStatus string
+type HarnSessionRecapUnavailableReason string
+
+const HarnSessionRecapVerificationPassed HarnSessionRecapVerificationStatus = "passed"
+
+func (status *HarnSessionRecapVerificationStatus) UnmarshalJSON(data []byte) error {
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded != string(HarnSessionRecapVerificationPassed) {
+		return fmt.Errorf("unknown Harn session recap verification status %q", decoded)
+	}
+	*status = HarnSessionRecapVerificationPassed
+	return nil
+}
+
+type HarnSessionRecapQuery struct {
+	SessionID   string  `json:"sessionId"`
+	RunID       *string `json:"runId"`
+	TurnID      *string `json:"turnId"`
+	FromEventID *uint64 `json:"fromEventId"`
+	Limit       *uint64 `json:"limit"`
+}
+type HarnSessionRecapCursor struct {
+	LastEventID *uint64 `json:"lastEventId"`
+	NextEventID *uint64 `json:"nextEventId"`
+}
+type HarnSessionRecapCoverage struct {
+	Scanned    uint64 `json:"scanned"`
+	Matched    uint64 `json:"matched"`
+	Pending    uint64 `json:"pending"`
+	Unassigned uint64 `json:"unassigned"`
+	Truncated  bool   `json:"truncated"`
+}
+type HarnSessionRecapSourceEvent struct {
+	EventID    uint64 `json:"eventId"`
+	RecordHash string `json:"recordHash"`
+}
+type HarnSessionRecapSource struct {
+	FirstEventID *uint64                       `json:"firstEventId"`
+	LastEventID  *uint64                       `json:"lastEventId"`
+	Events       []HarnSessionRecapSourceEvent `json:"events"`
+}
+type HarnSessionRecapTextFact struct {
+	Text          string `json:"text"`
+	SourceEventID uint64 `json:"sourceEventId"`
+}
+type HarnSessionRecapVerificationFact struct {
+	Schema        string                             `json:"schema"`
+	Status        HarnSessionRecapVerificationStatus `json:"status"`
+	VerifiedPaths []string                           `json:"verifiedPaths"`
+	SourceEventID uint64                             `json:"sourceEventId"`
+}
+type HarnSessionRecapToolExchange struct {
+	ToolCallID     string                            `json:"toolCallId"`
+	ToolName       *string                           `json:"toolName"`
+	State          HarnSessionRecapToolState         `json:"state"`
+	CallObserved   bool                              `json:"callObserved"`
+	ResultObserved bool                              `json:"resultObserved"`
+	Input          JSONValue                         `json:"input"`
+	Output         JSONValue                         `json:"output"`
+	Verification   *HarnSessionRecapVerificationFact `json:"verification"`
+	SourceEventIDs []uint64                          `json:"sourceEventIds"`
+}
+type HarnSessionRecapPlanStep struct {
+	ID      string                         `json:"id"`
+	Content string                         `json:"content"`
+	Status  HarnSessionRecapPlanStepStatus `json:"status"`
+}
+type HarnSessionRecapPlanEventFact struct {
+	Kind            HarnSessionRecapPlanEventKind `json:"kind"`
+	EventID         string                        `json:"eventId"`
+	InputRevisionID *string                       `json:"inputRevisionId"`
+}
+type HarnSessionRecapPlanFact struct {
+	DocumentID    string                         `json:"documentId"`
+	RevisionID    string                         `json:"revisionId"`
+	Title         string                         `json:"title"`
+	Summary       string                         `json:"summary"`
+	Steps         []HarnSessionRecapPlanStep     `json:"steps"`
+	Event         *HarnSessionRecapPlanEventFact `json:"event"`
+	SourceEventID uint64                         `json:"sourceEventId"`
+}
+type HarnSessionRecapProgressEntry struct {
+	Content  string                            `json:"content"`
+	Status   HarnSessionRecapProgressStatus    `json:"status"`
+	Priority *HarnSessionRecapProgressPriority `json:"priority"`
+}
+type HarnSessionRecapProgressFact struct {
+	Message       *string                         `json:"message"`
+	Entries       []HarnSessionRecapProgressEntry `json:"entries"`
+	Replace       bool                            `json:"replace"`
+	SourceEventID uint64                          `json:"sourceEventId"`
+}
+type HarnSessionRecapTerminalFact struct {
+	State         HarnSessionRecapCompletionState `json:"state"`
+	FinalStatus   *string                         `json:"finalStatus"`
+	StopReason    *string                         `json:"stopReason"`
+	Kind          *string                         `json:"kind"`
+	Owner         *string                         `json:"owner"`
+	Reason        *string                         `json:"reason"`
+	SourceEventID uint64                          `json:"sourceEventId"`
+}
+type HarnSessionRecapIteration struct {
+	Iteration      *int64                          `json:"iteration"`
+	State          HarnSessionRecapCompletionState `json:"state"`
+	AssistantText  []HarnSessionRecapTextFact      `json:"assistantText"`
+	Tools          []HarnSessionRecapToolExchange  `json:"tools"`
+	Plans          []HarnSessionRecapPlanFact      `json:"plans"`
+	Progress       []HarnSessionRecapProgressFact  `json:"progress"`
+	SourceEventIDs []uint64                        `json:"sourceEventIds"`
+}
+type HarnSessionPromptTurnRecap struct {
+	TurnID         string                          `json:"turnId"`
+	RunID          string                          `json:"runId"`
+	State          HarnSessionRecapCompletionState `json:"state"`
+	Prompts        []HarnSessionRecapTextFact      `json:"prompts"`
+	Iterations     []HarnSessionRecapIteration     `json:"iterations"`
+	Terminal       *HarnSessionRecapTerminalFact   `json:"terminal"`
+	SourceEventIDs []uint64                        `json:"sourceEventIds"`
+}
+type HarnSessionRecapSnapshot struct {
+	SchemaVersion  uint32                       `json:"schemaVersion"`
+	SessionID      string                       `json:"sessionId"`
+	Query          HarnSessionRecapQuery        `json:"query"`
+	Cursor         HarnSessionRecapCursor       `json:"cursor"`
+	Coverage       HarnSessionRecapCoverage     `json:"coverage"`
+	Source         HarnSessionRecapSource       `json:"source"`
+	ContentHash    string                       `json:"contentHash"`
+	ProjectionHash string                       `json:"projectionHash"`
+	Turns          []HarnSessionPromptTurnRecap `json:"turns"`
+	Extensions     JSONObject                   `json:"extensions"`
+}
+
+func harnSessionRecapDecodeStrict[T any](data []byte, target *T) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func (value *HarnSessionRecapQuery) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapQuery
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapQuery(decoded)
+	return nil
+}
+func (value *HarnSessionRecapCursor) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapCursor
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapCursor(decoded)
+	return nil
+}
+func (value *HarnSessionRecapCoverage) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapCoverage
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapCoverage(decoded)
+	return nil
+}
+func (value *HarnSessionRecapSourceEvent) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSourceEvent
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapSourceEvent(decoded)
+	return nil
+}
+func (value *HarnSessionRecapSource) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSource
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapSource(decoded)
+	return nil
+}
+func (value *HarnSessionRecapTextFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapTextFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapTextFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapVerificationFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapVerificationFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapVerificationFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapToolExchange) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapToolExchange
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapToolExchange(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanStep) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanStep
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanStep(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanEventFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanEventFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanEventFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapProgressEntry) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapProgressEntry
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapProgressEntry(decoded)
+	return nil
+}
+func (value *HarnSessionRecapProgressFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapProgressFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapProgressFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapTerminalFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapTerminalFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapTerminalFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapIteration) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapIteration
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapIteration(decoded)
+	return nil
+}
+func (value *HarnSessionPromptTurnRecap) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionPromptTurnRecap
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionPromptTurnRecap(decoded)
+	return nil
+}
+
+func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSnapshot
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*snapshot = HarnSessionRecapSnapshot(decoded)
+	return nil
+}
+
+type HarnSessionRecapAvailability struct {
+	State    string                             `json:"state"`
+	Snapshot *HarnSessionRecapSnapshot          `json:"snapshot,omitempty"`
+	Reason   *HarnSessionRecapUnavailableReason `json:"reason,omitempty"`
+}
+
+func (value *HarnSessionRecapAvailability) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapAvailability
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	switch decoded.State {
+	case "available":
+		if decoded.Snapshot == nil || decoded.Reason != nil {
+			return fmt.Errorf("available Harn session recap requires only snapshot")
+		}
+	case "unavailable":
+		if decoded.Snapshot != nil || decoded.Reason == nil {
+			return fmt.Errorf("unavailable Harn session recap requires only reason")
+		}
+	default:
+		return fmt.Errorf("unknown Harn session recap availability state %q", decoded.State)
+	}
+	*value = HarnSessionRecapAvailability(decoded)
+	return nil
 }

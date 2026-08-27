@@ -60,7 +60,16 @@ async fn http_router_round_trips_events() {
 
     let body = json!({
         "kind": {"kind": "message"},
-        "payload": {"text": "hello"},
+        "payload": {
+            "transcript_event": {
+                "kind": "message",
+                "role": "user",
+                "visibility": "public",
+                "text": "hello",
+                "metadata": {}
+            }
+        },
+        "headers": {"run_id": "run-http", "turn_id": "turn-http"},
     });
     let response = router
         .clone()
@@ -92,13 +101,61 @@ async fn http_router_round_trips_events() {
         .unwrap();
     let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(wire["nodes"][0]["children"], json!([]));
-    assert_eq!(wire["nodes"][0]["links"], json!([]));
+    assert_eq!(
+        wire["nodes"][0]["links"],
+        json!([
+            {"kind": "run", "targetId": "run-http"},
+            {"kind": "turn", "targetId": "turn-http"}
+        ])
+    );
     assert!(wire["nodes"][0].get("attributes").is_some());
     let timeline: harn_vm::session_timeline::SessionTimelineSnapshot =
         serde_json::from_slice(&bytes).unwrap();
     assert_eq!(timeline.query.session_id.as_deref(), Some(meta.id.as_str()));
     assert_eq!(timeline.nodes.len(), 1);
     assert_eq!(timeline.nodes[0].category, "message");
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/sessions/{}/recap?limit=10", meta.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let recap: harn_vm::session_recap::SessionRecapAvailability =
+        serde_json::from_slice(&bytes).unwrap();
+    let harn_vm::session_recap::SessionRecapAvailability::Available { snapshot } = recap else {
+        panic!("existing session must return an available recap")
+    };
+    assert_eq!(snapshot.coverage.scanned, 1);
+    assert_eq!(snapshot.coverage.matched, 1);
+    assert_eq!(snapshot.turns[0].prompts[0].text, "hello");
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/sessions/missing/recap")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+        json!({"state": "unavailable", "reason": "session_missing"})
+    );
 
     let response = router
         .clone()

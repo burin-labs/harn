@@ -11,6 +11,7 @@ use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_typescript_external_action_types;
+use super::session_recap::append_typescript_session_recap_types;
 use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
@@ -1170,6 +1171,7 @@ export interface HarnSessionTimelineUpdate {
 }
 ",
     );
+    append_typescript_session_recap_types(&mut out);
     out
 }
 

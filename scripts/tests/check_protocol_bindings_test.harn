@@ -5,6 +5,7 @@ const FAKE_PYTHON_BINDING = """
 HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
 HARN_AGENT_EVENT_METHOD = "harn/agent_event"
 HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
+HARN_STRICT_SESSION_RECAP_BINDING = False
 
 
 class _RoundTrip:
@@ -24,6 +25,7 @@ ACPResponse = _RoundTrip
 ACPSessionUpdateNotification = _RoundTrip
 HarnAgentEventNotification = _RoundTrip
 HarnToolAnnotations = _RoundTrip
+HarnSessionRecapAvailability = _RoundTrip
 A2ATask = _RoundTrip
 MCPTool = _RoundTrip
 MCPDiscoverResult = _RoundTrip
@@ -80,6 +82,7 @@ fn fixture_payload(version: string) -> dict {
       side_effect_level: "read_only",
       completion_evidence_role: "verification",
     },
+    sessionRecapAvailability: {state: "unavailable", snapshot: nil},
     a2aTask: {id: "task-1", state: "completed"},
     mcpTool: {name: "read_file", description: "Read"},
     mcpDiscoverResult: {tools: []},
@@ -115,6 +118,9 @@ pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task: un
   const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
   assert(args[1]?.contains("python bindings: OK"))
+  assert(args[1]?.contains("unknown recap snapshot field was accepted before write-back"))
+  assert(args[1]?.contains("HarnSessionRecapSnapshot"))
+  assert(args[1]?.contains("recap verification status did not hydrate into its closed enum"))
   assert_eq(args[2], "/tmp/artifacts")
 }
 

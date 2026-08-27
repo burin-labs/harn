@@ -11,6 +11,7 @@ use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
 use super::constants::*;
+use super::session_recap::append_go_session_recap_types;
 use super::support::*;
 use super::values::*;
 
@@ -37,7 +38,7 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
     out.push_str("// fields use pointer types or `omitempty` so encoding/json round-trips\n");
     out.push_str("// produce minimal envelopes equivalent to the Rust adapters.\n");
     out.push_str("package harnprotocol\n\n");
-    out.push_str("import \"encoding/json\"\n\n");
+    out.push_str("import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"fmt\"\n)\n\n");
 
     for (doc, name, value) in [
         (
@@ -267,6 +268,7 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
     ));
 
     out.push_str(&format_go_struct_fields(GO_TYPE_DEFINITIONS));
+    append_go_session_recap_types(&mut out);
     out
 }
 

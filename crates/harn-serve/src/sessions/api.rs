@@ -36,6 +36,7 @@ pub fn sessions_router(store: SharedSessionStore) -> Router {
         )
         .route("/sessions/{id}/view", get(session_view))
         .route("/sessions/{id}/timeline", get(session_timeline))
+        .route("/sessions/{id}/recap", get(session_recap))
         .route("/sessions/{id}/events", post(append_event).get(read_events))
         .route("/sessions/{id}/fork", post(fork_session))
         .route("/sessions/{id}/truncate", post(truncate_session))
@@ -83,6 +84,18 @@ struct TruncateRequest {
 struct TimelineQuery {
     #[serde(default = "default_timeline_limit")]
     limit: usize,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct RecapQuery {
+    #[serde(alias = "run_id")]
+    run_id: Option<String>,
+    #[serde(alias = "turn_id")]
+    turn_id: Option<String>,
+    #[serde(alias = "from_event_id")]
+    from_event_id: Option<EventId>,
+    limit: Option<usize>,
 }
 
 const fn default_timeline_limit() -> usize {
@@ -344,6 +357,44 @@ async fn session_timeline(
     {
         Ok(Some(snapshot)) => (StatusCode::OK, Json(json!(snapshot))).into_response(),
         Ok(None) => map_error(StoreError::NotFound("session".to_string())).into_response(),
+        Err(error) => map_error(StoreError::Backend(error.to_string())).into_response(),
+    }
+}
+
+#[tracing::instrument(
+    name = "harn.session.recap",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
+async fn session_recap(
+    State(state): State<SessionsState>,
+    Path(id): Path<String>,
+    Query(options): Query<RecapQuery>,
+) -> impl IntoResponse {
+    let query = harn_vm::session_recap::SessionRecapQuery {
+        session_id: id,
+        run_id: options.run_id,
+        turn_id: options.turn_id,
+        from_event_id: options.from_event_id,
+        limit: options.limit,
+    };
+    match harn_vm::session_recap::query_session_recap(state.store.as_ref(), query).await {
+        Ok(Some(snapshot)) => (
+            StatusCode::OK,
+            Json(json!(
+                harn_vm::session_recap::SessionRecapAvailability::available(snapshot)
+            )),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::OK,
+            Json(json!(
+                harn_vm::session_recap::SessionRecapAvailability::unavailable(
+                    harn_vm::session_recap::SessionRecapUnavailableReason::SessionMissing,
+                )
+            )),
+        )
+            .into_response(),
         Err(error) => map_error(StoreError::Backend(error.to_string())).into_response(),
     }
 }

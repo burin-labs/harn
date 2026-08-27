@@ -336,6 +336,62 @@ func TestRoundTripFixture(t *testing.T) {
 		}
 		assertRoundTrip(t, "ToolCallReceipt", raw, out)
 	})
+
+	t.Run("HarnSessionRecapAvailability", func(t *testing.T) {
+		raw, ok := fixture["sessionRecapAvailability"]
+		if !ok {
+			t.Fatal("fixture missing sessionRecapAvailability")
+		}
+		var availability HarnSessionRecapAvailability
+		if err := json.Unmarshal(raw, &availability); err != nil {
+			t.Fatalf("decode session recap: %v", err)
+		}
+		if availability.Snapshot == nil || len(availability.Snapshot.Turns) != 1 {
+			t.Fatalf("expected one non-vacuous recap turn, got %#v", availability.Snapshot)
+		}
+		if len(availability.Snapshot.Extensions) != 1 {
+			t.Fatalf("expected recap extension to survive decode, got %#v", availability.Snapshot.Extensions)
+		}
+		out, err := json.Marshal(availability)
+		if err != nil {
+			t.Fatalf("encode session recap: %v", err)
+		}
+		assertRoundTrip(t, "HarnSessionRecapAvailability", raw, out)
+
+		var unknown map[string]any
+		if err := json.Unmarshal(raw, &unknown); err != nil {
+			t.Fatalf("decode recap negative control: %v", err)
+		}
+		unknown["snapshot"].(map[string]any)["futureTopLevel"] = true
+		unknownBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode recap negative control: %v", err)
+		}
+		if err := json.Unmarshal(unknownBytes, &availability); err == nil {
+			t.Fatal("unknown recap snapshot field must be rejected before write-back")
+		}
+
+		delete(unknown["snapshot"].(map[string]any), "futureTopLevel")
+		verification := unknown["snapshot"].(map[string]any)["turns"].([]any)[0].(map[string]any)["iterations"].([]any)[0].(map[string]any)["tools"].([]any)[0].(map[string]any)["verification"].(map[string]any)
+		verification["futureNested"] = true
+		unknownNestedBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode nested recap negative control: %v", err)
+		}
+		if err := json.Unmarshal(unknownNestedBytes, &availability); err == nil {
+			t.Fatal("unknown nested recap field must be rejected before write-back")
+		}
+
+		delete(verification, "futureNested")
+		verification["status"] = "future_status"
+		invalidStatusBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode verification-status negative control: %v", err)
+		}
+		if err := json.Unmarshal(invalidStatusBytes, &availability); err == nil {
+			t.Fatal("unknown recap verification status must be rejected")
+		}
+	})
 }
 
 func mustString(t *testing.T, fixture map[string]json.RawMessage, key string) string {

@@ -14,6 +14,7 @@ use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_rust_external_action_types;
+use super::session_recap::append_rust_session_recap_types;
 use super::support::*;
 use super::values::*;
 
@@ -419,6 +420,8 @@ pub(super) fn generate_rust_for_version(
          tool_call_update notifications.",
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     ));
+
+    append_rust_session_recap_types(&mut out);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
     // one POSIX final newline without a trailing blank line so their

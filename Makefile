@@ -1,6 +1,7 @@
 .PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
+.PHONY: check-typescript-protocol-binding check-swift-protocol-binding
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -816,13 +817,14 @@ check-burin-protocol-artifacts:
 	@$(HARN_CLI_CMD) run --no-sandbox scripts/check_burin_protocol_bindings.harn -- --required
 	@echo "    Burin protocol bindings OK."
 
-# Round-trip the published JSON fixture through the Python and Go protocol
-# bindings to catch wire-vocabulary drift before downstream consumers vendor
-# the artifacts. Skips the Go half if the toolchain is missing so contributors
-# without Go installed locally are not blocked, but CI requires both.
+# Round-trip the published JSON fixture through generated protocol bindings and
+# exercise the closed recap write contract before downstream consumers vendor
+# the artifacts. Go remains optional for contributors, but CI requires it;
+# Swift runs in the dedicated macOS lane below.
 check-bindings:
 	@echo "=== Checking Harn protocol bindings round-trip the published fixture ==="
 	@$(HARN_CLI_CMD) run scripts/check_protocol_bindings.harn
+	@$(MAKE) check-typescript-protocol-binding
 	@if command -v go >/dev/null 2>&1; then \
 		stale=$$(gofmt -l spec/protocol-artifacts/go/harnprotocol); \
 		if [ -n "$$stale" ]; then \
@@ -833,6 +835,20 @@ check-bindings:
 		echo "    skipping go round-trip (go not installed)"; \
 	fi
 	@echo "    Harn protocol bindings OK."
+
+check-typescript-protocol-binding:
+	@set -eu; \
+		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-ts-binding.XXXXXX"); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		./node_modules/.bin/tsc --strict --module node16 --moduleResolution node16 --target es2022 --rootDir . --outDir "$$tmp" spec/protocol-artifacts/harn-protocol.ts scripts/tests/protocol_binding_session_recap.ts; \
+		node "$$tmp/scripts/tests/protocol_binding_session_recap.js" spec/protocol-artifacts/fixtures/round_trip.json
+
+check-swift-protocol-binding:
+	@set -eu; \
+		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-swift-binding.XXXXXX"); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
+		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json
 
 gen-session-bundle-schema:
 	$(HARN_CLI_CMD) session schema --out spec/schemas/session-bundle.v1.schema.json
