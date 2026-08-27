@@ -17,7 +17,7 @@
 use crate::llm::trace::{emit_agent_event, AgentTraceEvent};
 use crate::stdlib::json_stream::{JsonStreamStatus, StreamSchemaValidator};
 use crate::value::VmDictExt;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{VmError, VmValue};
 
 pub(crate) use crate::value::SchemaStreamAbort;
 
@@ -153,6 +153,7 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::ErrorCategory;
 
     #[test]
     fn parses_round_trip_message() {
