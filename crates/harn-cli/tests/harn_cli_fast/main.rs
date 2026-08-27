@@ -18,7 +18,7 @@
 #[path = "../test_util/mod.rs"]
 mod test_util;
 
-#[path = "../required_pr_e2e.rs"]
+#[path = "../support/required_pr_e2e.rs"]
 mod required_pr_e2e;
 
 mod batch_download_cli;
