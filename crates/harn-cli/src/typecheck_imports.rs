@@ -15,7 +15,15 @@ use harn_parser::TypeChecker;
 /// signature (and an imported name shadows a same-named builtin).
 pub(crate) fn checker_with_resolved_imports(checker: TypeChecker, path: &Path) -> TypeChecker {
     let graph = harn_modules::build(&[path.to_path_buf()]);
-    checker_with_graph(checker, path, &graph)
+    checker_with_resolved_graph(checker, path, &graph)
+}
+
+pub(crate) fn checker_with_resolved_graph(
+    checker: TypeChecker,
+    path: &Path,
+    graph: &harn_modules::ModuleGraph,
+) -> TypeChecker {
+    checker_with_graph(checker, path, graph)
 }
 
 pub(crate) fn checker_with_standalone_imports(

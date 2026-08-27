@@ -317,6 +317,10 @@ pub struct Vm {
     /// Host-side agent-loop state owned by this VM tree.
     pub(crate) agent_host_session_runtime:
         Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
+    /// Connector clients and their on-demand resolver owned by this execution
+    /// tree. Keeping this explicit avoids thread-local loss under task
+    /// migration and prevents sibling VM runs from observing each other.
+    pub(crate) connector_clients: Arc<crate::connectors::VmConnectorClients>,
     /// Per-isolate inline cache entries. `inline_cache_set_by_chunk` maps a
     /// compiled chunk identity to an index in this vector at frame entry; the
     /// dispatch loop uses the frame-local index for per-op reads/writes.
@@ -563,6 +567,7 @@ impl VmBaseline {
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             agent_host_session_runtime:
                 crate::llm::agent_session_host::active_agent_host_session_runtime(),
+            connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
@@ -832,6 +837,7 @@ impl Vm {
             tracing_runtime: crate::tracing::active_tracing_runtime(),
             agent_host_session_runtime:
                 crate::llm::agent_session_host::active_agent_host_session_runtime(),
+            connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
@@ -1101,6 +1107,7 @@ impl Vm {
             session_runtime: self.session_runtime.clone(),
             tracing_runtime: self.tracing_runtime.clone(),
             agent_host_session_runtime: self.agent_host_session_runtime.clone(),
+            connector_clients: self.connector_clients.clone(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
@@ -1250,6 +1257,11 @@ impl Vm {
     /// namespaces.
     pub fn set_harness(&mut self, harness: crate::harness::Harness) {
         self.root_harness = Some(harness.into_vm_value());
+    }
+
+    /// Install the connector projection owned by this VM execution tree.
+    pub fn set_connector_clients(&mut self, clients: crate::connectors::VmConnectorClients) {
+        self.connector_clients = Arc::new(clients);
     }
 
     pub(crate) fn harness(&self) -> Option<&crate::harness::VmHarness> {

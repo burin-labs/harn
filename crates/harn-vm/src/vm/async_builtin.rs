@@ -87,6 +87,18 @@ impl AsyncBuiltinCtx {
         self.child.lock().package_snapshot_registry.clone()
     }
 
+    /// Resolve a connector client from this VM tree's eager projection or its
+    /// execution-owned lazy resolver. The runtime handle is cloned before the
+    /// await so no VM lock crosses user/provider initialization work.
+    pub(crate) async fn connector_client(
+        &self,
+        provider: &str,
+    ) -> Result<Option<Arc<dyn crate::connectors::ConnectorClient>>, crate::connectors::ClientError>
+    {
+        let runtime = self.child.lock().connector_clients.clone();
+        runtime.resolve(provider).await
+    }
+
     /// Create an independent context rooted at a fresh child VM. Long-lived
     /// local tasks use this instead of sharing the parent builtin's output
     /// buffer after the parent future has returned.

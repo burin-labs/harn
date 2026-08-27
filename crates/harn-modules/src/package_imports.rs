@@ -5,6 +5,18 @@ use serde::Deserialize;
 
 use crate::package_execution::{PackageExecutionError, PackageExecutionGuard};
 use crate::package_snapshot::PackageSnapshot;
+use crate::ModuleGraph;
+
+/// A package-shaped import together with the module that declares it.
+///
+/// Keeping the importer is what lets package authority validate the import
+/// against its owning manifest instead of flattening root and transitive
+/// dependency declarations into one ambiguous alias set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageImport {
+    pub importer: PathBuf,
+    pub alias: String,
+}
 
 #[derive(Debug, Default, Deserialize)]
 struct PackageManifest {
@@ -18,7 +30,7 @@ struct PackageManifest {
 /// `std/` import that names no real stdlib module resolves to nothing and must
 /// NOT fall through to package resolution, or a package could shadow the
 /// standard library.
-enum LocalResolution {
+pub(super) enum LocalResolution {
     /// Resolved without touching installed packages.
     Resolved(PathBuf),
     /// Owned by the stdlib namespace but not a real module. Resolution ends.
@@ -27,11 +39,57 @@ enum LocalResolution {
     NotPackage,
 }
 
+impl ModuleGraph {
+    /// Package-shaped imports in the reachable graph, retaining their owner.
+    pub fn package_imports(&self) -> Vec<PackageImport> {
+        let mut imports = self
+            .modules
+            .iter()
+            .flat_map(|(file, module)| {
+                module.imports.iter().filter_map(move |import| {
+                    if !matches!(
+                        resolve_local_import(file, &import.raw_path),
+                        LocalResolution::NotPackage
+                    ) {
+                        return None;
+                    }
+                    Some(PackageImport {
+                        importer: file.clone(),
+                        alias: package_alias_from_import(&import.raw_path)?,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        imports.sort_by(|left, right| {
+            left.importer
+                .cmp(&right.importer)
+                .then_with(|| left.alias.cmp(&right.alias))
+        });
+        imports.dedup();
+        imports
+    }
+
+    /// Package aliases named by imports in the reachable graph. The local
+    /// resolver remains the semantic owner of classification, so a sibling
+    /// file and the standard library cannot accidentally be reclassified as a
+    /// package merely because they share a dependency's name.
+    pub fn package_import_aliases(&self) -> Vec<String> {
+        let mut aliases = self
+            .package_imports()
+            .into_iter()
+            .map(|import| import.alias)
+            .collect::<Vec<_>>();
+        aliases.sort();
+        aliases.dedup();
+        aliases
+    }
+}
+
 /// Resolve everything that does not require a package snapshot.
 ///
 /// Sole owner of the stdlib and relative-path import rules, so the lazy and
 /// pre-acquired entry points below cannot drift apart on what counts as local.
-fn resolve_local_import(current_file: &Path, import_path: &str) -> LocalResolution {
+pub(super) fn resolve_local_import(current_file: &Path, import_path: &str) -> LocalResolution {
     if let Some(module) = import_path
         .strip_prefix("std/")
         .or_else(|| (import_path == "observability").then_some("observability"))
@@ -273,6 +331,11 @@ fn safe_package_relative_path(raw: &str) -> Option<PathBuf> {
         }
     }
     saw_component.then_some(out)
+}
+
+pub(super) fn package_alias_from_import(raw: &str) -> Option<String> {
+    let path = safe_package_relative_path(raw)?;
+    package_name_from_relative_path(&path).map(ToString::to_string)
 }
 
 fn package_name_from_relative_path(path: &Path) -> Option<&str> {

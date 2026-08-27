@@ -2,6 +2,36 @@ use super::*;
 use crate::package_snapshot::probe_counter;
 
 #[test]
+fn graph_classifies_only_reachable_nonlocal_imports_as_package_aliases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "relative.harn",
+        "import \"transitive_dep/tools\"\npub fn local() { 1 }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import \"std/runtime\"\nimport \"./relative\"\nimport \"direct_dep/api\"\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+
+    assert_eq!(
+        graph.package_import_aliases(),
+        ["direct_dep".to_string(), "transitive_dep".to_string()]
+    );
+    let imports = graph.package_imports();
+    assert!(imports.iter().any(|import| {
+        import.alias == "direct_dep" && import.importer.file_name().unwrap() == "entry.harn"
+    }));
+    assert!(imports.iter().any(|import| {
+        import.alias == "transitive_dep" && import.importer.file_name().unwrap() == "relative.harn"
+    }));
+}
+
+#[test]
 fn package_export_map_resolves_declared_module() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -25,6 +55,11 @@ fn package_export_map_resolves_declared_module() {
     );
 
     let graph = build(std::slice::from_ref(&entry));
+    assert_eq!(
+        graph.package_import_aliases(),
+        ["acme".to_string()],
+        "classification must retain the raw alias after a snapshot resolves it"
+    );
     let imported = graph
         .imported_names_for_file(&entry)
         .expect("package export should resolve");

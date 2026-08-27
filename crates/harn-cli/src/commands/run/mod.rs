@@ -1148,11 +1148,12 @@ async fn execute_run_inner_scoped(
     };
     vm.set_harness(runtime_harness);
 
-    // Hook declarations and callable signatures are always validated because
-    // hooks can supply policy authority. Manifest triggers also validate when
-    // explicitly enabled; their durable lifecycle reconciliation is otherwise
-    // kept off an ordinary entrypoint's startup path. Handler module graphs
-    // initialize only on dispatch unless fail-fast initialization was requested.
+    // Hooks remain installed because they can supply policy authority, but an
+    // ordinary run resolves each callable only when its matching event fires.
+    // A dispatch error aborts the hook and therefore fails closed. Explicit
+    // eager mode validates every handler up front. Manifest triggers also
+    // validate when enabled; their durable lifecycle reconciliation otherwise
+    // stays off an ordinary entrypoint's startup path.
     let _manifest_runtime = if project_context == ProjectContextMode::Project {
         Some(
             match manifest_runtime::install_manifest_runtime(

@@ -6,6 +6,28 @@ use crate::context_manifest::ContextManifest;
 use crate::module_artifact::ModuleCompilationContext;
 use crate::VmError;
 
+/// Recompute a store outcome from the graph as it exists after run setup.
+///
+/// Package materialization can change import resolution between the initial
+/// cache probe and compilation. Writers use this constructor after setup so a
+/// newly compiled chunk is never paired with the probe's older graph.
+pub fn prepare_entry_store(source_path: &Path, source: &str) -> super::LookupOutcome {
+    let source_hash = super::sha256(source.as_bytes());
+    let (context_hash, manifest) = super::GraphWalk::new(source_path, source).finish();
+    super::LookupOutcome {
+        key: super::CacheKey {
+            source_hash,
+            context_hash,
+            harn_version: std::borrow::Cow::Borrowed(super::HARN_VERSION),
+            compiler_tag: super::compiler_options_tag(super::CompilerOptions::from_env()),
+            provenance: super::ModuleProvenance::User,
+        },
+        chunk: None,
+        manifest,
+        link_table: None,
+    }
+}
+
 /// Derive an entry interface and the graph capture that keeps it reusable.
 pub(crate) fn derive_interface(
     source_path: &Path,

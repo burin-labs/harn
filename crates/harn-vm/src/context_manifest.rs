@@ -127,6 +127,13 @@ pub struct ContextManifest {
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
+    /// Raw package aliases imported by the reachable graph. Cache hits use
+    /// this projection to revalidate manifest/lock authority without parsing
+    /// or rebuilding the graph.
+    pub package_import_aliases: Vec<String>,
+    /// Digest of the package lock whose generation resolved those aliases.
+    /// `None` when the graph imports no packages.
+    pub package_lock_digest: Option<String>,
     /// When this capture began, in [`module_source::stat_identity`]'s units and
     /// epoch. Every recorded stat was taken after this instant, which is what
     /// makes an older mtime provably un-reproducible by a later write.
@@ -166,6 +173,8 @@ impl ContextManifest {
             files: Vec::new(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
+            package_import_aliases: Vec::new(),
+            package_lock_digest: None,
         }
     }
 
@@ -176,6 +185,12 @@ impl ContextManifest {
     /// changed reports `false` and costs a walk.
     pub fn still_valid(&self, entry: &Path) -> bool {
         !matches!(self.check(entry), ManifestCheck::Stale)
+    }
+
+    /// Package aliases whose authority must be revalidated before a cached
+    /// entry chunk can execute.
+    pub fn package_import_aliases(&self) -> &[String] {
+        &self.package_import_aliases
     }
 
     /// As [`Self::still_valid`], but also reports whether the answer needed a

@@ -26,8 +26,9 @@ pub(crate) struct RunArgs {
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
     /// Load every project trigger and hook handler before the entry script runs.
-    /// Hooks are validated by default; trigger declarations are validated only
-    /// with `--project-triggers`. This option implies trigger registration.
+    /// Trigger contracts validate at registration; policy-hook exports resolve
+    /// on matching dispatch by default. This option implies trigger registration
+    /// and restores fail-fast module initialization for every handler.
     #[arg(long = "eager-project-handlers")]
     pub eager_project_handlers: bool,
     /// Register the project's manifest triggers for this run.

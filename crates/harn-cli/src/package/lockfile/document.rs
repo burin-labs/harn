@@ -250,7 +250,7 @@ impl LockFile {
 }
 
 impl LockEntry {
-    fn same_resolution(&self, other: &Self) -> bool {
+    pub(crate) fn same_resolution(&self, other: &Self) -> bool {
         if self == other {
             return true;
         }

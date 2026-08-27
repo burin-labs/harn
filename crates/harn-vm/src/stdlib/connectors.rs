@@ -32,7 +32,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     category = "connectors"
 )]
 async fn connector_call_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let call = Args::thrown("connector_call", &args);
@@ -40,11 +40,16 @@ async fn connector_call_impl(
     let method = call.non_empty_string(1, "method")?.to_string();
     let params = optional_json_arg(&call, 2, "params")?;
 
-    let client = active_connector_client(&provider).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "connector_call: connector `{provider}` is not active"
-        ))))
-    })?;
+    let client = ctx
+        .connector_client(&provider)
+        .await
+        .map_err(client_error_to_vm)?
+        .or_else(|| active_connector_client(&provider))
+        .ok_or_else(|| {
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                "connector_call: connector `{provider}` is not active"
+            ))))
+        })?;
 
     let result = client
         .call(&method, params)

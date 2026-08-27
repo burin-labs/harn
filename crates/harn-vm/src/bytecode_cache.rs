@@ -62,6 +62,7 @@ use crate::module_source::{self, ModuleSource};
 
 mod graph;
 pub(crate) use graph::derive_interface as module_compilation_context_with_manifest;
+pub use graph::prepare_entry_store;
 use graph::relative_path_label;
 
 /// Header magic for all bytecode-cache artifact families.
@@ -91,7 +92,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// ordinary lookup cannot accept an adjacent artifact compiled with privileged
 /// authority. `compiler_tag` could not express this: it folds the optimization
 /// and legacy-ambient bits only, never `privileged_wire_authority`.
-pub const SCHEMA_VERSION: u32 = 13;
+/// v14: entry manifests retain raw reachable package aliases so a cache hit can
+/// revalidate current manifest/lock authority without rebuilding the graph.
+pub const SCHEMA_VERSION: u32 = 14;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -1353,13 +1356,19 @@ fn walk_import_graph_fingerprinted(
     // it beside each source digest; content alone has not been a complete
     // module compilation identity since imported callable lowering shipped.
     let mut entry_compilation_context = None;
-    if let Some(recorded) = manifest.as_ref() {
+    if manifest.is_some() {
         let graph = harn_modules::build_with_source(source_path, source);
+        manifest
+            .as_mut()
+            .expect("manifest presence checked")
+            .package_import_aliases = graph.package_import_aliases();
         if capture_entry_compilation_context {
             entry_compilation_context =
                 ModuleCompilationContext::for_source_in_graph(&graph, source_path, source).ok();
         }
-        let contexts = recorded
+        let contexts = manifest
+            .as_ref()
+            .expect("manifest presence checked")
             .files
             .iter()
             .map(|file| match visited.get(&file.path) {

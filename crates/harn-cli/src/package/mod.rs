@@ -29,6 +29,7 @@ const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 mod credential_environment;
 pub(crate) mod errors;
 mod extensions;
+mod extensions_connectors;
 mod generations;
 mod git_cwd;
 mod input_policy;
@@ -50,6 +51,13 @@ pub use errors::{PackageError, PackageResult};
 pub(crate) use crate::path_policy::PathEntryKind;
 pub use credential_environment::*;
 pub use extensions::*;
+pub(crate) use extensions_connectors::{
+    dedupe_provider_connectors, installed_package_provider_connectors,
+};
+pub use extensions_connectors::{
+    ensure_provider_connector_dependencies, load_provider_connector, try_load_provider_connectors,
+    try_load_root_provider_connectors, ResolvedProviderConnectors,
+};
 pub(crate) use generations::*;
 pub(crate) use git_cwd::Cwd;
 pub(crate) use input_policy::should_exclude_package_entry;

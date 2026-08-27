@@ -271,37 +271,235 @@ pub fn should_handle(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn eager_and_lazy_hook_installation_reject_missing_and_private_handlers() {
+async fn lazy_hook_installation_defers_missing_and_private_handlers() {
     for (case, module_source) in [
         ("missing", "pub fn other(ctx) { return ctx }"),
         ("private", "fn handle(ctx) { return ctx }"),
     ] {
+        harn_vm::reset_thread_local_state();
         let tmp = tempfile::tempdir().unwrap();
         let harn_file = write_local_hook_project(tmp.path(), "handlers::handle", module_source);
         let extensions = load_runtime_extensions(&harn_file);
         assert_eq!(extensions.hooks.len(), 1, "{case} hook fixture must load");
 
-        for initialization in [
-            ManifestHandlerInitialization::Eager,
+        install_manifest_hooks_with_initialization(
+            &mut test_vm(),
+            &extensions,
             ManifestHandlerInitialization::OnDispatch,
-        ] {
-            let result = install_manifest_hooks_with_initialization(
-                &mut test_vm(),
-                &extensions,
-                initialization,
-            )
-            .await;
-            assert!(
-                result.is_err(),
-                "{case} handler unexpectedly installed in {initialization:?} mode"
-            );
-            let error = result.unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("hook handler 'handle' is not exported by module 'handlers'"),
-                "{case} handler must be rejected in {initialization:?} mode: {error}"
-            );
-        }
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{case} unused handler initialized eagerly: {error}"));
+
+        let error = install_manifest_hooks_with_initialization(
+            &mut test_vm(),
+            &extensions,
+            ManifestHandlerInitialization::Eager,
+        )
+        .await
+        .expect_err("eager validation must reject the broken handler");
+        assert!(
+            error
+                .to_string()
+                .contains("hook handler 'handle' is not exported by module 'handlers'"),
+            "{case} handler must be rejected in eager mode: {error}"
+        );
+        harn_vm::reset_thread_local_state();
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_broken_hook_fails_closed_when_its_event_dispatches() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        "pub fn other(ctx) { return ctx }",
+    );
+    let extensions = load_runtime_extensions(&harn_file);
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("lazy hook registration");
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+
+    let error = harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect_err("a matching unresolved policy hook must stop dispatch");
+    assert!(
+        error
+            .to_string()
+            .contains("function 'handle' is not exported by module"),
+        "unexpected dispatch error: {error}"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_missing_hook_module_fails_only_when_its_event_dispatches() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        "pub fn handle(ctx) { return ctx }",
+    );
+    std::fs::remove_file(tmp.path().join("lib.harn")).expect("remove hook module");
+    let extensions = load_runtime_extensions(&harn_file);
+    let eager_error = install_manifest_hooks_with_initialization(
+        &mut test_vm(),
+        &extensions,
+        ManifestHandlerInitialization::Eager,
+    )
+    .await
+    .expect_err("eager validation must reject the missing hook module");
+    assert!(eager_error.to_string().contains("does not exist"));
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("an unused missing hook module must stay deferred");
+
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+    let dispatch_error = harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect_err("a matching missing policy hook must stop dispatch");
+    assert!(
+        dispatch_error.to_string().contains("lib.harn"),
+        "unexpected dispatch error: {dispatch_error}"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_hook_materializes_a_reachable_dependency_only_when_it_dispatches() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        r#"
+import "missing"
+
+pub fn handle(_harness: Harness, _payload: dict) { return nil }
+"#,
+    );
+    let manifest = std::fs::read_to_string(tmp.path().join(MANIFEST)).expect("read manifest");
+    std::fs::write(
+        tmp.path().join(MANIFEST),
+        format!(
+            "{manifest}\n[dependencies]\nmissing = {{ git = \"https://example.invalid/missing.git\" }}\n"
+        ),
+    )
+    .expect("add unreachable dependency");
+    let extensions = try_load_root_runtime_extensions(&harn_file)
+        .expect("root hook registration must not prepare dependencies");
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("lazy hook registration");
+    assert!(!tmp.path().join(LOCK_FILE).exists());
+
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+    let error = harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect_err("matching hook must reach dependency preparation and fail closed");
+    assert!(
+        error.to_string().contains("harn.lock"),
+        "dispatch must report the missing dependency lock: {error}"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_hook_resolves_a_path_dependency_from_a_fresh_generation() {
+    harn_vm::reset_thread_local_state();
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_local_hook_project(
+        tmp.path(),
+        "handlers::handle",
+        r#"
+import { policy_value } from "fixture_dep/policy"
+
+pub fn handle(_harness: Harness, _payload: dict) {
+  if policy_value() != 42 { return Err("dependency returned the wrong value") }
+  return nil
+}
+"#,
+    );
+    let manifest = std::fs::read_to_string(tmp.path().join(MANIFEST)).expect("read manifest");
+    std::fs::write(
+        tmp.path().join(MANIFEST),
+        format!(
+            "{manifest}\n[dependencies]\nfixture_dep = {{ path = \"./vendor/fixture_dep\" }}\n"
+        ),
+    )
+    .expect("add path dependency");
+    let dependency = tmp.path().join("vendor/fixture_dep");
+    std::fs::create_dir_all(&dependency).expect("create path dependency");
+    std::fs::write(
+        dependency.join(MANIFEST),
+        "[package]\nname = \"fixture_dep\"\n",
+    )
+    .expect("write dependency manifest");
+    std::fs::write(
+        dependency.join("policy.harn"),
+        "pub fn policy_value() -> int { return 42 }\n",
+    )
+    .expect("write dependency module");
+    let cache = tempfile::tempdir().expect("package cache");
+    let workspace = PackageWorkspace::for_test(tmp.path(), cache.path());
+    install_packages_in(&workspace, false, None, false)
+        .expect("create lock and initial generation");
+    std::fs::remove_dir_all(tmp.path().join(".harn")).expect("remove initial generation");
+
+    let extensions = try_load_root_runtime_extensions(&harn_file)
+        .expect("root hook registration must leave the generation absent");
+    let mut vm = test_vm();
+    install_manifest_hooks_with_initialization(
+        &mut vm,
+        &extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
+    .expect("lazy hook registration");
+    assert!(!tmp.path().join(".harn/package-current.toml").exists());
+
+    let ctx = harn_vm::AsyncBuiltinCtx::from_vm(vm);
+    harn_vm::orchestration::run_post_tool_hooks_with_ctx(
+        Some(&ctx),
+        "write_file",
+        &serde_json::json!({"path": "guarded.txt"}),
+        "ok",
+    )
+    .await
+    .expect("matching hook must materialize and execute its path dependency");
+    assert!(tmp.path().join(".harn/package-current.toml").is_file());
+    harn_vm::reset_thread_local_state();
 }

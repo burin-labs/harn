@@ -22,7 +22,27 @@ pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), Package
 /// Load the nearest project manifest plus any installed package manifests and
 /// merge the root project's runtime extensions.
 pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
-    ensure_dependencies_materialized(anchor)?;
+    try_load_runtime_extensions_with_packages(anchor, true)
+}
+
+/// Load only runtime declarations owned by the nearest project manifest.
+///
+/// Installed dependency packages are deliberately left untouched. Ordinary
+/// entrypoints can register root policy and configuration without verifying,
+/// parsing, or initializing every package connector they never call. A
+/// package-aware consumer must resolve the dependency layer explicitly at its
+/// first package import, connector call, or eager handler request.
+pub fn try_load_root_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
+    try_load_runtime_extensions_with_packages(anchor, false)
+}
+
+fn try_load_runtime_extensions_with_packages(
+    anchor: &Path,
+    include_packages: bool,
+) -> Result<RuntimeExtensions, PackageError> {
+    if include_packages {
+        ensure_dependencies_materialized(anchor)?;
+    }
     let Some((root_manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(RuntimeExtensions::default());
     };
@@ -45,8 +65,11 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
-    let package_snapshot =
-        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new);
+    let package_snapshot = if include_packages {
+        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new)
+    } else {
+        None
+    };
     if let Some(snapshot) = package_snapshot.as_ref() {
         provider_connectors.extend(installed_package_provider_connectors(
             snapshot,
@@ -55,13 +78,18 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     }
     provider_connectors = dedupe_provider_connectors(provider_connectors);
     let root_manifest_path = manifest_dir.join(MANIFEST);
-    let runtime_personas = resolve_runtime_personas(
-        root_manifest.clone(),
-        root_manifest_path.clone(),
-        manifest_dir.clone(),
-        package_snapshot.clone(),
-    )?;
-    triggers.extend(installed_persona_trigger_configs(&runtime_personas)?);
+    let runtime_personas = if include_packages {
+        let personas = resolve_runtime_personas(
+            root_manifest.clone(),
+            root_manifest_path.clone(),
+            manifest_dir.clone(),
+            package_snapshot.clone(),
+        )?;
+        triggers.extend(installed_persona_trigger_configs(&personas)?);
+        personas
+    } else {
+        Vec::new()
+    };
 
     Ok(RuntimeExtensions {
         root_manifest_path: Some(root_manifest_path),
@@ -100,92 +128,6 @@ pub fn try_load_runtime_extensions_from_manifest(
         return Ok(None);
     }
     try_load_runtime_extensions(&manifest_path).map(Some)
-}
-
-fn installed_package_provider_connectors(
-    snapshot: &harn_modules::package_snapshot::PackageSnapshot,
-    packages_dir: &Path,
-) -> Result<Vec<ResolvedProviderConnectorConfig>, PackageError> {
-    let lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
-        PackageError::Lockfile(format!(
-            "published package generation is missing {}",
-            snapshot.lock_path().display()
-        ))
-    })?;
-    let mut providers = Vec::new();
-    for entry in &lock.packages {
-        validate_package_alias(&entry.name)?;
-        let package_dir = packages_dir.join(&entry.name);
-        if package_dir.is_dir() {
-            if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
-                providers.extend(resolved_provider_connectors_from_manifest(
-                    &manifest,
-                    &package_dir,
-                ));
-            }
-            continue;
-        }
-
-        let package_file = packages_dir.join(format!("{}.harn", entry.name));
-        if package_file.is_file() {
-            continue;
-        }
-
-        return Err(PackageError::Manifest(format!(
-            "installed package {} is missing under {}; run `harn install`",
-            entry.name,
-            packages_dir.display()
-        )));
-    }
-    Ok(providers)
-}
-
-fn dedupe_provider_connectors(
-    providers: Vec<ResolvedProviderConnectorConfig>,
-) -> Vec<ResolvedProviderConnectorConfig> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for provider in providers {
-        if seen.insert(provider.id.as_str().to_string()) {
-            out.push(provider);
-        }
-    }
-    out
-}
-
-/// Load one manifest-declared provider connector behind the runtime's common
-/// connector trait. Rust builtins are already present in the default registry.
-pub async fn load_provider_connector(
-    config: &ResolvedProviderConnectorConfig,
-) -> Result<Option<Box<dyn harn_vm::Connector>>, PackageError> {
-    match &config.connector {
-        ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
-        ResolvedProviderConnectorKind::Invalid(message) => {
-            Err(PackageError::Validation(message.clone()))
-        }
-        ResolvedProviderConnectorKind::Harn { module } => {
-            let module_path = harn_vm::resolve_module_import_path(&config.manifest_dir, module);
-            let connector = harn_vm::HarnConnector::load(&module_path)
-                .await
-                .map_err(|error| {
-                    PackageError::Validation(format!(
-                        "failed to load Harn connector '{}' for provider '{}': {error}",
-                        module_path.display(),
-                        config.id.as_str()
-                    ))
-                })?;
-            let observed = harn_vm::Connector::provider_id(&connector);
-            if observed != &config.id {
-                return Err(PackageError::Validation(format!(
-                    "provider '{}' resolves to connector module '{}' which declares provider_id '{}'",
-                    config.id.as_str(),
-                    module_path.display(),
-                    observed.as_str()
-                )));
-            }
-            Ok(Some(Box::new(connector)))
-        }
-    }
 }
 
 /// Load the project's runtime extensions, or leave the process.
@@ -244,7 +186,9 @@ pub async fn install_manifest_hooks(
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ManifestHandlerInitialization {
-    /// Validate the handler contract now and initialize its module on first use.
+    /// Resolve and validate the handler when its matching event first fires.
+    /// A resolution failure aborts that dispatch; policy hooks therefore stay
+    /// fail closed without making unrelated entrypoints parse unused modules.
     #[default]
     OnDispatch,
     /// Validate and initialize every handler module during installation.
@@ -258,7 +202,6 @@ impl ManifestHandlerInitialization {
 }
 
 /// Install manifest hooks with an explicit module-initialization policy.
-/// Declarations, exports, and callable signatures are validated in both modes.
 pub async fn install_manifest_hooks_with_initialization(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
@@ -276,12 +219,48 @@ pub async fn install_manifest_hooks_with_initialization(
             )
             .into());
         };
-        let module_path = crate::package::manifest_module_source_path(
-            &hook.manifest_dir,
-            hook.package_name.as_deref(),
-            &hook.exports,
-            Some(module_name),
-        )?;
+        let module_path = if initialization.is_on_dispatch() {
+            crate::package::manifest_module_path(
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )
+        } else {
+            crate::package::manifest_module_source_path(
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )?
+        };
+        if initialization.is_on_dispatch() {
+            let preparation_anchor = module_path.clone();
+            let callable = harn_vm::LazyVmCallable::new(module_path, function_name)
+                .with_preparation(move || {
+                    let preparation_anchor = preparation_anchor.clone();
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let graph =
+                                harn_modules::build(std::slice::from_ref(&preparation_anchor));
+                            ensure_reachable_dependencies_materialized(&preparation_anchor, &graph)
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        })
+                        .await
+                        .map_err(|error| {
+                            format!("hook dependency preparation task failed: {error}")
+                        })?
+                    }
+                });
+            harn_vm::orchestration::register_vm_hook_lazy(
+                hook.event,
+                hook.pattern.clone(),
+                hook.handler.clone(),
+                callable,
+            );
+            continue;
+        }
         let signatures =
             cached_module_callable_signatures(&mut module_signatures, &module_path, None)?;
         if signatures
@@ -292,15 +271,6 @@ pub async fn install_manifest_hooks_with_initialization(
                 "hook handler '{function_name}' is not exported by module '{module_name}'"
             )
             .into());
-        }
-        if initialization.is_on_dispatch() {
-            harn_vm::orchestration::register_vm_hook_lazy(
-                hook.event,
-                hook.pattern.clone(),
-                hook.handler.clone(),
-                harn_vm::LazyVmCallable::new(module_path, function_name),
-            );
-            continue;
         }
         let cache_key = (
             hook.manifest_dir.clone(),

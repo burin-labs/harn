@@ -79,12 +79,22 @@ pub(crate) async fn install_manifest_runtime(
     // failure, which on this path would cut a `--json` stream off before its
     // terminal event and skip the run's own summary and timing output. The
     // failure is the same one; only who gets to describe it changes.
-    let extensions =
-        package::try_load_runtime_extensions(path).map_err(ManifestRuntimeSetupError::packages)?;
+    let extensions = if project_triggers {
+        package::try_load_runtime_extensions(path)
+    } else {
+        package::try_load_root_runtime_extensions(path)
+    }
+    .map_err(ManifestRuntimeSetupError::packages)?;
     package::install_runtime_extensions(&extensions);
-    let connector_clients = crate::install_connector_clients(&extensions.provider_connectors)
-        .await
-        .map_err(ManifestRuntimeSetupError::connectors)?;
+    let connector_clients = if project_triggers {
+        crate::install_connector_clients_for_vm(vm, &extensions.provider_connectors)
+            .await
+            .map_err(ManifestRuntimeSetupError::connectors)?
+    } else {
+        let clients = crate::project_connector_clients(path);
+        vm.set_connector_clients(clients);
+        harn_vm::scope_active_connector_clients(std::collections::BTreeMap::new())
+    };
     if let Some(manifest) = extensions.root_manifest.as_ref() {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, vm).await;

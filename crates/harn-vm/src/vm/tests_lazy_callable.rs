@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::stdlib::register_vm_stdlib;
@@ -100,6 +101,39 @@ pub fn current() -> int {
             .expect("fresh VM call succeeds");
         assert!(matches!(fresh_value, VmValue::Int(1)), "{fresh_value:?}");
     });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lazy_callable_preparation_caches_a_terminal_failure_across_clones() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempt_counter = Arc::clone(&attempts);
+    let callable = VmCallable::Lazy(
+        LazyVmCallable::new("unused.harn".into(), "unused").with_preparation(move || {
+            let attempt_counter = Arc::clone(&attempt_counter);
+            async move {
+                attempt_counter.fetch_add(1, Ordering::SeqCst);
+                Err("preparation stopped".to_string())
+            }
+        }),
+    );
+
+    let resolutions = (0..8)
+        .map(|_| {
+            let callable = callable.clone();
+            tokio::spawn(async move {
+                let mut vm = Vm::new();
+                vm.resolve_callable(&callable).await
+            })
+        })
+        .collect::<Vec<_>>();
+    for resolution in resolutions {
+        let error = resolution
+            .await
+            .expect("resolution task")
+            .expect_err("preparation must stop resolution");
+        assert!(error.to_string().contains("preparation stopped"));
+    }
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]

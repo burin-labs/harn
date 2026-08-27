@@ -279,12 +279,12 @@ pub use connectors::{
     hmac::{verify_hmac_signed, SIGNATURE_VERIFY_AUDIT_TOPIC},
     install_active_connector_clients, install_active_metrics_registry,
     postprocess_normalized_event, scope_active_connector_clients, ActivationHandle,
-    ActiveConnectorClientsGuard, ClientError, Connector, ConnectorClient, ConnectorCtx,
-    ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse, ConnectorMetricsSnapshot,
-    ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
+    ActiveConnectorClientsGuard, ClientError, Connector, ConnectorClient, ConnectorClientResolver,
+    ConnectorCtx, ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse,
+    ConnectorMetricsSnapshot, ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
     HarnConnectorEffectPolicies, MetricsRegistry, PostNormalizeOutcome, ProviderPayloadSchema,
     RateLimitConfig, RateLimiterFactory, RawInbound, StreamConnector, TriggerBinding, TriggerKind,
-    TriggerRegistry, WebhookSignatureVariant,
+    TriggerRegistry, VmConnectorClients, WebhookSignatureVariant,
 };
 pub use corrections::{
     append_correction_record, apply_corrections_to_policy, correction_query_filters_from_json,
