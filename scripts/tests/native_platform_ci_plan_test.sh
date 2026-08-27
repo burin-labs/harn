@@ -92,6 +92,12 @@ write_paths windows_selector scripts/ci/affected_crate_args.sh
 assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/windows_selector"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"
 
+write_paths windows_cli_release_paths \
+  crates/harn-cli/src/commands/upgrade.rs \
+  crates/harn-cli/src/commands/models/batch/execution.rs
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/windows_cli_release_paths"
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/windows_cli_release_paths"
+
 write_paths package_content_hash crates/harn-modules/src/package_execution/content_hash.rs
 assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/package_content_hash"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/package_content_hash"

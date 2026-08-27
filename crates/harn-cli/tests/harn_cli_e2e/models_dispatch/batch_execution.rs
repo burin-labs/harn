@@ -32,7 +32,11 @@ fn initialize(requests: &std::path::Path, execution: &std::path::Path) -> Value 
         ],
         &[],
     );
-    assert_eq!(output.exit_code, 0, "init stderr={}", output.stderr);
+    assert_eq!(
+        output.exit_code, 0,
+        "init stdout={}\nstderr={}",
+        output.stdout, output.stderr
+    );
     parse_json(&output.stdout, "batch execute init")
 }
 
