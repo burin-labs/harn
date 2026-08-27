@@ -5,6 +5,7 @@ const FAKE_PYTHON_BINDING = """
 HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
 HARN_AGENT_EVENT_METHOD = "harn/agent_event"
 HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
+HARN_STRICT_SESSION_RECAP_BINDING = False
 
 
 class _RoundTrip:
@@ -117,6 +118,9 @@ pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task: un
   const args = python_binding_probe_args("/tmp/artifacts")
   assert_eq(args[0], "-c")
   assert(args[1]?.contains("python bindings: OK"))
+  assert(args[1]?.contains("unknown recap snapshot field was accepted before write-back"))
+  assert(args[1]?.contains("HarnSessionRecapSnapshot"))
+  assert(args[1]?.contains("recap verification status did not hydrate into its closed enum"))
   assert_eq(args[2], "/tmp/artifacts")
 }
 

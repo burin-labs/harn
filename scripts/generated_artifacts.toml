@@ -64,6 +64,8 @@ exempt_checks = [
   "check-docs-symbols",             # validates docs name no removed runtime API, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
+  "check-typescript-protocol-binding", # generated TypeScript runtime contract (external toolchain)
+  "check-swift-protocol-binding",   # generated Swift runtime contract (macOS toolchain)
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
   "check-protocol-symbol-removals", # declares removals from the published protocol bindings, not a mirror
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
@@ -459,14 +461,21 @@ make_all = true
 
 [[artifact]]
 id = "protocol-bindings-roundtrip"
-description = "Round-trips the published JSON fixture through the Python and Go protocol bindings to catch wire-vocabulary drift."
-gen = ""  # python/go bindings are emitted by dump-protocol-artifacts; this is the roundtrip validator
+description = "Round-trips the published JSON fixture through generated bindings and rejects lossy recap writes in Python, Go, TypeScript, and Swift."
+gen = ""  # bindings are emitted by dump-protocol-artifacts; these are behavioral validators
 check = "check-bindings"
 outputs = [
   "spec/protocol-artifacts/python/harn_protocol.py",
   "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
+  "spec/protocol-artifacts/harn-protocol.ts",
+  "spec/protocol-artifacts/HarnProtocol.swift",
 ]
-sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.harn"]
+sources = [
+  "spec/protocol-artifacts/",
+  "scripts/check_protocol_bindings.harn",
+  "scripts/tests/protocol_binding_session_recap.ts",
+  "scripts/tests/protocol_binding_session_recap.swift",
+]
 ci = true
 make_all = true
 
@@ -638,6 +647,8 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
 "check-run-view-fixtures" = "binary"          # production CLI fixture engine
 "check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
+"check-typescript-protocol-binding" = "excluded" # generated binding runtime probe (Node/TypeScript toolchain)
+"check-swift-protocol-binding" = "excluded"   # generated binding runtime probe (macOS Swift toolchain)
 "check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
 "check-wasm-wit" = "excluded"                 # pinned Bytecode Alliance wasm-tools validation (external toolchain)
 "check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)

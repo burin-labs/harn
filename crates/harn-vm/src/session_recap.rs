@@ -52,7 +52,7 @@ impl SessionRecapQuery {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionRecapSnapshot {
     pub schema_version: u32,
     pub session_id: String,
@@ -218,9 +218,15 @@ pub struct RecapToolExchange {
 #[serde(rename_all = "camelCase")]
 pub struct RecapVerificationFact {
     pub schema: String,
-    pub status: String,
+    pub status: RecapVerificationStatus,
     pub verified_paths: Vec<String>,
     pub source_event_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecapVerificationStatus {
+    Passed,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -380,15 +386,14 @@ pub async fn query_session_recap(
         unassigned,
         truncated: next_event_id.is_some(),
     };
-    let projection_hash = sha256_canonical(&serde_json::json!({
-        "schema_version": SESSION_RECAP_SCHEMA_VERSION,
-        "session_id": &query.session_id,
-        "query": &query,
-        "cursor": &cursor,
-        "coverage": &coverage,
-        "content_hash": &content_hash,
-        "turns": &turns,
-    }));
+    let projection_hash = recap_projection_hash(
+        &query.session_id,
+        &query,
+        &cursor,
+        &coverage,
+        &content_hash,
+        &turns,
+    );
     Ok(Some(SessionRecapSnapshot {
         schema_version: SESSION_RECAP_SCHEMA_VERSION,
         session_id: query.session_id.clone(),
@@ -1039,10 +1044,34 @@ fn verification_fact(
         .collect();
     Some(RecapVerificationFact {
         schema: schema.to_string(),
-        status: status.to_string(),
+        status: RecapVerificationStatus::Passed,
         verified_paths,
         source_event_id: event.event_id,
     })
+}
+
+/// Hash the Harn-owned deterministic projection fields.
+///
+/// `extensions` are deliberately outside this base hash. A decorative
+/// extension must carry its own binding to this projection hash before a
+/// consumer treats the extension as content-bound evidence.
+fn recap_projection_hash(
+    session_id: &str,
+    query: &SessionRecapQuery,
+    cursor: &SessionRecapCursor,
+    coverage: &SessionRecapCoverage,
+    content_hash: &str,
+    turns: &[PromptTurnRecap],
+) -> String {
+    sha256_canonical(&serde_json::json!({
+        "schema_version": SESSION_RECAP_SCHEMA_VERSION,
+        "session_id": session_id,
+        "query": query,
+        "cursor": cursor,
+        "coverage": coverage,
+        "content_hash": content_hash,
+        "turns": turns,
+    }))
 }
 
 fn sha256_canonical<T: Serialize>(value: &T) -> String {

@@ -48,7 +48,8 @@ the same host-facing surface (Python 3.9+, stdlib-only).
 - `go/harnprotocol/harnprotocol.go`: Go package with structs, typed string
 aliases, and constants mirroring the Python and Swift bindings.
 - `fixtures/round_trip.json`: representative JSON envelopes used by
-`make check-bindings` to exercise Python and Go round-trips.
+`make check-bindings` to exercise Python, Go, and TypeScript, and
+`make check-swift-protocol-binding` for the macOS projection.
 - `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures
 (stable success, unsupported-version retry, cache hints,
 input-required, header mismatch, no-session HTTP, recursive

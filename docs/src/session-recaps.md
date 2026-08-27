@@ -39,9 +39,14 @@ An available snapshot can contain zero matching facts. Check
 ## Snapshot contract
 
 `schemaVersion` is `1`. `source.events` identifies each contributing canonical
-event by ID and record hash. `contentHash` binds the source content and
-`projectionHash` binds the complete projected snapshot. Public text is redacted
-through Harn's active redaction policy before it reaches the snapshot.
+event by ID and record hash. `contentHash` binds the source content.
+`projectionHash` binds Harn's schema version, session ID, query, cursor,
+coverage, content hash, and projected turns. Public text is redacted through
+Harn's active redaction policy before it reaches the snapshot.
+
+`projectionHash` deliberately excludes `extensions`. An extension is decorative
+until it carries and verifies its own binding to the snapshot's
+`projectionHash` or `contentHash`.
 
 The schema-v1 write contract is closed. A writer must reject unknown fields in
 the availability envelope or snapshot. Forward-compatible data belongs in the

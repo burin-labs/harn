@@ -3027,6 +3027,7 @@ public enum HarnSessionRecapPlanStepStatus: String, Codable, Sendable, Equatable
 public enum HarnSessionRecapPlanEventKind: String, Codable, Sendable, Equatable { case created, updated }
 public enum HarnSessionRecapProgressStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed }
 public enum HarnSessionRecapProgressPriority: String, Codable, Sendable, Equatable { case high, medium, low }
+public enum HarnSessionRecapVerificationStatus: String, Codable, Sendable, Equatable { case passed }
 public enum HarnSessionRecapUnavailableReason: String, Codable, Sendable, Equatable { case journalUnavailable = "journal_unavailable", sessionMissing = "session_missing", projectionFailed = "projection_failed", admissionTerminal = "admission_terminal" }
 public enum HarnSessionRecapAvailabilityState: String, Codable, Sendable, Equatable { case available, unavailable }
 
@@ -3036,7 +3037,7 @@ public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable { public va
 public struct HarnSessionRecapSourceEvent: Codable, Sendable, Equatable { public var eventId: Int; public var recordHash: String }
 public struct HarnSessionRecapSource: Codable, Sendable, Equatable { public var firstEventId: Int?; public var lastEventId: Int?; public var events: [HarnSessionRecapSourceEvent] }
 public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable { public var text: String; public var sourceEventId: Int }
-public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: String; public var verifiedPaths: [String]; public var sourceEventId: Int }
+public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: HarnSessionRecapVerificationStatus; public var verifiedPaths: [String]; public var sourceEventId: Int }
 public struct HarnSessionRecapToolExchange: Codable, Sendable, Equatable {
     public var toolCallId: String; public var toolName: String?; public var state: HarnSessionRecapToolState
     public var callObserved: Bool; public var resultObserved: Bool; public var input: HarnACPValue?; public var output: HarnACPValue?
@@ -3074,4 +3075,55 @@ public struct HarnSessionRecapAvailability: Codable, Sendable, Equatable {
     public var state: HarnSessionRecapAvailabilityState
     public var snapshot: HarnSessionRecapSnapshot?
     public var reason: HarnSessionRecapUnavailableReason?
+}
+
+private struct HarnSessionRecapAnyCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+    init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
+    init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+}
+
+extension HarnSessionRecapSnapshot {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case schemaVersion, sessionId, query, cursor, coverage, source
+        case contentHash, projectionHash, turns, extensions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.container(keyedBy: HarnSessionRecapAnyCodingKey.self)
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        if let unknown = raw.allKeys.first(where: { !known.contains($0.stringValue) }) {
+            throw DecodingError.dataCorruptedError(
+                forKey: unknown,
+                in: raw,
+                debugDescription: "Harn session recap snapshot contains unknown field \(unknown.stringValue)"
+            )
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        sessionId = try values.decode(String.self, forKey: .sessionId)
+        query = try values.decode(HarnSessionRecapQuery.self, forKey: .query)
+        cursor = try values.decode(HarnSessionRecapCursor.self, forKey: .cursor)
+        coverage = try values.decode(HarnSessionRecapCoverage.self, forKey: .coverage)
+        source = try values.decode(HarnSessionRecapSource.self, forKey: .source)
+        contentHash = try values.decode(String.self, forKey: .contentHash)
+        projectionHash = try values.decode(String.self, forKey: .projectionHash)
+        turns = try values.decode([HarnSessionPromptTurnRecap].self, forKey: .turns)
+        extensions = try values.decode([String: HarnACPValue].self, forKey: .extensions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(sessionId, forKey: .sessionId)
+        try values.encode(query, forKey: .query)
+        try values.encode(cursor, forKey: .cursor)
+        try values.encode(coverage, forKey: .coverage)
+        try values.encode(source, forKey: .source)
+        try values.encode(contentHash, forKey: .contentHash)
+        try values.encode(projectionHash, forKey: .projectionHash)
+        try values.encode(turns, forKey: .turns)
+        try values.encode(extensions, forKey: .extensions)
+    }
 }

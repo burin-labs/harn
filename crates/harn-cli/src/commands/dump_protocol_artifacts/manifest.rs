@@ -304,7 +304,8 @@ pub(super) fn generate_readme() -> String {
          - `go/harnprotocol/harnprotocol.go`: Go package with structs, typed string\n\
            aliases, and constants mirroring the Python and Swift bindings.\n\
          - `fixtures/round_trip.json`: representative JSON envelopes used by\n\
-           `make check-bindings` to exercise Python and Go round-trips.\n\
+           `make check-bindings` to exercise Python, Go, and TypeScript, and\n\
+           `make check-swift-protocol-binding` for the macOS projection.\n\
          - `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures\n\
            (stable success, unsupported-version retry, cache hints,\n\
            input-required, header mismatch, no-session HTTP, recursive\n\

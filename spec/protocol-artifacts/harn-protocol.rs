@@ -2642,6 +2642,11 @@ pub enum HarnSessionRecapProgressPriority {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum HarnSessionRecapVerificationStatus {
+    Passed,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HarnSessionRecapUnavailableReason {
     JournalUnavailable,
     SessionMissing,
@@ -2696,7 +2701,7 @@ pub struct HarnSessionRecapTextFact {
 #[serde(rename_all = "camelCase")]
 pub struct HarnSessionRecapVerificationFact {
     pub schema: String,
-    pub status: String,
+    pub status: HarnSessionRecapVerificationStatus,
     pub verified_paths: Vec<String>,
     pub source_event_id: u64,
 }
@@ -2787,7 +2792,7 @@ pub struct HarnSessionPromptTurnRecap {
     pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSnapshot {
     pub schema_version: u32,
     pub session_id: String,

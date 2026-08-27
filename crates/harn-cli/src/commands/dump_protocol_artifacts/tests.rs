@@ -771,6 +771,29 @@ fn session_recap_schema_and_generated_rust_preserve_the_write_contract() {
         !validator.is_valid(&unknown),
         "schema v1 writers must reject unknown top-level snapshot fields"
     );
+    assert!(
+        serde_json::from_value::<generated_rust_binding::HarnSessionRecapAvailability>(
+            unknown.clone()
+        )
+        .is_err(),
+        "generated Rust readers must reject unknown snapshot fields before write-back"
+    );
+
+    unknown["snapshot"]
+        .as_object_mut()
+        .expect("snapshot object")
+        .remove("futureTopLevel");
+    unknown["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["status"] =
+        json!("future_status");
+    assert!(
+        !validator.is_valid(&unknown),
+        "schema v1 must reject unknown verification statuses"
+    );
+    assert!(
+        serde_json::from_value::<generated_rust_binding::HarnSessionRecapAvailability>(unknown)
+            .is_err(),
+        "generated Rust readers must reject unknown verification statuses"
+    );
 }
 
 #[test]

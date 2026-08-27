@@ -126,6 +126,7 @@ export type HarnSessionRecapPlanStepStatus = "pending" | "in_progress" | "comple
 export type HarnSessionRecapPlanEventKind = "created" | "updated"
 export type HarnSessionRecapProgressStatus = "pending" | "in_progress" | "completed"
 export type HarnSessionRecapProgressPriority = "high" | "medium" | "low"
+export type HarnSessionRecapVerificationStatus = "passed"
 export type HarnSessionRecapUnavailableReason = "journal_unavailable" | "session_missing" | "projection_failed" | "admission_terminal"
 
 export interface HarnSessionRecapQuery {
@@ -140,7 +141,7 @@ export interface HarnSessionRecapCoverage { scanned: number; matched: number; pe
 export interface HarnSessionRecapSourceEvent { eventId: number; recordHash: string }
 export interface HarnSessionRecapSource { firstEventId: number | null; lastEventId: number | null; events: HarnSessionRecapSourceEvent[] }
 export interface HarnSessionRecapTextFact { text: string; sourceEventId: number }
-export interface HarnSessionRecapVerificationFact { schema: string; status: string; verifiedPaths: string[]; sourceEventId: number }
+export interface HarnSessionRecapVerificationFact { schema: string; status: HarnSessionRecapVerificationStatus; verifiedPaths: string[]; sourceEventId: number }
 export interface HarnSessionRecapToolExchange {
   toolCallId: string
   toolName: string | null
@@ -183,6 +184,54 @@ export interface HarnSessionRecapSnapshot {
 export type HarnSessionRecapAvailability =
   | { state: "available"; snapshot: HarnSessionRecapSnapshot }
   | { state: "unavailable"; reason: HarnSessionRecapUnavailableReason }
+
+const HARN_SESSION_RECAP_SNAPSHOT_KEYS = new Set([
+  "schemaVersion", "sessionId", "query", "cursor", "coverage", "source",
+  "contentHash", "projectionHash", "turns", "extensions",
+])
+
+/** Decode the closed recap envelope without silently dropping future fields. */
+export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionRecapAvailability {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Harn session recap availability must be an object")
+  }
+  const availability = value as Record<string, unknown>
+  if (availability.state === "unavailable") {
+    return value as HarnSessionRecapAvailability
+  }
+  if (availability.state !== "available") {
+    throw new TypeError("Harn session recap availability has an unknown state")
+  }
+  const snapshot = availability.snapshot
+  if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
+    throw new TypeError("Harn session recap availability requires an object snapshot")
+  }
+  for (const key of Object.keys(snapshot)) {
+    if (!HARN_SESSION_RECAP_SNAPSHOT_KEYS.has(key)) {
+      throw new TypeError(`Harn session recap snapshot contains unknown field ${key}`)
+    }
+  }
+  const turns = (snapshot as Record<string, unknown>).turns
+  if (!Array.isArray(turns)) {
+    throw new TypeError("Harn session recap snapshot requires turns")
+  }
+  for (const turn of turns) {
+    if (typeof turn !== "object" || turn === null || !Array.isArray((turn as Record<string, unknown>).iterations)) continue
+    for (const iteration of (turn as { iterations: unknown[] }).iterations) {
+      if (typeof iteration !== "object" || iteration === null || !Array.isArray((iteration as Record<string, unknown>).tools)) continue
+      for (const tool of (iteration as { tools: unknown[] }).tools) {
+        if (typeof tool !== "object" || tool === null) continue
+        const verification = (tool as Record<string, unknown>).verification
+        if (verification !== null && verification !== undefined) {
+          if (typeof verification !== "object" || (verification as Record<string, unknown>).status !== "passed") {
+            throw new TypeError("Harn session recap verification status must be passed")
+          }
+        }
+      }
+    }
+  }
+  return value as HarnSessionRecapAvailability
+}
 "#,
     );
 }
@@ -213,6 +262,9 @@ pub enum HarnSessionRecapProgressStatus { Pending, InProgress, Completed }
 pub enum HarnSessionRecapProgressPriority { High, Medium, Low }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum HarnSessionRecapVerificationStatus { Passed }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HarnSessionRecapUnavailableReason { JournalUnavailable, SessionMissing, ProjectionFailed, AdmissionTerminal }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,7 +287,7 @@ pub struct HarnSessionRecapSource { pub first_event_id: Option<u64>, pub last_ev
 pub struct HarnSessionRecapTextFact { pub text: String, pub source_event_id: u64 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HarnSessionRecapVerificationFact { pub schema: String, pub status: String, pub verified_paths: Vec<String>, pub source_event_id: u64 }
+pub struct HarnSessionRecapVerificationFact { pub schema: String, pub status: HarnSessionRecapVerificationStatus, pub verified_paths: Vec<String>, pub source_event_id: u64 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnSessionRecapToolExchange {
@@ -282,7 +334,7 @@ pub struct HarnSessionPromptTurnRecap {
     pub terminal: Option<HarnSessionRecapTerminalFact>, pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSnapshot {
     pub schema_version: u32, pub session_id: String, pub query: HarnSessionRecapQuery,
     pub cursor: HarnSessionRecapCursor, pub coverage: HarnSessionRecapCoverage, pub source: HarnSessionRecapSource,
@@ -312,6 +364,7 @@ public enum HarnSessionRecapPlanStepStatus: String, Codable, Sendable, Equatable
 public enum HarnSessionRecapPlanEventKind: String, Codable, Sendable, Equatable { case created, updated }
 public enum HarnSessionRecapProgressStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed }
 public enum HarnSessionRecapProgressPriority: String, Codable, Sendable, Equatable { case high, medium, low }
+public enum HarnSessionRecapVerificationStatus: String, Codable, Sendable, Equatable { case passed }
 public enum HarnSessionRecapUnavailableReason: String, Codable, Sendable, Equatable { case journalUnavailable = "journal_unavailable", sessionMissing = "session_missing", projectionFailed = "projection_failed", admissionTerminal = "admission_terminal" }
 public enum HarnSessionRecapAvailabilityState: String, Codable, Sendable, Equatable { case available, unavailable }
 
@@ -321,7 +374,7 @@ public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable { public va
 public struct HarnSessionRecapSourceEvent: Codable, Sendable, Equatable { public var eventId: Int; public var recordHash: String }
 public struct HarnSessionRecapSource: Codable, Sendable, Equatable { public var firstEventId: Int?; public var lastEventId: Int?; public var events: [HarnSessionRecapSourceEvent] }
 public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable { public var text: String; public var sourceEventId: Int }
-public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: String; public var verifiedPaths: [String]; public var sourceEventId: Int }
+public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: HarnSessionRecapVerificationStatus; public var verifiedPaths: [String]; public var sourceEventId: Int }
 public struct HarnSessionRecapToolExchange: Codable, Sendable, Equatable {
     public var toolCallId: String; public var toolName: String?; public var state: HarnSessionRecapToolState
     public var callObserved: Bool; public var resultObserved: Bool; public var input: HarnACPValue?; public var output: HarnACPValue?
@@ -359,6 +412,57 @@ public struct HarnSessionRecapAvailability: Codable, Sendable, Equatable {
     public var state: HarnSessionRecapAvailabilityState
     public var snapshot: HarnSessionRecapSnapshot?
     public var reason: HarnSessionRecapUnavailableReason?
+}
+
+private struct HarnSessionRecapAnyCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+    init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
+    init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+}
+
+extension HarnSessionRecapSnapshot {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case schemaVersion, sessionId, query, cursor, coverage, source
+        case contentHash, projectionHash, turns, extensions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.container(keyedBy: HarnSessionRecapAnyCodingKey.self)
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        if let unknown = raw.allKeys.first(where: { !known.contains($0.stringValue) }) {
+            throw DecodingError.dataCorruptedError(
+                forKey: unknown,
+                in: raw,
+                debugDescription: "Harn session recap snapshot contains unknown field \(unknown.stringValue)"
+            )
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        sessionId = try values.decode(String.self, forKey: .sessionId)
+        query = try values.decode(HarnSessionRecapQuery.self, forKey: .query)
+        cursor = try values.decode(HarnSessionRecapCursor.self, forKey: .cursor)
+        coverage = try values.decode(HarnSessionRecapCoverage.self, forKey: .coverage)
+        source = try values.decode(HarnSessionRecapSource.self, forKey: .source)
+        contentHash = try values.decode(String.self, forKey: .contentHash)
+        projectionHash = try values.decode(String.self, forKey: .projectionHash)
+        turns = try values.decode([HarnSessionPromptTurnRecap].self, forKey: .turns)
+        extensions = try values.decode([String: HarnACPValue].self, forKey: .extensions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(sessionId, forKey: .sessionId)
+        try values.encode(query, forKey: .query)
+        try values.encode(cursor, forKey: .cursor)
+        try values.encode(coverage, forKey: .coverage)
+        try values.encode(source, forKey: .source)
+        try values.encode(contentHash, forKey: .contentHash)
+        try values.encode(projectionHash, forKey: .projectionHash)
+        try values.encode(turns, forKey: .turns)
+        try values.encode(extensions, forKey: .extensions)
+    }
 }
 "#,
     );
@@ -398,75 +502,217 @@ class HarnSessionRecapProgressPriority(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+class HarnSessionRecapVerificationStatus(str, Enum):
+    PASSED = "passed"
 class HarnSessionRecapUnavailableReason(str, Enum):
     JOURNAL_UNAVAILABLE = "journal_unavailable"
     SESSION_MISSING = "session_missing"
     PROJECTION_FAILED = "projection_failed"
     ADMISSION_TERMINAL = "admission_terminal"
+class HarnSessionRecapAvailabilityState(str, Enum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+class _HarnStrictRecapDataclass(_HarnDataclass):
+    @classmethod
+    def _strict_values(cls, data: Mapping[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data, Mapping):
+            raise TypeError(f"{cls.__name__}.from_wire expected a mapping, got {type(data).__name__}")
+        expected = {item.name for item in fields(cls)}  # type: ignore[arg-type]
+        unknown = set(data) - expected
+        missing = expected - set(data)
+        if unknown:
+            raise ValueError(f"{cls.__name__} contains unknown fields: {', '.join(sorted(unknown))}")
+        if missing:
+            raise ValueError(f"{cls.__name__} is missing fields: {', '.join(sorted(missing))}")
+        return dict(data)
+
+    @classmethod
+    def from_wire(cls: Type[_T], data: Mapping[str, Any]) -> _T:
+        return cls(**cls._strict_values(data))
+
+    def to_wire(self) -> JsonObject:
+        return _harn_recap_wire(self)
+
+def _harn_recap_wire(value: Any) -> Any:
+    if is_dataclass(value):
+        return _harn_recap_wire(asdict(value))
+    if isinstance(value, dict):
+        return {key: _harn_recap_wire(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_harn_recap_wire(item) for item in value]
+    if isinstance(value, Enum):
+        return value.value
+    return value
 
 @dataclass
-class HarnSessionRecapQuery(_HarnDataclass):
+class HarnSessionRecapQuery(_HarnStrictRecapDataclass):
     sessionId: str; runId: Optional[str]; turnId: Optional[str]; fromEventId: Optional[int]; limit: Optional[int]
 @dataclass
-class HarnSessionRecapCursor(_HarnDataclass):
+class HarnSessionRecapCursor(_HarnStrictRecapDataclass):
     lastEventId: Optional[int]; nextEventId: Optional[int]
 @dataclass
-class HarnSessionRecapCoverage(_HarnDataclass):
+class HarnSessionRecapCoverage(_HarnStrictRecapDataclass):
     scanned: int; matched: int; pending: int; unassigned: int; truncated: bool
 @dataclass
-class HarnSessionRecapSourceEvent(_HarnDataclass):
+class HarnSessionRecapSourceEvent(_HarnStrictRecapDataclass):
     eventId: int; recordHash: str
 @dataclass
-class HarnSessionRecapSource(_HarnDataclass):
+class HarnSessionRecapSource(_HarnStrictRecapDataclass):
     firstEventId: Optional[int]; lastEventId: Optional[int]; events: List[HarnSessionRecapSourceEvent]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapSource":
+        values = cls._strict_values(data)
+        values["events"] = [HarnSessionRecapSourceEvent.from_wire(item) for item in values["events"]]
+        return cls(**values)
 @dataclass
-class HarnSessionRecapTextFact(_HarnDataclass):
+class HarnSessionRecapTextFact(_HarnStrictRecapDataclass):
     text: str; sourceEventId: int
 @dataclass
-class HarnSessionRecapVerificationFact(_HarnDataclass):
-    schema: str; status: str; verifiedPaths: List[str]; sourceEventId: int
+class HarnSessionRecapVerificationFact(_HarnStrictRecapDataclass):
+    schema: str; status: HarnSessionRecapVerificationStatus; verifiedPaths: List[str]; sourceEventId: int
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapVerificationFact":
+        values = cls._strict_values(data)
+        values["status"] = HarnSessionRecapVerificationStatus(values["status"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapToolExchange(_HarnDataclass):
+class HarnSessionRecapToolExchange(_HarnStrictRecapDataclass):
     toolCallId: str; toolName: Optional[str]; state: HarnSessionRecapToolState; callObserved: bool
     resultObserved: bool; input: Optional[JsonValue]; output: Optional[JsonValue]
     verification: Optional[HarnSessionRecapVerificationFact]; sourceEventIds: List[int]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapToolExchange":
+        values = cls._strict_values(data)
+        values["state"] = HarnSessionRecapToolState(values["state"])
+        if values["verification"] is not None:
+            values["verification"] = HarnSessionRecapVerificationFact.from_wire(values["verification"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapPlanStep(_HarnDataclass):
+class HarnSessionRecapPlanStep(_HarnStrictRecapDataclass):
     id: str; content: str; status: HarnSessionRecapPlanStepStatus
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanStep":
+        values = cls._strict_values(data)
+        values["status"] = HarnSessionRecapPlanStepStatus(values["status"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapPlanEventFact(_HarnDataclass):
+class HarnSessionRecapPlanEventFact(_HarnStrictRecapDataclass):
     kind: HarnSessionRecapPlanEventKind; eventId: str; inputRevisionId: Optional[str]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanEventFact":
+        values = cls._strict_values(data)
+        values["kind"] = HarnSessionRecapPlanEventKind(values["kind"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapPlanFact(_HarnDataclass):
+class HarnSessionRecapPlanFact(_HarnStrictRecapDataclass):
     documentId: str; revisionId: str; title: str; summary: str; steps: List[HarnSessionRecapPlanStep]
     event: Optional[HarnSessionRecapPlanEventFact]; sourceEventId: int
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanFact":
+        values = cls._strict_values(data)
+        values["steps"] = [HarnSessionRecapPlanStep.from_wire(item) for item in values["steps"]]
+        if values["event"] is not None:
+            values["event"] = HarnSessionRecapPlanEventFact.from_wire(values["event"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapProgressEntry(_HarnDataclass):
+class HarnSessionRecapProgressEntry(_HarnStrictRecapDataclass):
     content: str; status: HarnSessionRecapProgressStatus; priority: Optional[HarnSessionRecapProgressPriority]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapProgressEntry":
+        values = cls._strict_values(data)
+        values["status"] = HarnSessionRecapProgressStatus(values["status"])
+        if values["priority"] is not None:
+            values["priority"] = HarnSessionRecapProgressPriority(values["priority"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapProgressFact(_HarnDataclass):
+class HarnSessionRecapProgressFact(_HarnStrictRecapDataclass):
     message: Optional[str]; entries: List[HarnSessionRecapProgressEntry]; replace: bool; sourceEventId: int
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapProgressFact":
+        values = cls._strict_values(data)
+        values["entries"] = [HarnSessionRecapProgressEntry.from_wire(item) for item in values["entries"]]
+        return cls(**values)
 @dataclass
-class HarnSessionRecapTerminalFact(_HarnDataclass):
+class HarnSessionRecapTerminalFact(_HarnStrictRecapDataclass):
     state: HarnSessionRecapCompletionState; finalStatus: Optional[str]; stopReason: Optional[str]
     kind: Optional[str]; owner: Optional[str]; reason: Optional[str]; sourceEventId: int
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapTerminalFact":
+        values = cls._strict_values(data)
+        values["state"] = HarnSessionRecapCompletionState(values["state"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapIteration(_HarnDataclass):
+class HarnSessionRecapIteration(_HarnStrictRecapDataclass):
     iteration: Optional[int]; state: HarnSessionRecapCompletionState; assistantText: List[HarnSessionRecapTextFact]
     tools: List[HarnSessionRecapToolExchange]; plans: List[HarnSessionRecapPlanFact]
     progress: List[HarnSessionRecapProgressFact]; sourceEventIds: List[int]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapIteration":
+        values = cls._strict_values(data)
+        values["state"] = HarnSessionRecapCompletionState(values["state"])
+        values["assistantText"] = [HarnSessionRecapTextFact.from_wire(item) for item in values["assistantText"]]
+        values["tools"] = [HarnSessionRecapToolExchange.from_wire(item) for item in values["tools"]]
+        values["plans"] = [HarnSessionRecapPlanFact.from_wire(item) for item in values["plans"]]
+        values["progress"] = [HarnSessionRecapProgressFact.from_wire(item) for item in values["progress"]]
+        return cls(**values)
 @dataclass
-class HarnSessionPromptTurnRecap(_HarnDataclass):
+class HarnSessionPromptTurnRecap(_HarnStrictRecapDataclass):
     turnId: str; runId: str; state: HarnSessionRecapCompletionState; prompts: List[HarnSessionRecapTextFact]
     iterations: List[HarnSessionRecapIteration]; terminal: Optional[HarnSessionRecapTerminalFact]; sourceEventIds: List[int]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionPromptTurnRecap":
+        values = cls._strict_values(data)
+        values["state"] = HarnSessionRecapCompletionState(values["state"])
+        values["prompts"] = [HarnSessionRecapTextFact.from_wire(item) for item in values["prompts"]]
+        values["iterations"] = [HarnSessionRecapIteration.from_wire(item) for item in values["iterations"]]
+        if values["terminal"] is not None:
+            values["terminal"] = HarnSessionRecapTerminalFact.from_wire(values["terminal"])
+        return cls(**values)
 @dataclass
-class HarnSessionRecapSnapshot(_HarnDataclass):
+class HarnSessionRecapSnapshot(_HarnStrictRecapDataclass):
     schemaVersion: int; sessionId: str; query: HarnSessionRecapQuery; cursor: HarnSessionRecapCursor
     coverage: HarnSessionRecapCoverage; source: HarnSessionRecapSource; contentHash: str; projectionHash: str
     turns: List[HarnSessionPromptTurnRecap]; extensions: Dict[str, JsonValue]
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapSnapshot":
+        values = cls._strict_values(data)
+        values["query"] = HarnSessionRecapQuery.from_wire(values["query"])
+        values["cursor"] = HarnSessionRecapCursor.from_wire(values["cursor"])
+        values["coverage"] = HarnSessionRecapCoverage.from_wire(values["coverage"])
+        values["source"] = HarnSessionRecapSource.from_wire(values["source"])
+        values["turns"] = [HarnSessionPromptTurnRecap.from_wire(item) for item in values["turns"]]
+        return cls(**values)
 @dataclass
 class HarnSessionRecapAvailability(_HarnDataclass):
-    state: str; snapshot: Optional[HarnSessionRecapSnapshot] = None; reason: Optional[HarnSessionRecapUnavailableReason] = None
+    state: HarnSessionRecapAvailabilityState
+    snapshot: Optional[HarnSessionRecapSnapshot] = None
+    reason: Optional[HarnSessionRecapUnavailableReason] = None
+
+    @classmethod
+    def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapAvailability":
+        if not isinstance(data, Mapping):
+            raise TypeError(f"HarnSessionRecapAvailability.from_wire expected a mapping, got {type(data).__name__}")
+        state = HarnSessionRecapAvailabilityState(data.get("state"))
+        expected = {"state", "snapshot"} if state is HarnSessionRecapAvailabilityState.AVAILABLE else {"state", "reason"}
+        unknown = set(data) - expected
+        missing = expected - set(data)
+        if unknown:
+            raise ValueError(f"HarnSessionRecapAvailability contains unknown fields: {', '.join(sorted(unknown))}")
+        if missing:
+            raise ValueError(f"HarnSessionRecapAvailability is missing fields: {', '.join(sorted(missing))}")
+        if state is HarnSessionRecapAvailabilityState.AVAILABLE:
+            return cls(state=state, snapshot=HarnSessionRecapSnapshot.from_wire(data["snapshot"]))
+        return cls(state=state, reason=HarnSessionRecapUnavailableReason(data["reason"]))
+
+    def to_wire(self) -> JsonObject:
+        if self.state is HarnSessionRecapAvailabilityState.AVAILABLE:
+            if self.snapshot is None or self.reason is not None:
+                raise ValueError("available Harn session recap requires only snapshot")
+            return {"state": self.state.value, "snapshot": _harn_recap_wire(self.snapshot)}
+        if self.reason is None or self.snapshot is not None:
+            raise ValueError("unavailable Harn session recap requires only reason")
+        return {"state": self.state.value, "reason": self.reason.value}
 "#,
     );
 }
@@ -484,7 +730,20 @@ type HarnSessionRecapPlanStepStatus string
 type HarnSessionRecapPlanEventKind string
 type HarnSessionRecapProgressStatus string
 type HarnSessionRecapProgressPriority string
+type HarnSessionRecapVerificationStatus string
 type HarnSessionRecapUnavailableReason string
+
+const HarnSessionRecapVerificationPassed HarnSessionRecapVerificationStatus = "passed"
+
+func (status *HarnSessionRecapVerificationStatus) UnmarshalJSON(data []byte) error {
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil { return err }
+	if decoded != string(HarnSessionRecapVerificationPassed) {
+		return fmt.Errorf("unknown Harn session recap verification status %q", decoded)
+	}
+	*status = HarnSessionRecapVerificationPassed
+	return nil
+}
 
 type HarnSessionRecapQuery struct {
 	SessionID string `json:"sessionId"`; RunID *string `json:"runId"`; TurnID *string `json:"turnId"`; FromEventID *uint64 `json:"fromEventId"`; Limit *uint64 `json:"limit"`
@@ -494,7 +753,7 @@ type HarnSessionRecapCoverage struct { Scanned uint64 `json:"scanned"`; Matched 
 type HarnSessionRecapSourceEvent struct { EventID uint64 `json:"eventId"`; RecordHash string `json:"recordHash"` }
 type HarnSessionRecapSource struct { FirstEventID *uint64 `json:"firstEventId"`; LastEventID *uint64 `json:"lastEventId"`; Events []HarnSessionRecapSourceEvent `json:"events"` }
 type HarnSessionRecapTextFact struct { Text string `json:"text"`; SourceEventID uint64 `json:"sourceEventId"` }
-type HarnSessionRecapVerificationFact struct { Schema string `json:"schema"`; Status string `json:"status"`; VerifiedPaths []string `json:"verifiedPaths"`; SourceEventID uint64 `json:"sourceEventId"` }
+type HarnSessionRecapVerificationFact struct { Schema string `json:"schema"`; Status HarnSessionRecapVerificationStatus `json:"status"`; VerifiedPaths []string `json:"verifiedPaths"`; SourceEventID uint64 `json:"sourceEventId"` }
 type HarnSessionRecapToolExchange struct {
 	ToolCallID string `json:"toolCallId"`; ToolName *string `json:"toolName"`; State HarnSessionRecapToolState `json:"state"`
 	CallObserved bool `json:"callObserved"`; ResultObserved bool `json:"resultObserved"`; Input JSONValue `json:"input"`; Output JSONValue `json:"output"`
@@ -525,6 +784,17 @@ type HarnSessionRecapSnapshot struct {
 	Cursor HarnSessionRecapCursor `json:"cursor"`; Coverage HarnSessionRecapCoverage `json:"coverage"`; Source HarnSessionRecapSource `json:"source"`
 	ContentHash string `json:"contentHash"`; ProjectionHash string `json:"projectionHash"`; Turns []HarnSessionPromptTurnRecap `json:"turns"`; Extensions JSONObject `json:"extensions"`
 }
+
+func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSnapshot
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var decoded wire
+	if err := decoder.Decode(&decoded); err != nil { return err }
+	*snapshot = HarnSessionRecapSnapshot(decoded)
+	return nil
+}
+
 type HarnSessionRecapAvailability struct { State string `json:"state"`; Snapshot *HarnSessionRecapSnapshot `json:"snapshot,omitempty"`; Reason *HarnSessionRecapUnavailableReason `json:"reason,omitempty"` }
 "#,
     );

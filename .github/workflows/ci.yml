@@ -1832,9 +1832,9 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent
-      - name: Typecheck generated Swift protocol bindings
+      - name: Verify generated Swift protocol bindings
         shell: bash
-        run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift
+        run: make check-swift-protocol-binding
 
   portal:
     name: Portal frontend

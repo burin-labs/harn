@@ -6,6 +6,7 @@ const PYTHON_BINDING_PROBE = """
 from __future__ import annotations
 
 import json
+import copy
 import sys
 from pathlib import Path
 from collections.abc import Mapping
@@ -64,6 +65,33 @@ def main() -> int:
     for label, payload, cls in cases:
         instance = cls.from_wire(payload)
         assert_round_trip(label, payload, instance.to_wire())
+        if label == "HarnSessionRecapAvailability" and getattr(hp, "HARN_STRICT_SESSION_RECAP_BINDING", True):
+            if not isinstance(instance.snapshot, hp.HarnSessionRecapSnapshot):
+                raise AssertionError("recap snapshot did not hydrate into its generated type")
+            if not isinstance(instance.snapshot.turns[0], hp.HarnSessionPromptTurnRecap):
+                raise AssertionError("recap turn did not hydrate into its generated type")
+            assert_round_trip("HarnSessionRecapSnapshot", payload["snapshot"], instance.snapshot.to_wire())
+            verification = instance.snapshot.turns[0].iterations[0].tools[0].verification
+            if verification is None or verification.status is not hp.HarnSessionRecapVerificationStatus.PASSED:
+                raise AssertionError("recap verification status did not hydrate into its closed enum")
+
+            unknown = copy.deepcopy(payload)
+            unknown["snapshot"]["futureTopLevel"] = True
+            try:
+                cls.from_wire(unknown)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unknown recap snapshot field was accepted before write-back")
+
+            invalid_status = copy.deepcopy(payload)
+            invalid_status["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["status"] = "future_status"
+            try:
+                cls.from_wire(invalid_status)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unknown recap verification status was accepted")
 
     print("python bindings: OK")
     return 0

@@ -7,7 +7,11 @@
 // produce minimal envelopes equivalent to the Rust adapters.
 package harnprotocol
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
 
 // ArtifactVersion pins the Harn release that generated this binding.
 const ArtifactVersion = "0.10.119-dev"
@@ -1244,7 +1248,22 @@ type HarnSessionRecapPlanStepStatus string
 type HarnSessionRecapPlanEventKind string
 type HarnSessionRecapProgressStatus string
 type HarnSessionRecapProgressPriority string
+type HarnSessionRecapVerificationStatus string
 type HarnSessionRecapUnavailableReason string
+
+const HarnSessionRecapVerificationPassed HarnSessionRecapVerificationStatus = "passed"
+
+func (status *HarnSessionRecapVerificationStatus) UnmarshalJSON(data []byte) error {
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded != string(HarnSessionRecapVerificationPassed) {
+		return fmt.Errorf("unknown Harn session recap verification status %q", decoded)
+	}
+	*status = HarnSessionRecapVerificationPassed
+	return nil
+}
 
 type HarnSessionRecapQuery struct {
 	SessionID   string  `json:"sessionId"`
@@ -1278,10 +1297,10 @@ type HarnSessionRecapTextFact struct {
 	SourceEventID uint64 `json:"sourceEventId"`
 }
 type HarnSessionRecapVerificationFact struct {
-	Schema        string   `json:"schema"`
-	Status        string   `json:"status"`
-	VerifiedPaths []string `json:"verifiedPaths"`
-	SourceEventID uint64   `json:"sourceEventId"`
+	Schema        string                             `json:"schema"`
+	Status        HarnSessionRecapVerificationStatus `json:"status"`
+	VerifiedPaths []string                           `json:"verifiedPaths"`
+	SourceEventID uint64                             `json:"sourceEventId"`
 }
 type HarnSessionRecapToolExchange struct {
 	ToolCallID     string                            `json:"toolCallId"`
@@ -1363,6 +1382,19 @@ type HarnSessionRecapSnapshot struct {
 	Turns          []HarnSessionPromptTurnRecap `json:"turns"`
 	Extensions     JSONObject                   `json:"extensions"`
 }
+
+func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSnapshot
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var decoded wire
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*snapshot = HarnSessionRecapSnapshot(decoded)
+	return nil
+}
+
 type HarnSessionRecapAvailability struct {
 	State    string                             `json:"state"`
 	Snapshot *HarnSessionRecapSnapshot          `json:"snapshot,omitempty"`

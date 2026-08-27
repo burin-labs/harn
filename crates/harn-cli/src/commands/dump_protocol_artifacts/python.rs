@@ -27,8 +27,8 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str("Mirrors the TypeScript and Swift artifacts generated alongside this\n");
     out.push_str("module. Field names match the wire JSON (camelCase) so dataclass\n");
     out.push_str("instances round-trip through ``json.dumps(asdict(obj))`` without a\n");
-    out.push_str("custom encoder. Optional fields default to ``None`` and are stripped\n");
-    out.push_str("by :func:`to_wire`.\n");
+    out.push_str("custom encoder. Generic optional fields default to ``None`` and are\n");
+    out.push_str("stripped by :func:`to_wire`; closed recap shapes preserve required nulls.\n");
     out.push_str("\"\"\"\n\n");
     out.push_str("from __future__ import annotations\n\n");
     out.push_str("from dataclasses import asdict, dataclass, field, fields, is_dataclass\n");
@@ -973,7 +973,9 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HarnSessionRecapPlanEventKind",
         "HarnSessionRecapProgressStatus",
         "HarnSessionRecapProgressPriority",
+        "HarnSessionRecapVerificationStatus",
         "HarnSessionRecapUnavailableReason",
+        "HarnSessionRecapAvailabilityState",
         "HarnSessionRecapQuery",
         "HarnSessionRecapCursor",
         "HarnSessionRecapCoverage",

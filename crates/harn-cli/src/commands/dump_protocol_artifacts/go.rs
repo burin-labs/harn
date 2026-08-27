@@ -38,7 +38,7 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
     out.push_str("// fields use pointer types or `omitempty` so encoding/json round-trips\n");
     out.push_str("// produce minimal envelopes equivalent to the Rust adapters.\n");
     out.push_str("package harnprotocol\n\n");
-    out.push_str("import \"encoding/json\"\n\n");
+    out.push_str("import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"fmt\"\n)\n\n");
 
     for (doc, name, value) in [
         (

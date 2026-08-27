@@ -357,6 +357,30 @@ func TestRoundTripFixture(t *testing.T) {
 			t.Fatalf("encode session recap: %v", err)
 		}
 		assertRoundTrip(t, "HarnSessionRecapAvailability", raw, out)
+
+		var unknown map[string]any
+		if err := json.Unmarshal(raw, &unknown); err != nil {
+			t.Fatalf("decode recap negative control: %v", err)
+		}
+		unknown["snapshot"].(map[string]any)["futureTopLevel"] = true
+		unknownBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode recap negative control: %v", err)
+		}
+		if err := json.Unmarshal(unknownBytes, &availability); err == nil {
+			t.Fatal("unknown recap snapshot field must be rejected before write-back")
+		}
+
+		delete(unknown["snapshot"].(map[string]any), "futureTopLevel")
+		verification := unknown["snapshot"].(map[string]any)["turns"].([]any)[0].(map[string]any)["iterations"].([]any)[0].(map[string]any)["tools"].([]any)[0].(map[string]any)["verification"].(map[string]any)
+		verification["status"] = "future_status"
+		invalidStatusBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode verification-status negative control: %v", err)
+		}
+		if err := json.Unmarshal(invalidStatusBytes, &availability); err == nil {
+			t.Fatal("unknown recap verification status must be rejected")
+		}
 	})
 }
 

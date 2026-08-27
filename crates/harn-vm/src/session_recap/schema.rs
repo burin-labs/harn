@@ -2,10 +2,10 @@ use serde_json::{json, Value};
 
 /// Closed schema-v1 write contract for the deterministic recap projection.
 ///
-/// Readers may tolerate additive unknown fields, but writers preserve
-/// forward-compatible data only through the explicit `extensions` object.
-/// This prevents decode/re-encode cycles from silently claiming unknown
-/// top-level fields as part of schema v1.
+/// Typed read/write bindings reject additive unknown fields. Forward-compatible
+/// data is preserved only through the explicit `extensions` object, preventing
+/// decode/re-encode cycles from silently dropping fields while claiming schema
+/// v1 conformance.
 pub fn session_recap_json_schema() -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -107,7 +107,7 @@ pub fn session_recap_json_schema() -> Value {
                 "required": ["schema", "status", "verifiedPaths", "sourceEventId"],
                 "properties": {
                     "schema": {"type": "string"},
-                    "status": {"type": "string"},
+                    "status": {"const": "passed"},
                     "verifiedPaths": {"type": "array", "items": {"type": "string"}},
                     "sourceEventId": {"type": "integer", "minimum": 0}
                 }

@@ -577,7 +577,7 @@
           "type": "integer"
         },
         "status": {
-          "type": "string"
+          "const": "passed"
         },
         "verifiedPaths": {
           "items": {
