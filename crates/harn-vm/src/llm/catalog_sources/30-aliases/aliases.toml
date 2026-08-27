@@ -686,11 +686,11 @@ id = "codestral-2508"
 provider = "mistral"
 
 [aliases."devstral-medium"]
-id = "devstral-medium-2512"
+id = "mistral-medium-3-5"
 provider = "mistral"
 
 [aliases."devstral-small"]
-id = "devstral-small-2512"
+id = "mistral-medium-3-5"
 provider = "mistral"
 
 # Current cheap open-weight coder routes.

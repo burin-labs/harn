@@ -1881,11 +1881,11 @@ id = "codestral-2508"
 provider = "mistral"
 
 [aliases."devstral-medium"]
-id = "devstral-medium-2512"
+id = "mistral-medium-3-5"
 provider = "mistral"
 
 [aliases."devstral-small"]
-id = "devstral-small-2512"
+id = "mistral-medium-3-5"
 provider = "mistral"
 
 # Current cheap open-weight coder routes.
@@ -3139,7 +3139,7 @@ logical_model = "mistral-medium-3.5-128b"
 equivalence_group = "mistral-medium-3.5-128b"
 api_dialect = "openai_chat_compat"
 capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
 architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT", source_url = "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04", last_verified = "2026-06-20" }
 tier = "frontier"
 open_weight = true
@@ -3184,29 +3184,6 @@ tier = "mid"
 open_weight = false
 strengths = ["coding", "speed", "cheap"]
 
-# Devstral 2 — Mistral's agentic-coding tunes (version 25.12; the
-# `devstral-medium-latest` / `devstral-small-latest` API handles
-# currently resolve to these dated ids).
-[models."devstral-medium-2512"]
-name = "Devstral 2 Medium"
-provider = "mistral"
-context_window = 262144
-api_dialect = "openai_chat_compat"
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.40, output_per_mtok = 2.00 }
-tier = "mid"
-open_weight = false
-strengths = ["coding", "tool_use", "agentic"]
-[models."devstral-small-2512"]
-name = "Devstral 2 Small"
-provider = "mistral"
-context_window = 262144
-api_dialect = "openai_chat_compat"
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.30 }
-tier = "small"
-open_weight = true
-strengths = ["coding", "cheap", "tool_use"]
 [models."mistralai/mistral-medium-3-5"]
 name = "Mistral Medium 3.5 (via OpenRouter)"
 provider = "openrouter"
