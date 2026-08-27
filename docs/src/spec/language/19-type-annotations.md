@@ -687,6 +687,7 @@ wrappers pick up the same narrowing.
   error_category: string | nil, attempts: int, repaired: bool,
   repair_tier: string | nil,
   extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
+  reported_total_tokens: int | nil,
   cost_usd: float | nil,
   cache_read_tokens: int, cache_write_tokens: int,
   cache_supported: bool,

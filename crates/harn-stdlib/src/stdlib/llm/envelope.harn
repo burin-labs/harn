@@ -67,6 +67,8 @@ pub type LlmProviderAttempts = {
 pub type LlmUsage = {
   input_tokens: int,
   output_tokens: int,
+  /* Preserved when a provider reports only a total, without inventing a component split. */
+  reported_total_tokens?: int,
   cost_usd?: float,
   known_cost_usd: float,
   provider_call_count: int,

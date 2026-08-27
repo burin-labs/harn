@@ -110,6 +110,7 @@ pub mod meta {
     pub const PROVIDER: &str = "provider";
     pub const INPUT_TOKENS: &str = "input_tokens";
     pub const OUTPUT_TOKENS: &str = "output_tokens";
+    pub const REPORTED_TOTAL_TOKENS: &str = "reported_total_tokens";
     pub const CACHE_READ_TOKENS: &str = "cache_read_tokens";
     pub const CACHE_WRITE_TOKENS: &str = "cache_write_tokens";
     pub const COST_USD: &str = "cost_usd";
@@ -1083,6 +1084,7 @@ mod tests {
         let usage = crate::llm::usage::LlmUsage {
             input_tokens: 100,
             output_tokens: 20,
+            reported_total_tokens: Some(120),
             cache_read_tokens: 40,
             cache_write_tokens: 8,
             cost_usd: Some(0.0123),
@@ -1106,6 +1108,7 @@ mod tests {
         assert_eq!(pairs[meta::PROVIDER], serde_json::json!("anthropic"));
         assert_eq!(pairs[meta::INPUT_TOKENS], serde_json::json!(100));
         assert_eq!(pairs[meta::OUTPUT_TOKENS], serde_json::json!(20));
+        assert_eq!(pairs[meta::REPORTED_TOTAL_TOKENS], serde_json::json!(120));
         assert_eq!(pairs[meta::CACHE_READ_TOKENS], serde_json::json!(40));
         assert_eq!(pairs[meta::CACHE_WRITE_TOKENS], serde_json::json!(8));
         assert_eq!(pairs[meta::COST_USD], serde_json::json!(0.0123));
@@ -1116,6 +1119,7 @@ mod tests {
         let usage = crate::llm::usage::LlmUsage {
             input_tokens: 5,
             output_tokens: 1,
+            reported_total_tokens: None,
             cost_usd: None,
             cache_read_tokens: 0,
             cache_write_tokens: 0,

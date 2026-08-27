@@ -160,6 +160,7 @@ or derive cache behavior independently.
 |---|---|---|
 | `input_tokens` | int | Input/prompt token count |
 | `output_tokens` | int | Output/completion token count |
+| `reported_total_tokens` | int \| nil | Whole-call token count reported directly by the provider. This preserves total-only receipts without assigning tokens to an unknown input/output component. |
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `known_cost_usd` | float | Priced lower bound across all physical provider calls, retained when `cost_usd` is unknown because one call was unpriced |
 | `provider_call_count` | int | Physical provider calls represented by this logical call, including retries |
@@ -182,6 +183,7 @@ prompt work:
 | Field | Meaning |
 |---|---|
 | `server_prompt_tokens` | Full prompt size from `usage.prompt_tokens` |
+| `server_total_tokens` | Whole-call count from `usage.total_tokens` when the provider reports no component breakdown |
 | `server_uncached_prompt_tokens` | Prompt tokens llama.cpp evaluated instead of reading from cache |
 | `server_cached_prompt_tokens` | Prompt tokens llama.cpp read from cache |
 | `server_prompt_eval_ms` | Time llama.cpp spent evaluating the uncached prompt |
