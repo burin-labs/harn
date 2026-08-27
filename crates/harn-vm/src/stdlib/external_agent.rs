@@ -85,7 +85,15 @@ fn external_agent_error_to_vm(error: ExternalAgentError) -> VmError {
             };
             ("discovery", category, message)
         }
-        ExternalAgentError::Denied(message) => ("denied", ErrorCategory::ToolRejected, message),
+        ExternalAgentError::Denied(message) => {
+            let category = crate::value::classify_error_message(&message);
+            let category = if category == ErrorCategory::Generic {
+                ErrorCategory::ToolRejected
+            } else {
+                category
+            };
+            ("denied", category, message)
+        }
         ExternalAgentError::Timeout(message) => ("timeout", ErrorCategory::Timeout, message),
         ExternalAgentError::Cancelled(message) => ("cancelled", ErrorCategory::Cancelled, message),
         ExternalAgentError::Transport(message) => {
@@ -97,7 +105,15 @@ fn external_agent_error_to_vm(error: ExternalAgentError) -> VmError {
             };
             ("transport", category, message)
         }
-        ExternalAgentError::Protocol(message) => ("protocol", ErrorCategory::ToolError, message),
+        ExternalAgentError::Protocol(message) => {
+            let category = crate::value::classify_error_message(&message);
+            let category = if category == ErrorCategory::Generic {
+                ErrorCategory::ToolError
+            } else {
+                category
+            };
+            ("protocol", category, message)
+        }
     };
     VmError::Thrown(json_result_to_vm_value(&serde_json::json!({
         "error": "external_agent_error",
@@ -134,6 +150,12 @@ mod tests {
                 "remote agent rejected task",
             ),
             (
+                ExternalAgentError::Denied("HTTP 401 Unauthorized".into()),
+                "denied",
+                ErrorCategory::Auth,
+                "HTTP 401 Unauthorized",
+            ),
+            (
                 ExternalAgentError::Timeout("request timed out".into()),
                 "timeout",
                 ErrorCategory::Timeout,
@@ -156,6 +178,12 @@ mod tests {
                 "protocol",
                 ErrorCategory::ToolError,
                 "invalid response",
+            ),
+            (
+                ExternalAgentError::Protocol("HTTP 503 Service Unavailable".into()),
+                "protocol",
+                ErrorCategory::Overloaded,
+                "HTTP 503 Service Unavailable",
             ),
         ];
 
