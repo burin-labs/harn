@@ -607,6 +607,45 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
   )
 }
 
+pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
+  harness: Harness,
+  task: unknown,
+) {
+  const detail = "Verified the requested behavior with the focused end-to-end test. ".repeat(6)
+  assert(len(detail) > 240)
+  with_llm_script(
+    harness.llm,
+    [llm_done(), {text: json_stringify({verdict: "done", detail: detail})}],
+    { ->
+      const session = "judge-overlong-detail-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        done_sentinel: "##DONE##",
+        loop_until_done: true,
+        max_iterations: 1,
+        verify_completion_judge: {provider: "mock", max_invocations: 1, fail_open_on_error: false},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish after the completion judge confirms the evidence.",
+          nil,
+          opts,
+        ) },
+      )
+      assert_eq([len(harness.llm.mock_calls()), captured.result.status], [2, "done"])
+      const decisions =
+        captured.events.filter({ event -> event.type == "judge_decision" }).to_list()
+      assert_eq(len(decisions), 1)
+      assert_eq(decisions[0].verdict, "done")
+      assert_eq(decisions[0].reasoning, substring(detail, 0, 240))
+    },
+  )
+}
+
 pipeline test_invalid_deterministic_completion_result_stops_unverified(
   harness: Harness,
   task: unknown,
