@@ -76,7 +76,18 @@ harn_collect_artifact_freshness_evidence() {
 harn_write_freshness_authority_path() {
   local output="$1"
   local path="$2"
+  local kind="${3:-file}"
   local projected="$path"
+  local tag=""
+
+  case "$kind" in
+    file) tag=f ;;
+    git-config) tag=g ;;
+    *)
+      echo "error: unknown Harn freshness authority kind: $kind" >&2
+      return 2
+      ;;
+  esac
 
   # Authority-list entries cross a data boundary: unlike command-line
   # arguments, NUL-delimited file contents are not rewritten by MSYS before a
@@ -91,7 +102,88 @@ harn_write_freshness_authority_path() {
       projected="$(cygpath -w "$path")" || return $?
       ;;
   esac
-  printf '%s\0' "$projected" >>"$output"
+  # The native checker owns authority semantics. The shell merely serializes
+  # the path plus its input kind, so no no-build path can depend on a mutable
+  # shell-generated projection.
+  printf '%s%s\0' "$tag" "$projected" >>"$output"
+}
+
+# Add every Git configuration source that was resolved when the receipt is
+# produced. Git follows includes while listing values, so included files with
+# active settings join the same native projection. The checker intentionally
+# does not invoke Git on its hot path: it filters these file bytes itself.
+#
+# An include added after the receipt is still covered because the native filter
+# retains include and includeIf directives from the parent file. A process that
+# changes Git's config-selection environment after the build needs a rebuild;
+# the receipt describes the exact process environment that produced its binary.
+harn_write_resolved_git_config_authorities() {
+  local output="$1"
+  local repo_root="$2"
+  local variable="$3"
+  local resolved_paths=""
+  local path=""
+
+  resolved_paths="$(git -C "$repo_root" var "$variable")" || return $?
+  while IFS= read -r path; do
+    [[ -n "$path" && "$path" != /dev/null ]] || continue
+    harn_write_freshness_authority_path "$output" "$path" git-config || return $?
+  done <<<"$resolved_paths"
+}
+
+harn_write_git_config_authorities() {
+  local output="$1"
+  local repo_root=""
+  local path=""
+  local origin=""
+  local key=""
+
+  repo_root="$(harn_repo_root)" || return $?
+  path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" || return $?
+  harn_write_freshness_authority_path "$output" "$path" git-config || return $?
+
+  # Ask Git for every effective global and system location rather than only
+  # recording paths that already contribute a setting. `git var` includes
+  # explicit overrides and every platform default, including missing files.
+  # The manifest's missing marker then makes later creation a stale transition.
+  harn_write_resolved_git_config_authorities \
+    "$output" "$repo_root" GIT_CONFIG_GLOBAL || return $?
+  harn_write_resolved_git_config_authorities \
+    "$output" "$repo_root" GIT_CONFIG_SYSTEM || return $?
+
+  # Per-worktree config is a separate writer once extensions.worktreeConfig is
+  # enabled. Bind its Git-resolved path even before the file exists.
+  path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config.worktree)" \
+    || return $?
+  harn_write_freshness_authority_path "$output" "$path" git-config || return $?
+
+  # `--show-origin --name-only -z` emits pairs of NUL-delimited origin and
+  # key records. Keep this build-time discovery in one Git process; the hook
+  # later verifies only the native manifest.
+  while IFS= read -r -d '' origin; do
+    if ! IFS= read -r -d '' key; then
+      echo "error: Git configuration origin list ended without a key" >&2
+      return 1
+    fi
+    case "$origin" in
+      file:*)
+        path="${origin#file:}"
+        case "$path" in
+          .git/*)
+            path="$(git -C "$repo_root" rev-parse --path-format=absolute \
+              --git-path "${path#.git/}")" || return $?
+            ;;
+          /* | [A-Za-z]:[\\/]*) ;;
+          *)
+            echo "error: cannot resolve relative Git configuration authority: $path" >&2
+            return 1
+            ;;
+        esac
+        harn_write_freshness_authority_path \
+          "$output" "$path" git-config || return $?
+        ;;
+    esac
+  done < <(git -C "$repo_root" config --includes --show-origin --name-only --null --list)
 }
 
 harn_write_freshness_authority_list() {
@@ -121,12 +213,12 @@ harn_write_freshness_authority_list() {
   for path in \
     "$repo_root/.cargo" \
     "$repo_root/.cargo/config.toml" \
-    "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" \
     "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"; do
     if [[ -e "$path" ]]; then
       harn_write_freshness_authority_path "$output" "$path" || return $?
     fi
   done
+  harn_write_git_config_authorities "$output" || return $?
 }
 
 harn_build_freshness_id_from_parts() {

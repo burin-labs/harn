@@ -10,7 +10,10 @@ use std::{
 use super::freshness_manifest::{artifact_stat_id, platform_build_id, write_manifest};
 
 const COMMAND: &str = "__internal-freshness-evidence-v5";
-const FORMAT: &str = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3";
+// Keep the command stable during the format cutover: the build bootstrap must
+// still ask the previously compiled binary for its evidence. The receipt
+// header is the consumer-facing contract and rejects older manifests.
+const FORMAT: &str = "harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4";
 
 pub(super) fn handle(raw_args: &[String]) -> bool {
     let (command, dep_info, target, repo_root, git_covered_list, manifest) = match raw_args {

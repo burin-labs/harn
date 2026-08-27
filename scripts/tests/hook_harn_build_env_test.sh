@@ -28,10 +28,10 @@ case "$*" in
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
-  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v3\n" >"$7"; fi
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v4\n" >"$7"; fi
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0
@@ -50,10 +50,10 @@ BIN
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
-  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v3\n" >"$7"; fi
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v4\n" >"$7"; fi
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0

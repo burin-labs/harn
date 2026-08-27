@@ -4,14 +4,14 @@
 )]
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
 };
 
-const FORMAT: &[u8] = b"harn-freshness-manifest-v3\0";
+const FORMAT: &[u8] = b"harn-freshness-manifest-v4\0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EntryKind {
@@ -19,6 +19,42 @@ enum EntryKind {
     Directory,
     Symlink,
     Missing,
+}
+
+/// The semantic content authority for one manifest path.
+///
+/// Most inputs are exact file bytes. Git configuration is different: the
+/// source inventory depends on a small set of resolved options, while normal
+/// branch and remote bookkeeping in the same file is unrelated and churns in
+/// every linked worktree. The native verifier owns this projection so hook
+/// checks never rely on a shell-generated cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContentKind {
+    Exact,
+    GitConfig,
+}
+
+impl ContentKind {
+    fn code(self) -> u8 {
+        match self {
+            Self::Exact => 1,
+            Self::GitConfig => 2,
+        }
+    }
+
+    fn from_code(code: u8) -> Result<Self, String> {
+        match code {
+            1 => Ok(Self::Exact),
+            2 => Ok(Self::GitConfig),
+            _ => Err(format!("unknown freshness-manifest content kind {code}")),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Authority {
+    path: PathBuf,
+    content_kind: ContentKind,
 }
 
 impl EntryKind {
@@ -55,6 +91,7 @@ impl EntryKind {
 struct CapturedEntry {
     path: PathBuf,
     kind: EntryKind,
+    content_kind: ContentKind,
     stat: blake3::Hash,
     content: Option<blake3::Hash>,
 }
@@ -80,7 +117,7 @@ pub(super) fn write_manifest(
     dependencies: &[(PathBuf, bool)],
     authority_list: &Path,
 ) -> Result<(), String> {
-    let mut paths = BTreeSet::<PathBuf>::new();
+    let mut paths = BTreeMap::<PathBuf, ContentKind>::new();
 
     for relative in git_covered {
         let path = repo_root.join(relative);
@@ -92,24 +129,25 @@ pub(super) fn write_manifest(
             add_tree(&mut paths, dependency)?;
         }
     }
-    for authority in read_nul_paths(authority_list)? {
+    for authority in read_authorities(authority_list)? {
         add_authority(&mut paths, &authority)?;
     }
 
     let mut paths = paths.into_iter().collect::<Vec<_>>();
-    paths.sort_by_key(|path| os_bytes(path.as_os_str()));
+    paths.sort_by_key(|(path, _)| os_bytes(path.as_os_str()));
     let entry_count = u64::try_from(paths.len())
         .map_err(|_| "freshness manifest contains too many paths".to_owned())?;
     let mut encoded = Vec::with_capacity(paths.len().saturating_mul(128));
     encoded.extend_from_slice(FORMAT);
     encoded.extend_from_slice(&entry_count.to_le_bytes());
     let mut content_buffer = vec![0_u8; 1024 * 1024];
-    for path in paths {
-        let entry = capture(&path, &mut content_buffer)?;
+    for (path, content_kind) in paths {
+        let entry = capture(&path, content_kind, &mut content_buffer)?;
         let path_bytes = os_bytes(entry.path.as_os_str());
         let path_length = u32::try_from(path_bytes.len())
             .map_err(|_| format!("manifest path is too long: {}", entry.path.display()))?;
         encoded.push(entry.kind.code());
+        encoded.push(entry.content_kind.code());
         encoded.extend_from_slice(&path_length.to_le_bytes());
         encoded.extend_from_slice(&path_bytes);
         encoded.extend_from_slice(entry.stat.as_bytes());
@@ -125,35 +163,69 @@ pub(super) fn write_manifest(
     })
 }
 
-fn add_authority(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
-        format!(
-            "cannot inspect manifest authority {}: {error}",
-            path.display()
-        )
-    })?;
+fn add_authority(
+    paths: &mut BTreeMap<PathBuf, ContentKind>,
+    authority: &Authority,
+) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(&authority.path) {
+        Ok(metadata) => metadata,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && authority.content_kind == ContentKind::GitConfig =>
+        {
+            return insert_path(paths, authority.path.clone(), authority.content_kind);
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect manifest authority {}: {error}",
+                authority.path.display()
+            ));
+        }
+    };
+    if authority.content_kind == ContentKind::GitConfig && !metadata.file_type().is_file() {
+        return Err(format!(
+            "Git configuration authority is not a regular file: {}",
+            authority.path.display()
+        ));
+    }
     if metadata.file_type().is_dir() {
-        paths.insert(path.to_path_buf());
-        Ok(())
+        insert_path(paths, authority.path.clone(), authority.content_kind)
     } else {
-        add_file(paths, path)
+        add_file_with_kind(paths, &authority.path, authority.content_kind)
     }
 }
 
+fn insert_path(
+    paths: &mut BTreeMap<PathBuf, ContentKind>,
+    path: PathBuf,
+    content_kind: ContentKind,
+) -> Result<(), String> {
+    if let Some(recorded_kind) = paths.get(&path) {
+        if *recorded_kind != content_kind {
+            return Err(format!(
+                "manifest input has conflicting content authorities: {}",
+                path.display()
+            ));
+        }
+    }
+    paths.insert(path, content_kind);
+    Ok(())
+}
+
 fn add_git_path(
-    paths: &mut BTreeSet<PathBuf>,
+    paths: &mut BTreeMap<PathBuf, ContentKind>,
     path: &Path,
     repo_root: &Path,
 ) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.file_type().is_dir() => {
-            paths.insert(path.to_path_buf());
+            insert_path(paths, path.to_path_buf(), ContentKind::Exact)?;
         }
         Ok(_) => {
             return Err(format!("Git-owned path is a directory: {}", path.display()));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            paths.insert(path.to_path_buf());
+            insert_path(paths, path.to_path_buf(), ContentKind::Exact)?;
         }
         Err(error) => {
             return Err(format!(
@@ -164,7 +236,7 @@ fn add_git_path(
     }
     let mut ancestor = path.parent();
     while let Some(directory) = ancestor {
-        paths.insert(directory.to_path_buf());
+        insert_path(paths, directory.to_path_buf(), ContentKind::Exact)?;
         if directory == repo_root {
             return Ok(());
         }
@@ -176,7 +248,15 @@ fn add_git_path(
     ))
 }
 
-fn add_file(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
+fn add_file(paths: &mut BTreeMap<PathBuf, ContentKind>, path: &Path) -> Result<(), String> {
+    add_file_with_kind(paths, path, ContentKind::Exact)
+}
+
+fn add_file_with_kind(
+    paths: &mut BTreeMap<PathBuf, ContentKind>,
+    path: &Path,
+    content_kind: ContentKind,
+) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect manifest input {}: {error}", path.display()))?;
     if metadata.file_type().is_dir() {
@@ -185,14 +265,13 @@ fn add_file(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
             path.display()
         ));
     }
-    paths.insert(path.to_path_buf());
-    Ok(())
+    insert_path(paths, path.to_path_buf(), content_kind)
 }
 
-fn add_tree(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
+fn add_tree(paths: &mut BTreeMap<PathBuf, ContentKind>, path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect manifest input {}: {error}", path.display()))?;
-    paths.insert(path.to_path_buf());
+    insert_path(paths, path.to_path_buf(), ContentKind::Exact)?;
     if !metadata.file_type().is_dir() {
         return Ok(());
     }
@@ -219,12 +298,17 @@ fn add_tree(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn capture(path: &Path, content_buffer: &mut [u8]) -> Result<CapturedEntry, String> {
+fn capture(
+    path: &Path,
+    content_kind: ContentKind,
+    content_buffer: &mut [u8],
+) -> Result<CapturedEntry, String> {
     let (kind, stat, metadata) = inspect(path)?;
-    let content = content_identity(path, kind, metadata.as_ref(), content_buffer)?;
+    let content = content_identity(path, kind, content_kind, metadata.as_ref(), content_buffer)?;
     Ok(CapturedEntry {
         path: path.to_path_buf(),
         kind,
+        content_kind,
         stat,
         content,
     })
@@ -262,9 +346,22 @@ fn inspect(path: &Path) -> Result<(EntryKind, blake3::Hash, Option<fs::Metadata>
 fn content_identity(
     path: &Path,
     kind: EntryKind,
+    content_kind: ContentKind,
     metadata: Option<&fs::Metadata>,
     content_buffer: &mut [u8],
 ) -> Result<Option<blake3::Hash>, String> {
+    if content_kind == ContentKind::GitConfig {
+        if kind == EntryKind::Missing {
+            return Ok(None);
+        }
+        if kind != EntryKind::File {
+            return Err(format!(
+                "Git configuration authority is not a regular file: {}",
+                path.display()
+            ));
+        }
+        return git_config_projection_hash(path).map(Some);
+    }
     let content = match kind {
         EntryKind::File => Some(hash_file(
             path,
@@ -282,6 +379,217 @@ fn content_identity(
         EntryKind::Missing => None,
     };
     Ok(content)
+}
+
+fn git_config_projection_hash(path: &Path) -> Result<blake3::Hash, String> {
+    let source = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "cannot read Git configuration authority {}: {error}",
+            path.display()
+        )
+    })?;
+    let projection = git_config_inventory_projection(&source).map_err(|error| {
+        format!(
+            "cannot project Git configuration authority {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(blake3::hash(&projection))
+}
+
+#[derive(Debug)]
+struct GitConfigSection {
+    name: String,
+    identity: String,
+}
+
+/// Return the subset of one Git config file that can change Harn's source
+/// inventory or its exact content semantics.
+///
+/// The build-time shell records the paths Git resolved from repository, global,
+/// system, and included scopes. This byte-local parser deliberately does not
+/// invoke Git again when a hook verifies a receipt. The projection excludes
+/// branch tracking, remotes, identities, and other bookkeeping that cannot
+/// affect the worktree while retaining `include` directives: adding an include
+/// after a receipt invalidates its parent authority rather than becoming an
+/// unobserved source of inventory settings.
+///
+/// Git only reports an included file once it contributes a setting. An include
+/// target that is absent or empty when a receipt is written is therefore not a
+/// manifest authority until the next build. The parent directive is still
+/// projected, so changing that directive fails closed; creating or editing an
+/// already-discovered included file is also covered.
+fn git_config_inventory_projection(source: &str) -> Result<Vec<u8>, String> {
+    let mut projection = b"harn-git-inventory-config-v1\0".to_vec();
+    let mut section = None::<GitConfigSection>;
+    let mut logical_line = String::new();
+    let mut logical_line_start = 1_usize;
+
+    for (index, raw_line) in source.split('\n').enumerate() {
+        let line_number = index + 1;
+        let raw_line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if logical_line.is_empty() {
+            logical_line_start = line_number;
+        }
+        logical_line.push_str(raw_line);
+        if has_unescaped_trailing_backslash(&logical_line) {
+            logical_line.pop();
+            continue;
+        }
+        parse_git_config_logical_line(
+            &logical_line,
+            logical_line_start,
+            &mut section,
+            &mut projection,
+        )?;
+        logical_line.clear();
+    }
+    if !logical_line.is_empty() {
+        return Err(format!(
+            "line {logical_line_start} ends with a continued value"
+        ));
+    }
+    Ok(projection)
+}
+
+fn has_unescaped_trailing_backslash(line: &str) -> bool {
+    line.bytes().rev().take_while(|byte| *byte == b'\\').count() % 2 == 1
+}
+
+fn parse_git_config_logical_line(
+    line: &str,
+    line_number: usize,
+    section: &mut Option<GitConfigSection>,
+    projection: &mut Vec<u8>,
+) -> Result<(), String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+        return Ok(());
+    }
+    if line.starts_with('[') {
+        *section = Some(parse_git_config_section(line, line_number)?);
+        return Ok(());
+    }
+    let section = section
+        .as_ref()
+        .ok_or_else(|| format!("line {line_number} has a setting before its section"))?;
+    let (key, value) = parse_git_config_setting(line, line_number)?;
+    if !is_inventory_git_config_setting(&section.name, &key) {
+        return Ok(());
+    }
+    write_projection_field(projection, &section.identity);
+    write_projection_field(projection, &key);
+    write_projection_field(projection, &value);
+    Ok(())
+}
+
+fn parse_git_config_section(line: &str, line_number: usize) -> Result<GitConfigSection, String> {
+    let inner = line
+        .strip_prefix('[')
+        .and_then(|line| line.strip_suffix(']'))
+        .map(str::trim)
+        .filter(|inner| !inner.is_empty())
+        .ok_or_else(|| format!("line {line_number} has an invalid section header"))?;
+    let name = inner
+        .split(|character: char| {
+            character == '.' || character == '"' || character.is_ascii_whitespace()
+        })
+        .next()
+        .unwrap_or_default();
+    if !is_git_config_name(name) {
+        return Err(format!("line {line_number} has an invalid section name"));
+    }
+    Ok(GitConfigSection {
+        name: name.to_ascii_lowercase(),
+        // A filter subsection selects a distinct driver. Preserve the complete
+        // header identity while normalizing the section name used for policy.
+        identity: inner.to_owned(),
+    })
+}
+
+fn parse_git_config_setting(line: &str, line_number: usize) -> Result<(String, String), String> {
+    let (raw_key, raw_value) = line.split_once('=').unwrap_or((line, "true"));
+    let key = raw_key.trim();
+    if !is_git_config_name(key) {
+        return Err(format!("line {line_number} has an invalid setting name"));
+    }
+    Ok((
+        key.to_ascii_lowercase(),
+        normalize_git_config_value(raw_value, line_number)?,
+    ))
+}
+
+fn is_git_config_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn normalize_git_config_value(value: &str, line_number: usize) -> Result<String, String> {
+    let mut normalized = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut previous_is_whitespace = true;
+    for character in value.trim_start().chars() {
+        if escaped {
+            normalized.push(match character {
+                '"' | '\\' => character,
+                'n' => '\n',
+                't' => '\t',
+                'b' => '\u{0008}',
+                _ => return Err(format!("line {line_number} has an invalid escape sequence")),
+            });
+            escaped = false;
+            previous_is_whitespace = false;
+            continue;
+        }
+        if quoted && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '"' {
+            quoted = !quoted;
+            previous_is_whitespace = false;
+            continue;
+        }
+        if !quoted && matches!(character, '#' | ';') && previous_is_whitespace {
+            break;
+        }
+        previous_is_whitespace = character.is_ascii_whitespace();
+        normalized.push(character);
+    }
+    if escaped || quoted {
+        return Err(format!(
+            "line {line_number} has an unterminated quoted value"
+        ));
+    }
+    Ok(normalized.trim_end().to_owned())
+}
+
+fn is_inventory_git_config_setting(section: &str, key: &str) -> bool {
+    match section {
+        "core" => matches!(
+            key,
+            "attributesfile"
+                | "autocrlf"
+                | "eol"
+                | "excludesfile"
+                | "filemode"
+                | "ignorecase"
+                | "precomposeunicode"
+                | "safecrlf"
+                | "symlinks"
+                | "worktree"
+        ),
+        "filter" | "include" | "includeif" => true,
+        _ => false,
+    }
+}
+
+fn write_projection_field(projection: &mut Vec<u8>, value: &str) {
+    projection.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    projection.extend_from_slice(value.as_bytes());
 }
 
 fn directory_inventory_identity(path: &Path) -> Result<blake3::Hash, String> {
@@ -365,6 +673,7 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
     let mut entries = Vec::with_capacity(entry_count);
     for offset in 0..entry_count {
         let kind = EntryKind::from_code(read_exact(&mut input, 1, "entry kind")?[0])?;
+        let content_kind = ContentKind::from_code(read_exact(&mut input, 1, "content kind")?[0])?;
         let path_length = usize::try_from(read_u32(&mut input, "path length")?)
             .map_err(|_| "freshness-manifest path length does not fit this platform".to_owned())?;
         let path_bytes = read_exact(&mut input, path_length, "path")?.to_vec();
@@ -381,7 +690,13 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
         } else {
             Some(read_hash(&mut input, "content identity")?)
         };
-        entries.push((path_from_os_bytes(path_bytes)?, kind, stat, content));
+        entries.push((
+            path_from_os_bytes(path_bytes)?,
+            kind,
+            content_kind,
+            stat,
+            content,
+        ));
         if input.is_empty() && offset + 1 != entry_count {
             return Err("freshness manifest ended before its declared entry count".into());
         }
@@ -406,7 +721,14 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
             .map(|chunk| {
                 scope.spawn(move || {
                     let mut content_buffer = vec![0_u8; 1024 * 1024];
-                    for (entry_path, recorded_kind, _recorded_stat, recorded_content) in chunk {
+                    for (
+                        entry_path,
+                        recorded_kind,
+                        content_kind,
+                        _recorded_stat,
+                        recorded_content,
+                    ) in chunk
+                    {
                         let (current_kind, _current_stat, metadata) = inspect(entry_path)?;
                         if *recorded_kind == EntryKind::Missing {
                             if current_kind == EntryKind::Missing {
@@ -424,6 +746,7 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
                             if content_identity(
                                 entry_path,
                                 current_kind,
+                                *content_kind,
                                 metadata.as_ref(),
                                 &mut content_buffer,
                             )? != *recorded_content
@@ -435,6 +758,7 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
                         if content_identity(
                             entry_path,
                             current_kind,
+                            *content_kind,
                             metadata.as_ref(),
                             &mut content_buffer,
                         )? != *recorded_content
@@ -698,7 +1022,7 @@ fn hash_platform_permissions(hasher: &mut blake3::Hasher, _metadata: &fs::Metada
     hasher.update(b"portable");
 }
 
-fn read_nul_paths(path: &Path) -> Result<Vec<PathBuf>, String> {
+fn read_authorities(path: &Path) -> Result<Vec<Authority>, String> {
     let bytes = fs::read(path).map_err(|error| {
         format!(
             "cannot read authority path list {}: {error}",
@@ -715,8 +1039,20 @@ fn read_nul_paths(path: &Path) -> Result<Vec<PathBuf>, String> {
         .split(|byte| *byte == 0)
         .filter(|value| !value.is_empty())
         .map(|value| {
-            String::from_utf8(value.to_vec())
+            let (tag, path) = value
+                .split_first()
+                .ok_or_else(|| "authority list contains an empty record".to_owned())?;
+            let content_kind = match tag {
+                b'f' => ContentKind::Exact,
+                b'g' => ContentKind::GitConfig,
+                _ => return Err("authority list contains an unknown content kind".into()),
+            };
+            if path.is_empty() {
+                return Err("authority list contains an empty path".into());
+            }
+            String::from_utf8(path.to_vec())
                 .map(PathBuf::from)
+                .map(|path| Authority { path, content_kind })
                 .map_err(|_| "authority path list contains a non-UTF-8 shell path".into())
         })
         .collect()
@@ -939,6 +1275,96 @@ mod tests {
             ),
             "unexpected verification result: {verification:?}"
         );
+    }
+
+    #[test]
+    fn git_config_projection_ignores_bookkeeping_but_retains_inventory_settings() {
+        let baseline = r#"
+            [core]
+                repositoryformatversion = 0
+            [branch "topic"]
+                remote = origin
+            [remote "origin"]
+                url = https://example.invalid/repository.git
+            [user]
+                email = contributor@example.invalid
+        "#;
+        let bookkeeping_churn = r#"
+            [core]
+                repositoryformatversion = 0
+            [branch "topic"]
+                remote = upstream
+            [remote "origin"]
+                url = ssh://example.invalid/repository.git
+            [user]
+                email = other@example.invalid
+        "#;
+        assert_eq!(
+            git_config_inventory_projection(baseline).unwrap(),
+            git_config_inventory_projection(bookkeeping_churn).unwrap()
+        );
+
+        let changed_core = format!("{baseline}\n[core]\n\texcludesFile = /tmp/ignored\n");
+        assert_ne!(
+            git_config_inventory_projection(baseline).unwrap(),
+            git_config_inventory_projection(&changed_core).unwrap()
+        );
+
+        let changed_filter = format!("{baseline}\n[filter \"rewrite\"]\n\tclean = cat\n");
+        assert_ne!(
+            git_config_inventory_projection(baseline).unwrap(),
+            git_config_inventory_projection(&changed_filter).unwrap()
+        );
+    }
+
+    #[test]
+    fn git_config_authorities_fail_closed_in_every_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = &temp.path().join("repo");
+        fs::create_dir(root).unwrap();
+        fs::write(root.join("input.harn"), b"source").unwrap();
+        let covered = BTreeSet::from([PathBuf::from("input.harn")]);
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, b"target:\n").unwrap();
+        let configs = [
+            temp.path().join("repository.gitconfig"),
+            temp.path().join("global.gitconfig"),
+            temp.path().join("system.gitconfig"),
+        ];
+        for config in &configs {
+            fs::write(config, b"[user]\n\temail = contributor@example.invalid\n").unwrap();
+        }
+        let authorities = temp.path().join("authorities");
+        let mut authority_bytes = Vec::new();
+        for config in &configs {
+            authority_bytes.push(b'g');
+            authority_bytes.extend_from_slice(config.to_str().unwrap().as_bytes());
+            authority_bytes.push(0);
+        }
+        fs::write(&authorities, authority_bytes).unwrap();
+
+        for config in &configs {
+            let manifest = temp.path().join(format!(
+                "{}.manifest",
+                config.file_name().unwrap().to_string_lossy()
+            ));
+            write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
+            fs::write(config, b"[user]\n\temail = other@example.invalid\n").unwrap();
+            assert_eq!(
+                verify_manifest(&manifest).unwrap(),
+                Verification::Fresh,
+                "unrelated configuration unexpectedly invalidated {}",
+                config.display()
+            );
+            fs::write(config, b"[core]\n\texcludesFile = /tmp/inventory-ignore\n").unwrap();
+            let error = verify_manifest(&manifest).unwrap_err();
+            assert!(
+                error.contains("content changed"),
+                "scope {} unexpectedly verified: {error}",
+                config.display()
+            );
+            fs::write(config, b"[user]\n\temail = contributor@example.invalid\n").unwrap();
+        }
     }
 
     #[cfg(unix)]

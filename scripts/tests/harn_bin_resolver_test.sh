@@ -25,6 +25,20 @@ source "$repo_root/scripts/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$repo_root/scripts/lib/harn_bin.sh"
 
+# Cargo publishes relinked binaries atomically. Mirror that behavior because
+# Linux may reject a direct write to a recently run executable with ETXTBSY.
+replace_executable_with_marker() {
+  local executable="$1"
+  local marker="$2"
+  local replacement=""
+
+  replacement="$(mktemp "${executable}.replacement.XXXXXX")"
+  cp "$executable" "$replacement"
+  printf '\n%s\n' "$marker" >> "$replacement"
+  chmod +x "$replacement"
+  mv "$replacement" "$executable"
+}
+
 tmp_root=$(mktemp -d)
 cleanup() {
   rm -rf "$tmp_root"
@@ -50,9 +64,9 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v3\n' >"$7"
+    printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
     "$binary_hash" "$dep_hash" "$dep_hash"
   exit 0
@@ -242,9 +256,9 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v3\n' >"$7"
+    printf 'harn-freshness-manifest-v4\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0
@@ -547,7 +561,7 @@ chmod +x "$authority_bin/cygpath"
 )
 seen_cargo_authority=0
 while IFS= read -r -d '' authority; do
-  if [[ "$authority" != C:\\* ]]; then
+  if [[ "$authority" != [fg]C:\\* ]]; then
     echo "Windows manifest authority was not projected to a native path: $authority" >&2
     exit 1
   fi
@@ -659,7 +673,7 @@ fn main() {
                 Path::new(&args[2]), &dependencies, Path::new(&args[6]),
             ).unwrap();
         }
-        println!("harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3");
+        println!("harn-artifact-evidence-v6-cargo-output-dep-info-v1-manifest-4");
         println!("build-freshness={BUILD_FRESHNESS}");
         println!("build-id={}", digest(&[&args[3]]));
         println!("artifact-stat={}", freshness_manifest::artifact_stat_id(Path::new(&args[3])).unwrap());
@@ -689,10 +703,24 @@ exit 91
 SH
 chmod +x "$hostile_diff"
 export FRESHNESS_TEST_DIFF_MARKER="$hostile_diff_marker"
+fixture_system_config="$tmp_root/system.gitconfig"
+printf '[user]\n\temail = system@example.invalid\n' > "$fixture_system_config"
+fixture_home="$tmp_root/home"
+fixture_xdg_config_home="$tmp_root/xdg-config"
+fixture_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+fixture_rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+mkdir -p "$fixture_home" "$fixture_xdg_config_home"
+export HOME="$fixture_home"
+export XDG_CONFIG_HOME="$fixture_xdg_config_home"
+export CARGO_HOME="$fixture_cargo_home"
+export RUSTUP_HOME="$fixture_rustup_home"
+unset GIT_CONFIG_GLOBAL
+export GIT_CONFIG_SYSTEM="$fixture_system_config"
 git -C "$cargo_fixture" init -q
 git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
 git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
 git -C "$cargo_fixture" config commit.gpgsign false
+git -C "$cargo_fixture" config extensions.worktreeConfig true
 git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
 git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
 git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
@@ -769,12 +797,138 @@ if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
 fi
 cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
 
+# Git config authority is narrowed in the native checker, not in this shell.
+# Create an actual linked-worktree branch and publish it with `git push -u`:
+# that mutates the shared common config while leaving the receipt worktree's
+# HEAD and branch ref untouched. Either fast path would have rejected the
+# receipt while the manifest hashed .git/config wholesale.
+fixture_remote="$tmp_root/cargo-fixture-remote.git"
+fixture_sibling="$tmp_root/cargo-fixture-sibling"
+git init --bare -q "$fixture_remote"
+git -C "$cargo_fixture" remote add origin "$fixture_remote"
+git -C "$cargo_fixture" worktree add -qb receipt-churn "$fixture_sibling"
+git -C "$fixture_sibling" push -qu origin receipt-churn
+if [[ "$(git -C "$cargo_fixture" config --get branch.receipt-churn.remote)" != origin ]]; then
+  echo "fixture did not create the expected upstream-tracking branch" >&2
+  exit 1
+fi
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-config-churn.out"
+)
+if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-config-churn.out"; then
+  echo "branch or remote config churn invalidated the resolver freshness receipt" >&2
+  exit 1
+fi
+fixture_hook_bin="$(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    REPO_ROOT="$repo_root" \
+    "$minimum_bash" -c \
+      '. "$REPO_ROOT/.githooks/lib.sh"; hook_find_fresh_worktree_harn_bin'
+)"
+if [[ "$fixture_hook_bin" != "$cargo_fixture_bin" ]]; then
+  echo "branch or remote config churn invalidated the hook freshness receipt" >&2
+  exit 1
+fi
+
+# The same native projection must still fail closed when any resolved scope
+# changes an option that changes untracked inventory or recorded content.
+assert_config_change_rejected() {
+  local scope="$1"
+  local expected_proof="${2:-manifest input content changed}"
+  if (
+    cd "$cargo_fixture"
+    CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+      "$repo_root/scripts/harn_bin.sh" --no-build --print \
+      > "$tmp_root/cargo-fixture-$scope-config-stale.out" \
+      2> "$tmp_root/cargo-fixture-$scope-config-stale.err"
+  ); then
+    echo "$scope Git config change left the freshness receipt usable" >&2
+    exit 1
+  fi
+  if ! grep -Fq "$expected_proof" \
+    "$tmp_root/cargo-fixture-$scope-config-stale.err"; then
+    echo "$scope Git config failure did not name manifest content proof" >&2
+    cat "$tmp_root/cargo-fixture-$scope-config-stale.err" >&2
+    exit 1
+  fi
+  if (
+    cd "$cargo_fixture"
+    CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+      REPO_ROOT="$repo_root" \
+      "$minimum_bash" -c \
+        '. "$REPO_ROOT/.githooks/lib.sh"; hook_find_fresh_worktree_harn_bin' \
+      > "$tmp_root/cargo-fixture-$scope-hook-stale.out" \
+      2> "$tmp_root/cargo-fixture-$scope-hook-stale.err"
+  ); then
+    echo "$scope Git config change left the hook freshness receipt usable" >&2
+    exit 1
+  fi
+  if ! grep -Fq "$expected_proof" \
+    "$tmp_root/cargo-fixture-$scope-hook-stale.err"; then
+    echo "$scope hook failure did not name manifest content proof" >&2
+    cat "$tmp_root/cargo-fixture-$scope-hook-stale.err" >&2
+    exit 1
+  fi
+}
+
+# Default Git config paths are inputs even before they exist. Exercise every
+# path returned by Git itself so a new XDG or home config cannot appear after
+# the build without invalidating both no-build consumers.
+default_global_count=0
+while IFS= read -r default_global_config; do
+  [[ -n "$default_global_config" ]] || continue
+  if [[ -e "$default_global_config" ]]; then
+    echo "default global Git config fixture unexpectedly exists: $default_global_config" >&2
+    exit 1
+  fi
+  mkdir -p "${default_global_config%/*}"
+  printf '[core]\n\texcludesFile = %s\n' \
+    "$tmp_root/default-global-ignore-$default_global_count" \
+    > "$default_global_config"
+  assert_config_change_rejected \
+    "default-global-$default_global_count" \
+    'freshness input inventory changed after the manifest snapshot'
+  rm "$default_global_config"
+  default_global_count=$((default_global_count + 1))
+done < <(git -C "$cargo_fixture" var GIT_CONFIG_GLOBAL)
+if [[ "$default_global_count" -lt 1 ]]; then
+  echo "Git did not resolve any default global configuration paths" >&2
+  exit 1
+fi
+
+# Worktree-scoped configuration has its own file. It is normally absent even
+# when extensions.worktreeConfig is enabled, so bind that absence before a
+# later writer creates the file.
+fixture_worktree_config="$(
+  git -C "$cargo_fixture" rev-parse --path-format=absolute --git-path config.worktree
+)"
+if [[ -e "$fixture_worktree_config" ]]; then
+  echo "per-worktree Git config fixture unexpectedly exists" >&2
+  exit 1
+fi
+git -C "$cargo_fixture" config --worktree \
+  core.excludesFile "$tmp_root/worktree-ignore"
+assert_config_change_rejected \
+  worktree 'freshness input inventory changed after the manifest snapshot'
+rm "$fixture_worktree_config"
+
+git -C "$cargo_fixture" config core.excludesFile "$tmp_root/repository-ignore"
+assert_config_change_rejected repository
+git -C "$cargo_fixture" config --unset core.excludesFile
+git -C "$cargo_fixture" config --system core.excludesFile "$tmp_root/system-ignore"
+assert_config_change_rejected system
+git -C "$cargo_fixture" config --system --unset core.excludesFile
+
 # Cargo owns its top-level checker output and may replace it while compiling
 # later test targets. The receipt binds the producer's immutable checker
 # snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn.
 cargo_fixture_cargo_checker="$(harn_cargo_freshness_checker_path "$cargo_fixture_bin")"
 cargo_fixture_proof_checker="$(harn_binary_freshness_checker_path "$cargo_fixture_bin")"
-printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_cargo_checker"
+replace_executable_with_marker "$cargo_fixture_cargo_checker" legitimate-cargo-relink
 (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
@@ -1122,7 +1276,7 @@ done
 # The producer-owned checker snapshot is itself part of the proof. Exercise
 # that terminal falsifier last: restoring bytes cannot restore filesystem
 # identity, and no later assertion should pretend the receipt is valid again.
-printf '\nunproven-proof-replacement\n' >> "$cargo_fixture_proof_checker"
+replace_executable_with_marker "$cargo_fixture_proof_checker" unproven-proof-replacement
 if (
   cd "$cargo_fixture"
   CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
