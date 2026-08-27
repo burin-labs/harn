@@ -1431,11 +1431,11 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
 #[cfg(test)]
-#[path = "tool_conformance_summary_tests.rs"]
-mod summary_tests;
-#[cfg(test)]
 #[path = "tool_conformance_request_tests.rs"]
 mod request_tests;
+#[cfg(test)]
+#[path = "tool_conformance_summary_tests.rs"]
+mod summary_tests;
 #[cfg(test)]
 #[path = "tool_conformance_tests.rs"]
 mod tests;

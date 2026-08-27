@@ -14,7 +14,22 @@ fn streaming_probe_request_includes_transport_and_usage_fields() {
     .expect("streaming probe body");
 
     assert_eq!(body["stream"], true);
-    assert!(body.get("stream_options").is_none());
+    assert_eq!(
+        body["stream_options"],
+        serde_json::json!({"include_usage": true})
+    );
+
+    let unverified_usage_body = probe_request_body(
+        "azure_openai",
+        "gpt-4o",
+        ToolProbeMode::Streaming,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("streaming probe body without terminal usage");
+    assert_eq!(unverified_usage_body["stream"], true);
+    assert!(unverified_usage_body.get("stream_options").is_none());
 
     let reported_usage_body = probe_request_body(
         "openai",
