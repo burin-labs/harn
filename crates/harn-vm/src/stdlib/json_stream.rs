@@ -327,7 +327,7 @@ impl JsonStreamValidator {
         match serde_json::from_str::<serde_json::Value>(&json) {
             Ok(json) => {
                 let value = schema::json_to_vm_value(&json);
-                match schema_validation_error(&value, &self.schema, "$") {
+                match schema_validation_error(&value, &self.schema, "") {
                     Some(invalid) => {
                         self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
                     }
@@ -432,7 +432,7 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
     match serde_json::from_str::<serde_json::Value>(buffer) {
         Ok(json) => {
             let value = schema::json_to_vm_value(&json);
-            match schema_validation_error(&value, schema, "$") {
+            match schema_validation_error(&value, schema, "") {
                 Some(invalid) => ParseOutcome::Invalid {
                     reason_kind: invalid.reason_kind,
                     reason: invalid.reason,
@@ -995,12 +995,33 @@ fn invalid_type_start(
     }
 }
 
-fn schema_validation_error(value: &VmValue, schema: &VmValue, path: &str) -> Option<EarlyInvalid> {
-    schema::first_schema_validation_issue(value, schema).map(|(reason_kind, reason)| EarlyInvalid {
-        reason_kind,
-        reason,
-        path: path.to_string(),
-    })
+fn schema_validation_error(
+    value: &VmValue,
+    schema: &VmValue,
+    path_prefix: &str,
+) -> Option<EarlyInvalid> {
+    schema::first_schema_validation_issue(value, schema)
+        .map(|issue| project_schema_validation_issue(issue, path_prefix))
+}
+
+fn project_schema_validation_issue(
+    issue: schema::SchemaValidationIssue,
+    path_prefix: &str,
+) -> EarlyInvalid {
+    let path = if path_prefix.is_empty() {
+        issue.path
+    } else if issue.path == "root" {
+        path_prefix.to_string()
+    } else if issue.path.starts_with('[') {
+        format!("{path_prefix}{}", issue.path)
+    } else {
+        format!("{path_prefix}.{}", issue.path)
+    };
+    EarlyInvalid {
+        reason_kind: issue.kind,
+        reason: issue.detail,
+        path,
+    }
 }
 
 fn expected_type(schema: &crate::value::DictMap) -> Option<&str> {
@@ -1466,6 +1487,42 @@ mod tests {
     }
 
     #[test]
+    fn nested_max_length_preserves_schema_issue_kind_detail_and_path() {
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["summary"],
+                "properties": {
+                    "summary": {"type": "string", "maxLength": 5}
+                }
+            }
+        });
+
+        let mut validator = StreamSchemaValidator::from_json_schema(&schema).expect("schema");
+        assert_eq!(
+            validator.feed(r#"[{"summary":"too "#).clone(),
+            JsonStreamStatus::Pending
+        );
+        let status = validator.feed(r#"long"}]"#).clone();
+        match status {
+            JsonStreamStatus::Invalid {
+                reason_kind,
+                reason,
+                path,
+            } => {
+                assert_eq!(reason_kind, SchemaValidationReasonKind::MaxLength);
+                assert_eq!(path, "[0].summary");
+                assert!(
+                    reason.contains("longer than 5"),
+                    "validator detail lost the maxLength fact: {reason:?}"
+                );
+            }
+            other => panic!("expected nested maxLength failure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn fenced_json_with_language_tag_validates_single_chunk() {
         let status = feed_chunks(&object_a_int_schema(), &["```json\n{\"a\":1}\n```"]);
         assert_eq!(status, JsonStreamStatus::Valid);
@@ -1547,15 +1604,13 @@ mod tests {
         // surface as Invalid, not be masked by the fence handling.
         let status = feed_chunks(&object_a_int_schema(), &["```json\n{\"a\":\"oops\"}\n```"]);
         match status {
-            JsonStreamStatus::Invalid { path, reason, .. } => {
-                // The violation is on property `a` (an int that arrived as a
-                // string); `early_invalid` pins it to `$.a`, but accept the
-                // coarser `$` from the post-parse path too — the point is the
-                // schema failure is surfaced, not masked by fence handling.
-                assert!(
-                    path == "$.a" || path == "$",
-                    "unexpected path {path:?} (reason {reason:?})"
-                );
+            JsonStreamStatus::Invalid {
+                reason_kind,
+                path,
+                reason,
+            } => {
+                assert_eq!(reason_kind, SchemaValidationReasonKind::WrongType);
+                assert_eq!(path, "$.a", "unexpected path (reason {reason:?})");
             }
             other => panic!("expected Invalid for schema-violating fenced value, got {other:?}"),
         }

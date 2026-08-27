@@ -30,6 +30,16 @@ pub(crate) struct CanonicalParamSchema {
     object_like: bool,
 }
 
+/// The first machine-readable schema failure projected for incremental
+/// consumers. The validator owns all three fields so callers cannot pair an
+/// exact kind and detail with a reconstructed or fallback path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SchemaValidationIssue {
+    pub(crate) kind: crate::value::SchemaValidationReasonKind,
+    pub(crate) detail: String,
+    pub(crate) path: String,
+}
+
 pub(crate) fn canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
     let normalized = canonicalize_schema_value(schema)?;
     let VmValue::Dict(schema) = normalized else {
@@ -82,12 +92,12 @@ pub(crate) fn schema_result_value(
 pub(crate) fn first_schema_validation_issue(
     data: &VmValue,
     schema: &VmValue,
-) -> Option<(crate::value::SchemaValidationReasonKind, String)> {
+) -> Option<SchemaValidationIssue> {
     let normalized = match canonicalize_schema_value(schema) {
         Ok(schema) => schema,
         Err(error) => {
             let issue = ValidationIssue::new("schema", error);
-            return Some((issue.kind, issue.render()));
+            return Some(project_validation_issue(issue));
         }
     };
     validate_schema_value(
@@ -100,7 +110,16 @@ pub(crate) fn first_schema_validation_issue(
     .errors
     .into_iter()
     .next()
-    .map(|issue| (issue.kind, issue.render()))
+    .map(project_validation_issue)
+}
+
+fn project_validation_issue(issue: ValidationIssue) -> SchemaValidationIssue {
+    let detail = issue.render();
+    SchemaValidationIssue {
+        kind: issue.kind,
+        detail,
+        path: issue.path,
+    }
 }
 
 pub(crate) fn schema_report_value(

@@ -14,7 +14,7 @@ pub(crate) use api::{
     schema_assert_param, schema_expect_value, schema_extend_value, schema_from_json_schema_value,
     schema_from_openapi_schema_value, schema_is_value, schema_omit_value, schema_partial_value,
     schema_pick_value, schema_report_value, schema_result_value, schema_to_json_schema_value,
-    schema_to_openapi_schema_value, CanonicalParamSchema,
+    schema_to_openapi_schema_value, CanonicalParamSchema, SchemaValidationIssue,
 };
 pub use canonicalize::json_to_vm_value;
 
