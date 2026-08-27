@@ -75,8 +75,9 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "fireworks"
 checked_on = "2026-08-16"
-fields = ["stream"]
+fields = ["cache", "stream"]
 sources = [
+  "https://docs.fireworks.ai/api-reference/post-chatcompletions",
   "https://github.com/burin-labs/harn/pull/6750",
 ]
 
@@ -353,6 +354,7 @@ method = "GET"
 path = "/models"
 
 [providers.fireworks]
+cache_usage_accounting = true
 base_url = "https://api.fireworks.ai/inference/v1"
 base_url_env = "FIREWORKS_BASE_URL"
 auth_style = "bearer"
