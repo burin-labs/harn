@@ -30,6 +30,10 @@ pub(crate) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     {
         return n;
     }
+    // Together can report the same count directly as usage.cached_tokens.
+    if let Some(n) = usage.get("cached_tokens").and_then(|v| v.as_i64()) {
+        return n;
+    }
     // OpenRouter variants: cache_read_tokens / cached_prompt_tokens.
     if let Some(n) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
         return n;
