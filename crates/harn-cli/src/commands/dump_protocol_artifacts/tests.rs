@@ -1090,6 +1090,18 @@ fn generated_go_artifact_is_gofmt_stable_when_gofmt_is_available() {
 }
 
 #[test]
+fn generated_go_artifact_fails_closed_without_gofmt() {
+    let tempdir = tempfile::tempdir().expect("temporary directory");
+    let missing_formatter = tempdir.path().join("missing-gofmt");
+    let error = format_go_source_with(generate_go(), &missing_formatter)
+        .expect_err("protocol generation must not treat missing formatting as success");
+    assert!(
+        error.contains("Go formatting is required to generate canonical protocol artifacts"),
+        "unexpected missing-gofmt error: {error}"
+    );
+}
+
+#[test]
 fn generated_rust_artifact_is_rustfmt_stable() {
     const VERSION: &str = "9.8.7-test.1";
     let source = protocol_source();

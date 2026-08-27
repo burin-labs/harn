@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use harn_serve::adapters::acp::{
@@ -922,15 +923,23 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 "#;
 
 fn format_go_source(source: String) -> Result<String, String> {
-    let mut child = match Command::new("gofmt")
+    format_go_source_with(source, Path::new("gofmt"))
+}
+
+pub(super) fn format_go_source_with(source: String, formatter: &Path) -> Result<String, String> {
+    let mut child = match Command::new(formatter)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
     {
         Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(source),
-        Err(error) => return Err(format!("failed to spawn gofmt: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "failed to spawn gofmt at {}: {error}; Go formatting is required to generate canonical protocol artifacts",
+                formatter.display()
+            ));
+        }
     };
 
     child

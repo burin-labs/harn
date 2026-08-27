@@ -23,6 +23,13 @@ if ! grep -Fq \
   exit 1
 fi
 
+if ! grep -Fq \
+  'uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6' \
+  "$workflow"; then
+  echo "macOS nightly must provision the pinned formatter used by generated Go contracts" >&2
+  exit 1
+fi
+
 performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_command_line="$(grep -Fn 'run: make check-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_binary_line="$(grep -Fn 'HARN_BIN: ./target/debug/harn' "$workflow" | cut -d: -f1)"
