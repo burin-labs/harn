@@ -15,7 +15,7 @@ use crate::llm::api::DialectContract;
 use crate::llm::api::StreamSchemaWatch;
 use crate::llm::capabilities::WireDialect;
 use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
-use crate::value::ErrorCategory;
+use crate::value::{ErrorCategory, VmValue};
 use crate::{install_active_metrics_registry, MetricsRegistry};
 use std::sync::Arc;
 
@@ -47,6 +47,30 @@ fn build_strict_payload(schema: serde_json::Value) -> crate::llm::api::LlmReques
     opts.schema_stream_abort = true;
     opts.session_id = None;
     crate::llm::api::LlmRequestPayload::from(&opts)
+}
+
+fn assert_schema_failure(err: &VmError, kind: &str, path: &str, detail_fragment: &str) {
+    let VmValue::Dict(caught) = err.thrown_value() else {
+        panic!("schema abort must lower to a structured caught value: {err:?}");
+    };
+    let Some(VmValue::Dict(cause)) = caught.get("schema_failure") else {
+        panic!("caught schema abort must retain its typed cause: {caught:?}");
+    };
+    assert_eq!(
+        cause.get("kind").map(VmValue::display).as_deref(),
+        Some(kind)
+    );
+    assert_eq!(
+        cause.get("path").map(VmValue::display).as_deref(),
+        Some(path)
+    );
+    assert!(
+        cause
+            .get("detail")
+            .map(VmValue::display)
+            .is_some_and(|detail| detail.contains(detail_fragment)),
+        "schema cause must retain the validator detail: {cause:?}"
+    );
 }
 
 #[test]
@@ -197,6 +221,8 @@ async fn openai_stream_aborts_on_impossible_property_type() {
     .await
     .expect_err("schema abort must surface as error");
 
+    assert_schema_failure(&err, "wrong_type", "$.age", "expected type 'int'");
+
     match &err {
         VmError::CategorizedError { category, message } => {
             assert_eq!(*category, ErrorCategory::SchemaStreamAborted);
@@ -254,6 +280,39 @@ async fn openai_stream_aborts_on_impossible_property_type() {
 
     reset_agent_trace_state();
     crate::clear_active_metrics_registry();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_abort_cause_distinguishes_max_length_from_wrong_type() {
+    reset_agent_trace_state();
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["detail"],
+        "properties": {"detail": {"type": "string", "maxLength": 5}}
+    });
+    let payload = build_payload(schema);
+    let watch = StreamSchemaWatch::from_payload(&payload).expect("schema is canonicalizable");
+    let frame = serde_json::json!({
+        "choices": [{"delta": {"content": "{\"detail\":\"too long\"}"}}]
+    });
+    let body = format!("data: {frame}\n\ndata: [DONE]\n\n");
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let reader = tokio::io::BufReader::new(body.as_bytes());
+    let err = consume_sse_lines(
+        reader,
+        "openai",
+        "gpt-test",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        Some(watch),
+        false,
+    )
+    .await
+    .expect_err("length violation must abort the stream");
+
+    assert_schema_failure(&err, "max_length", "$.detail", "longer than 5");
+    reset_agent_trace_state();
 }
 
 #[tokio::test(flavor = "current_thread")]
