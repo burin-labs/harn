@@ -99,6 +99,21 @@ harn run scripts/provider_catalog_notice.harn -- \
   --extraction scripts/provider_catalog_notice_fixtures/carried-update.json
 ```
 
+When either input is outside the worktree, grant its containing directory
+before the script path. Keep the run sandboxed and repeat `--read-only-root`
+when the notice and checked extraction come from different directories:
+
+```bash
+notice_path=/path/to/notice.json
+extraction_path=/path/to/extraction.json
+harn run \
+  --read-only-root "$(dirname "$notice_path")" \
+  --read-only-root "$(dirname "$extraction_path")" \
+  scripts/provider_catalog_notice.harn -- \
+  --notice "$notice_path" \
+  --extraction "$extraction_path"
+```
+
 For a live extraction, omit `--extraction` and optionally choose `--provider`
 and `--model`. The extraction has a $0.10 per-notice cap. By default the script
 only writes an idempotent local receipt below
@@ -114,13 +129,21 @@ git worktree add ../harn-provider-notice origin/main
 (
   cd ../harn-provider-notice
   make setup
-  harn run scripts/provider_catalog_notice.harn -- \
-    --notice /path/to/notice.json \
+  notice_path=/path/to/notice.json
+  harn run \
+    --read-only-root "$(dirname "$notice_path")" \
+    scripts/provider_catalog_notice.harn -- \
+    --notice "$notice_path" \
     --repo-root "$PWD" \
     --apply \
     --open-pr
 )
 ```
+
+Receipts stay below the dedicated worktree by default. If an adapter instead
+passes an absolute external `--output-dir`, create that directory first and
+grant that exact directory with `--write-root` before the script path. A
+read-only root does not authorize receipt writes.
 
 The optional cron package in
 `examples/triggers/provider-catalog-notice/` shows how a public adapter can

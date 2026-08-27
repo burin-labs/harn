@@ -934,6 +934,7 @@ check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run --allow-process-network scripts/update_provider_catalog.harn -- --check
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/provider_catalog_notice_test.harn
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/provider_catalog_notice_sandbox_test.sh
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.
