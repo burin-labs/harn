@@ -6076,6 +6076,12 @@ reasoning_disable_supported = true
 reasoning_wire_format = "thinking_type"
 reasoning_history_wire_field = "reasoning_content"
 reasoning_round_trip = "echo_same_key_when_tools_present"
+reasoning_excluded_portable_options = [
+  "temperature",
+  "top_p",
+  "presence_penalty",
+  "frequency_penalty",
+]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -6098,6 +6104,12 @@ reasoning_disable_supported = true
 reasoning_wire_format = "thinking_type"
 reasoning_history_wire_field = "reasoning_content"
 reasoning_round_trip = "echo_same_key_when_tools_present"
+reasoning_excluded_portable_options = [
+  "temperature",
+  "top_p",
+  "presence_penalty",
+  "frequency_penalty",
+]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
