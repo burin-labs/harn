@@ -1917,6 +1917,11 @@ id = "qwen/qwen3.6-27b"
 provider = "groq"
 tool_format = "native"
 
+[aliases."groq-qwen3.8"]
+id = "qwen/qwen3.8-27b"
+provider = "groq"
+tool_format = "native"
+
 # Z.AI cheap coding route (confirmed serving at paas/v4).
 [aliases."glm-4.6"]
 id = "glm-4.6"
@@ -4546,6 +4551,23 @@ benchmarks = { swe_bench_verified = 77.2 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "tool_use", "agentic"]
+
+[models."qwen/qwen3.8-27b"]
+name = "Qwen3.8 27B (Groq)"
+provider = "groq"
+context_window = 131042
+logical_model = "qwen3.8-27b"
+equivalence_group = "qwen3.8-27b"
+served_variant = "groq-lpu-preview"
+wire_model = "qwen/qwen3.8-27b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+# Groq's public preview model page supplied the route, context limit, feature
+# list, and rates. Native tools, strict JSON Schema, reasoning effort, and the
+# tools-plus-JSON rejection were verified against the live route on 2026-08-26.
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00 }
+tier = "mid"
+strengths = ["speed", "coding", "tool_use", "reasoning", "vision"]
 
 # Cohere and xAI first-party routes. Both are OpenAI-compatible enough for
 # Harn's chat-completions adapter, but their economics are unusual: Command A+

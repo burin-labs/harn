@@ -115,6 +115,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `groq` | `groq/compound*` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `none` | no | `system` | `json` | `none` | `none` | no | no | `unsupported` | no | no |
 | `groq` | `*gpt-oss-*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `groq` | `qwen/qwen3.6*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `groq` | `qwen/qwen3.8*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `groq` | `llama-*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | no |
 | `huggingface` | `qwen/qwen3-coder*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -372,6 +373,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `groq` | `groq/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `groq/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `qwen/qwen3.6-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `groq` | `qwen/qwen3.8-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `huggingface` | `Qwen/Qwen3-Coder-480B-A35B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `inception` | `mercury-2` | `native` | `unknown` | - | - | - | - | - | catalog note: Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet. |
 | `inception` | `mercury-coder-small` | `native` | `unknown` | - | - | - | - | - | catalog note: Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass. |
