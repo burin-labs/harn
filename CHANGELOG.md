@@ -9,6 +9,156 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.119
+
+### Added
+
+- **Session recap projection (#7370).** Agent results now expose typed
+  availability for a deterministic recap of the current prompt turn, grouped
+  by iteration with public assistant text, tool outcomes, plans, progress,
+  typed verification facts, terminal state, source hashes, and explicit
+  coverage. HTTP and ACP readers, a closed JSON schema, and generated Swift,
+  TypeScript, Rust, Python, and Go bindings expose the same host contract.
+- Harn now recognizes MiniMax M3 on SambaNova with its served context window and
+  prices.
+- Added NVIDIA NIM's Nemotron 3.5 Lightning route with its documented million-token
+  context window, tool calling, reasoning, and structured output support.
+- Add Groq's Qwen 3.8 27B preview route with its verified tools, structured output, vision, reasoning, and pricing metadata.
+- Record requested and provider-compatible output-schema hashes on each model
+  request without storing schema contents in default transcripts.
+- Provider catalog generation now emits Harn structural types from the public
+  catalog schema, so `.harn` consumers can validate catalog data without
+  maintaining parallel free-form dictionary shapes.
+
+### Changed
+
+- **Source-length checks no longer create merge-conflict baselines.** The
+  repository now keeps only a stable inventory of legacy oversized sources and
+  derives each strict no-growth ceiling from the pull request merge base or an
+  integrated commit's first parent. Shrinks need no generated update, while a
+  one-line increase still fails. Stable debt identity carries the same ceiling
+  through arbitrary rewrites and repeated renames.
+- Moonshot K3 now accepts `tool_choice: "required"`. Harn sends that mode through
+  instead of weakening it to automatic tool selection.
+- **Project-aware startup is demand-driven (#7314).** Ordinary `harn run`
+  entrypoints no longer materialize unreachable dependencies, construct
+  connector registries, or parse unused hook handlers. Package imports and
+  connector calls initialize their owning state on first use, matching policy
+  hook failures still stop dispatch, and `--eager-project-handlers` retains
+  fail-fast validation for the complete project. Cached package graphs
+  revalidate current manifest and lock authority before execution. Concurrent
+  dependency demands publish one cumulative immutable generation without
+  reverting lock authority installed concurrently. Explicit root provider
+  declarations override catalog providers; catalog built-ins
+  take precedence over package-contributed providers with the same ID, while
+  packages can continue to contribute non-catalog provider IDs.
+
+### Deprecated
+
+- **Together DeepSeek V4 Pro now resolves to the dated 0813 production route
+  (#7466).** The retiring preview id remains available for historical cost
+  attribution with a typed replacement pointer.
+
+### Removed
+
+- The deprecated direct Devstral routes now resolve to Mistral Medium 3.5.
+  The catalog no longer advertises invalid dated Devstral model IDs.
+
+### Fixed
+
+- ACP WebSocket clients can now list and load sessions saved in a project's
+  canonical session store after the listener restarts. Project roots are
+  validated before a persisted session is read, and cross-project lookups fail
+  without searching another store.
+- `harness.net.connector_call` now throws structured errors that preserve the
+  connector failure kind, runtime category, and message.
+- **Keep fresh builds after Git records branch tracking or remotes (#7176).**
+  Harn still rebuilds when source inventory settings change.
+- **Made locally rejected LLM options easier to handle (#7344).** Safe-call
+  errors now identify a rejected option as a local invalid request.
+- **Generated projects now pass strict type checks (#7353).** New project,
+  package, agent, chat, evaluation, MCP, pipeline lab, and tool files include
+  explicit parameter and return types.
+- **Cerebras prompt-cache usage is now accounted for (#7360).** Harn treats a
+  reported zero cached-token count as a confirmed cache miss.
+- **Streaming tool probes now use the requested provider transport (#7361).**
+  Dry runs show the same stream and terminal-usage fields as live calls.
+- **Gemini GenerateContent calls now stream every output chunk when requested
+  (#7364).** Repeated text is preserved, along with terminal usage and stop
+  reasons.
+- A checksum-verified `harn upgrade` now keeps an already enrolled standalone
+  agent-hook runtime synchronized with the installed release while preserving
+  explicit enrollment and typed source provenance.
+- **Implicit-annotation migration now rolls back partial writes (#7425).**
+  `harn fix --preserve-implicit-any` restores every previously rewritten source
+  when a later file cannot be written, then reports the incomplete typed census.
+- **Mistral Medium 3.5 cache pricing (#7428).** Cached input now uses
+  Mistral's discounted rate instead of the full input rate.
+- **Gemini Interactions structured output (#7439).** JSON object and JSON
+  Schema requests now use Google's typed text response format instead of the
+  retired bare-schema shape.
+- Gemini Interactions now preserves a named tool choice instead of allowing any tool.
+- Direct DeepSeek V4 calls now send the documented thinking switch and accept the
+  supported low, high, and max reasoning effort levels.
+- **Direct DeepSeek V4 tool loops retain required reasoning state (#7450).**
+  Harn replays its canonical assistant reasoning on requests carrying native
+  tools while continuing to strip untrusted provider-private fields.
+- Direct DeepSeek V4 calls now reject sampling controls that the provider ignores while thinking is enabled.
+  The same controls remain available when thinking is disabled.
+- External-agent delegation now preserves failure kinds and runtime categories in
+  catchable error records.
+- **Fireworks cache usage is now measured (#7455).** Harn reports cache hits
+  and confirmed cache misses from the provider's cached-token field.
+- **Together cache accounting reads flat token counts (#7458).** Harn now
+  recognizes `usage.cached_tokens` when Together returns that documented
+  response shape.
+- Anthropic responses that reach the model's context-window limit now report a
+  truncated outcome and use the existing token-limit recovery path.
+- Reject forced Anthropic tool choice with manual extended thinking before sending the request.
+- Structured output now uses the provider-compatible schema only while receiving
+  a response. After the response completes, Harn restores every rule from the
+  caller's schema before accepting it.
+- Keep `harn graph --module` output focused on references from the selected module.
+- **Groq native tools no longer conflict with structured output (#7476).**
+  When a call includes native tools, Harn now omits Groq's incompatible
+  `response_format` field while keeping the tools available.
+- **Groq Qwen 3.6 calls can select instruct or thinking mode (#7477).**
+  Set `thinking: false` for instruct mode or `thinking: true` for the
+  provider-managed thinking mode. Harn rejects unsupported numeric thinking
+  budgets before opening a connection.
+- Parallel fan-out now preserves deadlock diagnostics when worker scheduling starts branches out of source order.
+- Hosted and mock capability reads no longer request network access. Self-hosted
+  tool-format selection still probes the running server before choosing a tool
+  channel.
+- Correct the trusted provider-notice workflow examples to grant external input and receipt paths without disabling the sandbox.
+- The completion judge now accepts a provider's full explanation before keeping
+  its first 240 characters. This avoids wasting valid responses on schema retries.
+- Preserve schema-stream abort causes as typed reason kinds and exact details
+  in caught errors and provider-call receipts.
+- Schema validation errors now report how many model calls ran, the corrective retry budget, and whether retries were
+  disabled or exhausted.
+- NVIDIA NIM streaming calls now request the terminal usage frame, so successful
+  calls report token counts and cost instead of an unpriced zero.
+- DeepInfra, Fireworks, Hugging Face, MiniMax, Moonshot, SambaNova, and xAI
+  streaming calls now retain their final usage counters. Harn also accepts a
+  usage-only terminal receipt without a trailing `[DONE]` marker, so successful
+  calls can report token use and cost. Total-only receipts retain their measured
+  total without fabricating input or output counts. Hugging Face calls no longer
+  use a fixed price because its router selects upstream providers with different
+  rates.
+- **CLI report rendering accepts incomplete provider data (#7353).** Evaluation,
+  model, provider, batch, and trace commands now render missing or wrong-shaped
+  optional fields through one shared fallback contract instead of failing type
+  checks. `harn time run --eager-project-handlers` can explicitly validate every
+  project trigger and hook before measuring program execution.
+- Protocol artifact generation now fails clearly when `gofmt` is unavailable,
+  and cross-platform certification provisions the formatter explicitly. Doctor
+  tests no longer change the process-wide executable search path.
+- Windows upgrades now durably flush staged binaries through a write-capable
+  file handle before replacing the installed executable. Durable batch state now
+  uses the shared cross-platform compare-and-replace contract, and native Windows
+  CI exercises the release-critical Harn CLI test set before merge.
+
 ## v0.10.118
 
 ### Breaking
