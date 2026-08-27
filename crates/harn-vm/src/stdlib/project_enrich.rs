@@ -11,7 +11,7 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::json_to_vm_value;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::fs::ignore_policy::BUILTIN_IGNORED_DIRS;
@@ -174,16 +174,15 @@ async fn project_enrich_impl(
             write_cached_result(&cache_path, &final_result)?;
             Ok(final_result)
         }
-        Err(VmError::CategorizedError {
-            message,
-            category: ErrorCategory::SchemaValidation,
-        }) => Ok(validation_envelope(
-            &enriched_evidence,
-            message,
-            None,
-            estimated_input_tokens,
-            0,
-        )),
+        Err(error) if error_to_category(&error) == ErrorCategory::SchemaValidation => {
+            Ok(validation_envelope(
+                &enriched_evidence,
+                crate::llm::llm_error_message(&error),
+                None,
+                estimated_input_tokens,
+                0,
+            ))
+        }
         Err(error) => Err(error),
     }
 }

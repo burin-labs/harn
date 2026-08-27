@@ -476,6 +476,16 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     VmValue::dict(dict)
 }
 
+/// Project terminal schema-retry facts. `budget` counts retries after the
+/// initial call; `status` distinguishes disabled from exhausted.
+pub(crate) fn schema_retry_failure_facts(attempts: usize, budget: usize) -> VmValue {
+    let mut facts = std::collections::BTreeMap::new();
+    facts.insert("attempts".to_string(), VmValue::Int(attempts as i64));
+    facts.insert("budget".to_string(), VmValue::Int(budget as i64));
+    facts.put_str("status", if budget == 0 { "disabled" } else { "exhausted" });
+    VmValue::dict(facts)
+}
+
 /// Construct the canonical terminal LLM envelope for a request that Harn can
 /// prove invalid before dispatch. Callers provide the precise policy message;
 /// this helper owns the stable taxonomy and route fields.
@@ -500,7 +510,7 @@ pub(crate) fn invalid_request_error(
     VmError::Thrown(build_llm_error_dict(&structured, provider, model))
 }
 
-fn llm_error_message(err: &VmError) -> String {
+pub(crate) fn llm_error_message(err: &VmError) -> String {
     match err {
         VmError::ProviderStreamFailure(failure) => failure.to_string(),
         VmError::CategorizedError { message, .. } => message.clone(),
@@ -545,10 +555,19 @@ pub(crate) async fn execute_llm_call(
         outcome.errors.join("; ")
     );
     match outcome.output_validation_mode.as_str() {
-        "error" => Err(crate::value::VmError::CategorizedError {
-            message,
-            category: crate::value::ErrorCategory::SchemaValidation,
-        }),
+        "error" => {
+            let mut fields = std::collections::BTreeMap::new();
+            fields.put_str(
+                "category",
+                crate::value::ErrorCategory::SchemaValidation.as_str(),
+            );
+            fields.put_str("message", message);
+            fields.insert(
+                "schema_retry".to_string(),
+                schema_retry_failure_facts(outcome.attempts, outcome.schema_retries_budget),
+            );
+            Err(crate::value::VmError::Thrown(VmValue::dict(fields)))
+        }
         "warn" => {
             crate::events::log_warn("llm", &message);
             Ok(outcome.vm_result)
