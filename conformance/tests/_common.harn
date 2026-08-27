@@ -1,5 +1,17 @@
 import { poll_until } from "std/poll"
 
+/** Raise an integer atomic monotonically, preserving a concurrent larger write. */
+pub fn atomic_raise_max(runtime: HarnessRuntime, handle: any, candidate: int) -> int {
+  let observed = to_int(runtime.atomic_get(handle))
+  while candidate > observed {
+    if runtime.atomic_cas(handle, observed, candidate) {
+      return candidate
+    }
+    observed = to_int(runtime.atomic_get(handle))
+  }
+  return observed
+}
+
 /** Shared conformance helper for fixtures that exec the built `harn` binary. */
 fn first_group(pattern: any, text: string?) {
   const matches = regex_captures(pattern, text)

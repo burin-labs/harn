@@ -1,3 +1,5 @@
+import { atomic_raise_max } from "../_common"
+
 pipeline default(harness: Harness) {
   // Baseline: no `with { max_concurrent }` — existing behavior, all
   // tasks run concurrently. Each task returns its index.
@@ -36,9 +38,7 @@ pipeline default(harness: Harness) {
   const work = [1, 2, 3, 4, 5, 6, 7, 8]
   parallel each work with { max_concurrent: 2 } { _ ->
     const now = harness.runtime.atomic_add(in_flight, 1) + 1
-    if now > harness.runtime.atomic_get(peak) {
-      harness.runtime.atomic_set(peak, now)
-    }
+    atomic_raise_max(harness.runtime, peak, now)
     harness.clock.sleep_ms(25ms)
     harness.runtime.atomic_add(in_flight, -1)
   }

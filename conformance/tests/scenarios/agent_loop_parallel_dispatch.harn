@@ -16,6 +16,7 @@ import { agent_loop } from "std/agent/loop"
  */
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
+import { atomic_raise_max } from "../_common"
 
 fn fanout_tools(runtime: HarnessRuntime, state: dict, release_at: int) {
   const r = tool_registry()
@@ -27,9 +28,7 @@ fn fanout_tools(runtime: HarnessRuntime, state: dict, release_at: int) {
     {
       handler: { args ->
         const now = runtime.atomic_add(state.in_flight, 1) + 1
-        if now > runtime.atomic_get(state.peak) {
-          runtime.atomic_set(state.peak, now)
-        }
+        atomic_raise_max(runtime, state.peak, now)
         if now == release_at {
           let releases = 0
           while releases < release_at {
