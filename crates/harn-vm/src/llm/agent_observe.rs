@@ -38,9 +38,12 @@
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
 //! - `provider_call_request` core `{call_id, iteration, model, provider, call_role, stage?,
-//!   max_tokens, temperature, tool_choice, tool_format, context_token_breakdown}` —
+//!   max_tokens, temperature, tool_choice, tool_format, structured_output,
+//!   context_token_breakdown}` —
 //!   slim metadata for a single model call.
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
+//!   `structured_output` records mode, strictness, and stable redacted hashes
+//!   for the requested and provider-compatible schemas, never schema contents.
 //!   `served_context` carries stable redacted prompt/schema/tool hashes and
 //!   `manifest_content_hash`, which resolves to an earlier retained
 //!   `context_manifest` event.
