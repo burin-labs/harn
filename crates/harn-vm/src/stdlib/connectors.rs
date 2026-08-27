@@ -1,5 +1,5 @@
 use jsonwebtoken::jwk::JwkSet;
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 
 use crate::bridge::json_result_to_vm_value;
 use crate::connectors::{
@@ -143,8 +143,56 @@ async fn connector_shared_verify_jwt_inline_impl(
 fn client_error_to_vm(error: ClientError) -> VmError {
     match error {
         ClientError::EgressBlocked(blocked) => blocked.to_vm_error(),
-        other => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(other.to_string()))),
+        other => connector_error_to_vm(
+            client_error_kind(&other),
+            client_error_category(&other),
+            other.to_string(),
+        ),
     }
+}
+
+fn client_error_kind(error: &ClientError) -> &'static str {
+    match error {
+        ClientError::MethodNotFound(_) => "method_not_found",
+        ClientError::InvalidArgs(_) => "invalid_args",
+        ClientError::RateLimited(_) => "rate_limited",
+        ClientError::Transport(_) => "transport",
+        ClientError::EgressBlocked(_) => "egress_blocked",
+        ClientError::Other(_) => "other",
+    }
+}
+
+fn client_error_category(error: &ClientError) -> crate::value::ErrorCategory {
+    use crate::value::ErrorCategory;
+
+    match error {
+        ClientError::MethodNotFound(_) => ErrorCategory::NotFound,
+        ClientError::InvalidArgs(_) => ErrorCategory::InvalidRequest,
+        ClientError::RateLimited(_) => ErrorCategory::RateLimit,
+        ClientError::Transport(message) => {
+            let category = crate::value::classify_error_message(message);
+            if category == ErrorCategory::Generic {
+                ErrorCategory::TransientNetwork
+            } else {
+                category
+            }
+        }
+        ClientError::EgressBlocked(_) => ErrorCategory::EgressBlocked,
+        ClientError::Other(message) => crate::value::classify_error_message(message),
+    }
+}
+
+fn connector_error_to_vm(
+    kind: &str,
+    category: crate::value::ErrorCategory,
+    message: String,
+) -> VmError {
+    VmError::Thrown(json_result_to_vm_value(&json!({
+        "error": "connector_error",
+        "kind": kind,
+        "category": category.as_str(),
+        "message": message,
+    })))
 }
 
 /// A required dict argument, as JSON.
@@ -244,5 +292,52 @@ fn json_type_name(value: &JsonValue) -> &'static str {
         JsonValue::String(_) => "string",
         JsonValue::Array(_) => "list",
         JsonValue::Object(_) => "dict",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_errors_preserve_kind_and_runtime_category() {
+        use crate::value::ErrorCategory;
+
+        let cases = [
+            (
+                ClientError::MethodNotFound("method".into()),
+                "method_not_found",
+                ErrorCategory::NotFound,
+            ),
+            (
+                ClientError::InvalidArgs("args".into()),
+                "invalid_args",
+                ErrorCategory::InvalidRequest,
+            ),
+            (
+                ClientError::RateLimited("limit".into()),
+                "rate_limited",
+                ErrorCategory::RateLimit,
+            ),
+            (
+                ClientError::Transport("transport".into()),
+                "transport",
+                ErrorCategory::TransientNetwork,
+            ),
+            (
+                ClientError::Other("HTTP 503".into()),
+                "other",
+                ErrorCategory::Overloaded,
+            ),
+        ];
+
+        for (error, expected_kind, expected_category) in cases {
+            assert_eq!(client_error_kind(&error), expected_kind);
+            let vm_error = client_error_to_vm(error);
+            assert_eq!(
+                crate::value::error_to_category(&vm_error),
+                expected_category
+            );
+        }
     }
 }

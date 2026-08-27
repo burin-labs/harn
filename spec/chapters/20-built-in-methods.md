@@ -284,6 +284,13 @@ provider integrations.
 | `harness.obs.hypothesis_event_append(proof, kind, idempotency_key, expected_head, event_fingerprint, plan_fingerprint, hypothesis_id, run_id, payload, headers?)` | Append one exact authorized event to the reserved `hypotheses.events.v1` topic |
 | `harness.obs.metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter |
 
+`connector_call` throws `{error: "connector_error", kind, category, message}` when an
+active connector rejects a call. `kind` is one of `method_not_found`,
+`invalid_args`, `rate_limited`, `transport`, or `other`. `category` carries the
+shared runtime category used for retry and terminal-state decisions.
+Destination-policy failures keep the more specific `EgressBlocked` record
+described above.
+
 Harn-backed connector modules are loaded through manifest `[[providers]]`
 entries and must export `provider_id()`, `kinds()`, and `payload_schema()`.
 Those metadata exports are pure. Runtime exports declare a leading
