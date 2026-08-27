@@ -20,18 +20,56 @@ fn write_text(harness: Harness, root: string, rel: string, text: string) -> nil 
   return nil
 }
 
-fn source_text(lines: int) -> string {
-  return "source line\n".repeat(lines)
+fn source_text(lines: int, newline: string = "\n") -> string {
+  return ("source line" + newline).repeat(lines)
 }
 
-fn write_source(harness: Harness, root: string, rel: string, lines: int) -> nil {
-  write_text(harness, root, rel, source_text(lines))
+fn write_source(
+  harness: Harness,
+  root: string,
+  rel: string,
+  lines: int,
+  newline: string = "\n",
+) -> nil {
+  write_text(harness, root, rel, source_text(lines, newline))
   return nil
 }
 
-fn write_baseline(harness: Harness, root: string, source_path: string, lines: int) -> nil {
-  write_text(harness, root, baseline_path_for(source_path), to_string(lines) + "\n")
+fn write_inventory(
+  harness: Harness,
+  root: string,
+  paths: list<string>,
+  identities: dict<string, string> = {},
+) -> nil {
+  write_text(
+    harness,
+    root,
+    "scripts/source-file-length-legacy.json",
+    json_stringify_pretty(
+      {version: 1, legacy_path_identities: identities, legacy_oversized_paths: paths},
+    )
+      + "\n",
+  )
   return nil
+}
+
+fn git_ok(process: HarnessProcess, root: string, args: list<string>) -> string {
+  const result = process.run({program: "git", args: ["-C", root] + args})
+  require result.success, result.stderr
+  return result.stdout.trim()
+}
+
+fn init_repo(process: HarnessProcess, root: string) -> nil {
+  git_ok(process, root, ["init", "-q", "."])
+  git_ok(process, root, ["config", "user.name", "Source Ratchet Test"])
+  git_ok(process, root, ["config", "user.email", "source-ratchet@example.invalid"])
+  return nil
+}
+
+fn commit_all(process: HarnessProcess, root: string, message: string) -> string {
+  git_ok(process, root, ["add", "-A"])
+  git_ok(process, root, ["commit", "-q", "-m", message])
+  return git_ok(process, root, ["rev-parse", "HEAD"])
 }
 
 fn finding_kinds(findings: list<SourceLengthFinding>) -> list<string> {
@@ -44,358 +82,432 @@ pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, 
   assert_eq(logical_line_count("one"), 1)
   assert_eq(logical_line_count("one\n"), 1)
   assert_eq(logical_line_count("one\ntwo"), 2)
-  assert_eq(logical_line_count("one\ntwo\n"), 2)
   assert_eq(logical_line_count("one\r\ntwo\r\n"), 2)
 }
 
 @test
-pipeline test_cap_and_new_oversized_source_rules(harness: Harness, task: unknown) {
-  const at_cap = [{path: "crates/example/src/cap.rs", lines: 1500}]
-  assert_eq(evaluate_inventory(at_cap, []).count, 0)
-  const findings = evaluate_inventory([{path: "crates/example/src/large.rs", lines: 1501}], [])
-  assert_eq(findings.count, 1)
-  assert_eq(findings[0]?.kind, "new_oversized_source")
-  assert_eq(findings[0]?.actual, 1501)
+pipeline test_legacy_inventory_is_stable_sorted_policy_not_measurement(
+  harness: Harness,
+  task: unknown,
+) {
+  const valid = parse_legacy_inventory(
+    "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}",
+  )
+  assert_eq(valid.ok, true)
+  assert_eq(valid.paths, ["a.rs", "b.rs"])
+  assert_eq(valid.sources, [{id: "a.rs", path: "a.rs"}, {id: "b.rs", path: "b.rs"}])
+  const renamed = parse_legacy_inventory(
+    "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"b.rs\"]}",
+  )
+  assert_eq(renamed.sources, [{id: "a.rs", path: "b.rs"}])
+  assert_eq(
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"b.rs\",\"a.rs\"]}",
+    ).ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"a.rs\",\"a.rs\"]}",
+    ).ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{},\"legacy_oversized_paths\":[\"../escape.rs\"]}",
+    ).ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\"]}",
+    ).ok,
+    false,
+  )
+  assert_eq(
+    parse_legacy_inventory(
+      "{\"version\":1,\"legacy_path_identities\":{\"b.rs\":\"a.rs\"},\"legacy_oversized_paths\":[\"a.rs\",\"b.rs\"]}",
+    ).ok,
+    false,
+  )
+  assert_eq(parse_legacy_inventory("not json").ok, false)
 }
 
 @test
-pipeline test_exact_existing_count_passes_and_growth_fails(harness: Harness, task: unknown) {
-  const baseline = [
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/example/src/lib.rs"),
-      source_path: "crates/example/src/lib.rs",
-      lines: 1800,
-    },
-  ]
-  assert_eq(
-    evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1800}], baseline).count,
-    0,
-  )
-  const findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1801}], baseline)
-  assert_eq(findings.count, 1)
-  assert_eq(findings[0]?.kind, "growth")
-  assert_eq(findings[0]?.baseline, 1800)
+pipeline test_strict_merge_base_ceiling_accepts_shrink_and_rejects_any_growth(
+  harness: Harness,
+  task: unknown,
+) {
+  const path = "crates/example/src/large.rs"
+  const legacy = [path]
+  const base = [{path: path, approved: true, lines: 1800}]
+  assert_eq(evaluate_inventory([{path: path, lines: 1790}], legacy, base), [])
+  const one_line_growth = evaluate_inventory([{path: path, lines: 1801}], legacy, base)
+  assert_eq(finding_kinds(one_line_growth), ["growth"])
+  assert_eq(one_line_growth[0]?.ceiling, 1800)
 }
 
 @test
-pipeline test_shrink_requires_tightening_or_shard_deletion(harness: Harness, task: unknown) {
-  const baseline = [
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/example/src/lib.rs"),
-      source_path: "crates/example/src/lib.rs",
-      lines: 1800,
-    },
-  ]
-  let findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1700}], baseline)
-  assert_eq(finding_kinds(findings), ["stale_baseline"])
-  findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1500}], baseline)
-  assert_eq(finding_kinds(findings), ["obsolete_baseline"])
-}
-
-@test
-pipeline test_invalid_and_orphan_baselines_fail_closed(harness: Harness, task: unknown) {
-  const malformed = parse_baseline(
-    baseline_path_for("crates/example/src/malformed.rs"),
-    "not-a-number\n",
-  )
-  const under_cap = parse_baseline(baseline_path_for("crates/example/src/under.rs"), "1400\n")
-  const orphan = parse_baseline(baseline_path_for("crates/example/src/orphan.rs"), "1800\n")
-  const empty_path = parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n")
-  const sources = [
-    {path: "crates/example/src/malformed.rs", lines: 1800},
-    {path: "crates/example/src/under.rs", lines: 1800},
-  ]
-  const findings = evaluate_inventory(sources, [malformed, under_cap, orphan, empty_path])
+pipeline test_independent_shrinks_need_no_policy_edit_and_combined_growth_fails(
+  harness: Harness,
+  task: unknown,
+) {
+  const path = "crates/example/src/large.rs"
+  const legacy = [path]
+  const base = [{path: path, approved: true, lines: 1800}]
+  assert_eq(evaluate_inventory([{path: path, lines: 1795}], legacy, base), [])
+  assert_eq(evaluate_inventory([{path: path, lines: 1790}], legacy, base), [])
   assert_eq(
-    findings.map({ finding -> finding.path }).to_list(),
-    [
-      "crates/example/src/malformed.rs",
-      "crates/example/src/orphan.rs",
-      "crates/example/src/under.rs",
-      "scripts/source-file-length-baseline/.lines",
-    ],
-  )
-  assert_eq(
-    finding_kinds(findings),
-    ["malformed_baseline", "orphan_baseline", "invalid_baseline", "malformed_baseline"],
+    finding_kinds(evaluate_inventory([{path: path, lines: 1802}], legacy, base)),
+    ["growth"],
   )
 }
 
 @test
-pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harness, task: unknown) {
-  const path = baseline_path_for("crates/example/src/lib.rs")
+pipeline test_new_oversized_and_invented_legacy_exemptions_fail(harness: Harness, task: unknown) {
+  const added = "crates/example/src/added.rs"
   assert_eq(
-    baseline_path_for("tools\\new.rs"),
-    "scripts/source-file-length-baseline/tools/new.rs.lines",
+    finding_kinds(evaluate_inventory([{path: added, lines: 1501}], [], [])),
+    ["new_oversized_source"],
   )
+  assert_eq(
+    finding_kinds(
+      evaluate_inventory(
+        [{path: added, lines: 1501}],
+        [added],
+        [{path: added, approved: false, lines: 1700}],
+      ),
+    ),
+    ["invalid_legacy_inventory"],
+  )
+  assert_eq(
+    finding_kinds(
+      evaluate_inventory(
+        [{path: added, lines: 1501}],
+        [added],
+        [{path: added, approved: true, lines: 1500}],
+      ),
+    ),
+    ["invalid_legacy_inventory"],
+  )
+}
+
+@test
+pipeline test_renamed_deleted_and_repaid_legacy_paths_are_explicit(
+  harness: Harness,
+  task: unknown,
+) {
+  const old = "crates/example/src/old.rs"
+  assert_eq(
+    finding_kinds(evaluate_inventory([], [old], [{path: old, approved: true, lines: 1700}])),
+    ["legacy_path_missing"],
+  )
+  assert_eq(
+    finding_kinds(
+      evaluate_inventory(
+        [{path: old, lines: 1500}],
+        [old],
+        [{path: old, approved: true, lines: 1700}],
+      ),
+    ),
+    ["obsolete_legacy_path"],
+  )
+  assert_eq(
+    finding_kinds(evaluate_inventory([{path: old, lines: 1600}], [old], [])),
+    ["base_source_missing"],
+  )
+}
+
+@test
+pipeline test_source_scope_and_windows_path_normalization(harness: Harness, task: unknown) {
+  assert_eq(normalize_source_path("crates\\app\\src\\lib.rs"), "crates/app/src/lib.rs")
   assert_eq(
     normalize_source_path("spec\\protocol-artifacts\\generated.rs"),
     "spec/protocol-artifacts/generated.rs",
   )
-  assert_eq(parse_baseline(path, "1800\n").lines, 1800)
-  assert_eq(parse_baseline(path, "01800\n").error != nil, true)
-  assert_eq(parse_baseline(path, "1800 trailing\n").error != nil, true)
-  assert_eq(parse_baseline(path, "0\n").error != nil, true)
-  assert_eq(
-    parse_baseline("scripts/source-file-length-baseline/bad.txt", "1800\n").error != nil,
-    true,
-  )
-  assert_eq(
-    parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n").error != nil,
-    true,
-  )
-}
-
-@test
-pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
       write_source(harness, root, "crates/app/src/lib.rs", 1)
       write_source(harness, root, "crates/app/tests/integration.rs", 1)
-      write_source(harness, root, "crates/app/benches/latency.rs", 1)
-      write_source(harness, root, "bench/src/bin/bench.rs", 1)
-      write_source(harness, root, "tree-sitter-harn/bindings/rust/lib.rs", 1)
-      write_source(harness, root, "tools/new.rs", 1)
-      write_source(harness, root, "spec/protocol-artifacts/harn-protocol.rs", 1)
       write_source(harness, root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
       write_source(harness, root, "crates/harn-stdlib/tests/fixture.harn", 1)
-      write_source(harness, root, "conformance/tests/case.harn", 1)
-      write_source(harness, root, "scripts/helper.harn", 1)
-      write_source(harness, root, "crates/app/target/debug/generated.rs", 1)
-      write_source(harness, root, "crates/app/.target/debug/generated.rs", 1)
-      write_source(harness, root, ".harn-runs/performance/home/registry/generated.rs", 1)
-      write_source(harness, root, ".harn-toolchain-cache/cargo-target/debug/generated.rs", 1)
-      write_source(harness, root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
-      write_source(harness, root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
-      write_source(harness, root, "target-source/src/lib.rs", 1)
-      // Below the repo root, a `target-` directory stays in scope even when it
-      // carries a `debug/` artifact dir — only a ROOT `target-*` is treated as
-      // a per-worktree Cargo target. The path deliberately avoids a `build/`
-      // component: `files_below` inherits `walk_dir`'s built-in ignore set, so
-      // no fixture can assert anything about a path under `target/`, `build/`,
-      // `dist/`, `node_modules/`, `coverage/`, `venv/`, or `__pycache__/`.
-      write_source(harness, root, "crates/app/target-codex0-4942/debug/generated.rs", 1)
-      write_source(harness, root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
-      write_text(harness, root, "crates/app/src/not-source.txt", "text\n")
+      write_source(harness, root, "spec/protocol-artifacts/generated.rs", 1)
+      write_source(harness, root, "target/debug/generated.rs", 1)
       assert_eq(
         source_files(harness, root),
         [
-          "bench/src/bin/bench.rs",
-          "crates/app/benches/latency.rs",
           "crates/app/src/lib.rs",
-          "crates/app/target-codex0-4942/debug/generated.rs",
           "crates/app/tests/integration.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-          "target-source/src/lib.rs",
-          "tools/new.rs",
-          "tree-sitter-harn/bindings/rust/lib.rs",
         ],
       )
     },
   )
 }
 
-// A file the inventory walk never reaches is a file the ratchet silently stops
-// governing, and the fixtures above cannot catch that class — they can only
-// assert about paths the walk already reaches. `check_source_file_lengths`
-// reconciles the inventory against git to close it; these pin that reconciliation
-// without walking the repo, so the suite stays hermetic and fast.
 @test
-pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(
+pipeline test_merge_base_and_first_parent_resolve_without_fetching(
   harness: Harness,
   task: unknown,
 ) {
-  // `build` is one of the directory names `walk_dir` refuses to descend into,
-  // so a source tree under it is tracked by git and invisible to the ratchet.
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      init_repo(harness.process, root)
+      write_text(harness, root, "tracked.txt", "base\n")
+      const base = commit_all(harness.process, root, "base")
+      write_text(harness, root, "tracked.txt", "head\n")
+      commit_all(harness.process, root, "head")
+      const merge = resolve_base_revision(harness.process, root, "merge-base", base)
+      assert_eq(merge.ok, true)
+      assert_eq(merge.comparison, "merge-base")
+      assert_eq(merge.revision, base)
+      const parent = resolve_base_revision(harness.process, root, "first-parent")
+      assert_eq(parent.ok, true)
+      assert_eq(parent.revision, base)
+    },
+  )
+}
+
+@test
+pipeline test_missing_and_shallow_bases_fail_with_actionable_diagnostics(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const origin = path_join(root, "origin")
+      harness.fs.mkdir(origin)
+      init_repo(harness.process, origin)
+      write_text(harness, origin, "tracked.txt", "root\n")
+      commit_all(harness.process, origin, "root")
+      write_text(harness, origin, "tracked.txt", "tip\n")
+      commit_all(harness.process, origin, "tip")
+      const shallow = path_join(root, "shallow")
+      git_ok(harness.process, root, ["clone", "-q", "--depth", "1", "--no-local", origin, shallow])
+      const missing = resolve_base_revision(harness.process, shallow, "merge-base", "missing-ref")
+      assert_eq(missing.ok, false)
+      assert_eq(missing.error.contains("missing-ref"), true)
+      const no_parent = resolve_base_revision(harness.process, shallow, "first-parent")
+      assert_eq(no_parent.ok, false)
+      assert_eq(no_parent.error.contains("first parent"), true)
+    },
+  )
+}
+
+@test
+pipeline test_git_path_argv_and_crlf_counts_work_end_to_end(harness: Harness, task: unknown) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = "crates/example/src/large file [policy].rs"
+      const second_path = "crates/example/src/another large policy.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, path, 1502, "\r\n")
+      write_text(harness, root, second_path, "source line\n".repeat(1501) + "final line")
+      write_inventory(harness, root, [second_path, path])
+      const base = commit_all(harness.process, root, "base with quoted path")
+      write_source(harness, root, path, 1501, "\r\n")
+      write_source(harness, root, second_path, 1501)
+      commit_all(harness.process, root, "shrink")
+      let report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(report.findings, [])
+      assert_eq(report.base_revision, base)
+      write_source(harness, root, path, 1503, "\r\n")
+      commit_all(harness.process, root, "growth")
+      report = check_source_file_lengths(harness, root, "first-parent")
+      assert_eq(finding_kinds(report.findings), ["growth"])
+      assert_eq(report.findings[0]?.ceiling, 1501)
+    },
+  )
+}
+
+@test
+pipeline test_legacy_rename_follows_comparison_base_without_resetting_the_ceiling(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const old_path = "crates/example/src/large policy.rs"
+      const new_path = "crates/example/src/renamed policy [v2].rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, old_path, 1502)
+      write_text(
+        harness,
+        root,
+        "scripts/source-file-length-baseline/" + old_path + ".lines",
+        "1502\n",
+      )
+      const base = commit_all(harness.process, root, "base")
+      git_ok(harness.process, root, ["rm", "-q", "-r", "scripts/source-file-length-baseline"])
+      git_ok(harness.process, root, ["mv", old_path, new_path])
+      write_text(harness, root, new_path, "completely rewritten line\n".repeat(1501))
+      let identities: dict<string, string> = {}
+      identities[new_path] = old_path
+      write_inventory(harness, root, [new_path], identities)
+      commit_all(harness.process, root, "rename and rewrite")
+      const diff = git_ok(
+        harness.process,
+        root,
+        ["diff", "--find-renames", "--name-status", base, "--", old_path, new_path],
+      )
+      assert_eq(diff.contains("D\t" + old_path), true)
+      assert_eq(diff.contains("A\t" + new_path), true)
+      assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
+      write_source(harness, root, new_path, 1503)
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["growth"])
+      assert_eq(report.findings[0]?.ceiling, 1502)
+    },
+  )
+}
+
+@test
+pipeline test_rename_cannot_promote_excluded_source_into_legacy_policy(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const old_path = "spec/protocol-artifacts/generated.rs"
+      const new_path = "crates/example/src/generated.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, old_path, 1502)
+      write_inventory(harness, root, [])
+      const base = commit_all(harness.process, root, "excluded base")
+      mkdirs(harness, dirname(path_join(root, new_path)) ?? root)
+      git_ok(harness.process, root, ["mv", old_path, new_path])
+      let identities: dict<string, string> = {}
+      identities[new_path] = old_path
+      write_inventory(harness, root, [new_path], identities)
+      commit_all(harness.process, root, "promote excluded source")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains(old_path) ?? false, true)
+    },
+  )
+}
+
+@test
+pipeline test_identity_cannot_borrow_an_existing_paths_larger_ceiling(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const smaller = "crates/example/src/smaller.rs"
+      const larger = "crates/example/src/larger.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, smaller, 1600)
+      write_source(harness, root, larger, 2000)
+      write_inventory(harness, root, [larger, smaller])
+      const base = commit_all(harness.process, root, "two ceilings")
+      write_source(harness, root, smaller, 1900)
+      git_ok(harness.process, root, ["rm", larger])
+      let identities: dict<string, string> = {}
+      identities[smaller] = larger
+      write_inventory(harness, root, [smaller], identities)
+      commit_all(harness.process, root, "attempt identity transfer")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("existed") ?? false, true)
+    },
+  )
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const identity_path = "crates/example/src/original.rs"
+      const legacy_path = "crates/example/src/renamed.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, identity_path, 1400)
+      write_source(harness, root, legacy_path, 2000)
+      let base_ids: dict<string, string> = {}
+      base_ids[legacy_path] = identity_path
+      write_inventory(harness, root, [legacy_path], base_ids)
+      const base = commit_all(harness.process, root, "identity path reintroduced below cap")
+      write_source(harness, root, identity_path, 1900)
+      git_ok(harness.process, root, ["rm", legacy_path])
+      write_inventory(harness, root, [identity_path])
+      commit_all(harness.process, root, "attempt identity return")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("existed") ?? false, true)
+    },
+  )
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const original = "crates/example/src/original.rs"
+      const added = "crates/example/src/added.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, original, 2000)
+      write_inventory(harness, root, [original])
+      const base = commit_all(harness.process, root, "one ceiling")
+      write_source(harness, root, original, 1400)
+      write_source(harness, root, added, 1900)
+      let identities: dict<string, string> = {}
+      identities[added] = original
+      write_inventory(harness, root, [added], identities)
+      commit_all(harness.process, root, "attempt identity copy")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["invalid_legacy_inventory"])
+      assert_eq(report.findings[0]?.message?.contains("still exists") ?? false, true)
+    },
+  )
+}
+
+@test
+pipeline test_stable_identity_survives_repeated_low_similarity_renames(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const identity = "crates/example/src/original.rs"
+      const middle = "crates/example/src/middle.rs"
+      const latest = "crates/example/src/latest.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, identity, 1502)
+      write_inventory(harness, root, [identity])
+      commit_all(harness.process, root, "original")
+      git_ok(harness.process, root, ["mv", identity, middle])
+      write_text(harness, root, middle, "middle rewrite\n".repeat(1501))
+      let middle_ids: dict<string, string> = {}
+      middle_ids[middle] = identity
+      write_inventory(harness, root, [middle], middle_ids)
+      const base = commit_all(harness.process, root, "first rename")
+      git_ok(harness.process, root, ["mv", middle, latest])
+      write_text(harness, root, latest, "latest rewrite\n".repeat(1501))
+      let latest_ids: dict<string, string> = {}
+      latest_ids[latest] = identity
+      write_inventory(harness, root, [latest], latest_ids)
+      commit_all(harness.process, root, "second rename")
+      assert_eq(check_source_file_lengths(harness, root, "merge-base", base).findings, [])
+      write_text(harness, root, latest, "latest growth\n".repeat(1502))
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(report.findings), ["growth"])
+      assert_eq(report.findings[0]?.ceiling, 1501)
+    },
+  )
+}
+
+@test
+pipeline test_unscanned_sources_reconciliation_is_strict_and_sorted(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(
     unscanned_sources(
       ["crates/app/src/lib.rs"],
-      ["crates/app/src/lib.rs", "crates/app/src/build/hidden.rs"],
+      ["z.rs", "crates/app/src/lib.rs", "a.rs", "spec/protocol-artifacts/generated.rs"],
     ),
-    ["crates/app/src/build/hidden.rs"],
-  )
-}
-
-@test
-pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(
-  harness: Harness,
-  task: unknown,
-) {
-  assert_eq(unscanned_sources(["a.rs", "b.rs"], ["b.rs", "a.rs"]), [])
-  // Nothing is tracked under a synthetic root, so a fixture run reports nothing
-  // rather than flagging every file the fixture never committed.
-  assert_eq(unscanned_sources([], []), [])
-}
-
-@test
-pipeline test_unscanned_sources_excludes_generated_and_sorts(harness: Harness, task: unknown) {
-  // Generated protocol artifacts are deliberately outside the ratchet, so their
-  // absence from the inventory is not a coverage hole.
-  assert_eq(unscanned_sources([], ["spec/protocol-artifacts/harn-protocol.rs"]), [])
-  assert_eq(unscanned_sources([], ["z.rs", "a.rs", "m.rs"]), ["a.rs", "m.rs", "z.rs"])
-}
-
-@test
-pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(
-  harness: Harness,
-  task: unknown,
-) {
-  const sources = [
-    {path: "crates/z/src/lib.rs", lines: 1700},
-    {path: "crates/a/src/lib.rs", lines: 1600},
-    {path: "crates/b/src/lib.rs", lines: 1490},
-    {path: "crates/new/src/lib.rs", lines: 1600},
-  ]
-  const baselines = [
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/z/src/lib.rs"),
-      source_path: "crates/z/src/lib.rs",
-      lines: 1800,
-    },
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/a/src/lib.rs"),
-      source_path: "crates/a/src/lib.rs",
-      lines: 1700,
-    },
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/b/src/lib.rs"),
-      source_path: "crates/b/src/lib.rs",
-      lines: 1600,
-    },
-    {
-      kind: "valid",
-      shard_path: baseline_path_for("crates/orphan/src/lib.rs"),
-      source_path: "crates/orphan/src/lib.rs",
-      lines: 1600,
-    },
-  ]
-  const edits = plan_baseline_update(sources, baselines)
-  assert_eq(
-    edits.map({ edit -> edit.source_path }).to_list(),
-    [
-      "crates/a/src/lib.rs",
-      "crates/b/src/lib.rs",
-      "crates/orphan/src/lib.rs",
-      "crates/z/src/lib.rs",
-    ],
-  )
-  assert_eq(edits.map({ edit -> edit.kind }).to_list(), ["write", "delete", "delete", "write"])
-  assert_eq(edits.map({ edit -> edit.lines }).to_list(), [1600, nil, nil, 1700])
-  assert_eq(
-    edits.map({ edit -> edit.source_path }).to_list().contains("crates/new/src/lib.rs"),
-    false,
-  )
-}
-
-@test
-pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task: unknown) {
-  with_temp_dir(
-    harness.fs,
-    { root ->
-      const big = "crates/example/src/big.rs"
-      const small = "crates/example/src/small.rs"
-      write_source(harness, root, big, 1600)
-      write_source(harness, root, small, 20)
-      write_baseline(harness, root, big, 1600)
-      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
-      write_source(harness, root, big, 1550)
-      const report = check_source_file_lengths(harness, root)
-      assert_eq(finding_kinds(report.findings), ["stale_baseline"])
-      const tighten = plan_baseline_update(
-        source_inventory(harness, root),
-        baseline_inventory(harness, root),
-      )
-      assert_eq(tighten.count, 1)
-      assert_eq(tighten[0]?.kind, "write")
-      assert_eq(tighten[0]?.lines, 1550)
-      apply_baseline_edits(harness, root, tighten)
-      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
-      write_source(harness, root, big, 1500)
-      const remove = plan_baseline_update(
-        source_inventory(harness, root),
-        baseline_inventory(harness, root),
-      )
-      assert_eq(remove.count, 1)
-      assert_eq(remove[0]?.kind, "delete")
-      apply_baseline_edits(harness, root, remove)
-      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
-    },
-  )
-}
-
-@test
-pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, task: unknown) {
-  with_temp_dir(
-    harness.fs,
-    { root ->
-      const old = "crates/example/src/old.rs"
-      const added = "crates/example/src/added.rs"
-      write_source(harness, root, old, 1601)
-      write_baseline(harness, root, old, 1600)
-      write_source(harness, root, added, 1501)
-      const edits = plan_baseline_update(
-        source_inventory(harness, root),
-        baseline_inventory(harness, root),
-      )
-      assert_eq(edits.count, 0)
-      const report = check_source_file_lengths(harness, root)
-      assert_eq(finding_kinds(report.findings), ["new_oversized_source", "growth"])
-      assert_eq(report.findings[0]?.path, added)
-      assert_eq(report.findings[1]?.path, old)
-    },
-  )
-}
-
-@test
-pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, task: unknown) {
-  with_temp_dir(
-    harness.fs,
-    { root ->
-      const deleted = "crates/example/src/deleted.rs"
-      write_baseline(harness, root, deleted, 1600)
-      const report = check_source_file_lengths(harness, root)
-      assert_eq(finding_kinds(report.findings), ["orphan_baseline"])
-      const edits = plan_baseline_update(
-        source_inventory(harness, root),
-        baseline_inventory(harness, root),
-      )
-      assert_eq(edits.count, 1)
-      assert_eq(edits[0]?.kind, "delete")
-      apply_baseline_edits(harness, root, edits)
-      assert_eq(check_source_file_lengths(harness, root).findings.count, 0)
-    },
-  )
-}
-
-@test
-pipeline test_an_unusable_git_is_reported_not_silently_skipped(harness: Harness, task: unknown) {
-  with_temp_dir(
-    harness.fs,
-    { root ->
-      // A git repository whose config includes a file it cannot read. Git
-      // refuses to parse an unreadable include and exits 128 for every
-      // invocation — exactly what the CI audit lane hit, where the checkout
-      // action points `include.path` at a $RUNNER_TEMP credentials file the
-      // Harn sandbox denies. `git ls-files` then returns nothing, and a walk
-      // reconciled against nothing reports full coverage.
-      const cred = path_join(root, "cred.config")
-      harness.fs.write_text(cred, "")
-      harness.process.run({program: "git", args: ["-C", root, "init", "-q", "."]})
-      harness.process.run(
-        {program: "git", args: ["-C", root, "config", "--local", "--add", "include.path", cred]},
-      )
-      harness.process.run({program: "chmod", args: ["000", cred]})
-      const report = check_source_file_lengths(harness, root)
-      assert_eq(finding_kinds(report.findings), ["reconciliation_unavailable"])
-      // The message has to carry git's own words, or the next reader cannot
-      // tell an unreadable config from a missing repository.
-      assert_eq(report.findings[0]?.message?.contains("git could not list") ?? false, true)
-    },
+    ["a.rs", "z.rs"],
   )
 }

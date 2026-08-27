@@ -2,9 +2,11 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 
 const MAX_LINES = 1500
 
-const BASELINE_DIR = "scripts/source-file-length-baseline"
+const LEGACY_INVENTORY_PATH = "scripts/source-file-length-legacy.json"
 
-const BASELINE_SUFFIX = ".lines"
+const LEGACY_INVENTORY_VERSION = 1
+
+const HISTORICAL_BASELINE_DIR = "scripts/source-file-length-baseline"
 
 const SKIP_DIR_NAMES = [
   ".burin",
@@ -30,47 +32,36 @@ pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
 
 pub type SourceCount = {path: string, lines: int}
 
-pub type ValidBaselineCount = {kind: "valid", shard_path: string, source_path: string, lines: int}
+pub type LegacySource = {id: string, path: string}
 
-pub type InvalidBaselineCount = {
-  kind: "invalid",
-  shard_path: string,
-  source_path: string,
-  error: string,
-}
+pub type BaseSourceCount = {path: string, approved: bool, lines?: int, error?: string}
 
-pub type BaselineCount = ValidBaselineCount | InvalidBaselineCount
-
-pub type SourceLengthFindingKind = "malformed_baseline" \
-  | "orphan_baseline" \
-  | "invalid_baseline" \
-  | "obsolete_baseline" \
+pub type SourceLengthFindingKind = "invalid_legacy_inventory" \
+  | "legacy_path_missing" \
+  | "base_source_missing" \
+  | "obsolete_legacy_path" \
   | "new_oversized_source" \
   | "growth" \
-  | "stale_baseline" \
   | "unscanned_source" \
+  | "base_unavailable" \
   | "reconciliation_unavailable"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
   path: string,
   actual?: int,
-  baseline?: int,
+  ceiling?: int,
   message: string,
 }
-
-pub type BaselineWriteEdit = {kind: "write", shard_path: string, source_path: string, lines: int}
-
-pub type BaselineDeleteEdit = {kind: "delete", shard_path: string, source_path: string}
-
-pub type BaselineEdit = BaselineWriteEdit | BaselineDeleteEdit
 
 pub type SourceLengthReport = {
   root: string,
   max_lines: int,
   source_count: int,
-  baseline_count: int,
+  legacy_count: int,
   oversized_count: int,
+  comparison: string,
+  base_revision?: string,
   findings: list<SourceLengthFinding>,
 }
 
@@ -90,26 +81,9 @@ pub fn logical_line_count(text: string) -> int {
   return parts.count
 }
 
-/** Map one repo-relative source path to its conflict-isolated baseline shard. */
-pub fn baseline_path_for(source_path: string) -> string {
-  return BASELINE_DIR + "/" + normalize_source_path(source_path) + BASELINE_SUFFIX
-}
-
 /** Canonicalize an inventory path independently of the host path separator. */
 pub fn normalize_source_path(path: string) -> string {
   return replace(path_normalize(path), "\\", "/")
-}
-
-fn source_path_for_baseline(shard_path: string) -> string? {
-  const prefix = BASELINE_DIR + "/"
-  if !shard_path.starts_with(prefix) || !shard_path.ends_with(BASELINE_SUFFIX) {
-    return nil
-  }
-  const source_path = shard_path[len(prefix):len(shard_path) - len(BASELINE_SUFFIX)]
-  if source_path == "" {
-    return nil
-  }
-  return source_path
 }
 
 /** Identify generated Cargo target directories without hiding similarly named source trees. */
@@ -158,8 +132,8 @@ fn skip_dir(fs: HarnessFs, root: string, rel_dir: string, name: string) -> bool 
  * `__pycache__`, so the inventory's real reach is narrower than the constants
  * above suggest, and a source tree under one of those names would escape the
  * ratchet with no diagnostic.
- * `test_inventory_covers_every_tracked_in_scope_source` is what makes such a
- * hole loud, by reconciling the inventory against git rather than a fixture.
+ * The tracked-source reconciliation below makes such a hole loud by comparing
+ * the inventory walk with git rather than trusting fixtures alone.
  */
 fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) -> list<string> {
   const dir = if rel_dir == "" {
@@ -241,45 +215,6 @@ pub fn source_inventory(harness: Harness, root: string = "") -> list<SourceCount
   return sources
 }
 
-/** Parse one exact decimal baseline shard without trusting coercion defaults. */
-pub fn parse_baseline(shard_path: string, text: string) -> BaselineCount {
-  const source_path = source_path_for_baseline(shard_path)
-  if source_path == nil {
-    return {
-      kind: "invalid",
-      shard_path: shard_path,
-      source_path: shard_path,
-      error: "baseline shard path must end with ${BASELINE_SUFFIX}",
-    }
-  }
-  const raw = text.trim()
-  const parsed = to_int(raw)
-  if raw == "" || parsed == nil || to_string(parsed) != raw || parsed <= 0 {
-    return {
-      kind: "invalid",
-      shard_path: shard_path,
-      source_path: source_path,
-      error: "baseline shard must contain one canonical positive integer",
-    }
-  }
-  return {kind: "valid", shard_path: shard_path, source_path: source_path, lines: parsed}
-}
-
-pub fn baseline_inventory(harness: Harness, root: string = "") -> list<BaselineCount> {
-  const resolved_root = if root == "" {
-    repo_root(harness.fs)
-  } else {
-    path_normalize(root)
-  }
-  let baselines: list<BaselineCount> = []
-  for shard_path in files_below(harness, resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
-    baselines = baselines.appending(
-      parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))),
-    )
-  }
-  return baselines
-}
-
 fn source_index(sources: list<SourceCount>) -> dict<string, SourceCount> {
   let index: dict<string, SourceCount> = {}
   for source in sources {
@@ -290,181 +225,526 @@ fn source_index(sources: list<SourceCount>) -> dict<string, SourceCount> {
   return index
 }
 
-fn baseline_index(baselines: list<BaselineCount>) -> dict<string, BaselineCount> {
-  let index: dict<string, BaselineCount> = {}
-  for baseline in baselines {
-    if index[baseline.source_path] == nil {
-      index[baseline.source_path] = baseline
+fn base_source_index(sources: list<BaseSourceCount>) -> dict<string, BaseSourceCount> {
+  let index: dict<string, BaseSourceCount> = {}
+  for source in sources {
+    if index[source.path] == nil {
+      index[source.path] = source
     }
   }
   return index
 }
 
+fn legacy_path_shape_valid(path: string) -> bool {
+  if path == ""
+    || path.starts_with("/")
+    || path.contains("../")
+    || path == ".."
+    || path.contains("\n")
+    || path.contains("\r")
+    || path.contains("\t") {
+    return false
+  }
+  if normalize_source_path(path) != path {
+    return false
+  }
+  return path.ends_with(".rs")
+    || (path.starts_with(STDLIB_SOURCE_DIR + "/") && path.ends_with(".harn"))
+}
+
 /**
- * Evaluate a complete inventory. Iterating the sorted union makes every
- * diagnostic stable without depending on dictionary iteration order.
+ * Parse stable debt identity and current paths; the policy deliberately
+ * contains no measurements. Identity survives arbitrary rewrites and renames.
  */
+pub fn parse_legacy_inventory(text: string) -> dict {
+  const parsed = try {
+    json_parse(text)
+  }
+  if is_err(parsed) {
+    return {
+      ok: false,
+      paths: [],
+      error: "legacy inventory is not valid JSON: " + to_string(unwrap_err(parsed)),
+    }
+  }
+  const checked = schema_report(
+    unwrap(parsed),
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["version", "legacy_oversized_paths", "legacy_path_identities"],
+      properties: {
+        version: {type: "integer"},
+        legacy_oversized_paths: {type: "array", items: {type: "string"}},
+        legacy_path_identities: {type: "object", additionalProperties: {type: "string"}},
+      },
+    },
+  )
+  if !checked.ok {
+    return {ok: false, paths: [], error: "legacy inventory schema is invalid: " + checked.message}
+  }
+  const inventory = checked.value
+  if inventory.version != LEGACY_INVENTORY_VERSION {
+    return {
+      ok: false,
+      paths: [],
+      error: "legacy inventory version must be ${LEGACY_INVENTORY_VERSION}",
+    }
+  }
+  const paths = inventory.legacy_oversized_paths
+  const identities = inventory.legacy_path_identities
+  if paths != paths.sorted() {
+    return {ok: false, paths: [], error: "legacy inventory paths must be sorted"}
+  }
+  let seen: dict<string, bool> = {}
+  let seen_ids: dict<string, bool> = {}
+  let sources: list<LegacySource> = []
+  for path in paths {
+    if !legacy_path_shape_valid(path) {
+      return {ok: false, paths: [], error: "invalid legacy source path: " + path}
+    }
+    if seen[path] ?? false {
+      return {ok: false, paths: [], error: "duplicate legacy source path: " + path}
+    }
+    seen[path] = true
+    const id = to_string(identities[path] ?? path)
+    if !legacy_path_shape_valid(id) {
+      return {ok: false, paths: [], sources: [], error: "invalid legacy source identity: " + id}
+    }
+    if seen_ids[id] ?? false {
+      return {ok: false, paths: [], sources: [], error: "duplicate legacy source identity: " + id}
+    }
+    seen_ids[id] = true
+    sources = sources.appending({id: id, path: path})
+  }
+  for path in identities.keys() {
+    if !(seen[path] ?? false) {
+      return {
+        ok: false,
+        paths: [],
+        sources: [],
+        error: "legacy identity names a path outside the inventory: " + path,
+      }
+    }
+  }
+  return {ok: true, paths: paths, sources: sources, error: ""}
+}
+
+fn legacy_inventory(fs: HarnessFs, root: string) -> dict {
+  const path = path_join(root, LEGACY_INVENTORY_PATH)
+  if !fs.exists(path) {
+    return {ok: false, paths: [], error: LEGACY_INVENTORY_PATH + " is missing"}
+  }
+  return parse_legacy_inventory(fs.read_text(path))
+}
+
+/** Evaluate strict no-growth against immutable merge-base/first-parent counts. */
 pub fn evaluate_inventory(
   sources: list<SourceCount>,
-  baselines: list<BaselineCount>,
+  legacy_paths: list<string>,
+  base_sources: list<BaseSourceCount>,
   max_lines: int = MAX_LINES,
 ) -> list<SourceLengthFinding> {
   const sources_by_path = source_index(sources)
-  const baselines_by_path = baseline_index(baselines)
-  let paths: dict<string, bool> = {}
-  for source in sources {
-    paths[source.path] = true
-  }
-  for baseline in baselines {
-    if baseline.source_path != "" {
-      paths[baseline.source_path] = true
-    }
-  }
+  const base_by_path = base_source_index(base_sources)
   let findings: list<SourceLengthFinding> = []
-  for path in paths.keys().sorted() {
+  for path in legacy_paths {
     const source = sources_by_path[path]
-    const baseline = baselines_by_path[path]
-    if baseline != nil && baseline.kind == "invalid" {
-      findings = findings.appending(
-        {kind: "malformed_baseline", path: path, actual: source?.lines, message: baseline.error},
-      )
-      continue
-    }
     if source == nil {
       findings = findings.appending(
         {
-          kind: "orphan_baseline",
+          kind: "legacy_path_missing",
           path: path,
-          baseline: baseline?.lines,
-          message: "baseline shard remains for a missing or renamed source",
+          message:
+            "legacy source is missing at HEAD; remove it after deletion or update its path and preserve its identity after a rename",
         },
       )
       continue
     }
-    if baseline != nil && baseline.kind == "valid" && baseline.lines <= max_lines {
+    const base = base_by_path[path]
+    if base != nil && !base.approved {
       findings = findings.appending(
         {
-          kind: "invalid_baseline",
+          kind: "invalid_legacy_inventory",
           path: path,
           actual: source.lines,
-          baseline: baseline.lines,
-          message: "only files above ${max_lines} lines may have an existing baseline",
+          ceiling: max_lines,
+          message: to_string(base.error ?? "source was not approved legacy debt at the base"),
+        },
+      )
+      continue
+    }
+    if base == nil || base.lines == nil {
+      findings = findings.appending(
+        {
+          kind: "base_source_missing",
+          path: path,
+          actual: source.lines,
+          message: to_string(base?.error ?? "legacy source did not exist at the comparison base"),
         },
       )
       continue
     }
     if source.lines <= max_lines {
-      if baseline != nil {
-        findings = findings.appending(
-          {
-            kind: "obsolete_baseline",
-            path: path,
-            actual: source.lines,
-            baseline: baseline.lines,
-            message: "source is at or below the cap; delete its baseline shard",
-          },
-        )
-      }
-      continue
-    }
-    if baseline == nil {
       findings = findings.appending(
         {
-          kind: "new_oversized_source",
+          kind: "obsolete_legacy_path",
           path: path,
           actual: source.lines,
-          message: "new source exceeds the ${max_lines}-line cap",
+          ceiling: base.lines,
+          message: "source reached the ${max_lines}-line cap; remove it from the legacy inventory",
         },
       )
       continue
     }
-    const recorded = baseline.lines
-    if source.lines > recorded {
+    if base.lines <= max_lines {
+      findings = findings.appending(
+        {
+          kind: "invalid_legacy_inventory",
+          path: path,
+          actual: source.lines,
+          ceiling: max_lines,
+          message:
+            "legacy inventory cannot exempt a source that was within the cap at the comparison base",
+        },
+      )
+      continue
+    }
+    if source.lines > base.lines {
       findings = findings.appending(
         {
           kind: "growth",
           path: path,
           actual: source.lines,
-          baseline: recorded,
-          message: "existing source grew beyond its exact baseline",
+          ceiling: base.lines,
+          message: "legacy source grew beyond its comparison-base line count",
         },
       )
-    } else if source.lines < recorded {
+    }
+  }
+  for source in sources {
+    if source.lines > max_lines && !legacy_paths.contains(source.path) {
       findings = findings.appending(
         {
-          kind: "stale_baseline",
-          path: path,
+          kind: "new_oversized_source",
+          path: source.path,
           actual: source.lines,
-          baseline: recorded,
-          message: "source shrank; tighten its baseline shard",
+          ceiling: max_lines,
+          message:
+            "source exceeds the ${max_lines}-line cap and was not legacy debt at the comparison base",
         },
       )
     }
   }
-  return findings
+  return findings.sorted_by({ finding -> finding.path + ":" + finding.kind })
 }
 
-/** Plan exact edits that only tighten or remove existing baseline debt. */
-pub fn plan_baseline_update(
-  sources: list<SourceCount>,
-  baselines: list<BaselineCount>,
-  max_lines: int = MAX_LINES,
-) -> list<BaselineEdit> {
-  const sources_by_path = source_index(sources)
-  const baselines_by_path = baseline_index(baselines)
-  let edits: list<BaselineEdit> = []
-  for source in sources {
-    const baseline = baselines_by_path[source.path]
-    if source.lines > max_lines {
-      if baseline != nil && baseline.kind == "valid" && source.lines < baseline.lines {
-        edits = edits.appending(
+fn git_failure(result: dict, operation: string) -> string {
+  const detail = result.stderr.trim()
+  if detail != "" {
+    return operation + ": " + detail
+  }
+  return operation + " exited " + to_string(result.exit_code)
+}
+
+fn git_revision(
+  process: HarnessProcess,
+  root: string,
+  args: list<string>,
+  operation: string,
+) -> dict {
+  const result = process.run({program: "git", args: ["-C", root] + args})
+  if !result.success || result.stdout.trim() == "" {
+    return {ok: false, revision: "", error: git_failure(result, operation)}
+  }
+  return {ok: true, revision: result.stdout.trim(), error: ""}
+}
+
+/** Resolve one immutable comparison commit without fetching from the network. */
+pub fn resolve_base_revision(
+  process: HarnessProcess,
+  root: string,
+  comparison: string = "auto",
+  base_ref: string = "",
+) -> dict {
+  const head = git_revision(
+    process,
+    root,
+    ["rev-parse", "--verify", "HEAD^{commit}"],
+    "resolve HEAD",
+  )
+  if !head.ok {
+    return {ok: false, comparison: comparison, revision: "", error: head.error}
+  }
+  if comparison == "first-parent" {
+    const parent = git_revision(
+      process,
+      root,
+      ["rev-parse", "--verify", "HEAD^1"],
+      "resolve HEAD first parent",
+    )
+    return {
+      ok: parent.ok,
+      comparison: "first-parent",
+      revision: parent.revision,
+      error: parent.error,
+    }
+  }
+  if comparison == "merge-base" {
+    if base_ref == "" {
+      return {
+        ok: false,
+        comparison: comparison,
+        revision: "",
+        error: "merge-base comparison requires --base-ref or HARN_EXT_SOURCE_LENGTH_BASE_REF",
+      }
+    }
+    const base = git_revision(
+      process,
+      root,
+      ["merge-base", "HEAD", base_ref],
+      "resolve merge base against " + base_ref,
+    )
+    return {ok: base.ok, comparison: "merge-base", revision: base.revision, error: base.error}
+  }
+  if comparison != "auto" {
+    return {
+      ok: false,
+      comparison: comparison,
+      revision: "",
+      error: "comparison must be auto, merge-base, or first-parent",
+    }
+  }
+  const main = git_revision(
+    process,
+    root,
+    [
+      "rev-parse",
+      "--verify",
+      if base_ref == "" {
+        "origin/main^{commit}"
+      } else {
+        base_ref
+      },
+    ],
+    "resolve local main reference",
+  )
+  if main.ok {
+    const base = git_revision(
+      process,
+      root,
+      ["merge-base", "HEAD", main.revision],
+      "resolve local merge base",
+    )
+    if !base.ok {
+      return {ok: false, comparison: "merge-base", revision: "", error: base.error}
+    }
+    if base.revision != head.revision {
+      return {ok: true, comparison: "merge-base", revision: base.revision, error: ""}
+    }
+  }
+  const parent = git_revision(
+    process,
+    root,
+    ["rev-parse", "--verify", "HEAD^1"],
+    "resolve HEAD first parent",
+  )
+  return {ok: parent.ok, comparison: "first-parent", revision: parent.revision, error: parent.error}
+}
+
+fn base_source_inventory(
+  process: HarnessProcess,
+  root: string,
+  revision: string,
+  legacy_sources: list<LegacySource>,
+  base_legacy_sources: list<LegacySource>,
+  current_source_paths: list<string>,
+) -> list<BaseSourceCount> {
+  let base_by_id: dict<string, LegacySource> = {}
+  for source in base_legacy_sources {
+    base_by_id[source.id] = source
+  }
+  let sources: list<BaseSourceCount> = []
+  let approved: list<dict> = []
+  for source in legacy_sources {
+    const base_source = base_by_id[source.id]
+    if base_source == nil {
+      sources = sources.appending(
+        {
+          path: source.path,
+          approved: false,
+          error: "comparison-base policy did not approve legacy identity " + source.id
+            + "; after a rename, map the current path to its prior identity in legacy_path_identities",
+        },
+      )
+      continue
+    }
+    if base_source.path != source.path {
+      if current_source_paths.contains(base_source.path) {
+        sources = sources.appending(
           {
-            kind: "write",
-            shard_path: baseline_path_for(source.path),
-            source_path: source.path,
-            lines: source.lines,
+            path: source.path,
+            approved: false,
+            error: "legacy identity cannot move while its comparison-base path still exists at HEAD: "
+              + base_source.path,
           },
         )
+        continue
       }
-    } else if baseline != nil {
-      edits = edits.appending(
-        {kind: "delete", shard_path: baseline.shard_path, source_path: source.path},
+      const current_path_at_base = process.run(
+        {
+          program: "git",
+          args: [
+            "-C",
+            root,
+            "--literal-pathspecs",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            revision,
+            "--",
+            source.path,
+          ],
+        },
       )
+      if !current_path_at_base.success {
+        sources = sources.appending(
+          {
+            path: source.path,
+            approved: false,
+            error: git_failure(current_path_at_base, "verify rename destination at " + revision),
+          },
+        )
+        continue
+      }
+      if current_path_at_base.stdout.trim() != "" {
+        sources = sources.appending(
+          {
+            path: source.path,
+            approved: false,
+            error: "legacy identity cannot be reassigned onto a path that existed at the comparison base: "
+              + source.path,
+          },
+        )
+        continue
+      }
+    }
+    approved = approved.appending({path: source.path, base_path: base_source.path})
+  }
+  if approved.count == 0 {
+    return sources
+  }
+  // One comparison query keeps the ratchet proportional to repository scan
+  // work instead of paying a sandboxed process launch for every legacy file.
+  const base_paths = approved.map({ source -> source.base_path }).to_list()
+  const result = process.run(
+    {
+      program: "git",
+      args: [
+        "-c",
+        "core.quotePath=false",
+        "-C",
+        root,
+        "--literal-pathspecs",
+        "grep",
+        "--count",
+        "-e",
+        "^",
+        revision,
+        "--",
+      ]
+        + base_paths,
+    },
+  )
+  let counts: dict<string, int> = {}
+  let count_error = ""
+  if !result.success && result.exit_code != 1 {
+    count_error = git_failure(result, "count legacy sources at " + revision)
+  } else {
+    const prefix = revision + ":"
+    for line in result.stdout.lines() {
+      if !line.starts_with(prefix) {
+        count_error = "git grep returned an unexpected legacy-source record at " + revision
+        break
+      }
+      const record = line.substring(prefix.len())
+      const separator = record.last_index_of(":")
+      const count = if separator < 0 {
+        nil
+      } else {
+        to_int(record.substring(separator + 1))
+      }
+      if separator < 0 || count == nil || count < 0 {
+        count_error = "git grep returned an invalid legacy-source count at " + revision
+        break
+      }
+      counts[record.substring(0, separator)] = count
     }
   }
-  for baseline in baselines {
-    if sources_by_path[baseline.source_path] == nil {
-      edits = edits.appending(
-        {kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path},
-      )
+  for source in approved {
+    const lines = counts[source.base_path]
+    if count_error == "" && lines != nil {
+      sources = sources.appending({path: source.path, approved: true, lines: lines})
+    } else {
+      const error = if count_error != "" {
+        count_error
+      } else {
+        "comparison base did not contain " + source.base_path
+      }
+      sources = sources.appending({path: source.path, approved: true, error: error})
     }
   }
-  return edits.sorted_by({ edit -> edit.shard_path })
+  return sources
 }
 
-fn ensure_dir(harness: Harness, path: string) -> nil {
-  if path == "" || path == "." || harness.fs.exists(path) {
-    return nil
+/** Read the policy format owned by the comparison revision. */
+fn base_legacy_inventory(process: HarnessProcess, root: string, revision: string) -> dict {
+  const current = process.run(
+    {
+      program: "git",
+      args: ["-C", root, "cat-file", "blob", revision + ":" + LEGACY_INVENTORY_PATH],
+    },
+  )
+  if current.success {
+    return parse_legacy_inventory(current.stdout)
   }
-  const parent = dirname(path) ?? ""
-  if parent != "" && parent != path {
-    ensure_dir(harness, parent)
-  }
-  harness.fs.mkdir(path)
-  return nil
-}
-
-pub fn apply_baseline_edits(harness: Harness, root: string, edits: list<BaselineEdit>) -> nil {
-  for edit in edits {
-    const full_path = path_join(root, edit.shard_path)
-    if edit.kind == "write" {
-      ensure_dir(harness, dirname(full_path) ?? root)
-      harness.fs.write_text(full_path, to_string(edit.lines) + "\n")
-    } else if harness.fs.exists(full_path) {
-      harness.fs.delete(full_path)
+  // The first cutover must compare against the historical shard layout. This
+  // decodes base history only; current policy has one owner above.
+  const historical = process.run(
+    {
+      program: "git",
+      args: ["-C", root, "ls-tree", "-r", "--name-only", revision, "--", HISTORICAL_BASELINE_DIR],
+    },
+  )
+  if !historical.success {
+    return {
+      ok: false,
+      paths: [],
+      error: git_failure(historical, "read comparison-base legacy policy"),
     }
   }
-  return nil
+  const prefix = HISTORICAL_BASELINE_DIR + "/"
+  const suffix = ".lines"
+  let paths: list<string> = []
+  for line in historical.stdout.lines() {
+    const shard = normalize_source_path(line.trim())
+    if shard.starts_with(prefix) && shard.ends_with(suffix) {
+      const path = shard.substring(prefix.len(), shard.len() - suffix.len())
+      if !legacy_path_shape_valid(path) {
+        return {ok: false, paths: [], error: "invalid historical legacy source path: " + path}
+      }
+      paths = paths.appending(path)
+    }
+  }
+  if paths.count == 0 {
+    return {
+      ok: false,
+      paths: [],
+      error: "comparison base has neither the legacy inventory nor historical count shards",
+    }
+  }
+  const sources = paths.sorted().map({ path -> {id: path, path: path} }).to_list()
+  return {ok: true, paths: paths.sorted(), sources: sources, error: ""}
 }
 
 /**
@@ -524,15 +804,76 @@ pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<s
   return missing.sorted()
 }
 
-pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceLengthReport {
+pub fn check_source_file_lengths(
+  harness: Harness,
+  root: string = "",
+  comparison: string = "",
+  base_ref: string = "",
+) -> SourceLengthReport {
   const resolved_root = if root == "" {
     repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
   const sources = source_inventory(harness, resolved_root)
-  const baselines = baseline_inventory(harness, resolved_root)
-  let findings = evaluate_inventory(sources, baselines)
+  const inventory = legacy_inventory(harness.fs, resolved_root)
+  const requested_comparison = if comparison != "" {
+    comparison
+  } else {
+    to_string(harness.env.get("HARN_EXT_SOURCE_LENGTH_COMPARISON") ?? "auto")
+  }
+  const requested_base_ref = if base_ref != "" {
+    base_ref
+  } else {
+    to_string(harness.env.get("HARN_EXT_SOURCE_LENGTH_BASE_REF") ?? "")
+  }
+  const base = resolve_base_revision(
+    harness.process,
+    resolved_root,
+    requested_comparison,
+    requested_base_ref,
+  )
+  const base_inventory = if base.ok {
+    base_legacy_inventory(harness.process, resolved_root, base.revision)
+  } else {
+    {ok: false, paths: [], error: base.error}
+  }
+  let findings: list<SourceLengthFinding> = []
+  if !inventory.ok {
+    findings = findings.appending(
+      {kind: "invalid_legacy_inventory", path: LEGACY_INVENTORY_PATH, message: inventory.error},
+    )
+  }
+  if !base.ok {
+    findings = findings.appending(
+      {
+        kind: "base_unavailable",
+        path: resolved_root,
+        message: base.error
+          + "; the comparison commit must already exist locally (this check never fetches)",
+      },
+    )
+  }
+  if base.ok && !base_inventory.ok {
+    findings = findings.appending(
+      {kind: "base_unavailable", path: LEGACY_INVENTORY_PATH, message: base_inventory.error},
+    )
+  }
+  if inventory.ok && base.ok && base_inventory.ok {
+    findings = findings
+      + evaluate_inventory(
+        sources,
+        inventory.paths,
+        base_source_inventory(
+          harness.process,
+          resolved_root,
+          base.revision,
+          inventory.sources,
+          base_inventory.sources,
+          sources.map({ source -> source.path }).to_list(),
+        ),
+      )
+  }
   // Reuses the inventory walk that just ran, so the reconciliation costs one
   // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
   // no-op for fixture tests rather than something they have to opt out of.
@@ -560,16 +901,23 @@ pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceL
     root: resolved_root,
     max_lines: MAX_LINES,
     source_count: sources.count,
-    baseline_count: baselines.count,
+    legacy_count: inventory.paths.count,
     oversized_count: sources.filter({ source -> source.lines > MAX_LINES }).count,
-    findings: findings,
+    comparison: base.comparison,
+    base_revision: if base.ok {
+      base.revision
+    } else {
+      nil
+    },
+    findings: findings.sorted_by({ finding -> finding.path + ":" + finding.kind }),
   }
 }
 
 fn render_report(report: SourceLengthReport) -> string {
   if report.findings.count == 0 {
     return "source file-length ratchet passed: ${report.source_count} source file(s), "
-      + "${report.oversized_count} exact existing file(s), ${report.max_lines}-line cap"
+      + "${report.legacy_count} legacy path(s), ${report.max_lines}-line cap, "
+      + "${report.comparison} ${report.base_revision}"
   }
   let lines = ["source file-length ratchet failed: ${report.findings.count} violation(s)", ""]
   for finding in report.findings {
@@ -577,16 +925,16 @@ fn render_report(report: SourceLengthReport) -> string {
     if finding.actual != nil {
       detail = detail + " actual=" + to_string(finding.actual)
     }
-    if finding.baseline != nil {
-      detail = detail + " baseline=" + to_string(finding.baseline)
+    if finding.ceiling != nil {
+      detail = detail + " ceiling=" + to_string(finding.ceiling)
     }
     lines = lines + [detail + " — " + finding.message]
   }
   lines = lines
     + [
       "",
-      "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
-      "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
+      "Split oversized files. Shrinkage automatically becomes the next merge-base ceiling.",
+      "Remove a path from the stable legacy inventory only after it reaches the 1,500-line cap.",
     ]
   return join(lines, "\n")
 }
@@ -598,7 +946,8 @@ fn arg_spec() {
       args: [
         {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
         {kind: "switch", name: "json", long: "--json", default: false},
-        {kind: "switch", name: "update", long: "--update", default: false},
+        {kind: "flag", name: "comparison", long: "--comparison", parse: "string", default: ""},
+        {kind: "flag", name: "base_ref", long: "--base-ref", parse: "string", default: ""},
       ],
     },
   )
@@ -607,7 +956,7 @@ fn arg_spec() {
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--update]",
+      "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--comparison auto|merge-base|first-parent] [--base-ref REF]",
     )
     return nil
   }
@@ -622,15 +971,12 @@ fn main(harness: Harness) {
   } else {
     path_normalize(to_string(parsed.root))
   }
-  if parsed?.update ?? false {
-    const edits = plan_baseline_update(
-      source_inventory(harness, resolved_root),
-      baseline_inventory(harness, resolved_root),
-    )
-    apply_baseline_edits(harness, resolved_root, edits)
-    harness.stdio.println("updated ${edits.count} source file-length baseline shard(s)")
-  }
-  const report = check_source_file_lengths(harness, resolved_root)
+  const report = check_source_file_lengths(
+    harness,
+    resolved_root,
+    to_string(parsed?.comparison ?? ""),
+    to_string(parsed?.base_ref ?? ""),
+  )
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
