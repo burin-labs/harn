@@ -110,7 +110,7 @@ fn model_rejects_sampling_params(model: &str) -> bool {
 /// replaced by adaptive thinking. Passing `thinking.type = "enabled"` to
 /// one of these models is a 400. We transparently rewrite the payload to
 /// `{type: "adaptive"}` and emit a one-time warning.
-fn model_requires_adaptive_thinking(model: &str) -> bool {
+pub(crate) fn model_requires_adaptive_thinking(model: &str) -> bool {
     let lower = model.to_lowercase();
     matches!(claude_generation(&lower), Some((major, minor)) if (major, minor) >= (4, 7))
 }
@@ -1101,6 +1101,16 @@ fn normalize_anthropic_tool_choice(value: &serde_json::Value) -> Option<serde_js
         // Null or any other JSON scalar: treat as "no tool_choice".
         _ => None,
     }
+}
+
+/// Whether Anthropic's normalized tool choice requires a tool call.
+pub(crate) fn tool_choice_forces_tool_use(value: &serde_json::Value) -> bool {
+    normalize_anthropic_tool_choice(value).is_some_and(|choice| {
+        matches!(
+            choice.get("type").and_then(serde_json::Value::as_str),
+            Some("any") | Some("tool")
+        )
+    })
 }
 
 fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value, model: &str) {

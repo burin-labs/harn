@@ -479,6 +479,23 @@ pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result
             &opts.model,
         ));
     }
+    if opts.provider.eq_ignore_ascii_case("anthropic")
+        && matches!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Enabled { .. }
+        )
+        && !crate::llm::providers::anthropic::model_requires_adaptive_thinking(&opts.model)
+        && opts
+            .tool_choice
+            .as_ref()
+            .is_some_and(crate::llm::providers::anthropic::tool_choice_forces_tool_use)
+    {
+        return Err(crate::llm::call::invalid_request_error(
+            "Anthropic cannot combine forced tool choice with manual thinking; use `tool_choice: \"auto\"`, disable thinking, or use adaptive thinking",
+            &opts.provider,
+            &opts.model,
+        ));
+    }
     if opts.logprobs.is_some()
         && opts.stream
         && opts.provider.eq_ignore_ascii_case("gemini")
