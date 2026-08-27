@@ -1081,7 +1081,8 @@ mod tests {
         fs::write(&runtime, b"old-runtime").expect("runtime");
         fs::write(&candidate, b"new-runtime").expect("candidate");
         fs::write(
-            root.path().join("harn.standalone-v1"),
+            root.path()
+                .join(format!("{}.standalone-v1", harn_binary_name())),
             b"harn-run-standalone-v1\n",
         )
         .expect("marker");
@@ -1180,7 +1181,8 @@ mod tests {
         fs::write(&runtime, b"old-runtime").expect("runtime");
         fs::write(&candidate, b"new-runtime").expect("candidate");
         fs::write(
-            root.path().join("harn.standalone-v1"),
+            root.path()
+                .join(format!("{}.standalone-v1", harn_binary_name())),
             b"harn-run-standalone-v1\n",
         )
         .expect("marker");
