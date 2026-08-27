@@ -57,7 +57,6 @@ unverified = [
   "flexai",
   "friendli",
   "github_models",
-  "huggingface",
   "hunyuan",
   "hyperbolic",
   "inception",
@@ -109,6 +108,14 @@ fields = ["cache", "stream"]
 sources = [
   "https://console.groq.com/docs/prompt-caching",
   "https://github.com/groq/groq-python/blob/main/src/groq/types/chat/chat_completion_chunk.py",
+]
+
+[[usage_accounting_audit.verified]]
+provider = "huggingface"
+checked_on = "2026-08-27"
+fields = ["stream"]
+sources = [
+  "https://huggingface.co/docs/inference-providers/en/tasks/chat-completion",
 ]
 
 [[usage_accounting_audit.verified]]
