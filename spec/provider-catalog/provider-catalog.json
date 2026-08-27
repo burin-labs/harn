@@ -1169,6 +1169,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -21656,6 +21658,96 @@
       ]
     },
     {
+      "id": "sambanova/MiniMax-M3",
+      "name": "MiniMax M3 (SambaNova)",
+      "display_name": "MiniMax M3",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-minimax-m3"
+      ],
+      "context_window": 1048576,
+      "logical_model": "minimax-m3",
+      "equivalence_group": "minimax-m3",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "MiniMax-M3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_source": "declared",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.4,
+        "cache_read_per_mtok": 0.0,
+        "cache_write_per_mtok": 0.0
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
       "id": "sambanova/gemma-4-31B-it",
       "name": "Gemma 4 31B (SambaNova)",
       "display_name": "Gemma 4 31B",
@@ -25690,6 +25782,12 @@
     {
       "name": "sambanova-minimax-m2.7",
       "model_id": "sambanova/MiniMax-M2.7",
+      "provider": "sambanova",
+      "tool_format": "text"
+    },
+    {
+      "name": "sambanova-minimax-m3",
+      "model_id": "sambanova/MiniMax-M3",
       "provider": "sambanova",
       "tool_format": "text"
     },
@@ -29938,6 +30036,25 @@
       "base_url": "https://api.sambanova.ai/v1",
       "secret_env": "SAMBANOVA_API_KEY",
       "label": "MiniMax M2.7 (SambaNova)",
+      "family": "minimax",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "sambanova",
+      "model": "MiniMax-M3",
+      "base_url": "https://api.sambanova.ai/v1",
+      "secret_env": "SAMBANOVA_API_KEY",
+      "label": "MiniMax M3 (SambaNova)",
       "family": "minimax",
       "capabilities": [
         "native_tools",
