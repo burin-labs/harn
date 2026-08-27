@@ -84,7 +84,12 @@ pub(in crate::llm::tool_conformance) fn validate_probe_request_body_for_format(
             validate_gemini_probe_request(body, probe_case, request_profile, &mut issues);
         }
         "gemini_interactions" => {
-            validate_gemini_interactions_probe_request(body, probe_case, &mut issues);
+            validate_gemini_interactions_probe_request(
+                body,
+                probe_case,
+                request_profile,
+                &mut issues,
+            );
         }
         "ollama" => validate_ollama_probe_request(body, probe_case, &mut issues),
         "openai_compat" => {
@@ -458,6 +463,7 @@ fn validate_gemini_probe_request(
 fn validate_gemini_interactions_probe_request(
     body: &Value,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/input", issues);
@@ -518,15 +524,31 @@ fn validate_gemini_interactions_probe_request(
         issues,
     );
     if probe_case.requires_probe_tool() {
-        // Interactions has no allowed-name pin, so "must call the probe tool"
-        // narrows to the `any` mode.
-        require_string_eq(
-            body,
-            "/generation_config/tool_choice",
-            "any",
-            "Gemini Interactions tool_choice",
-            issues,
-        );
+        match request_profile {
+            ToolProbeRequestProfile::CatalogDefault => {
+                require_string_eq(
+                    body,
+                    "/generation_config/tool_choice/allowed_tools/mode",
+                    "any",
+                    "Gemini Interactions allowed tool mode",
+                    issues,
+                );
+                require_string_eq(
+                    body,
+                    "/generation_config/tool_choice/allowed_tools/tools/0",
+                    TOOL_PROBE_TOOL_NAME,
+                    "Gemini Interactions allowed tool name",
+                    issues,
+                );
+            }
+            ToolProbeRequestProfile::ParameterEdges => require_string_eq(
+                body,
+                "/generation_config/tool_choice",
+                "any",
+                "Gemini Interactions parameter-edge tool_choice",
+                issues,
+            ),
+        }
     } else {
         reject_present(
             body,
