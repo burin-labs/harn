@@ -1,12 +1,19 @@
 model
 fallback
 fallback
+nil-fallback
 true
 true
+true
+9
+nil
 7
+nil-fallback
 1.5
 {"ok":true}
+{}
 2
+0
 harn run 'two words' 'quote'"'"'s'
   items:
     - one

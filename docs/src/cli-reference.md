@@ -896,6 +896,7 @@ harn time run main.harn
 harn time run main.harn --json
 harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
+harn time run main.harn --eager-project-handlers
 harn time run main.harn --write-root /path/to/output
 harn time run main.harn --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY
 harn time run -e 'harness.stdio.log("hi")' --json
@@ -905,6 +906,12 @@ harn time run script.harn -- arg1 arg2
 `harn time run` accepts the same confinement and credential flags as
 [`harn run`](#harn-run) — the two share one flag definition, so a run and its
 timed twin are always confined identically.
+
+Pass `--eager-project-handlers` when the measurement should include fail-fast
+project validation. It implies project-trigger registration and loads every
+trigger and hook handler module before the timed script runs. Without the flag,
+`harn time run` keeps the ordinary demand-driven behavior and resolves a policy
+hook only when its matching event fires.
 
 The output is keyed by seven fixed rows — `parse`, `typecheck`,
 `bytecode_compile`, `run_setup`, `run_main`, `module_compile`, and

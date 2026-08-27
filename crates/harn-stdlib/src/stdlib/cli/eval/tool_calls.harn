@@ -40,14 +40,14 @@
  * Moving more of the evaluation pipeline into .harn is gated on G4
  * (#2297).
  */
-fn __safe_string(value: string, fallback: string) -> string {
+fn __safe_string(value: any, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_dict(value: dict) -> dict {
+fn __safe_dict(value: any) -> dict {
   if type_of(value) == "dict" {
     return value
   }

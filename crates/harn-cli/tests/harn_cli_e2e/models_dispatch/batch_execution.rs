@@ -239,7 +239,7 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
 }
 
 #[test]
-fn rejoin_quarantines_each_non_consumable_result_shape() {
+pub(crate) fn rejoin_quarantines_each_non_consumable_result_shape() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let requests = tmp.path().join("requests.jsonl");
     let execution_dir = tmp.path().join("execution");

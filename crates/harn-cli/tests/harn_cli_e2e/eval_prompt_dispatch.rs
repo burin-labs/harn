@@ -32,7 +32,7 @@ const FLEET: &[&str] = &[
 ];
 
 #[test]
-fn terminal_output_is_byte_identical_across_runs() {
+pub(crate) fn terminal_output_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let template = dir.path().join("system.harn.prompt");
     fs::write(&template, RENDER_TEMPLATE).expect("write template");

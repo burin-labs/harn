@@ -18,6 +18,9 @@
 #[path = "../test_util/mod.rs"]
 mod test_util;
 
+#[path = "../support/required_pr_e2e.rs"]
+mod required_pr_e2e;
+
 mod acp_registry_manifest;
 mod acp_server_cli;
 mod agent_run_command_argv_coercion;
@@ -113,3 +116,34 @@ mod version_dispatch;
 mod workflow_authoring_eval;
 mod workflow_cli;
 mod workflow_patch_cli;
+
+const _: [(&str, fn()); 7] = [
+    (
+        required_pr_e2e::CASES[0],
+        eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs,
+    ),
+    (
+        required_pr_e2e::CASES[1],
+        models_dispatch::batch_execution::rejoin_quarantines_each_non_consumable_result_shape,
+    ),
+    (
+        required_pr_e2e::CASES[2],
+        models_dispatch::core::models_recommend_human_text_has_model_and_rationale,
+    ),
+    (
+        required_pr_e2e::CASES[3],
+        models_dispatch::lora_inspect_plan::models_lora_inspect_human_text_includes_launch_hint,
+    ),
+    (
+        required_pr_e2e::CASES[4],
+        providers_dispatch::provider_tool_scorecard_human_reports_catalog_mismatch_codes,
+    ),
+    (
+        required_pr_e2e::CASES[5],
+        time_cli::time_run_setup_error_does_not_claim_a_lazy_module_load,
+    ),
+    (
+        required_pr_e2e::CASES[6],
+        trace_import_dispatch::converts_generic_trace_jsonl_to_cli_fixture,
+    ),
+];

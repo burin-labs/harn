@@ -25,7 +25,7 @@
  * `nil` or a different shape than expected — the renderers prefer
  * graceful degradation over hard crashes.
  */
-fn __safe_string(value: string, fallback: string) -> string {
+fn __safe_string(value: any, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
@@ -36,7 +36,7 @@ fn __safe_string(value: string, fallback: string) -> string {
  * Coerce a JSON value to a list, returning `[]` when the value is
  * `nil` or a non-list shape.
  */
-fn __safe_list(value: list) -> list {
+fn __safe_list(value: any) -> list {
   if type_of(value) == "list" {
     return value
   }
@@ -47,7 +47,7 @@ fn __safe_list(value: list) -> list {
  * Coerce a JSON value to a dict, returning `{}` when the value is
  * `nil` or a non-dict shape.
  */
-fn __safe_dict(value: dict) -> dict {
+fn __safe_dict(value: any) -> dict {
   if type_of(value) == "dict" {
     return value
   }

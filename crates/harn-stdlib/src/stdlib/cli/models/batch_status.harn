@@ -21,10 +21,10 @@ import {
   __mkdirp,
   __provider_auth_headers,
   __provider_base_url,
-  __safe_int,
   __truthy_env,
   __xai_provider_status,
   __xai_results_url,
+  coerce_optional_int,
 } from "std/cli/models/batch_transport"
 import {
   cli_json_envelope,
@@ -39,7 +39,7 @@ import {
 /** Poll submitted batches and persist normalized lifecycle receipts. */
 fn __status_job_base(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
-    + {request_count: __safe_int(job["request_count"]) ?? 0}
+    + {request_count: coerce_optional_int(job["request_count"]) ?? 0}
 }
 
 fn __cached_status_job(job: dict, dry_run: bool) -> dict {

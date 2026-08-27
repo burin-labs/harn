@@ -225,7 +225,7 @@ fn __result_status_code(row: dict) -> int {
   return to_int(response["status_code"] ?? response["status"] ?? row["status_code"]) ?? 0
 }
 
-fn __has_error(value: dict) -> bool {
+fn __has_error(value: any) -> bool {
   if value == nil {
     return false
   }

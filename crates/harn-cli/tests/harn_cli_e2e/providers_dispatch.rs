@@ -1224,7 +1224,7 @@ fn provider_tool_scorecard_json_reports_catalog_mismatches() {
 }
 
 #[test]
-fn provider_tool_scorecard_human_reports_catalog_mismatch_codes() {
+pub(crate) fn provider_tool_scorecard_human_reports_catalog_mismatch_codes() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("text-observed.json");
     let (provider, model) = native_preferred_text_supported_scorecard_route();

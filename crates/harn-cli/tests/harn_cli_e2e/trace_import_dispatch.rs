@@ -42,7 +42,7 @@ fn run_trace_import(trace: &str, trace_id: Option<&str>) -> (SubprocessOutcome, 
 }
 
 #[test]
-fn converts_generic_trace_jsonl_to_cli_fixture() {
+pub(crate) fn converts_generic_trace_jsonl_to_cli_fixture() {
     let trace = concat!(
         "{\"trace_id\":\"trace-1\",\"prompt\":\"Question\",\"response\":{\"text\":\"Answer\",\"model\":\"gpt-test\"},\"tool_calls\":[{\"name\":\"read_file\",\"arguments\":{\"path\":\"README.md\"}}]}\n",
         "{\"trace_id\":\"trace-2\",\"prompt\":\"Ignored\",\"response\":\"Nope\"}\n"

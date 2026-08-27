@@ -34,6 +34,11 @@ pub(crate) struct TimeRunArgs {
     /// Register project manifest triggers while timing the run.
     #[arg(long = "project-triggers")]
     pub project_triggers: bool,
+    /// Load every project trigger and hook handler before the timed script runs.
+    /// This matches `harn run --eager-project-handlers`: default timed runs
+    /// continue to resolve policy hooks only when their event dispatches.
+    #[arg(long = "eager-project-handlers")]
+    pub eager_project_handlers: bool,
     #[command(flatten)]
     pub sandbox: super::SandboxArgs,
     /// Positional arguments passed to the pipeline as the global `argv`

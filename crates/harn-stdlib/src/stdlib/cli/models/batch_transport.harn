@@ -98,7 +98,7 @@ pub fn __batch_create_recovery(provider: string, wire: string) -> BatchCreateRec
  * @effects: []
  * @errors: []
  */
-pub fn __safe_int(value: int?) -> int? {
+pub fn coerce_optional_int(value: any) -> int? {
   if type_of(value) == "int" {
     return value
   }
@@ -560,7 +560,7 @@ pub fn __submission_job_base(env: HarnessEnv, job: dict, payload: dict, dry_run:
     endpoint: safe_string(job["endpoint"], ""),
     tool_format: safe_string(job["tool_format"], ""),
     batch: safe_dict(job["batch"]),
-    request_count: __safe_int(job["request_count"]) ?? 0,
+    request_count: coerce_optional_int(job["request_count"]) ?? 0,
     request_file: safe_string(job["request_file"], ""),
     request_file_sha256: safe_string(
       payload["sha256"],
@@ -787,7 +787,7 @@ pub fn __fireworks_create_dataset(
     },
   )
   const body = safe_dict(response["body"])
-  const status_code = __safe_int(response["status"]) ?? 0
+  const status_code = coerce_optional_int(response["status"]) ?? 0
   if safe_bool(response["ok"], false) || status_code == 409 {
     return {
       ok: true,
@@ -937,10 +937,10 @@ pub fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: str
  */
 pub fn __xai_provider_status(body: dict) -> string {
   const state = safe_dict(body["state"])
-  const pending = __safe_int(state["num_pending"])
-  const requests = __safe_int(state["num_requests"])
-  const errors = __safe_int(state["num_error"]) ?? 0
-  const cancelled = __safe_int(state["num_cancelled"]) ?? 0
+  const pending = coerce_optional_int(state["num_pending"])
+  const requests = coerce_optional_int(state["num_requests"])
+  const errors = coerce_optional_int(state["num_error"]) ?? 0
+  const cancelled = coerce_optional_int(state["num_cancelled"]) ?? 0
   if pending != nil {
     if pending > 0 {
       return "running"

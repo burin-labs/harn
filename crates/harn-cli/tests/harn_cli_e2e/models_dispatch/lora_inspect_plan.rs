@@ -7,7 +7,7 @@ use super::support::{parse_json, run, success_data, LORA_PROMOTION_EVIDENCE_SCHE
 // - models lora inspect ---------------------------------------------------
 
 #[test]
-fn models_lora_inspect_human_text_includes_launch_hint() {
+pub(crate) fn models_lora_inspect_human_text_includes_launch_hint() {
     let adapter = write_lora_adapter_fixture();
     let adapter_path = adapter.path().display().to_string();
     let harn = run(

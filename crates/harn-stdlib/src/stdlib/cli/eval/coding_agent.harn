@@ -48,21 +48,21 @@
  * exposing `execute_run`, `snapshot_provider`, `llm_pricing_per_1k`,
  * and `provider_key_available` to script-land.
  */
-fn __safe_string(value: string, fallback: string) -> string {
+fn __safe_string(value: any, fallback: string) -> string {
   if type_of(value) == "string" {
     return value
   }
   return fallback
 }
 
-fn __safe_list(value: list) -> list {
+fn __safe_list(value: any) -> list {
   if type_of(value) == "list" {
     return value
   }
   return []
 }
 
-fn __safe_dict(value: dict) -> dict {
+fn __safe_dict(value: any) -> dict {
   if type_of(value) == "dict" {
     return value
   }

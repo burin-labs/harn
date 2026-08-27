@@ -1,3 +1,5 @@
+import { safe_bool, safe_dict, safe_int, safe_list, safe_string } from "std/cli/render"
+
 /**
  * `harn doctor` rendering layer ported to .harn — see harn#2312 (W12).
  *
@@ -29,41 +31,6 @@
  *   HARN_OUTPUT_JSON                 — "1" for the JSON envelope, else
  *                                       human-readable text.
  */
-fn __safe_string(value: string, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_list(value: list) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_dict(value: dict) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_bool(value: bool, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_int(value: int, fallback: int) -> int {
-  if type_of(value) == "int" {
-    return value
-  }
-  return fallback
-}
-
 /**
  * Uppercase an ASCII status string (`ok` → `OK`, `warn` → `WARN`,
  * etc). Harn's stdlib doesn't expose `to_uppercase` as a free
@@ -97,10 +64,10 @@ fn __status_upper(status: string) -> string {
 fn __render_checks_section(checks: list) -> string {
   let out = ""
   for raw_check in checks {
-    const check = __safe_dict(raw_check)
-    const status = __safe_string(check["status"], "")
-    const label = __safe_string(check["label"], "")
-    const detail = __safe_string(check["detail"], "")
+    const check = safe_dict(raw_check)
+    const status = safe_string(check["status"], "")
+    const label = safe_string(check["label"], "")
+    const detail = safe_string(check["detail"], "")
     const status_upper = __status_upper(status)
     const status_padded = str_pad(status_upper, 4, " ", "left")
     const label_padded = str_pad(label, 24, " ", "right")
@@ -114,7 +81,7 @@ fn __render_checks_section(checks: list) -> string {
       if type_of(docs) == "string" && docs != "" {
         out = out + "       docs: " + docs + "\n"
       }
-      const blocks = __safe_list(check["blocks"])
+      const blocks = safe_list(check["blocks"])
       if len(blocks) > 0 {
         out = out + "       blocks: " + join(blocks, ", ") + "\n"
       }
@@ -126,10 +93,10 @@ fn __render_checks_section(checks: list) -> string {
 fn __render_targets_section(targets: list) -> string {
   let out = "--- Targets ---\n"
   for raw_target in targets {
-    const target = __safe_dict(raw_target)
-    const triple = __safe_string(target["triple"], "")
+    const target = safe_dict(raw_target)
+    const triple = safe_string(target["triple"], "")
     const triple_padded = str_pad(triple, 32, " ", "right")
-    const installed = if __safe_bool(target["installed"], false) {
+    const installed = if safe_bool(target["installed"], false) {
       "installed"
     } else {
       "missing"
@@ -137,13 +104,13 @@ fn __render_targets_section(targets: list) -> string {
     const buildable_raw = target["buildable"]
     const buildable = if buildable_raw == nil {
       "not probed"
-    } else if __safe_bool(buildable_raw, false) {
+    } else if safe_bool(buildable_raw, false) {
       "buildable"
     } else {
       "not buildable"
     }
     out = out + "  " + triple_padded + " " + installed + ", " + buildable + "\n"
-    const reasons = __safe_list(target["reasons"])
+    const reasons = safe_list(target["reasons"])
     for reason in reasons {
       if type_of(reason) == "string" {
         out = out + "       " + reason + "\n"
@@ -156,22 +123,22 @@ fn __render_targets_section(targets: list) -> string {
 fn __render_providers_section(providers: list) -> string {
   let out = "--- Providers ---\n"
   for raw_provider in providers {
-    const provider = __safe_dict(raw_provider)
-    const name = __safe_string(provider["name"], "")
+    const provider = safe_dict(raw_provider)
+    const name = safe_string(provider["name"], "")
     const name_padded = str_pad(name, 24, " ", "right")
-    const configured = if __safe_bool(provider["configured"], false) {
+    const configured = if safe_bool(provider["configured"], false) {
       "configured"
     } else {
       "no credentials"
     }
-    const probed = __safe_bool(provider["probed"], false)
+    const probed = safe_bool(provider["probed"], false)
     const reachable_raw = provider["reachable"]
     const latency_raw = provider["latency_ms"]
     const reachable = if !probed {
       "not probed"
     } else if reachable_raw == nil {
       "probed"
-    } else if __safe_bool(reachable_raw, false) {
+    } else if safe_bool(reachable_raw, false) {
       if latency_raw == nil {
         "reachable"
       } else {
@@ -181,7 +148,7 @@ fn __render_providers_section(providers: list) -> string {
       "unreachable"
     }
     out = out + "  " + name_padded + " " + configured + ", " + reachable + "\n"
-    const errors = __safe_list(provider["errors"])
+    const errors = safe_list(provider["errors"])
     for error in errors {
       if type_of(error) == "string" {
         out = out + "       " + error + "\n"
@@ -194,10 +161,10 @@ fn __render_providers_section(providers: list) -> string {
 fn __render_capabilities_section(capabilities: list) -> string {
   let out = "--- Stdlib capabilities ---\n"
   for raw_capability in capabilities {
-    const capability = __safe_dict(raw_capability)
-    const name = __safe_string(capability["name"], "")
+    const capability = safe_dict(raw_capability)
+    const name = safe_string(capability["name"], "")
     const name_padded = str_pad(name, 24, " ", "right")
-    const profiles = __safe_list(capability["available_in_sandbox_profile"])
+    const profiles = safe_list(capability["available_in_sandbox_profile"])
     out = out + "  " + name_padded + " sandbox: " + join(profiles, ", ") + "\n"
   }
   return out
@@ -205,10 +172,10 @@ fn __render_capabilities_section(capabilities: list) -> string {
 
 fn __render_summary_section(summary: dict) -> string {
   let out = "--- Summary ---\n"
-  const ok_count = __safe_int(summary["ok"], 0)
-  const warn_count = __safe_int(summary["warning"], 0)
-  const fail_count = __safe_int(summary["blocking"], 0)
-  const skip_count = __safe_int(summary["skip"], 0)
+  const ok_count = safe_int(summary["ok"], 0)
+  const warn_count = safe_int(summary["warning"], 0)
+  const fail_count = safe_int(summary["blocking"], 0)
+  const skip_count = safe_int(summary["skip"], 0)
   out = out + "OK=" + to_string(ok_count)
     + " WARN="
     + to_string(warn_count)
@@ -217,7 +184,7 @@ fn __render_summary_section(summary: dict) -> string {
     + " SKIP="
     + to_string(skip_count)
     + "\n"
-  const blocked = __safe_list(summary["blocked_flows"])
+  const blocked = safe_list(summary["blocked_flows"])
   if len(blocked) > 0 {
     out = out + "blocked: " + join(blocked, ", ") + "\n"
   }
@@ -244,18 +211,18 @@ fn __render_summary_section(summary: dict) -> string {
  */
 fn __render_human(report: dict) -> string {
   let out = "Harn doctor\n\n"
-  out = out + __render_checks_section(__safe_list(report["checks"]))
+  out = out + __render_checks_section(safe_list(report["checks"]))
   out = out + "\n"
-  out = out + __render_targets_section(__safe_list(report["targets"]))
+  out = out + __render_targets_section(safe_list(report["targets"]))
   out = out + "\n"
-  out = out + __render_providers_section(__safe_list(report["providers"]))
+  out = out + __render_providers_section(safe_list(report["providers"]))
   out = out + "\n"
-  out = out + __render_capabilities_section(__safe_list(report["capabilities"]))
+  out = out + __render_capabilities_section(safe_list(report["capabilities"]))
   out = out + "\n"
-  out = out + __render_summary_section(__safe_dict(report["summary"]))
+  out = out + __render_summary_section(safe_dict(report["summary"]))
   out = out + "\n"
   out = out + "--- Next step ---\n"
-  out = out + __safe_string(report["next_step"], "")
+  out = out + safe_string(report["next_step"], "")
   return out
 }
 
@@ -295,8 +262,8 @@ fn main(harness: Harness) -> int {
     // `harness.stdio.println` add exactly one.
     harness.stdio.println(__render_human(report))
   }
-  const summary = __safe_dict(report["summary"])
-  const blocking = __safe_int(summary["blocking"], 0)
+  const summary = safe_dict(report["summary"])
+  const blocking = safe_int(summary["blocking"], 0)
   if blocking > 0 {
     return 1
   }

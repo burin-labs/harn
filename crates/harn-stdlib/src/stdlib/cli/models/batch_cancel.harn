@@ -19,8 +19,8 @@ import {
   __provider_auth_headers,
   __provider_base_url,
   __redact_download_url,
-  __safe_int,
   __truthy_env,
+  coerce_optional_int,
 } from "std/cli/models/batch_transport"
 import {
   cli_json_envelope,
@@ -36,7 +36,7 @@ import {
 fn __cancel_status(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
     + {
-      request_count: __safe_int(job["request_count"]) ?? 0,
+      request_count: coerce_optional_int(job["request_count"]) ?? 0,
       provider_status: job["provider_status"],
       source_status: safe_string(job["status"], ""),
       output_file_id: job["output_file_id"],

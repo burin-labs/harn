@@ -1,3 +1,5 @@
+import { safe_bool, safe_dict, safe_list, safe_string } from "std/cli/render"
+
 /**
  * `harn provider tool-probe` ported to .harn — see harn#2310 (W10).
  *
@@ -19,34 +21,6 @@
  *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
  *     handler level), else the human conformance summary.
  */
-fn __safe_string(value: string, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_dict(value: dict) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_list(value: list) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_bool(value: bool, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
 /**
  * Mirror Rust's `Debug` format for `ToolProbeClassification`: serde
  * emits snake_case in the JSON wire shape, but human output uses the
@@ -96,9 +70,9 @@ fn __classification_debug(value: string) -> string {
 }
 
 fn __any_case_ok(report: dict) -> bool {
-  const cases = __safe_list(report["cases"])
+  const cases = safe_list(report["cases"])
   for c in cases {
-    if type_of(c) == "dict" && __safe_bool(c["ok"], false) {
+    if type_of(c) == "dict" && safe_bool(c["ok"], false) {
       return true
     }
   }
@@ -106,14 +80,14 @@ fn __any_case_ok(report: dict) -> bool {
 }
 
 fn __render_human(report: dict) -> string {
-  const provider = __safe_string(report["provider"], "")
-  const model = __safe_string(report["model"], "")
-  const tool_format = __safe_string(report["tool_format"], "native")
-  const tc = __safe_dict(report["tool_calling"])
-  const fallback = __safe_string(tc["fallback_mode"], "")
-  const native = __safe_string(tc["native"], "")
-  const text = __safe_string(tc["text"], "")
-  const streaming_native = __safe_string(tc["streaming_native"], "")
+  const provider = safe_string(report["provider"], "")
+  const model = safe_string(report["model"], "")
+  const tool_format = safe_string(report["tool_format"], "native")
+  const tc = safe_dict(report["tool_calling"])
+  const fallback = safe_string(tc["fallback_mode"], "")
+  const native = safe_string(tc["native"], "")
+  const text = safe_string(tc["text"], "")
+  const streaming_native = safe_string(tc["streaming_native"], "")
   let out = provider + " " + model
     + " format="
     + tool_format
@@ -126,15 +100,15 @@ fn __render_human(report: dict) -> string {
     + " streaming_native="
     + streaming_native
     + "\n"
-  const cases = __safe_list(report["cases"])
+  const cases = safe_list(report["cases"])
   for c in cases {
     if type_of(c) != "dict" {
       continue
     }
-    const mode = __safe_string(c["mode"], "")
-    const classification = __classification_debug(__safe_string(c["classification"], ""))
-    const ok = __safe_bool(c["ok"], false)
-    const reason = __safe_string(c["failure_reason"], "-")
+    const mode = safe_string(c["mode"], "")
+    const classification = __classification_debug(safe_string(c["classification"], ""))
+    const ok = safe_bool(c["ok"], false)
+    const reason = safe_string(c["failure_reason"], "-")
     out = out + "  " + mode + ": " + classification
       + " ok="
       + to_string(ok)

@@ -9,17 +9,17 @@
 mod support;
 
 #[path = "models_dispatch/batch_execution.rs"]
-mod batch_execution;
+pub(crate) mod batch_execution;
 #[path = "models_dispatch/batch_lifecycle_providers.rs"]
 mod batch_lifecycle_providers;
 #[path = "models_dispatch/batch_plan_prepare.rs"]
 mod batch_plan_prepare;
 #[path = "models_dispatch/core.rs"]
-mod core;
+pub(crate) mod core;
 #[path = "models_dispatch/lora_fixtures.rs"]
 mod lora_fixtures;
 #[path = "models_dispatch/lora_inspect_plan.rs"]
-mod lora_inspect_plan;
+pub(crate) mod lora_inspect_plan;
 #[path = "models_dispatch/lora_migration.rs"]
 mod lora_migration;
 #[path = "models_dispatch/lora_preflight.rs"]

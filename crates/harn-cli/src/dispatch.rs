@@ -344,6 +344,14 @@ fn write_script_to_tempfile(name: &str, source: &str) -> std::io::Result<tempfil
 mod tests {
     use super::*;
 
+    async fn run_embedded_with_env(script_name: &str, vars: &[(&'static str, &str)]) -> RunOutcome {
+        let _guards = vars
+            .iter()
+            .map(|(key, value)| ScopedEnvVar::set(key, value))
+            .collect::<Vec<_>>();
+        run_embedded_script(script_name, Vec::new(), false).await
+    }
+
     #[tokio::test]
     async fn missing_script_returns_software_error() {
         let outcome = run_embedded_script("definitely/not/a/real/script", vec![], false).await;
@@ -374,6 +382,73 @@ mod tests {
         assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
         assert_eq!(outcome.stdout, "[]\n");
         assert!(outcome.stderr.is_empty(), "stderr was: {}", outcome.stderr);
+    }
+
+    #[tokio::test]
+    async fn eval_inlined_coercions_match_shared_render_fallbacks() {
+        let cases = [
+            (
+                "eval/context",
+                vec![
+                    ("HARN_EVAL_CONTEXT_REPORT_JSON", "{}"),
+                    ("HARN_EVAL_CONTEXT_OUTPUT_MODE", "summary"),
+                ],
+                "context eval: 0/0 passed",
+            ),
+            (
+                "eval/tool_calls",
+                vec![
+                    ("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "{}"),
+                    ("HARN_EVAL_TOOL_CALLS_MODE", "summary"),
+                ],
+                "tool-call eval: 0/0 passed",
+            ),
+            (
+                "eval/coding_agent",
+                vec![
+                    ("HARN_EVAL_CODING_AGENT_SUMMARY_JSON", "{}"),
+                    ("HARN_EVAL_CODING_AGENT_MODE", "summary"),
+                ],
+                "coding-agent eval: 0/0 passed",
+            ),
+            (
+                "eval/prompt",
+                vec![
+                    (
+                        "HARN_EVAL_PROMPT_REPORT_JSON",
+                        r#"{"template_path":"fixture","mode":"render","renders":[]}"#,
+                    ),
+                    ("HARN_EVAL_PROMPT_OUTPUT", "terminal"),
+                ],
+                "# harn eval prompt — fixture (mode: render)",
+            ),
+            (
+                "eval/model_selector",
+                vec![
+                    ("HARN_MODEL_SELECTOR_INPUT", "fixture"),
+                    (
+                        "HARN_MODEL_SELECTOR_ALIASES_JSON",
+                        r#"{"fixture":{"provider":null,"model":3}}"#,
+                    ),
+                ],
+                r#""provider":"fixture""#,
+            ),
+        ];
+
+        for (script, vars, expected) in cases {
+            let outcome = run_embedded_with_env(script, &vars).await;
+            assert_eq!(
+                outcome.exit_code, 0,
+                "{script} rejected a missing or wrong-shaped optional value: {}",
+                outcome.stderr,
+            );
+            assert!(
+                outcome.stdout.contains(expected),
+                "{script} did not reach its renderer: {}",
+                outcome.stdout,
+            );
+            assert!(outcome.stderr.is_empty(), "{script}: {}", outcome.stderr);
+        }
     }
 
     /// A run that departs from nothing announces nothing.

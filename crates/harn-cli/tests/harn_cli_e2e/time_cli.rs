@@ -52,6 +52,24 @@ fn run_time(script: &std::path::Path, cache_dir: &std::path::Path) -> std::proce
         .expect("spawn harn time run")
 }
 
+fn run_time_with_eager_project_handlers(
+    script: &std::path::Path,
+    cache_dir: &std::path::Path,
+) -> std::process::Output {
+    Command::new(binary_path())
+        .args([
+            "time",
+            "run",
+            "--json",
+            "--eager-project-handlers",
+            &script.to_string_lossy(),
+        ])
+        .env("HARN_CACHE_DIR", cache_dir)
+        .env("HARN_BYTECODE_CACHE", "1")
+        .output()
+        .expect("spawn harn time run")
+}
+
 #[test]
 fn time_run_json_smoke_emits_module_attribution_with_cache_miss_then_hit() {
     let workdir = tempfile::tempdir().expect("workdir");
@@ -168,7 +186,7 @@ fn time_run_json_smoke_emits_module_attribution_with_cache_miss_then_hit() {
 }
 
 #[test]
-fn time_run_setup_error_does_not_claim_a_lazy_module_load() {
+pub(crate) fn time_run_setup_error_does_not_claim_a_lazy_module_load() {
     let workdir = tempfile::tempdir().expect("workdir");
     let cache_dir = tempfile::tempdir().expect("cache dir");
     std::fs::write(
@@ -179,26 +197,35 @@ name = "timed-setup-error"
 
 [exports]
 handlers = "hooks.harn"
+absent = "absent.harn"
+
+[[hooks]]
+event = "SessionStart"
+handler = "absent::missing"
 
 [[hooks]]
 event = "PostTurn"
 handler = "handlers::valid"
-
-[[hooks]]
-event = "SessionEnd"
-handler = "handlers::missing"
 "#,
     )
     .expect("write manifest");
     std::fs::write(
         workdir.path().join("hooks.harn"),
-        "pub fn valid(_event) {}\n",
+        "pub fn valid(_harness: Harness, _event: dict) {}\n",
     )
     .expect("write hook module");
     let script = workdir.path().join("main.harn");
-    std::fs::write(&script, "pipeline default(_task: unknown) {}\n").expect("write script");
+    std::fs::write(
+        &script,
+        r#"
+pipeline default(harness: Harness) {
+  harness.stdio.println("unreachable")
+}
+"#,
+    )
+    .expect("write script");
 
-    let output = run_time(&script, cache_dir.path());
+    let output = run_time_with_eager_project_handlers(&script, cache_dir.path());
     assert!(!output.status.success(), "setup must fail on missing hook");
     let parsed = parse_envelope(&output);
     let data = assert_envelope(&parsed, TIME_RUN_SCHEMA_VERSION);
@@ -214,7 +241,8 @@ handler = "handlers::missing"
 
     assert_eq!(data["exit_code"], harn_cli::exit::RUN_SETUP_FAILURE);
     assert_eq!(run_setup["kind"], "top_level", "{run_setup}");
-    // Setup validation fails before the lazy handler module is reached.
+    // Explicit eager validation demands the missing handler, but resolving it remains
+    // run setup work rather than a successfully loaded module event.
     assert_eq!(module_load["events"], 0, "{module_load}");
     assert_eq!(module_load["kind"], "attribution", "{module_load}");
 }
