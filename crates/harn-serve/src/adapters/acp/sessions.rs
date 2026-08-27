@@ -501,6 +501,97 @@ pub(super) fn session_project_root_for_cwd(cwd: &Path) -> PathBuf {
     harn_vm::stdlib::process::find_project_root(&cwd).unwrap_or(cwd)
 }
 
+/// Why a persisted-session request cannot be scoped to one project.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AcpSessionProjectRootError {
+    Missing,
+    Invalid { cwd: String, detail: String },
+}
+
+impl std::fmt::Display for AcpSessionProjectRootError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => formatter.write_str("a cwd is required to select a project store"),
+            Self::Invalid { cwd, detail } => {
+                write!(
+                    formatter,
+                    "cwd `{cwd}` does not select a project directory: {detail}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for AcpSessionProjectRootError {}
+
+/// Resolve the only project store a persisted-session request may inspect.
+///
+/// Cold session lookup never searches sibling projects or falls back to the
+/// listener's process directory. The caller must name an existing directory;
+/// Harn then resolves it to its nearest project root.
+pub fn resolve_acp_session_project_root(
+    cwd: Option<&str>,
+) -> Result<PathBuf, AcpSessionProjectRootError> {
+    let cwd = cwd
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .ok_or(AcpSessionProjectRootError::Missing)?;
+    let canonical =
+        std::fs::canonicalize(cwd).map_err(|error| AcpSessionProjectRootError::Invalid {
+            cwd: cwd.to_string(),
+            detail: error.to_string(),
+        })?;
+    if !canonical.is_dir() {
+        return Err(AcpSessionProjectRootError::Invalid {
+            cwd: cwd.to_string(),
+            detail: "path is not a directory".to_string(),
+        });
+    }
+    Ok(harn_vm::stdlib::process::find_project_root(&canonical).unwrap_or(canonical))
+}
+
+/// Project one canonical store row into ACP's persisted-session shape.
+pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> serde_json::Value {
+    let mut item = serde_json::json!({
+        "sessionId": session.id,
+        "liveState": "persisted",
+        "activePrompt": false,
+        "attachableRoles": [],
+        "createdAt": session.created_at,
+        "updatedAt": session.updated_at,
+        "eventCount": session.event_count,
+        "usage": {
+            "inputTokens": session.usage_input,
+            "outputTokens": session.usage_output,
+            "costUsdMicros": session.usage_cost_usd_micros,
+        },
+        "_meta": {
+            "harn": {
+                "liveState": "persisted",
+                "activePrompt": false,
+                "eventCount": session.event_count,
+                "sessionType": session.session_type,
+                "parentSessionId": session.parent_session_id,
+                "projectScope": session.project_scope,
+            }
+        }
+    });
+    for (key, value) in [
+        ("title", session.title.map(serde_json::Value::String)),
+        ("cwd", session.cwd.map(serde_json::Value::String)),
+        ("model", session.model.map(serde_json::Value::String)),
+        (
+            "lastEventId",
+            session.last_event_id.map(serde_json::Value::from),
+        ),
+    ] {
+        if let Some(value) = value {
+            item[key] = value;
+        }
+    }
+    item
+}
+
 pub(super) fn mark_cancelled_session(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     params: &serde_json::Value,

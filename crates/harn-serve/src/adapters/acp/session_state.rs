@@ -155,13 +155,21 @@ impl AcpServer {
     /// exactly the way `session/list` resolves the roots it lists persisted
     /// sessions from. Sharing the resolution is what keeps listing and loading
     /// pointed at one store.
-    pub(super) fn restore_project_root(&self, params: &serde_json::Value) -> PathBuf {
+    pub(super) fn restore_project_root(
+        &self,
+        params: &serde_json::Value,
+    ) -> Result<PathBuf, AcpSessionProjectRootError> {
         let cwd = params
             .get("cwd")
             .and_then(|value| value.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        session_project_root_for_cwd(&cwd)
+            .or_else(|| {
+                params
+                    .get("_meta")
+                    .and_then(|meta| meta.get("harn"))
+                    .and_then(|harn| harn.get("cwd"))
+                    .and_then(|value| value.as_str())
+            });
+        resolve_acp_session_project_root(cwd)
     }
 
     pub(super) async fn handle_session_load(
@@ -211,8 +219,14 @@ impl AcpServer {
             // while a prompt runs — so ask the canonical store, which is the
             // same oracle `session/list` answers from. Anything it lists must
             // load, or the client is handed ids it is then told are unknown
-            // (burin#6267).
-            let project_root = self.restore_project_root(params);
+            // while the load path says they are unknown.
+            let project_root = match self.restore_project_root(params) {
+                Ok(project_root) => project_root,
+                Err(error) => {
+                    self.send_error(id, -32602, &format!("session/load: {error}"));
+                    return;
+                }
+            };
             match harn_vm::agent_session_restore::load_canonical_session_replay_events(
                 &project_root,
                 &session_id,

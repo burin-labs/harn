@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -44,6 +45,12 @@ pub(crate) struct ListenerConfig {
     pub(crate) mcp_router: Option<Router>,
     pub(crate) routes: Vec<RouteConfig>,
     pub(crate) tenant_store: Option<Arc<harn_vm::TenantStore>>,
+    /// The one project whose durable ACP sessions this listener may expose.
+    /// Live ACP traffic stays transport-owned; cold list/load must fail closed
+    /// when no project root is configured.
+    pub(crate) acp_project_root: Option<PathBuf>,
+    /// Login-session records accepted as listener bearer credentials. This is
+    /// not the canonical agent transcript store under a project's `.harn` directory.
     pub(crate) session_store: Option<Arc<harn_vm::SessionStore>>,
     /// When `true`, the Prometheus `/metrics` endpoint is exposed
     /// without auth. Defaults to `false` so a public bind does not
@@ -194,6 +201,9 @@ impl ListenerRuntime {
         let acp_state = Arc::new(AcpWebSocketState {
             event_log: config.event_log.clone(),
             auth: auth.clone(),
+            project_authority: super::acp_hub::persisted_sessions::ProjectAuthority::new(
+                config.acp_project_root.as_deref(),
+            )?,
             pipeline: None,
             hub: acp_hub.clone(),
         });
