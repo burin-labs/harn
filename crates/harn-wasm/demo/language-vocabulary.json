@@ -638,6 +638,7 @@
     "plan_entries",
     "platform",
     "pow",
+    "probe_provider_capabilities",
     "progress",
     "project_catalog_native",
     "project_context_profile_native",

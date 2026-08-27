@@ -702,9 +702,11 @@ be visible and greppable, and a row is promoted to `measured` only when a
 receipt actually exists.
 
 For `local`, `llamacpp`, `mlx`, and `ollama`, the running server gets the last
-word. The first capability lookup for an endpoint performs one short network
-probe. Harn caches the result for that endpoint. Ollama results also include
-the model because one daemon can hold packages with different templates.
+word. `harness.llm.probe_provider_capabilities(provider, model)` performs one
+short network probe. Harn also calls this path before a model request chooses
+its tool format. Harn caches the result for that endpoint. Ollama results also
+include the model because one daemon can hold packages with different
+templates.
 
 - llama.cpp and compatible `local` or `mlx` routes try `GET /props`. Native
   tools require both `supports_tools` and `supports_tool_calls` in
@@ -716,8 +718,10 @@ the model because one daemon can hold packages with different templates.
 - A missing, rejected, or malformed probe keeps the explicit fenced-JSON
   catch-all. Harn logs a warning and continues with the model call.
 
-The returned `runtime_probe` field is `nil` before a probe runs. Afterward, it
-contains `status`, a credential-free `endpoint`, `detail`, `native_tools`, and
+`harness.llm.provider_capabilities(provider, model)` reads the catalog and any
+cached probe result without using the network. Its `runtime_probe` field is
+`nil` before a probe runs. Afterward, the field contains `status`, a
+credential-free `endpoint`, `detail`, `native_tools`, and
 `supports_parallel_tool_calls`. `status` is `measured` or `unavailable`.
 See llama.cpp's [`/props` response](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#get-props)
 and Ollama's [`/api/show` response](https://docs.ollama.com/api/show)

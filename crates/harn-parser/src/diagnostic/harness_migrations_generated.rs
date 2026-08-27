@@ -274,6 +274,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("pipeline_lifecycle_audit_log_take", "harness.obs.pipeline_lifecycle_audit_log_take"),
     ("pipeline_on_finish", "harness.agent.pipeline_on_finish"),
     ("platform", "harness.system.platform"),
+    ("probe_provider_capabilities", "harness.llm.probe_provider_capabilities"),
     ("progress", "harness.stdio.progress"),
     ("project_catalog_native", "harness.project.catalog"),
     ("project_context_profile_native", "harness.project.context_profile"),

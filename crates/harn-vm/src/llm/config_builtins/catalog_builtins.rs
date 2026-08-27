@@ -12,12 +12,26 @@ use super::provider_projection::{provider_catalog_to_vm_value, provider_def_to_v
 /// Return provider/model capability metadata from the loaded capability matrix.
 #[harn_builtin(
     exposure = "harness.llm.provider_capabilities",
-    effects = ["llm.read@arg0", "network.observe@dynamic"],
+    effects = ["llm.read@arg0"],
     sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
+    category = "llm.config"
+)]
+pub(super) fn provider_capabilities_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    provider_capabilities_value(args)
+}
+
+/// Probe a self-hosted runtime, then return its effective capability metadata.
+#[harn_builtin(
+    exposure = "harness.llm.probe_provider_capabilities",
+    effects = ["llm.read@arg0", "network.observe@dynamic"],
+    sig = "probe_provider_capabilities(provider: string, model?: string|nil) -> dict",
     kind = "async",
     category = "llm.config"
 )]
-pub(super) async fn provider_capabilities_builtin(
+pub(super) async fn probe_provider_capabilities_builtin(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
