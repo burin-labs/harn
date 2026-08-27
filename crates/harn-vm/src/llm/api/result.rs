@@ -998,6 +998,11 @@ mod cache_supported_serde_tests {
             classify_llm_outcome(&truncated, false, true, false),
             LlmOutcomeKind::Truncated
         );
+        truncated.stop_reason = Some("model_context_window_exceeded".to_string());
+        assert_eq!(
+            classify_llm_outcome(&truncated, false, true, false),
+            LlmOutcomeKind::Truncated
+        );
 
         let mut refused = mock_completion_response("hi", None);
         refused.stop_reason = Some("content_filter".to_string());

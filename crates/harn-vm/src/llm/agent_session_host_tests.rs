@@ -1283,6 +1283,10 @@ fn provider_max_tokens_promoted_when_loop_clean() {
 #[test]
 fn provider_stop_reason_normalization_is_shared_with_transcripts() {
     assert_eq!(canonical_provider_stop_reason(Some("length")), "max_tokens");
+    assert_eq!(
+        canonical_provider_stop_reason(Some("model_context_window_exceeded")),
+        "max_tokens"
+    );
     assert_eq!(canonical_provider_stop_reason(Some("refusal")), "refusal");
     assert_eq!(canonical_provider_stop_reason(Some("tool_use")), "end_turn");
     assert_eq!(canonical_provider_stop_reason(None), "end_turn");
@@ -1331,6 +1335,7 @@ fn length_truncation_recognized_across_provider_spellings() {
     // Keyed on the normalized condition, not one wire format.
     assert!(is_length_truncation(Some("length"))); // OpenAI/OpenRouter/Ollama
     assert!(is_length_truncation(Some("max_tokens"))); // Anthropic
+    assert!(is_length_truncation(Some("model_context_window_exceeded"))); // Anthropic
     assert!(is_length_truncation(Some("LENGTH"))); // case-insensitive
     assert!(!is_length_truncation(Some("stop")));
     assert!(!is_length_truncation(Some("end_turn")));
