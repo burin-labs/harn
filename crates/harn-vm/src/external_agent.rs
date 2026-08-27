@@ -275,6 +275,7 @@ impl From<A2aClientError> for ExternalAgentError {
         match error {
             A2aClientError::InvalidTarget(message) => Self::InvalidRequest(message),
             A2aClientError::Discovery(message) => Self::Discovery(message),
+            A2aClientError::Transport(message) => Self::Transport(message),
             A2aClientError::Denied(message) => Self::Denied(message),
             A2aClientError::Timeout(message) => Self::Timeout(message),
             A2aClientError::Cancelled(message) => Self::Cancelled(message),

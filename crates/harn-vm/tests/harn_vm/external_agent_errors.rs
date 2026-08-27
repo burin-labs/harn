@@ -33,6 +33,10 @@ fn a2a_client_errors_keep_their_external_agent_kind() {
             ExternalAgentError::Discovery("invalid card".into()),
         ),
         (
+            A2aClientError::Transport("connection reset".into()),
+            ExternalAgentError::Transport("connection reset".into()),
+        ),
+        (
             A2aClientError::Denied("request denied".into()),
             ExternalAgentError::Denied("request denied".into()),
         ),

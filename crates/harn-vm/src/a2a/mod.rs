@@ -77,6 +77,7 @@ pub enum DispatchAck {
 pub enum A2aClientError {
     InvalidTarget(String),
     Discovery(String),
+    Transport(String),
     Protocol(String),
     Denied(String),
     Timeout(String),
@@ -88,6 +89,7 @@ impl std::fmt::Display for A2aClientError {
         match self {
             Self::InvalidTarget(message)
             | Self::Discovery(message)
+            | Self::Transport(message)
             | Self::Protocol(message)
             | Self::Denied(message)
             | Self::Timeout(message)
@@ -942,7 +944,7 @@ async fn send_http(
                     crate::egress::redact_reqwest_error(&error)
                 ))
             } else {
-                A2aClientError::Protocol(format!(
+                A2aClientError::Transport(format!(
                     "A2A HTTP request failed: {}",
                     crate::egress::redact_reqwest_error(&error)
                 ))
@@ -1015,6 +1017,17 @@ async fn recv_cancel(cancel_rx: &mut broadcast::Receiver<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rpc_request_builder_failures_are_transport_errors() {
+        let request = reqwest::Client::new().get("://invalid-url");
+        let (_cancel_tx, mut cancel_rx) = broadcast::channel(1);
+        let error = send_http(request, &mut cancel_rx, "request cancelled")
+            .await
+            .expect_err("invalid URL should fail before transport");
+
+        assert!(matches!(error, A2aClientError::Transport(_)));
+    }
 
     #[test]
     fn target_agent_label_prefers_path() {
