@@ -284,17 +284,17 @@ async fn openai_stream_aborts_on_impossible_property_type() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn stream_abort_cause_distinguishes_max_length_from_wrong_type() {
+async fn stream_abort_cause_distinguishes_missing_required_from_wrong_type() {
     reset_agent_trace_state();
     let schema = serde_json::json!({
         "type": "object",
         "required": ["detail"],
-        "properties": {"detail": {"type": "string", "maxLength": 5}}
+        "properties": {"detail": {"type": "string"}}
     });
     let payload = build_payload(schema);
     let watch = StreamSchemaWatch::from_payload(&payload).expect("schema is canonicalizable");
     let frame = serde_json::json!({
-        "choices": [{"delta": {"content": "{\"detail\":\"too long\"}"}}]
+        "choices": [{"delta": {"content": "{}"}}]
     });
     let body = format!("data: {frame}\n\ndata: [DONE]\n\n");
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -310,9 +310,9 @@ async fn stream_abort_cause_distinguishes_max_length_from_wrong_type() {
         false,
     )
     .await
-    .expect_err("length violation must abort the stream");
+    .expect_err("missing required property must abort the stream");
 
-    assert_schema_failure(&err, "max_length", "$.detail", "longer than 5");
+    assert_schema_failure(&err, "missing_required", "$", "required");
     reset_agent_trace_state();
 }
 
