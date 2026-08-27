@@ -708,4 +708,28 @@ mod tests {
         let error = validate_options(&options).expect_err("combination is provider-invalid");
         assert!(format!("{error:?}").contains("choose one"));
     }
+
+    #[test]
+    fn anthropic_rejects_forced_tool_choice_with_manual_thinking() {
+        let options = crate::llm::api::LlmCallOptions {
+            provider: "anthropic".to_string(),
+            model: "claude-haiku-4-5-20251001".to_string(),
+            thinking: crate::llm::api::ThinkingConfig::Enabled {
+                budget_tokens: Some(1024),
+            },
+            tool_choice: Some(serde_json::json!("required")),
+            ..Default::default()
+        };
+
+        let error = validate_options(&options).expect_err("combination is provider-invalid");
+        assert!(format!("{error:?}").contains("manual thinking"));
+
+        let mut automatic = options.clone();
+        automatic.tool_choice = Some(serde_json::json!("auto"));
+        validate_options(&automatic).expect("automatic tool choice remains valid");
+
+        let mut adaptive = options;
+        adaptive.thinking = crate::llm::api::ThinkingConfig::Adaptive;
+        validate_options(&adaptive).expect("adaptive thinking permits forced tool choice");
+    }
 }
