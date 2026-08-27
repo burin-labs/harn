@@ -7,7 +7,7 @@
 //! migrate every checker-owned omitted annotation to explicit `any`, audit the
 //! rewritten AST, and return a non-vacuous census.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use harn_parser::param_annotations::{self, DeclaredParam, UnannotatedParam};
 use harn_parser::TypeExpr;
@@ -94,6 +94,16 @@ struct CandidateFile {
 pub(super) fn migrate(
     targets: &[PathBuf],
     dry_run: bool,
+) -> Result<ImplicitAnyMigrationReport, String> {
+    migrate_with_writer(targets, dry_run, |path, source| {
+        std::fs::write(path, source)
+    })
+}
+
+fn migrate_with_writer(
+    targets: &[PathBuf],
+    dry_run: bool,
+    mut write: impl FnMut(&Path, &str) -> std::io::Result<()>,
 ) -> Result<ImplicitAnyMigrationReport, String> {
     let target_strings = targets
         .iter()
@@ -231,7 +241,7 @@ pub(super) fn migrate(
             .flat_map(|candidate| candidate.sites.iter().cloned())
             .collect();
         if !dry_run {
-            if let Err((failed_path, error)) = write_candidates(&candidates) {
+            if let Err((failed_path, error)) = write_candidates(&candidates, &mut write) {
                 report.changed.clear();
                 report.unresolved.push(file_finding(
                     &failed_path.to_string_lossy(),
@@ -382,10 +392,13 @@ fn audit_annotations(
     (unresolved, changed_semantics)
 }
 
-fn write_candidates(candidates: &[CandidateFile]) -> Result<(), (PathBuf, String)> {
+fn write_candidates(
+    candidates: &[CandidateFile],
+    write: &mut impl FnMut(&Path, &str) -> std::io::Result<()>,
+) -> Result<(), (PathBuf, String)> {
     let mut written: Vec<&CandidateFile> = Vec::new();
     for candidate in candidates {
-        if let Err(error) = std::fs::write(&candidate.path, &candidate.migrated) {
+        if let Err(error) = write(&candidate.path, &candidate.migrated) {
             let mut rollback_failures = Vec::new();
             if let Err(rollback_error) = std::fs::write(&candidate.path, &candidate.original) {
                 rollback_failures.push(format!("{}: {rollback_error}", candidate.path.display()));
@@ -563,5 +576,55 @@ mod tests {
             diagnostic.code,
             harn_parser::DiagnosticCode::ImplicitAnyParameter
         );
+    }
+
+    #[test]
+    fn later_write_failure_rolls_back_every_source_and_fails_with_named_census() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let first_path = temp.path().join("a-first.harn");
+        let failed_path = temp.path().join("b-failed.harn");
+        let first_before = b"fn first(value) { return value }\n";
+        let failed_before = b"fn second(value) { return value }\n";
+        std::fs::write(&first_path, first_before).unwrap();
+        std::fs::write(&failed_path, failed_before).unwrap();
+
+        let mut attempted = Vec::new();
+        let report = migrate_with_writer(&[temp.path().to_path_buf()], false, |path, source| {
+            attempted.push(path.to_path_buf());
+            if path == failed_path {
+                assert_eq!(
+                    std::fs::read_to_string(&first_path).unwrap(),
+                    "fn first(value: any) { return value }\n",
+                    "the first candidate must reach disk before the later write fails"
+                );
+                return Err(std::io::Error::other("injected later-write failure"));
+            }
+            std::fs::write(path, source)
+        })
+        .unwrap();
+
+        assert_eq!(attempted, vec![first_path.clone(), failed_path.clone()]);
+        assert_eq!(std::fs::read(&first_path).unwrap(), first_before);
+        assert_eq!(std::fs::read(&failed_path).unwrap(), failed_before);
+        assert_eq!(report.scanned_file_count, 2);
+        assert_eq!(report.observed_count, 2);
+        assert_eq!(report.changed_count, 0);
+        assert_eq!(report.pending_count, 2);
+        assert_eq!(report.unresolved_count, 1);
+        assert_eq!(report.changed_semantics_count, 0);
+        assert_eq!(report.unresolved[0].file, failed_path.display().to_string());
+        assert!(
+            report.unresolved[0]
+                .reason
+                .contains("injected later-write failure"),
+            "{report:#?}"
+        );
+        let error = super::super::require_complete_implicit_any_migration(&report)
+            .expect_err("an incomplete typed census must fail the command");
+        assert!(matches!(
+            error,
+            super::super::FixRunError::PartialFailure(message)
+                if message.contains("pending=2, unresolved=1, changed-semantics=0")
+        ));
     }
 }
