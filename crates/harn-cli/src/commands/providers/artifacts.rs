@@ -235,6 +235,10 @@ pub(crate) fn generated_artifacts_from_artifact(
             body: harn_vm::provider_catalog::typescript_declarations(),
         },
         GeneratedArtifact {
+            relative_path: "harn-provider-catalog.harn",
+            body: harn_vm::provider_catalog::harn_declarations()?,
+        },
+        GeneratedArtifact {
             relative_path: "HarnProviderCatalog.swift",
             body: harn_vm::provider_catalog::swift_binding()
                 .map_err(|error| format!("failed to generate Swift binding: {error}"))?,
@@ -282,6 +286,7 @@ mod tests {
         assert!(names.contains(&"provider-catalog.json"));
         assert!(names.contains(&"provider-catalog.schema.json"));
         assert!(names.contains(&"harn-provider-catalog.d.ts"));
+        assert!(names.contains(&"harn-provider-catalog.harn"));
         assert!(names.contains(&"HarnProviderCatalog.swift"));
     }
 
