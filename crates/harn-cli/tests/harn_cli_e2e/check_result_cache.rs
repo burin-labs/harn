@@ -62,7 +62,7 @@ fn warm_check_replays_identical_output_and_writes_artifacts() {
     std::fs::write(root.join("lib.harn"), "pub fn shared() {\n  return 1\n}\n").expect("write lib");
     std::fs::write(
         root.join("main.harn"),
-        "import { shared } from \"./lib\"\npipeline main(task) {\n  return shared()\n}\n",
+        "import { shared } from \"./lib\"\npipeline main(task: unknown) {\n  return shared()\n}\n",
     )
     .expect("write main");
 
@@ -94,7 +94,7 @@ fn editing_source_or_import_invalidates() {
     std::fs::write(root.join("lib.harn"), "pub fn shared() {\n  return 1\n}\n").expect("lib");
     std::fs::write(
         root.join("main.harn"),
-        "import { shared } from \"./lib\"\npipeline main(task) {\n  return shared()\n}\n",
+        "import { shared } from \"./lib\"\npipeline main(task: unknown) {\n  return shared()\n}\n",
     )
     .expect("main");
 
@@ -127,7 +127,7 @@ fn template_probe_invalidates_when_file_appears() {
     // with an existence probe on the candidate paths.
     std::fs::write(
         root.join("main.harn"),
-        "pipeline main(harness: Harness, task) {\n  return harness.fs.render_prompt(\"prompt.md\", {})\n}\n",
+        "pipeline main(harness: Harness, task: unknown) {\n  return harness.fs.render_prompt(\"prompt.md\", {})\n}\n",
     )
     .expect("main");
 
@@ -170,7 +170,7 @@ fn kill_switches_disable_the_cache() {
     let root = temp.path();
     std::fs::write(
         root.join("main.harn"),
-        "pipeline main(task) {\n  return 1\n}\n",
+        "pipeline main(task: unknown) {\n  return 1\n}\n",
     )
     .expect("main");
 
@@ -216,7 +216,7 @@ fn config_change_invalidates() {
     // An unused local fn produces a lint warning by default.
     std::fs::write(
         root.join("main.harn"),
-        "fn helper() {\n  return 1\n}\npipeline main(task) {\n  return 1\n}\n",
+        "fn helper() {\n  return 1\n}\npipeline main(task: unknown) {\n  return 1\n}\n",
     )
     .expect("main");
 
@@ -245,7 +245,7 @@ fn strictness_changes_cache_identity_and_preserves_warm_exit_semantics() {
     let root = temp.path();
     std::fs::write(
         root.join("main.harn"),
-        "fn unused_helper() {\n  return 1\n}\npipeline main(task) {\n  return 1\n}\n",
+        "fn unused_helper() {\n  return 1\n}\npipeline main(task: unknown) {\n  return 1\n}\n",
     )
     .expect("write source");
 

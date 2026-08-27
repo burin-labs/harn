@@ -137,7 +137,7 @@ impl LifetimeFixture {
             .expect("fixture FIFO path is shell-safe");
         let source = format!(
             "import {{ process_shell }} from \"std/runtime\"\n\
-             pipeline test(harness: Harness, task) {{\n\
+             pipeline test(harness: Harness, task: unknown) {{\n\
                const start = process_shell(harness.process, \"sh -c 'echo $$ \
                  $HARN_INTERNAL_PROCESS_OWNER_TOKEN >&{report_write}; exec cat \
                  {fifo_shell}' >/dev/null 2>&1{background}\")\n\

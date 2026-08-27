@@ -59,7 +59,7 @@ fn parallel_test_and_strict_check_share_installed_packages() {
         root.join("tests/test_answer.harn"),
         concat!(
             "import { answer } from \"acme/math\"\n\n",
-            "pipeline test_answer(_task) { assert_eq(answer(), 42) }\n",
+            "pipeline test_answer(_task: unknown) { assert_eq(answer(), 42) }\n",
         ),
     )
     .unwrap();

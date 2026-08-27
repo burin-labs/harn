@@ -83,7 +83,7 @@ fn operator_grant_supports_run_and_stale_lease_user_test_receipts() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline main(harness: Harness, _task) {{
+pipeline main(harness: Harness, _task: unknown) {{
   const receipt = git_push(
     harness.process,
     "origin",
@@ -127,7 +127,7 @@ pipeline main(harness: Harness, _task) {{
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline test_stale_lease(harness: Harness, _task) {{
+pipeline test_stale_lease(harness: Harness, _task: unknown) {{
   const receipt = git_push(
     harness.process,
     "origin",
@@ -168,7 +168,7 @@ fn user_test_requires_a_matching_operator_grant_across_worker_threads() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline test_protected_push(harness: Harness, _task) {{
+pipeline test_protected_push(harness: Harness, _task: unknown) {{
   const receipt = git_push(
     harness.process,
     "origin",
@@ -243,7 +243,7 @@ fn ref_plumbing_pushes_can_skip_the_checkouts_pre_push_hook() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline main(harness: Harness, _task) {{
+pipeline main(harness: Harness, _task: unknown) {{
   const hooked = git_push(
     harness.process,
     "origin",
@@ -334,7 +334,7 @@ fn a_leased_ref_deletion_can_also_skip_the_checkouts_pre_push_hook() {
         format!(
             r#"import {{ git_push }} from "std/git"
 
-pipeline main(harness: Harness, _task) {{
+pipeline main(harness: Harness, _task: unknown) {{
   const lease = {{ref: "refs/heads/attempt", expected_oid: "{oid}"}}
   const hooked = git_push(harness.process, "origin", ":refs/heads/attempt", {repo}, lease)
   assert(!hooked.success)

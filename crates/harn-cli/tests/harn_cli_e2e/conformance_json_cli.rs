@@ -89,13 +89,13 @@ fn conformance_json_reports_pass_and_expected_xfail() {
     write_fixture(
         temp.path(),
         "pass.harn",
-        "pipeline test(harness: Harness, task) {\n  harness.stdio.log(\"pass\")\n}\n",
+        "pipeline test(harness: Harness, task: unknown) {\n  harness.stdio.log(\"pass\")\n}\n",
         "[harn] pass\n",
     );
     write_fixture(
         temp.path(),
         "xfail_expected.harn",
-        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.log(\"actual\")\n}\n",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task: unknown) {\n  harness.stdio.log(\"actual\")\n}\n",
         "[harn] expected\n",
     );
 
@@ -138,7 +138,7 @@ fn parallel_conformance_json_matches_sequential_results() {
             temp.path(),
             &format!("group/case-{index}.harn"),
             &format!(
-                "pipeline test(harness: Harness, task) {{\n  harness.stdio.println({index})\n}}\n"
+                "pipeline test(harness: Harness, task: unknown) {{\n  harness.stdio.println({index})\n}}\n"
             ),
             &format!("{index}\n"),
         );
@@ -186,7 +186,7 @@ fn parallel_text_conformance_skips_xfail_cases_without_executing_them() {
     write_fixture(
         temp.path(),
         "xfail.harn",
-        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.println(true)\n}\n",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task: unknown) {\n  harness.stdio.println(true)\n}\n",
         "true\n",
     );
 
@@ -222,13 +222,13 @@ fn conformance_json_fails_on_failures_and_unexpected_xfail_passes() {
     write_fixture(
         temp.path(),
         "fail.harn",
-        "pipeline test(harness: Harness, task) {\n  harness.stdio.log(\"actual\")\n}\n",
+        "pipeline test(harness: Harness, task: unknown) {\n  harness.stdio.log(\"actual\")\n}\n",
         "[harn] expected\n",
     );
     write_fixture(
         temp.path(),
         "xfail_unexpected_pass.harn",
-        "// @xfail: tracked in #999\npipeline test(harness: Harness, task) {\n  harness.stdio.log(\"fixed\")\n}\n",
+        "// @xfail: tracked in #999\npipeline test(harness: Harness, task: unknown) {\n  harness.stdio.log(\"fixed\")\n}\n",
         "[harn] fixed\n",
     );
 
@@ -257,7 +257,7 @@ fn conformance_json_ignores_fixture_parent_runtime_state() {
     write_fixture(
         temp.path(),
         "metadata/isolated.harn",
-        "pipeline test(harness: Harness, task) {\n  assert_eq(harness.project.metadata_get({dir: \".\", namespace: \"classification\"}), nil)\n  const stale = harness.project.metadata_stale({dir: \".\"})\n  assert_eq(stale.any_stale, false)\n  const paths = harness.fs.runtime_paths()\n  assert_eq(paths.state_root.ends_with(\".harn\"), true)\n  assert_eq(paths.worktree_root.ends_with(\".harn/worktrees\"), true)\n  harness.stdio.log(\"isolated\")\n}\n",
+        "pipeline test(harness: Harness, task: unknown) {\n  assert_eq(harness.project.metadata_get({dir: \".\", namespace: \"classification\"}), nil)\n  const stale = harness.project.metadata_stale({dir: \".\"})\n  assert_eq(stale.any_stale, false)\n  const paths = harness.fs.runtime_paths()\n  assert_eq(paths.state_root.ends_with(\".harn\"), true)\n  assert_eq(paths.worktree_root.ends_with(\".harn/worktrees\"), true)\n  harness.stdio.log(\"isolated\")\n}\n",
         "[harn] isolated\n",
     );
     let stale_state = temp
@@ -322,7 +322,7 @@ fn conformance_json_schema_catalog_entry_is_registered() {
 }
 
 const PASSING_SOURCE: &str =
-    "pipeline test(harness: Harness, task) {\n  harness.stdio.println(true)\n}\n";
+    "pipeline test(harness: Harness, task: unknown) {\n  harness.stdio.println(true)\n}\n";
 
 /// The defect this guard exists for, at the boundary where it bit: a fixture
 /// added without its `.expected` sibling selected zero tests and exited 0, so

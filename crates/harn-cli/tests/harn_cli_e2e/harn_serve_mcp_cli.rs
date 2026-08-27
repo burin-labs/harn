@@ -100,7 +100,7 @@ fn write_mixed_surface_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("server.harn"),
         r#"
-pub fn render_value(args) {
+pub fn render_value(args: dict) {
   return {rendered: args.value}
 }
 

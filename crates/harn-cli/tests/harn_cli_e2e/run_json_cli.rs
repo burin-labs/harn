@@ -395,7 +395,7 @@ fn run_emit_summary_json_reports_runtime_failure_exit_code() {
         tmp.path(),
         "summary_failure.harn",
         r#"
-pipeline main(_) {
+pipeline main(_task: unknown) {
     throw "boom"
 }
 "#,
@@ -426,7 +426,7 @@ fn run_emit_summary_json_reports_compile_failure_exit_code() {
         tmp.path(),
         "summary_compile_failure.harn",
         r"
-pipeline main(_) {
+pipeline main(_task: unknown) {
     let =
 }
 ",
@@ -727,7 +727,7 @@ fn run_json_emits_terminal_error_on_runtime_failure() {
         tmp.path(),
         "boom.harn",
         r#"
-pipeline main(_) {
+pipeline main(_task: unknown) {
     throw "boom"
 }
 "#,

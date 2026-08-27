@@ -130,7 +130,7 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
     + ". */\n"
     + "pub fn "
     + handler
-    + "(args) {\n"
+    + "(args: unknown) -> string {\n"
     + "  const input = schema_expect(\n"
     + "    args,\n"
     + "    {type: \"object\", properties: {text: {type: \"string\"}}, required: [\"text\"]},\n"
@@ -205,7 +205,7 @@ fn __render_test_harn(package_name: string, ident: string) -> string {
     + "\n"
     + "pipeline test_"
     + ident
-    + "_tool(harness: Harness, task) {\n"
+    + "_tool(harness: Harness, task: unknown) {\n"
     + "  const registry = tools()\n"
     + "  const ok = agent_dispatch_tool_call(\n"
     + "    harness.tools,\n"

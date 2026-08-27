@@ -19,7 +19,9 @@ fn run_check(root: &Path, args: &[&str], jobs: Option<&str>) -> Output {
 }
 
 fn warning_source(name: &str) -> String {
-    format!("fn unused_{name}() {{\n  return 1\n}}\npipeline main(task) {{\n  return 1\n}}\n")
+    format!(
+        "fn unused_{name}() {{\n  return 1\n}}\npipeline main(task: unknown) {{\n  return 1\n}}\n"
+    )
 }
 
 fn stdout_json(output: &Output) -> serde_json::Value {
