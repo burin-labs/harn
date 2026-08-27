@@ -111,6 +111,11 @@ fn cache_accounting_declaration_tristate_gates_cache_zeroing() {
         // Absent: the test provider never declares either way. The parsed
         // values survive and the declaration reads as undeclared. A dedicated
         // provider keeps this transport contract independent of catalog rows.
+        assert_eq!(
+            crate::llm_config::provider_config("undeclared-cache")
+                .and_then(|provider| provider.cache_usage_accounting),
+            None
+        );
         let undeclared = call("undeclared-cache", "cached-model", None).await;
         assert_eq!(undeclared.cache_read_tokens, 150);
         assert!(undeclared.cache_supported);
