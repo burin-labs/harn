@@ -1517,7 +1517,6 @@ jobs:
         run: ./scripts/ci/windows_storage_budget.sh report after_restore
       - name: Install cargo-nextest
         uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
-        continue-on-error: true
         with:
           tool: nextest@0.9.132
       # Don't gate the whole pipeline on the full Windows test surface yet —
@@ -1580,23 +1579,21 @@ jobs:
           fi
 
           echo "windows: cargo package args: ${package_args[*]}"
-          if command -v cargo-nextest >/dev/null 2>&1; then
-            # Some affected crate sets compile Windows-only surfaces but have
-            # no tests matching the core unit filter; the compile itself is
-            # still the smoke gate for those PRs.
-            cargo nextest run --locked "${package_args[@]}" \
-              --features internal-freshness-checker \
-              --profile ci -E "$windows_filter" --no-tests=warn
-          else
-            cargo test --locked "${package_args[@]}" \
-              --features internal-freshness-checker --no-run
-            cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
-          fi
-          # Exercise the typed Cargo depfile owner and native Windows artifact
-          # identity APIs, including drive-colon/backslash/space fixtures.
-          cargo test --locked -p harn-cli --lib \
+          # Some affected crate sets compile Windows-only surfaces but have no
+          # tests matching the core unit filter; the compile itself is still
+          # the smoke gate for those PRs.
+          cargo nextest run --locked "${package_args[@]}" \
             --features internal-freshness-checker \
-            bootstrap::freshness -- --nocapture
+            --profile ci -E "$windows_filter" --no-tests=warn
+          # The default Harn CLI profile is the release-critical pre-merge set:
+          # library tests, fast integration tests, and the seven explicitly
+          # registered shipped-binary cases. Keep this native so Windows file
+          # durability and command-rendering defects cannot wait for release
+          # certification to become visible.
+          cargo nextest run --locked -p harn-cli \
+            --features internal-freshness-checker --profile ci
+          # Exercise the native Windows artifact identity binary, including
+          # drive-colon/backslash/space fixtures.
           cargo test --locked -p harn-cli --bin harn-freshness-check \
             --features internal-freshness-checker -- --nocapture
           printf 'completed_epoch=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"

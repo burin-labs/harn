@@ -873,7 +873,14 @@ fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
             return Err(format!("failed to chmod staged binary: {error}"));
         }
     }
-    if let Err(error) = fs::File::open(&temp_in_dest).and_then(|file| file.sync_all()) {
+    // `sync_all` maps to `FlushFileBuffers` on Windows, which requires a
+    // write-capable handle. `File::open` creates a read-only handle there and
+    // turns every otherwise-valid upgrade into `Access is denied`.
+    if let Err(error) = fs::OpenOptions::new()
+        .write(true)
+        .open(&temp_in_dest)
+        .and_then(|file| file.sync_all())
+    {
         let _ = fs::remove_file(&temp_in_dest);
         return Err(format!("failed to sync staged binary: {error}"));
     }

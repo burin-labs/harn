@@ -5,7 +5,6 @@
 //! exclusive file updates, atomic replacement, and process-crash boundaries.
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -823,33 +822,20 @@ fn save_state(state: &mut ExecutionState, expected_sha: Option<&str>) -> Result<
         .parent()
         .ok_or("manifest path has no parent")?
         .join(EXECUTION_FILE);
-    if let Some(expected) = expected_sha {
-        let actual = hash_file(&state_path)?;
-        if actual != expected {
-            return Err("stale batch execution writer rejected".to_string());
-        }
-    }
     let text = serde_json::to_string_pretty(state)
         .map_err(|error| format!("failed to serialize batch execution: {error}"))?
         + "\n";
-    let temp = state_path.with_extension(format!("json.{}.tmp", std::process::id()));
-    {
-        let mut file = fs::File::create(&temp)
-            .map_err(|error| format!("failed to create execution temp file: {error}"))?;
-        file.write_all(text.as_bytes())
-            .map_err(|error| format!("failed to write execution temp file: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("failed to flush execution temp file: {error}"))?;
+    let options = harn_vm::conditional_replace::ConditionalReplaceOptions {
+        expected_sha256: expected_sha.map(|digest| format!("sha256:{digest}")),
+        ..Default::default()
+    };
+    let receipt =
+        harn_vm::conditional_replace::conditional_replace(&state_path, text.as_bytes(), &options)
+            .map_err(|error| format!("failed to replace execution receipt: {error}"))?;
+    if receipt.status == harn_vm::conditional_replace::ConditionalReplaceStatus::Stale {
+        return Err("stale batch execution writer rejected".to_string());
     }
-    fs::rename(&temp, &state_path)
-        .map_err(|error| format!("failed to replace execution receipt: {error}"))?;
-    fs::File::open(
-        state_path
-            .parent()
-            .ok_or("execution receipt has no parent directory")?,
-    )
-    .and_then(|directory| directory.sync_all())
-    .map_err(|error| format!("failed to flush execution directory: {error}"))
+    Ok(())
 }
 
 fn load_state(execution_dir: &Path) -> Result<(ExecutionState, String), String> {

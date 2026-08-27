@@ -38,7 +38,8 @@ pub(crate) fn models_lora_inspect_human_text_includes_launch_hint() {
         "max LoRA rank: 16",
         "harn local launch local-gemma4-e4b --provider vllm",
         "--model-source google/gemma-4-e4b-it",
-        "--lora-adapter burin-tools=",
+        "--lora-adapter",
+        "burin-tools=",
         "--max-lora-rank 16",
     ] {
         assert!(
@@ -75,7 +76,8 @@ fn models_lora_inspect_canonicalizes_local_vllm_provider_alias() {
         "catalog LoRA launch flags: yes",
         "LoRA module format: json_with_base_model",
         "harn local launch local-gemma4-e4b --provider vllm",
-        "--lora-adapter burin-tools=",
+        "--lora-adapter",
+        "burin-tools=",
         "--max-lora-rank 16",
     ] {
         assert!(
