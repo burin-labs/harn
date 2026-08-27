@@ -117,6 +117,20 @@ harn_write_freshness_authority_path() {
 # retains include and includeIf directives from the parent file. A process that
 # changes Git's config-selection environment after the build needs a rebuild;
 # the receipt describes the exact process environment that produced its binary.
+harn_write_resolved_git_config_authorities() {
+  local output="$1"
+  local repo_root="$2"
+  local variable="$3"
+  local resolved_paths=""
+  local path=""
+
+  resolved_paths="$(git -C "$repo_root" var "$variable")" || return $?
+  while IFS= read -r path; do
+    [[ -n "$path" && "$path" != /dev/null ]] || continue
+    harn_write_freshness_authority_path "$output" "$path" git-config || return $?
+  done <<<"$resolved_paths"
+}
+
 harn_write_git_config_authorities() {
   local output="$1"
   local repo_root=""
@@ -128,15 +142,20 @@ harn_write_git_config_authorities() {
   path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" || return $?
   harn_write_freshness_authority_path "$output" "$path" git-config || return $?
 
-  # Explicit global/system locations are meaningful even while empty. They
-  # therefore need an authority entry before `git config --list` has a value
-  # to report from them.
-  if [[ -n "${GIT_CONFIG_GLOBAL:-}" && "$GIT_CONFIG_GLOBAL" != /dev/null ]]; then
-    harn_write_freshness_authority_path "$output" "$GIT_CONFIG_GLOBAL" git-config || return $?
-  fi
-  if [[ -n "${GIT_CONFIG_SYSTEM:-}" && "$GIT_CONFIG_SYSTEM" != /dev/null ]]; then
-    harn_write_freshness_authority_path "$output" "$GIT_CONFIG_SYSTEM" git-config || return $?
-  fi
+  # Ask Git for every effective global and system location rather than only
+  # recording paths that already contribute a setting. `git var` includes
+  # explicit overrides and every platform default, including missing files.
+  # The manifest's missing marker then makes later creation a stale transition.
+  harn_write_resolved_git_config_authorities \
+    "$output" "$repo_root" GIT_CONFIG_GLOBAL || return $?
+  harn_write_resolved_git_config_authorities \
+    "$output" "$repo_root" GIT_CONFIG_SYSTEM || return $?
+
+  # Per-worktree config is a separate writer once extensions.worktreeConfig is
+  # enabled. Bind its Git-resolved path even before the file exists.
+  path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config.worktree)" \
+    || return $?
+  harn_write_freshness_authority_path "$output" "$path" git-config || return $?
 
   # `--show-origin --name-only -z` emits pairs of NUL-delimited origin and
   # key records. Keep this build-time discovery in one Git process; the hook

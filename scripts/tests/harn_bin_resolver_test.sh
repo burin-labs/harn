@@ -703,16 +703,24 @@ exit 91
 SH
 chmod +x "$hostile_diff"
 export FRESHNESS_TEST_DIFF_MARKER="$hostile_diff_marker"
-fixture_global_config="$tmp_root/global.gitconfig"
 fixture_system_config="$tmp_root/system.gitconfig"
-printf '[user]\n\temail = global@example.invalid\n' > "$fixture_global_config"
 printf '[user]\n\temail = system@example.invalid\n' > "$fixture_system_config"
-export GIT_CONFIG_GLOBAL="$fixture_global_config"
+fixture_home="$tmp_root/home"
+fixture_xdg_config_home="$tmp_root/xdg-config"
+fixture_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+fixture_rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+mkdir -p "$fixture_home" "$fixture_xdg_config_home"
+export HOME="$fixture_home"
+export XDG_CONFIG_HOME="$fixture_xdg_config_home"
+export CARGO_HOME="$fixture_cargo_home"
+export RUSTUP_HOME="$fixture_rustup_home"
+unset GIT_CONFIG_GLOBAL
 export GIT_CONFIG_SYSTEM="$fixture_system_config"
 git -C "$cargo_fixture" init -q
 git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
 git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
 git -C "$cargo_fixture" config commit.gpgsign false
+git -C "$cargo_fixture" config extensions.worktreeConfig true
 git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
 git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
 git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
@@ -830,6 +838,7 @@ fi
 # changes an option that changes untracked inventory or recorded content.
 assert_config_change_rejected() {
   local scope="$1"
+  local expected_proof="${2:-manifest input content changed}"
   if (
     cd "$cargo_fixture"
     CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
@@ -840,7 +849,7 @@ assert_config_change_rejected() {
     echo "$scope Git config change left the freshness receipt usable" >&2
     exit 1
   fi
-  if ! grep -Fq 'manifest input content changed' \
+  if ! grep -Fq "$expected_proof" \
     "$tmp_root/cargo-fixture-$scope-config-stale.err"; then
     echo "$scope Git config failure did not name manifest content proof" >&2
     cat "$tmp_root/cargo-fixture-$scope-config-stale.err" >&2
@@ -858,7 +867,7 @@ assert_config_change_rejected() {
     echo "$scope Git config change left the hook freshness receipt usable" >&2
     exit 1
   fi
-  if ! grep -Fq 'manifest input content changed' \
+  if ! grep -Fq "$expected_proof" \
     "$tmp_root/cargo-fixture-$scope-hook-stale.err"; then
     echo "$scope hook failure did not name manifest content proof" >&2
     cat "$tmp_root/cargo-fixture-$scope-hook-stale.err" >&2
@@ -866,12 +875,50 @@ assert_config_change_rejected() {
   fi
 }
 
+# Default Git config paths are inputs even before they exist. Exercise every
+# path returned by Git itself so a new XDG or home config cannot appear after
+# the build without invalidating both no-build consumers.
+default_global_count=0
+while IFS= read -r default_global_config; do
+  [[ -n "$default_global_config" ]] || continue
+  if [[ -e "$default_global_config" ]]; then
+    echo "default global Git config fixture unexpectedly exists: $default_global_config" >&2
+    exit 1
+  fi
+  mkdir -p "${default_global_config%/*}"
+  printf '[core]\n\texcludesFile = %s\n' \
+    "$tmp_root/default-global-ignore-$default_global_count" \
+    > "$default_global_config"
+  assert_config_change_rejected \
+    "default-global-$default_global_count" \
+    'freshness input inventory changed after the manifest snapshot'
+  rm "$default_global_config"
+  default_global_count=$((default_global_count + 1))
+done < <(git -C "$cargo_fixture" var GIT_CONFIG_GLOBAL)
+if [[ "$default_global_count" -lt 1 ]]; then
+  echo "Git did not resolve any default global configuration paths" >&2
+  exit 1
+fi
+
+# Worktree-scoped configuration has its own file. It is normally absent even
+# when extensions.worktreeConfig is enabled, so bind that absence before a
+# later writer creates the file.
+fixture_worktree_config="$(
+  git -C "$cargo_fixture" rev-parse --path-format=absolute --git-path config.worktree
+)"
+if [[ -e "$fixture_worktree_config" ]]; then
+  echo "per-worktree Git config fixture unexpectedly exists" >&2
+  exit 1
+fi
+git -C "$cargo_fixture" config --worktree \
+  core.excludesFile "$tmp_root/worktree-ignore"
+assert_config_change_rejected \
+  worktree 'freshness input inventory changed after the manifest snapshot'
+rm "$fixture_worktree_config"
+
 git -C "$cargo_fixture" config core.excludesFile "$tmp_root/repository-ignore"
 assert_config_change_rejected repository
 git -C "$cargo_fixture" config --unset core.excludesFile
-git -C "$cargo_fixture" config --global core.excludesFile "$tmp_root/global-ignore"
-assert_config_change_rejected global
-git -C "$cargo_fixture" config --global --unset core.excludesFile
 git -C "$cargo_fixture" config --system core.excludesFile "$tmp_root/system-ignore"
 assert_config_change_rejected system
 git -C "$cargo_fixture" config --system --unset core.excludesFile
