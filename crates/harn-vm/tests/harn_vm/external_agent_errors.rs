@@ -1,4 +1,7 @@
-use harn_vm::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm, VmError};
+use harn_vm::{
+    a2a::A2aClientError, compile_source, external_agent::ExternalAgentError, register_vm_stdlib,
+    reset_thread_local_state, Vm, VmError,
+};
 
 fn run_source(source: &str) -> Result<String, String> {
     reset_thread_local_state();
@@ -20,6 +23,37 @@ fn run_source(source: &str) -> Result<String, String> {
             })
             .await
     })
+}
+
+#[test]
+fn a2a_client_errors_keep_their_external_agent_kind() {
+    let cases = [
+        (
+            A2aClientError::Discovery("invalid card".into()),
+            ExternalAgentError::Discovery("invalid card".into()),
+        ),
+        (
+            A2aClientError::Denied("request denied".into()),
+            ExternalAgentError::Denied("request denied".into()),
+        ),
+        (
+            A2aClientError::Timeout("request timed out".into()),
+            ExternalAgentError::Timeout("request timed out".into()),
+        ),
+        (
+            A2aClientError::Cancelled("request cancelled".into()),
+            ExternalAgentError::Cancelled("request cancelled".into()),
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let actual = ExternalAgentError::from(source);
+        assert_eq!(
+            std::mem::discriminant(&actual),
+            std::mem::discriminant(&expected)
+        );
+        assert_eq!(actual.to_string(), expected.to_string());
+    }
 }
 
 #[test]
@@ -49,4 +83,29 @@ pipeline main(harness: Harness, task: unknown) {
     .expect("Harn source should catch the external agent failure");
 
     assert!(output.contains("[harn] typed external agent error"));
+}
+
+#[test]
+fn external_agent_delegate_structures_argument_validation_errors() {
+    let output = run_source(
+        r#"
+pipeline main(harness: Harness, task: unknown) {
+  try {
+    harness.agent.external_agent_delegate("   ", {})
+  } catch (error) {
+    assert_eq(type_of(error), "dict", "external agent validation error value")
+    assert_eq(error.error, "external_agent_error", "external agent validation error family")
+    assert_eq(error.kind, "invalid_request", "external agent validation error kind")
+    assert_eq(error.category, "invalid_request", "external agent validation error category")
+    assert_eq(error.message, "__external_agent_delegate: task is required", "external agent validation error message")
+    harness.stdio.log("typed external agent validation error")
+    return
+  }
+  throw "external agent argument validation unexpectedly succeeded"
+}
+"#,
+    )
+    .expect("Harn source should catch the external agent validation failure");
+
+    assert!(output.contains("[harn] typed external agent validation error"));
 }

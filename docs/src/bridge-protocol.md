@@ -623,10 +623,13 @@ safe sequence:
 
 Delegation failures are caught as
 `{error: "external_agent_error", kind, category, message}`. `kind` is
-`invalid_request`, `transport`, or `protocol`. `category` uses the shared
-runtime category for retry and terminal-state decisions. Invalid requests use
-`invalid_request`, protocol failures use `tool_error`, and transport failures
-use their detected category or `transient_network`.
+`invalid_request`, `discovery`, `denied`, `timeout`, `cancelled`, `transport`,
+or `protocol`. `category` uses the shared runtime category for retry and
+terminal-state decisions. Invalid requests use `invalid_request`, discovery
+failures use a detected category or `tool_error`, denied requests use
+`tool_rejected`, timeouts use `timeout`, cancellations use `cancelled`, protocol
+failures use `tool_error`, and other transport failures use a detected category
+or `transient_network`.
 
 If a peer cannot provide a remote checkpoint, normal dispatch is refused. Hosts
 may set `checkpoint.allow_local_fallback: true` with an explicit local plan; Harn

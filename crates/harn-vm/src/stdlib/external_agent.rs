@@ -30,13 +30,15 @@ async fn external_agent_delegate_impl(
     let options = match args.get(1) {
         Some(VmValue::Dict(_)) => vm_value_to_json(&args[1]),
         Some(value) if !matches!(value, VmValue::Nil) => {
-            return Err(thrown("__external_agent_delegate: options must be a dict"));
+            return Err(invalid_request(
+                "__external_agent_delegate: options must be a dict",
+            ));
         }
         _ => serde_json::Value::Object(Default::default()),
     };
     let mut request: ExternalAgentDelegationRequest =
         serde_json::from_value(options).map_err(|error| {
-            thrown(format!(
+            invalid_request(format!(
                 "__external_agent_delegate: invalid options: {error}"
             ))
         })?;
@@ -58,13 +60,13 @@ fn required_string_arg(
 ) -> Result<String, VmError> {
     let value = args.get(index).map(VmValue::display).unwrap_or_default();
     if value.trim().is_empty() {
-        return Err(thrown(format!("{builtin}: {label} is required")));
+        return Err(invalid_request(format!("{builtin}: {label} is required")));
     }
     Ok(value)
 }
 
-fn thrown(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+fn invalid_request(message: impl Into<String>) -> VmError {
+    external_agent_error_to_vm(ExternalAgentError::InvalidRequest(message.into()))
 }
 
 fn external_agent_error_to_vm(error: ExternalAgentError) -> VmError {
@@ -74,6 +76,18 @@ fn external_agent_error_to_vm(error: ExternalAgentError) -> VmError {
         ExternalAgentError::InvalidRequest(message) => {
             ("invalid_request", ErrorCategory::InvalidRequest, message)
         }
+        ExternalAgentError::Discovery(message) => {
+            let category = crate::value::classify_error_message(&message);
+            let category = if category == ErrorCategory::Generic {
+                ErrorCategory::ToolError
+            } else {
+                category
+            };
+            ("discovery", category, message)
+        }
+        ExternalAgentError::Denied(message) => ("denied", ErrorCategory::ToolRejected, message),
+        ExternalAgentError::Timeout(message) => ("timeout", ErrorCategory::Timeout, message),
+        ExternalAgentError::Cancelled(message) => ("cancelled", ErrorCategory::Cancelled, message),
         ExternalAgentError::Transport(message) => {
             let category = crate::value::classify_error_message(&message);
             let category = if category == ErrorCategory::Generic {
@@ -106,6 +120,30 @@ mod tests {
                 "invalid_request",
                 ErrorCategory::InvalidRequest,
                 "invalid",
+            ),
+            (
+                ExternalAgentError::Discovery("A2A agent card missing protocolVersion".into()),
+                "discovery",
+                ErrorCategory::ToolError,
+                "A2A agent card missing protocolVersion",
+            ),
+            (
+                ExternalAgentError::Denied("remote agent rejected task".into()),
+                "denied",
+                ErrorCategory::ToolRejected,
+                "remote agent rejected task",
+            ),
+            (
+                ExternalAgentError::Timeout("request timed out".into()),
+                "timeout",
+                ErrorCategory::Timeout,
+                "request timed out",
+            ),
+            (
+                ExternalAgentError::Cancelled("request cancelled".into()),
+                "cancelled",
+                ErrorCategory::Cancelled,
+                "request cancelled",
             ),
             (
                 ExternalAgentError::Transport("connection dropped".into()),
