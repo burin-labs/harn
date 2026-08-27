@@ -515,16 +515,29 @@ fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
     );
     let transcript = fs::read_to_string(output_dir.join("transcript_events.jsonl"))
         .expect("transcript events exist");
-    assert!(
-        transcript.contains("runtime_feedback/structural_validator"),
-        "default validator should persist a typed corrective directive; got:\n{transcript}"
+    let transcript_events: Vec<serde_json::Value> = transcript
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("transcript event parses"))
+        .collect();
+    let corrective_messages: Vec<&str> = transcript_events
+        .iter()
+        .filter(|event| {
+            event["kind"] == "message" && event["role"] == "user" && event["visibility"] == "public"
+        })
+        .filter_map(|event| event["text"].as_str())
+        .filter(|text| text.contains("<directive authority=\"corrective\" ttl_turns=\"1\">"))
+        .collect();
+    assert_eq!(
+        corrective_messages.len(),
+        1,
+        "default validator should persist one typed corrective directive; got:\n{transcript}"
     );
     assert!(
         !transcript.contains("<runtime_feedback"),
         "internal feedback markup must not be persisted as model-visible content; got:\n{transcript}"
     );
     assert!(
-        transcript.contains("\\\"rule\\\":\\\"non_empty_when_writes_expected\\\""),
+        corrective_messages[0].contains("\"rule\":\"non_empty_when_writes_expected\""),
         "phantom completion should trip the write-expected rule; got:\n{transcript}"
     );
 }
