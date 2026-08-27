@@ -522,6 +522,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `Qwen/Qwen3.8-2.4T-A95B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `deepseek-ai/DeepSeek-V4-Pro-0813` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | catalog note: Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants. |
 | `together` | `moonshotai/Kimi-K2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
