@@ -17,3 +17,15 @@ fn cache_read_tokens_cover_anthropic_and_openai_chat_shapes() {
     });
     assert_eq!(extract_cache_read_tokens(&openai), 10_000);
 }
+
+#[test]
+fn cache_read_tokens_cover_together_flat_shape() {
+    let together = serde_json::json!({
+        "prompt_tokens": 10_200,
+        "completion_tokens": 20,
+        "total_tokens": 10_220,
+        "cached_tokens": 10_000
+    });
+
+    assert_eq!(extract_cache_read_tokens(&together), 10_000);
+}
