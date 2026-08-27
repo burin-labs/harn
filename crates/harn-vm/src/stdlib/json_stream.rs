@@ -1009,7 +1009,11 @@ fn project_schema_validation_issue(
     path_prefix: &str,
 ) -> EarlyInvalid {
     let path = if path_prefix.is_empty() {
-        issue.path
+        if issue.path == "root" {
+            "$".to_string()
+        } else {
+            issue.path
+        }
     } else if issue.path == "root" {
         path_prefix.to_string()
     } else if issue.path.starts_with('[') {
@@ -1519,6 +1523,20 @@ mod tests {
                 );
             }
             other => panic!("expected nested maxLength failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn root_schema_issue_preserves_public_json_path() {
+        let status = feed_chunks(&object_a_int_schema(), &[r#"{}"#]);
+        match status {
+            JsonStreamStatus::Invalid {
+                reason_kind, path, ..
+            } => {
+                assert_eq!(reason_kind, SchemaValidationReasonKind::MissingRequired);
+                assert_eq!(path, "$");
+            }
+            other => panic!("expected missing-required failure, got {other:?}"),
         }
     }
 
