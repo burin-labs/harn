@@ -692,7 +692,11 @@ pub fn __judge_completion_verdict_schema() -> dict {
     type: "object",
     properties: {
       verdict: {type: "string", enum: ["done", "continue"]},
-      detail: {type: "string", minLength: 1, maxLength: __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT},
+      detail: {
+        type: "string",
+        minLength: 1,
+        description: "Brief evidence basis or gap. Harn keeps the first 240 characters.",
+      },
       gap_class: {
         type: "string",
         enum: COMPLETION_JUDGE_GAP_CLASSES,
