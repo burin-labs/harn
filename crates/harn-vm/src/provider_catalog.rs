@@ -39,6 +39,7 @@ mod cache_accounting_tests;
 #[cfg(test)]
 mod display_name_tests;
 mod from_artifact;
+mod harn_binding;
 mod local_runtime;
 #[cfg(test)]
 mod local_runtime_tests;
@@ -59,6 +60,7 @@ mod validation;
 
 pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
 pub(crate) use from_artifact::config_from_artifact;
+pub use harn_binding::harn_declarations;
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
 pub use schema::{schema_json, schema_value};
 pub use types::*;

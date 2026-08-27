@@ -406,6 +406,7 @@ outputs = [
   "spec/provider-catalog/provider-catalog.json",
   "spec/provider-catalog/provider-catalog.schema.json",
   "spec/provider-catalog/harn-provider-catalog.d.ts",
+  "spec/provider-catalog/harn-provider-catalog.harn",
   "spec/provider-catalog/HarnProviderCatalog.swift",
   "crates/harn-stdlib/src/stdlib/llm/provider_names.harn",
 ]
