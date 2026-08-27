@@ -48,13 +48,14 @@ pub(super) fn structured_output_receipt(
     opts: &super::super::api::LlmCallOptions,
     payload: &super::super::api::LlmRequestPayload,
 ) -> serde_json::Value {
-    let (mode, strict, requested_schema) = match &opts.output_format {
-        super::super::api::OutputFormat::Text => ("text", None, None),
-        super::super::api::OutputFormat::JsonObject => ("json_object", None, None),
+    let (mode, strict, requested_schema, sent_schema) = match &opts.output_format {
+        super::super::api::OutputFormat::Text => ("text", None, None, None),
+        super::super::api::OutputFormat::JsonObject => ("json_object", None, None, None),
         super::super::api::OutputFormat::JsonSchema { schema, strict } => (
             "json_schema",
             Some(*strict),
             Some(opts.output_schema.as_ref().unwrap_or(schema)),
+            payload.output_schema.as_ref(),
         ),
     };
     let hash = |schema: Option<&serde_json::Value>| {
@@ -68,7 +69,7 @@ pub(super) fn structured_output_receipt(
         "mode": mode,
         "strict": strict,
         "requested_schema_content_hash": hash(requested_schema),
-        "sent_schema_content_hash": hash(payload.output_schema.as_ref()),
+        "sent_schema_content_hash": hash(sent_schema),
     })
 }
 
@@ -392,7 +393,6 @@ mod tests {
         ] {
             let mut opts = crate::llm::api::options::base_opts("openai");
             opts.output_format = format;
-            opts.output_schema = None;
             let payload = crate::llm::api::LlmRequestPayload::from(&opts);
             let receipt = structured_output_receipt(&opts, &payload);
 
