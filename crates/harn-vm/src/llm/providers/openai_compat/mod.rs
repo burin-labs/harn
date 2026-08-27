@@ -170,6 +170,7 @@ impl OpenAiCompatibleProvider {
                 remap_tool_call,
                 caps.reasoning_round_trip,
                 caps.reasoning_history_wire_field,
+                has_native_tools,
             );
             message
         }));

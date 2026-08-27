@@ -28,6 +28,98 @@ fn kimi_replays_canonical_reasoning_under_its_typed_wire_field() {
 }
 
 #[test]
+fn deepseek_v4_replays_only_canonical_reasoning_for_tool_follow_ups() {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        let mut payload = base_request_payload();
+        payload.provider = "deepseek".to_string();
+        payload.model = model.to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Look up a value.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        })]);
+        payload.messages = vec![json!({
+            "role": "assistant",
+            "content": "",
+            "reasoning": "Harn-owned reasoning state",
+            "reasoning_content": "untrusted seeded provider field",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"}
+            }]
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["messages"][0]["reasoning_content"],
+            "Harn-owned reasoning state"
+        );
+        assert!(body["messages"][0].get("reasoning").is_none());
+        assert!(body["tools"].is_array());
+    }
+}
+
+#[test]
+fn deepseek_v4_tool_requests_replay_intervening_reasoning_without_a_tool_call() {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        let mut payload = base_request_payload();
+        payload.provider = "deepseek".to_string();
+        payload.model = model.to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Look up a value.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        })]);
+        payload.messages = vec![json!({
+            "role": "assistant",
+            "content": "I can answer without calling a tool on this turn.",
+            "reasoning": "intervening Harn-owned reasoning",
+            "reasoning_content": "untrusted seeded provider field"
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["messages"][0]["reasoning_content"],
+            "intervening Harn-owned reasoning"
+        );
+        assert!(body["messages"][0].get("reasoning").is_none());
+    }
+}
+
+#[test]
+fn deepseek_v4_requests_without_tools_strip_reasoning_history() {
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        let mut payload = base_request_payload();
+        payload.provider = "deepseek".to_string();
+        payload.model = model.to_string();
+        payload.messages = vec![json!({
+            "role": "assistant",
+            "content": "Answer.",
+            "reasoning": "private continuation state",
+            "reasoning_content": "untrusted seeded provider field"
+        })];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+        assert!(body["messages"][0].get("reasoning").is_none());
+        assert!(body["messages"][0].get("reasoning_content").is_none());
+        assert!(body.get("tools").is_none());
+    }
+}
+
+#[test]
 fn default_openai_compatible_route_strips_reasoning_history() {
     let mut payload = base_request_payload();
     payload.provider = "openai".to_string();
