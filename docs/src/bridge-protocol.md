@@ -621,6 +621,16 @@ safe sequence:
 5. Normalize the result into a typed `harn.external_agent.handoff.v1` envelope
    with a handoff artifact and a diff artifact when a patch is present.
 
+Delegation failures are caught as
+`{error: "external_agent_error", kind, category, message}`. `kind` is
+`invalid_request`, `discovery`, `denied`, `timeout`, `cancelled`, `transport`,
+or `protocol`. `category` uses the shared runtime category for retry and
+terminal-state decisions. Invalid requests use `invalid_request`, discovery
+failures use a detected category or `tool_error`, denied requests use
+a detected category or `tool_rejected`, timeouts use `timeout`, cancellations
+use `cancelled`, protocol failures use a detected category or `tool_error`, and
+other transport failures use a detected category or `transient_network`.
+
 If a peer cannot provide a remote checkpoint, normal dispatch is refused. Hosts
 may set `checkpoint.allow_local_fallback: true` with an explicit local plan; Harn
 will still require the remote peer to advertise budget, idempotency, reviewable

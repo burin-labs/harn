@@ -246,6 +246,10 @@ impl Default for ExternalAgentDelegationEnvelope {
 #[derive(Debug)]
 pub enum ExternalAgentError {
     InvalidRequest(String),
+    Discovery(String),
+    Denied(String),
+    Timeout(String),
+    Cancelled(String),
     Transport(String),
     Protocol(String),
 }
@@ -253,9 +257,13 @@ pub enum ExternalAgentError {
 impl std::fmt::Display for ExternalAgentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidRequest(message) | Self::Transport(message) | Self::Protocol(message) => {
-                f.write_str(message)
-            }
+            Self::InvalidRequest(message)
+            | Self::Discovery(message)
+            | Self::Denied(message)
+            | Self::Timeout(message)
+            | Self::Cancelled(message)
+            | Self::Transport(message)
+            | Self::Protocol(message) => f.write_str(message),
         }
     }
 }
@@ -266,10 +274,11 @@ impl From<A2aClientError> for ExternalAgentError {
     fn from(error: A2aClientError) -> Self {
         match error {
             A2aClientError::InvalidTarget(message) => Self::InvalidRequest(message),
-            A2aClientError::Discovery(message)
-            | A2aClientError::Denied(message)
-            | A2aClientError::Timeout(message)
-            | A2aClientError::Cancelled(message) => Self::Transport(message),
+            A2aClientError::Discovery(message) => Self::Discovery(message),
+            A2aClientError::Transport(message) => Self::Transport(message),
+            A2aClientError::Denied(message) => Self::Denied(message),
+            A2aClientError::Timeout(message) => Self::Timeout(message),
+            A2aClientError::Cancelled(message) => Self::Cancelled(message),
             A2aClientError::Protocol(message) => Self::Protocol(message),
         }
     }
