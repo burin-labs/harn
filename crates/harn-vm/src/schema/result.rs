@@ -43,26 +43,15 @@ impl ValidationIssue {
         }
     }
 
-    pub(super) fn json_schema(
-        path: &str,
-        kind: &jsonschema::ValidationErrorKind,
-        message: impl Into<String>,
-    ) -> Self {
-        let kind = match kind {
-            jsonschema::ValidationErrorKind::Type { .. } => SchemaValidationReasonKind::WrongType,
-            jsonschema::ValidationErrorKind::Required { .. } => {
-                SchemaValidationReasonKind::MissingRequired
-            }
-            jsonschema::ValidationErrorKind::AdditionalProperties { .. }
-            | jsonschema::ValidationErrorKind::UnevaluatedProperties { .. } => {
+    pub(super) fn json_schema(path: &str, keyword: &str, message: impl Into<String>) -> Self {
+        let kind = match keyword {
+            "type" => SchemaValidationReasonKind::WrongType,
+            "required" => SchemaValidationReasonKind::MissingRequired,
+            "additionalProperties" | "unevaluatedProperties" => {
                 SchemaValidationReasonKind::UnexpectedProperty
             }
-            jsonschema::ValidationErrorKind::MaxLength { .. } => {
-                SchemaValidationReasonKind::MaxLength
-            }
-            jsonschema::ValidationErrorKind::MinLength { .. } => {
-                SchemaValidationReasonKind::MinLength
-            }
+            "maxLength" => SchemaValidationReasonKind::MaxLength,
+            "minLength" => SchemaValidationReasonKind::MinLength,
             _ => SchemaValidationReasonKind::ConstraintViolation,
         };
         Self {

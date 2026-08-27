@@ -199,7 +199,7 @@ fn validate_exported_json_schema(
             } else {
                 child_path(path_prefix, &suffix)
             };
-            ValidationIssue::json_schema(&path, error.kind(), error.to_string())
+            ValidationIssue::json_schema(&path, error.kind().keyword(), error.to_string())
         })
         .collect()
 }
