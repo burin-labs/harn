@@ -426,9 +426,9 @@ pub(crate) use self::agent_session_host::active_run_id as active_agent_run_id;
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
 pub(crate) use self::call::{
-    execute_llm_call, execute_schema_retry_loop, extract_structured_data, rewrite_structured_args,
-    structured_output_errors, structured_safe_envelope_err, structured_safe_envelope_ok,
-    SchemaLoopOutcome,
+    execute_llm_call, execute_schema_retry_loop, extract_structured_data, llm_error_message,
+    rewrite_structured_args, structured_output_errors, structured_safe_envelope_err,
+    structured_safe_envelope_ok, SchemaLoopOutcome,
 };
 pub use self::cost::{
     calculate_cost_for_provider, install_llm_cost_budget, install_llm_token_budget,

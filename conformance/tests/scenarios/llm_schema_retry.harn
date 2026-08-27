@@ -56,18 +56,20 @@ pipeline default(harness: Harness) {
     harness.llm,
     [llm_text("{\"improvement\": \"try again\"}")],
     { ->
-      const err = try {
-        harness.llm.call(
-          "Grade again",
-          nil,
-          {
-            provider: "mock",
-            output: {schema: schema, strict: true, validation: "error"},
-            schema_retries: 0,
-          },
-        )
-      }
-      harness.stdio.println(contains(unwrap_err(err).message, "schema"))
+      const safe = harness.llm.call_safe(
+        "Grade again",
+        nil,
+        {
+          provider: "mock",
+          output: {schema: schema, strict: true, validation: "error"},
+          schema_retries: 0,
+        },
+      )
+      const no_retry_error = safe.error
+      harness.stdio.println(contains(no_retry_error.message, "schema"))
+      harness.stdio.println(no_retry_error.schema_retry.attempts)
+      harness.stdio.println(no_retry_error.schema_retry.budget)
+      harness.stdio.println(no_retry_error.schema_retry.status)
       harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )
@@ -111,7 +113,11 @@ pipeline default(harness: Harness) {
           },
         )
       }
-      harness.stdio.println(contains(unwrap_err(prose_err).message, "parseable JSON"))
+      const exhausted_error = unwrap_err(prose_err)
+      harness.stdio.println(contains(exhausted_error.message, "parseable JSON"))
+      harness.stdio.println(exhausted_error.schema_retry.attempts)
+      harness.stdio.println(exhausted_error.schema_retry.budget)
+      harness.stdio.println(exhausted_error.schema_retry.status)
     },
   )
 }
@@ -125,10 +131,12 @@ pipeline default(harness: Harness) {
 // Issue #533: SchemaRetry trace events carry both the validation
 // errors AND the correction prompt text, so a transcript reader can
 // see why a retry happened and what the model received.
-// schema_retries: 0 — no retry; invalid JSON surfaces as an error.
+// schema_retries: 0 — no retry; call_safe surfaces the invalid JSON as an error.
+// Its error states that corrective retries were disabled.
 // `schema_retry_nudge: false` still retries; it just omits the
 // corrective user message.
 // schema_retry_nudge: false replays the original messages exactly;
 // the invalid response is NOT persisted as an assistant turn, so
 // the last role on the retry call is still "user".
 // Exhausted prose-only retries surface as hard schema failures.
+// Their error states how many calls ran and that the retry budget was exhausted.

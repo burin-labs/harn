@@ -579,6 +579,10 @@ fn envelope_failure(
         VmValue::Int(outcome.attempts as i64),
     );
     env.insert(
+        crate::value::intern_key("schema_retry"),
+        super::call::schema_retry_failure_facts(outcome.attempts, outcome.schema_retries_budget),
+    );
+    env.insert(
         crate::value::intern_key("repaired"),
         VmValue::Bool(repaired),
     );
@@ -920,6 +924,15 @@ mod tests {
 
         let success = envelope_success(&outcome, false, None);
         let failure = envelope_failure(&outcome, EnvelopeFailureKind::SchemaValidation, false);
+        let failure_json = crate::llm::vm_value_to_json(&failure);
+        assert_eq!(
+            failure_json["schema_retry"],
+            serde_json::json!({
+                "attempts": 1,
+                "budget": 2,
+                "status": "exhausted",
+            })
+        );
 
         let success_usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone().into()));

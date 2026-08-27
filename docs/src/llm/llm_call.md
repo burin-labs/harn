@@ -397,6 +397,19 @@ const result = harness.llm.call(prompt, nil, {
 })
 ```
 
+When schema validation remains invalid, the thrown error and
+`harness.llm.call_safe()` error include a `schema_retry` record:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `attempts` | int | Model calls made, including the initial call. |
+| `budget` | int | Corrective retries allowed after the initial call. |
+| `status` | string | `disabled` when `budget` is zero; `exhausted` when every allowed retry ran. |
+
+`harness.llm.call_structured_result()` includes the same record on schema
+failure. These fields describe corrective schema retries. Provider and network
+retry policy remains separate.
+
 #### Reasoning and modalities
 
 | Key | Type | Meaning |
