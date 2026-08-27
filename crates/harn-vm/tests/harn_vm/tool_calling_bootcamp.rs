@@ -30,11 +30,39 @@
 
 use harn_vm::value::VmError;
 
+struct CatalogOnlyPolicy;
+
+impl CatalogOnlyPolicy {
+    fn install() -> Self {
+        harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+            capabilities: std::collections::BTreeMap::from([
+                ("llm".to_string(), vec!["catalog".to_string()]),
+                ("state".to_string(), vec!["write".to_string()]),
+                ("stdio".to_string(), vec!["write".to_string()]),
+            ]),
+            side_effect_level: Some("workspace_write".to_string()),
+            ..Default::default()
+        });
+        Self
+    }
+}
+
+impl Drop for CatalogOnlyPolicy {
+    fn drop(&mut self) {
+        harn_vm::orchestration::pop_execution_policy();
+    }
+}
+
 /// Run one Harn snippet through a fresh VM with the full stdlib registered,
 /// returning Ok(stdout) or Err(error-string). A `throw` inside the snippet
 /// surfaces as Err here, which is how we observe a "rejected" config.
 fn run(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
+    // This is a zero-live-call catalog battery. A developer machine may have
+    // Ollama or another self-hosted runtime listening locally; admitting the
+    // probe would replace the shipped capability row with machine-local facts
+    // and make the same source pass in CI but fail on that workstation.
+    let _policy = CatalogOnlyPolicy::install();
     let chunk = harn_vm::compile_source(source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -53,6 +81,22 @@ fn run(source: &str) -> Result<String, String> {
             })
             .await
     })
+}
+
+#[test]
+fn bootcamp_policy_rejects_live_capability_probes() {
+    let error = run(r#"
+pipeline main(harness: Harness, task: unknown) {
+  harness.llm.probe_provider_capabilities("ollama", "devstral-small-2:24b")
+}
+"#)
+    .expect_err("the catalog battery must not observe a live local runtime");
+    assert!(
+        error.contains("probe_provider_capabilities")
+            && error.contains("net:observe")
+            && error.contains("ToolRejected"),
+        "probe denial must identify the rejected network observation: {error}"
+    );
 }
 
 /// `harness.stdio.log()` lines emitted by the snippet, stripped of the `[harn] ` prefix.
