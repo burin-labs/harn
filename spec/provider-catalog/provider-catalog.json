@@ -9780,6 +9780,104 @@
       }
     },
     {
+      "id": "qwen/qwen3.8-27b",
+      "name": "Qwen3.8 27B (Groq)",
+      "display_name": "Qwen3.8 27B",
+      "provider": "groq",
+      "aliases": [
+        "groq-qwen3.8"
+      ],
+      "context_window": 131042,
+      "logical_model": "qwen3.8-27b",
+      "equivalence_group": "qwen3.8-27b",
+      "served_variant": "groq-lpu-preview",
+      "wire_model": "qwen/qwen3.8-27b",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.8,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
       "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
       "name": "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)",
       "display_name": "Qwen3-Coder 480B A35B Instruct",
@@ -25207,6 +25305,12 @@
       "tool_format": "native"
     },
     {
+      "name": "groq-qwen3.8",
+      "model_id": "qwen/qwen3.8-27b",
+      "provider": "groq",
+      "tool_format": "native"
+    },
+    {
       "name": "haiku",
       "model_id": "claude-haiku-4-5-20251001",
       "provider": "anthropic"
@@ -27406,6 +27510,28 @@
         "structured_output_mode:native_json",
         "text_tools",
         "tools"
+      ]
+    },
+    {
+      "provider": "groq",
+      "model": "qwen/qwen3.8-27b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "secret_env": "GROQ_API_KEY",
+      "label": "Qwen3.8 27B (Groq)",
+      "family": "qwen",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {

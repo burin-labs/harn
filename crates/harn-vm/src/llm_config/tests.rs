@@ -495,6 +495,42 @@ fn cerebras_gemma_4_catalog_row_preserves_public_route_metadata() {
 }
 
 #[test]
+fn groq_qwen_3_8_catalog_row_preserves_public_route_metadata() {
+    let model = model_catalog_entry("qwen/qwen3.8-27b")
+        .expect("Groq Qwen 3.8's public preview route must be catalogued");
+
+    assert_eq!(model.provider, "groq");
+    assert_eq!(model.context_window, 131_042);
+    assert_eq!(model.wire_model.as_deref(), Some("qwen/qwen3.8-27b"));
+    assert_eq!(model.open_weight, Some(true));
+    for capability in ["tools", "vision", "streaming", "thinking"] {
+        assert!(
+            model.capabilities.iter().any(|value| value == capability),
+            "Groq Qwen 3.8 must expose {capability}"
+        );
+    }
+    let pricing = model
+        .pricing
+        .expect("Groq Qwen 3.8's public token rates must be catalogued");
+    assert_eq!(pricing.input_per_mtok, 0.80);
+    assert_eq!(pricing.output_per_mtok, 4.00);
+
+    let capabilities = crate::llm::capabilities::lookup("groq", "qwen/qwen3.8-27b");
+    assert!(capabilities.native_tools);
+    assert!(capabilities.tools_exclude_response_format);
+    assert!(capabilities.vision_supported);
+    assert_eq!(capabilities.structured_output.as_deref(), Some("native"));
+    assert_eq!(capabilities.thinking_modes, vec!["effort"]);
+    assert_eq!(
+        capabilities.reasoning_effort_levels,
+        vec!["none", "low", "medium", "high"]
+    );
+    assert!(capabilities.reasoning_none_supported);
+    assert!(capabilities.presence_penalty_supported);
+    assert!(!capabilities.top_k_supported);
+}
+
+#[test]
 fn test_external_config_overlays_default_catalog() {
     let mut config = default_config();
     let mut overlay = ProvidersConfig {
