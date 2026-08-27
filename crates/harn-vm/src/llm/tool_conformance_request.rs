@@ -441,19 +441,26 @@ fn signed_thinking_probe_messages(provider: &str, marker: &str) -> Vec<Value> {
 }
 
 fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
-    if payload.api_mode == LlmApiMode::Responses {
-        return crate::llm::providers::OpenAiResponsesProvider::build_request_body(payload);
-    }
-    match payload.provider.as_str() {
-        "azure_openai" => {
-            return crate::llm::providers::AzureOpenAiProvider::build_request_body(payload);
+    let mut body = if payload.api_mode == LlmApiMode::Responses {
+        crate::llm::providers::OpenAiResponsesProvider::build_request_body(payload)
+    } else {
+        match payload.provider.as_str() {
+            "azure_openai" => {
+                crate::llm::providers::AzureOpenAiProvider::build_request_body(payload)
+            }
+            "bedrock" => crate::llm::providers::BedrockProvider::build_request_body(payload),
+            "vertex" => crate::llm::providers::VertexProvider::build_request_body(payload),
+            _ => crate::llm::api::DialectContract::for_request(payload).build_request_body(payload),
         }
-        "bedrock" => return crate::llm::providers::BedrockProvider::build_request_body(payload),
-        "vertex" => return crate::llm::providers::VertexProvider::build_request_body(payload),
-        _ => {}
-    }
+    };
 
-    crate::llm::api::DialectContract::for_request(payload).build_request_body(payload)
+    super::helpers::apply_stream_transport_fields(
+        &payload.provider,
+        &payload.model,
+        payload.stream,
+        &mut body,
+    );
+    body
 }
 
 fn request_body_warnings(

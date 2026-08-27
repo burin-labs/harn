@@ -344,7 +344,10 @@ async fn vm_call_llm_api_with_body_inner(
     let model = &opts.model;
     crate::llm::managed_supply::attach_request_extension(&mut body, provider, model)?;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
-    let wants_streaming = delta_tx.is_some() && opts.stream;
+    // `stream` selects the provider transport. A delta receiver only decides
+    // whether a caller observes incremental text; probe calls intentionally
+    // collect the same stream without one.
+    let wants_streaming = opts.stream;
     // Whether this request offered any tools to the model. Used by the
     // billed-no-op contract guard so a deliberately terse text answer to a
     // tool-less prompt is never misclassified as a missing tool call.
@@ -396,13 +399,12 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
 
-    if use_stream_transport {
-        body["stream"] = serde_json::json!(true);
-        // OpenAI-style: request usage in the final streaming chunk.
-        if dialect.requests_stream_usage(provider, &resolved.endpoint) {
-            body["stream_options"] = serde_json::json!({"include_usage": true});
-        }
-    }
+    dialect.apply_stream_transport_fields(
+        &mut body,
+        provider,
+        &resolved.endpoint,
+        use_stream_transport,
+    );
 
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)

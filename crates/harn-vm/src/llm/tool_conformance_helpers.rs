@@ -5,18 +5,19 @@ use serde_json::{json, Value};
 use super::TOOL_PROBE_TOOL_NAME;
 use crate::value::VmValue;
 
-pub(crate) fn apply_live_transport_mode(
+pub(crate) fn apply_stream_transport_fields(
     provider: &str,
     model: &str,
-    mode: super::ToolProbeMode,
+    streaming: bool,
     body: &mut Value,
 ) {
-    if mode == super::ToolProbeMode::Streaming
-        && crate::llm::capabilities::lookup(provider, model).message_wire_format
-            == crate::llm::capabilities::WireDialect::OpenAiCompat
-    {
-        body["stream"] = Value::Bool(true);
-    }
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    let dialect =
+        crate::llm::api::DialectContract::new(caps.message_wire_format, caps.live_endpoint_family);
+    let endpoint = crate::llm_config::provider_config(provider)
+        .map(|definition| definition.chat_endpoint)
+        .unwrap_or_default();
+    dialect.apply_stream_transport_fields(body, provider, &endpoint, streaming);
 }
 
 pub(crate) fn aggregate_stream_text(text: &str, _provider: &str) -> Value {
