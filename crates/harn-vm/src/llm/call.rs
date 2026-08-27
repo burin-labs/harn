@@ -3,6 +3,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod preflight;
+
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmError, VmValue};
@@ -352,38 +354,22 @@ fn join_limited_keys(keys: &[String]) -> String {
     )
 }
 
-/// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
-/// full schema-retry loop; on success returns the LLM result dict, on
-/// failure returns the underlying `VmError`. `llm_call` propagates the
-/// error (re-wrapped as a thrown `{kind, reason, category, message,
-/// retry_after_ms?, provider, model}` dict so catch blocks can dispatch
-/// on the LLM error taxonomy);
-/// `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope with
-/// the same fields.
+/// Shared implementation of the ordinary throwing `llm_call` surface.
 pub(super) async fn llm_call_impl(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-    let opts = crate::llm::helpers::prepare_llm_options(&args).await?;
-    let provider = opts.provider.clone();
-    let model = opts.model.clone();
-    // Publish the resolved provider/model/capabilities to templates
-    // rendered while this `llm_call` frame is on the stack — e.g.
-    // schema-retry prompts or middleware that re-renders a partial
-    // for a corrective second pass.
-    let _llm_render_guard = crate::stdlib::template::LlmRenderContextGuard::enter(
-        crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
-    );
-    // `execute_llm_call` records the resolved provider/model into the
-    // runtime-introspection snapshot — that's the single DRY point for
-    // every llm_call path (plain, bridged, structured), so we don't
-    // also record here.
-    match execute_llm_call(ctx, opts, options, None, None).await {
-        Ok(v) => Ok(v),
-        Err(err) => Err(VmError::Thrown(build_llm_error_dict(
-            &err, &provider, &model,
-        ))),
+    preflight::execute(ctx, args, preflight::ErrorSurface::Throwing).await
+}
+
+/// Shared implementation of the non-throwing `llm_call_safe` surface.
+pub(super) async fn llm_call_safe_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> VmValue {
+    match preflight::execute(ctx, args, preflight::ErrorSurface::Safe).await {
+        Ok(response) => llm_safe_envelope_ok(response),
+        Err(error) => llm_safe_envelope_err(&error),
     }
 }
 

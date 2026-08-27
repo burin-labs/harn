@@ -358,7 +358,7 @@ use crate::vm::Vm;
 use std::sync::Arc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
-use self::call::{llm_call_impl, llm_safe_envelope_err, llm_safe_envelope_ok};
+use self::call::{llm_call_impl, llm_call_safe_impl};
 use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl, llm_stream_collect_impl};
 use self::trace::trace_llm_call;
 
@@ -727,10 +727,7 @@ async fn llm_call_safe_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    match llm_call_impl(Some(&ctx), args).await {
-        Ok(response) => Ok(llm_safe_envelope_ok(response)),
-        Err(err) => Ok(llm_safe_envelope_err(&err)),
-    }
+    Ok(llm_call_safe_impl(Some(&ctx), args).await)
 }
 
 /// Call an LLM for JSON data and return parsed schema-valid data.

@@ -139,9 +139,13 @@ pub(super) fn output_format_error(message: impl Into<String>) -> VmError {
 }
 
 pub(super) fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn provider catalog matrix` for compatibility."
-    ))))
+    crate::llm::call::invalid_request_error(
+        format!(
+            "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn provider catalog matrix` for compatibility."
+        ),
+        provider,
+        model,
+    )
 }
 
 pub(super) fn option_is_enabled(options: Option<&crate::value::DictMap>, key: &str) -> bool {

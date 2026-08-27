@@ -78,7 +78,25 @@ pub(crate) use system_prompt::{
 pub(crate) use thinking::{resolve_catalog_thinking_config, resolve_thinking_config};
 
 /// Resolve an outbound call after refreshing runtime-owned capabilities.
+///
+/// Ordinary throwing calls retain their established text errors. The safe
+/// surface uses [`prepare_llm_options_safe`] to preserve local error taxonomy.
 pub(crate) async fn prepare_llm_options(
+    args: &[VmValue],
+) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+    prepare_llm_options_result(args)
+        .await
+        .map_err(throwing_preflight_error)
+}
+
+/// Resolve an outbound call without discarding structured local failures.
+pub(crate) async fn prepare_llm_options_safe(
+    args: &[VmValue],
+) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+    prepare_llm_options_result(args).await
+}
+
+async fn prepare_llm_options_result(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     match extract_llm_options(args) {
@@ -107,4 +125,22 @@ pub(crate) async fn prepare_llm_options(
             }
         }
     }
+}
+
+fn throwing_preflight_error(error: VmError) -> VmError {
+    let message = match &error {
+        VmError::Thrown(VmValue::Dict(fields))
+            if matches!(fields.get("origin"), Some(VmValue::String(value)) if value.as_str() == "local")
+                && matches!(fields.get("category"), Some(VmValue::String(value)) if value.as_str() == "invalid_request") =>
+        {
+            fields.get("message").and_then(|value| match value {
+                VmValue::String(message) => Some(message.clone()),
+                _ => None,
+            })
+        }
+        _ => None,
+    };
+    message
+        .map(|message| VmError::Thrown(VmValue::String(message)))
+        .unwrap_or(error)
 }
