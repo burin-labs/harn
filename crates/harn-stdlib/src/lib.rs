@@ -255,6 +255,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/stall_observation" => "stdlib/agent/stall_observation.harn",
     "agent/stall_verification" => "stdlib/agent/stall_verification.harn",
     "agent/stall_detectors" => "stdlib/agent/stall_detectors.harn",
+    "agent/cut_rules" => "stdlib/agent/cut_rules.harn",
     "agent/governors" => "stdlib/agent/governors.harn",
     "agent/control" => "stdlib/agent/control.harn",
     "agent/action_graph" => "stdlib/agent/action_graph.harn",
@@ -895,6 +896,7 @@ mod tests {
             "agent/host_injection",
             "agent/tool_lifecycle",
             "agent/user",
+            "agent/cut_rules",
             "agent/governors",
             "agent/loop_post_turn",
             "agent/completion_gate",
@@ -963,6 +965,41 @@ mod tests {
         );
         assert_eq!(exports[0].required_params, 3);
         assert_eq!(exports[0].total_params, 5);
+    }
+
+    #[test]
+    fn pace_cut_rule_module_owns_public_functions() {
+        let cut_rule_exports = public_functions_for_module("agent/cut_rules")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "pace_cut_rule_action_of",
+            "pace_cut_rule_check_max_injections",
+            "pace_cut_rule_decision",
+            "pace_cut_rule_extend_max",
+        ] {
+            assert!(
+                cut_rule_exports.contains(name),
+                "std/agent/cut_rules should export {name}"
+            );
+        }
+
+        let governor_exports = public_functions_for_module("agent/governors")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for removed in [
+            "governor_pace_check_max_injections",
+            "governor_pace_decision",
+            "governor_pace_extend_max",
+            "pace_action_of",
+        ] {
+            assert!(
+                !governor_exports.contains(removed),
+                "std/agent/governors must not retain removed export {removed}"
+            );
+        }
     }
 
     #[test]

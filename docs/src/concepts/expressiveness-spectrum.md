@@ -196,7 +196,7 @@ const opts = {...base, stall_diagnostics: {
 
 Now "the agent edited a file" and "the build got closer to green" are two
 different facts, and the loop stops mistaking motion for progress. Those
-callbacks (progress, delivered-fix-not-landing, pace decisions) are covered in
+callbacks (progress, delivered-fix-not-landing, and pace cut rules) are covered in
 [Host-supplied facts](../stdlib/fact-intake-seams.md). Wrap the whole thing in
 [`workflow_stages`](../workflow-runtime.md#building-linear-stage-graphs) for the
 verify stage, retry threading, replay, and audit, and you have the full machine.

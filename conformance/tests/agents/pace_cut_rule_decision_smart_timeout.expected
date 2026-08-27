@@ -9,4 +9,3 @@ cut extend_budget_exhausted
 pace_check over_estimate_while_progressing
 cut pace_check_budget_exhausted
 cut extend_budget_exhausted
-[harn] governor pace decision ok

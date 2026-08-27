@@ -1,0 +1,21 @@
+// Run: harn test tests/agent/cut_rules_test.harn
+//
+// Pure vocabulary checks for `std/agent/cut_rules`. No model and no host.
+import { pace_cut_rule_action_of, pace_cut_rule_decision } from "std/agent/cut_rules"
+
+pipeline test_action_mapper(harness: Harness, task: unknown) {
+  assert_eq(pace_cut_rule_action_of({action: "cut"}), "abort")
+  assert_eq(pace_cut_rule_action_of({action: "pace_check"}), "warn")
+  assert_eq(pace_cut_rule_action_of({action: "extend", new_budget_ms: 10}), "proceed")
+  assert_eq(pace_cut_rule_action_of({action: "proceed"}), "proceed")
+  assert_eq(pace_cut_rule_action_of(nil), "proceed")
+}
+
+pipeline test_action_mapper_over_real_decision(harness: Harness, task: unknown) {
+  const decision = pace_cut_rule_decision(
+    {},
+    {armed_budget_ms: 100, elapsed_ms: 200, made_progress: false},
+  )
+  assert_eq(decision.action, "cut")
+  assert_eq(pace_cut_rule_action_of(decision), "abort")
+}
