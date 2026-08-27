@@ -639,11 +639,7 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
           },
         ) },
       )
-      assert_eq(
-        [len(harness.llm.mock_calls()), captured.result.status],
-        [2, "done"],
-        "one agent turn and one accepted structured judge response",
-      )
+      assert_eq([len(harness.llm.mock_calls()), captured.result.status], [2, "done"])
       const decisions =
         captured.events.filter({ event -> event.type == "judge_decision" }).to_list()
       assert_eq(len(decisions), 1)
