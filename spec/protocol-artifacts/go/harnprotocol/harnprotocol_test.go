@@ -373,6 +373,16 @@ func TestRoundTripFixture(t *testing.T) {
 
 		delete(unknown["snapshot"].(map[string]any), "futureTopLevel")
 		verification := unknown["snapshot"].(map[string]any)["turns"].([]any)[0].(map[string]any)["iterations"].([]any)[0].(map[string]any)["tools"].([]any)[0].(map[string]any)["verification"].(map[string]any)
+		verification["futureNested"] = true
+		unknownNestedBytes, err := json.Marshal(unknown)
+		if err != nil {
+			t.Fatalf("encode nested recap negative control: %v", err)
+		}
+		if err := json.Unmarshal(unknownNestedBytes, &availability); err == nil {
+			t.Fatal("unknown nested recap field must be rejected before write-back")
+		}
+
+		delete(verification, "futureNested")
 		verification["status"] = "future_status"
 		invalidStatusBytes, err := json.Marshal(unknown)
 		if err != nil {

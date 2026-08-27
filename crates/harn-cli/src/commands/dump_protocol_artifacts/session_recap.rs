@@ -185,51 +185,100 @@ export type HarnSessionRecapAvailability =
   | { state: "available"; snapshot: HarnSessionRecapSnapshot }
   | { state: "unavailable"; reason: HarnSessionRecapUnavailableReason }
 
-const HARN_SESSION_RECAP_SNAPSHOT_KEYS = new Set([
-  "schemaVersion", "sessionId", "query", "cursor", "coverage", "source",
-  "contentHash", "projectionHash", "turns", "extensions",
-])
+const HARN_SESSION_RECAP_KEYS = {
+  snapshot: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"],
+  query: ["sessionId", "runId", "turnId", "fromEventId", "limit"],
+  cursor: ["lastEventId", "nextEventId"],
+  coverage: ["scanned", "matched", "pending", "unassigned", "truncated"],
+  source: ["firstEventId", "lastEventId", "events"],
+  sourceEvent: ["eventId", "recordHash"],
+  text: ["text", "sourceEventId"],
+  verification: ["schema", "status", "verifiedPaths", "sourceEventId"],
+  tool: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"],
+  planStep: ["id", "content", "status"],
+  planEvent: ["kind", "eventId", "inputRevisionId"],
+  plan: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"],
+  progressEntry: ["content", "status", "priority"],
+  progress: ["message", "entries", "replace", "sourceEventId"],
+  terminal: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"],
+  iteration: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"],
+  turn: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"],
+} as const
+
+function harnSessionRecapObject(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`)
+  }
+  const object = value as Record<string, unknown>
+  const known = new Set(keys)
+  for (const key of Object.keys(object)) {
+    if (!known.has(key)) throw new TypeError(`${label} contains unknown field ${key}`)
+  }
+  return object
+}
+
+function harnSessionRecapArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`)
+  return value
+}
+
+function validateHarnSessionRecapSnapshot(value: unknown): void {
+  const snapshot = harnSessionRecapObject(value, "Harn session recap snapshot", HARN_SESSION_RECAP_KEYS.snapshot)
+  harnSessionRecapObject(snapshot.query, "Harn session recap query", HARN_SESSION_RECAP_KEYS.query)
+  harnSessionRecapObject(snapshot.cursor, "Harn session recap cursor", HARN_SESSION_RECAP_KEYS.cursor)
+  harnSessionRecapObject(snapshot.coverage, "Harn session recap coverage", HARN_SESSION_RECAP_KEYS.coverage)
+  const source = harnSessionRecapObject(snapshot.source, "Harn session recap source", HARN_SESSION_RECAP_KEYS.source)
+  for (const event of harnSessionRecapArray(source.events, "Harn session recap source events")) {
+    harnSessionRecapObject(event, "Harn session recap source event", HARN_SESSION_RECAP_KEYS.sourceEvent)
+  }
+  for (const turnValue of harnSessionRecapArray(snapshot.turns, "Harn session recap turns")) {
+    const turn = harnSessionRecapObject(turnValue, "Harn session recap turn", HARN_SESSION_RECAP_KEYS.turn)
+    for (const prompt of harnSessionRecapArray(turn.prompts, "Harn session recap prompts")) {
+      harnSessionRecapObject(prompt, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
+    }
+    if (turn.terminal !== null) harnSessionRecapObject(turn.terminal, "Harn session recap terminal", HARN_SESSION_RECAP_KEYS.terminal)
+    for (const iterationValue of harnSessionRecapArray(turn.iterations, "Harn session recap iterations")) {
+      const iteration = harnSessionRecapObject(iterationValue, "Harn session recap iteration", HARN_SESSION_RECAP_KEYS.iteration)
+      for (const text of harnSessionRecapArray(iteration.assistantText, "Harn session recap assistant text")) {
+        harnSessionRecapObject(text, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
+      }
+      for (const toolValue of harnSessionRecapArray(iteration.tools, "Harn session recap tools")) {
+        const tool = harnSessionRecapObject(toolValue, "Harn session recap tool", HARN_SESSION_RECAP_KEYS.tool)
+        if (tool.verification !== null) {
+          const verification = harnSessionRecapObject(tool.verification, "Harn session recap verification", HARN_SESSION_RECAP_KEYS.verification)
+          if (verification.status !== "passed") throw new TypeError("Harn session recap verification status must be passed")
+        }
+      }
+      for (const planValue of harnSessionRecapArray(iteration.plans, "Harn session recap plans")) {
+        const plan = harnSessionRecapObject(planValue, "Harn session recap plan", HARN_SESSION_RECAP_KEYS.plan)
+        for (const step of harnSessionRecapArray(plan.steps, "Harn session recap plan steps")) {
+          harnSessionRecapObject(step, "Harn session recap plan step", HARN_SESSION_RECAP_KEYS.planStep)
+        }
+        if (plan.event !== null) harnSessionRecapObject(plan.event, "Harn session recap plan event", HARN_SESSION_RECAP_KEYS.planEvent)
+      }
+      for (const progressValue of harnSessionRecapArray(iteration.progress, "Harn session recap progress")) {
+        const progress = harnSessionRecapObject(progressValue, "Harn session recap progress", HARN_SESSION_RECAP_KEYS.progress)
+        for (const entry of harnSessionRecapArray(progress.entries, "Harn session recap progress entries")) {
+          harnSessionRecapObject(entry, "Harn session recap progress entry", HARN_SESSION_RECAP_KEYS.progressEntry)
+        }
+      }
+    }
+  }
+}
 
 /** Decode the closed recap envelope without silently dropping future fields. */
 export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionRecapAvailability {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("Harn session recap availability must be an object")
-  }
-  const availability = value as Record<string, unknown>
+  const base = harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot", "reason"])
+  const availability = base as Record<string, unknown>
   if (availability.state === "unavailable") {
+    harnSessionRecapObject(value, "Harn session recap availability", ["state", "reason"])
     return value as HarnSessionRecapAvailability
   }
   if (availability.state !== "available") {
     throw new TypeError("Harn session recap availability has an unknown state")
   }
-  const snapshot = availability.snapshot
-  if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
-    throw new TypeError("Harn session recap availability requires an object snapshot")
-  }
-  for (const key of Object.keys(snapshot)) {
-    if (!HARN_SESSION_RECAP_SNAPSHOT_KEYS.has(key)) {
-      throw new TypeError(`Harn session recap snapshot contains unknown field ${key}`)
-    }
-  }
-  const turns = (snapshot as Record<string, unknown>).turns
-  if (!Array.isArray(turns)) {
-    throw new TypeError("Harn session recap snapshot requires turns")
-  }
-  for (const turn of turns) {
-    if (typeof turn !== "object" || turn === null || !Array.isArray((turn as Record<string, unknown>).iterations)) continue
-    for (const iteration of (turn as { iterations: unknown[] }).iterations) {
-      if (typeof iteration !== "object" || iteration === null || !Array.isArray((iteration as Record<string, unknown>).tools)) continue
-      for (const tool of (iteration as { tools: unknown[] }).tools) {
-        if (typeof tool !== "object" || tool === null) continue
-        const verification = (tool as Record<string, unknown>).verification
-        if (verification !== null && verification !== undefined) {
-          if (typeof verification !== "object" || (verification as Record<string, unknown>).status !== "passed") {
-            throw new TypeError("Harn session recap verification status must be passed")
-          }
-        }
-      }
-    }
-  }
+  harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot"])
+  validateHarnSessionRecapSnapshot(availability.snapshot)
   return value as HarnSessionRecapAvailability
 }
 "#,
@@ -268,66 +317,66 @@ pub enum HarnSessionRecapVerificationStatus { Passed }
 pub enum HarnSessionRecapUnavailableReason { JournalUnavailable, SessionMissing, ProjectionFailed, AdmissionTerminal }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapQuery { pub session_id: String, pub run_id: Option<String>, pub turn_id: Option<String>, pub from_event_id: Option<u64>, pub limit: Option<usize> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCursor { pub last_event_id: Option<u64>, pub next_event_id: Option<u64> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCoverage { pub scanned: usize, pub matched: usize, pub pending: usize, pub unassigned: usize, pub truncated: bool }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSourceEvent { pub event_id: u64, pub record_hash: String }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSource { pub first_event_id: Option<u64>, pub last_event_id: Option<u64>, pub events: Vec<HarnSessionRecapSourceEvent> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTextFact { pub text: String, pub source_event_id: u64 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapVerificationFact { pub schema: String, pub status: HarnSessionRecapVerificationStatus, pub verified_paths: Vec<String>, pub source_event_id: u64 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapToolExchange {
     pub tool_call_id: String, pub tool_name: Option<String>, pub state: HarnSessionRecapToolState,
     pub call_observed: bool, pub result_observed: bool, pub input: Option<Value>, pub output: Option<Value>,
     pub verification: Option<HarnSessionRecapVerificationFact>, pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanStep { pub id: String, pub content: String, pub status: HarnSessionRecapPlanStepStatus }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanEventFact { pub kind: HarnSessionRecapPlanEventKind, pub event_id: String, pub input_revision_id: Option<String> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanFact {
     pub document_id: String, pub revision_id: String, pub title: String, pub summary: String,
     pub steps: Vec<HarnSessionRecapPlanStep>, pub event: Option<HarnSessionRecapPlanEventFact>, pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressEntry { pub content: String, pub status: HarnSessionRecapProgressStatus, pub priority: Option<HarnSessionRecapProgressPriority> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressFact { pub message: Option<String>, pub entries: Vec<HarnSessionRecapProgressEntry>, pub replace: bool, pub source_event_id: u64 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTerminalFact {
     pub state: HarnSessionRecapCompletionState, pub final_status: Option<String>, pub stop_reason: Option<String>,
     pub kind: Option<String>, pub owner: Option<String>, pub reason: Option<String>, pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapIteration {
     pub iteration: Option<i64>, pub state: HarnSessionRecapCompletionState,
     pub assistant_text: Vec<HarnSessionRecapTextFact>, pub tools: Vec<HarnSessionRecapToolExchange>,
     pub plans: Vec<HarnSessionRecapPlanFact>, pub progress: Vec<HarnSessionRecapProgressFact>, pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionPromptTurnRecap {
     pub turn_id: String, pub run_id: String, pub state: HarnSessionRecapCompletionState,
     pub prompts: Vec<HarnSessionRecapTextFact>, pub iterations: Vec<HarnSessionRecapIteration>,
@@ -342,7 +391,7 @@ pub struct HarnSessionRecapSnapshot {
     #[serde(default)] pub extensions: std::collections::BTreeMap<String, Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnSessionRecapAvailability {
     Available { snapshot: Box<HarnSessionRecapSnapshot> },
     Unavailable { reason: HarnSessionRecapUnavailableReason },
@@ -419,6 +468,119 @@ private struct HarnSessionRecapAnyCodingKey: CodingKey {
     var intValue: Int?
     init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
     init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+}
+
+private func harnSessionRecapObject(
+    _ value: HarnACPValue?,
+    label: String,
+    keys: Set<String>
+) throws -> [String: HarnACPValue] {
+    guard case .object(let object) = value else {
+        throw DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "\(label) must be an object")
+        )
+    }
+    if let unknown = object.keys.first(where: { !keys.contains($0) }) {
+        throw DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "\(label) contains unknown field \(unknown)")
+        )
+    }
+    return object
+}
+
+private func harnSessionRecapArray(_ value: HarnACPValue?, label: String) throws -> [HarnACPValue] {
+    guard case .array(let array) = value else {
+        throw DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "\(label) must be an array")
+        )
+    }
+    return array
+}
+
+private func validateHarnSessionRecapSnapshot(_ value: HarnACPValue?) throws {
+    let snapshot = try harnSessionRecapObject(
+        value,
+        label: "Harn session recap snapshot",
+        keys: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"]
+    )
+    _ = try harnSessionRecapObject(snapshot["query"], label: "Harn session recap query", keys: ["sessionId", "runId", "turnId", "fromEventId", "limit"])
+    _ = try harnSessionRecapObject(snapshot["cursor"], label: "Harn session recap cursor", keys: ["lastEventId", "nextEventId"])
+    _ = try harnSessionRecapObject(snapshot["coverage"], label: "Harn session recap coverage", keys: ["scanned", "matched", "pending", "unassigned", "truncated"])
+    let source = try harnSessionRecapObject(snapshot["source"], label: "Harn session recap source", keys: ["firstEventId", "lastEventId", "events"])
+    for event in try harnSessionRecapArray(source["events"], label: "Harn session recap source events") {
+        _ = try harnSessionRecapObject(event, label: "Harn session recap source event", keys: ["eventId", "recordHash"])
+    }
+    for turnValue in try harnSessionRecapArray(snapshot["turns"], label: "Harn session recap turns") {
+        let turn = try harnSessionRecapObject(turnValue, label: "Harn session recap turn", keys: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"])
+        for prompt in try harnSessionRecapArray(turn["prompts"], label: "Harn session recap prompts") {
+            _ = try harnSessionRecapObject(prompt, label: "Harn session recap text", keys: ["text", "sourceEventId"])
+        }
+        if turn["terminal"] != .null {
+            _ = try harnSessionRecapObject(turn["terminal"], label: "Harn session recap terminal", keys: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"])
+        }
+        for iterationValue in try harnSessionRecapArray(turn["iterations"], label: "Harn session recap iterations") {
+            let iteration = try harnSessionRecapObject(iterationValue, label: "Harn session recap iteration", keys: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"])
+            for text in try harnSessionRecapArray(iteration["assistantText"], label: "Harn session recap assistant text") {
+                _ = try harnSessionRecapObject(text, label: "Harn session recap text", keys: ["text", "sourceEventId"])
+            }
+            for toolValue in try harnSessionRecapArray(iteration["tools"], label: "Harn session recap tools") {
+                let tool = try harnSessionRecapObject(toolValue, label: "Harn session recap tool", keys: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"])
+                if tool["verification"] != .null {
+                    _ = try harnSessionRecapObject(tool["verification"], label: "Harn session recap verification", keys: ["schema", "status", "verifiedPaths", "sourceEventId"])
+                }
+            }
+            for planValue in try harnSessionRecapArray(iteration["plans"], label: "Harn session recap plans") {
+                let plan = try harnSessionRecapObject(planValue, label: "Harn session recap plan", keys: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"])
+                for step in try harnSessionRecapArray(plan["steps"], label: "Harn session recap plan steps") {
+                    _ = try harnSessionRecapObject(step, label: "Harn session recap plan step", keys: ["id", "content", "status"])
+                }
+                if plan["event"] != .null {
+                    _ = try harnSessionRecapObject(plan["event"], label: "Harn session recap plan event", keys: ["kind", "eventId", "inputRevisionId"])
+                }
+            }
+            for progressValue in try harnSessionRecapArray(iteration["progress"], label: "Harn session recap progress") {
+                let progress = try harnSessionRecapObject(progressValue, label: "Harn session recap progress", keys: ["message", "entries", "replace", "sourceEventId"])
+                for entry in try harnSessionRecapArray(progress["entries"], label: "Harn session recap progress entries") {
+                    _ = try harnSessionRecapObject(entry, label: "Harn session recap progress entry", keys: ["content", "status", "priority"])
+                }
+            }
+        }
+    }
+}
+
+extension HarnSessionRecapAvailability {
+    private enum CodingKeys: String, CodingKey { case state, snapshot, reason }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try HarnACPValue(from: decoder)
+        let object = try harnSessionRecapObject(raw, label: "Harn session recap availability", keys: ["state", "snapshot", "reason"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(HarnSessionRecapAvailabilityState.self, forKey: .state)
+        switch state {
+        case .available:
+            if Set(object.keys) != Set(["state", "snapshot"]) {
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "available Harn session recap requires only snapshot"))
+            }
+            try validateHarnSessionRecapSnapshot(object["snapshot"])
+            snapshot = try values.decode(HarnSessionRecapSnapshot.self, forKey: .snapshot)
+            reason = nil
+        case .unavailable:
+            if Set(object.keys) != Set(["state", "reason"]) {
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "unavailable Harn session recap requires only reason"))
+            }
+            snapshot = nil
+            reason = try values.decode(HarnSessionRecapUnavailableReason.self, forKey: .reason)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(state, forKey: .state)
+        switch state {
+        case .available: try values.encode(snapshot, forKey: .snapshot)
+        case .unavailable: try values.encode(reason, forKey: .reason)
+        }
+    }
 }
 
 extension HarnSessionRecapSnapshot {
@@ -785,17 +947,58 @@ type HarnSessionRecapSnapshot struct {
 	ContentHash string `json:"contentHash"`; ProjectionHash string `json:"projectionHash"`; Turns []HarnSessionPromptTurnRecap `json:"turns"`; Extensions JSONObject `json:"extensions"`
 }
 
-func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
-	type wire HarnSessionRecapSnapshot
+func harnSessionRecapDecodeStrict[T any](data []byte, target *T) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func (value *HarnSessionRecapQuery) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapQuery; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapQuery(decoded); return nil }
+func (value *HarnSessionRecapCursor) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapCursor; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapCursor(decoded); return nil }
+func (value *HarnSessionRecapCoverage) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapCoverage; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapCoverage(decoded); return nil }
+func (value *HarnSessionRecapSourceEvent) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapSourceEvent; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapSourceEvent(decoded); return nil }
+func (value *HarnSessionRecapSource) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapSource; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapSource(decoded); return nil }
+func (value *HarnSessionRecapTextFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapTextFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapTextFact(decoded); return nil }
+func (value *HarnSessionRecapVerificationFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapVerificationFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapVerificationFact(decoded); return nil }
+func (value *HarnSessionRecapToolExchange) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapToolExchange; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapToolExchange(decoded); return nil }
+func (value *HarnSessionRecapPlanStep) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapPlanStep; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapPlanStep(decoded); return nil }
+func (value *HarnSessionRecapPlanEventFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapPlanEventFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapPlanEventFact(decoded); return nil }
+func (value *HarnSessionRecapPlanFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapPlanFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapPlanFact(decoded); return nil }
+func (value *HarnSessionRecapProgressEntry) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapProgressEntry; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapProgressEntry(decoded); return nil }
+func (value *HarnSessionRecapProgressFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapProgressFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapProgressFact(decoded); return nil }
+func (value *HarnSessionRecapTerminalFact) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapTerminalFact; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapTerminalFact(decoded); return nil }
+func (value *HarnSessionRecapIteration) UnmarshalJSON(data []byte) error { type wire HarnSessionRecapIteration; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionRecapIteration(decoded); return nil }
+func (value *HarnSessionPromptTurnRecap) UnmarshalJSON(data []byte) error { type wire HarnSessionPromptTurnRecap; var decoded wire; if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }; *value = HarnSessionPromptTurnRecap(decoded); return nil }
+
+func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSnapshot
 	var decoded wire
-	if err := decoder.Decode(&decoded); err != nil { return err }
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }
 	*snapshot = HarnSessionRecapSnapshot(decoded)
 	return nil
 }
 
 type HarnSessionRecapAvailability struct { State string `json:"state"`; Snapshot *HarnSessionRecapSnapshot `json:"snapshot,omitempty"`; Reason *HarnSessionRecapUnavailableReason `json:"reason,omitempty"` }
+
+func (value *HarnSessionRecapAvailability) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapAvailability
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil { return err }
+	switch decoded.State {
+	case "available":
+		if decoded.Snapshot == nil || decoded.Reason != nil {
+			return fmt.Errorf("available Harn session recap requires only snapshot")
+		}
+	case "unavailable":
+		if decoded.Snapshot != nil || decoded.Reason == nil {
+			return fmt.Errorf("unavailable Harn session recap requires only reason")
+		}
+	default:
+		return fmt.Errorf("unknown Harn session recap availability state %q", decoded.State)
+	}
+	*value = HarnSessionRecapAvailability(decoded)
+	return nil
+}
 "#,
     );
 }

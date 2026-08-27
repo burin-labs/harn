@@ -1699,50 +1699,99 @@ export type HarnSessionRecapAvailability =
   | { state: "available"; snapshot: HarnSessionRecapSnapshot }
   | { state: "unavailable"; reason: HarnSessionRecapUnavailableReason }
 
-const HARN_SESSION_RECAP_SNAPSHOT_KEYS = new Set([
-  "schemaVersion", "sessionId", "query", "cursor", "coverage", "source",
-  "contentHash", "projectionHash", "turns", "extensions",
-])
+const HARN_SESSION_RECAP_KEYS = {
+  snapshot: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"],
+  query: ["sessionId", "runId", "turnId", "fromEventId", "limit"],
+  cursor: ["lastEventId", "nextEventId"],
+  coverage: ["scanned", "matched", "pending", "unassigned", "truncated"],
+  source: ["firstEventId", "lastEventId", "events"],
+  sourceEvent: ["eventId", "recordHash"],
+  text: ["text", "sourceEventId"],
+  verification: ["schema", "status", "verifiedPaths", "sourceEventId"],
+  tool: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"],
+  planStep: ["id", "content", "status"],
+  planEvent: ["kind", "eventId", "inputRevisionId"],
+  plan: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"],
+  progressEntry: ["content", "status", "priority"],
+  progress: ["message", "entries", "replace", "sourceEventId"],
+  terminal: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"],
+  iteration: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"],
+  turn: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"],
+} as const
+
+function harnSessionRecapObject(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`)
+  }
+  const object = value as Record<string, unknown>
+  const known = new Set(keys)
+  for (const key of Object.keys(object)) {
+    if (!known.has(key)) throw new TypeError(`${label} contains unknown field ${key}`)
+  }
+  return object
+}
+
+function harnSessionRecapArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`)
+  return value
+}
+
+function validateHarnSessionRecapSnapshot(value: unknown): void {
+  const snapshot = harnSessionRecapObject(value, "Harn session recap snapshot", HARN_SESSION_RECAP_KEYS.snapshot)
+  harnSessionRecapObject(snapshot.query, "Harn session recap query", HARN_SESSION_RECAP_KEYS.query)
+  harnSessionRecapObject(snapshot.cursor, "Harn session recap cursor", HARN_SESSION_RECAP_KEYS.cursor)
+  harnSessionRecapObject(snapshot.coverage, "Harn session recap coverage", HARN_SESSION_RECAP_KEYS.coverage)
+  const source = harnSessionRecapObject(snapshot.source, "Harn session recap source", HARN_SESSION_RECAP_KEYS.source)
+  for (const event of harnSessionRecapArray(source.events, "Harn session recap source events")) {
+    harnSessionRecapObject(event, "Harn session recap source event", HARN_SESSION_RECAP_KEYS.sourceEvent)
+  }
+  for (const turnValue of harnSessionRecapArray(snapshot.turns, "Harn session recap turns")) {
+    const turn = harnSessionRecapObject(turnValue, "Harn session recap turn", HARN_SESSION_RECAP_KEYS.turn)
+    for (const prompt of harnSessionRecapArray(turn.prompts, "Harn session recap prompts")) {
+      harnSessionRecapObject(prompt, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
+    }
+    if (turn.terminal !== null) harnSessionRecapObject(turn.terminal, "Harn session recap terminal", HARN_SESSION_RECAP_KEYS.terminal)
+    for (const iterationValue of harnSessionRecapArray(turn.iterations, "Harn session recap iterations")) {
+      const iteration = harnSessionRecapObject(iterationValue, "Harn session recap iteration", HARN_SESSION_RECAP_KEYS.iteration)
+      for (const text of harnSessionRecapArray(iteration.assistantText, "Harn session recap assistant text")) {
+        harnSessionRecapObject(text, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
+      }
+      for (const toolValue of harnSessionRecapArray(iteration.tools, "Harn session recap tools")) {
+        const tool = harnSessionRecapObject(toolValue, "Harn session recap tool", HARN_SESSION_RECAP_KEYS.tool)
+        if (tool.verification !== null) {
+          const verification = harnSessionRecapObject(tool.verification, "Harn session recap verification", HARN_SESSION_RECAP_KEYS.verification)
+          if (verification.status !== "passed") throw new TypeError("Harn session recap verification status must be passed")
+        }
+      }
+      for (const planValue of harnSessionRecapArray(iteration.plans, "Harn session recap plans")) {
+        const plan = harnSessionRecapObject(planValue, "Harn session recap plan", HARN_SESSION_RECAP_KEYS.plan)
+        for (const step of harnSessionRecapArray(plan.steps, "Harn session recap plan steps")) {
+          harnSessionRecapObject(step, "Harn session recap plan step", HARN_SESSION_RECAP_KEYS.planStep)
+        }
+        if (plan.event !== null) harnSessionRecapObject(plan.event, "Harn session recap plan event", HARN_SESSION_RECAP_KEYS.planEvent)
+      }
+      for (const progressValue of harnSessionRecapArray(iteration.progress, "Harn session recap progress")) {
+        const progress = harnSessionRecapObject(progressValue, "Harn session recap progress", HARN_SESSION_RECAP_KEYS.progress)
+        for (const entry of harnSessionRecapArray(progress.entries, "Harn session recap progress entries")) {
+          harnSessionRecapObject(entry, "Harn session recap progress entry", HARN_SESSION_RECAP_KEYS.progressEntry)
+        }
+      }
+    }
+  }
+}
 
 /** Decode the closed recap envelope without silently dropping future fields. */
 export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionRecapAvailability {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("Harn session recap availability must be an object")
-  }
-  const availability = value as Record<string, unknown>
+  const base = harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot", "reason"])
+  const availability = base as Record<string, unknown>
   if (availability.state === "unavailable") {
+    harnSessionRecapObject(value, "Harn session recap availability", ["state", "reason"])
     return value as HarnSessionRecapAvailability
   }
   if (availability.state !== "available") {
     throw new TypeError("Harn session recap availability has an unknown state")
   }
-  const snapshot = availability.snapshot
-  if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
-    throw new TypeError("Harn session recap availability requires an object snapshot")
-  }
-  for (const key of Object.keys(snapshot)) {
-    if (!HARN_SESSION_RECAP_SNAPSHOT_KEYS.has(key)) {
-      throw new TypeError(`Harn session recap snapshot contains unknown field ${key}`)
-    }
-  }
-  const turns = (snapshot as Record<string, unknown>).turns
-  if (!Array.isArray(turns)) {
-    throw new TypeError("Harn session recap snapshot requires turns")
-  }
-  for (const turn of turns) {
-    if (typeof turn !== "object" || turn === null || !Array.isArray((turn as Record<string, unknown>).iterations)) continue
-    for (const iteration of (turn as { iterations: unknown[] }).iterations) {
-      if (typeof iteration !== "object" || iteration === null || !Array.isArray((iteration as Record<string, unknown>).tools)) continue
-      for (const tool of (iteration as { tools: unknown[] }).tools) {
-        if (typeof tool !== "object" || tool === null) continue
-        const verification = (tool as Record<string, unknown>).verification
-        if (verification !== null && verification !== undefined) {
-          if (typeof verification !== "object" || (verification as Record<string, unknown>).status !== "passed") {
-            throw new TypeError("Harn session recap verification status must be passed")
-          }
-        }
-      }
-    }
-  }
+  harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot"])
+  validateHarnSessionRecapSnapshot(availability.snapshot)
   return value as HarnSessionRecapAvailability
 }

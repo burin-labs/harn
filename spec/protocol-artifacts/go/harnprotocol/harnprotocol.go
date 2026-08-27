@@ -1383,12 +1383,161 @@ type HarnSessionRecapSnapshot struct {
 	Extensions     JSONObject                   `json:"extensions"`
 }
 
-func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
-	type wire HarnSessionRecapSnapshot
+func harnSessionRecapDecodeStrict[T any](data []byte, target *T) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func (value *HarnSessionRecapQuery) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapQuery
 	var decoded wire
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapQuery(decoded)
+	return nil
+}
+func (value *HarnSessionRecapCursor) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapCursor
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapCursor(decoded)
+	return nil
+}
+func (value *HarnSessionRecapCoverage) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapCoverage
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapCoverage(decoded)
+	return nil
+}
+func (value *HarnSessionRecapSourceEvent) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSourceEvent
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapSourceEvent(decoded)
+	return nil
+}
+func (value *HarnSessionRecapSource) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSource
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapSource(decoded)
+	return nil
+}
+func (value *HarnSessionRecapTextFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapTextFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapTextFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapVerificationFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapVerificationFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapVerificationFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapToolExchange) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapToolExchange
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapToolExchange(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanStep) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanStep
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanStep(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanEventFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanEventFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanEventFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapPlanFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapPlanFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapPlanFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapProgressEntry) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapProgressEntry
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapProgressEntry(decoded)
+	return nil
+}
+func (value *HarnSessionRecapProgressFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapProgressFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapProgressFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapTerminalFact) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapTerminalFact
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapTerminalFact(decoded)
+	return nil
+}
+func (value *HarnSessionRecapIteration) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapIteration
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionRecapIteration(decoded)
+	return nil
+}
+func (value *HarnSessionPromptTurnRecap) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionPromptTurnRecap
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	*value = HarnSessionPromptTurnRecap(decoded)
+	return nil
+}
+
+func (snapshot *HarnSessionRecapSnapshot) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapSnapshot
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
 		return err
 	}
 	*snapshot = HarnSessionRecapSnapshot(decoded)
@@ -1399,4 +1548,26 @@ type HarnSessionRecapAvailability struct {
 	State    string                             `json:"state"`
 	Snapshot *HarnSessionRecapSnapshot          `json:"snapshot,omitempty"`
 	Reason   *HarnSessionRecapUnavailableReason `json:"reason,omitempty"`
+}
+
+func (value *HarnSessionRecapAvailability) UnmarshalJSON(data []byte) error {
+	type wire HarnSessionRecapAvailability
+	var decoded wire
+	if err := harnSessionRecapDecodeStrict(data, &decoded); err != nil {
+		return err
+	}
+	switch decoded.State {
+	case "available":
+		if decoded.Snapshot == nil || decoded.Reason != nil {
+			return fmt.Errorf("available Harn session recap requires only snapshot")
+		}
+	case "unavailable":
+		if decoded.Snapshot != nil || decoded.Reason == nil {
+			return fmt.Errorf("unavailable Harn session recap requires only reason")
+		}
+	default:
+		return fmt.Errorf("unknown Harn session recap availability state %q", decoded.State)
+	}
+	*value = HarnSessionRecapAvailability(decoded)
+	return nil
 }

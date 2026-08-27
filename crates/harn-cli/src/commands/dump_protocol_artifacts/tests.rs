@@ -783,6 +783,23 @@ fn session_recap_schema_and_generated_rust_preserve_the_write_contract() {
         .as_object_mut()
         .expect("snapshot object")
         .remove("futureTopLevel");
+    unknown["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["futureNested"] =
+        json!(true);
+    assert!(
+        !validator.is_valid(&unknown),
+        "schema v1 writers must reject unknown nested recap fields"
+    );
+    assert!(
+        serde_json::from_value::<generated_rust_binding::HarnSessionRecapAvailability>(
+            unknown.clone()
+        )
+        .is_err(),
+        "generated Rust readers must reject unknown nested fields before write-back"
+    );
+    unknown["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]
+        .as_object_mut()
+        .expect("verification object")
+        .remove("futureNested");
     unknown["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["status"] =
         json!("future_status");
     assert!(

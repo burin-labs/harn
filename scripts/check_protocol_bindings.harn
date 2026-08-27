@@ -84,6 +84,15 @@ def main() -> int:
             else:
                 raise AssertionError("unknown recap snapshot field was accepted before write-back")
 
+            unknown_nested = copy.deepcopy(payload)
+            unknown_nested["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["futureNested"] = True
+            try:
+                cls.from_wire(unknown_nested)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unknown nested recap field was accepted before write-back")
+
             invalid_status = copy.deepcopy(payload)
             invalid_status["snapshot"]["turns"][0]["iterations"][0]["tools"][0]["verification"]["status"] = "future_status"
             try:

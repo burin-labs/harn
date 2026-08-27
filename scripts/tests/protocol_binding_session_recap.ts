@@ -36,6 +36,20 @@ try {
 }
 
 delete recap.snapshot.futureTopLevel;
+recap.snapshot.turns[0].iterations[0].tools[0].verification.futureNested = true;
+try {
+  decodeHarnSessionRecapAvailability(recap);
+  throw new Error("unknown nested recap field was accepted before write-back");
+} catch (error) {
+  if (
+    error instanceof Error &&
+    error.message === "unknown nested recap field was accepted before write-back"
+  ) {
+    throw error;
+  }
+}
+
+delete recap.snapshot.turns[0].iterations[0].tools[0].verification.futureNested;
 recap.snapshot.turns[0].iterations[0].tools[0].verification.status =
   "future_status";
 try {

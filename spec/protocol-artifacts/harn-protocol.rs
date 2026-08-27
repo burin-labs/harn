@@ -2655,7 +2655,7 @@ pub enum HarnSessionRecapUnavailableReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapQuery {
     pub session_id: String,
     pub run_id: Option<String>,
@@ -2664,13 +2664,13 @@ pub struct HarnSessionRecapQuery {
     pub limit: Option<usize>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCursor {
     pub last_event_id: Option<u64>,
     pub next_event_id: Option<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCoverage {
     pub scanned: usize,
     pub matched: usize,
@@ -2679,26 +2679,26 @@ pub struct HarnSessionRecapCoverage {
     pub truncated: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSourceEvent {
     pub event_id: u64,
     pub record_hash: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSource {
     pub first_event_id: Option<u64>,
     pub last_event_id: Option<u64>,
     pub events: Vec<HarnSessionRecapSourceEvent>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTextFact {
     pub text: String,
     pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapVerificationFact {
     pub schema: String,
     pub status: HarnSessionRecapVerificationStatus,
@@ -2706,7 +2706,7 @@ pub struct HarnSessionRecapVerificationFact {
     pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapToolExchange {
     pub tool_call_id: String,
     pub tool_name: Option<String>,
@@ -2719,21 +2719,21 @@ pub struct HarnSessionRecapToolExchange {
     pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanStep {
     pub id: String,
     pub content: String,
     pub status: HarnSessionRecapPlanStepStatus,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanEventFact {
     pub kind: HarnSessionRecapPlanEventKind,
     pub event_id: String,
     pub input_revision_id: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanFact {
     pub document_id: String,
     pub revision_id: String,
@@ -2744,14 +2744,14 @@ pub struct HarnSessionRecapPlanFact {
     pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressEntry {
     pub content: String,
     pub status: HarnSessionRecapProgressStatus,
     pub priority: Option<HarnSessionRecapProgressPriority>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressFact {
     pub message: Option<String>,
     pub entries: Vec<HarnSessionRecapProgressEntry>,
@@ -2759,7 +2759,7 @@ pub struct HarnSessionRecapProgressFact {
     pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTerminalFact {
     pub state: HarnSessionRecapCompletionState,
     pub final_status: Option<String>,
@@ -2770,7 +2770,7 @@ pub struct HarnSessionRecapTerminalFact {
     pub source_event_id: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapIteration {
     pub iteration: Option<i64>,
     pub state: HarnSessionRecapCompletionState,
@@ -2781,7 +2781,7 @@ pub struct HarnSessionRecapIteration {
     pub source_event_ids: Vec<u64>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionPromptTurnRecap {
     pub turn_id: String,
     pub run_id: String,
@@ -2807,7 +2807,7 @@ pub struct HarnSessionRecapSnapshot {
     pub extensions: std::collections::BTreeMap<String, Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnSessionRecapAvailability {
     Available {
         snapshot: Box<HarnSessionRecapSnapshot>,

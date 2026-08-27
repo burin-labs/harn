@@ -3,6 +3,7 @@ import Foundation
 private enum RecapBindingProbeError: Error {
     case expectedAvailableRecap
     case expectedUnknownSnapshotFieldRejection
+    case expectedUnknownNestedFieldRejection
     case expectedUnknownVerificationStatusRejection
 }
 
@@ -39,6 +40,21 @@ private struct RecapBindingProbe {
         var iterations = turns[0]["iterations"] as! [[String: Any]]
         var tools = iterations[0]["tools"] as! [[String: Any]]
         var verification = tools[0]["verification"] as! [String: Any]
+        verification["futureNested"] = true
+        tools[0]["verification"] = verification
+        iterations[0]["tools"] = tools
+        turns[0]["iterations"] = iterations
+        snapshot["turns"] = turns
+        unknown["snapshot"] = snapshot
+        let unknownNestedData = try JSONSerialization.data(withJSONObject: unknown)
+        do {
+            _ = try JSONDecoder().decode(HarnSessionRecapAvailability.self, from: unknownNestedData)
+            throw RecapBindingProbeError.expectedUnknownNestedFieldRejection
+        } catch RecapBindingProbeError.expectedUnknownNestedFieldRejection {
+            throw RecapBindingProbeError.expectedUnknownNestedFieldRejection
+        } catch {}
+
+        verification.removeValue(forKey: "futureNested")
         verification["status"] = "future_status"
         tools[0]["verification"] = verification
         iterations[0]["tools"] = tools
