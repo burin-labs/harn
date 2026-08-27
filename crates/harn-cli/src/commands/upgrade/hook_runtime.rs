@@ -1,0 +1,586 @@
+//! Lifecycle for the optional standalone agent-hook runtime.
+//!
+//! The capability marker enrolls a machine. Upgrades never create that marker,
+//! so installing Harn cannot silently opt a machine into hook execution. Once
+//! enrolled, the updater publishes immutable provenance keyed by the extracted
+//! binary digest before atomically replacing the binary. Every crash boundary
+//! therefore leaves either the old executable or a new executable whose typed
+//! provenance is already durable.
+
+use std::ffi::OsStr;
+use std::fs::{self, OpenOptions};
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+const CAPABILITY: &str = "harn-run-standalone-v1";
+const PROVENANCE_SCHEMA_VERSION: u32 = 1;
+const PROVENANCE_DIR: &str = "provenance-v1";
+const UPGRADE_LOCK: &str = ".upgrade.lock";
+const UPGRADE_LOCK_TIMEOUT: Duration = Duration::from_mins(1);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct HookRuntimeRelease {
+    pub version: String,
+    pub source_revision: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct HookRuntimeRefreshReport {
+    pub status: HookRuntimeRefreshStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum HookRuntimeRefreshStatus {
+    NotEnrolled,
+    Refreshed,
+    SkippedUnverified,
+}
+
+impl HookRuntimeRefreshReport {
+    pub(super) fn not_enrolled() -> Self {
+        Self {
+            status: HookRuntimeRefreshStatus::NotEnrolled,
+            binary_sha256: None,
+            version: None,
+            source_revision: None,
+        }
+    }
+
+    pub(super) fn skipped_unverified() -> Self {
+        Self {
+            status: HookRuntimeRefreshStatus::SkippedUnverified,
+            binary_sha256: None,
+            version: None,
+            source_revision: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HookRuntimeProvenance {
+    schema_version: u32,
+    capability: String,
+    version: String,
+    source_revision: String,
+    binary_name: String,
+    binary_sha256: String,
+}
+
+pub(super) fn configured_runtime_path() -> Option<PathBuf> {
+    runtime_path_from_environment(
+        std::env::var_os("AGENT_SHELL_GUARD_HARN_BIN").as_deref(),
+        std::env::var_os("XDG_CACHE_HOME").as_deref(),
+        harn_vm::user_dirs::home_dir().as_deref(),
+        cfg!(target_os = "windows"),
+    )
+}
+
+fn runtime_path_from_environment(
+    override_path: Option<&OsStr>,
+    xdg_cache_home: Option<&OsStr>,
+    home: Option<&Path>,
+    windows: bool,
+) -> Option<PathBuf> {
+    let binary_name = if windows { "harn.exe" } else { "harn" };
+    non_empty_path(override_path).or_else(|| {
+        non_empty_path(xdg_cache_home)
+            .map(|root| root.join("harn/hook-bin").join(binary_name))
+            .or_else(|| home.map(|root| root.join(".cache/harn/hook-bin").join(binary_name)))
+    })
+}
+
+fn non_empty_path(value: Option<&OsStr>) -> Option<PathBuf> {
+    value.filter(|value| !value.is_empty()).map(PathBuf::from)
+}
+
+pub(super) fn runtime_is_enrolled(runtime_path: &Path) -> Result<bool, String> {
+    marker_enrolls(&marker_path(runtime_path))
+}
+
+fn marker_path(runtime_path: &Path) -> PathBuf {
+    let mut name = runtime_path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("harn"))
+        .to_os_string();
+    name.push(".standalone-v1");
+    runtime_path.with_file_name(name)
+}
+
+fn marker_enrolls(path: &Path) -> Result<bool, String> {
+    let marker = match fs::read(path) {
+        Ok(marker) => marker,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(format!(
+                "failed to read hook runtime marker {}: {error}",
+                path.display()
+            ));
+        }
+    };
+    Ok(matches!(
+        marker.as_slice(),
+        b"harn-run-standalone-v1" | b"harn-run-standalone-v1\n" | b"harn-run-standalone-v1\r\n"
+    ))
+}
+
+#[cfg(test)]
+fn refresh_runtime_if_enrolled(
+    runtime_path: &Path,
+    candidate: &Path,
+    release: &HookRuntimeRelease,
+) -> Result<HookRuntimeRefreshReport, String> {
+    let Some(transaction) = HookRuntimeRefreshTransaction::acquire_if_enrolled(runtime_path)?
+    else {
+        return Ok(HookRuntimeRefreshReport::not_enrolled());
+    };
+    transaction.refresh(candidate, release)
+}
+
+/// Exclusive mutation authority for one enrolled hook runtime.
+///
+/// The caller keeps this value alive across the ordinary CLI install and the
+/// hook replacement so concurrent upgrades cannot commit different releases
+/// to those two paths.
+pub(super) struct HookRuntimeRefreshTransaction {
+    runtime_path: PathBuf,
+    _lock: fs::File,
+}
+
+impl HookRuntimeRefreshTransaction {
+    pub(super) fn acquire_if_enrolled(runtime_path: &Path) -> Result<Option<Self>, String> {
+        if !marker_enrolls(&marker_path(runtime_path))? {
+            return Ok(None);
+        }
+        let parent = runtime_path
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", runtime_path.display()))?;
+        let lock_path = parent.join(UPGRADE_LOCK);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|error| format!("failed to open {}: {error}", lock_path.display()))?;
+        harn_flock::lock_with_deadline(
+            &lock,
+            &lock_path,
+            harn_flock::LockMode::Exclusive,
+            UPGRADE_LOCK_TIMEOUT,
+        )
+        .map_err(|error| format!("failed to serialize hook runtime refresh: {error}"))?;
+
+        // Enrollment is mutable user intent. Re-read it under the writer lock so
+        // a queued upgrade cannot recreate a runtime after it was unenrolled.
+        if !marker_enrolls(&marker_path(runtime_path))? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            runtime_path: runtime_path.to_path_buf(),
+            _lock: lock,
+        }))
+    }
+
+    pub(super) fn refresh(
+        &self,
+        candidate: &Path,
+        release: &HookRuntimeRelease,
+    ) -> Result<HookRuntimeRefreshReport, String> {
+        self.refresh_with_boundary(candidate, release, || Ok(()))
+    }
+
+    fn refresh_with_boundary(
+        &self,
+        candidate: &Path,
+        release: &HookRuntimeRelease,
+        before_binary_replace: impl FnOnce() -> Result<(), String>,
+    ) -> Result<HookRuntimeRefreshReport, String> {
+        validate_release(release)?;
+        if !marker_enrolls(&marker_path(&self.runtime_path))? {
+            return Ok(HookRuntimeRefreshReport::not_enrolled());
+        }
+
+        let digest = super::file_sha256_hex(candidate)?;
+        let binary_name = self
+            .runtime_path
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("harn"))
+            .to_string_lossy();
+        let provenance = HookRuntimeProvenance {
+            schema_version: PROVENANCE_SCHEMA_VERSION,
+            capability: CAPABILITY.to_string(),
+            version: release.version.clone(),
+            source_revision: release.source_revision.clone(),
+            binary_name: binary_name.to_string(),
+            binary_sha256: digest.clone(),
+        };
+        let provenance_path = provenance_path(&self.runtime_path, &digest)?;
+        publish_provenance(&provenance_path, &provenance)?;
+        before_binary_replace()?;
+        if !marker_enrolls(&marker_path(&self.runtime_path))? {
+            return Ok(HookRuntimeRefreshReport::not_enrolled());
+        }
+        super::atomic_replace(candidate, &self.runtime_path)?;
+
+        let installed = read_installed_provenance(&self.runtime_path)?;
+        if installed != provenance {
+            return Err(format!(
+                "hook runtime read-back did not match {}",
+                provenance_path.display()
+            ));
+        }
+        Ok(HookRuntimeRefreshReport {
+            status: HookRuntimeRefreshStatus::Refreshed,
+            binary_sha256: Some(digest),
+            version: Some(release.version.clone()),
+            source_revision: Some(release.source_revision.clone()),
+        })
+    }
+}
+
+#[cfg(test)]
+fn refresh_with_boundary(
+    runtime_path: &Path,
+    candidate: &Path,
+    release: &HookRuntimeRelease,
+    before_binary_replace: impl FnOnce() -> Result<(), String>,
+) -> Result<HookRuntimeRefreshReport, String> {
+    let Some(transaction) = HookRuntimeRefreshTransaction::acquire_if_enrolled(runtime_path)?
+    else {
+        return Ok(HookRuntimeRefreshReport::not_enrolled());
+    };
+    transaction.refresh_with_boundary(candidate, release, before_binary_replace)
+}
+
+fn validate_release(release: &HookRuntimeRelease) -> Result<(), String> {
+    let version = release
+        .version
+        .strip_prefix('v')
+        .unwrap_or(&release.version);
+    let version_parts: Vec<_> = version.split('.').collect();
+    if version_parts.len() != 3
+        || version_parts
+            .iter()
+            .any(|part| part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Err(format!(
+            "hook runtime release version is not vX.Y.Z: {}",
+            release.version
+        ));
+    }
+    if release.source_revision.len() != 40
+        || !release
+            .source_revision
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
+    {
+        return Err("hook runtime source revision must be 40 lowercase hex characters".to_string());
+    }
+    Ok(())
+}
+
+fn provenance_path(runtime_path: &Path, digest: &str) -> Result<PathBuf, String> {
+    let parent = runtime_path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", runtime_path.display()))?;
+    Ok(parent.join(PROVENANCE_DIR).join(format!("{digest}.json")))
+}
+
+fn publish_provenance(path: &Path, provenance: &HookRuntimeProvenance) -> Result<(), String> {
+    if path.exists() {
+        let existing = read_provenance(path)?;
+        return if existing == *provenance {
+            Ok(())
+        } else {
+            Err(format!(
+                "immutable hook runtime provenance conflicts at {}",
+                path.display()
+            ))
+        };
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    let bytes = serde_json::to_vec_pretty(provenance)
+        .map_err(|error| format!("failed to encode hook runtime provenance: {error}"))?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
+        format!(
+            "failed to stage provenance in {}: {error}",
+            parent.display()
+        )
+    })?;
+    staged
+        .write_all(&bytes)
+        .and_then(|()| staged.write_all(b"\n"))
+        .and_then(|()| staged.as_file().sync_all())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    match staged.persist_noclobber(path) {
+        Ok(_) => super::sync_parent_directory(parent),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = read_provenance(path)?;
+            if existing == *provenance {
+                Ok(())
+            } else {
+                Err(format!(
+                    "immutable hook runtime provenance conflicts at {}",
+                    path.display()
+                ))
+            }
+        }
+        Err(error) => Err(format!(
+            "failed to publish {}: {}",
+            path.display(),
+            error.error
+        )),
+    }
+}
+
+fn read_provenance(path: &Path) -> Result<HookRuntimeProvenance, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn read_installed_provenance(runtime_path: &Path) -> Result<HookRuntimeProvenance, String> {
+    let digest = super::file_sha256_hex(runtime_path)?;
+    let path = provenance_path(runtime_path, &digest)?;
+    let provenance = read_provenance(&path)?;
+    if provenance.binary_sha256 != digest {
+        return Err(format!(
+            "hook runtime provenance digest does not match {}",
+            runtime_path.display()
+        ));
+    }
+    Ok(provenance)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc, Barrier};
+
+    use super::*;
+
+    const SOURCE_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const SOURCE_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn release(version: &str, source_revision: &str) -> HookRuntimeRelease {
+        HookRuntimeRelease {
+            version: version.to_string(),
+            source_revision: source_revision.to_string(),
+        }
+    }
+
+    fn enrolled_fixture() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let runtime = root
+            .path()
+            .join(if cfg!(windows) { "harn.exe" } else { "harn" });
+        fs::write(&runtime, b"old-runtime").expect("old runtime");
+        fs::write(marker_path(&runtime), format!("{CAPABILITY}\n")).expect("marker");
+        (root, runtime)
+    }
+
+    #[test]
+    fn path_resolution_matches_the_guard_on_unix_and_windows() {
+        let home = Path::new("/users/example");
+        assert_eq!(
+            runtime_path_from_environment(None, Some(OsStr::new("/cache")), Some(home), false),
+            Some(PathBuf::from("/cache/harn/hook-bin/harn"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(None, None, Some(home), false),
+            Some(PathBuf::from("/users/example/.cache/harn/hook-bin/harn"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(None, Some(OsStr::new("C:/cache")), None, true),
+            Some(PathBuf::from("C:/cache/harn/hook-bin/harn.exe"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(
+                Some(OsStr::new("/custom/harn")),
+                Some(OsStr::new("/cache")),
+                Some(home),
+                false,
+            ),
+            Some(PathBuf::from("/custom/harn"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(Some(OsStr::new("")), None, Some(home), false),
+            Some(PathBuf::from("/users/example/.cache/harn/hook-bin/harn"))
+        );
+        assert_eq!(
+            runtime_path_from_environment(Some(OsStr::new("  ")), None, Some(home), false),
+            Some(PathBuf::from("  "))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_path_preserves_non_utf8_runtime_names() {
+        use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+
+        let runtime_name = std::ffi::OsString::from_vec(b"harn-\xff".to_vec());
+        let runtime = Path::new("/cache").join(runtime_name);
+        assert_eq!(
+            marker_path(&runtime)
+                .file_name()
+                .expect("marker name")
+                .as_bytes(),
+            b"harn-\xff.standalone-v1"
+        );
+    }
+
+    #[test]
+    fn absent_or_malformed_marker_never_mutates_the_hook_cache() {
+        for marker in [
+            None,
+            Some(b"wrong\n".as_slice()),
+            Some(b"harn-run-standalone-v1\nextra\n".as_slice()),
+            Some(b"harn-run-standalone-v1\xff".as_slice()),
+        ] {
+            let root = tempfile::tempdir().expect("temp dir");
+            let runtime = root.path().join("harn");
+            let candidate = root.path().join("candidate");
+            fs::write(&runtime, b"old-runtime").expect("old runtime");
+            fs::write(&candidate, b"new-runtime").expect("candidate");
+            if let Some(marker) = marker {
+                fs::write(marker_path(&runtime), marker).expect("marker");
+            }
+            let report =
+                refresh_runtime_if_enrolled(&runtime, &candidate, &release("v1.2.3", SOURCE_A))
+                    .expect("unenrolled refresh is a no-op");
+            assert_eq!(report.status, HookRuntimeRefreshStatus::NotEnrolled);
+            assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+            assert!(!root.path().join(PROVENANCE_DIR).exists());
+            assert!(!root.path().join(UPGRADE_LOCK).exists());
+        }
+    }
+
+    #[test]
+    fn enrolled_refresh_publishes_matching_typed_provenance_and_executable() {
+        let (_root, runtime) = enrolled_fixture();
+        let candidate = runtime.with_file_name("candidate");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        let report =
+            refresh_runtime_if_enrolled(&runtime, &candidate, &release("v1.2.3", SOURCE_A))
+                .expect("refresh enrolled runtime");
+        assert_eq!(report.status, HookRuntimeRefreshStatus::Refreshed);
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"new-runtime");
+        let provenance = read_installed_provenance(&runtime).expect("read-back provenance");
+        assert_eq!(provenance.version, "v1.2.3");
+        assert_eq!(provenance.source_revision, SOURCE_A);
+        assert_eq!(provenance.capability, CAPABILITY);
+        assert_eq!(
+            provenance.binary_name,
+            runtime.file_name().unwrap().to_string_lossy()
+        );
+        assert!(marker_enrolls(&marker_path(&runtime)).expect("marker"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&runtime)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o111,
+                0o111
+            );
+        }
+    }
+
+    #[test]
+    fn interruption_after_provenance_keeps_the_prior_pair_usable() {
+        let (_root, runtime) = enrolled_fixture();
+        let candidate = runtime.with_file_name("candidate");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        let error =
+            refresh_with_boundary(&runtime, &candidate, &release("v1.2.3", SOURCE_A), || {
+                Err("injected interruption".to_string())
+            })
+            .expect_err("injected boundary must stop refresh");
+        assert_eq!(error, "injected interruption");
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+        assert!(marker_enrolls(&marker_path(&runtime)).expect("marker"));
+        let candidate_digest = super::super::file_sha256_hex(&candidate).expect("candidate hash");
+        let staged = provenance_path(&runtime, &candidate_digest).expect("provenance path");
+        assert!(
+            staged.is_file(),
+            "new immutable provenance is safely unused"
+        );
+    }
+
+    #[test]
+    fn unenrollment_at_the_replace_boundary_keeps_the_prior_runtime() {
+        let (_root, runtime) = enrolled_fixture();
+        let candidate = runtime.with_file_name("candidate");
+        fs::write(&candidate, b"new-runtime").expect("candidate");
+        let marker = marker_path(&runtime);
+        let report =
+            refresh_with_boundary(&runtime, &candidate, &release("v1.2.3", SOURCE_A), || {
+                fs::remove_file(&marker).map_err(|error| error.to_string())?;
+                Ok(())
+            })
+            .expect("unenrollment is a clean stop");
+        assert_eq!(report.status, HookRuntimeRefreshStatus::NotEnrolled);
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"old-runtime");
+    }
+
+    #[test]
+    fn concurrent_refreshes_serialize_and_leave_one_complete_pair() {
+        let (_root, runtime) = enrolled_fixture();
+        let candidate_a = runtime.with_file_name("candidate-a");
+        let candidate_b = runtime.with_file_name("candidate-b");
+        fs::write(&candidate_a, b"runtime-a").expect("candidate a");
+        fs::write(&candidate_b, b"runtime-b").expect("candidate b");
+        let started = Arc::new(Barrier::new(2));
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let runtime_a = runtime.clone();
+            let started_a = Arc::clone(&started);
+            let first = scope.spawn(move || {
+                refresh_with_boundary(
+                    &runtime_a,
+                    &candidate_a,
+                    &release("v1.2.3", SOURCE_A),
+                    || {
+                        started_a.wait();
+                        attempted_rx.recv().expect("second attempted refresh");
+                        Ok(())
+                    },
+                )
+            });
+            let runtime_b = runtime.clone();
+            let started_b = Arc::clone(&started);
+            let second = scope.spawn(move || {
+                started_b.wait();
+                attempted_tx.send(()).expect("signal attempted refresh");
+                refresh_runtime_if_enrolled(&runtime_b, &candidate_b, &release("v1.2.4", SOURCE_B))
+            });
+            first.join().expect("first thread").expect("first refresh");
+            second
+                .join()
+                .expect("second thread")
+                .expect("second refresh");
+        });
+        assert_eq!(fs::read(&runtime).expect("runtime"), b"runtime-b");
+        let provenance = read_installed_provenance(&runtime).expect("matching provenance");
+        assert_eq!(provenance.version, "v1.2.4");
+        assert_eq!(provenance.source_revision, SOURCE_B);
+        assert!(marker_enrolls(&marker_path(&runtime)).expect("marker"));
+    }
+}
