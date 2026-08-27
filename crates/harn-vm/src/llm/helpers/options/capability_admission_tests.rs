@@ -203,3 +203,50 @@ fn deepseek_v4_admits_only_its_documented_reasoning_efforts() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn deepseek_v4_rejects_sampling_controls_that_thinking_ignores() {
+    let _deepseek_key = ScopedEnvVar::set("DEEPSEEK_API_KEY", "test-key");
+    let controls = [
+        ("temperature", VmValue::Float(0.2)),
+        ("top_p", VmValue::Float(0.9)),
+        ("presence_penalty", VmValue::Float(0.2)),
+        ("frequency_penalty", VmValue::Float(0.2)),
+    ];
+
+    for model in ["deepseek-v4-flash", "deepseek-v4-pro"] {
+        for (option, value) in &controls {
+            let options = |effort: Option<&str>| {
+                let mut options = crate::value::DictMap::from_iter([
+                    (
+                        crate::value::intern_key("provider"),
+                        VmValue::String(arcstr::ArcStr::from("deepseek")),
+                    ),
+                    (
+                        crate::value::intern_key("model"),
+                        VmValue::String(arcstr::ArcStr::from(model)),
+                    ),
+                    (crate::value::intern_key(option), value.clone()),
+                ]);
+                if let Some(effort) = effort {
+                    options.insert(
+                        crate::value::intern_key("effort"),
+                        VmValue::String(arcstr::ArcStr::from(effort)),
+                    );
+                }
+                options
+            };
+
+            extract_with_options(options(None))
+                .expect("sampling control remains valid when thinking is disabled");
+            let error = extract_with_options(options(Some("high")))
+                .expect_err("ignored sampling control must fail before transport");
+            assert!(
+                error.to_string().contains(&format!(
+                    "option `{option}` is not supported while reasoning is enabled"
+                )),
+                "unexpected {model} error for {option}: {error}"
+            );
+        }
+    }
+}
