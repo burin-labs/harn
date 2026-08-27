@@ -41,12 +41,12 @@ pub fn main() -> string {
     fs::write(
         root.join("util.harn"),
         r#"
-import { Thing } from "types"
+import { Thing, normalize } from "types"
 
 pub fn format_title(value: string) -> string {
   const prompt = "Title: " + value
   const _response = llm_call(prompt, {provider: "auto"})
-  return value
+  return normalize(value)
 }
 "#,
     )
@@ -55,6 +55,10 @@ pub fn format_title(value: string) -> string {
         root.join("types.harn"),
         r"
 type Thing = {name: string}
+
+pub fn normalize(value: string) -> string {
+  return value
+}
 ",
     )
     .unwrap();
@@ -172,6 +176,17 @@ fn graph_json_module_filter_focuses_modules_but_keeps_edge_targets() {
     assert_eq!(
         parsed["data"]["graph"]["nodes"],
         serde_json::json!(["types.harn", "util.harn"])
+    );
+    let references = parsed["data"]["graph"]["references"].as_array().unwrap();
+    assert!(
+        references.iter().any(|edge| {
+            edge["from"] == "util.harn" && edge["to"] == "types.harn" && edge["name"] == "normalize"
+        }),
+        "the selected module's reference target must remain: {references:?}"
+    );
+    assert!(
+        references.iter().all(|edge| edge["from"] != "main.harn"),
+        "references from modules outside the filter must stay excluded: {references:?}"
     );
 }
 

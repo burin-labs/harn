@@ -160,6 +160,7 @@ fn analyze_graph(root: &Path, module_filter: Option<&str>) -> Result<GraphReport
     if let Some(filter) = module_filter {
         module_paths.retain(|path| module_matches_filter(path, filter, &root_dir));
     }
+    let selected_module_paths: BTreeSet<_> = module_paths.iter().cloned().collect();
 
     let display_paths: BTreeMap<PathBuf, String> = module_graph
         .module_paths()
@@ -212,6 +213,9 @@ fn analyze_graph(root: &Path, module_filter: Option<&str>) -> Result<GraphReport
 
     let mut reference_edges = Vec::new();
     for edge in references.edges() {
+        if !selected_module_paths.contains(&edge.from.file) {
+            continue;
+        }
         let from = display_paths
             .get(&edge.from.file)
             .cloned()
