@@ -362,12 +362,14 @@ impl LlmOutcomeKind {
 /// delegate here so a new provider spelling is added exactly once.
 pub(crate) fn stop_reason_is_length(stop_reason: &str) -> bool {
     // OpenAI-compat "length", Anthropic/Bedrock "max_tokens" (Bedrock wire
-    // camelCase is normalized before it reaches LlmResult), Gemini
-    // "MAX_TOKENS" (case-insensitive compare covers it).
+    // camelCase is normalized before it reaches LlmResult), Anthropic
+    // "model_context_window_exceeded", and Gemini "MAX_TOKENS"
+    // (case-insensitive compare covers it).
     stop_reason.eq_ignore_ascii_case("length")
         || stop_reason.eq_ignore_ascii_case("max_tokens")
         || stop_reason.eq_ignore_ascii_case("max_output_tokens")
         || stop_reason.eq_ignore_ascii_case("model_length")
+        || stop_reason.eq_ignore_ascii_case("model_context_window_exceeded")
 }
 
 fn stop_reason_is_refusal(stop_reason: &str) -> bool {
