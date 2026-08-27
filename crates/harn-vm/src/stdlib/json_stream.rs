@@ -329,7 +329,7 @@ impl JsonStreamValidator {
                 let value = schema::json_to_vm_value(&json);
                 match schema_validation_error(&value, &self.schema, "$") {
                     Some(invalid) => {
-                        self.invalidate(invalid.reason_kind, invalid.reason, invalid.path)
+                        self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
                     }
                     None => {
                         self.status = JsonStreamStatus::Valid;
