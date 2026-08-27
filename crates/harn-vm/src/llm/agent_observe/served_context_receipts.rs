@@ -282,6 +282,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn provider_request_receipts_distinguish_requested_and_sent_output_schemas() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-output-schema-receipt");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let requested_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "private_contract_marker": {"type": "string", "maxLength": 5}
+            },
+            "required": ["private_contract_marker"],
+            "additionalProperties": false
+        });
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-test".to_string();
+        opts.output_schema = Some(requested_schema.clone());
+        opts.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: requested_schema.clone(),
+            strict: true,
+        };
+
+        let payload =
+            super::super::dump_llm_request(1, "call-output-schema-receipt", "none", &opts)
+                .expect("valid request");
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let request = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_request")
+            .expect("provider_call_request event");
+        let receipt = &request["structured_output"];
+        let sent_schema = payload.output_schema.expect("sent output schema");
+
+        assert_eq!(receipt["mode"], serde_json::json!("json_schema"));
+        assert_eq!(receipt["strict"], serde_json::json!(true));
+        assert_eq!(
+            receipt["requested_schema_content_hash"],
+            serde_json::json!(stable_redacted_json_hash(&requested_schema))
+        );
+        assert_eq!(
+            receipt["sent_schema_content_hash"],
+            serde_json::json!(stable_redacted_json_hash(&sent_schema))
+        );
+        assert_ne!(
+            receipt["requested_schema_content_hash"], receipt["sent_schema_content_hash"],
+            "the control schema must exercise provider compatibility projection"
+        );
+        assert!(requested_schema.to_string().contains("maxLength"));
+        assert!(!sent_schema.to_string().contains("maxLength"));
+        assert!(
+            !request.to_string().contains("private_contract_marker"),
+            "default request events must retain schema hashes, not schema contents"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Every per-call `served_context` hash must resolve to retained bytes
     /// earlier in the SAME transcript, and a reader must be able to re-derive
     /// the hash from those bytes.
