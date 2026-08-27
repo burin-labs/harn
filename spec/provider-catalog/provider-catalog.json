@@ -11202,182 +11202,6 @@
       ]
     },
     {
-      "id": "devstral-medium-2512",
-      "name": "Devstral 2 Medium",
-      "display_name": "Devstral 2 Medium",
-      "provider": "mistral",
-      "aliases": [
-        "devstral-medium"
-      ],
-      "context_window": 262144,
-      "api_dialect": "openai_chat_compat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "none"
-      },
-      "reasoning": {
-        "modes": [],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": false,
-      "batch": {
-        "wire_format": "mistral",
-        "input_mode": "jsonl_or_inline",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "max_requests": 100000,
-        "max_input_bytes": 536870912,
-        "result_retention_days": 1,
-        "operational_notes": [
-          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
-          "Batch jobs use separate accounting from real-time rate limits.",
-          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
-        ]
-      },
-      "pricing": {
-        "input_per_mtok": 0.4,
-        "output_per_mtok": 2.0,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "structured_output",
-        "batch"
-      ],
-      "family": "mistral",
-      "lineage": "mistral",
-      "tier": "mid",
-      "open_weight": false,
-      "strengths": [
-        "coding",
-        "tool_use",
-        "agentic"
-      ]
-    },
-    {
-      "id": "devstral-small-2512",
-      "name": "Devstral 2 Small",
-      "display_name": "Devstral 2 Small",
-      "provider": "mistral",
-      "aliases": [
-        "devstral-small"
-      ],
-      "context_window": 262144,
-      "api_dialect": "openai_chat_compat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "none"
-      },
-      "reasoning": {
-        "modes": [],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": false,
-      "batch": {
-        "wire_format": "mistral",
-        "input_mode": "jsonl_or_inline",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "max_requests": 100000,
-        "max_input_bytes": 536870912,
-        "result_retention_days": 1,
-        "operational_notes": [
-          "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
-          "Batch jobs use separate accounting from real-time rate limits.",
-          "The default timeout is 24 hours; results are downloadable for 24 hours after completion."
-        ]
-      },
-      "pricing": {
-        "input_per_mtok": 0.1,
-        "output_per_mtok": 0.3,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "structured_output",
-        "batch"
-      ],
-      "family": "mistral",
-      "lineage": "mistral",
-      "tier": "small",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "cheap",
-        "tool_use"
-      ]
-    },
-    {
       "id": "mistral-large-2512",
       "name": "Mistral Large 3 2512",
       "display_name": "Mistral Large 3 2512",
@@ -11479,7 +11303,10 @@
       "name": "Mistral Medium 3.5",
       "display_name": "Mistral Medium 3.5",
       "provider": "mistral",
-      "aliases": [],
+      "aliases": [
+        "devstral-medium",
+        "devstral-small"
+      ],
       "context_window": 262144,
       "logical_model": "mistral-medium-3.5-128b",
       "equivalence_group": "mistral-medium-3.5-128b",
@@ -24967,12 +24794,12 @@
     },
     {
       "name": "devstral-medium",
-      "model_id": "devstral-medium-2512",
+      "model_id": "mistral-medium-3-5",
       "provider": "mistral"
     },
     {
       "name": "devstral-small",
-      "model_id": "devstral-small-2512",
+      "model_id": "mistral-medium-3-5",
       "provider": "mistral"
     },
     {
@@ -27603,42 +27430,6 @@
       "base_url": "https://api.mistral.ai/v1",
       "secret_env": "MISTRAL_API_KEY",
       "label": "Codestral 25.08",
-      "family": "mistral",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools"
-      ]
-    },
-    {
-      "provider": "mistral",
-      "model": "devstral-medium-2512",
-      "base_url": "https://api.mistral.ai/v1",
-      "secret_env": "MISTRAL_API_KEY",
-      "label": "Devstral 2 Medium",
-      "family": "mistral",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools"
-      ]
-    },
-    {
-      "provider": "mistral",
-      "model": "devstral-small-2512",
-      "base_url": "https://api.mistral.ai/v1",
-      "secret_env": "MISTRAL_API_KEY",
-      "label": "Devstral 2 Small",
       "family": "mistral",
       "capabilities": [
         "batch",
