@@ -460,6 +460,8 @@ async fn host_agent_session_finalize(
         crate::agent_sessions::append_event(&session_id, transcript_event)
             .map_err(VmError::Runtime)?;
     }
+    let recap_store = crate::agent_sessions::journal_store(&session_id);
+    let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
     live_transcript_journal::flush_terminal(
         &session_id,
         &canonical_status,
@@ -469,6 +471,38 @@ async fn host_agent_session_finalize(
         &terminal_outcome,
     )
     .await?;
+    let recap = if let Some(store) = recap_store {
+        match crate::session_recap::query_session_recap(
+            &store,
+            crate::session_recap::SessionRecapQuery {
+                run_id: Some(session.run_id.clone()),
+                from_event_id: recap_from_event_id,
+                ..crate::session_recap::SessionRecapQuery::for_session(&session_id)
+            },
+        )
+        .await
+        {
+            Ok(Some(snapshot)) => {
+                crate::session_recap::SessionRecapAvailability::available(snapshot)
+            }
+            Ok(None) => crate::session_recap::SessionRecapAvailability::unavailable(
+                crate::session_recap::SessionRecapUnavailableReason::SessionMissing,
+            ),
+            Err(error) => {
+                crate::events::log_warn(
+                    "agent.session_recap_projection",
+                    &format!("session={session_id} recap projection error: {error}"),
+                );
+                crate::session_recap::SessionRecapAvailability::unavailable(
+                    crate::session_recap::SessionRecapUnavailableReason::ProjectionFailed,
+                )
+            }
+        }
+    } else {
+        crate::session_recap::SessionRecapAvailability::unavailable(
+            crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
+        )
+    };
     cancellation::finish_agent_session(&mut session, &session_id, canonical_status != "suspended");
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
@@ -537,6 +571,7 @@ async fn host_agent_session_finalize(
             "mode": tool_mode,
         },
         "transcript": transcript_json,
+        "recap": recap,
         "trace": trace_summary,
         "tokens_used": session.tokens_used,
         "cost_usd": if session.unpriced_calls == 0 {

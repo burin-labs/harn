@@ -41,14 +41,14 @@ pub(crate) fn next_journal_event(
     })
 }
 
-pub(crate) fn pop_journal_event(id: &str) {
+pub(crate) fn record_persisted_journal_event(id: &str, event_id: u64) {
     super::SESSIONS.with(|sessions| {
         if let Some(journal) = sessions
             .borrow_mut()
             .get_mut(id)
             .and_then(|state| state.transcript_journal.as_mut())
         {
-            journal.pop_front();
+            journal.record_persisted_event(event_id);
         }
     });
 }
@@ -79,5 +79,32 @@ pub(crate) fn active_run_id(id: &str) -> Option<String> {
             .get(id)
             .and_then(|state| state.transcript_journal.as_ref())
             .map(|journal| journal.run_id().to_string())
+    })
+}
+
+/// First durable event written by the active invocation.
+pub(crate) fn journal_first_event_id(id: &str) -> Option<u64> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .try_borrow()
+            .ok()?
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .and_then(crate::agent_session_journal::JournalState::first_event_id)
+    })
+}
+
+/// Canonical store owned by the live journal for a terminal read-back.
+///
+/// The clone is another handle to the same SQLite store, not a second source of
+/// truth. Callers use it only after flushing queued mutations.
+pub(crate) fn journal_store(id: &str) -> Option<harn_session_store::SqliteSessionStore> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .try_borrow()
+            .ok()?
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(crate::agent_session_journal::JournalState::store)
     })
 }

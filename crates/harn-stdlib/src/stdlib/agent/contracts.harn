@@ -39,6 +39,151 @@ pub type AgentToolSummary = {
   ...rest,
 }
 
+/** Deterministic recap lifecycle state derived from durable session facts. */
+pub type AgentRecapCompletionState = "open" | "complete" | "incomplete" | "unassigned"
+
+pub type AgentRecapToolState = "open" | "completed" | "failed" | "incomplete"
+
+pub type AgentRecapTextFact = {text: string, sourceEventId: int}
+
+pub type AgentRecapVerificationFact = {
+  schema: string,
+  status: "passed",
+  verifiedPaths: list<string>,
+  sourceEventId: int,
+}
+
+pub type AgentRecapToolExchange = {
+  toolCallId: string,
+  toolName: string?,
+  state: AgentRecapToolState,
+  callObserved: bool,
+  resultObserved: bool,
+  input: any,
+  output: any,
+  verification: AgentRecapVerificationFact?,
+  sourceEventIds: list<int>,
+}
+
+pub type AgentRecapPlanStepStatus = "pending" \
+  | "in_progress" \
+  | "completed" \
+  | "blocked" \
+  | "cancelled"
+
+pub type AgentRecapPlanStep = {id: string, content: string, status: AgentRecapPlanStepStatus}
+
+pub type AgentRecapPlanEventKind = "created" | "updated"
+
+pub type AgentRecapPlanEventFact = {
+  kind: AgentRecapPlanEventKind,
+  eventId: string,
+  inputRevisionId: string?,
+}
+
+pub type AgentRecapPlanFact = {
+  documentId: string,
+  revisionId: string,
+  title: string,
+  summary: string,
+  steps: list<AgentRecapPlanStep>,
+  event: AgentRecapPlanEventFact?,
+  sourceEventId: int,
+}
+
+pub type AgentRecapProgressStatus = "pending" | "in_progress" | "completed"
+
+pub type AgentRecapProgressPriority = "high" | "medium" | "low"
+
+pub type AgentRecapProgressEntry = {
+  content: string,
+  status: AgentRecapProgressStatus,
+  priority: AgentRecapProgressPriority?,
+}
+
+pub type AgentRecapProgressFact = {
+  message: string?,
+  entries: list<AgentRecapProgressEntry>,
+  replace: bool,
+  sourceEventId: int,
+}
+
+pub type AgentRecapTerminalFact = {
+  state: AgentRecapCompletionState,
+  finalStatus: string?,
+  stopReason: string?,
+  kind: string?,
+  owner: string?,
+  reason: string?,
+  sourceEventId: int,
+}
+
+pub type AgentIterationRecap = {
+  iteration: int?,
+  state: AgentRecapCompletionState,
+  assistantText: list<AgentRecapTextFact>,
+  tools: list<AgentRecapToolExchange>,
+  plans: list<AgentRecapPlanFact>,
+  progress: list<AgentRecapProgressFact>,
+  sourceEventIds: list<int>,
+}
+
+pub type AgentPromptTurnRecap = {
+  turnId: string,
+  runId: string,
+  state: AgentRecapCompletionState,
+  prompts: list<AgentRecapTextFact>,
+  iterations: list<AgentIterationRecap>,
+  terminal: AgentRecapTerminalFact?,
+  sourceEventIds: list<int>,
+}
+
+pub type AgentRecapQuery = {
+  sessionId: string,
+  runId: string?,
+  turnId: string?,
+  fromEventId: int?,
+  limit: int?,
+}
+
+pub type AgentRecapCursor = {lastEventId: int?, nextEventId: int?}
+
+pub type AgentRecapCoverage = {
+  scanned: int,
+  matched: int,
+  pending: int,
+  unassigned: int,
+  truncated: bool,
+}
+
+pub type AgentRecapSourceEvent = {eventId: int, recordHash: string}
+
+pub type AgentRecapSource = {
+  firstEventId: int?,
+  lastEventId: int?,
+  events: list<AgentRecapSourceEvent>,
+}
+
+pub type AgentRecapSnapshot = {
+  schemaVersion: int,
+  sessionId: string,
+  query: AgentRecapQuery,
+  cursor: AgentRecapCursor,
+  coverage: AgentRecapCoverage,
+  source: AgentRecapSource,
+  contentHash: string,
+  projectionHash: string,
+  turns: list<AgentPromptTurnRecap>,
+}
+
+pub type AgentRecapUnavailableReason = "journal_unavailable" \
+  | "session_missing" \
+  | "projection_failed" \
+  | "admission_terminal"
+
+pub type AgentRecapAvailability = {state: "available", snapshot: AgentRecapSnapshot} \
+  | {state: "unavailable", reason: AgentRecapUnavailableReason}
+
 /**
  * Canonical result returned by `agent_loop` and `HarnessAgent.session_finalize`.
  *
@@ -62,6 +207,7 @@ pub type AgentResult = {
   llm: AgentLlmSummary,
   tools: AgentToolSummary,
   transcript: any,
+  recap: AgentRecapAvailability,
   trace: any,
   tokens_used: int,
   cost_usd: float?,

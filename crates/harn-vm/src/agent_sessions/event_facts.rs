@@ -81,6 +81,12 @@ pub(crate) const CHECKPOINT_KIND: &str = "/transcript_event/metadata/kind";
 /// Zero-or-one-based iteration counter carried by a `loop_checkpoint`.
 pub(crate) const ITERATION: &str = "/transcript_event/metadata/iteration";
 
+/// The common transcript metadata object carried by audit events.
+pub(crate) const TRANSCRIPT_METADATA: &str = "/transcript_event/metadata";
+/// Canonical plan document and mutation carried by a `plan_document` event.
+pub(crate) const PLAN_DOCUMENT: &str = "/transcript_event/metadata/plan_document";
+pub(crate) const PLAN_DOCUMENT_EVENT: &str = "/transcript_event/metadata/plan_document_event";
+
 /// Human-visible text, preferring the transcript envelope and falling back to
 /// the raw provider message the envelope was built from.
 pub(crate) const TEXT: [&str; 2] = ["/transcript_event/text", "/raw_message/content"];
@@ -113,6 +119,14 @@ pub(crate) const TOOL_OUTPUT_ANY: [&str; 3] = [
     "/raw_message/content",
     "/transcript_event/text",
 ];
+/// Error marker across the audit envelope and the provider-neutral raw result.
+pub(crate) const TOOL_IS_ERROR_ANY: [&str; 2] = [TOOL_IS_ERROR, "/raw_message/is_error"];
+/// Provider-neutral tool-result facts are storage-only and stripped before
+/// provider egress.
+pub(crate) const TOOL_RESULT_FACT_CALL_ID: &str = "/raw_message/_harn/tool_call_id";
+/// The only verification fact this projection accepts: a typed deterministic
+/// postcondition emitted by the tool producer.
+pub(crate) const TOOL_VERIFICATION: &str = "/raw_message/_harn/data/verification";
 
 /// First pointer that resolves to a non-empty trimmed string.
 ///
@@ -165,6 +179,11 @@ pub(crate) fn bool_at(payload: &Value, pointer: &str) -> bool {
         .pointer(pointer)
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+/// Whether any accepted pointer resolves to JSON `true`.
+pub(crate) fn bool_at_any(payload: &Value, pointers: &[&str]) -> bool {
+    pointers.iter().any(|pointer| bool_at(payload, pointer))
 }
 
 #[cfg(test)]
