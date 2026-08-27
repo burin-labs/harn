@@ -475,6 +475,9 @@ fn anthropic_interleaved_thinking_beta_header_is_sent_for_supported_model() {
         opts.thinking = ThinkingConfig::Enabled {
             budget_tokens: Some(8000),
         };
+        // This test exercises the beta header, not forced tool choice. Manual
+        // thinking only permits Anthropic's automatic tool mode.
+        opts.tool_choice = Some(serde_json::json!("auto"));
         let result = vm_call_llm_full(&opts)
             .await
             .expect("stubbed Anthropic response");
