@@ -143,7 +143,9 @@ pub(crate) async fn run(args: TimeRunArgs) {
     let cpu_start = cpu_ms();
     let wall_start = std::time::Instant::now();
     let sandbox = crate::commands::run::sandbox::sandbox_options_from_args(&args.sandbox);
-    let project_runtime = if args.project_triggers {
+    let project_runtime = if args.eager_project_handlers {
+        crate::commands::run::ProjectRuntimeMode::EagerHandlers
+    } else if args.project_triggers {
         crate::commands::run::ProjectRuntimeMode::WithTriggers
     } else {
         crate::commands::run::ProjectRuntimeMode::Project

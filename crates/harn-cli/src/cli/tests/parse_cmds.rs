@@ -54,6 +54,33 @@ fn test_time_run_can_register_project_triggers_explicitly() {
 }
 
 #[test]
+fn test_time_run_can_validate_project_handlers_explicitly() {
+    let cli = Cli::parse_from([
+        "harn",
+        "time",
+        "run",
+        "--eager-project-handlers",
+        "main.harn",
+    ]);
+    let Command::Time(args) = cli.command.unwrap() else {
+        panic!("expected time command");
+    };
+    let TimeCommand::Run(args) = args.command;
+    assert!(args.eager_project_handlers);
+
+    let help = Cli::command()
+        .find_subcommand_mut("time")
+        .and_then(|time| time.find_subcommand_mut("run"))
+        .expect("time run subcommand exists")
+        .render_help()
+        .to_string();
+    assert!(
+        help.contains("--eager-project-handlers"),
+        "time run help must disclose explicit eager validation: {help}",
+    );
+}
+
+#[test]
 fn test_run_standalone_is_explicit_and_conflicts_with_project_handlers() {
     let cli = Cli::parse_from(["harn", "run", "--standalone", "main.harn"]);
     let Command::Run(args) = cli.command.unwrap() else {

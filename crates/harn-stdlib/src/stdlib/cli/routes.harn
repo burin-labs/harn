@@ -1,3 +1,5 @@
+import { safe_bool, safe_dict, safe_int, safe_list, safe_string } from "std/cli/render"
+
 /**
  * `harn routes` ported to .harn — see harn#2311 (W11).
  *
@@ -40,41 +42,6 @@
  * the trigger/manifest/IR analyser. The shim only dispatches when the
  * extraction succeeded.
  */
-fn __safe_string(value: string, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_list(value: list) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_dict(value: dict) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_bool(value: bool, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_int(value: int, fallback: int) -> int {
-  if type_of(value) == "int" {
-    return value
-  }
-  return fallback
-}
-
 /**
  * Truncate `value` to at most `width` Unicode scalars. Mirrors the
  * host `truncate(&str, width)` helper — strings ≤ width pass through
@@ -182,10 +149,10 @@ fn __render_text(report: dict) -> string {
     + " "
     + __pad_left("fw_tokens", 8)
     + "  capabilities\n"
-  const triggers = __safe_list(report["triggers"])
+  const triggers = safe_list(report["triggers"])
   for trigger in triggers {
-    const t = __safe_dict(trigger)
-    const caps = __safe_list(t["requires_capabilities"])
+    const t = safe_dict(trigger)
+    const caps = safe_list(t["requires_capabilities"])
     const capabilities = if len(caps) == 0 {
       "-"
     } else {
@@ -196,25 +163,25 @@ fn __render_text(report: dict) -> string {
     } else {
       "-"
     }
-    const vendor_locked = __safe_bool(t["vendor_locked"], false)
+    const vendor_locked = safe_bool(t["vendor_locked"], false)
     const vendor = if vendor_locked {
       "yes"
     } else {
       "no"
     }
-    const fw_tokens = __safe_int(t["framework_overhead_tokens"], 0)
+    const fw_tokens = safe_int(t["framework_overhead_tokens"], 0)
     out = out
-      + __pad_right(__truncate(__safe_string(t["id"], ""), 28), 28)
+      + __pad_right(__truncate(safe_string(t["id"], ""), 28), 28)
       + " "
-      + __pad_right(__safe_string(t["kind"], ""), 10)
+      + __pad_right(safe_string(t["kind"], ""), 10)
       + " "
-      + __pad_right(__truncate(__safe_string(t["provider"], ""), 12), 12)
+      + __pad_right(__truncate(safe_string(t["provider"], ""), 12), 12)
       + " "
       + __pad_right(__truncate(path_value, 24), 24)
       + " "
-      + __pad_right(__truncate(__safe_string(t["module"], ""), 22), 22)
+      + __pad_right(__truncate(safe_string(t["module"], ""), 22), 22)
       + " "
-      + __pad_right(__truncate(__safe_string(t["handler"], ""), 18), 18)
+      + __pad_right(__truncate(safe_string(t["handler"], ""), 18), 18)
       + " "
       + __pad_right(vendor, 7)
       + " "
@@ -239,25 +206,25 @@ fn __render_text(report: dict) -> string {
  * envelope contract.
  */
 fn __strip_absent(report: dict) -> dict {
-  const triggers = __safe_list(report["triggers"])
+  const triggers = safe_list(report["triggers"])
   let cleaned = []
   for trigger in triggers {
-    const t = __safe_dict(trigger)
+    const t = safe_dict(trigger)
     let entry = {
-      id: __safe_string(t["id"], ""),
-      kind: __safe_string(t["kind"], ""),
-      provider: __safe_string(t["provider"], ""),
-      module: __safe_string(t["module"], ""),
-      handler: __safe_string(t["handler"], ""),
-      requires_capabilities: __safe_list(t["requires_capabilities"]),
-      budgets: __strip_budgets(__safe_dict(t["budgets"])),
-      vendor_locked: __safe_bool(t["vendor_locked"], false),
-      framework_overhead_tokens: __safe_int(t["framework_overhead_tokens"], 0),
+      id: safe_string(t["id"], ""),
+      kind: safe_string(t["kind"], ""),
+      provider: safe_string(t["provider"], ""),
+      module: safe_string(t["module"], ""),
+      handler: safe_string(t["handler"], ""),
+      requires_capabilities: safe_list(t["requires_capabilities"]),
+      budgets: __strip_budgets(safe_dict(t["budgets"])),
+      vendor_locked: safe_bool(t["vendor_locked"], false),
+      framework_overhead_tokens: safe_int(t["framework_overhead_tokens"], 0),
     }
     if type_of(t["path"]) == "string" {
       entry = entry + {path: t["path"]}
     }
-    const events = __safe_list(t["events"])
+    const events = safe_list(t["events"])
     if len(events) > 0 {
       entry = entry + {events: events}
     }

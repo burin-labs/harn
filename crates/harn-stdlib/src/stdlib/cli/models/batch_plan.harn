@@ -12,7 +12,7 @@ import {
   __has_string,
   __live_batch_adapter,
   __mkdirp,
-  __safe_int,
+  coerce_optional_int,
 } from "std/cli/models/batch_transport"
 /**
  * `harn models batch` renderer.
@@ -248,15 +248,15 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
   const provider = safe_string(entry["provider"], "")
   const id = safe_string(entry["id"], "")
   const batch_entry = safe_dict(entry["batch"])
-  const typed_discount = __safe_int(batch_entry["discount_percent"])
-  const typed_turnaround = __safe_int(batch_entry["turnaround_hours"])
+  const typed_discount = coerce_optional_int(batch_entry["discount_percent"])
+  const typed_turnaround = coerce_optional_int(batch_entry["turnaround_hours"])
   const discount = if typed_discount == nil {
-    __safe_int(entry["batch_discount_percent"])
+    coerce_optional_int(entry["batch_discount_percent"])
   } else {
     typed_discount
   }
   const turnaround = if typed_turnaround == nil {
-    __safe_int(entry["batch_turnaround_hours"])
+    coerce_optional_int(entry["batch_turnaround_hours"])
   } else {
     typed_turnaround
   }
@@ -314,9 +314,9 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
       input_mode: input_mode,
       discount_percent: discount,
       turnaround_hours: turnaround,
-      max_requests: __safe_int(batch_entry["max_requests"]),
-      max_input_bytes: __safe_int(batch_entry["max_input_bytes"]),
-      result_retention_days: __safe_int(batch_entry["result_retention_days"]),
+      max_requests: coerce_optional_int(batch_entry["max_requests"]),
+      max_input_bytes: coerce_optional_int(batch_entry["max_input_bytes"]),
+      result_retention_days: coerce_optional_int(batch_entry["result_retention_days"]),
       result_ordering: safe_string(batch_entry["result_ordering"], "unknown"),
       partial_failure: safe_string(batch_entry["partial_failure"], "unknown"),
       cancellation: safe_string(batch_entry["cancellation"], "unknown"),
@@ -358,11 +358,11 @@ fn __collect(
     if !safe_bool(entry["batch_api"], false) && !__has_string(capabilities, "batch") {
       continue
     }
-    const discount = __safe_int(entry["batch_discount_percent"])
+    const discount = coerce_optional_int(entry["batch_discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
       continue
     }
-    const turnaround = __safe_int(entry["batch_turnaround_hours"])
+    const turnaround = coerce_optional_int(entry["batch_turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
       continue
     }
@@ -372,7 +372,7 @@ fn __collect(
 }
 
 fn __render_batch_value(value: int?, suffix: string, fallback: string) -> string {
-  const parsed = __safe_int(value)
+  const parsed = coerce_optional_int(value)
   if parsed == nil {
     return fallback
   }
@@ -755,7 +755,7 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
         __batch_request_location(
           "group " + safe_string(group["id"], ""),
           safe_string(req["custom_id"], ""),
-          __safe_int(req["source_line"]) ?? 0,
+          coerce_optional_int(req["source_line"]) ?? 0,
         ),
         raw_row,
         body,
@@ -818,7 +818,7 @@ fn __build_manifest(
   let request_count = 0
   for item in request_rows {
     const entry = safe_dict(item)
-    const line_no = __safe_int(entry["line_no"]) ?? 0
+    const line_no = coerce_optional_int(entry["line_no"]) ?? 0
     const row = safe_dict(entry["row"])
     const provider = __row_string(row, "provider", provider_filter)
     const model = __row_string(row, "model", model_filter)
@@ -839,7 +839,7 @@ fn __build_manifest(
     }
     const candidate = safe_dict(resolved["candidate"])
     const batch = safe_dict(candidate["batch"])
-    const discount = __safe_int(batch["discount_percent"])
+    const discount = coerce_optional_int(batch["discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
       errors = errors.appending(
         "line "
@@ -851,7 +851,7 @@ fn __build_manifest(
       )
       continue
     }
-    const turnaround = __safe_int(batch["turnaround_hours"])
+    const turnaround = coerce_optional_int(batch["turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
       errors = errors.appending(
         "line "
@@ -1056,8 +1056,8 @@ fn __run_manifest(
     out: out_path,
     source: safe_dict(manifest["source"]),
     workload: workload,
-    request_count: __safe_int(manifest["requestCount"]) ?? 0,
-    group_count: __safe_int(manifest["groupCount"]) ?? 0,
+    request_count: coerce_optional_int(manifest["requestCount"]) ?? 0,
+    group_count: coerce_optional_int(manifest["groupCount"]) ?? 0,
     groups: safe_list(manifest["groups"]).map({ group -> __group_summary(safe_dict(group)) }),
     errors: errors,
     warnings: warnings,
@@ -1150,7 +1150,7 @@ fn __run_prepare(harness: Harness) -> int {
         artifacts = artifacts.appending(artifact)
         const job = safe_dict(artifact["job"])
         jobs = jobs.appending(__with_batch_lifecycle(job, "prepare", false))
-        request_count = request_count + (__safe_int(job["request_count"]) ?? 0)
+        request_count = request_count + (coerce_optional_int(job["request_count"]) ?? 0)
       }
     }
   }
@@ -1172,8 +1172,8 @@ fn __run_prepare(harness: Harness) -> int {
       path: manifest_path,
       sha256: loaded.source_sha256,
       source: safe_dict(manifest["source"]),
-      request_count: __safe_int(manifest["requestCount"]) ?? 0,
-      group_count: __safe_int(manifest["groupCount"]) ?? 0,
+      request_count: coerce_optional_int(manifest["requestCount"]) ?? 0,
+      group_count: coerce_optional_int(manifest["groupCount"]) ?? 0,
     },
     outDir: out_dir,
     jobCount: len(jobs),

@@ -1,3 +1,5 @@
+import { safe_int, safe_list, safe_string } from "std/cli/render"
+
 /**
  * `harn provider catalog recommend` ported to .harn — see harn#2310 (W10).
  *
@@ -17,27 +19,6 @@
  *     status, recommended_tool_format?, caveats: list<string>}).
  *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else human text.
  */
-fn __safe_string(value: string, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_list(value: list) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_int(value: int, fallback: int) -> int {
-  if type_of(value) == "int" {
-    return value
-  }
-  return fallback
-}
-
 fn __recommended_tool(value: string) -> string {
   if type_of(value) == "string" {
     return value
@@ -47,8 +28,8 @@ fn __recommended_tool(value: string) -> string {
 
 fn __render_human(report: dict) -> string {
   let out = "local provider recommendations\n"
-  out = out + "source: " + __safe_string(report["source"], "") + "\n"
-  const recommendations = __safe_list(report["recommendations"])
+  out = out + "source: " + safe_string(report["source"], "") + "\n"
+  const recommendations = safe_list(report["recommendations"])
   if len(recommendations) == 0 {
     return out + "(no local model outcomes found)\n"
   }
@@ -56,11 +37,11 @@ fn __render_human(report: dict) -> string {
     if type_of(rec) != "dict" {
       continue
     }
-    const rank = __safe_int(rec["rank"], 0)
-    const provider = __safe_string(rec["provider"], "")
-    const model = __safe_string(rec["model"], "")
-    const status = __safe_string(rec["status"], "")
-    const selector = __safe_string(rec["selector"], "")
+    const rank = safe_int(rec["rank"], 0)
+    const provider = safe_string(rec["provider"], "")
+    const model = safe_string(rec["model"], "")
+    const status = safe_string(rec["status"], "")
+    const selector = safe_string(rec["selector"], "")
     const tool_format = __recommended_tool(rec["recommended_tool_format"])
     out = out + to_string(rank) + ". " + provider + " " + model
       + " ("
@@ -70,7 +51,7 @@ fn __render_human(report: dict) -> string {
       + ", tools "
       + tool_format
       + ")\n"
-    const caveats = __safe_list(rec["caveats"])
+    const caveats = safe_list(rec["caveats"])
     for caveat in caveats {
       if type_of(caveat) == "string" {
         out = out + "   caveat: " + caveat + "\n"

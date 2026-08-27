@@ -1,3 +1,5 @@
+import { safe_bool, safe_dict, safe_list, safe_string } from "std/cli/render"
+
 /**
  * `harn provider probe` ported to .harn — see harn#2310 (W10).
  *
@@ -35,34 +37,6 @@
  *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
  *     handler level), else the human readiness summary.
  */
-fn __safe_string(value: string, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_dict(value: dict) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_list(value: list) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_bool(value: bool, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
 /** Mirror host `fmt_bytes`: `Some(n) → "{n}B"`, `None → "-"`. */
 fn __fmt_bytes(value: any) -> string {
   if type_of(value) == "int" {
@@ -88,11 +62,11 @@ fn __render_loaded_lines(models: list) -> string {
     if type_of(model) != "dict" {
       continue
     }
-    const name = __safe_string(model["name"], "")
+    const name = safe_string(model["name"], "")
     const size = __fmt_bytes(model["size_bytes"])
     const vram = __fmt_bytes(model["size_vram_bytes"])
     const ctx = __fmt_u64(model["context_length"])
-    const expires = __safe_string(model["expires_at"], "-")
+    const expires = safe_string(model["expires_at"], "-")
     out = out + "  - " + name
       + " (size="
       + size
@@ -134,8 +108,8 @@ fn main(harness: Harness) -> int {
       nil
     }
     if type_of(parsed_ok) == "dict" {
-      const readiness = __safe_dict(parsed_ok["readiness"])
-      if !__safe_bool(readiness["ok"], false) {
+      const readiness = safe_dict(parsed_ok["readiness"])
+      if !safe_bool(readiness["ok"], false) {
         return 1
       }
     }
@@ -147,12 +121,12 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: failed to parse provider-probe payload: " + e.message)
     return 70
   }
-  const readiness = __safe_dict(payload["readiness"])
-  const ok = __safe_bool(readiness["ok"], false)
-  const message = __safe_string(readiness["message"], "")
+  const readiness = safe_dict(payload["readiness"])
+  const ok = safe_bool(readiness["ok"], false)
+  const message = safe_string(readiness["message"], "")
   if ok {
     harness.stdio.println(message)
-    const loaded = __safe_list(payload["loaded_models"])
+    const loaded = safe_list(payload["loaded_models"])
     const lines = __render_loaded_lines(loaded)
     if lines != "" {
       // Strip the trailing newline `__render_loaded_lines` always

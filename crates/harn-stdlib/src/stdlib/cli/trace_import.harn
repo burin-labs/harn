@@ -27,7 +27,7 @@ fn __optional_int(obj: any, key: string) {
   return nil
 }
 
-fn __coerce_tool_calls(value: list) -> list {
+fn __coerce_tool_calls(value: any) -> list {
   if value == nil {
     return []
   }
@@ -58,7 +58,7 @@ fn __response_object(value: any) {
   return {}
 }
 
-fn __response_text(value: string) -> string {
+fn __response_text(value: any) -> string {
   if type_of(value) == "string" {
     return value
   }

@@ -18,6 +18,9 @@
 #[path = "../test_util/mod.rs"]
 mod test_util;
 
+#[path = "../required_pr_e2e.rs"]
+mod required_pr_e2e;
+
 mod batch_download_cli;
 mod burin_mini_playground;
 mod bytecode_cache;
@@ -36,3 +39,31 @@ mod persona_cli;
 mod profile;
 mod test_bench_cli;
 mod trigger_replay_cli;
+
+#[test]
+fn required_pr_e2e_inventory_is_selected_by_every_pr_profile() {
+    let nextest: toml::Value = toml::from_str(include_str!("../../../../.config/nextest.toml"))
+        .expect("nextest configuration must parse");
+    assert_eq!(
+        required_pr_e2e::CASES.len(),
+        7,
+        "required PR E2E inventory must remain explicit",
+    );
+
+    for profile in ["default", "ci"] {
+        let filter = nextest["profile"][profile]["default-filter"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{profile} must define a default filter"));
+        assert!(
+            filter.contains("binary(harn_cli_e2e)"),
+            "{profile} must select required cases from harn_cli_e2e",
+        );
+        for name in required_pr_e2e::CASES {
+            assert_eq!(
+                filter.matches(name).count(),
+                1,
+                "{name} must be selected exactly once by the {profile} profile",
+            );
+        }
+    }
+}

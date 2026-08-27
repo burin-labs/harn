@@ -144,7 +144,7 @@ fn models_list_rejects_unknown_or_ambiguous_query_input() {
 // - models recommend ------------------------------------------------------
 
 #[test]
-fn models_recommend_human_text_has_model_and_rationale() {
+pub(crate) fn models_recommend_human_text_has_model_and_rationale() {
     let harn = run(&["models", "recommend"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let lines: Vec<&str> = harn.stdout.lines().collect();
