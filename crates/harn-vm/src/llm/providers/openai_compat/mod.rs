@@ -35,8 +35,9 @@ use self::messages::{
     relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
 };
 use self::reasoning::{
-    enabled_reasoning_config, is_openrouter_reasoning_disable, minimax_thinking_config,
-    model_declares_reasoning, openrouter_reasoning_config, typed_thinking_config,
+    enabled_reasoning_config, groq_qwen_reasoning_effort, is_openrouter_reasoning_disable,
+    minimax_thinking_config, model_declares_reasoning, openrouter_reasoning_config,
+    typed_thinking_config,
 };
 use self::streaming::canonicalizing_delta_tx;
 use self::tools::{normalize_tool_choice_for_capabilities, provider_request_tools};
@@ -290,6 +291,11 @@ impl OpenAiCompatibleProvider {
             Some("enabled") => {
                 if let Some(reasoning) = enabled_reasoning_config(&opts.thinking, &caps) {
                     body["reasoning"] = reasoning;
+                }
+            }
+            Some("groq_qwen") => {
+                if let Some(effort) = groq_qwen_reasoning_effort(&opts.thinking) {
+                    body["reasoning_effort"] = serde_json::json!(effort);
                 }
             }
             Some("minimax") => {

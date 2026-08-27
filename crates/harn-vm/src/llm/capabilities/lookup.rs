@@ -335,6 +335,17 @@ mod tests {
     }
 
     #[test]
+    fn groq_qwen_36_declares_thinking_toggle() {
+        reset();
+        let caps = lookup("groq", "qwen/qwen3.6-27b");
+        assert_eq!(caps.thinking_modes, vec!["toggle"]);
+        assert!(caps.reasoning_disable_supported);
+        assert_eq!(caps.reasoning_wire_format.as_deref(), Some("groq_qwen"));
+        assert!(!caps.reasoning_effort_supported);
+        assert!(caps.reasoning_effort_levels.is_empty());
+    }
+
+    #[test]
     fn vision_capability_gates_known_multimodal_models() {
         reset();
         let minimax_m3 = lookup("minimax", "MiniMax-M3");

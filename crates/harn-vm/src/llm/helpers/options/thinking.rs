@@ -315,8 +315,14 @@ pub(super) fn validate_thinking_supported(
     let supported = match thinking {
         ThinkingConfig::Disabled => true,
         // `enabled` remains compatible with Anthropic Opus 4.7+ where
-        // providers/anthropic.rs rewrites it to adaptive thinking.
-        ThinkingConfig::Enabled { .. } => supports("enabled") || supports("adaptive"),
+        // providers/anthropic.rs rewrites it to adaptive thinking. A toggle
+        // route accepts only the provider-managed form with no token budget.
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+        } => supports("toggle") || supports("enabled") || supports("adaptive"),
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(_),
+        } => supports("enabled") || supports("adaptive"),
         ThinkingConfig::Adaptive => supports("adaptive"),
         // The probe suspends this arm too. "Does this route accept effort at
         // all?" is the same catalog claim as "which rungs does it accept?",

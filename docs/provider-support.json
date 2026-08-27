@@ -1381,7 +1381,9 @@
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [],
+        "reasoning_knobs": [
+          "toggle"
+        ],
         "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,

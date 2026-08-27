@@ -156,7 +156,7 @@
 #   thinking_block_style:
 #                     preferred transcript thinking style: none, thinking_blocks,
 #                     reasoning_summary, inline.
-#   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
+#   thinking_modes  : supported script-facing modes: toggle, enabled, adaptive, effort.
 #   interleaved_thinking_supported:
 #                     whether `thinking` can opt Anthropic Messages API
 #                     requests into the interleaved-thinking beta header.
@@ -5701,6 +5701,11 @@ thinking_block_style = "reasoning_summary"
 
 # Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
 # parses the Qwen tool format server-side); no reported parity issues.
+# Its `reasoning_effort` field is a two-state mode switch rather than an
+# effort ladder: `none` selects instruct mode and `default` selects thinking
+# mode. Harn projects those provider words from `thinking: false | true` so
+# callers do not mistake `default` for an effort level. Live Groq probes on
+# 2026-08-26 confirmed both modes.
 [[provider.groq]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
@@ -5709,6 +5714,9 @@ tools_exclude_response_format = true
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true
 structured_output = "native"
+thinking_modes = ["toggle"]
+reasoning_disable_supported = true
+reasoning_wire_format = "groq_qwen"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"

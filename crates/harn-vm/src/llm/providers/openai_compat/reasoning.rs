@@ -85,6 +85,24 @@ pub(super) fn enabled_reasoning_config(
     }
 }
 
+/// Project Groq Qwen's two-state reasoning switch from Harn's thinking toggle.
+pub(super) fn groq_qwen_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str> {
+    match thinking {
+        ThinkingConfig::Disabled
+        | ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        } => Some("none"),
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+        } => Some("default"),
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(_),
+        }
+        | ThinkingConfig::Adaptive
+        | ThinkingConfig::Effort { .. } => None,
+    }
+}
+
 pub(super) fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
         ThinkingConfig::Disabled

@@ -354,3 +354,20 @@ fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
 
     assert_eq!(body["reasoning"]["enabled"], false);
 }
+
+#[test]
+fn groq_qwen_36_projects_thinking_toggle_to_provider_modes() {
+    let mut enabled = base_request_payload();
+    enabled.provider = "groq".to_string();
+    enabled.model = "qwen/qwen3.6-27b".to_string();
+    enabled.thinking = ThinkingConfig::Enabled {
+        budget_tokens: None,
+    };
+    let enabled_body = OpenAiCompatibleProvider::build_request_body(&enabled);
+    assert_eq!(enabled_body["reasoning_effort"], "default");
+
+    let mut disabled = enabled;
+    disabled.thinking = ThinkingConfig::Disabled;
+    let disabled_body = OpenAiCompatibleProvider::build_request_body(&disabled);
+    assert_eq!(disabled_body["reasoning_effort"], "none");
+}
