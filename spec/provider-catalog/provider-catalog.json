@@ -12338,7 +12338,7 @@
         "preferred_format": "native",
         "parity": "interchangeable",
         "parity_source": "declared",
-        "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode.",
+        "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. A 2026-08-26 direct control confirmed that K3 accepts tool_choice=required with reasoning_effort=max and returns a native tool call.",
         "tool_search": []
       },
       "structured_output": "native",

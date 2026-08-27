@@ -5,16 +5,13 @@
 # `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring to cover
 # both the prefixed catalog key and the bare wire id.
 #
-# TOOL-CHANNEL CAVEAT (credentialed probe 2026-07-18, harn 0.10.23 binary,
-# direct Moonshot /v1, N=2 per case). The whole Kimi family reasons, and that
-# interacts with tool calling two ways:
-#   1. FORCED tool_choice (`required` or a named function) returns HTTP 400
-#      "tool_choice '...' is incompatible with thinking enabled". This is the
-#      likely cause of the "empty completion, end_turn, 0 tokens, $0" agent-loop
-#      drops reported on Kimi (a 400 bills nothing) — NOT a native-emission
-#      drop. Keep `allowed_tool_choice_modes` to `["auto", "none"]` for every
-#      Kimi route; never advertise `required`.
-#   2. With `tool_choice: auto` the native channel is reliable — k2.6 and k3
+# TOOL-CHANNEL CAVEAT. A 2026-07-18 credentialed probe found that forced tool
+# choice returned HTTP 400 while thinking was enabled. Moonshot added
+# `required` support for K3 by 2026-08-26: direct controls with mandatory
+# `reasoning_effort: max` returned one native call for both `auto` and
+# `required`. Older Kimi rows retain the measured restriction.
+#
+# With `tool_choice: auto` the native channel is reliable: k2.6 and k3
 #      both carried a backslash/quote/unicode large-string argument byte-exact
 #      2/2. The TEXT channel is model-dependent: k3 parsed byte-exact, but k2.6
 #      burned its whole budget in the reasoning channel (finish_reason=length,
@@ -29,15 +26,13 @@ model_match = "*kimi-k3*"
 # echo_marker call's backslash/quote/unicode large-string argument byte-exact
 # (2/2), and the Harn text-tool channel emitted a parseable `<tool_call>`
 # block byte-exact (2/2) with no reasoning-channel over-run — native and text
-# are interchangeable here. FORCED tool_choice is the footgun: K3 always
-# reasons (`reasoning_effort: max`), and Moonshot rejects `tool_choice:
-# "required"` / a named function with HTTP 400 "tool_choice '...' is
-# incompatible with thinking enabled". So `required` is dropped from
-# allowed_tool_choice_modes below; only `auto`/`none` are real modes.
+# are interchangeable here. A 2026-08-26 direct control confirmed that K3 now
+# accepts `required` with mandatory `reasoning_effort: max` and returns a
+# native tool call with `finish_reason: tool_calls`.
 native_tools = true
 preferred_tool_format = "native"
 tool_mode_parity = "interchangeable"
-tool_mode_parity_notes = "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode."
+tool_mode_parity_notes = "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. A 2026-08-26 direct control confirmed that K3 accepts tool_choice=required with reasoning_effort=max and returns a native tool call."
 structured_output = "native"
 # K3 always reasons through the OpenAI-compatible `reasoning_effort` field.
 # Moonshot documents `low`, `high`, and `max`; `max` remains the route default.
@@ -45,10 +40,8 @@ thinking_modes = ["effort"]
 vision = true
 vision_supported = true
 prompt_caching = true
-# Forced tool_choice (`required` / a named function) returns HTTP 400
-# "incompatible with thinking enabled" on K3's mandatory reasoning (measured
-# 2026-07-18); only `auto`/`none` are real modes.
-allowed_tool_choice_modes = ["auto", "none"]
+# Directly measured with K3's mandatory reasoning on 2026-08-26.
+allowed_tool_choice_modes = ["auto", "required", "none"]
 requires_tool_result_adjacency = true
 # K3 always reasons, requires `max_completion_tokens`, and rejects fixed
 # sampling and penalty knobs.
