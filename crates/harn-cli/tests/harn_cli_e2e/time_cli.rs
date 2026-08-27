@@ -23,7 +23,7 @@ fn write_hello_script(dir: &std::path::Path) -> std::path::PathBuf {
     let path = dir.join("hello.harn");
     std::fs::write(
         &path,
-        "import { greeting } from \"./helper\"\n\npipeline default(harness: Harness, task) {\n  harness.stdio.log(greeting())\n}\n",
+        "import { greeting } from \"./helper\"\n\npipeline default(harness: Harness, task: unknown) {\n  harness.stdio.log(greeting())\n}\n",
     )
     .expect("write hello.harn");
     path
@@ -196,7 +196,7 @@ handler = "handlers::missing"
     )
     .expect("write hook module");
     let script = workdir.path().join("main.harn");
-    std::fs::write(&script, "pipeline default(_task) {}\n").expect("write script");
+    std::fs::write(&script, "pipeline default(_task: unknown) {}\n").expect("write script");
 
     let output = run_time(&script, cache_dir.path());
     assert!(!output.status.success(), "setup must fail on missing hook");

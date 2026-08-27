@@ -128,7 +128,7 @@ import { agent_command_tools } from "std/agent/host_tools"
 
 // Returning a string from command_policy blocks the request before it runs,
 // while exposing the shaped request so we can assert its mode/argv.
-fn capture(request, args) {
+fn capture(request: dict, args: unknown) {
   return "MODE=" + to_string(request?.mode) + " ARGV=" + json_stringify(request?.argv)
 }
 
@@ -173,7 +173,7 @@ fn parallel_host_command_cancellation_interrupts_child_group() {
         r#"
 import {{ agent_command_tools }} from "std/agent/host_tools"
 
-fn allow(request, args) {{ return true }}
+fn allow(request: dict, args: unknown) {{ return true }}
 
 pipeline main(harness: Harness) {{
   const root = "{root}"
@@ -263,7 +263,7 @@ fn list_under_argv_still_works() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-fn capture(request, args) {
+fn capture(request: dict, args: unknown) {
   return "MODE=" + to_string(request?.mode)
 }
 
@@ -289,7 +289,7 @@ fn command_request_carries_root_as_internal_sandbox_scope() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-fn capture(request, args) {
+fn capture(request: dict, args: unknown) {
   return "CWD=" + to_string(request?.cwd) + " SANDBOX=" + json_stringify(request?.sandbox?.workspace_roots)
 }
 
@@ -313,7 +313,7 @@ fn command_policy_can_return_require_approval_verdict() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-fn require_approval(request, args) {
+fn require_approval(request: dict, args: unknown) {
   return {require_approval: true, reason: "needs human approval", approval_id: "approval-123"}
 }
 
@@ -360,7 +360,7 @@ fn list_under_command_works_without_shell() {
     let body = r#"
 import { agent_command_tools } from "std/agent/host_tools"
 
-fn capture(request, args) {
+fn capture(request: dict, args: unknown) {
   return "MODE=" + to_string(request?.mode)
 }
 

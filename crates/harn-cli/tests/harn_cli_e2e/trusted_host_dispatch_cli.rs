@@ -4,12 +4,12 @@ fn write_imported_host_dispatch_graph(root: &std::path::Path) {
     std::fs::create_dir_all(root).expect("create project");
     std::fs::write(
         root.join("helper.harn"),
-        "pub fn dispatch(payload) { return host_call(\"cloud.echo\", payload) }\n",
+        "pub fn dispatch(payload: dict) { return host_call(\"cloud.echo\", payload) }\n",
     )
     .expect("write helper");
     std::fs::write(
         root.join("route.harn"),
-        "import { dispatch } from \"./helper\"\n\npub fn route(payload) { return dispatch(payload) }\n",
+        "import { dispatch } from \"./helper\"\n\npub fn route(payload: dict) { return dispatch(payload) }\n",
     )
     .expect("write route");
 }
@@ -19,7 +19,7 @@ fn check_requires_explicit_trusted_host_dispatch_authority() {
     let temp = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         temp.path().join("route.harn"),
-        "pub fn route(payload) { return host_call(\"cloud.echo\", payload) }\n",
+        "pub fn route(payload: dict) { return host_call(\"cloud.echo\", payload) }\n",
     )
     .expect("write route");
 
@@ -119,7 +119,7 @@ fn test_requires_explicit_trusted_host_dispatch_authority() {
         r#"
 import { with_scenario } from "std/testing"
 
-pipeline test_route(harness: Harness, _task) {
+pipeline test_route(harness: Harness, _task: unknown) {
   const value = with_scenario(
     harness,
     {
@@ -194,7 +194,7 @@ fn test_honors_trusted_host_dispatch_declared_in_the_manifest() {
         r#"
 import { with_scenario } from "std/testing"
 
-pipeline test_route(harness: Harness, _task) {
+pipeline test_route(harness: Harness, _task: unknown) {
   const value = with_scenario(
     harness,
     {

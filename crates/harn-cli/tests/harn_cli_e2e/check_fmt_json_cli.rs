@@ -24,7 +24,8 @@ fn stdout_json(output: &std::process::Output) -> serde_json::Value {
 fn fmt_check_json_reports_clean_and_drift_files() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let script = temp.path().join("main.harn");
-    std::fs::write(&script, "pipeline main(task) {\n  return 1\n}\n").expect("write script");
+    std::fs::write(&script, "pipeline main(task: unknown) {\n  return 1\n}\n")
+        .expect("write script");
 
     let clean = Command::new(binary_path())
         .args(["fmt", "--check", "--json", script.to_str().unwrap()])
@@ -40,7 +41,7 @@ fn fmt_check_json_reports_clean_and_drift_files() {
     assert_eq!(data["summary"]["already_formatted"], 1);
     assert_eq!(data["files"][0]["status"], "already_formatted");
 
-    std::fs::write(&script, "pipeline main(task){return 1}\n").expect("rewrite script");
+    std::fs::write(&script, "pipeline main(task: unknown){return 1}\n").expect("rewrite script");
     let drift = Command::new(binary_path())
         .args(["fmt", "--check", "--json", script.to_str().unwrap()])
         .output()
@@ -62,7 +63,8 @@ fn fmt_check_json_reports_clean_and_drift_files() {
 fn check_json_reports_success_and_diagnostics() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let script = temp.path().join("main.harn");
-    std::fs::write(&script, "pipeline main(task) {\n  return 1\n}\n").expect("write script");
+    std::fs::write(&script, "pipeline main(task: unknown) {\n  return 1\n}\n")
+        .expect("write script");
 
     let ok = Command::new(binary_path())
         .args(["check", "--json", script.to_str().unwrap()])
@@ -197,7 +199,7 @@ fn check_reports_bytecode_compile_errors_not_just_type_errors() {
     let script = temp.path().join("main.harn");
     std::fs::write(
         &script,
-        "pipeline main(task) {\n  return \"value ${1 2}\"\n}\n",
+        "pipeline main(task: unknown) {\n  return \"value ${1 2}\"\n}\n",
     )
     .expect("write script");
 
@@ -229,7 +231,7 @@ fn check_json_exits_successfully_when_stdout_consumer_closes_early() {
         let script = temp.path().join(format!("case_{index:03}.harn"));
         std::fs::write(
             &script,
-            format!("pipeline main(task) {{\n  return {index}\n}}\n"),
+            format!("pipeline main(task: unknown) {{\n  return {index}\n}}\n"),
         )
         .expect("write script");
     }
