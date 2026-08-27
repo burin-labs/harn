@@ -587,6 +587,9 @@ pub enum ReasoningRoundTripPolicy {
     EchoSigned,
     /// Replay Harn's canonical reasoning text under the typed provider field.
     EchoSameKey,
+    /// Replay canonical reasoning under the typed field only when the current
+    /// request carries native tools.
+    EchoSameKeyWhenToolsPresent,
 }
 
 impl ReasoningRoundTripPolicy {
@@ -595,6 +598,7 @@ impl ReasoningRoundTripPolicy {
             Self::Strip => "strip",
             Self::EchoSigned => "echo_signed",
             Self::EchoSameKey => "echo_same_key",
+            Self::EchoSameKeyWhenToolsPresent => "echo_same_key_when_tools_present",
         }
     }
 }

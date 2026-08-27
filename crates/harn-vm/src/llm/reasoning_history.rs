@@ -141,8 +141,14 @@ pub(crate) fn openai_same_key_reasoning(
     message: &serde_json::Value,
     policy: ReasoningRoundTripPolicy,
     field: Option<ReasoningHistoryWireField>,
+    request_has_tools: bool,
 ) -> Option<(&'static str, serde_json::Value)> {
-    if policy != ReasoningRoundTripPolicy::EchoSameKey
+    let replay_allowed = match policy {
+        ReasoningRoundTripPolicy::EchoSameKey => true,
+        ReasoningRoundTripPolicy::EchoSameKeyWhenToolsPresent => request_has_tools,
+        ReasoningRoundTripPolicy::Strip | ReasoningRoundTripPolicy::EchoSigned => false,
+    };
+    if !replay_allowed
         || message.get("role").and_then(serde_json::Value::as_str) != Some("assistant")
     {
         return None;

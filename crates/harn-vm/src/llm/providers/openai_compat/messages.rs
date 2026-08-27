@@ -369,6 +369,7 @@ pub(super) fn sanitize_openai_message_for_request(
     remap_tool_call: bool,
     reasoning_round_trip: crate::llm::capabilities::ReasoningRoundTripPolicy,
     reasoning_history_wire_field: Option<crate::llm::capabilities::ReasoningHistoryWireField>,
+    request_has_tools: bool,
 ) {
     // Harn persists native results in one provider-neutral shape. Project it
     // onto OpenAI's `tool` role only at this adapter boundary.
@@ -398,6 +399,7 @@ pub(super) fn sanitize_openai_message_for_request(
         message,
         reasoning_round_trip,
         reasoning_history_wire_field,
+        request_has_tools,
     );
 
     let Some(object) = message.as_object_mut() else {

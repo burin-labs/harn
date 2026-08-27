@@ -117,7 +117,8 @@
 #   cache_breakpoint_style:
 #                     explicit cache_control strategy: none, top_level, or last_block.
 #   reasoning_round_trip:
-#                     private reasoning replay: strip, echo_signed, or echo_same_key.
+#                     private reasoning replay: strip, echo_signed,
+#                     echo_same_key, or echo_same_key_when_tools_present.
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio_supported : whether Harn can send audio input blocks on this route.
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
@@ -6073,6 +6074,8 @@ reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "high", "max"]
 reasoning_disable_supported = true
 reasoning_wire_format = "thinking_type"
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key_when_tools_present"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -6093,6 +6096,8 @@ reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "high", "max"]
 reasoning_disable_supported = true
 reasoning_wire_format = "thinking_type"
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key_when_tools_present"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
