@@ -156,6 +156,10 @@ fn offthread_error_preserves_schema_stream_abort_category() {
 
     assert_eq!(parsed.provider, "openrouter");
     assert_eq!(parsed.model, "mistralai/devstral-small");
+    assert_eq!(
+        parsed.reason_kind,
+        crate::value::SchemaValidationReasonKind::InvalidJson
+    );
     assert_eq!(parsed.path, "$");
     assert_eq!(parsed.chunks_consumed, 1);
 }

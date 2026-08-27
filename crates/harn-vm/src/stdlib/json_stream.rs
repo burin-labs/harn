@@ -1457,6 +1457,13 @@ mod tests {
             invalid_map.get("verdict").map(VmValue::display).as_deref(),
             Some("invalid")
         );
+        assert_eq!(
+            invalid_map
+                .get("reason_kind")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("wrong_type")
+        );
         assert!(invalid_map.contains_key("reason"));
         assert!(invalid_map.contains_key("path"));
     }
