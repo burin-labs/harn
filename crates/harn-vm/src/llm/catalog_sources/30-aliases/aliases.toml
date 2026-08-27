@@ -378,13 +378,19 @@ provider = "openrouter"
 id = "kwaipilot/kat-coder-pro-v2"
 provider = "openrouter"
 
-# Together mirror of DeepSeek V4 Pro.
+# Together mirror of DeepSeek V4 Pro. The stable aliases follow Together's
+# current dated production route; the retired preview remains addressable only
+# by its exact provider id for historical attribution.
 [aliases."together-deepseek"]
-id = "deepseek-ai/DeepSeek-V4-Pro"
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "together"
 
 [aliases."together-deepseek-v4-pro"]
-id = "deepseek-ai/DeepSeek-V4-Pro"
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
+provider = "together"
+
+[aliases."together-deepseek-v4-pro-0813"]
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "together"
 
 # StepFun long-context agent route via OpenRouter.

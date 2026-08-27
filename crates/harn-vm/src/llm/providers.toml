@@ -1573,13 +1573,19 @@ provider = "openrouter"
 id = "kwaipilot/kat-coder-pro-v2"
 provider = "openrouter"
 
-# Together mirror of DeepSeek V4 Pro.
+# Together mirror of DeepSeek V4 Pro. The stable aliases follow Together's
+# current dated production route; the retired preview remains addressable only
+# by its exact provider id for historical attribution.
 [aliases."together-deepseek"]
-id = "deepseek-ai/DeepSeek-V4-Pro"
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "together"
 
 [aliases."together-deepseek-v4-pro"]
-id = "deepseek-ai/DeepSeek-V4-Pro"
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
+provider = "together"
+
+[aliases."together-deepseek-v4-pro-0813"]
+id = "deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "together"
 
 # StepFun long-context agent route via OpenRouter.
@@ -3465,11 +3471,34 @@ context_window = 512000
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
+deprecated = true
+deprecation_note = "Together retires this preview route on 2026-08-27. Use deepseek-ai/DeepSeek-V4-Pro-0813."
+superseded_by = "deepseek-ai/DeepSeek-V4-Pro-0813"
 
 tier = "frontier"
 open_weight = true
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# Together's public model page lists this dated successor on serverless and
+# dedicated infrastructure with a 1.05M-token context window. Pricing and
+# route metadata were verified there on 2026-08-26.
+[models."deepseek-ai/DeepSeek-V4-Pro-0813"]
+name = "DeepSeek V4 Pro 0813 (Together)"
+provider = "together"
+wire_model = "deepseek-ai/DeepSeek-V4-Pro-0813"
+logical_model = "deepseek-v4-pro-0813"
+equivalence_group = "deepseek-v4-pro-0813"
+served_variant = "together"
+api_dialect = "openai_chat"
+context_window = 1050000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.13 }
+architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, license = "MIT", source_url = "https://www.together.ai/models/deepseek-v4-pro-0813", last_verified = "2026-08-26" }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 
 # DeepSeek V4 Flash 0731 — the dated snapshot Together actually serves
 # serverless (the undated `DeepSeek-V4-Flash` is not on the serverless tier).

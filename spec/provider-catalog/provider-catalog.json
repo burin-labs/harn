@@ -22701,10 +22701,7 @@
       "name": "DeepSeek V4 Pro (Together)",
       "display_name": "DeepSeek V4 Pro",
       "provider": "together",
-      "aliases": [
-        "together-deepseek",
-        "together-deepseek-v4-pro"
-      ],
+      "aliases": [],
       "context_window": 512000,
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
@@ -22761,7 +22758,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Together retires this preview route on 2026-08-27. Use deepseek-ai/DeepSeek-V4-Pro-0813.",
+        "superseded_by": "deepseek-ai/DeepSeek-V4-Pro-0813"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -22791,6 +22790,116 @@
         "long_context",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "name": "DeepSeek V4 Pro 0813 (Together)",
+      "display_name": "DeepSeek V4 Pro 0813",
+      "provider": "together",
+      "aliases": [
+        "together-deepseek",
+        "together-deepseek-v4-pro",
+        "together-deepseek-v4-pro-0813"
+      ],
+      "context_window": 1050000,
+      "logical_model": "deepseek-v4-pro-0813",
+      "equivalence_group": "deepseek-v4-pro-0813",
+      "served_variant": "together",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 1600.0,
+        "active_parameter_count_b": 49.0,
+        "moe": true,
+        "license": "MIT",
+        "source_url": "https://www.together.ai/models/deepseek-v4-pro-0813",
+        "last_verified": "2026-08-26"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 1.32,
+        "output_per_mtok": 3.96,
+        "cache_read_per_mtok": 0.13,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -25600,7 +25709,7 @@
     },
     {
       "name": "together-deepseek",
-      "model_id": "deepseek-ai/DeepSeek-V4-Pro",
+      "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "provider": "together"
     },
     {
@@ -25610,7 +25719,12 @@
     },
     {
       "name": "together-deepseek-v4-pro",
-      "model_id": "deepseek-ai/DeepSeek-V4-Pro",
+      "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider": "together"
+    },
+    {
+      "name": "together-deepseek-v4-pro-0813",
+      "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "provider": "together"
     },
     {
@@ -25747,8 +25861,8 @@
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in this catalog.",
-      "model_id": "openai/gpt-5.6-terra-pro",
-      "provider": "openrouter",
+      "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider": "together",
       "source": "selector:largest_context"
     }
   ],
@@ -30042,10 +30156,10 @@
     },
     {
       "provider": "together",
-      "model": "deepseek-ai/DeepSeek-V4-Pro",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "base_url": "https://api.together.xyz/v1",
       "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "DeepSeek V4 Pro (Together)",
+      "label": "DeepSeek V4 Pro 0813 (Together)",
       "family": "deepseek",
       "capabilities": [
         "batch",
