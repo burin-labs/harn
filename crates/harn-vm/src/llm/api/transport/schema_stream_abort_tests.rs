@@ -312,7 +312,7 @@ async fn stream_abort_cause_distinguishes_missing_required_from_wrong_type() {
     .await
     .expect_err("missing required property must abort the stream");
 
-    assert_schema_failure(&err, "missing_required", "root", "required");
+    assert_schema_failure(&err, "missing_required", "$", "required");
     reset_agent_trace_state();
 }
 
