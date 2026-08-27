@@ -342,6 +342,7 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
     use crate::value::{classify_error_message, ErrorCategory};
     let msg = match err {
         VmError::ProviderStreamFailure(failure) => return failure.category().is_transient(),
+        VmError::SchemaStreamAbort(abort) => return abort.category().is_transient(),
         VmError::CategorizedError { category, message } => {
             let llm_info = crate::llm::api::classify_llm_error(category.clone(), message);
             return if llm_info.reason == crate::llm::api::LlmErrorReason::Unknown {
@@ -403,6 +404,7 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
 pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
     let (category, message) = match err {
         VmError::ProviderStreamFailure(failure) => (failure.category(), failure.to_string()),
+        VmError::SchemaStreamAbort(abort) => (abort.category(), abort.to_string()),
         VmError::CategorizedError { category, message } => (category.clone(), message.clone()),
         VmError::Thrown(crate::value::VmValue::String(s)) => {
             (crate::value::classify_error_message(s), s.to_string())
@@ -963,6 +965,7 @@ pub(crate) async fn observed_llm_call(
                         classified: &classified,
                         message: &message,
                         stream_failure: None,
+                        schema_failure: None,
                         usage: Some(&usage),
                         retryable: false,
                         failover_eligible: true,
@@ -1261,6 +1264,7 @@ pub(crate) async fn observed_llm_call(
                     classified: &classified,
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
+                    schema_failure: error.schema_stream_abort(),
                     usage: terminal_usage.as_ref().or(error_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,

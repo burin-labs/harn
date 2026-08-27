@@ -13,7 +13,7 @@ use serde_json::error::Category;
 
 use crate::schema;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmResourceHandle, VmValue};
+use crate::value::{SchemaValidationReasonKind, VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
 #[derive(Clone)]
@@ -29,7 +29,11 @@ struct JsonStreamValidator {
 pub(crate) enum JsonStreamStatus {
     Pending,
     Valid,
-    Invalid { reason: String, path: String },
+    Invalid {
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: String,
+    },
 }
 
 /// Send-safe Rust API for the incremental JSON validator. Mirrors the
@@ -84,6 +88,7 @@ impl StreamSchemaValidator {
         if let Err(err) = self.scan.feed(chunk) {
             self.buffer.push_str(chunk);
             self.status = JsonStreamStatus::Invalid {
+                reason_kind: SchemaValidationReasonKind::InvalidJson,
                 reason: err,
                 path: "$".to_string(),
             };
@@ -114,6 +119,7 @@ impl StreamSchemaValidator {
 
         if let Some(invalid) = early_invalid(json, &canonical) {
             self.status = JsonStreamStatus::Invalid {
+                reason_kind: invalid.reason_kind,
                 reason: invalid.reason,
                 path: invalid.path,
             };
@@ -127,9 +133,15 @@ impl StreamSchemaValidator {
                     JsonStreamStatus::Valid
                 }
                 ParseOutcome::Pending => JsonStreamStatus::Pending,
-                ParseOutcome::Invalid { reason, path } => {
-                    JsonStreamStatus::Invalid { reason, path }
-                }
+                ParseOutcome::Invalid {
+                    reason_kind,
+                    reason,
+                    path,
+                } => JsonStreamStatus::Invalid {
+                    reason_kind,
+                    reason,
+                    path,
+                },
             };
         } else {
             self.status = JsonStreamStatus::Pending;
@@ -201,6 +213,7 @@ enum TrailFence {
 
 #[derive(Clone, Debug)]
 struct EarlyInvalid {
+    reason_kind: SchemaValidationReasonKind,
     reason: String,
     path: String,
 }
@@ -382,14 +395,18 @@ impl JsonStreamValidator {
         let text = match std::str::from_utf8(chunk) {
             Ok(text) => text,
             Err(error) => {
-                self.invalidate(format!("chunk is not valid UTF-8: {error}"), "$");
+                self.invalidate(
+                    SchemaValidationReasonKind::InvalidJson,
+                    format!("chunk is not valid UTF-8: {error}"),
+                    "$",
+                );
                 return;
             }
         };
 
         if let Err(error) = self.scan.feed(text) {
             self.buffer.push_str(text);
-            self.invalidate(error, "$");
+            self.invalidate(SchemaValidationReasonKind::InvalidJson, error, "$");
             return;
         }
         self.buffer.push_str(text);
@@ -404,7 +421,7 @@ impl JsonStreamValidator {
         }
 
         if let Some(invalid) = early_invalid(json, &self.schema) {
-            self.invalidate(invalid.reason, invalid.path);
+            self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
             return;
         }
 
@@ -422,7 +439,9 @@ impl JsonStreamValidator {
             Ok(json) => {
                 let value = schema::json_to_vm_value(&json);
                 match schema_validation_error(&value, &self.schema, "$") {
-                    Some(invalid) => self.invalidate(invalid.reason, invalid.path),
+                    Some(invalid) => {
+                        self.invalidate(invalid.reason_kind, invalid.reason, invalid.path)
+                    }
                     None => {
                         self.status = JsonStreamStatus::Valid;
                         self.value = Some(value);
@@ -434,12 +453,22 @@ impl JsonStreamValidator {
                 self.status = JsonStreamStatus::Pending;
                 self.value = None;
             }
-            Err(error) => self.invalidate(format!("JSON parse error: {error}"), "$"),
+            Err(error) => self.invalidate(
+                SchemaValidationReasonKind::InvalidJson,
+                format!("JSON parse error: {error}"),
+                "$",
+            ),
         }
     }
 
-    fn invalidate(&mut self, reason: String, path: impl Into<String>) {
+    fn invalidate(
+        &mut self,
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: impl Into<String>,
+    ) {
         self.status = JsonStreamStatus::Invalid {
+            reason_kind,
             reason,
             path: path.into(),
         };
@@ -481,11 +510,19 @@ impl JsonStreamValidator {
             // unrecoverable stream rather than "nothing arrived", so surface
             // Invalid instead of a permanent Pending.
             if self.scan.lead_fence == LeadFence::SkipLine && !self.buffer.trim().is_empty() {
-                self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
+                self.invalidate(
+                    SchemaValidationReasonKind::InvalidJson,
+                    "incomplete JSON document at end of stream".to_string(),
+                    "$",
+                );
             }
             return;
         }
-        self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
+        self.invalidate(
+            SchemaValidationReasonKind::InvalidJson,
+            "incomplete JSON document at end of stream".to_string(),
+            "$",
+        );
     }
 }
 
@@ -495,7 +532,11 @@ impl JsonStreamValidator {
 enum ParseOutcome {
     Valid,
     Pending,
-    Invalid { reason: String, path: String },
+    Invalid {
+        reason_kind: SchemaValidationReasonKind,
+        reason: String,
+        path: String,
+    },
 }
 
 fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
@@ -504,6 +545,7 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
             let value = schema::json_to_vm_value(&json);
             match schema_validation_error(&value, schema, "$") {
                 Some(invalid) => ParseOutcome::Invalid {
+                    reason_kind: invalid.reason_kind,
                     reason: invalid.reason,
                     path: invalid.path,
                 },
@@ -512,6 +554,7 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
         }
         Err(error) if error.classify() == Category::Eof => ParseOutcome::Pending,
         Err(error) => ParseOutcome::Invalid {
+            reason_kind: SchemaValidationReasonKind::InvalidJson,
             reason: format!("JSON parse error: {error}"),
             path: "$".to_string(),
         },
@@ -895,8 +938,16 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
     match status {
         JsonStreamStatus::Pending => VmValue::enum_variant("JsonStreamStatus", "Pending", vec![]),
         JsonStreamStatus::Valid => VmValue::enum_variant("JsonStreamStatus", "Valid", vec![]),
-        JsonStreamStatus::Invalid { reason, path } => {
+        JsonStreamStatus::Invalid {
+            reason_kind,
+            reason,
+            path,
+        } => {
             let payload = BTreeMap::from([
+                (
+                    "reason_kind".to_string(),
+                    VmValue::String(arcstr::ArcStr::from(reason_kind.as_str())),
+                ),
                 (
                     "reason".to_string(),
                     VmValue::String(arcstr::ArcStr::from(reason.as_str())),
@@ -925,8 +976,13 @@ fn verdict_value(status: &JsonStreamStatus) -> VmValue {
         JsonStreamStatus::Valid => {
             dict.put_str("verdict", "valid");
         }
-        JsonStreamStatus::Invalid { reason, path } => {
+        JsonStreamStatus::Invalid {
+            reason_kind,
+            reason,
+            path,
+        } => {
             dict.put_str("verdict", "invalid");
+            dict.put_str("reason_kind", reason_kind.as_str());
             dict.put_str("reason", reason.as_str());
             dict.put_str("path", path.as_str());
         }
@@ -1040,6 +1096,7 @@ fn invalid_type_start(
         None
     } else {
         Some(EarlyInvalid {
+            reason_kind: SchemaValidationReasonKind::WrongType,
             reason: format!(
                 "expected type '{expected}', got JSON {}",
                 token_label(first)
@@ -1050,22 +1107,11 @@ fn invalid_type_start(
 }
 
 fn schema_validation_error(value: &VmValue, schema: &VmValue, path: &str) -> Option<EarlyInvalid> {
-    match schema::schema_result_value(value, schema, false) {
-        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
-            let reason = enum_variant
-                .fields
-                .first()
-                .and_then(VmValue::as_dict)
-                .and_then(|payload| payload.get("message"))
-                .map(VmValue::display)
-                .unwrap_or_else(|| "schema validation failed".to_string());
-            Some(EarlyInvalid {
-                reason,
-                path: path.to_string(),
-            })
-        }
-        _ => None,
-    }
+    schema::first_schema_validation_issue(value, schema).map(|(reason_kind, reason)| EarlyInvalid {
+        reason_kind,
+        reason,
+        path: path.to_string(),
+    })
 }
 
 fn expected_type(schema: &crate::value::DictMap) -> Option<&str> {
@@ -1605,7 +1651,7 @@ mod tests {
         // surface as Invalid, not be masked by the fence handling.
         let status = feed_chunks(&object_a_int_schema(), &["```json\n{\"a\":\"oops\"}\n```"]);
         match status {
-            JsonStreamStatus::Invalid { path, reason } => {
+            JsonStreamStatus::Invalid { path, reason, .. } => {
                 // The violation is on property `a` (an int that arrived as a
                 // string); `early_invalid` pins it to `$.a`, but accept the
                 // coarser `$` from the post-parse path too — the point is the

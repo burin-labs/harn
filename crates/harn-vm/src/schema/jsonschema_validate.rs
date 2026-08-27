@@ -199,7 +199,7 @@ fn validate_exported_json_schema(
             } else {
                 child_path(path_prefix, &suffix)
             };
-            ValidationIssue::schema(&path, error.to_string())
+            ValidationIssue::json_schema(&path, error.kind(), error.to_string())
         })
         .collect()
 }
@@ -349,7 +349,7 @@ fn validate_harn_types_inner(
     }
     if let Some(expected) = schema_type_name(schema) {
         if !value_matches_type(value, expected) {
-            errors.push(ValidationIssue::schema(
+            errors.push(ValidationIssue::wrong_type(
                 path,
                 format!(
                     "expected type '{}', got '{}'",

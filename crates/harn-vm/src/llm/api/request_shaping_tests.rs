@@ -144,6 +144,7 @@ fn offthread_error_preserves_schema_stream_abort_category() {
     let abort = super::SchemaStreamAbort {
         provider: "openrouter".to_string(),
         model: "mistralai/devstral-small".to_string(),
+        reason_kind: crate::value::SchemaValidationReasonKind::InvalidJson,
         reason: "expected JSON value, got '`'".to_string(),
         path: "$".to_string(),
         chunks_consumed: 1,

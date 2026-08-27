@@ -150,6 +150,11 @@ pub enum VmError {
     /// so retry, transcript, and host projections never need to reclassify
     /// rendered prose.
     ProviderStreamFailure(Box<ProviderStreamFailure>),
+    /// A streamed model response became impossible under its output schema.
+    /// Carries the validator's closed reason kind and exact detail so retries,
+    /// caught values, and transcript receipts never rebuild cause data from
+    /// the human-readable message.
+    SchemaStreamAbort(Box<SchemaStreamAbort>),
     DaemonQueueFull {
         daemon_id: String,
         capacity: usize,
@@ -228,6 +233,7 @@ impl VmError {
                 VmValue::dict(dict)
             }
             VmError::ProviderStreamFailure(failure) => failure.thrown_value(),
+            VmError::SchemaStreamAbort(abort) => abort.thrown_value(),
             other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
         }
     }
@@ -235,6 +241,13 @@ impl VmError {
     pub fn provider_stream_failure(&self) -> Option<&ProviderStreamFailure> {
         match self {
             Self::ProviderStreamFailure(failure) => Some(failure),
+            _ => None,
+        }
+    }
+
+    pub fn schema_stream_abort(&self) -> Option<&SchemaStreamAbort> {
+        match self {
+            Self::SchemaStreamAbort(abort) => Some(abort),
             _ => None,
         }
     }
@@ -339,6 +352,82 @@ impl std::fmt::Display for ProviderStreamFailure {
             write!(f, ", deadline={}", deadline.as_str())?;
         }
         write!(f, ", partial={}): {}", self.partial, self.detail)
+    }
+}
+
+/// Stable cause classes for JSON and schema validation failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaValidationReasonKind {
+    InvalidJson,
+    InvalidSchema,
+    WrongType,
+    MissingRequired,
+    UnexpectedProperty,
+    MaxLength,
+    MinLength,
+    ConstraintViolation,
+}
+
+impl SchemaValidationReasonKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidJson => "invalid_json",
+            Self::InvalidSchema => "invalid_schema",
+            Self::WrongType => "wrong_type",
+            Self::MissingRequired => "missing_required",
+            Self::UnexpectedProperty => "unexpected_property",
+            Self::MaxLength => "max_length",
+            Self::MinLength => "min_length",
+            Self::ConstraintViolation => "constraint_violation",
+        }
+    }
+}
+
+/// Typed cause retained when incremental schema validation aborts a provider
+/// stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaStreamAbort {
+    pub provider: String,
+    pub model: String,
+    pub reason_kind: SchemaValidationReasonKind,
+    pub reason: String,
+    pub path: String,
+    pub chunks_consumed: usize,
+}
+
+impl SchemaStreamAbort {
+    pub fn category(&self) -> ErrorCategory {
+        ErrorCategory::SchemaStreamAborted
+    }
+
+    fn thrown_value(&self) -> VmValue {
+        let mut cause = std::collections::BTreeMap::new();
+        cause.put_str("kind", self.reason_kind.as_str());
+        cause.put_str("detail", self.reason.as_str());
+        cause.put_str("path", self.path.as_str());
+        cause.insert(
+            "chunks_consumed".to_string(),
+            VmValue::Int(self.chunks_consumed as i64),
+        );
+        cause.put_str("provider", self.provider.as_str());
+        cause.put_str("model", self.model.as_str());
+
+        let mut dict = std::collections::BTreeMap::new();
+        dict.put_str("category", self.category().as_str());
+        dict.put_str("message", self.to_string());
+        dict.put_str("source", "schema_stream");
+        dict.insert("schema_failure".to_string(), VmValue::dict(cause));
+        VmValue::dict(dict)
+    }
+}
+
+impl std::fmt::Display for SchemaStreamAbort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "schema_stream_aborted at {}: {} (provider={} model={} chunks_consumed={})",
+            self.path, self.reason, self.provider, self.model, self.chunks_consumed
+        )
     }
 }
 
@@ -550,6 +639,7 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
         VmError::AbandonedExecution => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::ProviderStreamFailure(failure) => failure.category(),
+        VmError::SchemaStreamAbort(abort) => abort.category(),
         VmError::Thrown(VmValue::Dict(d)) => d
             .get("category")
             .map(|v| ErrorCategory::parse(&v.display()))
@@ -723,6 +813,7 @@ impl std::fmt::Display for VmError {
                 write!(f, "Error [{}]: {}", category.as_str(), message)
             }
             VmError::ProviderStreamFailure(failure) => failure.fmt(f),
+            VmError::SchemaStreamAbort(abort) => abort.fmt(f),
             VmError::DaemonQueueFull {
                 daemon_id,
                 capacity,

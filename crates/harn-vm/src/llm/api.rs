@@ -119,6 +119,7 @@ struct OffthreadLlmError {
     message: String,
     category: Option<ErrorCategory>,
     stream_failure: Option<Box<crate::value::ProviderStreamFailure>>,
+    schema_stream_abort: Option<Box<crate::value::SchemaStreamAbort>>,
     thrown: Option<VmValue>,
 }
 
@@ -129,12 +130,21 @@ impl OffthreadLlmError {
                 message: failure.to_string(),
                 category: Some(failure.category()),
                 stream_failure: Some(failure),
+                schema_stream_abort: None,
+                thrown: None,
+            },
+            VmError::SchemaStreamAbort(abort) => Self {
+                message: abort.to_string(),
+                category: Some(abort.category()),
+                stream_failure: None,
+                schema_stream_abort: Some(abort),
                 thrown: None,
             },
             VmError::CategorizedError { message, category } => Self {
                 message,
                 category: Some(category),
                 stream_failure: None,
+                schema_stream_abort: None,
                 thrown: None,
             },
             VmError::Thrown(VmValue::String(message)) => {
@@ -144,6 +154,7 @@ impl OffthreadLlmError {
                 message: value.display(),
                 category: None,
                 stream_failure: None,
+                schema_stream_abort: None,
                 thrown: Some(value),
             },
             other => Self::from_display_message(other.to_string()),
@@ -156,6 +167,7 @@ impl OffthreadLlmError {
                 message: stripped.to_string(),
                 category: Some(category),
                 stream_failure: None,
+                schema_stream_abort: None,
                 thrown: None,
             };
         }
@@ -163,6 +175,7 @@ impl OffthreadLlmError {
             message,
             category: None,
             stream_failure: None,
+            schema_stream_abort: None,
             thrown: None,
         }
     }
@@ -170,6 +183,9 @@ impl OffthreadLlmError {
     fn into_vm_error(self) -> VmError {
         if let Some(failure) = self.stream_failure {
             return VmError::ProviderStreamFailure(failure);
+        }
+        if let Some(abort) = self.schema_stream_abort {
+            return VmError::SchemaStreamAbort(abort);
         }
         match self.category {
             Some(category) => VmError::CategorizedError {

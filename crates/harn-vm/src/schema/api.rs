@@ -76,6 +76,33 @@ pub(crate) fn schema_result_value(
     }
 }
 
+/// Return the first typed validation issue without projecting it through the
+/// public `Result` value. Incremental validators use this boundary so their
+/// machine-readable cause and human detail come from the same schema pass.
+pub(crate) fn first_schema_validation_issue(
+    data: &VmValue,
+    schema: &VmValue,
+) -> Option<(crate::value::SchemaValidationReasonKind, String)> {
+    let normalized = match canonicalize_schema_value(schema) {
+        Ok(schema) => schema,
+        Err(error) => {
+            let issue = ValidationIssue::new("schema", error);
+            return Some((issue.kind, issue.render()));
+        }
+    };
+    validate_schema_value(
+        data,
+        &normalized,
+        ValidationOptions {
+            apply_defaults: false,
+        },
+    )
+    .errors
+    .into_iter()
+    .next()
+    .map(|issue| (issue.kind, issue.render()))
+}
+
 pub(crate) fn schema_report_value(
     data: &VmValue,
     schema: &VmValue,

@@ -223,16 +223,14 @@ async fn openai_stream_aborts_on_impossible_property_type() {
 
     assert_schema_failure(&err, "wrong_type", "$.age", "expected type 'int'");
 
-    match &err {
-        VmError::CategorizedError { category, message } => {
-            assert_eq!(*category, ErrorCategory::SchemaStreamAborted);
-            assert!(
-                message.contains("$.age"),
-                "abort message should include JSON path; got: {message}"
-            );
-        }
-        other => panic!("expected CategorizedError; got {other:?}"),
-    }
+    assert_eq!(
+        crate::value::error_to_category(&err),
+        ErrorCategory::SchemaStreamAborted
+    );
+    assert!(
+        err.to_string().contains("$.age"),
+        "abort message should include JSON path; got: {err}"
+    );
 
     let events = peek_agent_trace();
     let aborts: Vec<_> = events
@@ -241,12 +239,14 @@ async fn openai_stream_aborts_on_impossible_property_type() {
             AgentTraceEvent::SchemaStreamAborted {
                 provider,
                 model,
+                reason_kind,
                 reason,
                 path,
                 chunks_consumed,
             } => Some((
                 provider.clone(),
                 model.clone(),
+                reason_kind.clone(),
                 reason.clone(),
                 path.clone(),
                 *chunks_consumed,
@@ -259,9 +259,10 @@ async fn openai_stream_aborts_on_impossible_property_type() {
         1,
         "expected exactly one SchemaStreamAborted event; got {events:#?}"
     );
-    let (provider, model, _reason, path, chunks) = &aborts[0];
+    let (provider, model, reason_kind, _reason, path, chunks) = &aborts[0];
     assert_eq!(provider, "openai");
     assert_eq!(model, "gpt-test");
+    assert_eq!(reason_kind, "wrong_type");
     assert_eq!(path, "$.age");
     assert!(*chunks >= 1);
 

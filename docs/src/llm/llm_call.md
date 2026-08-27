@@ -483,6 +483,13 @@ Caught stream failures carry `source: "provider_stream"`, `phase`
 `idle`, or `nil`), and `partial`. The same fields appear on
 `provider_call_error` transcript receipts.
 
+Schema-stream abort receipts carry a `schema_failure` record with `kind`,
+`detail`, `path`, and `chunks_consumed`. `kind` is one of `invalid_json`,
+`invalid_schema`, `wrong_type`, `missing_required`, `unexpected_property`,
+`max_length`, `min_length`, or `constraint_violation`. `detail` keeps the exact
+validator message for diagnosis. The error category remains
+`schema_stream_aborted`.
+
 #### OpenAI Responses
 
 These keys require `provider: "openai"` and `api_mode: "responses"`.
