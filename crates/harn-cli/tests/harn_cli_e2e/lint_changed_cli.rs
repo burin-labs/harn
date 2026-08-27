@@ -15,6 +15,7 @@ const WARNING_SOURCE: &str =
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")

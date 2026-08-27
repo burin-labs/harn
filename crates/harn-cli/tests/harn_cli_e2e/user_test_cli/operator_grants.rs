@@ -11,6 +11,7 @@ struct GitFixture {
 fn git(cwd: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(cwd)
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .output()
         .expect("spawn git");

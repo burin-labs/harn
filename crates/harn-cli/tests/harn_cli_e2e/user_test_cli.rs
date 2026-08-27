@@ -14,6 +14,7 @@ fn binary_path() -> std::path::PathBuf {
 fn git(repo: &std::path::Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .output()
         .expect("spawn git");
