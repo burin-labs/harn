@@ -616,6 +616,7 @@ mod trace_summary_pricing_tests {
             usage: LlmUsage {
                 input_tokens: 1_000,
                 output_tokens: 100,
+                reported_total_tokens: None,
                 cost_usd,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,

@@ -48,10 +48,11 @@ impl ProviderUsageReceipt {
     /// evidence. An empty usage object remains a valid but unmeasured receipt.
     pub(crate) fn from_openai_usage_tokens(usage: &Value) -> Option<Self> {
         let input_tokens =
-            optional_non_negative_json_int(usage, &["prompt_tokens", "input_tokens"])?;
+            optional_non_negative_json_int(usage, &["prompt_tokens", "input_tokens"]).ok()?;
         let output_tokens =
-            optional_non_negative_json_int(usage, &["completion_tokens", "output_tokens"])?;
-        let reported_total_tokens = optional_non_negative_json_int(usage, &["total_tokens"])?;
+            optional_non_negative_json_int(usage, &["completion_tokens", "output_tokens"]).ok()?;
+        let reported_total_tokens =
+            optional_non_negative_json_int(usage, &["total_tokens"]).ok()?;
         Some(
             Self::new(input_tokens, output_tokens, None, false)
                 .with_reported_total(reported_total_tokens),
@@ -186,20 +187,26 @@ impl ProviderUsageReceipt {
     }
 }
 
-fn optional_non_negative_json_int(value: &Value, keys: &[&str]) -> Option<Option<i64>> {
-    let object = value.as_object()?;
+fn optional_non_negative_json_int(
+    value: &Value,
+    keys: &[&str],
+) -> Result<Option<i64>, InvalidOptionalReceiptField> {
+    let object = value.as_object().ok_or(InvalidOptionalReceiptField)?;
     let mut observed = None;
     for key in keys {
         let Some(raw) = object.get(*key) else {
             continue;
         };
-        let tokens = raw.as_i64().filter(|tokens| *tokens >= 0)?;
+        let tokens = raw
+            .as_i64()
+            .filter(|tokens| *tokens >= 0)
+            .ok_or(InvalidOptionalReceiptField)?;
         if observed.is_some_and(|existing| existing != tokens) {
-            return None;
+            return Err(InvalidOptionalReceiptField);
         }
         observed = Some(tokens);
     }
-    Some(observed)
+    Ok(observed)
 }
 
 fn non_negative_int(fields: &crate::value::DictMap, key: &str) -> Option<i64> {
