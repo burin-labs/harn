@@ -149,10 +149,16 @@ thinking_block_style = "none"
 # this row only ever sends {low,medium,high} (reasoning_effort_levels) and
 # never floors to off for tool tasks. Must NOT carry a Qwen-style
 # `auto_reasoning_overrides = "off"`.
+#
+# Groq rejects `response_format` whenever native tools are present. Live
+# controls on 2026-08-26 showed that each feature works alone, while their
+# combination returns HTTP 400. Keep that provider-wide wire constraint in
+# the shared request builder rather than asking callers to coordinate it.
 [[provider.groq]]
 model_match = "*gpt-oss-*"
 native_tools = true
 preferred_tool_format = "native"
+tools_exclude_response_format = true
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true
 structured_output = "native"
@@ -174,6 +180,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "qwen/qwen3.6*"
 native_tools = true
 preferred_tool_format = "native"
+tools_exclude_response_format = true
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true
 structured_output = "native"
@@ -217,6 +224,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "llama-*"
 native_tools = true
 preferred_tool_format = "native"
+tools_exclude_response_format = true
 recommended_endpoint = "/chat/completions"
 text_tool_wire_format_supported = true
 structured_output = "native"

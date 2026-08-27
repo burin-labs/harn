@@ -386,6 +386,56 @@ fn cerebras_keeps_response_format_without_tools() {
 }
 
 #[test]
+fn groq_tools_drop_response_format() {
+    let mut payload = base_request_payload();
+    payload.provider = "groq".to_string();
+    payload.model = "openai/gpt-oss-20b".to_string();
+    payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema: json!({
+            "type": "object",
+            "properties": {"answer": {"type": "integer"}},
+            "required": ["answer"],
+            "additionalProperties": false,
+        }),
+        strict: true,
+    };
+    payload.native_tools = Some(vec![json!({
+        "type": "function",
+        "function": {
+            "name": "echo",
+            "description": "Echo a value",
+            "parameters": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": false,
+            }
+        }
+    })]);
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+    assert!(body.get("tools").is_some());
+    assert!(
+        body.get("response_format").is_none(),
+        "Groq rejects native tools combined with response_format: {body}"
+    );
+}
+
+#[test]
+fn groq_keeps_response_format_without_tools() {
+    let mut payload = base_request_payload();
+    payload.provider = "groq".to_string();
+    payload.model = "openai/gpt-oss-20b".to_string();
+    payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+    assert_eq!(body["response_format"]["type"], "json_object");
+    assert!(body.get("tools").is_none());
+}
+
+#[test]
 fn build_request_body_remaps_reserved_tool_call_token() {
     // llamacpp + qwen3.6 is flagged `reserved_tool_call_token` in
     // capabilities.toml, so the colliding delimiters must be remapped off

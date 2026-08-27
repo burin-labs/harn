@@ -262,6 +262,16 @@ mod tests {
     }
 
     #[test]
+    fn groq_tools_exclude_response_format() {
+        reset();
+        assert!(
+            lookup("groq", "openai/gpt-oss-20b").tools_exclude_response_format,
+            "Groq rejects native tools combined with response_format"
+        );
+        assert!(lookup("groq", "qwen/qwen3.6-27b").tools_exclude_response_format);
+    }
+
+    #[test]
     fn serving_precision_seeds_known_gpt_oss_verdicts() {
         reset();
         // Full-precision routes verified during the 2026-06 meter effort.
