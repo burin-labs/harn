@@ -76,12 +76,12 @@ notes = "Reported by `project_visible_assistant_text` only, which has exactly on
 [[boundary]]
 id = "host_event_ingest"
 title = "__host_agent_emit_event ingress"
-drops = "Host events whose type is not allowlisted or whose payload does not deserialize into an AgentEvent."
+drops = "Host events whose type is registered but whose payload does not deserialize into an AgentEvent. Unknown event names warn once per session and do not fail the run."
 was_silent = true
 event = "agent_event:boundary_failure"
 anchors = ["crates/harn-vm/src/agent_events/from_host.rs"]
 test = "crates/harn-vm/src/agent_events/from_host_tests.rs"
-notes = "The VmError alone was not enough: every stdlib emit site wraps agent_emit_event in `try { }` and discards the result, so a rejected event vanished. The funnel emission is not swallowable by a caller's try."
+notes = "Unknown types are additive vocabulary and must not kill a run (harn#7541 / burin-code#6556). Malformed payloads of a known type still report through the funnel because every stdlib emit site wraps agent_emit_event in `try { }` and would otherwise swallow the VmError."
 
 [[boundary]]
 id = "provider_admission_gate"

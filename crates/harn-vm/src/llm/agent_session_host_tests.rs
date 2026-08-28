@@ -504,7 +504,8 @@ fn agent_emit_loop_stuck_preserves_pipeline_payload() {
     });
 
     let event = AgentEvent::from_host_payload("session-1", "loop_stuck", &payload)
-        .expect("loop_stuck event");
+        .expect("loop_stuck event")
+        .expect("loop_stuck is host-emittable");
 
     match event {
         AgentEvent::LoopStuckSignal {

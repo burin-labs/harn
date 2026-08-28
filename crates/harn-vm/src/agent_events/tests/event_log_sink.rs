@@ -83,7 +83,8 @@ fn persists_typed_repair_claim_without_feedback_prose_matching() {
             "visible_text_prefix": "prose may change independently",
         }),
     )
-    .expect("typed repair feedback");
+    .expect("typed repair feedback")
+    .expect("missing_tool_call_nudge is host-emittable");
 
     sink.handle_event(&event);
 

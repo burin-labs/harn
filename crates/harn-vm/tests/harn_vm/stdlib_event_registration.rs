@@ -8,6 +8,10 @@ use harn_vm::value::VmError;
 
 fn run(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
+    execute_compiled(source)
+}
+
+fn execute_compiled(source: &str) -> Result<String, String> {
     let chunk = harn_vm::compile_source(source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -144,5 +148,102 @@ pipeline main(harness: Harness, task: unknown) {
             "1",
             "1",
         ],
+    );
+}
+
+fn run_with_host_ingest_warnings(
+    source: &str,
+) -> (Result<String, String>, Vec<harn_vm::events::LogEvent>) {
+    use harn_vm::events::{add_event_sink, clear_event_sinks, reset_event_sinks, CollectorSink};
+    use std::rc::Rc;
+    harn_vm::reset_thread_local_state();
+    let sink = Rc::new(CollectorSink::new());
+    clear_event_sinks();
+    add_event_sink(sink.clone());
+    let result = execute_compiled(source);
+    let warnings = sink
+        .logs
+        .borrow()
+        .iter()
+        .filter(|event| event.category == "host_event_ingest")
+        .cloned()
+        .collect();
+    reset_event_sinks();
+    (result, warnings)
+}
+
+#[test]
+fn unknown_host_event_type_completes_the_run_and_warns_once_per_session() {
+    let source = r#"
+import { agent_capture_events } from "std/agent/events"
+import { agent_emit_event } from "std/agent/state"
+
+pipeline main(harness: Harness, task: unknown) {
+  const session = harness.agent.open("unknown-event-warn")
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() {
+      agent_emit_event(harness.agent, session, "zz_probe_never_seen", {ok: true})
+      agent_emit_event(harness.agent, session, "zz_probe_never_seen", {again: true})
+      agent_emit_event(harness.agent, session, "progress_reported", {})
+      return nil
+    },
+  )
+  harness.stdio.log("completed")
+  harness.stdio.log(len(captured.events))
+  for event in captured.events {
+    harness.stdio.log(event.type)
+  }
+  const transcript = harness.agent.snapshot(session)
+  harness.stdio.log(len(transcript_events_by_kind(transcript, "zz_probe_never_seen")))
+  harness.stdio.log(len(transcript_events_by_kind(transcript, "progress_reported")))
+}
+"#;
+    let (output, warnings) = run_with_host_ingest_warnings(source);
+    let lines = output
+        .expect("Harn source executes")
+        .lines()
+        .filter_map(|line| line.strip_prefix("[harn] "))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines,
+        vec!["completed", "1", "progress_reported", "0", "1"],
+        "unknown type must not kill the run, reach subscribers, or journal"
+    );
+    assert_eq!(
+        warnings.len(),
+        1,
+        "exactly one warning per unknown type per session, got {warnings:?}"
+    );
+    assert_eq!(warnings[0].level, harn_vm::events::EventLevel::Warn);
+    assert!(
+        warnings[0].message.contains("`zz_probe_never_seen`"),
+        "warning must name the type: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn malformed_known_host_event_type_is_still_fatal() {
+    let error = run(r#"
+import { agent_emit_event } from "std/agent/state"
+
+pipeline main(harness: Harness, task: unknown) {
+  const session = harness.agent.open("malformed-known-event")
+  agent_emit_event(
+    harness.agent,
+    session,
+    "iteration_start",
+    {iteration: "not-a-number"},
+  )
+  harness.stdio.log("should-not-reach")
+}
+"#)
+    .expect_err("malformed payload of a known type must fail the run");
+    assert!(
+        error.contains("invalid `iteration_start` payload") || error.contains("iteration_start"),
+        "fatal error must name the known type, got {error}"
     );
 }

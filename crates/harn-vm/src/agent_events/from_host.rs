@@ -35,6 +35,9 @@
 //! `AgentEvent` variants (`worker_update`, `handoff`, `artifact`, …) are
 //! constructed elsewhere and are *not* emittable through this host path.
 
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
 use serde_json::{Map, Value};
 
 use crate::value::VmError;
@@ -161,6 +164,36 @@ pub(super) fn registered_host_event_types() -> impl Iterator<Item = &'static str
     HOST_EVENT_POLICIES.iter().map(|policy| policy.event_type)
 }
 
+thread_local! {
+    /// Dedup set for unknown-type warnings, keyed by `(session_id, event_type)`.
+    /// One warning per unknown name per session; a later session or a different
+    /// name warns again. Thread-local so parallel VM threads stay independent
+    /// and `reset_thread_local_state` can observe a clean slate.
+    static WARNED_UNKNOWN_HOST_EVENTS: RefCell<BTreeSet<(String, String)>> =
+        const { RefCell::new(BTreeSet::new()) };
+}
+
+/// Clear the unknown-type warn-once set. Called from [`super::reset_all_sinks`]
+/// so a fresh test (or reused runtime thread) starts with no suppressed
+/// diagnostics.
+pub(crate) fn reset_unknown_host_event_warnings() {
+    WARNED_UNKNOWN_HOST_EVENTS.with(|warned| warned.borrow_mut().clear());
+}
+
+fn warn_unknown_host_event_once(session_id: &str, event_type: &str) {
+    let first = WARNED_UNKNOWN_HOST_EVENTS.with(|warned| {
+        warned
+            .borrow_mut()
+            .insert((session_id.to_string(), event_type.to_string()))
+    });
+    if first {
+        crate::events::log_warn(
+            "host_event_ingest",
+            &format!("unsupported event type `{event_type}`"),
+        );
+    }
+}
+
 fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
     HOST_EVENT_POLICIES
         .iter()
@@ -170,25 +203,26 @@ fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
 impl AgentEvent {
     /// Build a typed [`AgentEvent`] from a host `emit_event` call.
     ///
-    /// Mirrors the accept/reject boundary and per-field defaults of the
-    /// retired `build_agent_event` hand-match exactly; unsupported
-    /// `event_type` values return a `Runtime` error.
+    /// Known types keep the retired `build_agent_event` accept/reject
+    /// boundary: a malformed payload of a registered name is a contract
+    /// violation and returns a `Runtime` error. An `event_type` this
+    /// registry has never seen is not a contract violation — Harn's
+    /// vocabulary is additive across pins — so the call returns `Ok(None)`
+    /// after at most one warning per type per session. Callers must not
+    /// journal or emit the dropped name.
     pub fn from_host_payload(
         session_id: &str,
         event_type: &str,
         payload: &Value,
-    ) -> Result<AgentEvent, VmError> {
+    ) -> Result<Option<AgentEvent>, VmError> {
         if host_event_policy(event_type).is_none() {
-            return Err(reject(
-                session_id,
-                format!("unsupported event type `{event_type}`"),
-                payload,
-            ));
+            warn_unknown_host_event_once(session_id, event_type);
+            return Ok(None);
         }
         if let Some(event) = from_host_special(session_id, event_type, payload) {
-            return Ok(event);
+            return Ok(Some(event));
         }
-        from_host_generic(session_id, event_type, payload)
+        from_host_generic(session_id, event_type, payload).map(Some)
     }
 
     pub(crate) fn host_transcript_role(event_type: &str) -> Option<HostTranscriptRole> {
@@ -465,15 +499,14 @@ fn from_host_generic(
     Ok(event)
 }
 
-/// Refuse a host event, loudly.
+/// Refuse a malformed payload of a *registered* host event, loudly.
 ///
-/// The `VmError` alone was not enough: every stdlib emit site wraps
-/// `agent_emit_event` in `try { }` and discards the result, so a rejected
-/// event type or a malformed payload used to vanish without a trace — the
-/// runtime's own event bus had a silent boundary in it. The rejection now also
-/// goes out through the loud-boundary funnel (harn#5142), which is not
-/// swallowable by a caller's `try`, so a `.harn` boundary reporting through a
-/// name nobody registered is visible instead of merely ineffective.
+/// Unknown `event_type` names are not a contract violation and do not go
+/// through this funnel: they warn once per session and return `Ok(None)`.
+/// A known type with an invalid payload used to vanish because every
+/// stdlib emit site wraps `agent_emit_event` in `try { }` and discards the
+/// result. The rejection now also goes out through the loud-boundary
+/// funnel (harn#5142), which is not swallowable by a caller's `try`.
 fn reject(session_id: &str, detail: String, payload: &Value) -> VmError {
     crate::boundary::BoundaryFailure::new(
         crate::boundary::BoundaryId::HostEventIngest,

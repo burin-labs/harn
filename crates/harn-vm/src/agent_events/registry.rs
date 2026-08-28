@@ -62,6 +62,7 @@ pub fn reset_all_sinks() {
             !sinks.is_empty()
         });
         crate::agent_sessions::reset_session_store();
+        super::from_host::reset_unknown_host_event_warnings();
         reset_wildcard_sinks();
     }
     #[cfg(not(test))]
@@ -71,6 +72,7 @@ pub fn reset_all_sinks() {
             .expect("sink registry poisoned")
             .clear();
         crate::agent_sessions::reset_session_store();
+        super::from_host::reset_unknown_host_event_warnings();
         wildcard_sinks()
             .write()
             .expect("wildcard registry poisoned")
