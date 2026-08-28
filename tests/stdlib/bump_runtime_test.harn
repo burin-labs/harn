@@ -24,6 +24,7 @@ import { assert_eq, assert_throws } from "std/testing"
  */
 fn make_fake(config: dict = {}) {
   let calls = []
+  let remote_base_index = 0
   const record = fn(name, arg) { calls = calls + [{name: name, arg: arg}] }
   const cfg = {
     target: "v0.10.30",
@@ -38,6 +39,11 @@ fn make_fake(config: dict = {}) {
     additions: [".harn-version", "harn.lock"],
     deletions: [],
     existing_pr: nil,
+    base_sha: "base000",
+    remote_base_available: true,
+    remote_base_oid: "base000",
+    remote_base_detail: "",
+    remote_base_sequence: [],
     branch_matches: false,
     commit_oid: "c0ffee",
     auto_merge_enabled: true,
@@ -57,7 +63,7 @@ fn make_fake(config: dict = {}) {
       attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
     } },
     read_current_version: fn() { return cfg.current },
-    base_sha: fn() { return "base000" },
+    base_sha: fn() { return cfg.base_sha },
     apply_version: fn(_target) {
       record("apply_version", _target)
       return {
@@ -80,6 +86,24 @@ fn make_fake(config: dict = {}) {
       }
     },
     working_changes: fn() { return {additions: cfg.additions, deletions: cfg.deletions} },
+    remote_base_head: fn() {
+      record("remote_base_head", nil)
+      const fallback = {
+        available: cfg.remote_base_available,
+        oid: cfg.remote_base_oid,
+        detail: cfg.remote_base_detail,
+      }
+      const sequence = cfg.remote_base_sequence
+      const value = if len(sequence) == 0 {
+        fallback
+      } else if remote_base_index < len(sequence) {
+        sequence[remote_base_index]
+      } else {
+        sequence[len(sequence) - 1]
+      }
+      remote_base_index = remote_base_index + 1
+      return value
+    },
     find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(pr, base_sha) {
       record("disable_auto_merge", {pr: pr, base_sha: base_sha})
@@ -204,7 +228,16 @@ pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task: unk
   assert_eq(receipt.commit_oid, "c0ffee")
   assert_eq(
     call_names(fake.calls()),
-    ["apply_version", "run_validation", "publish_commit", "upsert_pr", "enable_auto_merge"],
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "publish_commit",
+      "upsert_pr",
+      "remote_base_head",
+      "enable_auto_merge",
+    ],
   )
 }
 
@@ -216,7 +249,7 @@ pipeline test_refresh_failure_blocks_validation_and_commit(harness: Harness, tas
   assert_eq(receipt.ok, false)
   assert_eq(receipt.refresh_ok, false)
   assert_eq(receipt.refresh_detail, "repository refresh failed")
-  assert_eq(call_names(fake.calls()), ["apply_version"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version"])
 }
 
 /** 5. Validation failure: no commit, no PR, ok=false. */
@@ -226,7 +259,7 @@ pipeline test_validation_failure_blocks_commit(harness: Harness, task: unknown) 
   assert_eq(receipt.outcome, "validation_failed")
   assert_eq(receipt.ok, false)
   assert_eq(receipt.validation.ok, false)
-  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version", "run_validation"])
 }
 
 /** Fleet repair opt-in publishes an exact lease but never arms auto-merge. */
@@ -245,7 +278,14 @@ pipeline test_validation_failure_can_publish_repair_pr_without_auto_merge(
   assert_eq(receipt.auto_merge, nil)
   assert_eq(
     call_names(fake.calls()),
-    ["apply_version", "run_validation", "publish_commit", "upsert_pr"],
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "publish_commit",
+      "upsert_pr",
+    ],
   )
 }
 
@@ -260,7 +300,7 @@ pipeline test_validation_failure_opt_in_does_not_publish_an_empty_delta(
   assert_eq(receipt.outcome, "validation_failed")
   assert_eq(receipt.ok, false)
   assert_eq(receipt.pr_action, "none")
-  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version", "run_validation"])
 }
 
 pipeline test_validation_failure_opt_in_never_becomes_success_when_branch_matches_base(
@@ -274,7 +314,10 @@ pipeline test_validation_failure_opt_in_never_becomes_success_when_branch_matche
   assert_eq(receipt.outcome, "validation_failed")
   assert_eq(receipt.ok, false)
   assert_eq(receipt.pr_action, "none")
-  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation", "publish_commit"])
+  assert_eq(
+    call_names(fake.calls()),
+    ["remote_base_head", "apply_version", "run_validation", "remote_base_head", "publish_commit"],
+  )
 }
 
 pipeline test_refresh_failure_can_publish_repair_pr_without_validation_or_auto_merge(
@@ -291,7 +334,10 @@ pipeline test_refresh_failure_can_publish_repair_pr_without_validation_or_auto_m
   assert_eq(receipt.pr_number, 4242)
   assert_eq(receipt.commit_oid, "c0ffee")
   assert_eq(receipt.auto_merge, nil)
-  assert_eq(call_names(fake.calls()), ["apply_version", "publish_commit", "upsert_pr"])
+  assert_eq(
+    call_names(fake.calls()),
+    ["remote_base_head", "apply_version", "remote_base_head", "publish_commit", "upsert_pr"],
+  )
 }
 
 pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(
@@ -303,12 +349,12 @@ pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(
   assert_eq(receipt.outcome, "refresh_failed")
   assert_eq(receipt.ok, false)
   assert_eq(receipt.pr_action, "none")
-  assert_eq(call_names(fake.calls()), ["apply_version"])
+  assert_eq(call_names(fake.calls()), ["remote_base_head", "apply_version"])
 }
 
 /**
  * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
- * BEFORE the branch and signed commit are atomically published. Order matters.
+ * BEFORE refresh and validation begin. Order matters.
  */
 pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task: unknown) {
   const stale: BumpPrState = {
@@ -330,11 +376,14 @@ pipeline test_stale_lease_is_disarmed_before_publication(harness: Harness, task:
   assert_eq(
     call_names(fake.calls()),
     [
+      "disable_auto_merge",
+      "remote_base_head",
       "apply_version",
       "run_validation",
-      "disable_auto_merge",
+      "remote_base_head",
       "publish_commit",
       "upsert_pr",
+      "remote_base_head",
       "enable_auto_merge",
     ],
   )
@@ -356,7 +405,7 @@ pipeline test_failed_lease_disarm_stops_before_publication(harness: Harness, tas
     assert_throws({ -> run_bump(opts(), fake.adapter) }),
     "std/bump/runtime: failed to disable stale auto-merge on #72",
   )
-  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation", "disable_auto_merge"])
+  assert_eq(call_names(fake.calls()), ["disable_auto_merge"])
 }
 
 /**
@@ -382,7 +431,16 @@ pipeline test_existing_pr_is_refreshed_in_place(harness: Harness, task: unknown)
   assert_eq(receipt.pr_number, 88)
   assert_eq(
     call_names(fake.calls()),
-    ["apply_version", "run_validation", "publish_commit", "upsert_pr", "enable_auto_merge"],
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "publish_commit",
+      "upsert_pr",
+      "remote_base_head",
+      "enable_auto_merge",
+    ],
   )
 }
 
@@ -420,6 +478,126 @@ pipeline test_branch_matching_base_closes_stale_pr(harness: Harness, task: unkno
   assert_eq(receipt.pr_action, "closed")
   assert_eq(
     call_names(fake.calls()),
-    ["apply_version", "run_validation", "publish_commit", "close_pr"],
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "publish_commit",
+      "close_pr",
+    ],
   )
+}
+
+pipeline test_base_advance_after_validation_blocks_publication(harness: Harness, task: unknown) {
+  const fake = make_fake(
+    {
+      remote_base_sequence: [
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base999", detail: ""},
+      ],
+    },
+  )
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "base_advanced")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.expected_base_oid, "base000")
+  assert_eq(receipt.observed_base_oid, "base999")
+  assert_eq(receipt.base_current, false)
+  assert_eq(receipt.base_check_phase, "before_publication")
+  assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: "base999"})
+  assert_eq(
+    receipt.notes,
+    [
+      "remote base advanced from base000 to base999",
+      "retry the bump from a fresh checkout of main",
+    ],
+  )
+  assert_eq(
+    call_names(fake.calls()),
+    ["remote_base_head", "apply_version", "run_validation", "remote_base_head"],
+  )
+}
+
+pipeline test_missing_remote_base_identity_cannot_read_as_current(harness: Harness, task: unknown) {
+  const fake = make_fake(
+    {
+      remote_base_available: false,
+      remote_base_oid: nil,
+      remote_base_detail: "branch lookup unavailable",
+    },
+  )
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "base_advanced")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.observed_base_oid, nil)
+  assert_eq(receipt.base_current, false)
+  assert_eq(receipt.base_check_phase, "before_refresh")
+  assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: nil})
+  assert_eq(
+    receipt.notes,
+    [
+      "remote base identity unavailable: branch lookup unavailable",
+      "retry the bump from a fresh checkout of main",
+    ],
+  )
+  assert_eq(call_names(fake.calls()), ["remote_base_head"])
+}
+
+pipeline test_base_advance_before_arming_leaves_refreshed_pr_unarmed(
+  harness: Harness,
+  task: unknown,
+) {
+  const fake = make_fake(
+    {
+      remote_base_sequence: [
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base999", detail: ""},
+      ],
+    },
+  )
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "base_advanced")
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.pr_number, 4242)
+  assert_eq(receipt.base_check_phase, "before_arming")
+  assert_eq(receipt.recovery, {kind: "fresh_base_retry", base_oid: "base999"})
+  assert_eq(
+    call_names(fake.calls()),
+    [
+      "remote_base_head",
+      "apply_version",
+      "run_validation",
+      "remote_base_head",
+      "publish_commit",
+      "upsert_pr",
+      "remote_base_head",
+    ],
+  )
+}
+
+pipeline test_fresh_base_retry_revalidates_and_publishes_the_new_composition(
+  harness: Harness,
+  task: unknown,
+) {
+  const stale = make_fake(
+    {
+      remote_base_sequence: [
+        {available: true, oid: "base000", detail: ""},
+        {available: true, oid: "base999", detail: ""},
+      ],
+    },
+  )
+  const first = run_bump(opts(), stale.adapter)
+  assert_eq(first.outcome, "base_advanced")
+  assert_eq(first.recovery, {kind: "fresh_base_retry", base_oid: "base999"})
+  const fresh = make_fake({base_sha: "base999", remote_base_oid: "base999"})
+  const second = run_bump(opts(), fresh.adapter)
+  assert_eq(second.outcome, "committed")
+  assert_eq(second.expected_base_oid, "base999")
+  assert_eq(second.observed_base_oid, "base999")
+  const publication = fresh.calls().filter({ call -> call.name == "publish_commit" }).to_list()
+  assert_eq(publication[0].arg.base_sha, "base999")
+  assert_eq(len(fresh.calls().filter({ call -> call.name == "enable_auto_merge" }).to_list()), 1)
 }

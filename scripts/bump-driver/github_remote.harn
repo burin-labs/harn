@@ -1,8 +1,10 @@
 import { LiveBumpRemote } from "std/bump/live"
 /** GitHub package implementation of std/bump/live's remote capability. */
 import {
+  GithubBranchHeadRequest,
   GithubBranchTreeCompareRequest,
   GithubPullRequestUpsertRequest,
+  github_branch_head,
   github_close_pr,
   github_compare_branch_trees,
   github_find_open_pr,
@@ -123,6 +125,20 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         prerelease: release.prerelease,
         asset_names: release.assets.map({ asset -> asset.name }).to_list(),
       }
+    },
+    base_head: fn() {
+      const request: GithubBranchHeadRequest = {
+        owner: repo.owner,
+        repo: repo.name,
+        branch: config.base,
+        options: options,
+      }
+      const result = github_branch_head(harness, request)
+      if is_err(result) {
+        return {available: false, oid: nil, detail: json_stringify(unwrap_err(result))}
+      }
+      const head = unwrap(result)
+      return {available: true, oid: head.oid, detail: ""}
     },
     find_bump_pr: fn() {
       const found = github_find_open_pr(

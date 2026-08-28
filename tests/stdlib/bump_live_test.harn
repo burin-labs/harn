@@ -9,6 +9,7 @@ fn unreachable_remote() -> LiveBumpRemote {
   return {
     latest_release_tag: unreachable,
     release_view: fn(_tag) { return unreachable() },
+    base_head: unreachable,
     find_bump_pr: unreachable,
     disable_auto_merge: fn(_pr, _base_sha) { return unreachable() },
     publish_commit: fn(_request) { return unreachable() },

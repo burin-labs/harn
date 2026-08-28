@@ -112,6 +112,38 @@ fn pull(head_oid: string) {
   }
 }
 
+pipeline test_base_head_projects_exact_identity_and_unavailable_state(
+  harness: Harness,
+  task: unknown,
+) {
+  harness.testing.http_mock_clear()
+  const url = API + "/repos/octo-org/octo-repo/branches/main"
+  harness.testing.http_mock(
+    "GET",
+    url,
+    {
+      responses: [
+        {
+          status: 200,
+          body: json_stringify(
+            {name: "main", commit: {sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+          ),
+        },
+        {status: 503, body: json_stringify({message: "temporarily unavailable"})},
+      ],
+    },
+  )
+  assert_eq(
+    remote(harness).base_head(),
+    {available: true, oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", detail: ""},
+  )
+  const unavailable = remote(harness).base_head()
+  assert_eq(unavailable.available, false)
+  assert_eq(unavailable.oid, nil)
+  assert(trim(unavailable.detail) != "")
+  harness.testing.http_mock_clear()
+}
+
 pipeline test_release_projection_is_closed_and_exact(harness: Harness, task: unknown) {
   harness.testing.http_mock_clear()
   const tag = "v0.10.53"

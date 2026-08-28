@@ -13,6 +13,7 @@
 import {
   BumpAdapter,
   BumpAutoMerge,
+  BumpBaseHead,
   BumpChangeSet,
   BumpCommitRequest,
   BumpCommitResult,
@@ -48,6 +49,7 @@ pub type LiveBumpRelease = {found: bool, draft: bool, prerelease: bool, asset_na
 pub type LiveBumpRemote = {
   latest_release_tag: fn() -> string,
   release_view: fn(string) -> LiveBumpRelease,
+  base_head: fn() -> BumpBaseHead,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -260,6 +262,7 @@ pub fn live_bump_adapter(
       }
     },
     working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
+    remote_base_head: remote.base_head,
     find_bump_pr: remote.find_bump_pr,
     disable_auto_merge: remote.disable_auto_merge,
     publish_commit: remote.publish_commit,
