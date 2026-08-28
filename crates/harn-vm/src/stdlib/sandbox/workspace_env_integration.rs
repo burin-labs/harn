@@ -259,7 +259,7 @@ fn explicit_process_cache_env_wins_over_safe_inherited_cache() {
         &env.display().to_string(),
         &[],
         &ProcessCommandConfig {
-            cwd: Some(workspace.clone()),
+            cwd: Some(workspace),
             env: vec![("GOMODCACHE".to_string(), explicit.display().to_string())],
             ..ProcessCommandConfig::default()
         },
