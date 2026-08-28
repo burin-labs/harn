@@ -11,14 +11,16 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
-
 use crate::commands::run::{
     execute_run_json_with_options, CliLlmMockMode, RunExecutionOptions, RunJsonOptions,
     RunProfileOptions, RunSandboxOptions,
 };
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
+
+mod canonical_replay;
+use canonical_replay::canonical_replay_result;
 
 pub(crate) const OFFLINE_CODING_REPLAY_SCHEMA: &str = "harn.offline-coding-replay.v1";
 const TOOL_SEQUENCE: &str = "tool_sequence";
@@ -834,56 +836,6 @@ fn canonical_blake3(value: &JsonValue) -> String {
     blake3::hash(&harn_vm::canonical_json::to_vec(value))
         .to_hex()
         .to_string()
-}
-
-fn canonical_replay_result(value: &JsonValue, workspace: &Path) -> JsonValue {
-    const VOLATILE_FIELDS: &[&str] = &[
-        "audit_id",
-        "command_id",
-        "duration_ms",
-        "ended_at",
-        "handle_id",
-        "output_path",
-        "pid",
-        "process_group_id",
-        "sandbox",
-        "started_at",
-        "stderr_path",
-        "stdout_path",
-    ];
-
-    let lexical_root = workspace.to_string_lossy();
-    let canonical_root = fs::canonicalize(workspace)
-        .ok()
-        .map(|path| path.to_string_lossy().into_owned());
-    fn normalize(value: &JsonValue, lexical_root: &str, canonical_root: Option<&str>) -> JsonValue {
-        match value {
-            JsonValue::Object(object) => JsonValue::Object(
-                object
-                    .iter()
-                    .filter(|(key, _)| !VOLATILE_FIELDS.contains(&key.as_str()))
-                    .map(|(key, value)| {
-                        (key.clone(), normalize(value, lexical_root, canonical_root))
-                    })
-                    .collect(),
-            ),
-            JsonValue::Array(values) => JsonValue::Array(
-                values
-                    .iter()
-                    .map(|value| normalize(value, lexical_root, canonical_root))
-                    .collect(),
-            ),
-            JsonValue::String(text) => {
-                let normalized = canonical_root
-                    .and_then(|root| text.strip_prefix(root))
-                    .or_else(|| text.strip_prefix(lexical_root))
-                    .map_or_else(|| text.clone(), |suffix| format!("$WORKSPACE{suffix}"));
-                JsonValue::String(normalized)
-            }
-            _ => value.clone(),
-        }
-    }
-    normalize(value, &lexical_root, canonical_root.as_deref())
 }
 
 fn repeatability_receipt(receipts: &[OfflineCodingReplayReceipt]) -> RepeatabilityReceipt {
