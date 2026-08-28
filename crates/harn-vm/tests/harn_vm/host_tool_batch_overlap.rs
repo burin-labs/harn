@@ -11,28 +11,50 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use harn_vm::bridge::HostBridge;
 use harn_vm::value::{VmError, VmValue};
 
 const WORKER_COUNT: usize = 4;
+const OVERLAP_PROOF_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, PartialEq, Eq)]
+enum OverlapProofFailure {
+    Vm(String),
+    TimedOut {
+        release_at: usize,
+        timeout: Duration,
+    },
+}
 
 fn run_with_overlap_park(
     source: &str,
     release_at: usize,
     peak: Arc<AtomicUsize>,
     in_flight: Arc<AtomicUsize>,
-) -> Result<String, String> {
+) -> Result<String, OverlapProofFailure> {
+    run_with_overlap_park_timeout(source, release_at, peak, in_flight, OVERLAP_PROOF_TIMEOUT)
+}
+
+fn run_with_overlap_park_timeout(
+    source: &str,
+    release_at: usize,
+    peak: Arc<AtomicUsize>,
+    in_flight: Arc<AtomicUsize>,
+    timeout: Duration,
+) -> Result<String, OverlapProofFailure> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let chunk = harn_vm::compile_source(source).map_err(OverlapProofFailure::Vm)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
+        .map_err(|error| OverlapProofFailure::Vm(error.to_string()))?;
+    let outcome = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
+        tokio::time::timeout(
+            timeout,
+            local.run_until(async {
                 let bridge = Arc::new(HostBridge::from_parts(
                     Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                     Arc::new(AtomicBool::new(false)),
@@ -64,13 +86,18 @@ fn run_with_overlap_park(
                 let result = vm
                     .execute(&chunk)
                     .await
-                    .map_err(|e: VmError| format!("{e:?}"));
+                    .map_err(|error: VmError| OverlapProofFailure::Vm(format!("{error:?}")));
                 let output = vm.output().to_string();
-                harn_vm::llm::clear_current_host_bridge();
                 result.map(|_| output)
-            })
-            .await
-    })
+            }),
+        )
+        .await
+    });
+    harn_vm::llm::clear_current_host_bridge();
+    outcome.map_err(|_| OverlapProofFailure::TimedOut {
+        release_at,
+        timeout,
+    })?
 }
 
 fn out_lines(raw: &str) -> Vec<String> {
@@ -123,7 +150,7 @@ fn fanout_calls() {
 }
 
 fn count_ok_results_source() -> &'static str {
-    r#"
+    r"
 fn count_ok(results: list) -> int {
   let ok = 0
   for r in results {
@@ -133,7 +160,7 @@ fn count_ok(results: list) -> int {
   }
   return ok
 }
-"#
+"
 }
 
 fn run_host_batch_case(label: &str, cap: usize) -> (Vec<String>, usize, usize) {
@@ -161,7 +188,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let in_flight = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
     let raw = run_with_overlap_park(&source, cap, peak.clone(), in_flight.clone())
-        .unwrap_or_else(|e| panic!("{label} host-batch pipeline must run: {e}"));
+        .unwrap_or_else(|error| panic!("{label} host-batch pipeline must run: {error:?}"));
     let lines = out_lines(&raw);
     assert_eq!(
         require_usize(&lines, &format!("{label}_RESULTS")),
@@ -179,6 +206,27 @@ pipeline main(harness: Harness, task: unknown) {{
         "{label}: every __overlap_park must be matched by __overlap_exit"
     );
     (lines, peak.load(Ordering::SeqCst), cap)
+}
+
+#[test]
+fn overlap_proof_times_out_when_the_causal_barrier_cannot_release() {
+    let timeout = Duration::from_millis(25);
+    let failure = run_with_overlap_park_timeout(
+        "pipeline main(harness: Harness, task: unknown) { __overlap_park(2) }",
+        2,
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+        timeout,
+    )
+    .expect_err("an unreleased causal barrier must fail within its own bound");
+
+    assert_eq!(
+        failure,
+        OverlapProofFailure::TimedOut {
+            release_at: 2,
+            timeout,
+        }
+    );
 }
 
 #[test]
