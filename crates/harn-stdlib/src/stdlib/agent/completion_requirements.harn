@@ -28,7 +28,14 @@ pub type CompletionRequirementReport = {
 
 pub type CompletionRequirementEvidencePacket = {actions?: list, fallback_observations?: list}
 
-/** Return the optional requirement ledger, normalized to its public shape. */
+/**
+ * Return the optional requirement ledger, normalized to its public shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_contract({requirements: [{requirement_id: "build", name: "Build the artifact."}]})
+ */
 pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementContract? {
   if type_of(value) != "dict" || type_of(value?.requirements) != "list"
     || len(value.requirements) == 0 {
@@ -48,7 +55,14 @@ pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementC
   return {requirements: requirements}
 }
 
-/** JSON-schema projection accepted by the existing structured judge call. */
+/**
+ * JSON-schema projection accepted by the existing structured judge call.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_assessments_schema(contract)
+ */
 pub fn completion_requirement_assessments_schema(
   contract: CompletionRequirementContract?,
 ) -> dict? {
@@ -72,7 +86,14 @@ pub fn completion_requirement_assessments_schema(
   }
 }
 
-/** Stable requirement text added to the one completion judge's input. */
+/**
+ * Stable requirement text added to the one completion judge's input.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_contract_prompt(contract)
+ */
 pub fn completion_requirement_contract_prompt(contract: CompletionRequirementContract?) -> string {
   if contract == nil || len(contract.requirements) == 0 {
     return ""
@@ -147,6 +168,11 @@ fn completion_requirement_matches(raw_rows: unknown, requirement_id: string) -> 
 /**
  * Join model assessments to the authoritative ledger and evidence packet.
  * A scalar `done` cannot collapse a missing, duplicate, unmet, or uncited row.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_report(contract, assessments, evidence_packet)
  */
 pub fn completion_requirement_report(
   contract: CompletionRequirementContract?,
@@ -219,7 +245,14 @@ pub fn completion_requirement_report(
   }
 }
 
-/** Plain, bounded feedback for an incomplete atomic-requirement report. */
+/**
+ * Plain, bounded feedback for an incomplete atomic-requirement report.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_pending_feedback(report)
+ */
 pub fn completion_requirement_pending_feedback(report: CompletionRequirementReport) -> string {
   return "Completion rejected: " + to_string(report.pending_count)
     + " pending or invalid assessment(s) across "
