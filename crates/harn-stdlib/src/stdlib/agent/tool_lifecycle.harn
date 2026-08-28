@@ -55,7 +55,12 @@ pub fn agent_tool_handler_result<T>(text: string, data: T) -> AgentToolHandlerRe
   return {schema: "harn.agent_tool_handler_result.v1", text: text, data: data}
 }
 
-/** Preserve an explicit typed handler result, or pair rendered text with producer data. */
+/**
+ * Preserve an explicit typed handler result, or pair rendered text with producer data.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn agent_tool_handler_result_normalize<T>(
   rendered: unknown,
   data: T,
