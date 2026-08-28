@@ -9,6 +9,45 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.120
+
+### Added
+
+- `harn replay` can now re-execute recorded coding turns in fresh offline
+  workspaces and fail closed on tool, file-effect, or terminal-outcome drift.
+- Confined subprocesses can opt into TCP loopback servers without gaining remote network access.
+- Provider request traces now retain ordered, content-addressed message lineage
+  with projection and compaction provenance, so exact model-visible context stays
+  reconstructable after long-session context changes.
+- Provider catalog model deprecations can now include a machine-readable
+  `sunset_date`, so clients can warn about route shutdowns without parsing prose.
+
+### Changed
+
+- Agent loops now review the final work product for brittle assumptions,
+  incomplete integration, and unsupported completion claims before yielding.
+
+### Fixed
+
+- Retry transient GitHub GraphQL server failures during signed runtime-bump
+  publication without replaying semantic GraphQL errors.
+- Completion gates and judges now arbitrate a final response even when an older
+  effect-phased tool proposal remains deferred, preventing valid completions from
+  stalling indefinitely. Loops without a completion adjudicator remain
+  conservative and still require exact re-proposal.
+- Runtime bump automation now disarms an existing bump before refresh, refuses
+  to publish or arm work validated against an older or unobservable base
+  revision, and emits a typed fresh-checkout retry receipt for bounded
+  controllers.
+- Offline coding replay now compares equivalent native path and newline forms consistently across operating systems.
+- Prevent Harn-only optional-field metadata from producing invalid nested tool schemas on provider APIs.
+- Local sandbox sessions can now start hosted workloads inside read-only mounts
+  without granting those workloads write access to the mounted files.
+- Sandboxed tool processes now reuse prewarmed workspace-local toolchain caches
+  instead of replacing them with empty per-run caches.
+- Stop agent loops immediately after a configured terminal tool succeeds, even when an earlier tool proposal was deferred
+  and later abandoned.
+
 ## v0.10.119
 
 ### Added
