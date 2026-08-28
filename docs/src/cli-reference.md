@@ -2971,6 +2971,7 @@ fixture, or an agent session stored in the SQLite EventLog.
 ```bash
 harn replay .harn-runs/<run>.json
 harn replay --fixture conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json --runs 3 --json
+harn replay --fixture fixtures/coding-turn.replay.json --json
 harn replay --session-id <id> --events-db .harn/events.sqlite --runs 3 --json
 harn replay --session-id <id> --events-db .harn/events.sqlite --at 7 --counterfactual ./what-if.harn --json
 ```
@@ -2983,6 +2984,16 @@ plus an allowlist-normalized determinism summary.
 `--at <event-id>` rehydrates the session prefix through the inclusive
 event id. Repeat `--counterfactual <plan.harn>` to chain returned edit-op
 lists into one cumulative dry-run divergence report.
+An `offline_coding_replay` fixture takes the execution path instead of the
+projection path. It recreates the declared workspace seed, runs the recorded
+LLM responses with provider and network access disabled, and fails closed on
+tool order, ids, execution status, final diff, or terminal-outcome divergence.
+`--json` uses the universal envelope; the offline receipt is in `data`, with
+its producer version and attested source revision when available, exact canonical argument and semantic
+result digests, cross-run repeatability verdict, and independently observed
+provider-fixture and process-network isolation facts. Its receipt always lists
+pending and missing comparison names. `harn --json-schemas` is the schema
+authority.
 
 ## harn eval
 

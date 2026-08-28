@@ -666,6 +666,28 @@ fn matched_receipt_emits_typed_checkpoint() {
         }
             if session_id == "mock-session"
                 && receipt["schema"] == "harn.llm_mock_fixture_consumption.v1"
+                && receipt["source"] == "cli_replay"
+                && receipt["matched"] == true
                 && receipt["resolved_scope"] == "agent.main"
     )));
+}
+
+#[test]
+fn cli_mock_preserves_a_recorded_tool_call_id() {
+    reset_llm_mock_state();
+    let mock = crate::llm::jsonl::parse_llm_mock_value(&serde_json::json!({
+        "tool_calls": [{
+            "id": "recorded-call",
+            "name": "ask_user",
+            "arguments": {"question": "Which?"}
+        }]
+    }))
+    .expect("parse recorded mock");
+    install_cli_llm_mocks(vec![mock]);
+    let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
+
+    let result = mock_llm_response(&request).expect("recorded response");
+
+    assert_eq!(result.tool_calls[0]["id"], "recorded-call");
+    clear_cli_llm_mock_mode();
 }

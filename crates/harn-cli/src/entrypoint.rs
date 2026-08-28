@@ -691,7 +691,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         Command::Runs(args) => cli::run_runs_command(args).await,
         Command::Session(args) => commands::session::run(args).await,
         Command::Replay(args) => {
-            let exit = commands::replay::run(args);
+            let exit = commands::replay::run(args).await;
             if exit != 0 {
                 process::exit(exit);
             }

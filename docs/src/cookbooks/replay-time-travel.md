@@ -1,7 +1,7 @@
 # Replay time-travel cookbook
 
 `harn replay` rehydrates a recorded agent session from a SQLite EventLog
-and replays it deterministically. With `--at <event-id>` you can rewind
+and projects it deterministically. With `--at <event-id>` you can rewind
 to **any past event** and replay the session as it stood at that point —
 the foundation for auditing "what had the agent seen by the time it made
 this decision?".
@@ -166,6 +166,93 @@ The typical loop:
    one to confirm your fix changes the outcome you expected and nothing
    else.
 
-Because replay is deterministic and the EventLog is append-only, the
+Because this projection is deterministic and the EventLog is append-only, the
 audit is reproducible: the same `--session-id … --at N` always rehydrates
 the same prefix.
+
+## Re-execute a coding turn offline
+
+A run record answers "what did the saved run say?" An offline coding replay
+answers the stronger question: "does the recorded read, edit, and verification
+trajectory still produce the same result from a clean workspace?"
+
+Put the program, its recorded `--llm-mock` JSONL, and the initial files under
+one seed directory. The program receives the recreated workspace path as
+`argv[0]` and must return its `AgentResult`, including the producer-owned typed
+terminal. Keep the files whose mutations matter under `effect_root`; run
+artifacts can live elsewhere in the seed.
+
+```json
+{
+  "_type": "offline_coding_replay",
+  "schema_version": "harn.offline-coding-replay.v1",
+  "workspace_seed": "coding-turn",
+  "program": "turn.harn",
+  "llm_mock": "turn.llm-mock.jsonl",
+  "effect_root": "repo",
+  "expected": {
+    "tools": [
+      {
+        "id": "call-read",
+        "name": "read_file",
+        "status": "completed",
+        "args_blake3": "1111111111111111111111111111111111111111111111111111111111111111",
+        "result_blake3": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      {
+        "id": "call-edit",
+        "name": "edit_file",
+        "status": "completed",
+        "args_blake3": "3333333333333333333333333333333333333333333333333333333333333333",
+        "result_blake3": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "id": "call-verify",
+        "name": "run_command",
+        "status": "completed",
+        "args_blake3": "5555555555555555555555555555555555555555555555555555555555555555",
+        "result_blake3": "6666666666666666666666666666666666666666666666666666666666666666",
+        "exit_code": 0
+      }
+    ],
+    "effects": [
+      {
+        "path": "src/lib.rs",
+        "before_blake3": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "after_blake3": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "terminal": {
+      "outcome": {"kind": "natural", "reason": "natural", "owner": "agent"},
+      "exit_code": 0
+    }
+  }
+}
+```
+
+Run it through the normal replay command:
+
+```bash
+harn replay --fixture fixtures/coding-turn.replay.json --json
+```
+
+Harn copies the seed to a new temporary workspace for every run, installs only
+the recorded LLM fixture, runs through the ordinary sandbox with process
+network disabled, and computes the final tree diff. The universal JSON envelope
+keeps replay data under `data`; `data.producer` identifies the CLI version and,
+for attested builds, source revision that performed the run. Each expected tool carries BLAKE3
+digests of its canonical JSON arguments and semantic result. Harn normalizes
+workspace paths and runtime-only identifiers before hashing results. Terminal
+tool-event status, result digest, and any declared command exit code prove the
+execution outcome, while typed mock-consumption checkpoints distinguish the
+CLI tape from builtin fallback. The receipt names all five comparisons: tool
+sequence, workspace effects, terminal verdict, provider isolation, and network
+isolation. `pending_comparisons` and
+`missing_comparisons` are always present. A missing returned terminal, empty
+expected tool/effect evidence, an unmatched LLM prompt, an unexpected file
+change, or any mismatch exits non-zero.
+
+Use `--runs N` for repeated clean-room executions. Each run gets a new copy of
+the seed, so a previous run cannot make a later comparison pass. The
+`data.repeatability` receipt also compares every run's tools, effects, terminal,
+and exit code with the first run.

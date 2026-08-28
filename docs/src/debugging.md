@@ -159,15 +159,20 @@ This highlights differences in tool calls, outputs, and token consumption.
 
 ## Replay
 
-Replay re-executes a recorded run, using the saved LLM responses instead of
-making live API calls. This is useful for deterministic debugging:
+A run-record input reconstructs and checks the saved record. It does not run
+the program or its tools again:
 
 ```bash
 harn replay .harn-runs/<run-id>.json
 ```
 
-Replay shows each stage transition and lets you verify that your pipeline
-produces the same results given the same LLM responses.
+This view shows each saved stage transition and checks the embedded fixture.
+Use an `offline_coding_replay` fixture when you need to prove the recorded
+read, edit, and verification steps still reproduce in a fresh workspace. That
+mode runs the Harn program with its recorded LLM tape, provider access removed,
+and process network disabled, then checks the tool sequence, final diff, and
+producer-written agent terminal outcome. See the
+[replay cookbook](./cookbooks/replay-time-travel.md#re-execute-a-coding-turn-offline).
 
 ## Visualizing a pipeline
 
