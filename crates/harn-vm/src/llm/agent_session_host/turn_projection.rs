@@ -251,14 +251,30 @@ async fn host_agent_session_project_turn(
         )));
     };
     let transcript_dict = transcript.as_dict().cloned().unwrap_or_default();
-    let result = crate::stdlib::transcript_project::project_transcript(
+    let mut result = crate::stdlib::transcript_project::project_transcript(
         Some(&ctx),
         &transcript_dict,
         &policy,
     )
     .await?;
     let event = crate::stdlib::transcript_project::projection_event_value(&result, &policy);
-    let _ = crate::agent_sessions::append_event(&session_id, event.clone());
+    let event_ref = crate::llm::helpers::vm_value_to_json(&event)
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let event_ref = crate::agent_sessions::append_event(&session_id, event.clone())
+        .is_ok()
+        .then_some(event_ref)
+        .flatten();
+    crate::llm::message_lineage::attach_projection(
+        &mut result.messages,
+        &result.source_message_indices,
+        &crate::llm::message_lineage::ProjectionLineage {
+            policy: policy.kind.as_str().to_string(),
+            event_ref,
+            prefix_hash: Some(result.prefix_hash.clone()),
+        },
+    );
     crate::llm::emit_live_agent_event_with_ctx(
         Some(&ctx),
         &AgentEvent::TranscriptProjected {

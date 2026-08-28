@@ -520,6 +520,9 @@ fn __agent_decorate_turn_message(
   if decorated == nil {
     return out
   }
+  if type_of(decorated) == "dict" && out?._harn_message_lineage != nil {
+    return decorated + {_harn_message_lineage: out._harn_message_lineage}
+  }
   return decorated
 }
 

@@ -508,6 +508,7 @@ pub(super) fn dump_llm_request(
             &payload,
             &served_manifest,
             &tool_schemas,
+            opts.message_lineage.as_ref(),
             iteration,
             call_id,
             opts.session_id.as_deref(),

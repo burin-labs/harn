@@ -90,15 +90,31 @@ pub(crate) fn directive_envelope_message(
     })
 }
 
+#[cfg(test)]
+pub(crate) fn tracked_directive_envelope_message(
+    reminder_id: &str,
+    text: &str,
+) -> serde_json::Value {
+    directive_envelope_message(&[RenderedReminder::tracked(reminder_id, text)])
+        .expect("tracked directive is non-empty")
+}
+
 /// Remove durable placement receipts before a message array reaches any
 /// provider. The receipts distinguish reminder instances inside Harn; the
 /// model-facing directive text carries authority and lifetime, not IDs.
-pub(super) fn strip_directive_commit_metadata(messages: &mut [serde_json::Value]) {
+pub(crate) fn strip_directive_commit_metadata(messages: &mut [serde_json::Value]) {
     for message in messages {
         if let Some(object) = message.as_object_mut() {
             object.remove(DIRECTIVE_IDS_KEY);
         }
     }
+}
+
+pub(crate) fn has_directive_commit_metadata(message: &serde_json::Value) -> bool {
+    message
+        .get(DIRECTIVE_IDS_KEY)
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|ids| !ids.is_empty())
 }
 
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {

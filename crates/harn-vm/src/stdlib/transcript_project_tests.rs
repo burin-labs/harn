@@ -39,6 +39,28 @@ async fn raw_policy_is_identity_and_emits_hash() {
     assert!(result.prefix_hash.starts_with("sha256:"));
 }
 
+#[test]
+fn explicit_custom_indices_distinguish_a_later_duplicate_message() {
+    let repeated = serde_json::json!({"role": "user", "content": "X"});
+    let raw = vec![
+        repeated.clone(),
+        serde_json::json!({"role": "assistant", "content": "Y"}),
+        repeated.clone(),
+    ];
+    let projected = json_to_vm_value(&serde_json::json!({
+        "messages": [repeated],
+        "kept_indices": [2],
+        "dropped_indices": [0, 1],
+    }));
+
+    let decision = parse_custom_projector_result(&raw, &projected).expect("custom projection");
+    assert_eq!(decision.kept_indices, vec![2]);
+    assert_eq!(
+        projected_source_indices(&decision, &PolicyKind::Custom),
+        vec![Some(2)]
+    );
+}
+
 #[tokio::test]
 async fn clean_tool_repair_drops_failed_then_success_pair() {
     let transcript = transcript_with(

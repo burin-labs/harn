@@ -72,6 +72,7 @@ pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub mod managed_supply;
+pub(crate) mod message_lineage;
 pub(crate) mod mock;
 mod mock_builtins;
 mod mock_error;

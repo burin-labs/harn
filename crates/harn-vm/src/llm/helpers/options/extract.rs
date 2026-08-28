@@ -413,7 +413,8 @@ pub(crate) fn extract_llm_options(
     } else {
         apply_rendered_reminder_messages(messages, &rendered_reminders)
     };
-    strip_directive_commit_metadata(&mut messages);
+    let message_lineage = crate::llm::message_lineage::take_from_messages(&mut messages);
+    super::reminders::strip_directive_commit_metadata(&mut messages);
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
     let audio = option_is_enabled(options.as_ref(), "audio")
@@ -914,6 +915,7 @@ pub(crate) fn extract_llm_options(
         dispatch_provenance,
         reminders,
         reminder_lifecycle,
+        message_lineage,
         messages,
         system,
         system_prompt_root,
