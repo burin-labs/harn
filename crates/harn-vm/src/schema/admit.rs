@@ -24,10 +24,11 @@ impl std::fmt::Display for UnsatisfiableJsonSchema {
         } else {
             self.collapsed_branches.join(", ")
         };
+        let path = &self.path;
+        let keyword = self.keyword;
         write!(
             f,
-            "structured output schema admits no value: tool `{tool}` collapsed branch set [{branches}] at {} (`{}`)",
-            self.path, self.keyword
+            "structured output schema admits no value: tool `{tool}` collapsed branch set [{branches}] at {path} (`{keyword}`)"
         )
     }
 }
@@ -60,27 +61,31 @@ fn first_unsatisfiable_node(
     let tool_ref = tool.as_deref();
 
     for keyword in ["anyOf", "oneOf"] {
-        if let Some(Value::Array(branches)) = object.get(keyword) {
-            if branches.is_empty() {
-                return Some(UnsatisfiableJsonSchema {
-                    tool,
-                    path: child_path(path, keyword),
-                    keyword,
-                    collapsed_branches: collapsed_branches_from_object(object),
-                });
-            }
-        }
-    }
-
-    if let Some(Value::Array(values)) = object.get("enum") {
-        if values.is_empty() {
+        if object
+            .get(keyword)
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        {
             return Some(UnsatisfiableJsonSchema {
                 tool,
-                path: child_path(path, "enum"),
-                keyword: "enum",
+                path: child_path(path, keyword),
+                keyword,
                 collapsed_branches: collapsed_branches_from_object(object),
             });
         }
+    }
+
+    if object
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        return Some(UnsatisfiableJsonSchema {
+            tool,
+            path: child_path(path, "enum"),
+            keyword: "enum",
+            collapsed_branches: collapsed_branches_from_object(object),
+        });
     }
 
     if let Some(missing) = impossible_required_properties(object) {
@@ -121,12 +126,10 @@ fn first_unsatisfiable_node(
         "else",
         "unevaluatedProperties",
     ] {
-        if let Some(schema) = object.get(schema_keyword) {
-            if let Some(error) =
-                first_unsatisfiable_node(schema, &child_path(path, schema_keyword), tool_ref)
-            {
-                return Some(error);
-            }
+        if let Some(error) = object.get(schema_keyword).and_then(|schema| {
+            first_unsatisfiable_node(schema, &child_path(path, schema_keyword), tool_ref)
+        }) {
+            return Some(error);
         }
     }
     for array_keyword in ["anyOf", "oneOf", "allOf", "prefixItems"] {
@@ -189,11 +192,7 @@ fn impossible_required_properties(object: &Map<String, Value>) -> Option<Vec<Str
             .collect(),
         None => required,
     };
-    if missing.is_empty() {
-        None
-    } else {
-        Some(missing)
-    }
+    (!missing.is_empty()).then_some(missing)
 }
 
 fn child_path(parent: &str, child: &str) -> String {

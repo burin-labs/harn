@@ -859,10 +859,7 @@ fn discriminated_union_tool_after_rejected_call_keeps_or_rejects_empty_schema() 
     assert_eq!(error.tool.as_deref(), Some("edit"));
     assert_eq!(
         error.collapsed_branches,
-        actions
-            .iter()
-            .map(|action| (*action).to_string())
-            .collect::<Vec<_>>()
+        actions.iter().map(ToString::to_string).collect::<Vec<_>>()
     );
     let message = error.to_string();
     assert!(message.contains("tool `edit`"), "{message}");
