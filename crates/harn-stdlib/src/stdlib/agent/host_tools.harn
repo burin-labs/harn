@@ -1,5 +1,5 @@
 import { command_capture_annotate, command_capture_plan_request } from "std/agent/command_capture"
-import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { agent_tool_handler_result_normalize } from "std/agent/tool_lifecycle"
 
 fn __agent_host_options(options: dict?) {
   return options ?? {}
@@ -1002,7 +1002,7 @@ pub fn agent_command_tools(
             } else {
               result
             }
-            return agent_tool_handler_result(__agent_host_render(done, opts, key), done)
+            return agent_tool_handler_result_normalize(__agent_host_render(done, opts, key), done)
           },
         },
       ),

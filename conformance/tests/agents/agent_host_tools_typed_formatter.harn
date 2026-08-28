@@ -1,0 +1,33 @@
+import { agent_command_tools } from "std/agent/host_tools"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+pipeline main(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("harn-host-tools-typed-")
+  const tools = agent_command_tools(
+    harness,
+    nil,
+    {
+      root: root,
+      cwd: root,
+      allow_argv_prefixes: [["sh", "-c"]],
+      result_formatter: { value, _key ->
+        return agent_tool_handler_result(
+          "command-ok",
+          {exit_code: value.exit_code, stdout: value.stdout},
+        )
+      },
+    },
+  )
+  const result = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "run_command", arguments: {argv: ["sh", "-c", "printf typed-output"]}},
+    tools,
+  )
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.rendered_result)
+  harness.stdio.println(result.result.schema)
+  harness.stdio.println(result.result.data.exit_code)
+  harness.stdio.println(result.result.data.stdout)
+  harness.fs.delete(root)
+}
