@@ -168,7 +168,11 @@ pub fn execution_root_path() -> PathBuf {
 /// exact cwd they will pass to the child without reimplementing it.
 pub fn inherited_process_cwd() -> Result<PathBuf, VmError> {
     if let Some((policy, _profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
-        crate::stdlib::sandbox::policy_process_cwd(&policy)
+        let preferred = current_execution_context()
+            .and_then(|context| context.cwd)
+            .filter(|cwd| !cwd.is_empty())
+            .map(PathBuf::from);
+        crate::stdlib::sandbox::policy_process_cwd(&policy, preferred.as_deref())
     } else {
         Ok(execution_root_path())
     }

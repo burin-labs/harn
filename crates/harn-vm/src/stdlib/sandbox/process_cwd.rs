@@ -61,3 +61,30 @@ pub(super) fn enforce_process_cwd_for_policy(
             .join(", ")
     )))
 }
+
+pub(crate) fn policy_process_cwd(
+    policy: &CapabilityPolicy,
+    preferred: Option<&Path>,
+) -> Result<PathBuf, VmError> {
+    if let Some(preferred) = preferred {
+        let preferred = normalize_for_policy(preferred);
+        if enforce_process_cwd_for_policy(&preferred, policy).is_ok() {
+            return Ok(preferred);
+        }
+    }
+    let roots = normalized_workspace_roots(policy);
+    let current = std::env::current_dir().map_err(|error| {
+        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+            format!("process cwd resolution failed: {error}"),
+        )))
+    })?;
+    let current = normalize_for_policy(&current);
+    if roots.iter().any(|root| path_is_within(&current, root)) {
+        return Ok(current);
+    }
+    roots.first().cloned().ok_or_else(|| {
+        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+            "process cwd resolution failed: no workspace root available",
+        )))
+    })
+}

@@ -68,6 +68,7 @@ pub(crate) use process_output::windows_command_output;
 pub use process_output::{deterministic_message_locale_env, MESSAGE_LOCALE_OVERRIDE_ENV};
 pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
+pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1451,7 +1452,7 @@ fn sandboxed_process_config(
     if let Some(cwd) = resolved.cwd.as_ref() {
         enforce_process_cwd_for_policy(cwd, policy)?;
     } else {
-        resolved.cwd = Some(policy_process_cwd(policy)?);
+        resolved.cwd = Some(policy_process_cwd(policy, None)?);
     }
     neutralize_rustc_wrapper(&mut resolved.env);
     inject_workspace_process_env(&mut resolved.env, policy);
@@ -1485,24 +1486,6 @@ fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
             env.push((key.to_string(), String::new()));
         }
     }
-}
-
-pub(crate) fn policy_process_cwd(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
-    let roots = normalized_workspace_roots(policy);
-    let current = std::env::current_dir().map_err(|error| {
-        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
-            format!("process cwd resolution failed: {error}"),
-        )))
-    })?;
-    let current = normalize_for_policy(&current);
-    if roots.iter().any(|root| path_is_within(&current, root)) {
-        return Ok(current);
-    }
-    roots.first().cloned().ok_or_else(|| {
-        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
-            "process cwd resolution failed: no workspace root available",
-        )))
-    })
 }
 
 fn build_std_command<B: SandboxBackend + ?Sized>(
