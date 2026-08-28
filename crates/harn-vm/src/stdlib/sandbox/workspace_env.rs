@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use crate::orchestration::CapabilityPolicy;
 
-use super::{normalized_workspace_roots, warn_once};
+use super::{
+    base_workspace_roots, normalize_for_policy, normalized_workspace_roots, path_is_within,
+    warn_once,
+};
 
 pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
 pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
@@ -58,6 +61,28 @@ fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Option<PathBuf>
     )
 }
 
+/// Preserve a caller-selected toolchain path only when it resolves inside a
+/// writable workspace root. This lets an outer harness prewarm one cache for
+/// the whole run without allowing an inherited global path to widen the jail.
+fn inherited_workspace_cache_path(policy: &CapabilityPolicy, key: &str) -> Option<String> {
+    if !crate::security::environment_policy::TOOLCHAIN_CACHE_ENV_VARS.contains(&key) {
+        return None;
+    }
+    let raw = match crate::stdlib::process::current_session_environment() {
+        Some(environment) => environment.launcher_value(key)?.to_string(),
+        None => crate::test_env::env_var_seamed(key)?,
+    };
+    let candidate = PathBuf::from(raw.trim());
+    if !candidate.is_absolute() {
+        return None;
+    }
+    let resolved = normalize_for_policy(&candidate);
+    base_workspace_roots(policy)
+        .iter()
+        .any(|root| path_is_within(&resolved, root))
+        .then(|| resolved.display().to_string())
+}
+
 fn workspace_toolchain_env_with_package_cache(
     policy: &CapabilityPolicy,
     package_cache: Option<PathBuf>,
@@ -65,20 +90,38 @@ fn workspace_toolchain_env_with_package_cache(
     let Some(root) = workspace_local_toolchain_cache(policy) else {
         return Vec::new();
     };
-    let path = |suffix: &str| root.join(suffix).display().to_string();
+    let path = |key: &str, suffix: &str| {
+        inherited_workspace_cache_path(policy, key)
+            .unwrap_or_else(|| root.join(suffix).display().to_string())
+    };
     let mut env = vec![
         ("HOME".to_string(), root.display().to_string()),
-        ("XDG_CACHE_HOME".to_string(), path("xdg-cache")),
-        ("GOCACHE".to_string(), path("go-build")),
-        ("GOMODCACHE".to_string(), path("go-mod")),
-        ("GOPATH".to_string(), path("go")),
-        ("CARGO_TARGET_DIR".to_string(), path("cargo-target")),
-        ("PIP_CACHE_DIR".to_string(), path("pip")),
-        ("UV_CACHE_DIR".to_string(), path("uv")),
-        ("NPM_CONFIG_CACHE".to_string(), path("npm")),
-        ("YARN_CACHE_FOLDER".to_string(), path("yarn")),
-        ("PNPM_HOME".to_string(), path("pnpm/home")),
-        ("PYTHONUSERBASE".to_string(), path("python-user")),
+        (
+            "XDG_CACHE_HOME".to_string(),
+            root.join("xdg-cache").display().to_string(),
+        ),
+        ("GOCACHE".to_string(), path("GOCACHE", "go-build")),
+        ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),
+        ("GOPATH".to_string(), path("GOPATH", "go")),
+        (
+            "CARGO_TARGET_DIR".to_string(),
+            path("CARGO_TARGET_DIR", "cargo-target"),
+        ),
+        ("PIP_CACHE_DIR".to_string(), path("PIP_CACHE_DIR", "pip")),
+        ("UV_CACHE_DIR".to_string(), path("UV_CACHE_DIR", "uv")),
+        (
+            "NPM_CONFIG_CACHE".to_string(),
+            path("NPM_CONFIG_CACHE", "npm"),
+        ),
+        (
+            "YARN_CACHE_FOLDER".to_string(),
+            path("YARN_CACHE_FOLDER", "yarn"),
+        ),
+        ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
+        (
+            "PYTHONUSERBASE".to_string(),
+            root.join("python-user").display().to_string(),
+        ),
     ];
 
     // Harn's package cache is resolved before HOME/XDG are relocated. In
