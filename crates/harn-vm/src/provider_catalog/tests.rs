@@ -985,7 +985,7 @@ deprecated = true
 }
 
 #[test]
-fn malformed_sunset_dates_are_rejected() {
+fn impossible_sunset_dates_are_rejected() {
     let mut catalog = artifact();
     assert!(validate_artifact(&catalog).is_ok());
     let model = catalog
@@ -993,7 +993,7 @@ fn malformed_sunset_dates_are_rejected() {
         .iter_mut()
         .find(|model| model.deprecation.status == DeprecationStatus::Deprecated)
         .expect("catalog has a deprecated model");
-    model.deprecation.sunset_date = Some("August 27, 2026".to_string());
+    model.deprecation.sunset_date = Some("2026-02-30".to_string());
 
     assert!(!validate_artifact(&catalog).is_ok());
 }
