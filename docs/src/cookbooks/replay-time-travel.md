@@ -192,9 +192,28 @@ artifacts can live elsewhere in the seed.
   "effect_root": "repo",
   "expected": {
     "tools": [
-      {"id": "call-read", "name": "read_file"},
-      {"id": "call-edit", "name": "edit_file"},
-      {"id": "call-verify", "name": "run_command"}
+      {
+        "id": "call-read",
+        "name": "read_file",
+        "status": "completed",
+        "args_blake3": "1111111111111111111111111111111111111111111111111111111111111111",
+        "result_blake3": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      {
+        "id": "call-edit",
+        "name": "edit_file",
+        "status": "completed",
+        "args_blake3": "3333333333333333333333333333333333333333333333333333333333333333",
+        "result_blake3": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "id": "call-verify",
+        "name": "run_command",
+        "status": "completed",
+        "args_blake3": "5555555555555555555555555555555555555555555555555555555555555555",
+        "result_blake3": "6666666666666666666666666666666666666666666666666666666666666666",
+        "exit_code": 0
+      }
     ],
     "effects": [
       {
@@ -219,12 +238,21 @@ harn replay --fixture fixtures/coding-turn.replay.json --json
 
 Harn copies the seed to a new temporary workspace for every run, installs only
 the recorded LLM fixture, runs through the ordinary sandbox with process
-network disabled, and computes the final tree diff. The receipt names all five
-comparisons: tool sequence, workspace effects, terminal verdict, provider
-isolation, and network isolation. `pending_comparisons` and
+network disabled, and computes the final tree diff. The universal JSON envelope
+keeps replay data under `data`; `data.producer` identifies the CLI version and,
+for attested builds, source revision that performed the run. Each expected tool carries BLAKE3
+digests of its canonical JSON arguments and semantic result. Harn normalizes
+workspace paths and runtime-only identifiers before hashing results. Terminal
+tool-event status, result digest, and any declared command exit code prove the
+execution outcome, while typed mock-consumption checkpoints distinguish the
+CLI tape from builtin fallback. The receipt names all five comparisons: tool
+sequence, workspace effects, terminal verdict, provider isolation, and network
+isolation. `pending_comparisons` and
 `missing_comparisons` are always present. A missing returned terminal, empty
 expected tool/effect evidence, an unmatched LLM prompt, an unexpected file
 change, or any mismatch exits non-zero.
 
 Use `--runs N` for repeated clean-room executions. Each run gets a new copy of
-the seed, so a previous run cannot make a later comparison pass.
+the seed, so a previous run cannot make a later comparison pass. The
+`data.repeatability` receipt also compares every run's tools, effects, terminal,
+and exit code with the first run.

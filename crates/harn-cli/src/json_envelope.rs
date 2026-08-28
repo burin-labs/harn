@@ -442,7 +442,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_version: crate::commands::replay::REPLAY_SCHEMA_VERSION,
             description:
                 "Replay summary: per-stage status/outcome/branch, embedded fixture verdicts, and multi-run determinism.",
-            schema_json: None,
+            schema_json: Some(crate::commands::replay::json_schema()),
         },
         SchemaEntry {
             command: "version",

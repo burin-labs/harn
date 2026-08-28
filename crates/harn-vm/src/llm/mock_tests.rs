@@ -666,6 +666,8 @@ fn matched_receipt_emits_typed_checkpoint() {
         }
             if session_id == "mock-session"
                 && receipt["schema"] == "harn.llm_mock_fixture_consumption.v1"
+                && receipt["source"] == "cli_replay"
+                && receipt["matched"] == true
                 && receipt["resolved_scope"] == "agent.main"
     )));
 }

@@ -18,10 +18,9 @@ use crate::commands::run::{
     execute_run_json_with_options, CliLlmMockMode, RunExecutionOptions, RunJsonOptions,
     RunProfileOptions, RunSandboxOptions,
 };
+use crate::json_envelope::{self, JsonEnvelope, JsonError};
 
 pub(crate) const OFFLINE_CODING_REPLAY_SCHEMA: &str = "harn.offline-coding-replay.v1";
-const RECEIPT_SCHEMA_VERSION: u32 = 1;
-const RECEIPT_SCHEMA: &str = "harn.offline-coding-replay-receipt.v1";
 const TOOL_SEQUENCE: &str = "tool_sequence";
 const WORKSPACE_EFFECTS: &str = "workspace_effects";
 const TERMINAL_VERDICT: &str = "terminal_verdict";
@@ -56,6 +55,11 @@ struct OfflineCodingExpected {
 struct ExpectedToolCall {
     id: String,
     name: String,
+    status: harn_vm::agent_events::ToolCallStatus,
+    args_blake3: String,
+    result_blake3: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -74,17 +78,29 @@ struct ExpectedTerminal {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub(crate) struct OfflineCodingReplayRunsReceipt {
-    schema: &'static str,
-    #[serde(rename = "schemaVersion")]
-    schema_version: u32,
-    ok: bool,
+pub(crate) struct OfflineCodingReplayData {
+    kind: &'static str,
     source: String,
+    producer: ReplayProducer,
     runs: Vec<OfflineCodingReplayReceipt>,
+    repeatability: RepeatabilityReceipt,
     pending_count: usize,
     pending_comparisons: Vec<String>,
     missing_count: usize,
     missing_comparisons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ReplayProducer {
+    harn_version: &'static str,
+    source_revision: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RepeatabilityReceipt {
+    pass: bool,
+    baseline_run: Option<usize>,
+    divergent_runs: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -121,7 +137,20 @@ enum ComparisonStatus {
 struct ToolComparison {
     pass: bool,
     expected: Vec<ExpectedToolCall>,
-    actual: Vec<ExpectedToolCall>,
+    actual: Vec<ObservedToolCall>,
+    successful: Vec<String>,
+    rejected: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+struct ObservedToolCall {
+    id: String,
+    name: String,
+    status: harn_vm::agent_events::ToolCallStatus,
+    args_blake3: String,
+    result_blake3: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -137,23 +166,61 @@ struct TerminalComparison {
     expected: harn_vm::agent_events::AgentTerminalOutcome,
     actual: Option<harn_vm::agent_events::AgentTerminalOutcome>,
     expected_exit_code: i32,
-    actual_exit_code: i32,
+    actual_exit_code: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 struct IsolationReceipt {
-    provider: String,
-    network: String,
+    provider: ProviderIsolationReceipt,
+    network: NetworkIsolationReceipt,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct ProviderIsolationReceipt {
+    pass: bool,
+    checkpoint_count: usize,
+    builtin_count: usize,
+    miss_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NetworkIsolationReceipt {
+    pass: bool,
+    sandbox_enabled: bool,
+    process_network_allowed: bool,
 }
 
 struct ObservedReplay {
-    tools: Vec<ExpectedToolCall>,
-    effects: Vec<ExpectedEffect>,
+    tools: Option<Vec<ObservedToolCall>>,
+    successful_tools: Vec<String>,
+    rejected_tools: Vec<String>,
+    effects: Option<Vec<ExpectedEffect>>,
     terminal: Option<harn_vm::agent_events::AgentTerminalOutcome>,
     exit_code: i32,
     execution_error: Option<String>,
-    terminal_error: Option<String>,
-    isolation_established: bool,
+    observation_errors: Vec<String>,
+    provider_isolation: ProviderIsolationReceipt,
+    network_isolation: NetworkIsolationReceipt,
+}
+
+#[derive(Clone, Default)]
+struct AgentEventCapture(Arc<Mutex<Vec<harn_vm::agent_events::AgentEvent>>>);
+
+impl AgentEventCapture {
+    fn events(&self) -> Result<Vec<harn_vm::agent_events::AgentEvent>, String> {
+        self.0
+            .lock()
+            .map_err(|_| "agent event capture lock was poisoned".to_string())
+            .map(|events| events.clone())
+    }
+}
+
+impl harn_vm::agent_events::AgentEventSink for AgentEventCapture {
+    fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        if let Ok(mut events) = self.0.lock() {
+            events.push(event.clone());
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -249,30 +316,49 @@ pub(crate) async fn run(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    let repeatability = repeatability_receipt(&receipts);
     let ok = receipts.iter().all(|receipt| receipt.pass)
+        && repeatability.pass
         && pending_comparisons.is_empty()
         && missing_comparisons.is_empty();
-    let envelope = OfflineCodingReplayRunsReceipt {
-        schema: RECEIPT_SCHEMA,
-        schema_version: RECEIPT_SCHEMA_VERSION,
-        ok,
+    let data = OfflineCodingReplayData {
+        kind: "offline_coding",
         source: fixture_path.to_string_lossy().into_owned(),
+        producer: ReplayProducer {
+            harn_version: env!("CARGO_PKG_VERSION"),
+            source_revision: match env!("HARN_BUILD_REVISION") {
+                "" => None,
+                revision => Some(revision),
+            },
+        },
         runs: receipts,
+        repeatability,
         pending_count: pending_comparisons.len(),
         pending_comparisons,
         missing_count: missing_comparisons.len(),
         missing_comparisons,
     };
     if json_output {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&envelope)
-                .expect("offline coding replay receipt serializes")
-        );
+        let envelope = if ok {
+            JsonEnvelope::ok(crate::commands::replay::REPLAY_SCHEMA_VERSION, data)
+        } else {
+            JsonEnvelope {
+                schema_version: crate::commands::replay::REPLAY_SCHEMA_VERSION,
+                ok: false,
+                data: Some(data),
+                error: Some(JsonError {
+                    code: "offline_coding_replay_failed".to_string(),
+                    message: "one or more offline coding replay comparisons failed".to_string(),
+                    details: JsonValue::Null,
+                }),
+                warnings: Vec::new(),
+            }
+        };
+        println!("{}", json_envelope::to_string_pretty(&envelope));
     } else {
-        print_human(&envelope);
+        print_human(ok, &data);
     }
-    i32::from(!envelope.ok)
+    i32::from(!ok)
 }
 
 async fn execute_once(
@@ -295,48 +381,97 @@ async fn execute_once(
     let mut argv = vec![workspace.to_string_lossy().into_owned()];
     argv.extend(fixture.argv.iter().cloned());
     let capture = RunEventCapture::default();
-    let outcome = execute_run_json_with_options(
-        &program.to_string_lossy(),
-        false,
-        HashSet::new(),
-        argv,
-        Vec::new(),
-        CliLlmMockMode::Replay {
-            fixture_path: llm_mock,
-        },
-        None,
-        RunProfileOptions::default(),
-        Box::new(capture.clone()),
-        RunJsonOptions { quiet: true },
-        RunExecutionOptions {
-            sandbox: RunSandboxOptions::sandboxed(false).with_workspace_root(&workspace),
-            ..RunExecutionOptions::default()
-        },
+    let agent_capture = AgentEventCapture::default();
+    let sandbox = RunSandboxOptions::sandboxed(false).with_workspace_root(&workspace);
+    let network_isolation = NetworkIsolationReceipt {
+        pass: sandbox.enabled && !sandbox.allow_process_network,
+        sandbox_enabled: sandbox.enabled,
+        process_network_allowed: sandbox.allow_process_network,
+    };
+    let sink: Arc<dyn harn_vm::agent_events::AgentEventSink> = Arc::new(agent_capture.clone());
+    let outcome = harn_vm::llm::scope_agent_event_sink(
+        Some(sink),
+        execute_run_json_with_options(
+            &program.to_string_lossy(),
+            false,
+            HashSet::new(),
+            argv,
+            Vec::new(),
+            CliLlmMockMode::Replay {
+                fixture_path: llm_mock,
+            },
+            None,
+            RunProfileOptions::default(),
+            Box::new(capture.clone()),
+            RunJsonOptions { quiet: true },
+            RunExecutionOptions {
+                sandbox,
+                ..RunExecutionOptions::default()
+            },
+        ),
     )
     .await;
-    let events = capture.events()?;
-    let actual_tools = tool_calls_from_result(&events)?;
-    let after = snapshot_tree(&effect_root)?;
-    let actual_effects = tree_diff(&before, &after);
-    let terminal_result = terminal_from_events(&events);
-    let terminal_error = terminal_result.as_ref().err().cloned();
-    let actual_terminal = terminal_result.ok();
-    let execution_error = error_from_events(&events);
-    let isolation_established = events
-        .iter()
-        .any(|event| event["data"]["event_type"] == "result");
+
+    let mut observation_errors = Vec::new();
+    let run_events = match capture.events() {
+        Ok(events) => events,
+        Err(error) => {
+            observation_errors.push(error);
+            Vec::new()
+        }
+    };
+    let agent_events = match agent_capture.events() {
+        Ok(events) => events,
+        Err(error) => {
+            observation_errors.push(error);
+            Vec::new()
+        }
+    };
+    let actual_tools = match tool_calls_from_agent_events(&agent_events, &workspace) {
+        Ok(tools) => Some(tools),
+        Err(error) => {
+            observation_errors.push(error);
+            None
+        }
+    };
+    let (successful_tools, rejected_tools) = match tool_dispositions_from_result(&run_events) {
+        Ok(value) => value,
+        Err(error) => {
+            observation_errors.push(error);
+            (Vec::new(), Vec::new())
+        }
+    };
+    let actual_effects = match snapshot_tree(&effect_root) {
+        Ok(after) => Some(tree_diff(&before, &after)),
+        Err(error) => {
+            observation_errors.push(error);
+            None
+        }
+    };
+    let actual_terminal = match terminal_from_events(&run_events) {
+        Ok(terminal) => Some(terminal),
+        Err(error) => {
+            observation_errors.push(error);
+            None
+        }
+    };
+    let execution_error = error_from_events(&run_events);
+    let provider_isolation = provider_isolation_from_events(&agent_events);
 
     Ok(compare(
         run,
         fixture,
         ObservedReplay {
             tools: actual_tools,
+            successful_tools,
+            rejected_tools,
             effects: actual_effects,
             terminal: actual_terminal,
             exit_code: outcome.exit_code,
             execution_error,
-            terminal_error,
-            isolation_established,
+            observation_errors,
+            provider_isolation,
+            network_isolation,
         },
     ))
 }
@@ -353,23 +488,67 @@ fn compare(
     if fixture.expected.effects.is_empty() {
         missing.push(WORKSPACE_EFFECTS.to_string());
     }
+    if observed.tools.is_none() {
+        missing.push(TOOL_SEQUENCE.to_string());
+    }
+    if observed.effects.is_none() {
+        missing.push(WORKSPACE_EFFECTS.to_string());
+    }
     if observed.terminal.is_none() {
         missing.push(TERMINAL_VERDICT.to_string());
     }
-    if !observed.isolation_established {
+    if observed.provider_isolation.checkpoint_count == 0 {
         missing.push(PROVIDER_ISOLATION.to_string());
+    }
+    if !observed.network_isolation.sandbox_enabled {
         missing.push(NETWORK_ISOLATION.to_string());
     }
 
-    let tools_pass = !fixture.expected.tools.is_empty() && fixture.expected.tools == observed.tools;
+    missing.sort();
+    missing.dedup();
+    let exact_tool_outcomes = observed.tools.as_ref().is_some_and(|tools| {
+        fixture.expected.tools.len() == tools.len()
+            && fixture
+                .expected
+                .tools
+                .iter()
+                .zip(tools)
+                .all(|(expected, actual)| {
+                    expected.id == actual.id
+                        && expected.name == actual.name
+                        && expected.status == actual.status
+                        && expected.args_blake3 == actual.args_blake3
+                        && actual.result_blake3.as_ref() == Some(&expected.result_blake3)
+                        && expected
+                            .exit_code
+                            .is_none_or(|code| actual.exit_code == Some(code))
+                })
+    });
+    let dispositions_match = observed.tools.as_ref().is_some_and(|tools| {
+        let completed = tools
+            .iter()
+            .filter(|tool| tool.status == harn_vm::agent_events::ToolCallStatus::Completed)
+            .map(|tool| tool.name.clone())
+            .collect::<Vec<_>>();
+        let failed = tools
+            .iter()
+            .filter(|tool| tool.status == harn_vm::agent_events::ToolCallStatus::Failed)
+            .map(|tool| tool.name.clone())
+            .collect::<Vec<_>>();
+        completed == observed.successful_tools && failed == observed.rejected_tools
+    });
+    let tools_pass =
+        !fixture.expected.tools.is_empty() && exact_tool_outcomes && dispositions_match;
     let effects_pass = !fixture.expected.effects.is_empty()
-        && normalized_effects(&fixture.expected.effects) == normalized_effects(&observed.effects);
+        && observed.effects.as_ref().is_some_and(|effects| {
+            normalized_effects(&fixture.expected.effects) == normalized_effects(effects)
+        });
     let terminal_pass = observed.terminal.as_ref() == Some(&fixture.expected.terminal.outcome)
         && fixture.expected.terminal.exit_code == observed.exit_code;
 
     let mut failures = Vec::new();
     if !tools_pass {
-        failures.push("tool order or tool-call ids diverged".to_string());
+        failures.push("tool order, inputs, or results diverged".to_string());
     }
     if !effects_pass {
         failures.push("workspace final diff diverged".to_string());
@@ -383,11 +562,22 @@ fn compare(
             observed.exit_code
         ));
     }
+    if !observed.provider_isolation.pass {
+        failures.push(format!(
+            "provider fixture isolation failed (checkpoints={}, builtin={}, misses={})",
+            observed.provider_isolation.checkpoint_count,
+            observed.provider_isolation.builtin_count,
+            observed.provider_isolation.miss_count,
+        ));
+    }
+    if !observed.network_isolation.pass {
+        failures.push("process network isolation was not enabled".to_string());
+    }
     if let Some(error) = observed.execution_error {
         failures.push(format!("re-execution failed: {error}"));
     }
-    if let Some(error) = observed.terminal_error {
-        failures.push(error);
+    for error in &observed.observation_errors {
+        failures.push(format!("post-execution observation failed: {error}"));
     }
     for name in &missing {
         failures.push(format!("comparison {name} is missing evidence"));
@@ -411,13 +601,13 @@ fn compare(
         ),
         comparison(
             PROVIDER_ISOLATION,
-            observed.isolation_established,
-            !observed.isolation_established,
+            observed.provider_isolation.pass,
+            observed.provider_isolation.checkpoint_count == 0,
         ),
         comparison(
             NETWORK_ISOLATION,
-            observed.isolation_established,
-            !observed.isolation_established,
+            observed.network_isolation.pass,
+            !observed.network_isolation.sandbox_enabled,
         ),
     ];
     let pass = failures.is_empty() && missing.is_empty();
@@ -428,33 +618,29 @@ fn compare(
         tools: ToolComparison {
             pass: tools_pass,
             expected: fixture.expected.tools.clone(),
-            actual: observed.tools,
+            actual: observed.tools.unwrap_or_default(),
+            successful: observed.successful_tools,
+            rejected: observed.rejected_tools,
         },
         effects: EffectComparison {
             pass: effects_pass,
             expected: normalized_effects(&fixture.expected.effects),
-            actual: normalized_effects(&observed.effects),
+            actual: observed
+                .effects
+                .as_deref()
+                .map(normalized_effects)
+                .unwrap_or_default(),
         },
         terminal: TerminalComparison {
             pass: terminal_pass,
             expected: fixture.expected.terminal.outcome.clone(),
             actual: observed.terminal,
             expected_exit_code: fixture.expected.terminal.exit_code,
-            actual_exit_code: observed.exit_code,
+            actual_exit_code: Some(observed.exit_code),
         },
         isolation: IsolationReceipt {
-            provider: if observed.isolation_established {
-                "recorded_fixture_only"
-            } else {
-                "not_established"
-            }
-            .to_string(),
-            network: if observed.isolation_established {
-                "disabled"
-            } else {
-                "not_established"
-            }
-            .to_string(),
+            provider: observed.provider_isolation,
+            network: observed.network_isolation,
         },
         pending_count: 0,
         pending_comparisons: Vec::new(),
@@ -489,6 +675,8 @@ fn setup_failure_receipt(
             pass: false,
             expected: fixture.expected.tools.clone(),
             actual: Vec::new(),
+            successful: Vec::new(),
+            rejected: Vec::new(),
         },
         effects: EffectComparison {
             pass: false,
@@ -500,11 +688,15 @@ fn setup_failure_receipt(
             expected: fixture.expected.terminal.outcome.clone(),
             actual: None,
             expected_exit_code: fixture.expected.terminal.exit_code,
-            actual_exit_code: 1,
+            actual_exit_code: None,
         },
         isolation: IsolationReceipt {
-            provider: "not_established".to_string(),
-            network: "not_established".to_string(),
+            provider: ProviderIsolationReceipt::default(),
+            network: NetworkIsolationReceipt {
+                pass: false,
+                sandbox_enabled: false,
+                process_network_allowed: false,
+            },
         },
         pending_count: 0,
         pending_comparisons: Vec::new(),
@@ -543,26 +735,231 @@ fn terminal_from_events(
         .map_err(|error| format!("run result terminal is not an AgentTerminalOutcome: {error}"))
 }
 
-fn tool_calls_from_result(events: &[JsonValue]) -> Result<Vec<ExpectedToolCall>, String> {
-    let calls = result_value(events)?["tools"]["calls"]
-        .as_array()
-        .ok_or_else(|| "run result does not contain AgentResult.tools.calls".to_string())?;
-    calls
+fn tool_calls_from_agent_events(
+    events: &[harn_vm::agent_events::AgentEvent],
+    workspace: &Path,
+) -> Result<Vec<ObservedToolCall>, String> {
+    let mut calls = Vec::new();
+    for event in events {
+        if let harn_vm::agent_events::AgentEvent::ToolCall {
+            tool_call_id,
+            tool_name,
+            raw_input,
+            parsing,
+            ..
+        } = event
+        {
+            if *parsing == Some(true) {
+                continue;
+            }
+            calls.push(ObservedToolCall {
+                id: tool_call_id.clone(),
+                name: tool_name.clone(),
+                status: harn_vm::agent_events::ToolCallStatus::Pending,
+                args_blake3: canonical_blake3(raw_input),
+                result_blake3: None,
+                exit_code: None,
+            });
+        }
+        if let harn_vm::agent_events::AgentEvent::ToolCallUpdate {
+            tool_call_id,
+            status,
+            raw_output,
+            data,
+            parsing,
+            ..
+        } = event
+        {
+            if parsing.is_some()
+                || !matches!(
+                    status,
+                    harn_vm::agent_events::ToolCallStatus::Completed
+                        | harn_vm::agent_events::ToolCallStatus::Failed
+                )
+            {
+                continue;
+            }
+            let call = calls
+                .iter_mut()
+                .rev()
+                .find(|call| call.id == *tool_call_id)
+                .ok_or_else(|| {
+                    format!("terminal tool update has no matching call: {tool_call_id}")
+                })?;
+            call.status = *status;
+            let result = data
+                .clone()
+                .or_else(|| raw_output.as_ref().map(decode_rendered_tool_result));
+            call.result_blake3 = result
+                .as_ref()
+                .map(|value| canonical_replay_result(value, workspace))
+                .map(|value| canonical_blake3(&value));
+            call.exit_code = data
+                .as_ref()
+                .and_then(|value| value["run_outcome"]["exit_code"].as_i64())
+                .or_else(|| data.as_ref().and_then(|value| value["exit_code"].as_i64()))
+                .or_else(|| {
+                    result
+                        .as_ref()
+                        .and_then(|value| value["exit_code"].as_i64())
+                });
+        }
+    }
+    if calls.is_empty() {
+        return Err("agent event stream contains no tool calls".to_string());
+    }
+    if let Some(call) = calls.iter().find(|call| {
+        !matches!(
+            call.status,
+            harn_vm::agent_events::ToolCallStatus::Completed
+                | harn_vm::agent_events::ToolCallStatus::Failed
+        )
+    }) {
+        return Err(format!(
+            "tool call {} has no terminal execution status",
+            call.id
+        ));
+    }
+    Ok(calls)
+}
+
+fn decode_rendered_tool_result(value: &JsonValue) -> JsonValue {
+    value.as_str().map_or_else(
+        || value.clone(),
+        |text| serde_json::from_str(text).unwrap_or_else(|_| value.clone()),
+    )
+}
+
+fn canonical_blake3(value: &JsonValue) -> String {
+    blake3::hash(&harn_vm::canonical_json::to_vec(value))
+        .to_hex()
+        .to_string()
+}
+
+fn canonical_replay_result(value: &JsonValue, workspace: &Path) -> JsonValue {
+    const VOLATILE_FIELDS: &[&str] = &[
+        "audit_id",
+        "command_id",
+        "duration_ms",
+        "ended_at",
+        "handle_id",
+        "output_path",
+        "pid",
+        "process_group_id",
+        "sandbox",
+        "started_at",
+        "stderr_path",
+        "stdout_path",
+    ];
+
+    let lexical_root = workspace.to_string_lossy();
+    let canonical_root = fs::canonicalize(workspace)
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    fn normalize(value: &JsonValue, lexical_root: &str, canonical_root: Option<&str>) -> JsonValue {
+        match value {
+            JsonValue::Object(object) => JsonValue::Object(
+                object
+                    .iter()
+                    .filter(|(key, _)| !VOLATILE_FIELDS.contains(&key.as_str()))
+                    .map(|(key, value)| {
+                        (key.clone(), normalize(value, lexical_root, canonical_root))
+                    })
+                    .collect(),
+            ),
+            JsonValue::Array(values) => JsonValue::Array(
+                values
+                    .iter()
+                    .map(|value| normalize(value, lexical_root, canonical_root))
+                    .collect(),
+            ),
+            JsonValue::String(text) => {
+                let normalized = canonical_root
+                    .and_then(|root| text.strip_prefix(root))
+                    .or_else(|| text.strip_prefix(lexical_root))
+                    .map_or_else(|| text.clone(), |suffix| format!("$WORKSPACE{suffix}"));
+                JsonValue::String(normalized)
+            }
+            _ => value.clone(),
+        }
+    }
+    normalize(value, &lexical_root, canonical_root.as_deref())
+}
+
+fn repeatability_receipt(receipts: &[OfflineCodingReplayReceipt]) -> RepeatabilityReceipt {
+    let Some(baseline) = receipts.first() else {
+        return RepeatabilityReceipt {
+            pass: false,
+            baseline_run: None,
+            divergent_runs: Vec::new(),
+        };
+    };
+    let divergent_runs = receipts
         .iter()
-        .enumerate()
-        .map(|(index, call)| {
-            let id = call["id"]
-                .as_str()
-                .ok_or_else(|| format!("AgentResult.tools.calls[{index}] is missing id"))?;
-            let name = call["name"]
-                .as_str()
-                .ok_or_else(|| format!("AgentResult.tools.calls[{index}] is missing name"))?;
-            Ok(ExpectedToolCall {
-                id: id.to_string(),
-                name: name.to_string(),
-            })
+        .skip(1)
+        .filter(|candidate| {
+            candidate.tools.actual != baseline.tools.actual
+                || candidate.effects.actual != baseline.effects.actual
+                || candidate.terminal.actual != baseline.terminal.actual
+                || candidate.terminal.actual_exit_code != baseline.terminal.actual_exit_code
         })
-        .collect()
+        .map(|receipt| receipt.run)
+        .collect::<Vec<_>>();
+    RepeatabilityReceipt {
+        pass: divergent_runs.is_empty(),
+        baseline_run: Some(baseline.run),
+        divergent_runs,
+    }
+}
+
+fn tool_dispositions_from_result(
+    events: &[JsonValue],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let tools = &result_value(events)?["tools"];
+    let read = |field: &str| -> Result<Vec<String>, String> {
+        tools[field]
+            .as_array()
+            .ok_or_else(|| format!("AgentResult.tools.{field} is missing"))?
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("AgentResult.tools.{field}[{index}] is not a string"))
+            })
+            .collect()
+    };
+    Ok((read("successful")?, read("rejected")?))
+}
+
+fn provider_isolation_from_events(
+    events: &[harn_vm::agent_events::AgentEvent],
+) -> ProviderIsolationReceipt {
+    let checkpoints = events.iter().filter_map(|event| match event {
+        harn_vm::agent_events::AgentEvent::TypedCheckpoint { checkpoint, .. }
+            if checkpoint["schema"] == "harn.llm_mock_fixture_consumption.v1" =>
+        {
+            Some(checkpoint)
+        }
+        _ => None,
+    });
+    let mut receipt = ProviderIsolationReceipt::default();
+    let mut all_cli_matches = true;
+    for checkpoint in checkpoints {
+        receipt.checkpoint_count += 1;
+        let source = checkpoint["source"].as_str();
+        let matched = checkpoint["matched"].as_bool() == Some(true);
+        if source == Some("builtin") {
+            receipt.builtin_count += 1;
+        }
+        if !matched {
+            receipt.miss_count += 1;
+        }
+        all_cli_matches &= source == Some("cli_replay") && matched;
+    }
+    receipt.pass = receipt.checkpoint_count > 0 && all_cli_matches;
+    receipt
 }
 
 fn result_value(events: &[JsonValue]) -> Result<&JsonValue, String> {
@@ -792,10 +1189,10 @@ fn validated_relative(value: &str, field: &str) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
-fn print_human(receipt: &OfflineCodingReplayRunsReceipt) {
+fn print_human(ok: bool, receipt: &OfflineCodingReplayData) {
     println!(
         "Offline coding replay: {}",
-        if receipt.ok { "PASS" } else { "FAIL" }
+        if ok { "PASS" } else { "FAIL" }
     );
     for run in &receipt.runs {
         println!(
@@ -829,7 +1226,8 @@ mod tests {
 
     use super::{
         compare, execute_once, tree_diff, ExpectedEffect, ExpectedTerminal, ExpectedToolCall,
-        ObservedReplay, OfflineCodingExpected, OfflineCodingReplayFixture,
+        NetworkIsolationReceipt, ObservedReplay, ObservedToolCall, OfflineCodingExpected,
+        OfflineCodingReplayFixture, ProviderIsolationReceipt,
     };
 
     fn fixture() -> OfflineCodingReplayFixture {
@@ -845,6 +1243,10 @@ mod tests {
                 tools: vec![ExpectedToolCall {
                     id: "call-read".to_string(),
                     name: "read_file".to_string(),
+                    status: harn_vm::agent_events::ToolCallStatus::Completed,
+                    args_blake3: "0".repeat(64),
+                    result_blake3: "1".repeat(64),
+                    exit_code: None,
                 }],
                 effects: vec![ExpectedEffect {
                     path: "src/lib.rs".to_string(),
@@ -869,26 +1271,42 @@ mod tests {
             1,
             &fixture,
             ObservedReplay {
-                tools: fixture.expected.tools.clone(),
-                effects: Vec::new(),
+                tools: Some(vec![ObservedToolCall {
+                    id: "call-read".to_string(),
+                    name: "read_file".to_string(),
+                    status: harn_vm::agent_events::ToolCallStatus::Completed,
+                    args_blake3: "0".repeat(64),
+                    result_blake3: Some("1".repeat(64)),
+                    exit_code: None,
+                }]),
+                successful_tools: vec!["read_file".to_string()],
+                rejected_tools: Vec::new(),
+                effects: Some(Vec::new()),
                 terminal: Some(harn_vm::agent_events::AgentTerminalOutcome::new(
                     harn_vm::agent_events::AgentTerminalKind::Natural,
                     "completed",
                 )),
                 exit_code: 0,
                 execution_error: None,
-                terminal_error: None,
-                isolation_established: true,
+                observation_errors: Vec::new(),
+                provider_isolation: ProviderIsolationReceipt {
+                    pass: true,
+                    checkpoint_count: 1,
+                    builtin_count: 0,
+                    miss_count: 0,
+                },
+                network_isolation: NetworkIsolationReceipt {
+                    pass: true,
+                    sandbox_enabled: true,
+                    process_network_allowed: false,
+                },
             },
         );
         assert!(
             !receipt.pass,
             "a projected successful terminal must not hide a missing edit"
         );
-        assert!(receipt
-            .failures
-            .iter()
-            .any(|failure| failure.contains("final diff")));
+        assert!(!receipt.effects.pass);
     }
 
     #[test]
@@ -987,14 +1405,53 @@ fn main(harness: Harness) {
             ExpectedToolCall {
                 id: "call-read".to_string(),
                 name: "read_file".to_string(),
+                status: harn_vm::agent_events::ToolCallStatus::Completed,
+                args_blake3: super::canonical_blake3(&serde_json::json!({"path":"note.txt"})),
+                result_blake3: super::canonical_blake3(&serde_json::json!({
+                    "content": "hello\n",
+                    "encoding": "utf-8",
+                    "path": "$WORKSPACE/repo/note.txt",
+                    "size": 6,
+                    "truncated": false
+                })),
+                exit_code: None,
             },
             ExpectedToolCall {
                 id: "call-edit".to_string(),
                 name: "edit_file".to_string(),
+                status: harn_vm::agent_events::ToolCallStatus::Completed,
+                args_blake3: super::canonical_blake3(&serde_json::json!({
+                    "path":"note.txt",
+                    "old_string":"hello",
+                    "new_string":"hello world"
+                })),
+                result_blake3: super::canonical_blake3(&serde_json::json!({
+                    "bytes_written": 12,
+                    "path": "$WORKSPACE/repo/note.txt",
+                    "replacements": 1
+                })),
+                exit_code: None,
             },
             ExpectedToolCall {
                 id: "call-verify".to_string(),
                 name: "run_command".to_string(),
+                status: harn_vm::agent_events::ToolCallStatus::Completed,
+                args_blake3: super::canonical_blake3(&serde_json::json!({
+                    "argv":["grep","-n","hello world","note.txt"]
+                })),
+                result_blake3: super::canonical_blake3(&serde_json::json!({
+                    "byte_count": 14,
+                    "cwd": "$WORKSPACE/repo",
+                    "exit_code": 0,
+                    "line_count": 1,
+                    "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",
+                    "signal": null,
+                    "status": "completed",
+                    "stderr": "",
+                    "stdout": "1:hello world\n",
+                    "timed_out": false
+                })),
+                exit_code: Some(0),
             },
         ];
         fixture.expected.effects = vec![ExpectedEffect {

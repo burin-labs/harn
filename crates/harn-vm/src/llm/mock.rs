@@ -105,6 +105,9 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
 /// absorber, or the legacy default bucket without inspecting queue internals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockConsumptionReceipt {
+    /// Queue that supplied the response. `None` only while the queue-owned
+    /// match is crossing into the dispatcher that knows its source.
+    pub source: Option<MockConsumptionSource>,
     pub requested_scope: String,
     pub resolved_scope: String,
     pub matched: bool,
@@ -124,6 +127,7 @@ impl MockConsumptionReceipt {
         remaining: usize,
     ) -> Self {
         Self {
+            source: None,
             requested_scope: requested_scope.to_string(),
             resolved_scope: resolved_scope.to_string(),
             matched: true,
@@ -136,6 +140,7 @@ impl MockConsumptionReceipt {
 
     pub(crate) fn miss(requested_scope: &str, remaining: usize) -> Self {
         Self {
+            source: None,
             requested_scope: requested_scope.to_string(),
             resolved_scope: String::new(),
             matched: false,
@@ -145,6 +150,13 @@ impl MockConsumptionReceipt {
             remaining,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MockConsumptionSource {
+    CliReplay,
+    Builtin,
 }
 
 /// Consumption policy label for a matched entry.
@@ -424,25 +436,30 @@ pub(crate) fn get_llm_mock_receipts() -> Vec<MockConsumptionReceipt> {
     with_mock_state(|state| state.receipts.clone())
 }
 
-fn record_mock_receipt(session_id: Option<&str>, receipt: MockConsumptionReceipt) {
-    if receipt.matched {
-        if let Some(session_id) = session_id.filter(|id| !id.is_empty()) {
-            super::agent_runtime::emit_agent_event_sync(
-                &crate::agent_events::AgentEvent::TypedCheckpoint {
-                    session_id: session_id.to_string(),
-                    checkpoint: serde_json::json!({
-                        "kind": "llm_mock_fixture_consumption",
-                        "schema": "harn.llm_mock_fixture_consumption.v1",
-                        "id": receipt.id,
-                        "requested_scope": receipt.requested_scope,
-                        "resolved_scope": receipt.resolved_scope,
-                        "consume": receipt.consume,
-                        "fell_through": receipt.fell_through,
-                        "remaining": receipt.remaining,
-                    }),
-                },
-            );
-        }
+fn record_mock_receipt(
+    session_id: Option<&str>,
+    source: MockConsumptionSource,
+    mut receipt: MockConsumptionReceipt,
+) {
+    receipt.source = Some(source);
+    if let Some(session_id) = session_id.filter(|id| !id.is_empty()) {
+        super::agent_runtime::emit_agent_event_sync(
+            &crate::agent_events::AgentEvent::TypedCheckpoint {
+                session_id: session_id.to_string(),
+                checkpoint: serde_json::json!({
+                    "kind": "llm_mock_fixture_consumption",
+                    "schema": "harn.llm_mock_fixture_consumption.v1",
+                    "source": receipt.source,
+                    "matched": receipt.matched,
+                    "id": receipt.id,
+                    "requested_scope": receipt.requested_scope,
+                    "resolved_scope": receipt.resolved_scope,
+                    "consume": receipt.consume,
+                    "fell_through": receipt.fell_through,
+                    "remaining": receipt.remaining,
+                }),
+            },
+        );
     }
     with_mock_state_mut(|state| state.receipts.push(receipt));
 }
@@ -1294,7 +1311,11 @@ pub(crate) fn mock_llm_response(
     if let Some(matched) =
         try_match_cli_mock(request.cli_llm_mock_scope, requested_scope, &match_text)
     {
-        record_mock_receipt(request.session_id.as_deref(), matched.receipt);
+        record_mock_receipt(
+            request.session_id.as_deref(),
+            MockConsumptionSource::CliReplay,
+            matched.receipt,
+        );
         return matched.outcome.map(|mut result| {
             if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -1304,7 +1325,11 @@ pub(crate) fn mock_llm_response(
     }
 
     if let Some(matched) = try_match_builtin_mock(requested_scope, &match_text) {
-        record_mock_receipt(request.session_id.as_deref(), matched.receipt);
+        record_mock_receipt(
+            request.session_id.as_deref(),
+            MockConsumptionSource::Builtin,
+            matched.receipt,
+        );
         return matched.outcome.map(|mut result| {
             if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -1326,7 +1351,12 @@ pub(crate) fn mock_llm_response(
         } else {
             with_mock_state(|state| state.builtin_queue.miss_receipt(requested_scope))
         };
-        record_mock_receipt(request.session_id.as_deref(), receipt);
+        let source = if cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope) {
+            MockConsumptionSource::CliReplay
+        } else {
+            MockConsumptionSource::Builtin
+        };
+        record_mock_receipt(request.session_id.as_deref(), source, receipt);
     }
 
     if cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope) {

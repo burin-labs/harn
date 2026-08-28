@@ -2987,8 +2987,13 @@ lists into one cumulative dry-run divergence report.
 An `offline_coding_replay` fixture takes the execution path instead of the
 projection path. It recreates the declared workspace seed, runs the recorded
 LLM responses with provider and network access disabled, and fails closed on
-tool-order/id, final-diff, or terminal-outcome divergence. Its receipt always
-lists pending and missing comparison names.
+tool order, ids, execution status, final diff, or terminal-outcome divergence.
+`--json` uses the universal envelope; the offline receipt is in `data`, with
+its producer version and attested source revision when available, exact canonical argument and semantic
+result digests, cross-run repeatability verdict, and independently observed
+provider-fixture and process-network isolation facts. Its receipt always lists
+pending and missing comparison names. `harn --json-schemas` is the schema
+authority.
 
 ## harn eval
 

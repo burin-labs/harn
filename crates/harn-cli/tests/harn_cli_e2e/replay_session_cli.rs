@@ -699,3 +699,290 @@ fn replay_fixture_runs_use_oracle_allowlist() {
     assert_eq!(parsed["determinism"]["pass"], true);
     assert_eq!(unique_normalized_runs(&parsed).len(), 1);
 }
+
+fn offline_coding_fixture(
+    verify_argv: Vec<String>,
+    include_finish: bool,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let hash_json = |value: &serde_json::Value| {
+        blake3::hash(&harn_vm::canonical_json::to_vec(value))
+            .to_hex()
+            .to_string()
+    };
+    let read_args = json!({"path":"note.txt"});
+    let edit_args = json!({
+        "path":"note.txt",
+        "old_string":"hello",
+        "new_string":"hello world"
+    });
+    let verify_args = json!({"argv":verify_argv});
+    let read_result = json!({
+        "content": "hello\n",
+        "encoding": "utf-8",
+        "path": "$WORKSPACE/repo/note.txt",
+        "size": 6,
+        "truncated": false
+    });
+    let edit_result = json!({
+        "bytes_written": 12,
+        "path": "$WORKSPACE/repo/note.txt",
+        "replacements": 1
+    });
+    let successful_verify_result = json!({
+        "byte_count": 14,
+        "cwd": "$WORKSPACE/repo",
+        "exit_code": 0,
+        "line_count": 1,
+        "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",
+        "signal": null,
+        "status": "completed",
+        "stderr": "",
+        "stdout": "1:hello world\n",
+        "timed_out": false
+    });
+    let successful_verify = verify_args == json!({"argv":["grep","-n","hello world","note.txt"]});
+    let temp = tempfile::tempdir().expect("offline replay tempdir");
+    let seed = temp.path().join("seed");
+    std::fs::create_dir_all(seed.join("repo")).expect("seed repo");
+    std::fs::write(seed.join("repo/note.txt"), "hello\n").expect("seed file");
+    std::fs::write(
+        seed.join("turn.harn"),
+        r#"
+import { agent_loop } from "std/agent/loop"
+import { agent_edit_tools, agent_host_tools } from "std/agent/host_tools"
+
+fn main(harness: Harness) {
+  const workspace = argv[0]
+  const root = path_join(workspace, "repo")
+  const options = {
+    root: root,
+    cwd: root,
+    enabled_tools: ["read_file", "edit_file", "run_command"],
+    allow_argv_prefixes: [["grep"], ["python3"]],
+  }
+  let tools = agent_host_tools(harness, nil, options)
+  tools = agent_edit_tools(harness.fs, harness.tools, tools, options)
+  return agent_loop(harness, "Edit and verify note.txt.", nil, {
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    max_iterations: 6,
+    done_judge: nil,
+  })
+}
+"#,
+    )
+    .expect("replay program");
+
+    let mut tape = vec![
+        json!({"id":"turn-read","scope":"agent.main","consume":"once","text":"","tool_calls":[{"id":"call-read","name":"read_file","arguments":read_args}]}),
+        json!({"id":"turn-edit","scope":"agent.main","consume":"once","text":"","tool_calls":[{"id":"call-edit","name":"edit_file","arguments":edit_args}]}),
+        json!({"id":"turn-verify","scope":"agent.main","consume":"once","text":"","tool_calls":[{"id":"call-verify","name":"run_command","arguments":verify_args}]}),
+    ];
+    if include_finish {
+        tape.push(
+            json!({"id":"turn-finish","scope":"agent.main","consume":"once","text":"Verified."}),
+        );
+    }
+    let tape = std::iter::once(json!({"schemaVersion":1,"strictScopes":true}))
+        .chain(tape)
+        .map(|value| serde_json::to_string(&value).expect("mock entry"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(seed.join("turn.jsonl"), format!("{tape}\n")).expect("LLM tape");
+
+    let before = blake3::hash(b"hello\n").to_hex().to_string();
+    let after = blake3::hash(b"hello world\n").to_hex().to_string();
+    let fixture = json!({
+        "_type": "offline_coding_replay",
+        "schema_version": "harn.offline-coding-replay.v1",
+        "workspace_seed": "seed",
+        "program": "turn.harn",
+        "llm_mock": "turn.jsonl",
+        "effect_root": "repo",
+        "expected": {
+            "tools": [
+                {"id":"call-read","name":"read_file","status":"completed","args_blake3":hash_json(&read_args),"result_blake3":hash_json(&read_result)},
+                {"id":"call-edit","name":"edit_file","status":"completed","args_blake3":hash_json(&edit_args),"result_blake3":hash_json(&edit_result)},
+                {"id":"call-verify","name":"run_command","status":"completed","args_blake3":hash_json(&verify_args),"result_blake3":if successful_verify { hash_json(&successful_verify_result) } else { "0".repeat(64) },"exit_code":0}
+            ],
+            "effects": [{"path":"note.txt","before_blake3":before,"after_blake3":after}],
+            "terminal": {"outcome":{"kind":"natural","reason":"natural","owner":"agent"},"exit_code":0}
+        }
+    });
+    let path = temp.path().join("turn.replay.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&fixture).expect("replay fixture"),
+    )
+    .expect("write replay fixture");
+    (temp, path)
+}
+
+fn run_offline_fixture_with_runs(
+    path: &std::path::Path,
+    runs: usize,
+) -> (std::process::ExitStatus, serde_json::Value) {
+    let output = harn_e2e_command()
+        .args(["replay", "--fixture"])
+        .arg(path)
+        .args(["--runs", &runs.to_string()])
+        .arg("--json")
+        .output()
+        .expect("run public offline replay CLI");
+    (output.status, stdout_json(&output))
+}
+
+fn run_offline_fixture(path: &std::path::Path) -> (std::process::ExitStatus, serde_json::Value) {
+    run_offline_fixture_with_runs(path, 1)
+}
+
+#[test]
+fn offline_coding_replay_cli_proves_execution_and_universal_envelope() {
+    let (_temp, path) = offline_coding_fixture(
+        vec!["grep", "-n", "hello world", "note.txt"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        true,
+    );
+    let (status, receipt) = run_offline_fixture_with_runs(&path, 2);
+    assert!(status.success(), "receipt: {receipt:#}");
+    assert_eq!(receipt["ok"], true);
+    assert_eq!(receipt["data"]["kind"], "offline_coding");
+    assert_eq!(receipt["data"]["runs"].as_array().map(Vec::len), Some(2));
+    assert_eq!(receipt["data"]["repeatability"]["pass"], true);
+    assert_eq!(
+        receipt["data"]["runs"][0]["isolation"]["provider"]["pass"],
+        true
+    );
+    assert_eq!(
+        receipt["data"]["runs"][0]["isolation"]["network"]["pass"],
+        true
+    );
+    assert_eq!(
+        receipt["data"]["runs"][0]["tools"]["actual"][2]["status"],
+        "completed"
+    );
+    assert_eq!(
+        receipt["data"]["runs"][0]["tools"]["actual"][2]["exit_code"],
+        0
+    );
+    assert!(receipt["data"]["producer"]["harn_version"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    let expected_revision = env!("HARN_BUILD_REVISION");
+    if expected_revision.is_empty() {
+        assert!(receipt["data"]["producer"]["source_revision"].is_null());
+    } else {
+        assert_eq!(
+            receipt["data"]["producer"]["source_revision"],
+            expected_revision
+        );
+    }
+    assert!(receipt.get("schemaVersion").is_some());
+    assert!(receipt.get("error").is_some());
+    assert!(receipt.get("warnings").is_some());
+
+    let schema_output = harn_e2e_command()
+        .args(["--json-schemas", "--command", "replay"])
+        .output()
+        .expect("read public replay JSON schema");
+    assert!(schema_output.status.success());
+    let schema_catalog = stdout_json(&schema_output);
+    let schema = &schema_catalog["data"][0]["schemaJson"];
+    jsonschema::draft202012::meta::validate(schema).expect("replay schema is draft 2020-12");
+    jsonschema::draft202012::new(schema)
+        .expect("replay schema compiles")
+        .validate(&receipt)
+        .expect("offline replay receipt validates against the public replay schema");
+}
+
+#[test]
+fn offline_coding_replay_cli_rejects_changed_tool_inputs_with_matching_effects() {
+    let (_temp, path) = offline_coding_fixture(
+        vec!["grep", "-n", "hello world", "note.txt"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        true,
+    );
+    let mut fixture: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read replay fixture"))
+            .expect("parse replay fixture");
+    fixture["expected"]["tools"][0]["args_blake3"] = serde_json::Value::String("0".repeat(64));
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&fixture).expect("serialize changed replay fixture"),
+    )
+    .expect("write changed replay fixture");
+
+    let (status, receipt) = run_offline_fixture(&path);
+    assert!(!status.success(), "receipt: {receipt:#}");
+    assert_eq!(receipt["data"]["runs"][0]["effects"]["pass"], true);
+    assert_eq!(receipt["data"]["runs"][0]["tools"]["pass"], false);
+}
+
+#[test]
+fn offline_coding_replay_cli_rejects_failed_verification() {
+    let (_temp, path) = offline_coding_fixture(
+        vec!["grep", "-n", "absent", "note.txt"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        true,
+    );
+    let (status, receipt) = run_offline_fixture(&path);
+    assert!(!status.success(), "receipt: {receipt:#}");
+    assert_eq!(receipt["data"]["runs"][0]["effects"]["pass"], true);
+    assert_ne!(
+        receipt["data"]["runs"][0]["tools"]["actual"][2]["exit_code"],
+        0
+    );
+    assert_eq!(receipt["data"]["runs"][0]["tools"]["pass"], false);
+}
+
+#[test]
+fn offline_coding_replay_cli_rejects_incomplete_cli_tape() {
+    let (_temp, path) = offline_coding_fixture(
+        vec!["grep", "-n", "hello world", "note.txt"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        false,
+    );
+    let (status, receipt) = run_offline_fixture(&path);
+    assert!(!status.success(), "receipt: {receipt:#}");
+    assert!(
+        receipt["data"]["runs"][0]["isolation"]["provider"]["miss_count"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    );
+    assert_eq!(
+        receipt["data"]["runs"][0]["isolation"]["provider"]["pass"],
+        false
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn offline_coding_replay_cli_blocks_process_network_escape() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("local listener");
+    let port = listener.local_addr().expect("listener address").port();
+    let script =
+        format!("import socket; socket.create_connection(('127.0.0.1', {port}), 1).close()");
+    let (_temp, path) = offline_coding_fixture(vec!["python3".into(), "-c".into(), script], true);
+    let (status, receipt) = run_offline_fixture(&path);
+    assert!(
+        !status.success(),
+        "network escape unexpectedly succeeded: {receipt:#}"
+    );
+    assert_eq!(
+        receipt["data"]["runs"][0]["isolation"]["network"]["pass"],
+        true
+    );
+    assert_ne!(
+        receipt["data"]["runs"][0]["tools"]["actual"][2]["exit_code"],
+        0
+    );
+}

@@ -15,6 +15,75 @@ use crate::json_envelope::{self, JsonEnvelope};
 
 pub(crate) const REPLAY_SCHEMA_VERSION: u32 = 1;
 
+pub(crate) fn json_schema() -> JsonValue {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["schemaVersion", "ok", "data", "error", "warnings"],
+        "properties": {
+            "schemaVersion": {"const": REPLAY_SCHEMA_VERSION},
+            "ok": {"type": "boolean"},
+            "data": {
+                "anyOf": [
+                    {"type": "null"},
+                    {
+                        "type": "object",
+                        "required": ["run_id", "status", "fixture"],
+                        "properties": {
+                            "run_id": {"type": "string"},
+                            "status": {"type": "string"},
+                            "fixture": {"type": "object"}
+                        }
+                    },
+                    {
+                        "type": "object",
+                        "required": ["kind", "source", "producer", "runs", "repeatability", "pending_count", "missing_count"],
+                        "properties": {
+                            "kind": {"const": "offline_coding"},
+                            "source": {"type": "string"},
+                            "producer": {
+                                "type": "object",
+                                "required": ["harn_version", "source_revision"],
+                                "properties": {
+                                    "harn_version": {"type": "string", "minLength": 1},
+                                    "source_revision": {
+                                        "type": ["string", "null"],
+                                        "pattern": "^[0-9a-f]{40}$|^[0-9a-f]{64}$"
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "runs": {"type": "array"},
+                            "repeatability": {
+                                "type": "object",
+                                "required": ["pass", "baseline_run", "divergent_runs"],
+                                "properties": {
+                                    "pass": {"type": "boolean"},
+                                    "baseline_run": {"type": ["integer", "null"], "minimum": 1},
+                                    "divergent_runs": {
+                                        "type": "array",
+                                        "items": {"type": "integer", "minimum": 1}
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "pending_count": {"type": "integer", "minimum": 0},
+                            "missing_count": {"type": "integer", "minimum": 0}
+                        }
+                    }
+                ]
+            },
+            "error": {"type": ["object", "null"]},
+            "warnings": {"type": "array"}
+        },
+        "additionalProperties": false,
+        "x-harn-provenance": {
+            "source": "crates/harn-cli/src/commands/replay.rs",
+            "schemaVersion": REPLAY_SCHEMA_VERSION
+        }
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayReport {
     pub run_id: String,
