@@ -844,13 +844,29 @@ fn __done_judge_due(opts: dict, payload: dict, completion_proposed: bool) {
 fn __completion_result(opts: any, payload: dict, stop_reason: string) {
   const batch_state = opts?._tool_batch_dependency_state
   const deferred = batch_state?.deferred_signatures ?? []
-  if len(deferred) > 0 {
-    return {kind: "continue", done_judge_due: false, pending_tool_batch_effects: true}
-  }
+  const pending_tool_batch_effects = len(deferred) > 0
   const verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
   const done_due = __done_judge_due(opts, payload, true)
+  // A deferred proposal remains durable for exact re-proposal, but it is not a
+  // second terminal authority. When the host configured a completion gate or
+  // judge, that owner has the task facts needed to decide whether a later
+  // action superseded the proposal. Silently continuing here bypassed that
+  // owner and could make one old deferred signature veto every later terminal
+  // response without a receipt or repair directive.
+  //
+  // Without an adjudicator, retain the conservative contract: the model must
+  // re-propose the deferred effect before the loop can finish.
+  if pending_tool_batch_effects && !verify_due && !done_due {
+    return {kind: "continue", done_judge_due: false, pending_tool_batch_effects: true}
+  }
   if verify_due || done_due {
-    return {kind: "break", stop_reason: stop_reason, needs_verify: true, done_judge_due: done_due}
+    return {
+      kind: "break",
+      stop_reason: stop_reason,
+      needs_verify: true,
+      done_judge_due: done_due,
+      pending_tool_batch_effects: pending_tool_batch_effects,
+    }
   }
   if __done_judge_config(opts) != nil {
     return {kind: "continue", done_judge_due: false}

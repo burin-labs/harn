@@ -144,6 +144,11 @@ pub type CompletionEvidenceSnapshot = {
   successful_tools_used: string,
   iteration: int,
   knowledge_state: string,
+  // Effect-phased proposals survive turns so an exact re-proposal can be
+  // recognized. A completion policy is the only authority allowed to decide
+  // that later evidence superseded one, so expose the pending count instead
+  // of making that lifecycle state an invisible terminal veto.
+  pending_tool_batch_effect_count: int,
   // Absent until a deterministic gate has actually run and reported. A judge
   // stage reads it; nothing else may synthesize one.
   verification?: CompletionVerificationState?,
@@ -168,6 +173,7 @@ pub type CompletionDirectiveReceipt = {
   invoked: CompletionJudgeInvocations,
   feedback_delivery: CompletionFeedbackDelivery,
   projection: CompletionEvidenceProjectionStats,
+  pending_tool_batch_effect_count: int,
   // The gap the model judge named, and — when an adjudication was overruled —
   // WHAT overruled it. `trigger` names whichever adjudicator ANSWERED, not the
   // boundary that asked, so a reader counting conversions must count
@@ -614,6 +620,9 @@ fn __judge_payload(
     opts,
     "sha256:" + sha256(transcript),
   )
+  const pending_tool_batch_effect_count = len(
+    opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
+  )
   const evidence_id = "sha256:"
     + sha256(
       json_stringify(
@@ -624,6 +633,7 @@ fn __judge_payload(
           actions: evidence.packet.actions,
           fallback_observations: evidence.packet.fallback_observations,
           lifecycle_issues: evidence.packet.lifecycle_issues,
+          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
         },
       ),
     )
@@ -644,6 +654,7 @@ fn __judge_payload(
     successful_tools_used: join(successful_tool_names, ", "),
     iteration: iteration,
     knowledge_state: __judge_knowledge_state(lifecycle, text),
+    pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: nil,
   }
 }
@@ -1114,6 +1125,7 @@ fn __judge_directive(
     invoked: invoked,
     feedback_delivery: feedback_delivery,
     projection: payload.judge_evidence_projection,
+    pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
     converted_from: verdict?.converted_from,
     gap_class: verdict?.gap_class,
     verification: payload.verification,

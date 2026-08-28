@@ -1,0 +1,176 @@
+// Run: harn test tests/agent/deferred_effect_completion_arbitration_test.harn
+//
+// A deferred effect is a durable proposal, not an independent terminal owner.
+// The completion gate is the typed seam that can decide whether later evidence
+// superseded it. Without that seam the loop remains conservative and requires
+// exact re-proposal.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn lifecycle_tools(runtime: HarnessRuntime, run_count: any, verify_count: any) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect bounded workspace state.",
+    {
+      handler: { _args -> "workspace inspected" },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a workspace command.",
+    {
+      handler: { args ->
+        runtime.atomic_add(run_count, 1)
+        return "ran " + to_string(args?.command ?? "")
+      },
+      parameters: {command: {type: "string"}},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+    },
+  )
+  return tool_define(
+    tools,
+    "verify",
+    "Run the canonical verifier.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(verify_count, 1)
+        return "verification passed"
+      },
+      parameters: {},
+      annotations: {kind: "verify", side_effect_level: "process_exec"},
+    },
+  )
+}
+
+fn mixed_observation_and_verification() -> dict {
+  return {
+    tool_calls: [
+      {id: "inspect-1", name: "inspect", arguments: {}},
+      {id: "run-1", name: "run", arguments: {command: "project-check"}},
+    ],
+  }
+}
+
+fn deferred_receipts(events: list) -> list {
+  return events.filter(
+    { event ->
+      event?.type == "tool_batch_disposition" && event?.receipt?.disposition == "deferred"
+    },
+  )
+    .to_list()
+}
+
+fn completion_receipts(events: list) -> list {
+  return events.filter(
+    { event ->
+      event?.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+pipeline test_completion_gate_arbitrates_a_superseded_deferred_effect(
+  harness: Harness,
+  _task: unknown,
+) {
+  const run_count = harness.runtime.atomic(0)
+  const verify_count = harness.runtime.atomic(0)
+  const gate_count = harness.runtime.atomic(0)
+  const session = "deferred-effect-arbitrated-" + harness.random.uuid()
+  const captured = with_llm_script(
+    harness.llm,
+    [
+      mixed_observation_and_verification(),
+      {tool_calls: [{id: "verify-1", name: "verify", arguments: {}}]},
+      llm_text("Work complete. ##DONE##"),
+    ],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: lifecycle_tools(harness.runtime, run_count, verify_count),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        verify_completion: { _payload ->
+          harness.runtime.atomic_add(gate_count, 1)
+          return {
+            confirm: true,
+            reason: "verified_after_write",
+            verification: {command: "project-check", observed: "passed"},
+          }
+        },
+      }
+      return agent_capture_events(
+        harness.agent,
+        session,
+        { -> agent_loop(harness, "Complete and verify the task.", nil, options) },
+      )
+    },
+  )
+  assert_eq(len(deferred_receipts(captured.events)), 1)
+  assert_eq(harness.runtime.atomic_get(run_count), 0)
+  assert_eq(harness.runtime.atomic_get(verify_count), 1)
+  assert_eq(harness.runtime.atomic_get(gate_count), 1)
+  assert_eq(captured.result.status, "done")
+  assert_eq(captured.result.stop_reason, "sentinel")
+  assert_eq(captured.result.llm.iterations, 3)
+  const decisions = completion_receipts(captured.events)
+  assert_eq(len(decisions), 1)
+  assert_eq(decisions[0].action, "accept")
+  assert_eq(decisions[0].pending_tool_batch_effect_count, 1)
+  assert(decisions[0].invoked.deterministic)
+}
+
+pipeline test_deferred_effect_remains_pending_without_a_completion_adjudicator(
+  harness: Harness,
+  _task: unknown,
+) {
+  const run_count = harness.runtime.atomic(0)
+  const verify_count = harness.runtime.atomic(0)
+  const session = "deferred-effect-conservative-" + harness.random.uuid()
+  const captured = with_llm_script(
+    harness.llm,
+    [
+      mixed_observation_and_verification(),
+      llm_text("Work complete. ##DONE##"),
+      {tool_calls: [{id: "run-2", name: "run", arguments: {command: "project-check"}}]},
+      llm_text("Work complete. ##DONE##"),
+    ],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: lifecycle_tools(harness.runtime, run_count, verify_count),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+      }
+      return agent_capture_events(
+        harness.agent,
+        session,
+        { -> agent_loop(harness, "Complete the task.", nil, options) },
+      )
+    },
+  )
+  assert_eq(len(deferred_receipts(captured.events)), 1)
+  assert_eq(harness.runtime.atomic_get(run_count), 1)
+  assert_eq(harness.runtime.atomic_get(verify_count), 0)
+  assert_eq(captured.result.status, "done")
+  assert_eq(captured.result.stop_reason, "sentinel")
+  assert_eq(captured.result.llm.iterations, 4)
+  const decisions = completion_receipts(captured.events)
+  assert_eq(len(decisions), 0)
+}
