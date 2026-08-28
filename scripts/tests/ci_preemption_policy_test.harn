@@ -1,0 +1,214 @@
+import {
+  GitHubRun,
+  JobLogEvidence,
+  RecoveryPolicy,
+  classify_recovery,
+  configured_timeout_candidates,
+} from "../ci_preemption_policy.harn"
+
+const POLICY: RecoveryPolicy = {
+  schema: "harn.ci_preemption_policy.v1",
+  aggregate_job_names: ["CI status"],
+  timeout_completion_grace_seconds: 90,
+}
+
+fn workflow() -> dict {
+  return {
+    name: "CI",
+    jobs: {
+      tests: {name: "Tests", "timeout-minutes": "trusted 20, fallback 40"},
+      lint: {name: "Lint", "timeout-minutes": 10},
+    },
+  }
+}
+
+fn run_with_jobs(jobs: list<dict>, attempt: int = 1) -> GitHubRun {
+  return schema_expect(
+    {
+      databaseId: 7001,
+      event: "pull_request",
+      conclusion: "failure",
+      status: "completed",
+      headBranch: "feature/timeout-recovery",
+      headSha: "0123456789abcdef",
+      url: "https://example.test/actions/runs/7001",
+      attempt: attempt,
+      workflowName: "CI",
+      jobs: jobs,
+    },
+    schema_of(GitHubRun),
+  )
+}
+
+fn job(
+  id: int,
+  name: string,
+  conclusion: string,
+  started_at: string,
+  completed_at: string,
+) -> dict {
+  return {
+    databaseId: id,
+    name: name,
+    status: "completed",
+    conclusion: conclusion,
+    startedAt: started_at,
+    completedAt: completed_at,
+    steps: [],
+  }
+}
+
+fn log(id: int, text: string) -> JobLogEvidence {
+  return {job_id: id, available: true, text: text}
+}
+
+pipeline test_configured_timeout_is_proven_from_workflow_clock_and_annotation(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs(
+      [
+        job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:23:48Z"),
+        job(199, "CI status", "failure", "2026-08-28T18:23:48Z", "2026-08-28T18:23:50Z"),
+      ],
+    ),
+    workflow(),
+    POLICY,
+    [log(101, "\\u001b[31m##[error]The operation was canceled.\\u001b[0m")],
+    1,
+  )
+  assert_eq(receipt.classification, "configured_timeout")
+  assert_eq(receipt.failed_job_count, 1)
+  assert_eq(receipt.retry_safe_job_count, 1)
+  assert_eq(receipt.terminal_failure_job_count, 0)
+  assert_eq(receipt.unknown_job_count, 0)
+  assert_eq(receipt.evidence_complete, true)
+  assert_eq(receipt.jobs[0]?.kind, "configured_timeout")
+  assert_eq(receipt.jobs[0]?.elapsed_seconds, 1218)
+  assert_eq(receipt.jobs[0]?.configured_timeout_minutes, 20)
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
+}
+
+pipeline test_timeout_candidates_are_scoped_to_owning_job_field(task: unknown) {
+  assert_eq(configured_timeout_candidates(workflow(), "Tests"), [20, 40])
+  assert_eq(configured_timeout_candidates(workflow(), "Lint"), [10])
+  assert_eq(configured_timeout_candidates(workflow(), "Unknown"), [])
+}
+
+pipeline test_runner_shutdown_and_exit_143_remains_retry_safe(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:04:00Z")]),
+    workflow(),
+    POLICY,
+    [log(101, "The runner has received a shutdown signal.\nProcess completed with exit code 143.")],
+    1,
+  )
+  assert_eq(receipt.classification, "runner_preemption")
+  assert_eq(receipt.planned_action, "rerun_failed_jobs")
+}
+
+pipeline test_actual_job_failure_is_not_retried(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([job(101, "Tests", "failure", "2026-08-28T18:03:30Z", "2026-08-28T18:04:00Z")]),
+    workflow(),
+    POLICY,
+    [log(101, "Process completed with exit code 101.")],
+    1,
+  )
+  assert_eq(receipt.classification, "job_failure")
+  assert_eq(receipt.jobs[0]?.kind, "job_failure")
+  assert_eq(receipt.terminal_failure_job_count, 1)
+  assert_eq(receipt.unknown_job_count, 0)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_mixed_timeout_and_job_failure_fails_closed(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs(
+      [
+        job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:23:48Z"),
+        job(102, "Lint", "failure", "2026-08-28T18:03:30Z", "2026-08-28T18:04:00Z"),
+      ],
+    ),
+    workflow(),
+    POLICY,
+    [
+      log(101, "##[error]The operation was canceled."),
+      log(102, "Process completed with exit code 1."),
+    ],
+    1,
+  )
+  assert_eq(receipt.classification, "mixed_failure")
+  assert_eq(receipt.retry_safe_job_count, 1)
+  assert_eq(receipt.terminal_failure_job_count, 1)
+  assert_eq(receipt.unknown_job_count, 0)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_missing_log_evidence_fails_closed(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:23:48Z")]),
+    workflow(),
+    POLICY,
+    [],
+    1,
+  )
+  assert_eq(receipt.classification, "evidence_unavailable")
+  assert_eq(receipt.inspected_job_count, 0)
+  assert_eq(receipt.evidence_complete, false)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_no_failed_jobs_does_not_report_complete_evidence(task: unknown) {
+  const receipt = classify_recovery(run_with_jobs([]), workflow(), POLICY, [], 1)
+  assert_eq(receipt.classification, "no_failed_jobs")
+  assert_eq(receipt.failed_job_count, 0)
+  assert_eq(receipt.inspected_job_count, 0)
+  assert_eq(receipt.evidence_complete, false)
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_manual_cancellation_before_deadline_fails_closed(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs([job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:13:30Z")]),
+    workflow(),
+    POLICY,
+    [log(101, "##[error]The operation was canceled.")],
+    1,
+  )
+  assert_eq(receipt.classification, "cancellation_unknown")
+  assert_eq(receipt.planned_action, "none")
+}
+
+pipeline test_second_transient_attempt_is_not_retried(task: unknown) {
+  const receipt = classify_recovery(
+    run_with_jobs(
+      [job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:23:48Z")],
+      2,
+    ),
+    workflow(),
+    POLICY,
+    [log(101, "##[error]The operation was canceled.")],
+    1,
+  )
+  assert_eq(receipt.classification, "configured_timeout")
+  assert_eq(receipt.planned_action, "none_max_attempts_reached")
+}
+
+pipeline test_merge_group_recovery_uses_structured_pr_identity(task: unknown) {
+  const base = run_with_jobs(
+    [job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:23:48Z")],
+  )
+  const merge_run: GitHubRun = schema_expect(
+    {...base, event: "merge_group", headBranch: "gh-readonly-queue/main/pr-4113-0123456789abcdef"},
+    schema_of(GitHubRun),
+  )
+  const receipt = classify_recovery(
+    merge_run,
+    workflow(),
+    POLICY,
+    [log(101, "##[error]The operation was canceled.")],
+    1,
+  )
+  assert_eq(receipt.classification, "configured_timeout")
+  assert_eq(receipt.pr_number, 4113)
+  assert_eq(receipt.planned_action, "requeue_merge_queue")
+}
