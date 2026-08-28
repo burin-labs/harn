@@ -396,25 +396,6 @@ fn __tool_batch_merge_deferred_signatures(previous: any, newly_deferred: list, e
   return merged
 }
 
-fn __tool_batch_explicit_terminal_succeeded(
-  plan: any,
-  selected: list,
-  results: list,
-  options: any,
-) -> bool {
-  if plan.selected_phase != "terminal" {
-    return false
-  }
-  const terminal_names = options?._stop_after_successful_tools ?? []
-  for (index, entry) in iter(selected).enumerate() {
-    const name = to_string(entry.call?.name ?? entry.call?.tool_name ?? "")
-    if contains(terminal_names, name) && __tool_result_ok(results[index]) {
-      return true
-    }
-  }
-  return false
-}
-
 fn __tool_batch_process_is_read_effect(call: dict) -> bool {
   const args = __intra_turn_call_args(call)
   const command = args?.command ?? args?.cmd ?? args?.script
@@ -486,17 +467,16 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     cap,
     selected_indices,
   )
-  // `stop_after_successful_tools` is explicit terminal authority. Once one of
-  // those tools succeeds, older effect-phase proposals are obsolete: the model
-  // has observed every intervening result and deliberately chose completion.
-  // Retaining an unrelated deferred signature here makes the post-turn gate
-  // request another inference after the terminal tool already succeeded.
-  const explicit_terminal_succeeded = __tool_batch_explicit_terminal_succeeded(
-    plan,
-    selected,
-    raw_selected,
-    options,
-  )
+  let explicit_terminal_succeeded = false
+  if plan.selected_phase == "terminal" {
+    for (index, entry) in iter(selected).enumerate() {
+      const name = to_string(entry.call?.name ?? entry.call?.tool_name ?? "")
+      if contains(options?._stop_after_successful_tools ?? [], name)
+        && __tool_result_ok(raw_selected[index]) {
+        explicit_terminal_succeeded = true
+      }
+    }
+  }
   // Results are re-sorted to the model's original call order before they are
   // returned. Selected and deferred calls are now interleaved rather than
   // split at a boundary, and on the text channel a tool result carries no
