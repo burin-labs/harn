@@ -861,12 +861,8 @@ fn discriminated_union_tool_after_rejected_call_keeps_or_rejects_empty_schema() 
         error.collapsed_branches,
         actions.iter().map(ToString::to_string).collect::<Vec<_>>()
     );
-    let message = error.to_string();
-    assert!(message.contains("tool `edit`"), "{message}");
-    assert!(
-        message.contains("collapsed branch set [create, replace_range, append]"),
-        "{message}"
-    );
+    assert_eq!(error.path, "#/properties/args/properties/action/anyOf");
+    assert_eq!(error.keyword, "anyOf");
 }
 
 #[test]
@@ -876,7 +872,8 @@ fn empty_union_rewrite_is_rejected_as_unsatisfiable() {
         "properties": {
             "name": {"enum": ["edit"]},
             "args": {"union": []}
-        }
+        },
+        "required": ["args"]
     });
     normalize_provider_json_schema(&mut schema);
     assert_eq!(schema["properties"]["args"]["anyOf"], serde_json::json!([]));
@@ -901,4 +898,53 @@ fn empty_enum_and_impossible_required_are_rejected() {
     let error = reject_unsatisfiable_output_schema(&impossible).expect_err("impossible required");
     assert_eq!(error.keyword, "required");
     assert_eq!(error.collapsed_branches, ["action"]);
+}
+
+#[test]
+fn unsatisfiable_analysis_does_not_reject_live_alternatives() {
+    let admissible = [
+        serde_json::json!({
+            "type": "object",
+            "properties": {"optional": false}
+        }),
+        serde_json::json!({
+            "type": "object",
+            "$defs": {"unused": false}
+        }),
+        serde_json::json!({"not": false}),
+        serde_json::json!({"if": true, "then": false, "else": false}),
+        serde_json::json!({"anyOf": [false, {"type": "string"}]}),
+        serde_json::json!({"oneOf": [false, {"type": "string"}]}),
+        serde_json::json!({
+            "properties": {"required_but_not_object_only": false},
+            "required": ["required_but_not_object_only"]
+        }),
+    ];
+
+    for schema in admissible {
+        reject_unsatisfiable_output_schema(&schema)
+            .unwrap_or_else(|error| panic!("live schema was rejected: {schema}: {error}"));
+    }
+}
+
+#[test]
+fn unsatisfiable_analysis_proves_only_structural_contradictions() {
+    let unsatisfiable = [
+        serde_json::json!(false),
+        serde_json::json!({"anyOf": [false, {"enum": []}]}),
+        serde_json::json!({"oneOf": [false, {"enum": []}]}),
+        serde_json::json!({"allOf": [{"type": "string"}, false]}),
+        serde_json::json!({
+            "type": "object",
+            "properties": {"required_child": false},
+            "required": ["required_child"]
+        }),
+    ];
+
+    for schema in unsatisfiable {
+        assert!(
+            reject_unsatisfiable_output_schema(&schema).is_err(),
+            "structural contradiction was admitted: {schema}"
+        );
+    }
 }

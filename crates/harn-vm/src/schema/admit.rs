@@ -1,9 +1,11 @@
-//! Reject JSON Schema shapes that admit no value before they reach a provider.
+//! Reject JSON Schema shapes proven to admit no value before they reach a provider.
 //!
 //! llama.cpp converts an empty combinator (`anyOf: []`, `oneOf: []`,
 //! `enum: []`) into `root ::=` and 500s the request. Harn must refuse those
 //! schemas at the normalize/emit seam, with a diagnostic that names the tool
-//! and the collapsed branch set when either is known.
+//! and the collapsed branch set when either is known. This deliberately
+//! sound-but-incomplete analysis skips constraints whose interactions require
+//! a full JSON Schema solver.
 
 use serde_json::{Map, Value};
 
@@ -49,31 +51,19 @@ fn first_unsatisfiable_node(
     inherited_tool: Option<&str>,
 ) -> Option<UnsatisfiableJsonSchema> {
     let object = match value {
-        Value::Object(object) => object,
-        Value::Array(items) => {
-            return items.iter().enumerate().find_map(|(index, item)| {
-                first_unsatisfiable_node(item, &index_path(path, index), inherited_tool)
+        Value::Bool(false) => {
+            return Some(UnsatisfiableJsonSchema {
+                tool: inherited_tool.map(str::to_string),
+                path: path.to_string(),
+                keyword: "false",
+                collapsed_branches: Vec::new(),
             });
         }
+        Value::Object(object) => object,
         _ => return None,
     };
     let tool = tool_name_from_object(object).or_else(|| inherited_tool.map(str::to_string));
     let tool_ref = tool.as_deref();
-
-    for keyword in ["anyOf", "oneOf"] {
-        if object
-            .get(keyword)
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty)
-        {
-            return Some(UnsatisfiableJsonSchema {
-                tool,
-                path: child_path(path, keyword),
-                keyword,
-                collapsed_branches: collapsed_branches_from_object(object),
-            });
-        }
-    }
 
     if object
         .get("enum")
@@ -88,61 +78,72 @@ fn first_unsatisfiable_node(
         });
     }
 
-    if let Some(missing) = impossible_required_properties(object) {
-        return Some(UnsatisfiableJsonSchema {
-            tool,
-            path: child_path(path, "required"),
-            keyword: "required",
-            collapsed_branches: missing,
-        });
+    if schema_requires_object(object) {
+        if let Some(missing) = impossible_required_properties(object) {
+            return Some(UnsatisfiableJsonSchema {
+                tool: tool.clone(),
+                path: child_path(path, "required"),
+                keyword: "required",
+                collapsed_branches: missing,
+            });
+        }
+
+        if let (Some(Value::Object(properties)), Some(Value::Array(required))) =
+            (object.get("properties"), object.get("required"))
+        {
+            let properties_path = child_path(path, "properties");
+            for name in required.iter().filter_map(Value::as_str) {
+                if let Some(error) = properties.get(name).and_then(|schema| {
+                    first_unsatisfiable_node(schema, &child_path(&properties_path, name), tool_ref)
+                }) {
+                    return Some(error);
+                }
+            }
+        }
     }
 
-    if let Some(Value::Object(properties)) = object.get("properties") {
-        let properties_path = child_path(path, "properties");
-        if let Some(error) = properties.iter().find_map(|(name, schema)| {
-            first_unsatisfiable_node(schema, &child_path(&properties_path, name), tool_ref)
+    if let Some(Value::Array(children)) = object.get("allOf") {
+        let array_path = child_path(path, "allOf");
+        if let Some(error) = children.iter().enumerate().find_map(|(index, schema)| {
+            first_unsatisfiable_node(schema, &index_path(&array_path, index), tool_ref)
         }) {
             return Some(error);
         }
     }
-    for map_keyword in ["$defs", "definitions", "patternProperties"] {
-        if let Some(Value::Object(children)) = object.get(map_keyword) {
-            let map_path = child_path(path, map_keyword);
-            if let Some(error) = children.iter().find_map(|(name, schema)| {
-                first_unsatisfiable_node(schema, &child_path(&map_path, name), tool_ref)
-            }) {
-                return Some(error);
-            }
-        }
-    }
-    for schema_keyword in [
-        "items",
-        "contains",
-        "propertyNames",
-        "additionalProperties",
-        "not",
-        "if",
-        "then",
-        "else",
-        "unevaluatedProperties",
-    ] {
-        if let Some(error) = object.get(schema_keyword).and_then(|schema| {
-            first_unsatisfiable_node(schema, &child_path(path, schema_keyword), tool_ref)
-        }) {
-            return Some(error);
-        }
-    }
-    for array_keyword in ["anyOf", "oneOf", "allOf", "prefixItems"] {
-        if let Some(Value::Array(children)) = object.get(array_keyword) {
-            let array_path = child_path(path, array_keyword);
-            if let Some(error) = children.iter().enumerate().find_map(|(index, schema)| {
+
+    for keyword in ["anyOf", "oneOf"] {
+        let Some(Value::Array(children)) = object.get(keyword) else {
+            continue;
+        };
+        let array_path = child_path(path, keyword);
+        let all_branches_unsatisfiable = children.is_empty()
+            || children.iter().enumerate().all(|(index, schema)| {
                 first_unsatisfiable_node(schema, &index_path(&array_path, index), tool_ref)
-            }) {
-                return Some(error);
-            }
+                    .is_some()
+            });
+        if all_branches_unsatisfiable {
+            return Some(UnsatisfiableJsonSchema {
+                tool: tool.clone(),
+                path: array_path,
+                keyword,
+                collapsed_branches: collapsed_branches_from_object(object),
+            });
         }
     }
     None
+}
+
+/// Object-only keywords cannot make a schema unsatisfiable while a non-object
+/// value remains admissible. Deliberately require an explicit object-only type;
+/// cross-branch inference belongs in a fuller schema solver.
+fn schema_requires_object(object: &Map<String, Value>) -> bool {
+    match object.get("type") {
+        Some(Value::String(kind)) => kind == "object",
+        Some(Value::Array(kinds)) => {
+            !kinds.is_empty() && kinds.iter().all(|kind| kind.as_str() == Some("object"))
+        }
+        _ => false,
+    }
 }
 
 fn tool_name_from_object(object: &Map<String, Value>) -> Option<String> {
