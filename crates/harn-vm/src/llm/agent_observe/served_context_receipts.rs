@@ -1,4 +1,248 @@
+use super::chrono_now;
 pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
+
+use serde::Serialize;
+
+const MESSAGE_LINEAGE_SCHEMA: &str = "harn.llm.message_lineage.v1";
+const SERVED_MESSAGE_SCHEMA: &str = "harn.llm.served_message.v1";
+
+#[derive(Clone, Debug, Serialize)]
+struct ProjectionLineage {
+    policy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefix_hash: Option<String>,
+}
+
+impl Default for ProjectionLineage {
+    fn default() -> Self {
+        Self {
+            policy: "raw".to_string(),
+            event_ref: None,
+            prefix_hash: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ServedMessageKind {
+    User,
+    Assistant,
+    AssistantToolCall,
+    ToolResult,
+    Instruction,
+    ContextDirective,
+    CondensedMemory,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ServedMessageLineage {
+    position: usize,
+    role: String,
+    semantic_kind: ServedMessageKind,
+    message_content_hash: String,
+    definition_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_message_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compaction_receipt_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct MessageLineageManifest {
+    schema: &'static str,
+    call_id: String,
+    iteration: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    projection: ProjectionLineage,
+    messages: Vec<ServedMessageLineage>,
+}
+
+#[derive(Default)]
+struct SessionLineageContext {
+    source_messages: Vec<serde_json::Value>,
+    summary: Option<String>,
+    compaction_receipt_ref: Option<String>,
+    projection: ProjectionLineage,
+}
+
+fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn session_lineage_context(session_id: Option<&str>) -> SessionLineageContext {
+    let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
+        return SessionLineageContext::default();
+    };
+    let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
+        return SessionLineageContext::default();
+    };
+    let Some(transcript) = transcript.as_dict() else {
+        return SessionLineageContext::default();
+    };
+
+    let source_messages = crate::llm::helpers::transcript_message_list(transcript)
+        .unwrap_or_default()
+        .iter()
+        .map(crate::llm::helpers::vm_value_to_json)
+        .collect();
+    let summary = crate::llm::helpers::transcript_summary_text(transcript);
+    let mut projection = ProjectionLineage::default();
+    let mut found_projection = false;
+    let mut compaction_receipt_ref = None;
+
+    if let Some(crate::value::VmValue::List(events)) = transcript.get("events") {
+        for event in events.iter().rev() {
+            let event = crate::llm::helpers::vm_value_to_json(event);
+            let kind = event
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if !found_projection && kind == "transcript.projection" {
+                let metadata = event.get("metadata").unwrap_or(&serde_json::Value::Null);
+                projection = ProjectionLineage {
+                    policy: string_field(metadata, "policy").unwrap_or_else(|| "raw".to_string()),
+                    event_ref: string_field(&event, "id"),
+                    prefix_hash: string_field(metadata, "prefix_hash"),
+                };
+                found_projection = true;
+            }
+            if compaction_receipt_ref.is_none() && kind == "compaction" {
+                compaction_receipt_ref = event
+                    .pointer("/metadata/receipt/receipt_id")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+            }
+            if found_projection && compaction_receipt_ref.is_some() {
+                break;
+            }
+        }
+    }
+
+    SessionLineageContext {
+        source_messages,
+        summary,
+        compaction_receipt_ref,
+        projection,
+    }
+}
+
+fn message_role(message: &serde_json::Value) -> String {
+    string_field(message, "role").unwrap_or_else(|| "unknown".to_string())
+}
+
+fn message_semantic_kind(
+    message: &serde_json::Value,
+    compaction_receipt_ref: Option<&str>,
+) -> ServedMessageKind {
+    if compaction_receipt_ref.is_some() {
+        return ServedMessageKind::CondensedMemory;
+    }
+    if message.get("kind").and_then(serde_json::Value::as_str) == Some("system_reminder") {
+        return ServedMessageKind::ContextDirective;
+    }
+    match message.get("role").and_then(serde_json::Value::as_str) {
+        Some("user") => ServedMessageKind::User,
+        Some("assistant")
+            if message
+                .get("tool_calls")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|calls| !calls.is_empty()) =>
+        {
+            ServedMessageKind::AssistantToolCall
+        }
+        Some("assistant") => ServedMessageKind::Assistant,
+        Some("tool" | "tool_result") => ServedMessageKind::ToolResult,
+        Some("system" | "developer") => ServedMessageKind::Instruction,
+        _ => ServedMessageKind::Unknown,
+    }
+}
+
+fn source_message_index(
+    source: &[serde_json::Value],
+    message: &serde_json::Value,
+    after: usize,
+) -> Option<usize> {
+    source
+        .iter()
+        .enumerate()
+        .skip(after)
+        .find_map(|(index, candidate)| (candidate == message).then_some(index))
+        .or_else(|| source.iter().position(|candidate| candidate == message))
+}
+
+fn message_lineage_manifest(
+    messages: &[serde_json::Value],
+    iteration: usize,
+    call_id: &str,
+    session_id: Option<&str>,
+) -> MessageLineageManifest {
+    let context = session_lineage_context(session_id);
+    let mut source_cursor = 0usize;
+    let mut summary_linked = false;
+    let messages = messages
+        .iter()
+        .enumerate()
+        .map(|(position, message)| {
+            let source_message_index =
+                source_message_index(&context.source_messages, message, source_cursor);
+            if let Some(index) = source_message_index {
+                source_cursor = index.saturating_add(1);
+            }
+            let is_summary = !summary_linked
+                && context.summary.as_deref()
+                    == message.get("content").and_then(serde_json::Value::as_str);
+            summary_linked |= is_summary;
+            let compaction_receipt_ref = is_summary
+                .then(|| context.compaction_receipt_ref.clone())
+                .flatten();
+            let message_content_hash = stable_redacted_json_hash(message);
+            ServedMessageLineage {
+                position,
+                role: message_role(message),
+                semantic_kind: message_semantic_kind(message, compaction_receipt_ref.as_deref()),
+                definition_ref: message_content_hash.clone(),
+                message_content_hash,
+                source_message_index,
+                compaction_receipt_ref,
+            }
+        })
+        .collect();
+    MessageLineageManifest {
+        schema: MESSAGE_LINEAGE_SCHEMA,
+        call_id: call_id.to_string(),
+        iteration,
+        session_id: session_id.map(str::to_string),
+        projection: context.projection,
+        messages,
+    }
+}
+
+pub(super) fn served_message_definitions(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    messages
+        .iter()
+        .map(|message| {
+            let content_hash = stable_redacted_json_hash(message);
+            serde_json::json!({
+                "type": "served_message",
+                "timestamp": chrono_now(),
+                "span_id": crate::tracing::current_span_id(),
+                "schema": SERVED_MESSAGE_SCHEMA,
+                "content_hash": content_hash,
+                "message": message,
+            })
+        })
+        .collect()
+}
 
 /// Names of the tools the model was actually offered, in served order.
 ///
@@ -77,6 +321,9 @@ pub(super) fn served_context_receipt(
     payload: &super::super::api::LlmRequestPayload,
     manifest: &crate::llm::prompt::ContextAssemblyManifest,
     tool_schemas: &[crate::llm::tools::ToolSchema],
+    iteration: usize,
+    call_id: &str,
+    session_id: Option<&str>,
 ) -> serde_json::Value {
     let system_prompt = payload.system.as_deref().unwrap_or("");
     let messages = serde_json::Value::Array(payload.messages.clone());
@@ -87,6 +334,8 @@ pub(super) fn served_context_receipt(
         .map(|tools| serde_json::Value::Array(tools.clone()))
         .unwrap_or(serde_json::Value::Null);
     let manifest_value = manifest.as_json();
+    let message_lineage =
+        message_lineage_manifest(&payload.messages, iteration, call_id, session_id);
 
     serde_json::json!({
         "schema": "harn.llm.served_context.v1",
@@ -98,6 +347,7 @@ pub(super) fn served_context_receipt(
         "system_prompt_bytes": system_prompt.len(),
         "messages_content_hash": stable_redacted_json_hash(&messages),
         "message_count": payload.messages.len(),
+        "message_lineage": message_lineage,
         "tool_schemas_content_hash": stable_redacted_json_hash(&tool_schemas_value),
         "tool_schema_count": tool_schemas.len(),
         "served_tool_names": served_tool_names(tool_schemas, &native_tools),
@@ -697,6 +947,211 @@ mod tests {
             served_context["system_prompt_content_hash"],
             serde_json::json!(stable_redacted_string_hash(served_system)),
             "receipt digest must describe the post-conversion payload",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forced_compaction_context_is_exactly_reconstructable_without_a_provider() {
+        let _guard = crate::llm::env_guard();
+        let previous_verbose = set_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", None);
+        let dir = temp_transcript_dir("harn-served-context-compaction-lineage");
+        let dir_string = dir.to_string_lossy().to_string();
+        super::super::push_llm_transcript_dir(&dir_string);
+
+        let stable_goal = "stable_goal";
+        let recent_failure = "recent_failure";
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "archived task context"}),
+            serde_json::json!({"role": "assistant", "content": "archived investigation"}),
+            serde_json::json!({"role": "user", "content": "continue from current evidence"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": "checking",
+                "tool_calls": [{"id": "tool-1", "name": "verify", "arguments": {}}],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "tool-1",
+                "content": recent_failure,
+            }),
+        ];
+        let config = crate::orchestration::AutoCompactConfig {
+            token_threshold: 0,
+            keep_last: 3,
+            ..crate::orchestration::AutoCompactConfig::default()
+        };
+        let compacted =
+            crate::orchestration::auto_compact_messages_with_result(&mut messages, &config, None)
+                .await
+                .expect("deterministic compaction")
+                .expect("forced compaction must fire");
+        let condensed_memory = compacted.summary;
+        assert_eq!(messages[0]["content"], serde_json::json!(&condensed_memory));
+
+        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+            "served-context-compaction-{}",
+            uuid::Uuid::now_v7()
+        )));
+        crate::agent_sessions::replace_messages_with_summary(
+            &session_id,
+            &messages,
+            Some(&condensed_memory),
+        )
+        .expect("persist compacted session");
+        let receipt = crate::orchestration::CompactionReceipt {
+            schema_version: crate::orchestration::COMPACTION_RECEIPT_SCHEMA_VERSION,
+            receipt_id: "compaction-lineage-receipt".to_string(),
+            session_id: Some(session_id.clone()),
+            mode: "auto".to_string(),
+            reason: "threshold".to_string(),
+            strategy: "observation_mask".to_string(),
+            engine_strategy: "observation_mask".to_string(),
+            archived_messages: 2,
+            estimated_tokens_before: 1,
+            estimated_tokens_after: 1,
+            ..crate::orchestration::CompactionReceipt::default()
+        };
+        let compaction_event = crate::llm::helpers::transcript_event_with_id(
+            &receipt.receipt_id,
+            "compaction",
+            "system",
+            "internal",
+            "",
+            Some(serde_json::json!({"receipt": receipt.to_json()})),
+        );
+        crate::agent_sessions::append_event(&session_id, compaction_event)
+            .expect("persist compaction receipt");
+
+        let transcript = crate::agent_sessions::transcript(&session_id)
+            .and_then(|value| value.as_dict().cloned())
+            .expect("compacted transcript");
+        let projection_policy = crate::stdlib::transcript_project::parse_projection_options(
+            &crate::value::VmValue::Nil,
+        )
+        .expect("default projection policy");
+        let projection = crate::stdlib::transcript_project::project_transcript(
+            None,
+            &transcript,
+            &projection_policy,
+        )
+        .await
+        .expect("deterministic raw projection");
+        let projection_event = crate::stdlib::transcript_project::projection_event_value(
+            &projection,
+            &projection_policy,
+        );
+        let projection_event_json = crate::llm::helpers::vm_value_to_json(&projection_event);
+        crate::agent_sessions::append_event(&session_id, projection_event)
+            .expect("persist projection receipt");
+
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-test".to_string();
+        opts.system = Some(stable_goal.to_string());
+        opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
+            "test:stable-goal",
+            "test",
+            "agent_loop",
+            opts.system.as_deref(),
+        );
+        opts.messages = projection.messages;
+        opts.session_id = Some(session_id);
+
+        let payload = super::super::dump_llm_request(7, "call-after-compaction", "native", &opts)
+            .expect("provider-bound request is observable without dispatch");
+        super::super::pop_llm_transcript_dir();
+        restore_env_for_test("HARN_LLM_TRANSCRIPT_VERBOSE", previous_verbose);
+
+        let events = read_transcript_events(&dir);
+        let system = events
+            .iter()
+            .find(|event| event["type"] == "system_prompt")
+            .expect("stable goal definition");
+        assert_eq!(system["content"], serde_json::json!(stable_goal));
+
+        let definitions: std::collections::BTreeMap<String, serde_json::Value> = events
+            .iter()
+            .filter(|event| event["type"] == "served_message")
+            .map(|event| {
+                (
+                    event["content_hash"]
+                        .as_str()
+                        .expect("message definition hash")
+                        .to_string(),
+                    event["message"].clone(),
+                )
+            })
+            .collect();
+        let request = events
+            .iter()
+            .find(|event| event["type"] == "provider_call_request")
+            .expect("provider request receipt");
+        let lineage = &request["served_context"]["message_lineage"];
+        assert_eq!(
+            lineage["call_id"],
+            serde_json::json!("call-after-compaction")
+        );
+        assert_eq!(lineage["iteration"], serde_json::json!(7));
+        assert_eq!(lineage["projection"]["policy"], serde_json::json!("raw"));
+        assert_eq!(
+            lineage["projection"]["event_ref"],
+            projection_event_json["id"]
+        );
+        assert_eq!(
+            lineage["projection"]["prefix_hash"],
+            projection_event_json["metadata"]["prefix_hash"]
+        );
+
+        let lineage_messages = lineage["messages"].as_array().expect("ordered lineage");
+        let reconstruct = |definitions: &std::collections::BTreeMap<String, serde_json::Value>| {
+            lineage_messages
+                .iter()
+                .map(|entry| {
+                    entry["definition_ref"]
+                        .as_str()
+                        .and_then(|definition_ref| definitions.get(definition_ref))
+                        .cloned()
+                })
+                .collect::<Option<Vec<_>>>()
+        };
+        let reconstructed = reconstruct(&definitions).expect("complete message definitions");
+        assert_eq!(reconstructed, payload.messages);
+        assert_eq!(
+            reconstructed[0]["content"],
+            serde_json::json!(&condensed_memory)
+        );
+        assert_eq!(
+            reconstructed.last().expect("recent message")["content"],
+            serde_json::json!(recent_failure)
+        );
+        assert_eq!(
+            lineage_messages[0]["semantic_kind"],
+            serde_json::json!("condensed_memory")
+        );
+        assert_eq!(
+            lineage_messages[0]["compaction_receipt_ref"],
+            serde_json::json!("compaction-lineage-receipt")
+        );
+        assert_eq!(
+            lineage_messages.last().expect("recent lineage")["semantic_kind"],
+            serde_json::json!("tool_result")
+        );
+        assert_eq!(
+            request["served_context"]["messages_content_hash"],
+            serde_json::json!(stable_redacted_json_hash(&serde_json::Value::Array(
+                reconstructed.clone()
+            )))
+        );
+
+        let missing_ref = lineage_messages[0]["definition_ref"]
+            .as_str()
+            .expect("falsifier ref");
+        let mut incomplete = definitions;
+        incomplete.remove(missing_ref);
+        assert!(
+            reconstruct(&incomplete).is_none(),
+            "the negative control must make reconstruction fail closed"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

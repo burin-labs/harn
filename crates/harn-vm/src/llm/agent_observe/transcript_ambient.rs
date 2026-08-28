@@ -13,6 +13,9 @@ thread_local! {
     /// active transcript. Unlike prompt/schema state, template renders carry
     /// an explicit snapshot reference, so A/B/A may safely emit A only once.
     static EMITTED_CAPABILITY_SNAPSHOT_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    /// Content-addressed provider-visible messages already defined in the
+    /// active transcript. Request receipts carry these ids in served order.
+    static EMITTED_SERVED_MESSAGE_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -25,6 +28,7 @@ pub(crate) struct LlmTranscriptAmbient {
     context_manifest_hash: Option<u64>,
     tool_schemas_hash: Option<u64>,
     capability_snapshot_ids: BTreeSet<String>,
+    served_message_ids: BTreeSet<String>,
     transcript_dirs: Vec<String>,
 }
 
@@ -43,6 +47,9 @@ pub(crate) fn swap_llm_transcript_ambient(
         capability_snapshot_ids: EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|slot| {
             std::mem::replace(&mut *slot.borrow_mut(), replacement.capability_snapshot_ids)
         }),
+        served_message_ids: EMITTED_SERVED_MESSAGE_IDS.with(|slot| {
+            std::mem::replace(&mut *slot.borrow_mut(), replacement.served_message_ids)
+        }),
         transcript_dirs: TRANSCRIPT_DIR_STACK
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
     }
@@ -53,6 +60,7 @@ fn reset_deduplication() {
     LAST_CONTEXT_MANIFEST_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
     EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
+    EMITTED_SERVED_MESSAGE_IDS.with(|ids| ids.borrow_mut().clear());
 }
 
 pub(super) fn system_prompt_changed(current: u64) -> bool {
@@ -86,6 +94,26 @@ pub(super) fn record_capability_snapshot_definition(snapshot_id: &str) {
     if current_transcript_dir().is_some() {
         EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| {
             ids.borrow_mut().insert(snapshot_id.to_string());
+        });
+    }
+}
+
+/// Whether a provider-visible message needs a retained definition in the
+/// active transcript. Unscoped sinks receive definitions beside every
+/// reference because they cannot promise that an earlier definition remains
+/// reachable.
+pub(super) fn served_message_needs_definition(message_id: &str) -> bool {
+    if current_transcript_dir().is_none() {
+        return true;
+    }
+    EMITTED_SERVED_MESSAGE_IDS.with(|ids| !ids.borrow().contains(message_id))
+}
+
+/// Claim a provider-visible message definition only after persistence.
+pub(super) fn record_served_message_definition(message_id: &str) {
+    if current_transcript_dir().is_some() {
+        EMITTED_SERVED_MESSAGE_IDS.with(|ids| {
+            ids.borrow_mut().insert(message_id.to_string());
         });
     }
 }

@@ -11,9 +11,9 @@ use super::*;
 /// handles for the same path can interleave their bytes mid-line and
 /// produce invalid JSON that downstream readers (and tests) silently
 /// drop.
-pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
+pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) -> bool {
     let dir = current_transcript_dir();
-    let _ = try_append_llm_transcript_entry_to_dir(entry, dir.as_deref());
+    try_append_llm_transcript_entry_to_dir(entry, dir.as_deref())
 }
 
 pub(super) fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) {
@@ -420,6 +420,17 @@ pub(super) fn dump_llm_request(
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
+    for definition in served_context_receipts::served_message_definitions(&payload.messages) {
+        let Some(message_id) = definition
+            .get("content_hash")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if served_message_needs_definition(message_id) && append_llm_transcript_entry(&definition) {
+            record_served_message_definition(message_id);
+        }
+    }
 
     let structural_experiment = opts
         .applied_structural_experiment
@@ -497,6 +508,9 @@ pub(super) fn dump_llm_request(
             &payload,
             &served_manifest,
             &tool_schemas,
+            iteration,
+            call_id,
+            opts.session_id.as_deref(),
         ),
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,

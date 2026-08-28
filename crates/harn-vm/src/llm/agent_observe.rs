@@ -32,6 +32,7 @@
 //!   the visible conversation. Emitted every time a message lands in the
 //!   transcript (user task, nudge, assistant reply, tool result, host
 //!   push).
+//! - `served_message` — one deduplicated, redacted message definition.
 //! - `routing_decision` `{call_id, iteration, policy, requested_quality,
 //!   selected_provider, selected_model, fallback_chain, alternatives}` —
 //!   emitted once before `provider_call_request` whenever a routing
@@ -44,9 +45,9 @@
 //!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
 //!   `structured_output` records mode, strictness, and stable redacted hashes
 //!   for the requested and provider-compatible schemas, never schema contents.
-//!   `served_context` carries stable redacted prompt/schema/tool hashes and
-//!   `manifest_content_hash`, which resolves to an earlier retained
-//!   `context_manifest` event.
+//!   `served_context` carries prompt/schema/tool hashes, a context-manifest
+//!   hash, and ordered message lineage joined to call, projection, compaction,
+//!   source index, semantic kind, and retained redacted message definitions.
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
@@ -71,10 +72,8 @@
 //!   tool_calls, tool_parse_errors}` — post-parse view of the last
 //!   assistant turn.
 //!
-//! To reconstruct the prompt sent at `call_id=X`, replay events in order
-//! and track the last `system_prompt`, `context_manifest`, and `tool_schemas`,
-//! plus every `message` up to (but not including) the matching
-//! `provider_call_request`.
+//! Reconstruct `call_id=X` from its system, context, schema, and ordered message
+//! references; projection and compaction no longer require prefix guesswork.
 //!
 //! `system_prompt`, `context_manifest`, and `tool_schemas` are emitted only
 //! when their payload changes, so a call's `served_context` hashes usually
@@ -111,7 +110,8 @@ mod transcript_ambient;
 
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
-    record_capability_snapshot_definition, system_prompt_changed, tool_schemas_changed,
+    record_capability_snapshot_definition, record_served_message_definition,
+    served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
     current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,

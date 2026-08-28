@@ -186,8 +186,40 @@ pub fn read_agent_result_result(
 // events. `mode` is one of disabled/enabled/adaptive/effort/off.
 pub type ThinkingConfig = {mode: string, enabled: bool, budget_tokens?: int?, level?: string}
 
+pub type ServedMessageSemanticKind = "user" \
+  | "assistant" \
+  | "assistant_tool_call" \
+  | "tool_result" \
+  | "instruction" \
+  | "context_directive" \
+  | "condensed_memory" \
+  | "unknown"
+
+pub type ServedMessageLineage = {
+  position: int,
+  role: string,
+  semantic_kind: ServedMessageSemanticKind,
+  message_content_hash: string,
+  definition_ref: string,
+  source_message_index?: int,
+  compaction_receipt_ref?: string,
+}
+
+pub type ServedContextProjectionLineage = {policy: string, event_ref?: string, prefix_hash?: string}
+
+pub type ServedMessageLineageManifest = {
+  schema: "harn.llm.message_lineage.v1",
+  call_id: string,
+  iteration: int,
+  session_id?: string,
+  projection: ServedContextProjectionLineage,
+  messages: list<ServedMessageLineage>,
+}
+
 // Self-describing served-context receipt (`harn.llm.served_context.v1`). Every
-// hash is REDACTED content, never the content itself.
+// hash is over redacted content. The ordered lineage resolves each message to
+// one content-addressed `served_message` event so a reader can reconstruct the
+// exact provider-visible sequence without verbose snapshots.
 pub type ServedContext = {
   schema: string,
   redaction: string,
@@ -198,10 +230,21 @@ pub type ServedContext = {
   system_prompt_bytes: int,
   messages_content_hash: string,
   message_count: int,
+  message_lineage?: ServedMessageLineageManifest,
   tool_schemas_content_hash: string,
   tool_schema_count: int,
   native_tools_content_hash: string,
   native_tool_count: int,
+}
+
+pub type ServedMessageEvent = {
+  type: "served_message",
+  timestamp: string,
+  span_id?: int?,
+  schema: "harn.llm.served_message.v1",
+  content_hash: string,
+  message: unknown,
+  schema_version?: int,
 }
 
 // One system-prompt contributor in wire order. `digest` and all whole-prompt
@@ -424,6 +467,7 @@ pub type ResolvedDispatchEvent = {
 pub type TranscriptEvent = SystemPromptEvent \
   | ContextManifestEvent \
   | ToolSchemasEvent \
+  | ServedMessageEvent \
   | RoutingDecisionEvent \
   | ProviderCallRequestEvent \
   | ProviderCallResponseEvent \
@@ -466,6 +510,11 @@ pub fn transcript_event_spec() -> DiscriminatedSpec {
         schema_of(ContextManifestEvent),
       ),
       __event_family("tool_schemas", "harn.transcript.tool_schemas", schema_of(ToolSchemasEvent)),
+      __event_family(
+        "served_message",
+        "harn.transcript.served_message",
+        schema_of(ServedMessageEvent),
+      ),
       __event_family(
         "routing_decision",
         "harn.transcript.routing_decision",
