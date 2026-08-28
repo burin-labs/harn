@@ -157,6 +157,9 @@
             },
             "write_roots": {
               "$ref": "#/$defs/stringArray"
+            },
+            "allow_tcp_loopback": {
+              "type": "boolean"
             }
           }
         }

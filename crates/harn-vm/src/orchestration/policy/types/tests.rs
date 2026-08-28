@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use super::{
     intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ModelPolicy,
-    ProcessNetworkProxy, RequiredSuccessfulTool, SandboxProfile,
+    ProcessNetworkProxy, ProcessSandboxPolicy, RequiredSuccessfulTool, SandboxProfile,
 };
 
 #[test]
@@ -142,6 +142,43 @@ fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
         roots.is_empty(),
         "/repo-backup is beside /repo, not inside it: {roots:?}"
     );
+}
+
+#[test]
+fn tcp_loopback_is_host_owned_process_authority() {
+    let allowed = CapabilityPolicy {
+        process_sandbox: ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            ..ProcessSandboxPolicy::default()
+        },
+        ..CapabilityPolicy::default()
+    };
+    let denied = CapabilityPolicy::default();
+
+    assert!(
+        allowed
+            .intersect(&allowed)
+            .expect("matching loopback grants intersect")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    assert!(
+        allowed
+            .intersect(&denied)
+            .expect("a nested policy cannot erase host loopback authority")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    assert!(
+        !denied
+            .intersect(&allowed)
+            .expect("a nested policy cannot invent loopback authority")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    denied
+        .assert_within_ceiling(&allowed)
+        .expect_err("a flattened stage cannot invent loopback authority");
 }
 
 #[test]

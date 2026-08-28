@@ -187,6 +187,7 @@
       "policy": {
         "capabilities": {},
         "process_sandbox": {
+          "allow_tcp_loopback": false,
           "presets": null,
           "read_roots": [],
           "write_roots": []

@@ -356,6 +356,17 @@ fn render_profile_with_extra_read_roots(
             profile.push_str("(allow network*)\n");
         }
     }
+    if policy.process_sandbox.allow_tcp_loopback {
+        // Local test servers need all three operations: bind/listen, accept,
+        // and the client connection back to the listener. Match the remote
+        // endpoint on outbound. A `local ip` outbound filter also matches an
+        // unbound socket's wildcard source and would silently admit remote
+        // egress. Keeping these rules separate from `network*` preserves the
+        // managed-proxy boundary when the run also has provider/network work.
+        profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+        profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+        profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+    }
     profile
 }
 
@@ -1045,6 +1056,29 @@ mod tests {
         allowed.side_effect_level = Some("network".to_string());
         let allowed_profile = render_profile(&allowed);
         assert!(allowed_profile.contains("(allow network*)"));
+    }
+
+    #[test]
+    fn tcp_loopback_policy_does_not_open_remote_network() {
+        let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+        policy.side_effect_level = Some("process_exec".to_string());
+        policy.process_sandbox.allow_tcp_loopback = true;
+
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow network-bind (local ip \"localhost:*\"))"),
+            "{profile}"
+        );
+        assert!(
+            profile.contains("(allow network-inbound (local ip \"localhost:*\"))"),
+            "{profile}"
+        );
+        assert!(
+            profile.contains("(allow network-outbound (remote ip \"localhost:*\"))"),
+            "{profile}"
+        );
+        assert!(!profile.contains("(allow network*)"), "{profile}");
     }
 
     #[test]

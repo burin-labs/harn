@@ -210,6 +210,7 @@ fn test_time_run_shares_the_run_confinement_surface() {
         "--write-root",
         "../receipts",
         "--allow-process-network",
+        "--allow-process-loopback",
     ];
     let run = {
         let mut argv = vec!["harn", "run"];
@@ -234,6 +235,7 @@ fn test_time_run_shares_the_run_confinement_surface() {
     assert_eq!(timed.grant, run.grant);
     assert_eq!(timed.write_root, run.write_root);
     assert_eq!(timed.allow_process_network, run.allow_process_network);
+    assert_eq!(timed.allow_process_loopback, run.allow_process_loopback);
 }
 
 #[test]

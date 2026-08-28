@@ -60,6 +60,7 @@ fn capability_intersection_narrows_process_sandbox_policy() {
             ]),
             read_roots: vec!["/opt/sdk".to_string()],
             write_roots: vec!["/opt/cache".to_string()],
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -71,6 +72,7 @@ fn capability_intersection_narrows_process_sandbox_policy() {
             ]),
             read_roots: vec!["/opt/sdk".to_string(), "/opt/other".to_string()],
             write_roots: vec!["/opt/cache".to_string(), "/opt/other-cache".to_string()],
+            ..Default::default()
         },
         ..Default::default()
     };

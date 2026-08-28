@@ -110,6 +110,12 @@ fn profile_setup(
                 .to_string(),
         ));
     }
+    if policy.process_sandbox.allow_tcp_loopback && !policy_allows_network(policy) {
+        return Err(sandbox_rejection(
+            "TCP loopback-only child networking requires a private Linux network namespace; this build cannot enforce that boundary"
+                .to_string(),
+        ));
+    }
     // landlock_profile() returns Err under OsHardened when Landlock is
     // unavailable (effective_fallback resolves to Enforce), so the
     // OsHardened "must engage" contract is enforced before fork rather

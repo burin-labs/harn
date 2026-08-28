@@ -32,6 +32,14 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub allow_process_network: bool,
+    /// Permit child processes to bind and connect TCP loopback sockets while
+    /// retaining the external-egress deny. Unsupported OS backends fail closed.
+    #[arg(
+        long = "allow-process-loopback",
+        action = clap::ArgAction::SetTrue,
+        conflicts_with = "no_sandbox"
+    )]
+    pub allow_process_loopback: bool,
     /// Extra read-only filesystem roots. Repeatable; each path is
     /// readable but never writable.
     #[arg(
