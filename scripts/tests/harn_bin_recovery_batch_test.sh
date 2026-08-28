@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This test owns the binary resolver seam below. A caller-owned binary would
+# bypass the disposable recovery fixture entirely.
+unset HARN_BIN
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # The path is repository-relative but resolved dynamically for fixture use.
 # shellcheck disable=SC1091
