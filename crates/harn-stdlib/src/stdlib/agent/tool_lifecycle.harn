@@ -55,6 +55,19 @@ pub fn agent_tool_handler_result<T>(text: string, data: T) -> AgentToolHandlerRe
   return {schema: "harn.agent_tool_handler_result.v1", text: text, data: data}
 }
 
+/** Preserve an explicit typed handler result, or pair rendered text with producer data. */
+pub fn agent_tool_handler_result_normalize<T>(
+  rendered: unknown,
+  data: T,
+) -> AgentToolHandlerResult<unknown> {
+  if type_of(rendered) == "dict"
+    && rendered?.schema == "harn.agent_tool_handler_result.v1"
+    && type_of(rendered?.text) == "string" {
+    return agent_tool_handler_result(rendered.text, rendered?.data)
+  }
+  return agent_tool_handler_result(to_string(rendered), data)
+}
+
 const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
   "schema_validation",
   "tool_error",
