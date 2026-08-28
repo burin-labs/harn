@@ -182,6 +182,12 @@ pub type CompactionPolicy = {
   author?: string,
 }
 
+/** One stable, host-projected acceptance item for a completion decision. */
+pub type CompletionRequirement = {requirement_id: string, name: string}
+
+/** Atomic acceptance items the existing completion judge must account for. */
+pub type CompletionRequirementContract = {requirements: list<CompletionRequirement>}
+
 /**
  * Structured judge config accepted by `done_judge:` and
  * `verify_completion_judge:`. Validated by the judge option validators
@@ -198,6 +204,7 @@ pub type JudgeConfig = {
   timeout_ms?: int,
   operation_timeout_ms?: int,
   deadline_reserve_ms?: int,
+  requirement_contract?: CompletionRequirementContract,
   cadence?: {every?: int, when?: any, max_invocations?: int, min_iterations_before_first?: int},
 }
 

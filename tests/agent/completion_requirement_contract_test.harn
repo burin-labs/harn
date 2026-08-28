@@ -1,0 +1,242 @@
+// Run: harn test tests/agent/completion_requirement_contract_test.harn
+import {
+  CompletionRequirementEvidencePacket,
+  completion_requirement_report,
+} from "std/agent/completion_requirements"
+import { agent_capture_events } from "std/agent/events"
+import { __judge_completion_verdict_read, __judge_completion_verdict_schema } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
+import { llm_done, with_llm_script } from "std/testing"
+
+fn requirement_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {requirement_id: "artifact", name: "Create the requested artifact."},
+      {requirement_id: "behavior", name: "Exercise the requested behavior."},
+    ],
+  }
+}
+
+fn evidence_packet() -> CompletionRequirementEvidencePacket {
+  return {actions: [{evidence_index: 4}, {evidence_index: 9}], fallback_observations: []}
+}
+
+fn completion_receipts(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+fn edit_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "edit",
+    "Apply a source edit.",
+    {
+      handler: { _args -> "write applied" },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+pipeline test_requirement_report_joins_every_row_to_real_evidence(harness: Harness, task: unknown) {
+  const report = completion_requirement_report(
+    requirement_contract(),
+    [
+      {requirement_id: "artifact", met: true, evidence_refs: [4]},
+      {requirement_id: "behavior", met: true, evidence_refs: [9]},
+    ],
+    evidence_packet(),
+  )
+  assert(report.complete)
+  assert_eq(report.pending_count, 0)
+  assert_eq(report.rows.map({ row -> row.status }).to_list(), ["met", "met"])
+}
+
+pipeline test_requirement_report_fails_closed_on_missing_duplicate_and_unsupported_rows(
+  harness: Harness,
+  task: unknown,
+) {
+  const missing = completion_requirement_report(
+    requirement_contract(),
+    [{requirement_id: "artifact", met: true, evidence_refs: [4]}],
+    evidence_packet(),
+  )
+  assert(!missing.complete)
+  assert_eq(missing.pending_count, 1)
+  assert_eq(missing.pending_names, ["Exercise the requested behavior."])
+  assert_eq(missing.rows[1].status, "missing")
+  const duplicate = completion_requirement_report(
+    requirement_contract(),
+    [
+      {requirement_id: "artifact", met: true, evidence_refs: [4]},
+      {requirement_id: "artifact", met: true, evidence_refs: [4]},
+      {requirement_id: "behavior", met: true, evidence_refs: [9]},
+    ],
+    evidence_packet(),
+  )
+  assert(!duplicate.complete)
+  assert_eq(duplicate.rows[0].status, "unsupported")
+  const unsupported = completion_requirement_report(
+    requirement_contract(),
+    [
+      {requirement_id: "artifact", met: true, evidence_refs: [404]},
+      {requirement_id: "behavior", met: true, evidence_refs: [9]},
+    ],
+    evidence_packet(),
+  )
+  assert(!unsupported.complete)
+  assert_eq(unsupported.rows[0].status, "unsupported")
+  const extra = completion_requirement_report(
+    requirement_contract(),
+    [
+      {requirement_id: "artifact", met: true, evidence_refs: [4]},
+      {requirement_id: "behavior", met: true, evidence_refs: [9]},
+      {requirement_id: "invented", met: true, evidence_refs: [4]},
+    ],
+    evidence_packet(),
+  )
+  assert(!extra.complete)
+  assert_eq(extra.pending_count, 1)
+  assert_eq(extra.pending_names, ["Unknown requirement `invented`"])
+}
+
+pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completion_seam(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The work is complete.",
+            requirement_report: [
+              {requirement_id: "artifact", met: true, evidence_refs: [2]},
+              {requirement_id: "behavior", met: false, evidence_refs: []},
+            ],
+          },
+        ),
+      },
+      llm_done(),
+    ],
+    { ->
+      const session = "requirement-contract-negative-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: edit_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {
+          provider: "mock",
+          max_invocations: 1,
+          requirement_contract: requirement_contract(),
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Create and exercise the requested behavior.", nil, opts) },
+      )
+      const requirement_receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(requirement_receipts), 1)
+      assert_eq(requirement_receipts[0].action, "continue")
+      assert_eq(requirement_receipts[0].reason, "completion_requirements_pending")
+      assert_eq(requirement_receipts[0].requirements.pending_count, 1)
+      assert_eq(
+        requirement_receipts[0].requirements.pending_names,
+        ["Exercise the requested behavior."],
+      )
+    },
+  )
+}
+
+pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "Every requirement has direct evidence.",
+            requirement_report: [
+              {requirement_id: "artifact", met: true, evidence_refs: [2]},
+              {requirement_id: "behavior", met: true, evidence_refs: [2]},
+            ],
+          },
+        ),
+      },
+    ],
+    { ->
+      const session = "requirement-contract-positive-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: edit_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        verify_completion_judge: {
+          provider: "mock",
+          max_invocations: 1,
+          requirement_contract: requirement_contract(),
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Create and exercise the requested behavior.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      const receipts = completion_receipts(captured.events)
+      assert_eq(receipts[len(receipts) - 1].action, "accept")
+      assert(receipts[len(receipts) - 1].requirements.complete)
+    },
+  )
+}
+
+pipeline test_requirement_schema_is_optional_for_legacy_judges(harness: Harness, task: unknown) {
+  const legacy = __judge_completion_verdict_schema()
+  const contracted = __judge_completion_verdict_schema(requirement_contract())
+  assert_eq(legacy.properties.requirement_report, nil)
+  assert_eq(contracted.properties.requirement_report.type, "array")
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "done", detail: "Complete."},
+    requirement_contract(),
+    evidence_packet(),
+  )
+  assert(decoded.requirement_report?.complete == false)
+  assert_eq(decoded.requirement_report?.pending_count, 2)
+}
