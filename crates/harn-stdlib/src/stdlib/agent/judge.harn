@@ -906,18 +906,8 @@ fn __judge_invoke_structured(
         typed_checkpoint: checkpoint,
       }
     }
-    if judge_cfg.fail_open_on_error ?? false {
-      return {
-        vetoed: false,
-        verdict: "done",
-        reasoning: to_string(checkpoint.error),
-        next_step: "",
-        judge_duration_ms: duration_ms,
-        source: "llm",
-        admission: ran.admission,
-        typed_checkpoint: checkpoint,
-      }
-    }
+    // A completion judge is an authority gate, not an advisory reviewer. If it
+    // cannot decide, the claim remains unverified.
     return {
       vetoed: true,
       feedback: to_string(checkpoint.error),
@@ -926,6 +916,8 @@ fn __judge_invoke_structured(
       next_step: to_string(checkpoint.error),
       judge_duration_ms: duration_ms,
       source: "llm",
+      judge_outcome: "error",
+      reason: "completion_judge_error",
       admission: ran.admission,
       typed_checkpoint: checkpoint,
     }
@@ -1059,7 +1051,6 @@ pub fn agent_done_contract(options: dict = {}) -> dict {
   const bundle = {
     done_judge: judge
       + {
-        fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error ?? false,
         feedback_fallback: opts?.feedback_fallback
           ?? judge?.feedback_fallback
           ?? "The done claim is not yet justified; address the specific gaps before finishing.",

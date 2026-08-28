@@ -194,7 +194,6 @@ pub type JudgeConfig = {
   model?: string,
   system?: string,
   feedback_fallback?: string,
-  fail_open_on_error?: bool,
   max_invocations?: int,
   timeout_ms?: int,
   operation_timeout_ms?: int,

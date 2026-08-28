@@ -198,9 +198,51 @@ fn run_diagnosis_recovery(harness: Harness) {
   )
 }
 
+/**
+ * A prior judge veto remains authoritative at the next natural boundary. This
+ * is the production shape that matters for long coding runs: after the final
+ * allowed judge call says `continue`, a later prose-only turn at the iteration
+ * boundary must not turn the unaccepted work into a successful session.
+ */
+fn run_natural_after_veto_cap(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First proposal. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is incomplete.\"}"),
+      llm_text("Second proposal. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Evidence is still incomplete.\"}"),
+      llm_text("Final prose without a completion marker."),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Keep working until the completion authority accepts the evidence.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 10,
+          done_sentinel: "##DONE##",
+          verify_completion_judge: {max_invocations: 2},
+          done_judge: {max_invocations: 2},
+          post_turn_callback: { _info -> return {stop: true, stop_reason: "natural"} },
+        },
+      )
+      harness.stdio.println("natural_after_veto.status=${result.status}")
+      harness.stdio.println("natural_after_veto.stop_reason=${result.stop_reason}")
+      harness.stdio.println("natural_after_veto.invocations=${result.completion_judge.invocations}")
+      harness.stdio.println("natural_after_veto.vetoes=${result.completion_judge.vetoes}")
+      harness.stdio.println("natural_after_veto.cap_reached=${result.completion_judge.cap_reached}")
+    },
+  )
+}
+
 pipeline default(harness: Harness) {
   run_capped(harness)
   run_approved(harness)
   run_cap_disabled(harness)
   run_diagnosis_recovery(harness)
+  run_natural_after_veto_cap(harness)
 }
