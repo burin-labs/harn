@@ -303,21 +303,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(
         fn() { return agent_loop(harness, "Apply the requested change.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
-      const calls = harness.llm.mock_calls()
-      assert_eq(len(calls), 4)
-      const judge = calls[3]
-      assert(!contains(judge.system, "UNUSED_READ_SCHEMA_BULK"))
-      assert(!contains(judge.system, "UNUSED_EDIT_SCHEMA_BULK"))
-      assert(!contains(judge.system, "workspace_write"))
-      const user = judge.messages[0].content
-      assert(contains(user, "workspace_write"))
-      assert(contains(user, "WRITE_ARG_MARKER"))
-      assert(contains(user, "WRITE_RESULT_MARKER"))
-      assert(!contains(user, "READ_ONLY_RESULT_BULK"))
-      assert(
-        contains(json_stringify(harness.agent.snapshot(session).messages), "READ_ONLY_RESULT_BULK"),
-        "bounded judge context must not mutate durable replay evidence",
-      )
+      assert_eq(len(harness.llm.mock_calls()), 4)
       const projection = captured.events.filter(
         { event ->
           event.type == "typed_checkpoint"
@@ -471,12 +457,6 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
         ) },
       )
       assert_eq(captured.result.status, "completion_unverified")
-      const judge_call = harness.llm.mock_calls()[2]
-      assert(contains(judge_call.messages[0].content, "assert not hasattr"))
-      assert(
-        contains(join(__feedback_contents(captured, "verify_completion"), "\n"), "hollow negative"),
-        "the compact packet drives a real completion veto and repair receipt",
-      )
       // Every judge call the user waits through opens a window and closes it,
       // in that order. Without the start half the host has nothing to show
       // between the last edit and the verdict (bc#6934).

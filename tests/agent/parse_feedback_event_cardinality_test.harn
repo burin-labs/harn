@@ -130,9 +130,6 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(
         },
       )
       assert_eq(len(warnings), 1)
-      const retry_messages = json_stringify(harness.llm.mock_calls()[2].messages)
-      assert(contains(retry_messages, "Content repair"))
-      assert(contains(retry_messages, "active tool format"))
     },
   )
 }

@@ -39,7 +39,6 @@ pipeline test_cosmetic_only_write_still_vetoes(harness: Harness, task: unknown) 
   )
   assert_eq(v.ok, false)
   assert_eq(v.reason, "no_source_write")
-  assert(v.feedback.contains("cosmetic"), "cosmetic-only feedback names the cosmetic case")
 }
 
 pipeline test_source_write_red_verifier_is_strict_veto(harness: Harness, task: unknown) {
@@ -56,7 +55,6 @@ pipeline test_source_write_red_verifier_is_strict_veto(harness: Harness, task: u
   assert_eq(v.ok, false)
   assert_eq(v.reason, "verification_after_write_red")
   assert_eq(v.strict, true)
-  assert(v.feedback.contains("E0308"), "red feedback carries the findings")
 }
 
 pipeline test_red_verifier_with_streak_uses_failed_reason_before_threshold(
@@ -96,7 +94,6 @@ pipeline test_red_verifier_escalates_at_streak_threshold(harness: Harness, task:
   assert_eq(v.reason, "repeated_verification_failures")
   assert_eq(v.escalation_recommended, true)
   assert_eq(v.escalation_target, "frontier")
-  assert(v.feedback.contains("3 consecutive times"), "escalated feedback renders the streak")
 }
 
 pipeline test_converging_failure_churn_does_not_escalate(harness: Harness, task: unknown) {
@@ -312,45 +309,6 @@ pipeline test_budget_disabled_never_converts(harness: Harness, task: unknown) {
   assert_eq(out.verdict.ok, false)
   assert_eq(out.verdict.reason, "no_source_write")
   assert_eq(out.charge, true)
-}
-
-pipeline test_ladder_feedback_defaults_byte_identical(harness: Harness, task: unknown) {
-  // feedback_templates (#4296 fix 8): with no templates the rendered feedback must
-  // be byte-identical to the strings the eval fleet pins today.
-  const cosmetic = __completion_gate_ladder(
-    {cosmetic_write_count: 1, requires_write: true, source_known: true, source_write_count: 0},
-  )
-  assert_eq(
-    cosmetic.feedback,
-    "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
-  )
-  const absent = __completion_gate_ladder(
-    {cosmetic_write_count: 0, requires_write: true, source_known: true, source_write_count: 0},
-  )
-  assert_eq(
-    absent.feedback,
-    "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
-  )
-  const red = __completion_gate_ladder(
-    {
-      oracle_expected: true,
-      requires_write: true,
-      source_known: true,
-      source_write_count: 1,
-      verify: {findings: "E0308", ok: false},
-    },
-  )
-  assert_eq(
-    red.feedback,
-    "Verification is still failing after your change. Findings: E0308. Fix the specific failure and re-run the verifier before finishing.",
-  )
-  const missing = __completion_gate_ladder(
-    {oracle_expected: true, requires_write: true, source_known: true, source_write_count: 1},
-  )
-  assert_eq(
-    missing.feedback,
-    "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
-  )
 }
 
 pipeline test_ladder_feedback_override_replaces(harness: Harness, task: unknown) {

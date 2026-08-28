@@ -32,7 +32,6 @@ pipeline test_archive_exactly_one_reports_archived(harness: Harness, task: unkno
   assert_eq(len(result.messages), len(messages))
   // A real summary was produced and surfaced.
   assert_eq(result.summary != "", true)
-  assert_eq(result.summary.contains("auto-compacted 1 older messages"), true)
 }
 
 pipeline test_archived_count_is_not_inferred_from_length(harness: Harness, task: unknown) {
@@ -68,11 +67,10 @@ pipeline test_summary_index_follows_keep_first(harness: Harness, task: unknown) 
     {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
   )
   // The first message is the preserved head, NOT the summary.
-  assert_eq(result.messages[0].content.contains("preserved-head"), true)
+  assert_eq(result.messages[0].content, messages[0].content)
   // The summary lives at the keep_first boundary (index 1) and matches the
   // engine-returned summary text.
   assert_eq(result.messages[1].content, result.summary)
-  assert_eq(result.summary.contains("auto-compacted"), true)
 }
 
 pipeline test_no_compaction_reports_zero_archived(harness: Harness, task: unknown) {

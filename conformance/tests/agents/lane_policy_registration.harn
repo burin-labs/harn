@@ -142,16 +142,13 @@ pipeline default(harness: Harness) {
         },
       )
       const result = agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts)
-      const feedback = json_stringify(harness.llm.mock_calls()[1].messages)
       harness.stdio.println("C.status=" + result.status)
       harness.stdio.println(
-        "C.feedback_lists_available=" + to_string(contains(feedback, "Available tools")),
+        "C.edit_succeeded=" + to_string(contains(result.tools.successful, "edit")),
       )
-      harness.stdio.println("C.feedback_offers_edit=" + to_string(contains(feedback, "edit")))
       harness.stdio.println(
-        "C.feedback_names_run_codemod=" + to_string(contains(feedback, "run_codemod")),
+        "C.git_succeeded=" + to_string(contains(result.tools.successful, "git")),
       )
-      harness.stdio.println("C.feedback_names_glob=" + to_string(contains(feedback, "glob")))
     },
   )
   // --- D. lane_scope_classifier fires live on the pre_turn_scope_classifier seam ---

@@ -44,20 +44,10 @@ fn repair_tools() {
   return tools
 }
 
-const REVERIFY_MARKER = "REVERIFY_MANDATE_FIRED"
-
-/**
- * Confirms on every stop EXCEPT the post-edit re-verify, which it vetoes with a
- * recognizable marker so the test can observe that the mandate fired.
- */
-fn reverify_probe(info: dict) {
-  if info.stop_reason == "post_edit_reverify" {
-    return REVERIFY_MARKER
-  }
-  nil
-}
-
 fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) {
+  const probes = harness.runtime.shared_cell(
+    {scope: "task_group", key: "post-edit-reverify-" + harness.random.uuid(), initial: 0},
+  )
   return with_llm_script(
     harness.llm,
     [
@@ -83,7 +73,13 @@ fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) 
           max_iterations: 6,
           session_id: session,
           done_sentinel: "##DONE##",
-          verify_completion: reverify_probe,
+          verify_completion: { info ->
+            if info.stop_reason == "post_edit_reverify" {
+              const snap = harness.runtime.shared_snapshot(probes)
+              harness.runtime.shared_cas(probes, snap, snap.value + 1)
+            }
+            return nil
+          },
           stall_diagnostics: {
             enabled: true,
             repair_aware: repair_aware,
@@ -92,8 +88,7 @@ fn run_scenario(harness: Harness, repair_aware: bool, post_edit_reverify: bool) 
           },
         },
       )
-      const all_messages = json_stringify(harness.llm.mock_calls())
-      return contains(all_messages, REVERIFY_MARKER)
+      return harness.runtime.shared_snapshot(probes).value == 1
     },
   )
 }

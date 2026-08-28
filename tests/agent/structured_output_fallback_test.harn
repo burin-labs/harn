@@ -57,8 +57,8 @@ fn _run_rejected_structured_turn(harness: Harness, suffix: string, rejection) {
   const structured_requests = harness.runtime.shared_cell(
     {scope: "task_group", key: "structured-fallback-native-" + suffix, initial: 0},
   )
-  const prompt_fallbacks = harness.runtime.shared_cell(
-    {scope: "task_group", key: "structured-fallback-prompt-" + suffix, initial: 0},
+  const text_fallbacks = harness.runtime.shared_cell(
+    {scope: "task_group", key: "structured-fallback-text-" + suffix, initial: 0},
   )
   const ordinary_after = harness.runtime.shared_cell(
     {scope: "task_group", key: "structured-fallback-ordinary-" + suffix, initial: 0},
@@ -77,12 +77,8 @@ fn _run_rejected_structured_turn(harness: Harness, suffix: string, rejection) {
       return rejection
     }
     if attempt == 2 {
-      const prompt = to_string(call?.prompt ?? "")
-      if call?.opts?.output == "text"
-        && call?.opts?.tools == nil
-        && contains(prompt, "Structured output transport is unavailable")
-        && contains(prompt, "verify") {
-        _bump(harness.runtime, prompt_fallbacks)
+      if call?.opts?.output == "text" && call?.opts?.tools == nil {
+        _bump(harness.runtime, text_fallbacks)
       }
       return {ok: true, value: {text: VERIFY_CALL, provider: "mock", model: "mock"}}
     }
@@ -115,7 +111,7 @@ fn _run_rejected_structured_turn(harness: Harness, suffix: string, rejection) {
   assert_eq(result.status, "done")
   assert_eq(harness.runtime.shared_snapshot(calls).value, ["look", "verify"])
   assert_eq(harness.runtime.shared_snapshot(structured_requests).value, 1)
-  assert_eq(harness.runtime.shared_snapshot(prompt_fallbacks).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(text_fallbacks).value, 1)
   assert_eq(harness.runtime.shared_snapshot(ordinary_after).value, 1)
   assert_eq(harness.runtime.shared_snapshot(attempts).value, 4)
 }

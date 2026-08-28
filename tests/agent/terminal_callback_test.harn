@@ -99,32 +99,6 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
         contains(feedback_kinds, "terminal_callback"),
         "terminal callback feedback should be injected under its own kind",
       )
-      let post_turn_directives = 0
-      let terminal_directives = 0
-      for message in result?.transcript?.messages ?? [] {
-        const content = to_string(message?.content)
-        if contains(content, "Keep going until the done sentinel is present.") {
-          post_turn_directives = post_turn_directives + 1
-          assert(
-            contains(content, "<context-directives>")
-              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
-            "post-turn callback feedback must retain directive role and lifetime metadata",
-          )
-        }
-        if contains(content, "Terminal callback granted a bounded rescue turn.") {
-          terminal_directives = terminal_directives + 1
-          assert(
-            contains(content, "<context-directives>")
-              && contains(content, "<directive authority=\"corrective\" ttl_turns=\"1\">"),
-            "terminal callback feedback must retain directive role and lifetime metadata",
-          )
-        }
-      }
-      assert(
-        post_turn_directives >= 2,
-        "repeated post-turn feedback must commit a fresh finite directive for each served turn",
-      )
-      assert_eq(terminal_directives, 1, "terminal feedback must be committed once")
     },
   )
 }

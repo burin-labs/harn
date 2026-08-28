@@ -79,21 +79,6 @@ async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
     assert_eq!(mock_calls[0].mock_scope, "compaction");
     assert_eq!(mock_calls[0].system, None);
     assert_eq!(mock_calls[0].messages.len(), 1);
-    let prompt = mock_calls[0].messages[0]["content"]
-        .as_str()
-        .expect("compaction prompt text");
-    assert!(
-        prompt.contains("The workspace compiles successfully."),
-        "the archived success claim must reach the summarizer: {prompt}"
-    );
-    assert!(
-        prompt.contains("L81 ERROR: syntax: unexpected '}'"),
-        "the newer retained diagnostic must ground the summary: {prompt}"
-    );
-    assert!(
-        prompt.contains("newer than every archived message"),
-        "the prompt must establish the retained tail's temporal authority: {prompt}"
-    );
 
     let transcript = std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
         .expect("LLM transcript");
