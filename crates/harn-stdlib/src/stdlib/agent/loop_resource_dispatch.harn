@@ -469,10 +469,10 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
   )
   let explicit_terminal_succeeded = false
   if plan.selected_phase == "terminal" {
-    for (index, entry) in iter(selected).enumerate() {
-      const name = to_string(entry.call?.name ?? entry.call?.tool_name ?? "")
+    for result in raw_selected {
+      const name = to_string(result?.tool_name ?? result?.name ?? "")
       if contains(options?._stop_after_successful_tools ?? [], name)
-        && __tool_result_ok(raw_selected[index]) {
+        && __tool_result_ok(result) {
         explicit_terminal_succeeded = true
       }
     }
