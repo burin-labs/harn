@@ -71,7 +71,7 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
             "managed child-process egress is not available on OpenBSD".to_string(),
         ));
     }
-    if policy.process_sandbox.allow_tcp_loopback && !policy_allows_network(policy) {
+    if policy.process_sandbox.allow_tcp_loopback {
         return Err(sandbox_rejection(
             "TCP loopback-only child networking is not enforceable by pledge".to_string(),
         ));

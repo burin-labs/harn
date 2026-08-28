@@ -110,7 +110,7 @@ fn profile_setup(
                 .to_string(),
         ));
     }
-    if policy.process_sandbox.allow_tcp_loopback && !policy_allows_network(policy) {
+    if policy.process_sandbox.allow_tcp_loopback {
         return Err(sandbox_rejection(
             "TCP loopback-only child networking requires a private Linux network namespace; this build cannot enforce that boundary"
                 .to_string(),
