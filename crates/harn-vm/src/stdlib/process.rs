@@ -1090,13 +1090,12 @@ fn process_command_config(
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
         config.cwd = Some(resolved);
-    } else if let Some(context) = current_execution_context() {
-        if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
-            crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
-            config.cwd = Some(std::path::PathBuf::from(cwd));
-        }
-        if !context.env.is_empty() {
-            config.env.extend(context.env);
+    } else {
+        config.cwd = Some(inherited_process_cwd()?);
+        if let Some(context) = current_execution_context() {
+            if !context.env.is_empty() {
+                config.env.extend(context.env);
+            }
         }
     }
     config.env.extend(runtime_child_env_overlay());

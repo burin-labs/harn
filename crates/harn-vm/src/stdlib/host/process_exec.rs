@@ -440,18 +440,13 @@ impl ProcessExecLaunch {
     fn from_params(params: &crate::value::DictMap, label: &str) -> Result<Self, VmError> {
         let (program, args) = process_exec_argv(params)?;
         let execution_context = crate::stdlib::process::current_execution_context();
-        let cwd = optional_string(params, "cwd")
-            .or_else(|| {
-                execution_context
-                    .as_ref()
-                    .and_then(|context| context.cwd.clone())
-                    .filter(|cwd| !cwd.is_empty())
-            })
-            .map(|cwd| resolve_process_exec_cwd(&cwd));
-        if let Some(cwd) = &cwd {
-            crate::process_sandbox::enforce_process_cwd(cwd)
-                .map_err(|error| contextualize_process_error(label, "cwd", error))?;
-        }
+        let cwd = match optional_string(params, "cwd") {
+            Some(cwd) => resolve_process_exec_cwd(&cwd),
+            None => crate::stdlib::process::inherited_process_cwd()
+                .map_err(|error| contextualize_process_error(label, "cwd", error))?,
+        };
+        crate::process_sandbox::enforce_process_cwd(&cwd)
+            .map_err(|error| contextualize_process_error(label, "cwd", error))?;
 
         let closed_env = match optional_string(params, "env_mode")
             .as_deref()
@@ -503,7 +498,7 @@ impl ProcessExecLaunch {
         Ok(Self {
             program,
             args,
-            cwd,
+            cwd: Some(cwd),
             env,
             env_remove,
             closed_env,
