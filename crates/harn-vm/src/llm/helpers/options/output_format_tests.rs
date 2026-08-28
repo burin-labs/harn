@@ -262,7 +262,7 @@ fn constrained_request_for_discriminated_union_after_rejected_call() {
             schema: schema.clone(),
             strict: true,
         },
-        output_schema: Some(schema.clone()),
+        output_schema: Some(schema),
         ..LlmCallOptions::default()
     };
     let payload = LlmRequestPayload::from(&opts);
