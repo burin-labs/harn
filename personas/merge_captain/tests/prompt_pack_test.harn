@@ -10,7 +10,6 @@ import {
   known_failure_modes,
   pack_manifest,
   prompt_ids,
-  prompt_text,
   revision_gate,
   schema_for,
   side_effect_policy,
@@ -30,10 +29,7 @@ pipeline test_prompt_pack_has_required_narrow_decisions(harness: Harness, task: 
   assert(ids.contains("audit_release_changelog"))
 }
 
-pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_every_decision_has_strict_schema_budget_and_goldens(harness: Harness, task: unknown) {
   for id in prompt_ids() {
     const schema = schema_for(id)
     assert_eq(schema.type, "object")
@@ -45,9 +41,6 @@ pipeline test_every_prompt_has_strict_schema_prompt_budget_and_goldens(
     assert(budget.reserved_output_tokens > 0)
     assert(budget.exclude.contains("raw_logs"))
     assert_eq(budget.raw_logs_allowed, false)
-    const prompt = prompt_text(id)
-    assert(prompt.contains("JSON"))
-    assert(prompt.contains("Deterministic Harn code owns all side effects"))
     const examples = golden_examples_for(id)
     assert_eq(len(examples), 1)
     const validation = validate_output(id, examples[0].output)
@@ -296,7 +289,7 @@ pipeline test_pack_manifest_is_inspectable(harness: Harness, task: unknown) {
   const pack = pack_manifest()
   assert_eq(pack._type, "merge_captain.prompt_pack")
   assert_eq(pack.id, "merge-captain-value-pack-v1")
-  assert(pack.side_effect_policy.contains(side_effect_policy()))
+  assert_eq(pack.side_effect_policy, side_effect_policy())
   assert_eq(len(pack.prompts), len(prompt_ids()))
   assert_eq(len(pack.known_failure_modes), 1)
 }

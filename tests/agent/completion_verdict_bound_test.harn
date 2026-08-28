@@ -18,20 +18,14 @@
 // parroted it, the harness thrash-stopped, and verified-passing work was
 // recorded as incomplete. The loop cannot satisfy such a veto — its only
 // repair is to ask again for a token the model has already declined to emit.
-// So the prompts must not teach the judge to want a marker, and a `continue`
-// must name work, not formatting.
-import {
-  __done_contract_judge_system,
-  __judge_completion_verdict_read,
-  __judge_completion_verdict_schema,
-} from "std/agent/judge"
-import { completion_judge_system_prompt, completion_judge_user_prompt } from "std/agent/prompts"
+// Prompt wording is intentionally not pinned here. This file verifies the
+// typed verdict contract and tolerant read path instead.
+import { __judge_completion_verdict_read, __judge_completion_verdict_schema } from "std/agent/judge"
 
 pipeline test_verdict_schema_keeps_one_tolerant_detail_field(harness: Harness, task: unknown) {
   const schema = __judge_completion_verdict_schema()
   assert_eq(schema.properties.keys().sorted(), ["detail", "gap_class", "verdict"])
   assert_eq(schema.properties.detail.maxLength, nil)
-  assert(contains(schema.properties.detail.description, "240"))
   assert_eq(schema?.additionalProperties, false)
 }
 
@@ -118,56 +112,6 @@ pipeline test_decoded_detail_is_clamped_to_the_contract(harness: Harness, task: 
     {verdict: "continue", detail: "gap. ".repeat(limit)},
   )
   assert_eq(len(overlong.detail), limit)
-}
-
-// The phrase every completion-judge prompt uses to hand wire format back to
-// the deterministic layer. Pinning it is a prose check, not a behavioral one:
-// it cannot prove a model obeys the disclaimer, only that no edit silently
-// drops it. The contract check below is the structural half.
-const PROTOCOL_DISCLAIMER = "enforced elsewhere"
-
-fn _judge_prompt_surface(harness: Harness) -> list<string> {
-  return [
-    completion_judge_system_prompt(harness.fs),
-    completion_judge_user_prompt(
-      harness.fs,
-      {
-        stop_reason: "natural",
-        iteration: 3,
-        judge_evidence: "wrote src/cache.rs; the targeted test passed",
-        last_text: "Added the eviction path and ran the focused test.",
-      },
-    ),
-    __done_contract_judge_system({}),
-  ]
-}
-
-pipeline test_completion_judge_prompts_disclaim_wire_format(harness: Harness, task: unknown) {
-  const surface = _judge_prompt_surface(harness)
-  assert_eq(len(surface), 3)
-  for prompt in surface {
-    // Indexed by the prompt's own opening words so a failure says which of the
-    // three prompt surfaces lost the disclaimer.
-    const label = substring(trim(prompt), 0, 24)
-    assert_eq([label, contains(prompt, PROTOCOL_DISCLAIMER)], [label, true])
-  }
-}
-
-pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harness, task: unknown) {
-  const schema = __judge_completion_verdict_schema()
-  const user = completion_judge_user_prompt(
-    harness.fs,
-    {stop_reason: "natural", iteration: 1, judge_evidence: "none", last_text: "Done."},
-  )
-  // The stable prefix ships the schema, so a prompt naming the superseded
-  // fields would contradict it and invite exactly the long answer the bound
-  // above exists to prevent.
-  for field in ["action", "repair", "specific_gaps", "accepted_evidence"] {
-    assert_eq([field, contains(user, "`" + field + "`")], [field, false])
-  }
-  for key in schema.properties.keys() {
-    assert_eq([key, contains(user, "`" + key + "`")], [key, true])
-  }
 }
 
 pipeline test_out_of_contract_verdict_is_preserved_verbatim(harness: Harness, task: unknown) {

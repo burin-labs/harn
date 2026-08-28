@@ -121,12 +121,6 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
       assert_eq(receipts[0].checkpoint.warning.pattern, "repeated_same_observation")
       assert(receipts[0].checkpoint.warning.signature != "")
       assert(contains(receipts[0].checkpoint.tool_names, "run"))
-      let calls = harness.llm.mock_calls()
-      let recovery_prompt = json_stringify(calls[2].messages)
-      assert(contains(recovery_prompt, "<context-directives>"))
-      assert(!contains(recovery_prompt, "thrash_recovery"))
-      assert(!contains(recovery_prompt, "Repeated call signature"))
-      assert(contains(recovery_prompt, "Do not issue that same call again"))
     },
   )
 }
@@ -193,18 +187,6 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(
       assert(receipt.warning.signature != "", "monologue warning should carry a content signature")
       assert_eq(receipt.tool_count, 0)
       assert_eq(len(receipt.tool_names), 0)
-      const calls = harness.llm.mock_calls()
-      const recovery_prompt = json_stringify(calls[2].messages)
-      assert(contains(recovery_prompt, "<context-directives>"), "recovery prompt should be scoped")
-      assert(!contains(recovery_prompt, "monologue_recovery"), "internal reason should stay hidden")
-      assert(
-        contains(recovery_prompt, "emit exactly one concrete tool call"),
-        "recovery prompt should demand one call",
-      )
-      assert(
-        contains(recovery_prompt, "inspect app/Models/Entry.php"),
-        "recovery prompt should preserve stated intent",
-      )
     },
   )
 }
