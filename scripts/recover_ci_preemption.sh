@@ -5,17 +5,16 @@ usage() {
   cat <<'USAGE'
 Usage:
   scripts/recover_ci_preemption.sh --repo OWNER/REPO --run-id RUN_ID [--apply]
-  scripts/recover_ci_preemption.sh --repo OWNER/REPO --run-id RUN_ID --run-json PATH --logs-dir DIR
+  scripts/recover_ci_preemption.sh --repo OWNER/REPO --run-id RUN_ID \
+    --run-json PATH --workflow PATH [--logs-dir DIR]
 
-Classifies GitHub Actions failures caused by hosted-runner shutdown preemption.
+Classify a failed GitHub Actions run with the typed Harn recovery policy.
 
-Default mode is a dry run: it prints the classification and the exact recovery
-command. With --apply, it executes only first-attempt runner shutdown recovery:
-  - pull_request runs: rerun failed jobs
-  - merge_group runs: re-arm the parsed PR's merge queue auto-merge
-
-The classifier is intentionally strict. It requires both the GitHub runner
-shutdown diagnostic and exit code 143 in a failed/cancelled job log.
+The shell adapter retrieves metadata and raw logs into a private temporary
+directory. It never prints log contents. Default mode emits one JSON receipt
+without mutating GitHub. With --apply, the adapter executes only the bounded
+action selected by policy after every substantive failed job has exact,
+retry-safe evidence.
 USAGE
 }
 
@@ -26,8 +25,10 @@ die() {
 
 repo=""
 run_id=""
-run_json=""
-logs_dir=""
+input_run_json=""
+input_logs_dir=""
+input_workflow=""
+input_policy=""
 apply=false
 emit_summary=false
 max_attempts=1
@@ -43,11 +44,19 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --run-json)
-      run_json="${2:-}"
+      input_run_json="${2:-}"
       shift 2
       ;;
     --logs-dir)
-      logs_dir="${2:-}"
+      input_logs_dir="${2:-}"
+      shift 2
+      ;;
+    --workflow)
+      input_workflow="${2:-}"
+      shift 2
+      ;;
+    --policy)
+      input_policy="${2:-}"
       shift 2
       ;;
     --apply)
@@ -72,190 +81,180 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$run_json" ]]; then
-  [[ -n "$repo" ]] || die "--repo is required when --run-json is omitted"
-  [[ -n "$run_id" ]] || die "--run-id is required when --run-json is omitted"
-fi
-
+[[ "$repo" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] || die "--repo must be OWNER/REPO"
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]] || die "--run-id must be a positive integer"
 [[ "$max_attempts" =~ ^[0-9]+$ ]] || die "--max-attempts must be an integer"
 
-tmp_dir="$(mktemp -d)"
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+policy_source="${input_policy:-$repo_root/.github/ci-preemption-policy.json}"
+[[ -f "$policy_source" ]] || die "recovery policy not found: $policy_source"
+
+harn_bin="${HARN_BIN:-}"
+if [[ -z "$harn_bin" ]]; then
+  harn_bin=$(command -v harn || true)
+fi
+[[ -x "$harn_bin" ]] || die "HARN_BIN must name an executable Harn binary"
+
+umask 077
+tmp_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
+logs_dir="$tmp_dir/logs"
+mkdir -p "$logs_dir"
+run_json="$tmp_dir/run.json"
+workflow="$tmp_dir/workflow.yml"
+policy="$tmp_dir/policy.json"
+cp -- "$policy_source" "$policy"
 
-if [[ -z "$run_json" ]]; then
-  run_json="$tmp_dir/run.json"
+emit_receipt_summary() {
+  local receipt="$1"
+  if [[ "$emit_summary" != "true" || -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    return 0
+  fi
+  {
+    printf '## CI recovery\n\n'
+    printf -- '- classification: %s\n' "$(jq -r '.classification' <<< "$receipt")"
+    printf -- '- failed jobs: %s\n' "$(jq -r '.failed_job_count' <<< "$receipt")"
+    printf -- '- retry-safe jobs: %s\n' "$(jq -r '.retry_safe_job_count' <<< "$receipt")"
+    printf -- '- terminal failures: %s\n' "$(jq -r '.terminal_failure_job_count' <<< "$receipt")"
+    printf -- '- unknown jobs: %s\n' "$(jq -r '.unknown_job_count' <<< "$receipt")"
+    printf -- '- evidence complete: %s\n' "$(jq -r '.evidence_complete' <<< "$receipt")"
+    jq -r '.jobs[] | "- job: " + (.job_name | @json) + " (" + .kind + ")"' <<< "$receipt"
+    printf -- '- action: %s\n' "$(jq -r '.planned_action' <<< "$receipt")"
+    jq -r '.run_url | select(length > 0) | "- run: " + .' <<< "$receipt"
+  } >> "$GITHUB_STEP_SUMMARY"
+}
+
+metadata_unavailable() {
+  local receipt
+  receipt=$(jq -cn \
+    --argjson run_id "$run_id" \
+    '{
+      schema: "harn.ci_preemption_recovery.v2",
+      run_id: $run_id,
+      classification: "metadata_unavailable",
+      workflow: "",
+      event: "",
+      conclusion: "",
+      attempt: 0,
+      head_branch: "",
+      failed_job_count: 0,
+      inspected_job_count: 0,
+      retry_safe_job_count: 0,
+      terminal_failure_job_count: 0,
+      unknown_job_count: 0,
+      evidence_complete: false,
+      jobs: [],
+      planned_action: "none",
+      run_url: ""
+    }')
+  printf '%s\n' "$receipt"
+  emit_receipt_summary "$receipt"
+}
+
+if [[ -n "$input_run_json" ]]; then
+  [[ -f "$input_run_json" ]] || die "run JSON not found: $input_run_json"
+  cp -- "$input_run_json" "$run_json"
+else
   if ! gh run view "$run_id" \
     --repo "$repo" \
     --json databaseId,event,conclusion,status,headBranch,headSha,url,attempt,workflowName,jobs \
-    > "$run_json"; then
-    # This controller is recovery machinery, not another required proof. If
-    # GitHub's own API is unavailable, no safe classification or mutation can
-    # be made; report that fact and leave the original failed run authoritative
-    # instead of creating a second red workflow for every API 5xx.
-    printf 'classification=metadata_unavailable\n'
-    printf 'planned_action=none\n'
-    printf 'run_id=%s\n' "$run_id"
-    echo "::warning title=CI preemption repair::GitHub run metadata is unavailable; no recovery action was attempted for run ${run_id}" >&2
-    if [[ "$emit_summary" == "true" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-      {
-        printf '## CI Preemption Repair\n\n'
-        printf -- "- classification: \`metadata_unavailable\`\n"
-        printf -- "- action: \`none\`\n"
-        printf -- "- run id: \`%s\`\n" "$run_id"
-      } >> "$GITHUB_STEP_SUMMARY"
-    fi
+    > "$run_json" 2> "$tmp_dir/run-metadata.err"; then
+    metadata_unavailable
     exit 0
   fi
 fi
 
-[[ -f "$run_json" ]] || die "run JSON not found: $run_json"
-
-json_string() {
-  jq -r "$1 // \"\"" "$run_json"
-}
-
-json_number() {
-  jq -r "$1 // 0" "$run_json"
-}
-
-run_id="${run_id:-$(json_number '.databaseId')}"
-event="$(json_string '.event')"
-conclusion="$(json_string '.conclusion')"
-status="$(json_string '.status')"
-head_branch="$(json_string '.headBranch')"
-attempt="$(json_number '.attempt')"
-workflow_name="$(json_string '.workflowName')"
-run_url="$(json_string '.url')"
-
-ensure_job_log() {
-  local job_id="$1"
-  local log_path=""
-
-  if [[ -n "$logs_dir" ]]; then
-    for candidate in "$logs_dir/$job_id.log" "$logs_dir/$job_id.txt"; do
-      if [[ -f "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
-    return 1
-  fi
-
-  [[ -n "$repo" ]] || return 1
-  log_path="$tmp_dir/$job_id.log"
-  if gh api "/repos/$repo/actions/jobs/$job_id/logs" > "$log_path"; then
-    printf '%s\n' "$log_path"
-    return 0
-  fi
-  return 1
-}
-
-log_has_runner_preemption_signature() {
-  local log_path="$1"
-  grep -Eqi 'runner has received a shutdown signal|runner service is stopped' "$log_path" \
-    && grep -Eqi 'exit code 143' "$log_path"
-}
-
-pr_number=""
-if [[ "$head_branch" =~ (^|/)pr-([0-9]+)- ]]; then
-  pr_number="${BASH_REMATCH[2]}"
+if ! jq -e --argjson expected "$run_id" '.databaseId == $expected' "$run_json" >/dev/null; then
+  die "run metadata does not match --run-id"
 fi
 
-classification="unknown_failure"
-preempted_jobs=""
-inspected_jobs=0
-
-if [[ "$status" != "completed" ]]; then
-  classification="run_not_completed"
-elif [[ "$conclusion" != "failure" && "$conclusion" != "cancelled" ]]; then
-  classification="run_not_failed"
+if [[ -n "$input_workflow" ]]; then
+  [[ -f "$input_workflow" ]] || die "workflow not found: $input_workflow"
+  cp -- "$input_workflow" "$workflow"
 else
-  while IFS=$'\t' read -r job_id job_name job_conclusion; do
-    [[ -n "$job_id" ]] || continue
-    inspected_jobs=$((inspected_jobs + 1))
-    if log_path="$(ensure_job_log "$job_id")" \
-      && log_has_runner_preemption_signature "$log_path"; then
-      classification="runner_preemption"
-      if [[ -n "$preempted_jobs" ]]; then
-        preempted_jobs="$preempted_jobs, "
-      fi
-      preempted_jobs="${preempted_jobs}${job_name} (${job_id}, ${job_conclusion})"
-    fi
-  done < <(
-    jq -r '
-      .jobs[]
-      | select((.conclusion == "failure" or .conclusion == "cancelled") and .name != "CI status")
-      | [.databaseId, .name, .conclusion]
-      | @tsv
-    ' "$run_json"
-  )
-
-  if [[ "$classification" != "runner_preemption" && "$inspected_jobs" -eq 0 ]]; then
-    classification="no_failed_jobs"
+  workflow_path=$(gh api "/repos/$repo/actions/runs/$run_id" --jq '.path' \
+    2> "$tmp_dir/workflow-metadata.err" || true)
+  workflow_path="${workflow_path%@*}"
+  if [[ ! "$workflow_path" =~ ^\.github/workflows/[^/]+\.(yml|yaml)$ ]] \
+    || [[ ! -f "$repo_root/$workflow_path" ]]; then
+    metadata_unavailable
+    exit 0
   fi
+  cp -- "$repo_root/$workflow_path" "$workflow"
 fi
 
-planned_action="none"
-planned_command=""
-declare -a command=()
-
-if [[ "$classification" == "runner_preemption" ]]; then
-  if [[ "$attempt" -gt "$max_attempts" ]]; then
-    planned_action="none_max_attempts_reached"
-  elif [[ "$event" == "pull_request" ]]; then
-    planned_action="rerun_failed_jobs"
-    planned_command="gh run rerun $run_id --repo $repo --failed"
-    command=(gh run rerun "$run_id" --repo "$repo" --failed)
-  elif [[ "$event" == "merge_group" && -n "$pr_number" ]]; then
-    planned_action="requeue_merge_queue"
-    planned_command="gh pr merge $pr_number --repo $repo --auto --squash"
-    command=(gh pr merge "$pr_number" --repo "$repo" --auto --squash)
-  elif [[ "$event" == "merge_group" ]]; then
-    planned_action="manual_merge_group_recovery"
+while IFS= read -r job_id; do
+  [[ "$job_id" =~ ^[1-9][0-9]*$ ]] || continue
+  destination="$logs_dir/$job_id.log"
+  if [[ -n "$input_logs_dir" ]]; then
+    if [[ -f "$input_logs_dir/$job_id.log" ]]; then
+      cp -- "$input_logs_dir/$job_id.log" "$destination"
+    elif [[ -f "$input_logs_dir/$job_id.txt" ]]; then
+      cp -- "$input_logs_dir/$job_id.txt" "$destination"
+    fi
   else
-    planned_action="manual_recovery"
+    candidate="$tmp_dir/$job_id.download"
+    if gh api --allow-escape-sequences \
+      "/repos/$repo/actions/jobs/$job_id/logs" \
+      > "$candidate" 2> "$tmp_dir/$job_id.err"; then
+      mv -- "$candidate" "$destination"
+    else
+      rm -f -- "$candidate"
+    fi
   fi
+done < <(
+  jq -r '
+    .jobs[]
+    | select(.conclusion == "failure" or .conclusion == "cancelled")
+    | .databaseId
+  ' "$run_json"
+)
+
+receipt=$(
+  "$harn_bin" run \
+    --read-only-root "$tmp_dir" \
+    "$repo_root/scripts/ci_preemption_policy.harn" \
+    -- \
+    --run-json "$run_json" \
+    --workflow "$workflow" \
+    --logs-dir "$logs_dir" \
+    --policy "$policy" \
+    --max-attempts "$max_attempts"
+)
+
+if ! jq -e '
+  .schema == "harn.ci_preemption_recovery.v2"
+  and (.run_id | type == "number")
+  and (.classification | type == "string")
+  and (.planned_action | type == "string")
+  and (.jobs | type == "array")
+' <<< "$receipt" >/dev/null; then
+  die "Harn recovery policy returned an invalid receipt"
 fi
 
-printf 'classification=%s\n' "$classification"
-printf 'workflow=%s\n' "$workflow_name"
-printf 'event=%s\n' "$event"
-printf 'conclusion=%s\n' "$conclusion"
-printf 'attempt=%s\n' "$attempt"
-printf 'head_branch=%s\n' "$head_branch"
-printf 'pr_number=%s\n' "$pr_number"
-printf 'preempted_jobs=%s\n' "$preempted_jobs"
-printf 'planned_action=%s\n' "$planned_action"
-printf 'planned_command=%s\n' "$planned_command"
-printf 'run_url=%s\n' "$run_url"
+printf '%s\n' "$(jq -c . <<< "$receipt")"
+emit_receipt_summary "$receipt"
 
-if [[ "$emit_summary" == "true" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  {
-    printf '## CI Preemption Repair\n\n'
-    printf -- "- classification: \`%s\`\n" "$classification"
-    printf -- "- workflow: \`%s\`\n" "$workflow_name"
-    printf -- "- event: \`%s\`\n" "$event"
-    printf -- "- attempt: \`%s\`\n" "$attempt"
-    printf -- "- action: \`%s\`\n" "$planned_action"
-    if [[ -n "$preempted_jobs" ]]; then
-      printf -- "- preempted jobs: \`%s\`\n" "$preempted_jobs"
-    fi
-    if [[ -n "$planned_command" ]]; then
-      printf -- "- command: \`%s\`\n" "$planned_command"
-    fi
-    if [[ -n "$run_url" ]]; then
-      printf -- '- run: %s\n' "$run_url"
-    fi
-  } >> "$GITHUB_STEP_SUMMARY"
+if [[ "$apply" != "true" ]]; then
+  exit 0
 fi
 
-if [[ "$apply" == "true" && "${#command[@]}" -gt 0 ]]; then
-  printf 'applying: %s\n' "$planned_command"
-  "${command[@]}"
-elif [[ "$apply" == "true" && "$classification" == "runner_preemption" ]]; then
-  printf '::warning title=CI preemption repair::runner preemption classified, but no automatic action is safe for event=%s head_branch=%s attempt=%s\n' \
-    "$event" "$head_branch" "$attempt"
-fi
+planned_action=$(jq -r '.planned_action' <<< "$receipt")
+case "$planned_action" in
+  rerun_failed_jobs)
+    gh run rerun "$(jq -r '.run_id' <<< "$receipt")" --repo "$repo" --failed
+    ;;
+  requeue_merge_queue)
+    pr_number=$(jq -r '.pr_number // empty' <<< "$receipt")
+    [[ "$pr_number" =~ ^[1-9][0-9]*$ ]] || die "policy selected requeue without a PR number"
+    gh pr merge "$pr_number" --repo "$repo" --auto --squash
+    ;;
+  none|none_max_attempts_reached|manual_merge_group_recovery|manual_recovery)
+    ;;
+  *)
+    die "policy selected unsupported action: $planned_action"
+    ;;
+esac

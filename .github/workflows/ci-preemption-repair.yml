@@ -3,9 +3,9 @@ name: CI preemption repair
 on:
   # Privileged `workflow_run` is intentional here: this default-branch
   # controller never checks out or executes the completed run's PR code. It
-  # only downloads GitHub-owned job metadata/logs, applies a strict
-  # runner-shutdown + exit-143 classifier, and performs bounded first-attempt
-  # recovery.
+  # only downloads GitHub-owned metadata and private logs, applies the typed
+  # recovery policy from the default branch, and performs bounded recovery
+  # when every substantive failed job has exact retry-safe evidence.
   workflow_run: # zizmor: ignore[dangerous-triggers] intentional bounded default-branch CI repair controller
     workflows:
       - CI
@@ -31,9 +31,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set up Harn
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.119"
       - name: Classify failure and apply safe recovery
         env:
           GH_TOKEN: ${{ github.token }}
+          HARN_BIN: ${{ steps.harn.outputs.path }}
           TARGET_RUN_ID: ${{ github.event.workflow_run.id }}
           TARGET_REPO: ${{ github.repository }}
         run: |

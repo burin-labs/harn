@@ -1,0 +1,457 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+pub type RecoveryClassification = "runner_preemption" \
+  | "configured_timeout" \
+  | "transient_ci_failure" \
+  | "job_failure" \
+  | "mixed_failure" \
+  | "metadata_unavailable" \
+  | "evidence_unavailable" \
+  | "cancellation_unknown" \
+  | "no_failed_jobs" \
+  | "run_not_completed" \
+  | "run_not_failed"
+
+pub type JobFailureKind = "runner_preemption" \
+  | "configured_timeout" \
+  | "job_failure" \
+  | "evidence_unavailable" \
+  | "cancellation_unknown"
+
+pub type RecoveryAction = "none" \
+  | "rerun_failed_jobs" \
+  | "requeue_merge_queue" \
+  | "manual_merge_group_recovery" \
+  | "manual_recovery" \
+  | "none_max_attempts_reached"
+
+pub type RecoveryPolicy = {
+  schema: "harn.ci_preemption_policy.v1",
+  aggregate_job_names: list<string>,
+  timeout_completion_grace_seconds: int,
+}
+
+pub type GitHubJobStep = {
+  name: string,
+  status?: string,
+  conclusion?: string,
+  number?: int,
+  startedAt?: string,
+  completedAt?: string,
+}
+
+pub type GitHubJob = {
+  databaseId: int,
+  name: string,
+  status?: string,
+  conclusion?: string,
+  startedAt?: string,
+  completedAt?: string,
+  steps?: list<GitHubJobStep>,
+}
+
+pub type GitHubRun = {
+  databaseId: int,
+  event: string,
+  conclusion: string,
+  status: string,
+  headBranch?: string,
+  headSha?: string,
+  url?: string,
+  attempt: int,
+  workflowName: string,
+  jobs: list<GitHubJob>,
+}
+
+pub type JobLogEvidence = {job_id: int, available: bool, text: string}
+
+pub type JobFailureReceipt = {
+  job_id: int,
+  job_name: string,
+  conclusion: string,
+  kind: JobFailureKind,
+  retry_safe: bool,
+  log_available: bool,
+  elapsed_seconds?: int,
+  configured_timeout_minutes?: int,
+}
+
+pub type RecoveryReceipt = {
+  schema: "harn.ci_preemption_recovery.v2",
+  run_id: int,
+  classification: RecoveryClassification,
+  workflow: string,
+  event: string,
+  conclusion: string,
+  attempt: int,
+  head_branch: string,
+  pr_number?: int,
+  failed_job_count: int,
+  inspected_job_count: int,
+  retry_safe_job_count: int,
+  terminal_failure_job_count: int,
+  unknown_job_count: int,
+  evidence_complete: bool,
+  jobs: list<JobFailureReceipt>,
+  planned_action: RecoveryAction,
+  run_url: string,
+}
+
+fn timestamp_seconds(raw: string?) -> int? {
+  if raw == nil || raw == "" {
+    return nil
+  }
+  const parsed = try {
+    date_parse(raw)
+  }
+  if is_err(parsed) {
+    return nil
+  }
+  return to_int(round(to_float(unwrap(parsed))))
+}
+
+fn elapsed_seconds(job: GitHubJob) -> int? {
+  const started = timestamp_seconds(job.startedAt)
+  const completed = timestamp_seconds(job.completedAt)
+  if started == nil || completed == nil || completed < started {
+    return nil
+  }
+  return completed - started
+}
+
+fn workflow_job(workflow: dict, display_name: string) -> dict? {
+  for entry in workflow?.jobs ?? {} {
+    const job = entry.value
+    const configured_name = trim(to_string(job?.name ?? entry.key))
+    if configured_name == display_name {
+      return job
+    }
+  }
+  return nil
+}
+
+/**
+ * Return only explicit numeric alternatives from a job's timeout field.
+ * GitHub expressions commonly select one timeout with `condition && A || B`;
+ * every extracted value is still scoped to the timeout field itself.
+ */
+pub fn configured_timeout_candidates(workflow: dict, display_name: string) -> list<int> {
+  const job = workflow_job(workflow, display_name)
+  if job == nil {
+    return []
+  }
+  const raw = job["timeout-minutes"]
+  if type_of(raw) == "int" {
+    const value = to_int(raw)
+    return if value != nil && value > 0 && value <= 360 {
+      [value]
+    } else {
+      []
+    }
+  }
+  if type_of(raw) != "string" {
+    return []
+  }
+  let values: list<int> = []
+  for capture in regex_captures(r"\b([1-9][0-9]{0,2})\b", to_string(raw)) {
+    const value = to_int(capture.groups[0] ?? "")
+    if value != nil && value <= 360 && !values.contains(value) {
+      values = values + [value]
+    }
+  }
+  return values.sorted()
+}
+
+fn exact_timeout_minutes(
+  workflow: dict,
+  job: GitHubJob,
+  log_text: string,
+  grace_seconds: int,
+) -> int? {
+  if job.conclusion != "cancelled"
+    || !log_text.contains("##[error]The operation was canceled.") {
+    return nil
+  }
+  const elapsed = elapsed_seconds(job)
+  if elapsed == nil {
+    return nil
+  }
+  for timeout_minutes in configured_timeout_candidates(workflow, job.name) {
+    const deadline_seconds = timeout_minutes * 60
+    if elapsed >= deadline_seconds && elapsed <= deadline_seconds + max(0, grace_seconds) {
+      return timeout_minutes
+    }
+  }
+  return nil
+}
+
+fn has_runner_preemption_signature(log_text: string) -> bool {
+  const lower = log_text.lower()
+  const shutdown = lower.contains("runner has received a shutdown signal")
+    || lower.contains("runner service is stopped")
+  return shutdown && lower.contains("exit code 143")
+}
+
+fn find_log(logs: list<JobLogEvidence>, job_id: int) -> JobLogEvidence? {
+  return logs.find({ evidence -> evidence.job_id == job_id })
+}
+
+fn classify_job(
+  workflow: dict,
+  policy: RecoveryPolicy,
+  job: GitHubJob,
+  logs: list<JobLogEvidence>,
+) -> JobFailureReceipt {
+  const log = find_log(logs, job.databaseId)
+  const available = log?.available ?? false
+  const text = log?.text ?? ""
+  const elapsed = elapsed_seconds(job)
+  if !available {
+    return schema_expect(
+      {
+        job_id: job.databaseId,
+        job_name: job.name,
+        conclusion: job.conclusion ?? "",
+        kind: "evidence_unavailable",
+        retry_safe: false,
+        log_available: false,
+        elapsed_seconds: elapsed,
+      },
+      schema_of(JobFailureReceipt),
+    )
+  }
+  if has_runner_preemption_signature(text) {
+    return schema_expect(
+      {
+        job_id: job.databaseId,
+        job_name: job.name,
+        conclusion: job.conclusion ?? "",
+        kind: "runner_preemption",
+        retry_safe: true,
+        log_available: true,
+        elapsed_seconds: elapsed,
+      },
+      schema_of(JobFailureReceipt),
+    )
+  }
+  const timeout_minutes = exact_timeout_minutes(
+    workflow,
+    job,
+    text,
+    policy.timeout_completion_grace_seconds,
+  )
+  if timeout_minutes != nil {
+    return schema_expect(
+      {
+        job_id: job.databaseId,
+        job_name: job.name,
+        conclusion: job.conclusion ?? "",
+        kind: "configured_timeout",
+        retry_safe: true,
+        log_available: true,
+        elapsed_seconds: elapsed,
+        configured_timeout_minutes: timeout_minutes,
+      },
+      schema_of(JobFailureReceipt),
+    )
+  }
+  if job.conclusion == "failure" {
+    return schema_expect(
+      {
+        job_id: job.databaseId,
+        job_name: job.name,
+        conclusion: job.conclusion ?? "",
+        kind: "job_failure",
+        retry_safe: false,
+        log_available: true,
+        elapsed_seconds: elapsed,
+      },
+      schema_of(JobFailureReceipt),
+    )
+  }
+  return schema_expect(
+    {
+      job_id: job.databaseId,
+      job_name: job.name,
+      conclusion: job.conclusion ?? "",
+      kind: "cancellation_unknown",
+      retry_safe: false,
+      log_available: true,
+      elapsed_seconds: elapsed,
+    },
+    schema_of(JobFailureReceipt),
+  )
+}
+
+fn overall_classification(jobs: list<JobFailureReceipt>) -> RecoveryClassification {
+  if jobs.count == 0 {
+    return "no_failed_jobs"
+  }
+  if jobs.all({ job -> job.kind == "runner_preemption" }) {
+    return "runner_preemption"
+  }
+  if jobs.all({ job -> job.kind == "configured_timeout" }) {
+    return "configured_timeout"
+  }
+  if jobs.all({ job -> job.retry_safe }) {
+    return "transient_ci_failure"
+  }
+  if jobs.all({ job -> job.kind == "job_failure" }) {
+    return "job_failure"
+  }
+  if jobs.all({ job -> job.kind == "evidence_unavailable" }) {
+    return "evidence_unavailable"
+  }
+  if jobs.all({ job -> job.kind == "cancellation_unknown" }) {
+    return "cancellation_unknown"
+  }
+  return "mixed_failure"
+}
+
+fn merge_group_pr_number(head_branch: string) -> int? {
+  const matches = regex_captures(r"(^|/)pr-([0-9]+)-", head_branch)
+  if matches.count != 1 {
+    return nil
+  }
+  return to_int(matches[0].groups[1] ?? "")
+}
+
+pub fn classify_recovery(
+  run: GitHubRun,
+  workflow: dict,
+  policy: RecoveryPolicy,
+  logs: list<JobLogEvidence>,
+  max_attempts: int,
+) -> RecoveryReceipt {
+  const head_branch = run.headBranch ?? ""
+  const pr_number = merge_group_pr_number(head_branch)
+  let receipts: list<JobFailureReceipt> = []
+  let classification: RecoveryClassification = "run_not_completed"
+  if run.status == "completed" {
+    if run.conclusion != "failure" && run.conclusion != "cancelled" {
+      classification = "run_not_failed"
+    } else {
+      const failed_jobs = run.jobs.filter(
+        { job ->
+          (job.conclusion == "failure" || job.conclusion == "cancelled")
+            && !policy.aggregate_job_names.contains(job.name)
+        },
+      )
+        .to_list()
+      receipts = failed_jobs.map({ job -> classify_job(workflow, policy, job, logs) }).to_list()
+      classification = overall_classification(receipts)
+    }
+  }
+  const retry_safe_count = receipts.filter({ receipt -> receipt.retry_safe }).count
+  const terminal_failure_count = receipts.filter({ receipt -> receipt.kind == "job_failure" }).count
+  const unknown_count = receipts.filter(
+    { receipt -> receipt.kind == "evidence_unavailable" || receipt.kind == "cancellation_unknown" },
+  ).count
+  const exact_transient = receipts.count > 0 && retry_safe_count == receipts.count
+  let action: RecoveryAction = "none"
+  if exact_transient {
+    if run.attempt > max_attempts {
+      action = "none_max_attempts_reached"
+    } else if run.event == "pull_request" {
+      action = "rerun_failed_jobs"
+    } else if run.event == "merge_group" && pr_number != nil {
+      action = "requeue_merge_queue"
+    } else if run.event == "merge_group" {
+      action = "manual_merge_group_recovery"
+    } else {
+      action = "manual_recovery"
+    }
+  }
+  return schema_expect(
+    {
+      schema: "harn.ci_preemption_recovery.v2",
+      run_id: run.databaseId,
+      classification: classification,
+      workflow: run.workflowName,
+      event: run.event,
+      conclusion: run.conclusion,
+      attempt: run.attempt,
+      head_branch: head_branch,
+      pr_number: pr_number,
+      failed_job_count: receipts.count,
+      inspected_job_count: receipts.filter({ receipt -> receipt.log_available }).count,
+      retry_safe_job_count: retry_safe_count,
+      terminal_failure_job_count: terminal_failure_count,
+      unknown_job_count: unknown_count,
+      evidence_complete: receipts.all({ receipt -> receipt.log_available }),
+      jobs: receipts,
+      planned_action: action,
+      run_url: run.url ?? "",
+    },
+    schema_of(RecoveryReceipt),
+  )
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "ci_preemption_policy",
+      args: [
+        {kind: "flag", name: "run_json", long: "--run-json", parse: "string", required: true},
+        {kind: "flag", name: "workflow", long: "--workflow", parse: "string", required: true},
+        {kind: "flag", name: "logs_dir", long: "--logs-dir", parse: "string", required: true},
+        {kind: "flag", name: "policy", long: "--policy", parse: "string", required: true},
+        {kind: "flag", name: "max_attempts", long: "--max-attempts", parse: "int", default: 1},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/ci_preemption_policy.harn -- --run-json PATH --workflow PATH --logs-dir DIR --policy PATH [--max-attempts N]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const options = unwrap(parsed_result).options
+  const run_value: GitHubRun = schema_expect(
+    json_parse(harness.fs.read_text(to_string(options.run_json))),
+    schema_of(GitHubRun),
+  )
+  const policy_value: RecoveryPolicy = schema_expect(
+    json_parse(harness.fs.read_text(to_string(options.policy))),
+    schema_of(RecoveryPolicy),
+  )
+  const workflow = yaml_parse(harness.fs.read_text(to_string(options.workflow)))
+  guard type_of(workflow) == "dict" else {
+    harness.stdio.eprintln("workflow is not a YAML object")
+    harness.runtime.exit(2)
+  }
+  const logs_dir = to_string(options.logs_dir)
+  let logs: list<JobLogEvidence> = []
+  for job in run_value.jobs {
+    const log_path = path_join(logs_dir, to_string(job.databaseId) + ".log")
+    const available = harness.fs.exists(log_path)
+    logs = logs
+      + [
+        {
+          job_id: job.databaseId,
+          available: available,
+          text: if available {
+            harness.fs.read_text(log_path)
+          } else {
+            ""
+          },
+        },
+      ]
+  }
+  const receipt = classify_recovery(
+    run_value,
+    workflow,
+    policy_value,
+    logs,
+    max(0, to_int(options.max_attempts) ?? 1),
+  )
+  harness.stdio.println(json_stringify(receipt))
+}

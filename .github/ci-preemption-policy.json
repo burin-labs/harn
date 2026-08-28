@@ -1,0 +1,5 @@
+{
+  "schema": "harn.ci_preemption_policy.v1",
+  "aggregate_job_names": ["CI status"],
+  "timeout_completion_grace_seconds": 90
+}
