@@ -1,3 +1,12 @@
+import {
+  CompletionRequirementEvidencePacket,
+  CompletionRequirementReport,
+  completion_requirement_assessments_schema,
+  completion_requirement_contract,
+  completion_requirement_contract_prompt,
+  completion_requirement_pending_feedback,
+  completion_requirement_report,
+} from "std/agent/completion_requirements"
 pub import {
   COMPLETION_JUDGE_DEFAULT_CAP,
   CompletionReview,
@@ -139,6 +148,7 @@ pub type CompletionEvidenceSnapshot = {
   raw_text: string,
   transcript: string,
   judge_evidence: string,
+  judge_evidence_packet: CompletionEvidencePacket,
   judge_evidence_projection: CompletionEvidenceProjectionStats,
   all_tools_used: string,
   successful_tools_used: string,
@@ -185,6 +195,7 @@ pub type CompletionDirectiveReceipt = {
   verification?: CompletionVerificationState?,
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
+  requirements?: CompletionRequirementReport?,
 }
 
 pub type CompletionDirective = {
@@ -205,6 +216,7 @@ pub type CompletionJudgeVerdict = {
   verdict: string,
   detail: string,
   gap_class: CompletionJudgeGapClass,
+  requirement_report?: CompletionRequirementReport?,
 }
 
 /** Normalized result from either a deterministic or model completion check. */
@@ -229,6 +241,7 @@ type CompletionStageVerdict = {
   terminal_evidence_preserved?: bool,
   admission?: CompletionJudgeAdmission?,
   typed_checkpoint?: dict?,
+  requirement_report?: CompletionRequirementReport?,
 }
 
 /** Stable identity for the two model-judge positions in the completion plan. */
@@ -649,6 +662,7 @@ fn __judge_payload(
     raw_text: raw_text == "" ? text : raw_text,
     transcript: transcript,
     judge_evidence: evidence.serialized,
+    judge_evidence_packet: evidence.packet,
     judge_evidence_projection: evidence.stats,
     all_tools_used: join(tool_names, ", "),
     successful_tools_used: join(successful_tool_names, ", "),
@@ -698,22 +712,28 @@ const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
  * @api_stability: experimental
  * @example: __judge_completion_verdict_schema()
  */
-pub fn __judge_completion_verdict_schema() -> dict {
+pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil) -> dict {
+  const contract = completion_requirement_contract(raw_requirement_contract)
+  let properties = {
+    verdict: {type: "string", enum: ["done", "continue"]},
+    detail: {
+      type: "string",
+      minLength: 1,
+      description: "Brief evidence basis or gap. Harn keeps the first 240 characters.",
+    },
+    gap_class: {
+      type: "string",
+      enum: COMPLETION_JUDGE_GAP_CLASSES,
+      description: "On `continue`, the kind of gap being named. On `done`, use `other`.",
+    },
+  }
+  const assessments = completion_requirement_assessments_schema(contract)
+  if assessments != nil {
+    properties = properties + {requirement_report: assessments}
+  }
   return {
     type: "object",
-    properties: {
-      verdict: {type: "string", enum: ["done", "continue"]},
-      detail: {
-        type: "string",
-        minLength: 1,
-        description: "Brief evidence basis or gap. Harn keeps the first 240 characters.",
-      },
-      gap_class: {
-        type: "string",
-        enum: COMPLETION_JUDGE_GAP_CLASSES,
-        description: "On `continue`, the kind of gap being named. On `done`, use `other`.",
-      },
-    },
+    properties: properties,
     required: ["verdict", "detail"],
     additionalProperties: false,
   }
@@ -732,7 +752,11 @@ pub fn __judge_completion_verdict_schema() -> dict {
  * @api_stability: experimental
  * @example: __judge_completion_verdict_read({verdict: "done", detail: "tests pass"})
  */
-pub fn __judge_completion_verdict_read(result: dict) -> CompletionJudgeVerdict {
+pub fn __judge_completion_verdict_read(
+  result: dict,
+  raw_requirement_contract: unknown = nil,
+  evidence_packet: CompletionRequirementEvidencePacket = {},
+) -> CompletionJudgeVerdict {
   const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
   const verdict = if raw == "accept" {
     "done"
@@ -757,6 +781,11 @@ pub fn __judge_completion_verdict_read(result: dict) -> CompletionJudgeVerdict {
     verdict: verdict,
     detail: clamped,
     gap_class: __completion_judge_gap_class(result?.gap_class),
+    requirement_report: completion_requirement_report(
+      completion_requirement_contract(raw_requirement_contract),
+      result?.requirement_report,
+      evidence_packet,
+    ),
   }
 }
 
@@ -773,10 +802,14 @@ fn __judge_stable_prefix(
   } else {
     "\n\nCompletion rubric:\n" + rubric
   }
+  const requirement_block = completion_requirement_contract_prompt(
+    completion_requirement_contract(judge_cfg?.requirement_contract),
+  )
   return system
     + "\n\nStable completion goal:\n"
     + payload.task
     + rubric_block
+    + requirement_block
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
 }
@@ -851,7 +884,8 @@ fn __judge_invoke_structured(
   payload: CompletionEvidenceSnapshot,
 ) -> CompletionStageVerdict {
   const system = judge_cfg.system ?? ""
-  const schema = __judge_completion_verdict_schema()
+  const contract = completion_requirement_contract(judge_cfg.requirement_contract)
+  const schema = __judge_completion_verdict_schema(contract)
   agent_emit_event(
     harness.agent,
     payload.session_id,
@@ -922,9 +956,19 @@ fn __judge_invoke_structured(
       typed_checkpoint: checkpoint,
     }
   }
-  const decoded = __judge_completion_verdict_read(checkpoint.data)
-  const verdict = decoded.verdict
-  const detail = decoded.detail
+  const decoded = __judge_completion_verdict_read(
+    checkpoint.data,
+    contract,
+    payload.judge_evidence_packet,
+  )
+  const requirement_report = decoded.requirement_report
+  const requirements_pending = requirement_report != nil && !requirement_report.complete
+  const verdict = requirements_pending ? "continue" : decoded.verdict
+  const detail = if requirements_pending {
+    completion_requirement_pending_feedback(requirement_report)
+  } else {
+    decoded.detail
+  }
   const feedback_default = judge_cfg.feedback_fallback ?? ""
   const feedback = if detail == "" {
     feedback_default
@@ -935,6 +979,7 @@ fn __judge_invoke_structured(
     vetoed: verdict == "continue",
     verdict: verdict,
     gap_class: decoded.gap_class,
+    reason: requirements_pending ? "completion_requirements_pending" : nil,
     feedback: if verdict == "continue" {
       feedback
     } else {
@@ -950,6 +995,7 @@ fn __judge_invoke_structured(
     source: "llm",
     admission: ran.admission,
     typed_checkpoint: checkpoint,
+    requirement_report: requirement_report,
   }
 }
 
@@ -1122,6 +1168,7 @@ fn __judge_directive(
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
+    requirements: verdict?.requirement_report,
   }
   return {
     action: action,

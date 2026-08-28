@@ -123,6 +123,38 @@ pub fn __validate_judge_dict_or_bool(label: string, value: any) {
   }
 }
 
+/** Validate the optional atomic-requirement ledger at the judge boundary. */
+fn __validate_completion_requirement_contract(label: string, value: any) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + ".requirement_contract` must be a dict or nil; got "
+      + type_of(value)
+  }
+  const requirements = value?.requirements
+  if type_of(requirements) != "list" || len(requirements) == 0 {
+    throw "agent_loop: `" + label
+      + ".requirement_contract.requirements` must be a non-empty list"
+  }
+  let seen: dict = {}
+  for requirement in requirements {
+    if type_of(requirement) != "dict" {
+      throw "agent_loop: every `" + label
+        + ".requirement_contract.requirements` item must be a dict"
+    }
+    const requirement_id = trim(to_string(requirement?.requirement_id ?? ""))
+    const name = trim(to_string(requirement?.name ?? ""))
+    if requirement_id == "" || name == "" {
+      throw "agent_loop: every completion requirement needs non-empty `requirement_id` and `name`"
+    }
+    if seen[requirement_id] ?? false {
+      throw "agent_loop: duplicate completion `requirement_id` `" + requirement_id + "`"
+    }
+    seen = seen + {[requirement_id]: true}
+  }
+}
+
 fn __validate_removed_judge_options(label: string, value: dict | bool | nil) {
   if type_of(value) != "dict" {
     return
@@ -588,6 +620,10 @@ pub fn __validate_agent_loop_completion_options(opts: dict) {
     __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
     __validate_removed_judge_options("verify_completion_judge", opts.verify_completion_judge)
     if type_of(opts.verify_completion_judge) == "dict" {
+      __validate_completion_requirement_contract(
+        "verify_completion_judge",
+        opts.verify_completion_judge?.requirement_contract,
+      )
       __validate_optional_nonnegative_int(
         "verify_completion_judge",
         "max_invocations",
@@ -615,6 +651,10 @@ pub fn __validate_agent_loop_completion_options(opts: dict) {
     __validate_removed_judge_options("done_judge", opts.done_judge)
     __validate_done_judge_cadence(opts.done_judge)
     if type_of(opts.done_judge) == "dict" {
+      __validate_completion_requirement_contract(
+        "done_judge",
+        opts.done_judge?.requirement_contract,
+      )
       __validate_optional_positive_int("done_judge", "timeout_ms", opts.done_judge?.timeout_ms)
       __validate_optional_positive_int(
         "done_judge",

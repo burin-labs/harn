@@ -1,0 +1,229 @@
+import { CompletionRequirement, CompletionRequirementContract } from "std/agent/options_types"
+
+pub type CompletionRequirementAssessment = {
+  requirement_id: string,
+  met: bool,
+  evidence_refs: list<int>,
+}
+
+pub type CompletionRequirementRowStatus = "met" | "unmet" | "missing" | "unsupported"
+
+pub type CompletionRequirementStatus = {
+  requirement_id: string,
+  name: string,
+  met: bool,
+  evidence_refs: list<int>,
+  status: CompletionRequirementRowStatus,
+}
+
+pub type CompletionRequirementReport = {
+  schema: "harn.completion_requirement_report.v1",
+  complete: bool,
+  required_count: int,
+  reported_count: int,
+  pending_count: int,
+  pending_names: list<string>,
+  rows: list<CompletionRequirementStatus>,
+}
+
+pub type CompletionRequirementEvidencePacket = {actions?: list, fallback_observations?: list}
+
+/** Return the optional requirement ledger, normalized to its public shape. */
+pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementContract? {
+  if type_of(value) != "dict" || type_of(value?.requirements) != "list"
+    || len(value.requirements) == 0 {
+    return nil
+  }
+  let requirements: list<CompletionRequirement> = []
+  for raw in value.requirements {
+    const requirement_id = trim(to_string(raw?.requirement_id ?? ""))
+    const name = trim(to_string(raw?.name ?? ""))
+    if requirement_id != "" && name != "" {
+      requirements = requirements + [{requirement_id: requirement_id, name: name}]
+    }
+  }
+  if len(requirements) == 0 {
+    return nil
+  }
+  return {requirements: requirements}
+}
+
+/** JSON-schema projection accepted by the existing structured judge call. */
+pub fn completion_requirement_assessments_schema(
+  contract: CompletionRequirementContract?,
+) -> dict? {
+  if contract == nil || len(contract.requirements) == 0 {
+    return nil
+  }
+  return {
+    type: "array",
+    description:
+      "One assessment per required item. Cite only evidence_index values from the supplied completion evidence packet.",
+    items: {
+      type: "object",
+      properties: {
+        requirement_id: {type: "string"},
+        met: {type: "boolean"},
+        evidence_refs: {type: "array", items: {type: "integer"}},
+      },
+      required: ["requirement_id", "met", "evidence_refs"],
+      additionalProperties: false,
+    },
+  }
+}
+
+/** Stable requirement text added to the one completion judge's input. */
+pub fn completion_requirement_contract_prompt(contract: CompletionRequirementContract?) -> string {
+  if contract == nil || len(contract.requirements) == 0 {
+    return ""
+  }
+  return "\n\nAtomic completion requirements:\n"
+    + json_stringify(contract.requirements)
+    + "\nReturn one requirement_report row for every requirement_id. Mark met only when the supplied evidence packet directly supports that item, and cite the supporting evidence_index values."
+}
+
+fn completion_requirement_supported_evidence_indices(
+  packet: CompletionRequirementEvidencePacket,
+) -> list<int> {
+  let indices: list<int> = []
+  for action in (packet.actions ?? []) + (packet.fallback_observations ?? []) {
+    if type_of(action?.evidence_index) == "int" && !indices.contains(action.evidence_index) {
+      indices = indices + [action.evidence_index]
+    }
+  }
+  return indices
+}
+
+fn completion_requirement_strict_refs(raw: unknown) -> list<int> {
+  let refs: list<int> = []
+  if type_of(raw) != "list" {
+    return refs
+  }
+  for value in raw {
+    if type_of(value) == "int" && !refs.contains(value) {
+      refs = refs + [value]
+    }
+  }
+  return refs
+}
+
+fn completion_requirement_refs_well_formed(raw: unknown) -> bool {
+  if type_of(raw) != "list" {
+    return false
+  }
+  for value in raw {
+    if type_of(value) != "int" {
+      return false
+    }
+  }
+  return true
+}
+
+fn completion_requirement_refs_supported(refs: list<int>, supported: list<int>) -> bool {
+  if len(refs) == 0 {
+    return false
+  }
+  for evidence_index in refs {
+    if !supported.contains(evidence_index) {
+      return false
+    }
+  }
+  return true
+}
+
+fn completion_requirement_matches(raw_rows: unknown, requirement_id: string) -> list {
+  let matches = []
+  if type_of(raw_rows) != "list" {
+    return matches
+  }
+  for row in raw_rows {
+    if trim(to_string(row?.requirement_id ?? "")) == requirement_id {
+      matches = matches + [row]
+    }
+  }
+  return matches
+}
+
+/**
+ * Join model assessments to the authoritative ledger and evidence packet.
+ * A scalar `done` cannot collapse a missing, duplicate, unmet, or uncited row.
+ */
+pub fn completion_requirement_report(
+  contract: CompletionRequirementContract?,
+  raw_rows: unknown,
+  evidence_packet: CompletionRequirementEvidencePacket,
+) -> CompletionRequirementReport? {
+  if contract == nil || len(contract.requirements) == 0 {
+    return nil
+  }
+  const supported = completion_requirement_supported_evidence_indices(evidence_packet)
+  let rows: list<CompletionRequirementStatus> = []
+  let pending_names: list<string> = []
+  let authoritative_ids: list<string> = []
+  for requirement in contract.requirements {
+    authoritative_ids = authoritative_ids + [requirement.requirement_id]
+  }
+  for requirement in contract.requirements {
+    const matches = completion_requirement_matches(raw_rows, requirement.requirement_id)
+    let refs: list<int> = []
+    let status: CompletionRequirementRowStatus = "missing"
+    if len(matches) == 1 {
+      const raw = matches[0]
+      refs = completion_requirement_strict_refs(raw?.evidence_refs)
+      if type_of(raw?.met) != "bool" || raw.met != true {
+        status = "unmet"
+      } else if !completion_requirement_refs_well_formed(raw?.evidence_refs)
+        || !completion_requirement_refs_supported(refs, supported) {
+        status = "unsupported"
+      } else {
+        status = "met"
+      }
+    } else if len(matches) > 1 {
+      status = "unsupported"
+    }
+    const met = status == "met"
+    if !met {
+      pending_names = pending_names + [requirement.name]
+    }
+    rows = rows
+      + [
+        {
+          requirement_id: requirement.requirement_id,
+          name: requirement.name,
+          met: met,
+          evidence_refs: refs,
+          status: status,
+        },
+      ]
+  }
+  if type_of(raw_rows) == "list" {
+    for raw in raw_rows {
+      const reported_id = trim(to_string(raw?.requirement_id ?? ""))
+      if reported_id == "" || !authoritative_ids.contains(reported_id) {
+        pending_names = pending_names
+          + [
+            reported_id == "" ? "Invalid requirement row" : "Unknown requirement `" + reported_id
+              + "`",
+          ]
+      }
+    }
+  }
+  return {
+    schema: "harn.completion_requirement_report.v1",
+    complete: len(pending_names) == 0,
+    required_count: len(contract.requirements),
+    reported_count: type_of(raw_rows) == "list" ? len(raw_rows) : 0,
+    pending_count: len(pending_names),
+    pending_names: pending_names,
+    rows: rows,
+  }
+}
+
+/** Plain, bounded feedback for an incomplete atomic-requirement report. */
+pub fn completion_requirement_pending_feedback(report: CompletionRequirementReport) -> string {
+  return "Completion rejected: " + to_string(report.pending_count)
+    + " pending or invalid assessment(s) across "
+    + to_string(report.required_count)
+    + " required acceptance item(s): "
+    + join(report.pending_names, "; ")
+}
