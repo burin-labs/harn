@@ -1,5 +1,7 @@
+import { canon_event_paths } from "std/agent/canon"
 import {
   CompletionRequirementEvidencePacket,
+  CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
   completion_requirement_assessments_schema,
   completion_requirement_contract,
@@ -23,7 +25,6 @@ import {
   CompletionVerificationState,
   __completion_arbitration_converts,
   __completion_judge_gap_class,
-  __completion_verification_evidence_index,
   __completion_verification_state_read,
   __judge_emit_decision,
   __judge_emit_started,
@@ -49,6 +50,16 @@ import {
 const __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT = 4500
 
 const __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT = 160
+
+// Negative indices are reserved for Harn-owned session summaries. Transcript
+// lifecycle indices are non-negative, so the two namespaces cannot alias.
+const __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX = -1
+
+const __JUDGE_VERIFICATION_EVIDENCE_INDEX = -2
+
+const __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX = -3
+
+const __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT = 12
 
 /** Action the completion-judge model is allowed to return. */
 pub type CompletionJudgeAction = "accept" | "continue"
@@ -97,6 +108,7 @@ pub type CompletionEvidencePacket = {
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
   fallback_observations: list<CompletionEvidenceAction>,
+  requirement_evidence: list<CompletionRequirementEvidenceRecord>,
 }
 
 /**
@@ -398,6 +410,83 @@ fn __judge_clip_evidence(value: any, limit: int) -> string {
     + substring(text, len(text) - tail_chars, len(text))
 }
 
+fn __judge_bounded_artifact_id(value: unknown) -> string {
+  const identity = trim(to_string(value ?? ""))
+  if identity == "" {
+    return ""
+  }
+  if len(identity) <= __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT {
+    return identity
+  }
+  // Keep a readable prefix and a collision-resistant identity for paths longer
+  // than the evidence envelope. No changed artifact silently disappears.
+  return substring(identity, 0, 80) + "…#sha256:" + sha256(identity)
+}
+
+fn __judge_push_artifact_ids(items: list<string>, bucket: unknown) -> list<string> {
+  let out = items
+  if type_of(bucket) != "list" {
+    return out
+  }
+  for value in bucket {
+    const identity = trim(to_string(value ?? ""))
+    if identity != "" && !out.contains(identity) {
+      out = out + [identity]
+    }
+  }
+  return out
+}
+
+fn __judge_mutation_artifact_ids(
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  opts: dict,
+) -> list<string> {
+  let artifact_ids: list<string> = []
+  for call in lifecycle.calls {
+    const descriptor = __judge_tool_descriptor(opts, call.name)
+    if !__judge_descriptor_is_mutation(descriptor) || call.status != "completed" {
+      continue
+    }
+    for result in call.results {
+      if result.outcome != "ok" {
+        continue
+      }
+      artifact_ids = __judge_push_artifact_ids(artifact_ids, canon_event_paths(result.data))
+    }
+  }
+  return artifact_ids
+}
+
+fn __judge_mutation_requirement_evidence(
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  opts: dict,
+) -> list<CompletionRequirementEvidenceRecord> {
+  const artifact_ids = __judge_mutation_artifact_ids(lifecycle, opts).sorted()
+  if len(artifact_ids) == 0 {
+    return []
+  }
+  const sample_count = if len(artifact_ids) < __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT {
+    len(artifact_ids)
+  } else {
+    __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT
+  }
+  let representative_ids: list<string> = []
+  for identity in artifact_ids.slice(0, sample_count) {
+    representative_ids = representative_ids + [__judge_bounded_artifact_id(identity)]
+  }
+  const record: CompletionRequirementEvidenceRecord = {
+    evidence_index: __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX,
+    role: "mutation_summary",
+    supports_completion: true,
+    summary: "Changed " + to_string(len(artifact_ids)) + " artifact(s) across this session.",
+    representative_artifact_ids: representative_ids,
+    artifact_count: len(artifact_ids),
+    artifact_set_digest: "sha256:" + sha256(json_stringify(artifact_ids)),
+    measurement: "observed",
+  }
+  return [record]
+}
+
 fn __judge_descriptor_is_verifier(descriptor: dict) -> bool {
   return descriptor?.evidence_role == "verification"
 }
@@ -550,6 +639,7 @@ fn __judge_evidence_projection_from_lifecycle(
     lifecycle_issues: latest_issues,
     actions: selected,
     fallback_observations: observation_fallback,
+    requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
   }
   let selection: list<CompletionEvidenceSelection> = []
   for action in selected {
@@ -613,6 +703,78 @@ fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: 
   return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
 }
 
+fn __judge_requirement_evidence_without(
+  records: list<CompletionRequirementEvidenceRecord>,
+  evidence_index: int,
+) -> list<CompletionRequirementEvidenceRecord> {
+  return records.filter({ record -> record.evidence_index != evidence_index }).to_list()
+}
+
+/** Project Harn-owned final-output and deterministic readings onto one evidence model. */
+pub fn __judge_requirement_evidence_packet(
+  packet: CompletionEvidencePacket,
+  final_text: string,
+  verification: CompletionVerificationState? = nil,
+) -> CompletionEvidencePacket {
+  let records = packet.requirement_evidence
+  records = __judge_requirement_evidence_without(records, __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX)
+  records = __judge_requirement_evidence_without(records, __JUDGE_VERIFICATION_EVIDENCE_INDEX)
+  const answer = trim(final_text)
+  if answer != "" {
+    records = records
+      + [
+        {
+          evidence_index: __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX,
+          role: "assistant_output",
+          supports_completion: true,
+          summary: __judge_clip_evidence(answer, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
+          representative_artifact_ids: [],
+          measurement: "present",
+        },
+      ]
+  }
+  if verification != nil {
+    records = records
+      + [
+        {
+          evidence_index: __JUDGE_VERIFICATION_EVIDENCE_INDEX,
+          role: "deterministic_verification",
+          supports_completion: verification.observed == "passed",
+          summary: "Deterministic verification observed `" + verification.observed + "`.",
+          representative_artifact_ids: [],
+          measurement: verification.observed,
+        },
+      ]
+  }
+  return packet + {requirement_evidence: records}
+}
+
+fn __judge_evidence_id(
+  task: string,
+  stop_reason: string,
+  text: string,
+  packet: CompletionEvidencePacket,
+  pending_tool_batch_effect_count: int,
+  verification: CompletionVerificationState? = nil,
+) -> string {
+  return "sha256:"
+    + sha256(
+      json_stringify(
+        {
+          task: task,
+          trigger: stop_reason,
+          candidate_text: text,
+          actions: packet.actions,
+          fallback_observations: packet.fallback_observations,
+          requirement_evidence: packet.requirement_evidence,
+          lifecycle_issues: packet.lifecycle_issues,
+          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
+          verification: verification,
+        },
+      ),
+    )
+}
+
 fn __judge_payload(
   agent: HarnessAgent,
   session: dict,
@@ -627,29 +789,25 @@ fn __judge_payload(
   const tool_names = __session_tool_names(lifecycle)
   const successful_tool_names = __session_successful_tool_names(lifecycle)
   const transcript = json_stringify(messages)
-  const evidence = __judge_evidence_projection_from_lifecycle(
+  const projected = __judge_evidence_projection_from_lifecycle(
     messages,
     lifecycle,
     opts,
     "sha256:" + sha256(transcript),
   )
+  const evidence_packet = __judge_requirement_evidence_packet(projected.packet, text)
+  const evidence_serialized = json_stringify(evidence_packet)
+  const evidence_stats = projected.stats + {serialized_chars: len(evidence_serialized)}
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
-  const evidence_id = "sha256:"
-    + sha256(
-      json_stringify(
-        {
-          task: session?.task ?? "",
-          trigger: stop_reason,
-          candidate_text: text,
-          actions: evidence.packet.actions,
-          fallback_observations: evidence.packet.fallback_observations,
-          lifecycle_issues: evidence.packet.lifecycle_issues,
-          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
-        },
-      ),
-    )
+  const evidence_id = __judge_evidence_id(
+    session?.task ?? "",
+    stop_reason,
+    text,
+    evidence_packet,
+    pending_tool_batch_effect_count,
+  )
   return {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
@@ -661,9 +819,9 @@ fn __judge_payload(
     last_text: text,
     raw_text: raw_text == "" ? text : raw_text,
     transcript: transcript,
-    judge_evidence: evidence.serialized,
-    judge_evidence_packet: evidence.packet,
-    judge_evidence_projection: evidence.stats,
+    judge_evidence: evidence_serialized,
+    judge_evidence_packet: evidence_packet,
+    judge_evidence_projection: evidence_stats,
     all_tools_used: join(tool_names, ", "),
     successful_tools_used: join(successful_tool_names, ", "),
     iteration: iteration,
@@ -681,14 +839,29 @@ fn __judge_payload_with_verification(
   if state == nil {
     return payload
   }
+  const verification = state
+    + {observed_at_evidence_index: __JUDGE_VERIFICATION_EVIDENCE_INDEX}
+  const evidence_packet = __judge_requirement_evidence_packet(
+    payload.judge_evidence_packet,
+    payload.last_text,
+    verification,
+  )
+  const evidence_serialized = json_stringify(evidence_packet)
   return payload
     + {
-      verification: state
-        + {
-          observed_at_evidence_index: __completion_verification_evidence_index(
-            payload.judge_evidence_projection.selected_actions,
-          ),
-        },
+      evidence_id: __judge_evidence_id(
+        payload.task,
+        payload.stop_reason,
+        payload.last_text,
+        evidence_packet,
+        payload.pending_tool_batch_effect_count,
+        verification,
+      ),
+      judge_evidence: evidence_serialized,
+      judge_evidence_packet: evidence_packet,
+      judge_evidence_projection: payload.judge_evidence_projection
+        + {serialized_chars: len(evidence_serialized)},
+      verification: verification,
     }
 }
 

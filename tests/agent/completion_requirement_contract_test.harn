@@ -4,22 +4,68 @@ import {
   completion_requirement_report,
 } from "std/agent/completion_requirements"
 import { agent_capture_events } from "std/agent/events"
-import { __judge_completion_verdict_read, __judge_completion_verdict_schema } from "std/agent/judge"
+import {
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_schema,
+  __judge_evidence_projection,
+  __judge_requirement_evidence_packet,
+} from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_done, with_llm_script } from "std/testing"
 
 fn requirement_contract() -> CompletionRequirementContract {
   return {
     requirements: [
-      {requirement_id: "artifact", name: "Create the requested artifact."},
-      {requirement_id: "behavior", name: "Exercise the requested behavior."},
+      {
+        requirement_id: "artifact",
+        name: "Create the requested artifact.",
+        evidence_roles: ["mutation_summary"],
+      },
+      {
+        requirement_id: "behavior",
+        name: "Exercise the requested behavior.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+}
+
+fn artifact_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "artifact",
+        name: "Create the requested artifact.",
+        evidence_roles: ["mutation_summary"],
+      },
     ],
   }
 }
 
 fn evidence_packet() -> CompletionRequirementEvidencePacket {
-  return {actions: [{evidence_index: 4}, {evidence_index: 9}], fallback_observations: []}
+  return {
+    requirement_evidence: [
+      {
+        evidence_index: 4,
+        role: "mutation_summary",
+        supports_completion: true,
+        summary: "The requested artifact changed.",
+        representative_artifact_ids: ["src/artifact.harn"],
+        artifact_count: 1,
+        artifact_set_digest: "sha256:fixture",
+      },
+      {
+        evidence_index: 9,
+        role: "deterministic_verification",
+        supports_completion: true,
+        summary: "The verifier passed.",
+        representative_artifact_ids: [],
+        measurement: "passed",
+      },
+    ],
+  }
 }
 
 fn completion_receipts(events: list) -> list {
@@ -41,7 +87,12 @@ fn edit_tools() {
     "edit",
     "Apply a source edit.",
     {
-      handler: { _args -> "write applied" },
+      handler: { _args ->
+        agent_tool_handler_result(
+          "write applied",
+          {mutation_status: "applied", changed_paths: ["src/artifact.harn"]},
+        )
+      },
       parameters: {content: {type: "string", required: true}},
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
     },
@@ -96,6 +147,16 @@ pipeline test_requirement_report_fails_closed_on_missing_duplicate_and_unsupport
   )
   assert(!unsupported.complete)
   assert_eq(unsupported.rows[0].status, "unsupported")
+  const malformed = completion_requirement_report(
+    requirement_contract(),
+    [
+      {requirement_id: "artifact", met: true, evidence_refs: ["4"]},
+      {requirement_id: "behavior", met: true, evidence_refs: [9]},
+    ],
+    evidence_packet(),
+  )
+  assert(!malformed.complete)
+  assert_eq(malformed.rows[0].status, "unsupported")
   const extra = completion_requirement_report(
     requirement_contract(),
     [
@@ -108,6 +169,78 @@ pipeline test_requirement_report_fails_closed_on_missing_duplicate_and_unsupport
   assert(!extra.complete)
   assert_eq(extra.pending_count, 1)
   assert_eq(extra.pending_names, ["Unknown requirement `invented`"])
+}
+
+pipeline test_tool_free_answer_can_cite_final_assistant_output(harness: Harness, task: unknown) {
+  const projected = __judge_evidence_projection([], {})
+  const packet = __judge_requirement_evidence_packet(
+    projected.packet,
+    "The answer follows from the supplied facts.",
+  )
+  const report = completion_requirement_report(
+    {
+      requirements: [
+        {
+          requirement_id: "answer",
+          name: "Answer the question.",
+          evidence_roles: ["assistant_output"],
+        },
+      ],
+    },
+    [{requirement_id: "answer", met: true, evidence_refs: [-1]}],
+    packet,
+  )
+  assert(report.complete)
+  assert_eq(packet.requirement_evidence[0].role, "assistant_output")
+}
+
+pipeline test_requirement_refs_reject_wrong_role_and_missing_measurement(
+  harness: Harness,
+  task: unknown,
+) {
+  const projected = __judge_evidence_projection([], {})
+  const assistant_packet = __judge_requirement_evidence_packet(projected.packet, "A final answer.")
+  const verification_contract = {
+    requirements: [
+      {
+        requirement_id: "verified",
+        name: "Verification passed.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  const wrong_role = completion_requirement_report(
+    verification_contract,
+    [{requirement_id: "verified", met: true, evidence_refs: [-1]}],
+    assistant_packet,
+  )
+  assert(!wrong_role.complete)
+  assert_eq(wrong_role.rows[0].status, "unsupported")
+  const unmeasured_packet = __judge_requirement_evidence_packet(
+    projected.packet,
+    "A final answer.",
+    {oracle_expected: true, command: "check", observed: "not_run"},
+  )
+  const unmeasured = completion_requirement_report(
+    verification_contract,
+    [{requirement_id: "verified", met: true, evidence_refs: [-2]}],
+    unmeasured_packet,
+  )
+  assert(!unmeasured.complete)
+  assert_eq(unmeasured.rows[0].status, "unsupported")
+}
+
+pipeline test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement(
+  harness: Harness,
+  task: unknown,
+) {
+  const report = completion_requirement_report(
+    {requirements: [{requirement_id: "answer", name: "Answer the question."}]},
+    [{requirement_id: "answer", met: true, evidence_refs: [4]}],
+    evidence_packet(),
+  )
+  assert(!report.complete)
+  assert_eq(report.rows[0].status, "unsupported")
 }
 
 pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completion_seam(
@@ -128,7 +261,7 @@ pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completi
             verdict: "done",
             detail: "The work is complete.",
             requirement_report: [
-              {requirement_id: "artifact", met: true, evidence_refs: [2]},
+              {requirement_id: "artifact", met: true, evidence_refs: [-3]},
               {requirement_id: "behavior", met: false, evidence_refs: []},
             ],
           },
@@ -190,10 +323,7 @@ pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
           {
             verdict: "done",
             detail: "Every requirement has direct evidence.",
-            requirement_report: [
-              {requirement_id: "artifact", met: true, evidence_refs: [2]},
-              {requirement_id: "behavior", met: true, evidence_refs: [2]},
-            ],
+            requirement_report: [{requirement_id: "artifact", met: true, evidence_refs: [-3]}],
           },
         ),
       },
@@ -211,7 +341,7 @@ pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
         verify_completion_judge: {
           provider: "mock",
           max_invocations: 1,
-          requirement_contract: requirement_contract(),
+          requirement_contract: artifact_contract(),
         },
       }
       const captured = agent_capture_events(

@@ -151,6 +151,24 @@ fn __validate_completion_requirement_contract(label: string, value: any) {
     if seen[requirement_id] ?? false {
       throw "agent_loop: duplicate completion `requirement_id` `" + requirement_id + "`"
     }
+    const evidence_roles = requirement?.evidence_roles
+    if evidence_roles != nil {
+      if type_of(evidence_roles) != "list" || len(evidence_roles) == 0 {
+        throw "agent_loop: completion requirement `evidence_roles` must be a non-empty list"
+      }
+      let seen_roles: dict = {}
+      for role in evidence_roles {
+        if role != "assistant_output" && role != "deterministic_verification"
+          && role != "mutation_summary" {
+          throw "agent_loop: unsupported completion requirement evidence role `" + to_string(role)
+            + "`"
+        }
+        if seen_roles[role] ?? false {
+          throw "agent_loop: duplicate completion requirement evidence role `" + role + "`"
+        }
+        seen_roles = seen_roles + {[role]: true}
+      }
+    }
     seen = seen + {[requirement_id]: true}
   }
 }

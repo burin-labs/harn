@@ -164,6 +164,88 @@ pipeline test_completion_judge_projects_bounded_structural_evidence(
   )
 }
 
+pipeline test_completion_evidence_retains_every_mutated_artifact_across_session(
+  harness: Harness,
+  task: unknown,
+) {
+  const messages = [
+    __assistant_facts(
+      "First change.",
+      [{id: "edit-1", function: {name: "edit", arguments: {path: "src/first.rs"}}}],
+    ),
+    __result_facts(
+      "edit",
+      "edit-1",
+      "first write applied",
+      "ok",
+      {mutation_status: "applied", changed_paths: ["src/first.rs", "tests/first.rs"]},
+    ),
+    __assistant_facts(
+      "Second change.",
+      [{id: "edit-2", function: {name: "edit", arguments: {path: "src/second.rs"}}}],
+    ),
+    __result_facts(
+      "edit",
+      "edit-2",
+      "second write applied",
+      "ok",
+      {mutation_status: "applied", changed_paths: ["src/second.rs"]},
+    ),
+  ]
+  const projected = __judge_evidence_projection(
+    messages,
+    {tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}]},
+  )
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.actions[0].tool_call_id, "edit-2")
+  assert_eq(len(projected.packet.requirement_evidence), 1)
+  assert_eq(projected.packet.requirement_evidence[0].role, "mutation_summary")
+  assert_eq(projected.packet.requirement_evidence[0].artifact_count, 3)
+  assert_eq(
+    projected.packet.requirement_evidence[0].representative_artifact_ids,
+    ["src/first.rs", "src/second.rs", "tests/first.rs"],
+  )
+  assert_eq(
+    projected.packet.requirement_evidence[0].artifact_set_digest,
+    "sha256:" + sha256(json_stringify(["src/first.rs", "src/second.rs", "tests/first.rs"])),
+  )
+}
+
+pipeline test_completion_mutation_summary_is_bounded_for_many_artifacts(
+  harness: Harness,
+  task: unknown,
+) {
+  let changed_paths: list<string> = []
+  for index in range(0, 200) {
+    changed_paths = changed_paths + ["src/generated/artifact-" + to_string(index) + ".rs"]
+  }
+  const messages = [
+    __assistant_facts(
+      "Apply the generated change.",
+      [{id: "edit-many", function: {name: "edit", arguments: {path: "src/generated"}}}],
+    ),
+    __result_facts(
+      "edit",
+      "edit-many",
+      "writes applied",
+      "ok",
+      {mutation_status: "applied", changed_paths: changed_paths},
+    ),
+  ]
+  const projected = __judge_evidence_projection(
+    messages,
+    {tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}]},
+  )
+  const record = projected.packet.requirement_evidence[0]
+  assert_eq(record.artifact_count, 200)
+  assert_eq(len(record.representative_artifact_ids), 12)
+  assert_eq(record.artifact_set_digest, "sha256:" + sha256(json_stringify(changed_paths.sorted())))
+  assert(
+    projected.stats.serialized_chars < 10000,
+    "the prompt-facing whole-session mutation summary must remain bounded",
+  )
+}
+
 pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
   harness: Harness,
   task: unknown,

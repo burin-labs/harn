@@ -182,8 +182,17 @@ pub type CompactionPolicy = {
   author?: string,
 }
 
+/** Evidence roles a host may allow one acceptance item to cite. */
+pub type CompletionRequirementEvidenceRole = "assistant_output" \
+  | "deterministic_verification" \
+  | "mutation_summary"
+
 /** One stable, host-projected acceptance item for a completion decision. */
-pub type CompletionRequirement = {requirement_id: string, name: string}
+pub type CompletionRequirement = {
+  requirement_id: string,
+  name: string,
+  evidence_roles?: list<CompletionRequirementEvidenceRole>,
+}
 
 /** Atomic acceptance items the existing completion judge must account for. */
 pub type CompletionRequirementContract = {requirements: list<CompletionRequirement>}
