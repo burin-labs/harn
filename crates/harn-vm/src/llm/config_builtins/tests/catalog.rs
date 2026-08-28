@@ -157,7 +157,7 @@ fn test_llm_catalog_surfaces_batch_and_tool_parity_metadata_for_scripts() {
 }
 
 #[test]
-fn provider_catalog_builtin_surfaces_presentation_families_and_effort_levels() {
+fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
     llm_config::clear_user_overrides();
     crate::llm::capabilities::clear_user_overrides();
     let catalog = provider_catalog_to_vm_value();
@@ -195,4 +195,19 @@ fn provider_catalog_builtin_surfaces_presentation_families_and_effort_levels() {
         other => panic!("expected reasoning_effort_levels list, got {other:?}"),
     };
     assert_eq!(levels, ["none", "low", "medium", "high", "xhigh", "max"]);
+
+    let retired_together_route = models
+        .iter()
+        .filter_map(VmValue::as_dict)
+        .find(|model| {
+            model.get("id").map(VmValue::display) == Some("deepseek-ai/DeepSeek-V4-Pro".to_string())
+        })
+        .expect("deprecated Together DeepSeek V4 Pro route");
+    assert_eq!(
+        retired_together_route
+            .get("sunset_date")
+            .map(VmValue::display)
+            .as_deref(),
+        Some("2026-08-27")
+    );
 }

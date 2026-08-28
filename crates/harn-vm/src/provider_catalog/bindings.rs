@@ -201,7 +201,7 @@ export interface HarnCatalogModel {
   prompt_cache: boolean
   batch?: HarnModelBatchSupport
   pricing?: HarnModelPricing
-  deprecation: { status: "active" | "deprecated"; note?: string; superseded_by?: string }
+  deprecation: { status: "active" | "deprecated"; note?: string; sunset_date?: string; superseded_by?: string }
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
@@ -1100,11 +1100,13 @@ public struct HarnLocalMemory: Codable, Sendable, Equatable {
 public struct HarnModelDeprecation: Codable, Sendable, Equatable {
     public let status: String
     public let note: String?
+    public let sunsetDate: String?
     public let supersededBy: String?
 
     enum CodingKeys: String, CodingKey {
         case status
         case note
+        case sunsetDate = "sunset_date"
         case supersededBy = "superseded_by"
     }
 }

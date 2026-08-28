@@ -95,6 +95,7 @@ pub(super) fn test_equivalent_model_with_context(
         pricing: None,
         deprecated: false,
         deprecation_note: None,
+        sunset_date: None,
         superseded_by: None,
         serving_tiers: Vec::new(),
         quality_tags: Vec::new(),

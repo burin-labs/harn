@@ -3507,6 +3507,7 @@ capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
 deprecated = true
 deprecation_note = "Together retires this preview route on 2026-08-27. Use deepseek-ai/DeepSeek-V4-Pro-0813."
+sunset_date = "2026-08-27"
 superseded_by = "deepseek-ai/DeepSeek-V4-Pro-0813"
 
 tier = "frontier"

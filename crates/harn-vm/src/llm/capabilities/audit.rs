@@ -505,6 +505,7 @@ preferred_tool_format = "native"
                     }),
                     deprecated: false,
                     deprecation_note: None,
+                    sunset_date: None,
                     superseded_by: None,
                     serving_tiers: Vec::new(),
                     quality_tags: Vec::new(),

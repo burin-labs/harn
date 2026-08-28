@@ -554,6 +554,10 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "status": {"enum": ["active", "deprecated"]},
                     "note": {"type": "string"},
+                    "sunset_date": {
+                        "type": "string",
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                    },
                     "superseded_by": {"type": "string"}
                 },
                 "additionalProperties": false
