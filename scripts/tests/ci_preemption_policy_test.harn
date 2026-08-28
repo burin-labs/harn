@@ -157,6 +157,15 @@ pipeline test_missing_log_evidence_fails_closed(task: unknown) {
   assert_eq(receipt.planned_action, "none")
 }
 
+pipeline test_no_failed_jobs_does_not_report_complete_evidence(task: unknown) {
+  const receipt = classify_recovery(run_with_jobs([]), workflow(), POLICY, [], 1)
+  assert_eq(receipt.classification, "no_failed_jobs")
+  assert_eq(receipt.failed_job_count, 0)
+  assert_eq(receipt.inspected_job_count, 0)
+  assert_eq(receipt.evidence_complete, false)
+  assert_eq(receipt.planned_action, "none")
+}
+
 pipeline test_manual_cancellation_before_deadline_fails_closed(task: unknown) {
   const receipt = classify_recovery(
     run_with_jobs([job(101, "Tests", "cancelled", "2026-08-28T18:03:30Z", "2026-08-28T18:13:30Z")]),

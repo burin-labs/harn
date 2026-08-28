@@ -378,7 +378,8 @@ pub fn classify_recovery(
       retry_safe_job_count: retry_safe_count,
       terminal_failure_job_count: terminal_failure_count,
       unknown_job_count: unknown_count,
-      evidence_complete: receipts.all({ receipt -> receipt.log_available }),
+      evidence_complete: receipts.count > 0
+        && receipts.all({ receipt -> receipt.log_available }),
       jobs: receipts,
       planned_action: action,
       run_url: run.url ?? "",
