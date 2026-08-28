@@ -339,6 +339,7 @@ fn model_patch_schema() -> &'static PatchSchema {
             "pricing",
             "deprecated",
             "deprecation_note",
+            "sunset_date",
             "superseded_by",
             "serving_tiers",
             "quality_tags",

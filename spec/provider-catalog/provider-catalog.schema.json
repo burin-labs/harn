@@ -180,6 +180,10 @@
             "deprecated"
           ]
         },
+        "sunset_date": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        },
         "superseded_by": {
           "type": "string"
         }
@@ -1683,7 +1687,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v9.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v10.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1727,10 +1731,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v9.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v10.json"
     },
     "schema_version": {
-      "const": 9
+      "const": 10
     },
     "variants": {
       "items": {

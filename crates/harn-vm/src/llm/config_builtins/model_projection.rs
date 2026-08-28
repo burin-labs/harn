@@ -198,6 +198,14 @@ pub(super) fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> V
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("sunset_date"),
+        model
+            .sunset_date
+            .as_deref()
+            .map(|date| VmValue::String(arcstr::ArcStr::from(date)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         crate::value::intern_key("superseded_by"),
         model
             .superseded_by

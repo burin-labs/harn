@@ -325,11 +325,13 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 9, got 2"),
+        error.contains(&format!(
+            "schema_version must be {PROVIDER_CATALOG_SCHEMA_VERSION}, got 2"
+        )),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
-        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v9.json"),
+        error.contains(&format!("schema must be {PROVIDER_CATALOG_SCHEMA_ID}")),
         "unexpected stale-catalog rejection: {error}"
     );
 }
@@ -983,6 +985,34 @@ deprecated = true
 }
 
 #[test]
+fn malformed_sunset_dates_are_rejected() {
+    let mut catalog = artifact();
+    assert!(validate_artifact(&catalog).is_ok());
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|model| model.deprecation.status == DeprecationStatus::Deprecated)
+        .expect("catalog has a deprecated model");
+    model.deprecation.sunset_date = Some("August 27, 2026".to_string());
+
+    assert!(!validate_artifact(&catalog).is_ok());
+}
+
+#[test]
+fn active_models_cannot_declare_sunset_dates() {
+    let mut catalog = artifact();
+    assert!(validate_artifact(&catalog).is_ok());
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|model| model.deprecation.status == DeprecationStatus::Active)
+        .expect("catalog has an active model");
+    model.deprecation.sunset_date = Some("2026-08-27".to_string());
+
+    assert!(!validate_artifact(&catalog).is_ok());
+}
+
+#[test]
 fn direct_deepseek_legacy_models_are_rejected() {
     let _guard = install_overlay(
         r#"
@@ -1150,7 +1180,7 @@ fn validation_rejects_malformed_model_family_presentation() {
 }
 
 #[test]
-fn serving_tiers_and_supersession_surface_in_contract() {
+fn serving_tiers_and_deprecation_surface_in_contract() {
     let schema = schema_value();
     assert_eq!(
         schema["$defs"]["model"]["properties"]["serving_tiers"]["items"]["$ref"],
@@ -1161,6 +1191,10 @@ fn serving_tiers_and_supersession_surface_in_contract() {
         "#/$defs/pricing"
     );
     assert!(schema["$defs"]["deprecation"]["properties"]["superseded_by"].is_object());
+    assert_eq!(
+        schema["$defs"]["deprecation"]["properties"]["sunset_date"]["pattern"],
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    );
 
     let typescript = typescript_declarations();
     assert!(typescript.contains("export interface HarnModelServingTier"));

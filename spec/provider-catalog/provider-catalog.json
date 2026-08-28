@@ -1,6 +1,6 @@
 {
-  "schema_version": 9,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v9.json",
+  "schema_version": 10,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v10.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -22872,6 +22872,7 @@
       "deprecation": {
         "status": "deprecated",
         "note": "Together retires this preview route on 2026-08-27. Use deepseek-ai/DeepSeek-V4-Pro-0813.",
+        "sunset_date": "2026-08-27",
         "superseded_by": "deepseek-ai/DeepSeek-V4-Pro-0813"
       },
       "availability": "serverless",

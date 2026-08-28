@@ -887,6 +887,12 @@ pub struct ModelDef {
     pub deprecated: bool,
     #[serde(default)]
     pub deprecation_note: Option<String>,
+    /// ISO 8601 date (`YYYY-MM-DD`) when the provider will stop serving this
+    /// route. This is distinct from the date a deprecation was announced: it
+    /// is the customer-impacting deadline after which routing must fail or
+    /// move to `superseded_by`.
+    #[serde(default)]
+    pub sunset_date: Option<String>,
     /// Structured replacement pointer: the catalog id of the model that
     /// supersedes this one (e.g. an older Opus row points at the newest
     /// Opus). Lets release tooling express "migrate to X" in a

@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 9;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v9.json";
+    "https://harnlang.com/schemas/provider-catalog.v10.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -490,6 +490,7 @@ fn catalog_model(
                 DeprecationStatus::Active
             },
             note: model.deprecation_note.clone(),
+            sunset_date: model.sunset_date.clone(),
             superseded_by: model.superseded_by.clone(),
         },
         availability: ModelAvailabilityStatus::from(model.availability),
