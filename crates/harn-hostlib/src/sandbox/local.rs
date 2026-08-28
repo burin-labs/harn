@@ -812,6 +812,83 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_backend_launches_in_read_only_mount_without_granting_write_or_escape() {
+        let persona = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(persona.path().join("entrypoint.txt"), "PERSONA_OK").unwrap();
+
+        let backend = LocalSandbox::default();
+        let session = backend
+            .provision(SandboxSpec {
+                mounts: vec![FilesystemMount {
+                    source: persona.path().to_path_buf(),
+                    target: "/mnt/persona".to_string(),
+                    access: FilesystemAccess::ReadOnly,
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let read = backend
+            .exec(
+                &session.id,
+                ExecRequest {
+                    command: "sh".to_string(),
+                    args: vec!["-c".to_string(), "cat entrypoint.txt".to_string()],
+                    cwd: Some("/mnt/persona".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("a read-only mounted directory must be a launchable cwd");
+        assert_eq!(read.exit_code, 0, "{read:?}");
+        assert_eq!(read.stdout, "PERSONA_OK");
+
+        let write = backend
+            .exec(
+                &session.id,
+                ExecRequest {
+                    command: "sh".to_string(),
+                    args: vec![
+                        "-c".to_string(),
+                        "printf forbidden > should-not-exist.txt".to_string(),
+                    ],
+                    cwd: Some("/mnt/persona".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the sandbox should execute and report the denied write");
+        assert_ne!(
+            write.exit_code, 0,
+            "read-only mount accepted a write: {write:?}"
+        );
+        assert!(
+            !persona.path().join("should-not-exist.txt").exists(),
+            "read-only mount must remain immutable"
+        );
+
+        let escape = backend
+            .exec(
+                &session.id,
+                ExecRequest {
+                    command: "sh".to_string(),
+                    args: vec!["-c".to_string(), "pwd".to_string()],
+                    cwd: Some(outside.path().display().to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("a cwd outside every declared mount must remain rejected");
+        assert!(
+            escape.to_string().contains("process cwd"),
+            "escape rejection should identify the process axis: {escape}"
+        );
+    }
+
     #[test]
     fn mount_env_uses_canonical_mount_names() {
         let mounts = vec![ResolvedMount {
