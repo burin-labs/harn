@@ -185,8 +185,11 @@ async fn host_agent_emit_event(
     if event_type == "model_job" {
         crate::testbench::tape::record_model_job_event(&payload);
     }
-    let event =
-        crate::agent_events::AgentEvent::from_host_payload(&session_id, &event_type, &payload)?;
+    let Some(event) =
+        crate::agent_events::AgentEvent::from_host_payload(&session_id, &event_type, &payload)?
+    else {
+        return Ok(VmValue::Nil);
+    };
     if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type.as_str()) {
         let transcript_event = super::super::helpers::transcript_event(
             &event_type,

@@ -7,14 +7,45 @@
 use super::*;
 use serde_json::json;
 
+fn accepted_host_event(
+    session_id: &str,
+    event_type: &str,
+    payload: &serde_json::Value,
+) -> AgentEvent {
+    AgentEvent::from_host_payload(session_id, event_type, payload)
+        .unwrap_or_else(|error| {
+            panic!("expected accepted host event `{event_type}`, got error {error:?}")
+        })
+        .unwrap_or_else(|| {
+            panic!("expected accepted host event `{event_type}`, got unknown-type drop")
+        })
+}
+
+fn capture_host_ingest_warnings(body: impl FnOnce()) -> Vec<crate::events::LogEvent> {
+    use crate::events::{add_event_sink, clear_event_sinks, reset_event_sinks, CollectorSink};
+    use std::rc::Rc;
+    let sink = Rc::new(CollectorSink::new());
+    clear_event_sinks();
+    add_event_sink(sink.clone());
+    body();
+    let warnings = sink
+        .logs
+        .borrow()
+        .iter()
+        .filter(|event| event.category == "host_event_ingest")
+        .cloned()
+        .collect();
+    reset_event_sinks();
+    warnings
+}
+
 #[test]
 fn from_host_deserializes_generic_variant() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "iteration_start",
         &json!({ "iteration": 3, "provider": "openai", "model": "gpt" }),
-    )
-    .expect("iteration_start");
+    );
     match event {
         AgentEvent::IterationStart {
             session_id,
@@ -33,7 +64,7 @@ fn from_host_deserializes_generic_variant() {
 
 #[test]
 fn capability_gap_preserves_unresolved_route_diagnosis() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "capability_gap",
         &json!({
@@ -46,8 +77,7 @@ fn capability_gap_preserves_unresolved_route_diagnosis() {
             "fallback_tool_format": "json",
             "message": "route is unresolved",
         }),
-    )
-    .expect("capability_gap");
+    );
 
     match event {
         AgentEvent::CapabilityGap {
@@ -68,12 +98,11 @@ fn capability_gap_preserves_unresolved_route_diagnosis() {
 fn from_host_tool_call_defaults_status_and_audit() {
     // No `status` in the payload -> Pending; audit comes from the (absent)
     // ambient mutation session -> None, never from the payload.
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "tool_call",
         &json!({ "tool_call_id": "t1", "tool_name": "read_file", "audit": {"bogus": true} }),
-    )
-    .expect("tool_call");
+    );
     match event {
         AgentEvent::ToolCall {
             status,
@@ -91,7 +120,7 @@ fn from_host_tool_call_defaults_status_and_audit() {
 
 #[test]
 fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "tool_call_update",
         &json!({
@@ -104,8 +133,7 @@ fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
             },
             "executor": "harn",
         }),
-    )
-    .expect("tool_call_update");
+    );
     match event {
         AgentEvent::ToolCallUpdate {
             status,
@@ -129,7 +157,7 @@ fn from_host_tool_call_update_defaults_status_and_maps_executor_alias() {
 
 #[test]
 fn from_host_tool_call_update_preserves_structured_executor() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "tool_call_update",
         &json!({
@@ -139,8 +167,7 @@ fn from_host_tool_call_update_preserves_structured_executor() {
             "mutation_status": "unknown",
             "executor": { "kind": "mcp_server", "server_name": "linear" },
         }),
-    )
-    .expect("tool_call_update");
+    );
     match event {
         AgentEvent::ToolCallUpdate { executor, .. } => {
             assert_eq!(
@@ -162,7 +189,7 @@ fn from_host_tool_call_update_preserves_structured_mutation_status() {
         ("not_applied", ToolMutationStatus::NotApplied),
         ("unknown", ToolMutationStatus::Unknown),
     ] {
-        let event = AgentEvent::from_host_payload(
+        let event = accepted_host_event(
             "s1",
             "tool_call_update",
             &json!({
@@ -171,8 +198,7 @@ fn from_host_tool_call_update_preserves_structured_mutation_status() {
                 "status": "completed",
                 "mutation_status": wire,
             }),
-        )
-        .expect("typed mutation status");
+        );
         assert!(matches!(
             event,
             AgentEvent::ToolCallUpdate {
@@ -212,8 +238,7 @@ fn from_host_tool_call_update_rejects_unknown_executor() {
 
 #[test]
 fn from_host_progress_reported_defaults_replace_true() {
-    let event = AgentEvent::from_host_payload("s1", "progress_reported", &json!({}))
-        .expect("progress_reported");
+    let event = accepted_host_event("s1", "progress_reported", &json!({}));
     match event {
         AgentEvent::ProgressReported {
             replace,
@@ -243,7 +268,7 @@ fn progress_reported_uses_the_durable_internal_journal_policy() {
 fn from_host_verdict_deserializes_complete_payload() {
     // The loop always emits a normalized (complete) verdict payload; the
     // typed path deserializes it 1:1.
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "scope_classifier_verdict",
         &json!({
@@ -255,8 +280,7 @@ fn from_host_verdict_deserializes_complete_payload() {
             "evidence": "e",
             "skip_main_turn": false,
         }),
-    )
-    .expect("scope_classifier_verdict");
+    );
     match event {
         AgentEvent::ScopeClassifierVerdict {
             label,
@@ -276,7 +300,7 @@ fn from_host_verdict_deserializes_complete_payload() {
 
 #[test]
 fn from_host_input_guardrail_deserializes_complete_payload() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "input_guardrail_verdict",
         &json!({
@@ -288,8 +312,7 @@ fn from_host_input_guardrail_deserializes_complete_payload() {
             "confidence_threshold": 0.8,
             "classifier_kind": "custom",
         }),
-    )
-    .expect("input_guardrail_verdict");
+    );
     match event {
         AgentEvent::InputGuardrailVerdict {
             tripwire,
@@ -311,7 +334,7 @@ fn from_host_input_guardrail_deserializes_complete_payload() {
 
 #[test]
 fn from_host_nudge_maps_to_feedback_injected() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "llm_auto_continue",
         &json!({
@@ -320,8 +343,7 @@ fn from_host_nudge_maps_to_feedback_injected() {
             "attempt": 1,
             "max_continuations": 3,
         }),
-    )
-    .expect("llm_auto_continue");
+    );
     match event {
         AgentEvent::FeedbackInjected { kind, content, .. } => {
             assert_eq!(kind, "llm_auto_continue");
@@ -333,7 +355,7 @@ fn from_host_nudge_maps_to_feedback_injected() {
 
 #[test]
 fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "no_progress_streak_nudge",
         &json!({
@@ -344,8 +366,7 @@ fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
             "has_tools": true,
             "made_tool_calls": false,
         }),
-    )
-    .expect("no_progress_streak_nudge");
+    );
     match event {
         AgentEvent::FeedbackInjected {
             kind,
@@ -366,7 +387,7 @@ fn from_host_no_progress_nudge_preserves_injected_text_and_streak() {
 
 #[test]
 fn from_host_no_progress_nudge_without_text_uses_explanatory_fallback() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "no_progress_streak_nudge",
         &json!({
@@ -376,8 +397,7 @@ fn from_host_no_progress_nudge_without_text_uses_explanatory_fallback() {
             "has_tools": true,
             "made_tool_calls": false,
         }),
-    )
-    .expect("no_progress_streak_nudge");
+    );
     match event {
         AgentEvent::FeedbackInjected {
             kind,
@@ -396,7 +416,7 @@ fn from_host_no_progress_nudge_without_text_uses_explanatory_fallback() {
 
 #[test]
 fn from_host_judge_decision_preserves_source() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "judge_decision",
         &json!({
@@ -415,8 +435,7 @@ fn from_host_judge_decision_preserves_source() {
             "specific_gaps": ["rerun the verifier"],
             "accepted_evidence": ["targeted verifier passed"],
         }),
-    )
-    .expect("judge_decision");
+    );
     match event {
         AgentEvent::JudgeDecision {
             source,
@@ -436,12 +455,11 @@ fn from_host_judge_decision_preserves_source() {
 
 #[test]
 fn judge_started_enters_the_host_boundary_with_its_trigger() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "judge_started",
         &json!({ "iteration": 4, "trigger": "verify_completion" }),
-    )
-    .expect("judge_started");
+    );
     match event {
         AgentEvent::JudgeStarted {
             session_id,
@@ -460,8 +478,7 @@ fn judge_started_enters_the_host_boundary_with_its_trigger() {
 fn judge_started_without_a_trigger_still_opens_the_window() {
     // The window a host renders must not depend on an optional label; a judge
     // invoked without a named trigger still costs the user the same wait.
-    let event = AgentEvent::from_host_payload("s1", "judge_started", &json!({ "iteration": 0 }))
-        .expect("judge_started");
+    let event = accepted_host_event("s1", "judge_started", &json!({ "iteration": 0 }));
     match event {
         AgentEvent::JudgeStarted { trigger, .. } => assert_eq!(trigger, None),
         other => panic!("expected JudgeStarted, got {other:?}"),
@@ -470,7 +487,7 @@ fn judge_started_without_a_trigger_still_opens_the_window() {
 
 #[test]
 fn from_host_stance_events_map_to_stance_transition() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "stance_write_access_granted",
         &json!({
@@ -478,8 +495,7 @@ fn from_host_stance_events_map_to_stance_transition() {
             "allowed_tools": ["read_file", "write_file"],
             "consent": "operator",
         }),
-    )
-    .expect("stance_write_access_granted");
+    );
     match event {
         AgentEvent::StanceTransition {
             phase,
@@ -501,7 +517,7 @@ fn from_host_stance_events_map_to_stance_transition() {
 fn from_host_deserializes_budget_events() {
     // Budget termination is a normal host-emitted loop outcome, so both
     // variants must stay inside the explicit host allowlist.
-    match AgentEvent::from_host_payload(
+    match accepted_host_event(
         "s1",
         "budget_exhausted",
         &json!({
@@ -519,9 +535,7 @@ fn from_host_deserializes_budget_events() {
             "provider": "openai",
             "model": "gpt-5.6-sol",
         }),
-    )
-    .expect("budget_exhausted")
-    {
+    ) {
         AgentEvent::BudgetExhausted {
             max_iterations,
             kind,
@@ -551,13 +565,11 @@ fn from_host_deserializes_budget_events() {
         }
         other => panic!("expected BudgetExhausted, got {other:?}"),
     }
-    match AgentEvent::from_host_payload(
+    match accepted_host_event(
         "s1",
         "budget_circuit_breaker",
         &json!({ "kind": "consecutive_failures", "consecutive_count": 3, "paused_for_ms": 500 }),
-    )
-    .expect("budget_circuit_breaker")
-    {
+    ) {
         AgentEvent::BudgetCircuitBreaker {
             consecutive_count,
             paused_for_ms,
@@ -572,7 +584,7 @@ fn from_host_deserializes_budget_events() {
 
 #[test]
 fn documented_stdlib_events_are_typed_and_journaled() {
-    let required_tools = AgentEvent::from_host_payload(
+    let required_tools = accepted_host_event(
         "s1",
         "require_successful_tools_violation",
         &json!({
@@ -588,8 +600,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
                 "iterations": 2,
             },
         }),
-    )
-    .expect("require_successful_tools_violation");
+    );
     assert!(matches!(
         required_tools,
         AgentEvent::RequireSuccessfulToolsViolation {
@@ -598,7 +609,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
         } if actor == "implementer"
     ));
 
-    let final_wrapup = AgentEvent::from_host_payload(
+    let final_wrapup = accepted_host_event(
         "s1",
         "final_wrapup",
         &json!({
@@ -615,8 +626,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
                 "evidence_line": "the final summary contained an unconsumed tool call",
             },
         }),
-    )
-    .expect("final_wrapup");
+    );
     assert!(matches!(
         final_wrapup,
         AgentEvent::FinalWrapup {
@@ -626,7 +636,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
         } if evidence.parsed_call_count == 1
     ));
 
-    let legacy_final_wrapup = AgentEvent::from_host_payload(
+    let legacy_final_wrapup = accepted_host_event(
         "s1",
         "final_wrapup",
         &json!({
@@ -636,8 +646,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
             "host_directive": false,
             "terminal_kind": "max_iterations",
         }),
-    )
-    .expect("legacy final_wrapup");
+    );
     assert!(matches!(
         legacy_final_wrapup,
         AgentEvent::FinalWrapup {
@@ -646,7 +655,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
         }
     ));
 
-    let thinking = AgentEvent::from_host_payload(
+    let thinking = accepted_host_event(
         "s1",
         "pack_thinking_stripped",
         &json!({
@@ -654,14 +663,13 @@ fn documented_stdlib_events_are_typed_and_journaled() {
             "requested": "high",
             "reason": "claude_opus_adaptive",
         }),
-    )
-    .expect("pack_thinking_stripped");
+    );
     assert!(matches!(
         thinking,
         AgentEvent::PackThinkingStripped { ref requested, .. } if requested == "high"
     ));
 
-    let tie = AgentEvent::from_host_payload(
+    let tie = accepted_host_event(
         "s1",
         "self_consistency_tie",
         &json!({
@@ -672,14 +680,13 @@ fn documented_stdlib_events_are_typed_and_journaled() {
                 {"answer": "beta", "count": 2},
             ],
         }),
-    )
-    .expect("self_consistency_tie");
+    );
     assert!(matches!(
         tie,
         AgentEvent::SelfConsistencyTie { total: 4, .. }
     ));
 
-    let fallback = AgentEvent::from_host_payload(
+    let fallback = accepted_host_event(
         "s1",
         "code_librarian_query_nl_fallback",
         &json!({
@@ -689,8 +696,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
             "result_count": 2,
             "text": "where is session recovery implemented?",
         }),
-    )
-    .expect("code_librarian_query_nl_fallback");
+    );
     assert!(matches!(
         fallback,
         AgentEvent::CodeLibrarianQueryNlFallback {
@@ -716,13 +722,20 @@ fn documented_stdlib_events_are_typed_and_journaled() {
 }
 
 #[test]
-fn from_host_rejects_non_host_and_unknown_event_types() {
+fn from_host_drops_non_host_and_unknown_event_types_without_failing() {
+    crate::agent_sessions::reset_session_store();
     // A real `AgentEvent` variant that is never emitted through the host
-    // path stays rejected (parity with the retired match's allowlist).
-    AgentEvent::from_host_payload("s1", "worker_update", &json!({}))
-        .expect_err("worker_update is not a host-emittable event type");
-    AgentEvent::from_host_payload("s1", "totally_made_up", &json!({}))
-        .expect_err("unknown event type rejected");
+    // path is the same class as a never-seen name: drop, do not fail.
+    assert!(
+        AgentEvent::from_host_payload("s1", "worker_update", &json!({}))
+            .expect("non-host type must not fail ingest")
+            .is_none()
+    );
+    assert!(
+        AgentEvent::from_host_payload("s1", "totally_made_up", &json!({}))
+            .expect("unknown type must not fail ingest")
+            .is_none()
+    );
 }
 
 #[test]
@@ -733,8 +746,7 @@ fn from_host_accepts_model_job_events_and_journals_them_as_tool_activity() {
         "job_id": "job-1",
         "state": "running",
     });
-    let event = AgentEvent::from_host_payload("s1", "model_job", &payload)
-        .expect("model_job is host-emittable");
+    let event = accepted_host_event("s1", "model_job", &payload);
     assert!(matches!(
         event,
         AgentEvent::ModelJob {
@@ -750,7 +762,7 @@ fn from_host_accepts_model_job_events_and_journals_them_as_tool_activity() {
 
 #[test]
 fn from_host_accepts_typed_tool_batch_disposition_receipts() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "tool_batch_disposition",
         &json!({
@@ -775,8 +787,7 @@ fn from_host_accepts_typed_tool_batch_disposition_receipts() {
                 "blocking_mutation_status": null
             }
         }),
-    )
-    .expect("tool_batch_disposition is host-emittable");
+    );
 
     match event {
         AgentEvent::ToolBatchDisposition {
@@ -801,7 +812,7 @@ fn from_host_accepts_typed_tool_batch_disposition_receipts() {
 /// payload, so one attribution rule covers both languages.
 #[test]
 fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "boundary_failure",
         &json!({
@@ -811,8 +822,7 @@ fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
             "detail": "tool-shaped bytes were not parsed",
             "dropped_count": 1,
         }),
-    )
-    .expect("boundary_failure is host-emittable");
+    );
     match event {
         AgentEvent::BoundaryFailure {
             session_id,
@@ -839,46 +849,121 @@ fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
     }
 }
 
-/// The `host_event_ingest` boundary. The `VmError` alone was never enough:
-/// every stdlib emit site wraps `agent_emit_event` in `try { }` and discards
-/// the result, so a rejected event used to vanish. The funnel emission is not
-/// swallowable by a caller's `try`.
+/// The `host_event_ingest` boundary. Unknown names warn and drop. A
+/// malformed payload of a registered type still fails the emit and
+/// reports through the funnel, because every stdlib site wraps
+/// `agent_emit_event` in `try { }` and would otherwise swallow the error.
 #[test]
-fn a_rejected_host_event_reports_through_the_funnel() {
-    for (event_type, payload) in [
-        ("totally_made_up", json!({})),
-        ("iteration_start", json!({ "iteration": "not-a-number" })),
-    ] {
-        let captured = crate::boundary::tests::CapturedEvents::install();
-        AgentEvent::from_host_payload("s1", event_type, &payload)
-            .expect_err("this payload must be rejected");
-        let events = captured.boundary_failures();
-        assert_eq!(events.len(), 1, "for {event_type}: got {events:?}");
-        match &events[0] {
-            AgentEvent::BoundaryFailure {
-                session_id,
-                boundary,
-                kind,
-                owner,
-                excerpt,
-                ..
-            } => {
-                assert_eq!(session_id, "s1");
-                assert_eq!(*boundary, crate::boundary::BoundaryId::HostEventIngest);
-                assert_eq!(*kind, crate::boundary::BoundaryFailureKind::Unrecognized);
-                assert_eq!(owner, "harness");
-                assert!(excerpt.is_some(), "the rejected payload must ride along");
-            }
-            other => panic!("expected BoundaryFailure, got {other:?}"),
+fn a_malformed_known_host_event_reports_through_the_funnel() {
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    AgentEvent::from_host_payload(
+        "s1",
+        "iteration_start",
+        &json!({ "iteration": "not-a-number" }),
+    )
+    .expect_err("malformed known type must stay fatal");
+    let events = captured.boundary_failures();
+    assert_eq!(events.len(), 1, "got {events:?}");
+    match &events[0] {
+        AgentEvent::BoundaryFailure {
+            session_id,
+            boundary,
+            kind,
+            owner,
+            excerpt,
+            ..
+        } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(*boundary, crate::boundary::BoundaryId::HostEventIngest);
+            assert_eq!(*kind, crate::boundary::BoundaryFailureKind::Unrecognized);
+            assert_eq!(owner, "harness");
+            assert!(excerpt.is_some(), "the rejected payload must ride along");
         }
+        other => panic!("expected BoundaryFailure, got {other:?}"),
     }
+}
+
+#[test]
+fn an_unknown_host_event_type_warns_once_per_session_and_is_not_a_boundary_failure() {
+    crate::agent_sessions::reset_session_store();
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    let warnings = capture_host_ingest_warnings(|| {
+        for _ in 0..2 {
+            let dropped = AgentEvent::from_host_payload("s1", "totally_made_up", &json!({}))
+                .expect("unknown type must not fail ingest");
+            assert!(
+                dropped.is_none(),
+                "unknown type must not become an AgentEvent"
+            );
+        }
+        let other_session = AgentEvent::from_host_payload("s2", "totally_made_up", &json!({}))
+            .expect("unknown type on a later session must not fail ingest");
+        assert!(other_session.is_none());
+        let other_type = AgentEvent::from_host_payload("s1", "also_made_up", &json!({}))
+            .expect("a second unknown type must not fail ingest");
+        assert!(other_type.is_none());
+    });
+    assert!(
+        captured.boundary_failures().is_empty(),
+        "unknown types must not surface as boundary_failure: {:?}",
+        captured.boundary_failures()
+    );
+    assert_eq!(
+        warnings.len(),
+        3,
+        "one warning per unknown type per session, got {warnings:?}"
+    );
+    assert_eq!(warnings[0].level, crate::events::EventLevel::Warn);
+    assert_eq!(
+        warnings[0].metadata.get("event_type"),
+        Some(&json!("totally_made_up"))
+    );
+    assert_eq!(warnings[1].metadata.get("session_id"), Some(&json!("s2")));
+    assert_eq!(
+        warnings[2].metadata.get("event_type"),
+        Some(&json!("also_made_up"))
+    );
+}
+
+#[test]
+fn an_unknown_host_event_warns_once_when_a_session_moves_threads() {
+    fn call_on_thread(
+        runtime: std::sync::Arc<crate::agent_sessions::AgentSessionRuntime>,
+    ) -> Vec<crate::events::LogEvent> {
+        std::thread::spawn(move || {
+            let previous = crate::agent_sessions::swap_active_session_runtime(runtime);
+            let warnings = capture_host_ingest_warnings(|| {
+                let dropped =
+                    AgentEvent::from_host_payload("migrating", "future_event", &json!({}))
+                        .expect("unknown type must not fail ingest");
+                assert!(dropped.is_none());
+            });
+            crate::agent_sessions::swap_active_session_runtime(previous);
+            warnings
+        })
+        .join()
+        .expect("warning worker thread must finish")
+    }
+
+    let runtime = crate::agent_sessions::fresh_session_runtime();
+    let mut warnings = call_on_thread(runtime.clone());
+    warnings.extend(call_on_thread(runtime));
+
+    assert_eq!(warnings.len(), 1, "session migration warned more than once");
+    assert_eq!(
+        warnings[0].metadata.get("session_id"),
+        Some(&json!("migrating"))
+    );
+    assert_eq!(
+        warnings[0].metadata.get("event_type"),
+        Some(&json!("future_event"))
+    );
 }
 
 #[test]
 fn an_accepted_host_event_reports_no_boundary_failure() {
     let captured = crate::boundary::tests::CapturedEvents::install();
-    AgentEvent::from_host_payload("s1", "iteration_start", &json!({ "iteration": 1 }))
-        .expect("accepted");
+    accepted_host_event("s1", "iteration_start", &json!({ "iteration": 1 }));
     assert!(captured.boundary_failures().is_empty());
 }
 
@@ -1018,7 +1103,7 @@ fn the_emitter_scan_actually_finds_emitters() {
 
 #[test]
 fn llm_call_log_enters_the_host_boundary_with_its_route_and_latency() {
-    let event = AgentEvent::from_host_payload(
+    let event = accepted_host_event(
         "s1",
         "llm_call_log",
         &json!({
@@ -1032,8 +1117,7 @@ fn llm_call_log_enters_the_host_boundary_with_its_route_and_latency() {
             "attempt": 1,
             "prompt": "kept for an include_prompt caller"
         }),
-    )
-    .expect("the shipped stdlib's own event must be accepted");
+    );
     match event {
         AgentEvent::LlmCallLog {
             session_id,
@@ -1065,12 +1149,11 @@ fn llm_call_log_enters_the_host_boundary_with_its_route_and_latency() {
 fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
     // One case per arm the drift check turned up. Each asserts the scalar a
     // consumer joins on plus that nothing was dropped on the way through.
-    let routing = AgentEvent::from_host_payload(
+    let routing = accepted_host_event(
         "s1",
         "llm_routing_decision",
         &json!({"route_index": -1, "route_name": "default", "used_default": true}),
-    )
-    .expect("accepted");
+    );
     match routing {
         AgentEvent::LlmRoutingDecision {
             route_index,
@@ -1088,12 +1171,11 @@ fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
         other => panic!("expected LlmRoutingDecision, got {other:?}"),
     }
 
-    let fallback = AgentEvent::from_host_payload(
+    let fallback = accepted_host_event(
         "s1",
         "llm_fallback_attempt",
         &json!({"fallback_index": 2, "fallback_total": 3, "ok": false, "status": "rate_limit"}),
-    )
-    .expect("accepted");
+    );
     match fallback {
         AgentEvent::LlmFallbackAttempt {
             fallback_index,
@@ -1109,13 +1191,12 @@ fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
         other => panic!("expected LlmFallbackAttempt, got {other:?}"),
     }
 
-    let shadow = AgentEvent::from_host_payload(
+    let shadow = accepted_host_event(
         "s1",
         "llm_shadow_diff",
         &json!({"primary_ok": true, "shadow_ok": false, "primary_status": "ok",
                 "shadow_status": "timeout", "primary_len": 120, "shadow_len": 0}),
-    )
-    .expect("accepted");
+    );
     match shadow {
         AgentEvent::LlmShadowDiff {
             primary_ok,
@@ -1131,13 +1212,12 @@ fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
         other => panic!("expected LlmShadowDiff, got {other:?}"),
     }
 
-    let hit = AgentEvent::from_host_payload(
+    let hit = accepted_host_event(
         "s1",
         "semantic_cache_hit",
         &json!({"similarity": 0.94, "provider": "openai", "model": "gpt-5.6-luna",
                 "metrics": {"model_calls_avoided": 1}}),
-    )
-    .expect("accepted");
+    );
     match hit {
         AgentEvent::SemanticCacheHit {
             similarity,
@@ -1155,12 +1235,11 @@ fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
         other => panic!("expected SemanticCacheHit, got {other:?}"),
     }
 
-    let miss = AgentEvent::from_host_payload(
+    let miss = accepted_host_event(
         "s1",
         "semantic_cache_miss",
         &json!({"nearest_similarity": 0.61, "metrics": {"compute_ms": 42}}),
-    )
-    .expect("accepted");
+    );
     match miss {
         AgentEvent::SemanticCacheMiss {
             nearest_similarity,
