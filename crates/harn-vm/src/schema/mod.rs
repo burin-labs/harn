@@ -23,6 +23,15 @@ pub use canonicalize::json_to_vm_value;
 pub(crate) fn normalize_provider_json_schema(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
+            // Harn's compact tool parameter declarations use
+            // `required: false` on the parameter schema itself. JSON Schema
+            // reserves `required` for an array of property names, including
+            // inside nested object properties. The boolean is Harn metadata,
+            // not provider schema, and OpenAI rejects the whole tool catalog
+            // if it leaks onto the wire.
+            if matches!(object.get("required"), Some(serde_json::Value::Bool(_))) {
+                object.remove("required");
+            }
             // `schema_of(...)` uses Harn's canonical `union` spelling. That is
             // an internal schema key, not a JSON Schema keyword; letting it
             // reach a provider makes the provider reject an otherwise valid

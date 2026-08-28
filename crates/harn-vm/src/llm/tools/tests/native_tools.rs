@@ -204,6 +204,42 @@ fn vm_tools_to_native_preserves_json_schema_required_arrays() {
 }
 
 #[test]
+fn vm_tools_to_native_removes_nested_harn_required_flags() {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "payload".to_string(),
+        vm_dict(&[
+            ("type", vm_str("dict")),
+            (
+                "properties",
+                vm_dict(&[
+                    (
+                        "label",
+                        vm_dict(&[
+                            ("type", vm_str("str")),
+                            ("required", super::VmValue::Bool(false)),
+                        ]),
+                    ),
+                    ("id", vm_dict(&[("type", vm_str("str"))])),
+                ]),
+            ),
+            ("required", vm_list(vec![vm_str("id")])),
+        ]),
+    );
+    let tool = vm_dict(&[
+        ("name", vm_str("submit")),
+        ("description", vm_str("Submit payload")),
+        ("parameters", super::VmValue::dict(params)),
+    ]);
+
+    let tools = vm_tools_to_native(&vm_list(vec![tool]), "openai", "gpt-5.6-sol")
+        .expect("openai native tools");
+    let payload = &tools[0]["function"]["parameters"]["properties"]["payload"];
+    assert_eq!(payload["required"], json!(["id"]));
+    assert!(payload["properties"]["label"].get("required").is_none());
+}
+
+#[test]
 fn vm_tools_to_native_preserves_mcp_camel_case_input_schema_for_anthropic() {
     let input_schema = vm_dict(&[
         ("type", vm_str("object")),
