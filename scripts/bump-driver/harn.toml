@@ -15,4 +15,4 @@ default = "github_remote.harn"
 [dependencies]
 # Immutable release tag plus the content-addressed lockfile keep CI and local
 # bump runs on the same reviewed connector implementation.
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.8.3" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.8.7" }

@@ -53,11 +53,15 @@ fn __must(result: any, operation: string) {
 
 fn __retryable_publication_failure(failure: GithubConnectorError) -> bool {
   const status = failure.http_status ?? 0
-  return failure.category == "network" && status >= 500 && status < 600
+  if failure.category == "network" && status >= 500 && status < 600 {
+    return true
+  }
+  return failure.category == "graphql" && failure.graphql_error_kind == "server"
+    && (failure.retryable ?? false)
 }
 
 /**
- * Replay only the leased worktree publication after a transient GitHub 5xx.
+ * Replay only the leased worktree publication after a classified transient GitHub failure.
  *
  * Refresh, formatting, validation, and signed-worktree assembly all precede
  * this adapter. Re-entering the connector derives the same delta from the same
