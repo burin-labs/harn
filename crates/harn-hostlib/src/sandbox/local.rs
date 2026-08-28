@@ -816,7 +816,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn local_backend_launches_in_read_only_mount_without_granting_write_or_escape() {
         let persona = tempfile::tempdir().unwrap();
