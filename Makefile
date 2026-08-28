@@ -568,12 +568,13 @@ fmt-harn:
 audit-fmt-harn-tokens:
 	HARN_FMT_AUDIT_BASE="$${HARN_FMT_AUDIT_BASE:-origin/main}" cargo test -p harn-fmt tests::semantic_tokens::merge_base_harn_rewrite_preserves_semantic_tokens -- --exact
 
-# Run the @test pipelines that cover scripts/*.harn against pure-logic
-# fixtures (no filesystem dependency outside the canonical spec mirror
-# check). Wired into `make all` and exercised by CI.
+# Run Harn-level interface tests for repository scripts and focused stdlib
+# owners. Fixtures stay inside the test workspace except for the canonical
+# spec mirror check. Wired into `make all` and exercised by CI.
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/models_batch_rejoin_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/diagnostics-timing/tests/ --parallel
 	@echo "    Harn script tests OK."

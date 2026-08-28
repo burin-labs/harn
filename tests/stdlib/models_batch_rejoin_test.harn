@@ -1,0 +1,275 @@
+// Run: harn test tests/stdlib/models_batch_rejoin_test.harn
+import { BatchRejoinInput, BatchRejoinRun, batch_rejoin } from "std/cli/models/batch_rejoin"
+import { assert_eq } from "std/testing"
+
+type RejoinFixture = {
+  root: string,
+  execution_path: string,
+  manifest_path: string,
+  download_path: string,
+  artifact_path: string,
+}
+
+type RejoinCase = {
+  name: string,
+  result_text: string,
+  job_status: string,
+  mutation: string,
+  expected_reasons: list<string>,
+}
+
+fn _write_json(fs: HarnessFs, path: string, value: dict) -> string {
+  const text = json_stringify_pretty(value) + "\n"
+  fs.write_text(path, text)
+  return sha256(text)
+}
+
+fn _write_fixture(fs: HarnessFs, root: string, test_case: RejoinCase) -> RejoinFixture {
+  fs.mkdir(root)
+  const results_dir = path_join(root, "results")
+  fs.mkdir(results_dir)
+  const prepared_dir = path_join(root, "prepared")
+  fs.mkdir(prepared_dir)
+  const manifest_path = path_join(root, "manifest.json")
+  const manifest = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_manifest",
+    groups: [
+      {
+        id: "group-1",
+        provider: "anthropic",
+        model: "fixture-model",
+        endpoint: "/fixture",
+        requests: [{custom_id: "request-1", messages: []}],
+      },
+    ],
+  }
+  const manifest_sha = _write_json(fs, manifest_path, manifest)
+  const execution_id = "batch-" + substring(manifest_sha, 0, 24)
+  const prepare_path = path_join(prepared_dir, "receipt.json")
+  const prepare_sha = _write_json(
+    fs,
+    prepare_path,
+    {
+      schemaVersion: 1,
+      kind: "harn.model_batch_prepare_receipt",
+      manifest: {path: manifest_path, sha256: manifest_sha},
+      jobs: [{id: "job-1"}],
+    },
+  )
+  const submission_path = path_join(root, "submission.json")
+  const submission_sha = _write_json(
+    fs,
+    submission_path,
+    {
+      schemaVersion: 1,
+      kind: "harn.model_batch_submission_receipt",
+      source: {path: prepare_path, sha256: prepare_sha},
+      jobs: [{id: "job-1"}],
+    },
+  )
+  const status_path = path_join(root, "status.json")
+  const status_sha = _write_json(
+    fs,
+    status_path,
+    {
+      schemaVersion: 1,
+      kind: "harn.model_batch_status_receipt",
+      source: {path: submission_path, sha256: submission_sha},
+      jobs: [{id: "job-1"}],
+    },
+  )
+  const artifact_path = path_join(results_dir, "results.jsonl")
+  fs.write_text(artifact_path, test_case.result_text)
+  const artifact_sha = sha256(test_case.result_text)
+  const download_path = path_join(results_dir, "receipt.json")
+  const download_sha = _write_json(
+    fs,
+    download_path,
+    {
+      schemaVersion: 1,
+      kind: "harn.model_batch_results_receipt",
+      source: {path: status_path, sha256: status_sha},
+      jobs: [
+        {
+          id: "job-1",
+          status: test_case.job_status,
+          provider: "anthropic",
+          provider_batch_id: "provider-batch-1",
+          artifacts: [{label: "results", path: artifact_path, sha256: artifact_sha}],
+        },
+      ],
+    },
+  )
+  const execution_path = path_join(root, "execution.json")
+  _write_json(
+    fs,
+    execution_path,
+    {
+      schemaVersion: 1,
+      kind: "harn.model_batch_execution_receipt",
+      executionId: execution_id,
+      paths: {manifest: manifest_path, downloadReceipt: download_path},
+      jobIds: ["job-1"],
+      requestIds: ["request-1"],
+      artifacts: [
+        {role: "manifest", path: manifest_path, sha256: manifest_sha},
+        {role: "prepare_receipt", path: prepare_path, sha256: prepare_sha},
+        {role: "submission_receipt", path: submission_path, sha256: submission_sha},
+        {role: "status_receipt", path: status_path, sha256: status_sha},
+        {role: "download_receipt", path: download_path, sha256: download_sha},
+        {role: "raw_result", path: artifact_path, sha256: artifact_sha},
+      ],
+    },
+  )
+  return {
+    root: root,
+    execution_path: execution_path,
+    manifest_path: manifest_path,
+    download_path: download_path,
+    artifact_path: artifact_path,
+  }
+}
+
+fn _apply_mutation(fs: HarnessFs, fixture: RejoinFixture, mutation: string) {
+  if mutation == "artifact_after_receipt" {
+    fs.write_text(fixture.artifact_path, "changed without receipt update\n")
+  } else if mutation == "manifest_after_receipt" {
+    let manifest = json_parse(fs.read_text(fixture.manifest_path))
+    manifest["groups"][0]["requests"][0]["custom_id"] = "wrong-manifest-id"
+    fs.write_text(fixture.manifest_path, json_stringify_pretty(manifest) + "\n")
+  } else if mutation == "execution_identity" {
+    let execution = json_parse(fs.read_text(fixture.execution_path))
+    execution["executionId"] = "caller-selected-execution"
+    fs.write_text(fixture.execution_path, json_stringify_pretty(execution) + "\n")
+  }
+}
+
+pipeline test_batch_rejoin_accepts_complete_lineage(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("batch-rejoin-positive-")
+  const fixture = _write_fixture(
+    harness.fs,
+    path_join(root, "case"),
+    {
+      name: "complete",
+      result_text: "{\"custom_id\":\"request-1\",\"response\":{\"status_code\":200,\"body\":{}}}\n",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: [],
+    },
+  )
+  const input: BatchRejoinInput = {
+    execution_path: fixture.execution_path,
+    manifest_path: fixture.manifest_path,
+    download_path: fixture.download_path,
+    out_dir: path_join(fixture.root, "rejoin"),
+  }
+  const run: BatchRejoinRun = batch_rejoin(harness.fs, input)
+  assert_eq(run.receipt["status"], "complete")
+  assert_eq(run.receipt["consumable"], true)
+  assert_eq(run.receipt["matchedCount"], 1)
+  assert_eq(run.receipt["quarantine"]["reasons"], [])
+  assert_eq(run.errors, [])
+  harness.fs.delete(root)
+}
+
+pipeline test_batch_rejoin_quarantines_each_non_consumable_result_shape(harness: Harness) {
+  const success = "{\"custom_id\":\"request-1\",\"response\":{\"status_code\":200,\"body\":{}}}\n"
+  const cases: list<RejoinCase> = [
+    {
+      name: "missing",
+      result_text: "",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["missing_results"],
+    },
+    {
+      name: "duplicate",
+      result_text: success + success,
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["duplicate_results"],
+    },
+    {
+      name: "unexpected",
+      result_text: success
+        + "{\"custom_id\":\"unexpected\",\"response\":{\"status_code\":200,\"body\":{}}}\n",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["unexpected_results"],
+    },
+    {
+      name: "idless",
+      result_text: success + "{\"response\":{\"status_code\":200,\"body\":{}}}\n",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["rows_without_custom_id"],
+    },
+    {
+      name: "malformed",
+      result_text: success + "{not-json}\n",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["malformed_results"],
+    },
+    {
+      name: "provider-error",
+      result_text:
+        "{\"custom_id\":\"request-1\",\"result\":{\"type\":\"errored\",\"error\":{\"type\":\"fixture_error\"}}}\n",
+      job_status: "downloaded",
+      mutation: "",
+      expected_reasons: ["provider_error_results"],
+    },
+    {
+      name: "partial",
+      result_text: success,
+      job_status: "ready",
+      mutation: "",
+      expected_reasons: ["partial_jobs"],
+    },
+    {
+      name: "changed-artifact",
+      result_text: success,
+      job_status: "downloaded",
+      mutation: "artifact_after_receipt",
+      expected_reasons: ["missing_results", "lineage_or_artifact_errors"],
+    },
+    {
+      name: "wrong-manifest",
+      result_text: success,
+      job_status: "downloaded",
+      mutation: "manifest_after_receipt",
+      expected_reasons: ["missing_results", "unexpected_results", "lineage_or_artifact_errors"],
+    },
+    {
+      name: "wrong-execution",
+      result_text: success,
+      job_status: "downloaded",
+      mutation: "execution_identity",
+      expected_reasons: ["lineage_or_artifact_errors"],
+    },
+  ]
+  const suite_root = harness.fs.mkdtemp_in_workspace("batch-rejoin-")
+  for test_case in cases {
+    const fixture = _write_fixture(harness.fs, path_join(suite_root, test_case.name), test_case)
+    _apply_mutation(harness.fs, fixture, test_case.mutation)
+    const input: BatchRejoinInput = {
+      execution_path: fixture.execution_path,
+      manifest_path: fixture.manifest_path,
+      download_path: fixture.download_path,
+      out_dir: path_join(fixture.root, "rejoin"),
+    }
+    const run: BatchRejoinRun = batch_rejoin(harness.fs, input)
+    assert_eq(run.receipt["consumable"], false)
+    assert_eq(run.receipt["quarantine"]["reasons"], test_case.expected_reasons)
+    if test_case.name == "changed-artifact" {
+      assert_eq(len(run.errors), 2)
+    } else if test_case.name == "wrong-manifest" {
+      assert(run.errors.contains("wrong_execution_identity"))
+      assert(run.errors.contains("execution_request_identity_changed"))
+    } else if test_case.name == "wrong-execution" {
+      assert_eq(run.errors, ["wrong_execution_identity"])
+    }
+  }
+  harness.fs.delete(suite_root)
+}

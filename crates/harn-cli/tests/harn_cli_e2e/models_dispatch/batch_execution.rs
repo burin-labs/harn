@@ -92,45 +92,6 @@ fn result_artifact(download: &Value) -> (&str, &str) {
         .expect("result artifact")
 }
 
-fn bind_mutated_download(
-    execution_dir: &std::path::Path,
-    download: &mut Value,
-    execution: &mut Value,
-    artifact_path: &str,
-    artifact_bytes: &[u8],
-) {
-    fs::write(artifact_path, artifact_bytes).expect("write mutated result");
-    let artifact_sha = sha256(artifact_bytes);
-    for job in download["jobs"].as_array_mut().expect("download jobs") {
-        for artifact in job["artifacts"].as_array_mut().expect("download artifacts") {
-            if artifact["path"] == artifact_path {
-                artifact["sha256"] = Value::String(artifact_sha.clone());
-                artifact["bytes"] = Value::from(artifact_bytes.len());
-            }
-        }
-    }
-    for artifact in execution["artifacts"]
-        .as_array_mut()
-        .expect("execution artifacts")
-    {
-        if artifact["path"] == artifact_path {
-            artifact["sha256"] = Value::String(artifact_sha.clone());
-        }
-    }
-    let download_path = execution_dir.join("results/receipt.json");
-    write_json(&download_path, download);
-    let download_sha = sha256(&fs::read(&download_path).expect("read rebound download"));
-    for artifact in execution["artifacts"]
-        .as_array_mut()
-        .expect("execution artifacts")
-    {
-        if artifact["role"] == "download_receipt" {
-            artifact["sha256"] = Value::String(download_sha.clone());
-        }
-    }
-    write_json(&execution_dir.join("execution.json"), execution);
-}
-
 fn run_rejoin(execution_dir: &std::path::Path, manifest: &std::path::Path, case: &str) -> Value {
     let out_dir = execution_dir.join(format!("rejoin-{case}"));
     let output = run(
@@ -243,7 +204,7 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
 }
 
 #[test]
-pub(crate) fn rejoin_quarantines_each_non_consumable_result_shape() {
+pub(crate) fn rejoin_cli_quarantines_an_artifact_without_matching_receipts() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let requests = tmp.path().join("requests.jsonl");
     let execution_dir = tmp.path().join("execution");
@@ -256,150 +217,21 @@ pub(crate) fn rejoin_quarantines_each_non_consumable_result_shape() {
     );
 
     let manifest_path = execution_dir.join("manifest.json");
-    let download_path = execution_dir.join("results/receipt.json");
-    let execution_path = execution_dir.join("execution.json");
-    let base_download: Value =
-        serde_json::from_slice(&fs::read(&download_path).expect("read download"))
-            .expect("parse download");
-    let base_execution: Value =
-        serde_json::from_slice(&fs::read(&execution_path).expect("read execution"))
-            .expect("parse execution");
-    let (_, artifact_path) = result_artifact(&base_download);
-    let base_artifact = fs::read(artifact_path).expect("read result artifact");
-    let first_line = base_artifact
-        .split(|byte| *byte == b'\n')
-        .find(|line| !line.is_empty())
-        .expect("first result row");
-    let first_row: Value = serde_json::from_slice(first_line).expect("parse first result row");
-
-    let cases: Vec<(&str, Vec<u8>, &str)> = vec![
-        ("missing", Vec::new(), "missing_results"),
-        (
-            "duplicate",
-            [base_artifact.clone(), first_line.to_vec(), vec![b'\n']].concat(),
-            "duplicate_results",
-        ),
-        (
-            "unexpected",
-            [
-                base_artifact.clone(),
-                serde_json::to_vec(&serde_json::json!({
-                    "custom_id": "wire-unexpected",
-                    "response": {"status_code": 200, "body": {}}
-                }))
-                .expect("serialize unexpected"),
-                vec![b'\n'],
-            ]
-            .concat(),
-            "unexpected_results",
-        ),
-        (
-            "idless",
-            [
-                base_artifact.clone(),
-                serde_json::to_vec(&serde_json::json!({
-                    "response": {"status_code": 200, "body": {}}
-                }))
-                .expect("serialize idless"),
-                vec![b'\n'],
-            ]
-            .concat(),
-            "rows_without_custom_id",
-        ),
-        (
-            "malformed",
-            [base_artifact.clone(), b"{not-json}\n".to_vec()].concat(),
-            "malformed_results",
-        ),
-        (
-            "provider-error",
-            [
-                serde_json::to_vec(&serde_json::json!({
-                    "custom_id": first_row["custom_id"],
-                    "result": {"type": "errored", "error": {"type": "fixture_error"}}
-                }))
-                .expect("serialize provider error"),
-                vec![b'\n'],
-            ]
-            .concat(),
-            "provider_error_results",
-        ),
-    ];
-    for (case, bytes, reason) in cases {
-        let mut download = base_download.clone();
-        let mut execution = base_execution.clone();
-        bind_mutated_download(
-            &execution_dir,
-            &mut download,
-            &mut execution,
-            artifact_path,
-            &bytes,
-        );
-        let receipt = run_rejoin(&execution_dir, &manifest_path, case);
-        assert_eq!(receipt["consumable"], false, "{case}");
-        assert!(
-            receipt["quarantine"]["reasons"]
-                .as_array()
-                .is_some_and(|reasons| reasons.iter().any(|value| value == reason)),
-            "{case}: {}",
-            receipt["quarantine"]
-        );
-    }
-
-    let mut partial_download = base_download.clone();
-    partial_download["jobs"][0]["status"] = Value::String("ready".to_string());
-    let mut partial_execution = base_execution;
-    bind_mutated_download(
-        &execution_dir,
-        &mut partial_download,
-        &mut partial_execution,
-        artifact_path,
-        &base_artifact,
-    );
-    let partial = run_rejoin(&execution_dir, &manifest_path, "partial");
-    assert_eq!(
-        partial["quarantine"]["reasons"],
-        serde_json::json!(["partial_jobs"])
-    );
-
+    let download: Value = serde_json::from_slice(
+        &fs::read(execution_dir.join("results/receipt.json")).expect("read download"),
+    )
+    .expect("parse download");
+    let (_, artifact_path) = result_artifact(&download);
     fs::write(artifact_path, b"changed without receipt update\n").expect("change raw artifact");
     let changed = run_rejoin(&execution_dir, &manifest_path, "changed-artifact");
-    assert!(changed["quarantine"]["reasons"]
+    assert_eq!(changed["consumable"], false);
+    assert_eq!(
+        changed["quarantine"]["reasons"],
+        serde_json::json!(["missing_results", "lineage_or_artifact_errors"])
+    );
+    assert!(changed["errors"]
         .as_array()
-        .is_some_and(|reasons| reasons
-            .iter()
-            .any(|value| value == "lineage_or_artifact_errors")));
-
-    fs::write(artifact_path, &base_artifact).expect("restore result artifact");
-    let wrong_manifest_path = execution_dir.join("wrong-manifest.json");
-    let mut wrong_manifest: Value =
-        serde_json::from_slice(&fs::read(&manifest_path).expect("read manifest"))
-            .expect("parse manifest");
-    wrong_manifest["groups"][0]["requests"][0]["custom_id"] =
-        Value::String("wrong-manifest-id".to_string());
-    write_json(&wrong_manifest_path, &wrong_manifest);
-    let wrong = run_rejoin(&execution_dir, &wrong_manifest_path, "wrong-manifest");
-    assert!(wrong["quarantine"]["reasons"]
-        .as_array()
-        .is_some_and(|reasons| reasons
-            .iter()
-            .any(|value| value == "lineage_or_artifact_errors")));
-
-    let execution_path = execution_dir.join("execution.json");
-    let mut wrong_execution: Value =
-        serde_json::from_slice(&fs::read(&execution_path).expect("read execution"))
-            .expect("parse execution");
-    wrong_execution["executionId"] = Value::String("caller-selected-execution".to_string());
-    write_json(&execution_path, &wrong_execution);
-    let wrong = run_rejoin(&execution_dir, &manifest_path, "wrong-execution");
-    assert!(wrong["errors"].as_array().is_some_and(|errors| errors
-        .iter()
-        .any(|value| value == "wrong_execution_identity")));
-    assert!(wrong["quarantine"]["reasons"]
-        .as_array()
-        .is_some_and(|reasons| reasons
-            .iter()
-            .any(|value| value == "lineage_or_artifact_errors")));
+        .is_some_and(|errors| !errors.is_empty()));
 }
 
 #[test]
