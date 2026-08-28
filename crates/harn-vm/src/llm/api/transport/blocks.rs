@@ -19,15 +19,8 @@ pub(super) fn append_coalesced_text_block(
         return;
     }
     if let Some(last) = blocks.last_mut() {
-        if can_coalesce_text_block(last, block_type, visibility) {
-            let existing = last
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let mut merged = String::with_capacity(existing.len() + text.len());
-            merged.push_str(existing);
-            merged.push_str(text);
-            last["text"] = serde_json::Value::String(merged);
+        if let Some(existing) = coalescible_text_mut(last, block_type, visibility) {
+            existing.push_str(text);
             return;
         }
     }
@@ -38,27 +31,25 @@ pub(super) fn append_coalesced_text_block(
     }));
 }
 
-fn can_coalesce_text_block(block: &serde_json::Value, block_type: &str, visibility: &str) -> bool {
-    if block.get("type").and_then(serde_json::Value::as_str) != Some(block_type) {
-        return false;
-    }
-    if block.get("visibility").and_then(serde_json::Value::as_str) != Some(visibility) {
-        return false;
-    }
-    if block
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .is_none()
+fn coalescible_text_mut<'a>(
+    block: &'a mut serde_json::Value,
+    block_type: &str,
+    visibility: &str,
+) -> Option<&'a mut String> {
+    let object = block.as_object_mut()?;
+    // Only the canonical plain-text shape is safe to extend. Any additional
+    // provider metadata carries a semantic boundary, whether or not this
+    // module knows that field's name yet.
+    if object.len() != 3
+        || object.get("type").and_then(serde_json::Value::as_str) != Some(block_type)
+        || object.get("visibility").and_then(serde_json::Value::as_str) != Some(visibility)
     {
-        return false;
+        return None;
     }
-    // Provider-signed / identity-bearing blocks keep their boundaries even
-    // when type and visibility happen to match a later fragment.
-    block.get("signature").is_none()
-        && block.get("id").is_none()
-        && block.get("name").is_none()
-        && block.get("arguments").is_none()
-        && block.get("thinking").is_none()
+    match object.get_mut("text") {
+        Some(serde_json::Value::String(text)) => Some(text),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -111,26 +102,25 @@ mod tests {
 
     #[test]
     fn does_not_merge_into_provider_signed_or_tool_blocks() {
-        let mut blocks = vec![
-            serde_json::json!({
-                "type": "thinking",
-                "thinking": "signed",
-                "signature": "sig",
-            }),
-            serde_json::json!({
-                "type": "tool_call",
-                "id": "call_1",
-                "name": "search_web",
-                "arguments": {"q": "x"},
-                "visibility": "internal",
-            }),
-        ];
+        let mut blocks = vec![serde_json::json!({
+            "type": "reasoning",
+            "text": "signed",
+            "visibility": "private",
+            "signature": "sig",
+        })];
         append_coalesced_text_block(&mut blocks, "reasoning", "later", "private");
+        blocks.push(serde_json::json!({
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "search_web",
+            "arguments": {"q": "x"},
+            "visibility": "internal",
+        }));
         append_coalesced_text_block(&mut blocks, "output_text", "after", "public");
         assert_eq!(blocks.len(), 4);
         assert_eq!(blocks[0]["signature"], "sig");
-        assert_eq!(blocks[1]["type"], "tool_call");
-        assert_eq!(blocks[2]["text"], "later");
+        assert_eq!(blocks[1]["text"], "later");
+        assert_eq!(blocks[2]["type"], "tool_call");
         assert_eq!(blocks[3]["text"], "after");
     }
 }
