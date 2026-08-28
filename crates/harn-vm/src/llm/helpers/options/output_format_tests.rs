@@ -180,3 +180,136 @@ structured_output = "format_kw"
     .expect("supported structured output");
     crate::llm::capabilities::clear_user_overrides();
 }
+
+#[test]
+fn rejects_empty_any_of_after_union_rewrite() {
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "enum": ["edit"]},
+            "args": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "anyOf": [],
+                        "x-harn-collapsed-branches": ["create", "replace_range"]
+                    }
+                },
+                "required": ["action"]
+            }
+        },
+        "required": ["name", "args"]
+    }));
+
+    let error = parse_schema_value(Some(&schema), "output").expect_err("empty anyOf");
+    let message = error.to_string();
+    assert!(
+        message.contains("tool `edit`"),
+        "diagnostic must name the tool: {message}"
+    );
+    assert!(
+        message.contains("collapsed branch set [create, replace_range]"),
+        "diagnostic must name the collapsed branches: {message}"
+    );
+}
+
+#[test]
+fn constrained_request_for_discriminated_union_after_rejected_call() {
+    use crate::llm::api::{LlmCallOptions, LlmRequestPayload, OutputFormat};
+    use crate::llm::providers::schema_compat::project_output_schema_for_provider;
+
+    let schema = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "name": {"type": "string", "enum": ["edit"]},
+            "args": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "action": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "action": {"const": "create"},
+                                    "path": {"type": "string"}
+                                },
+                                "required": ["action", "path"]
+                            },
+                            {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "action": {"const": "replace_range"},
+                                    "path": {"type": "string"}
+                                },
+                                "required": ["action", "path"]
+                            }
+                        ]
+                    }
+                },
+                "required": ["action"]
+            }
+        },
+        "required": ["name", "args"]
+    });
+    let mut opts = LlmCallOptions {
+        provider: "llamacpp".to_string(),
+        model: "local".to_string(),
+        output_format: OutputFormat::JsonSchema {
+            schema: schema.clone(),
+            strict: true,
+        },
+        output_schema: Some(schema.clone()),
+        ..LlmCallOptions::default()
+    };
+    let payload = LlmRequestPayload::from(&opts);
+    let sent = payload
+        .output_schema
+        .as_ref()
+        .expect("constrained request carries a schema");
+    crate::schema::reject_unsatisfiable_output_schema(sent)
+        .expect("rejected-call follow-up must not emit an empty schema");
+    let projected = project_output_schema_for_provider("openai", "gpt-5.4", true, sent, false);
+    let branches = projected
+        .pointer("/properties/args/properties/action/anyOf")
+        .or_else(|| projected.pointer("/properties/args/properties/action/oneOf"))
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    assert!(
+        branches >= 1,
+        "serialized schema must keep at least one admissible action branch: {projected}"
+    );
+
+    opts.output_schema = Some(serde_json::json!({
+        "type": "object",
+        "properties": {
+            "name": {"enum": ["edit"]},
+            "args": {
+                "properties": {
+                    "action": {
+                        "anyOf": [],
+                        "x-harn-collapsed-branches": ["create", "replace_range"]
+                    }
+                }
+            }
+        }
+    }));
+    opts.output_format = OutputFormat::JsonSchema {
+        schema: opts.output_schema.clone().expect("collapsed schema"),
+        strict: true,
+    };
+    let collapsed = LlmRequestPayload::from(&opts);
+    let error = crate::schema::reject_unsatisfiable_output_schema(
+        collapsed.output_schema.as_ref().expect("schema"),
+    )
+    .expect_err("empty collapsed union must be rejected before emit");
+    assert_eq!(error.tool.as_deref(), Some("edit"));
+    assert_eq!(
+        error.collapsed_branches,
+        ["create".to_string(), "replace_range".to_string()]
+    );
+}

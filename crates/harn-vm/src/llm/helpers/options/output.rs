@@ -126,6 +126,8 @@ pub(super) fn parse_schema_value(
         Some(value @ VmValue::Dict(_)) => {
             let mut schema = vm_value_to_json(value);
             crate::schema::normalize_provider_json_schema(&mut schema);
+            crate::schema::reject_unsatisfiable_output_schema(&schema)
+                .map_err(|error| output_format_error(format!("{field}: {error}")))?;
             Ok(Some(schema))
         }
         Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(

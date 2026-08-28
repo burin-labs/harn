@@ -407,6 +407,15 @@ pub(super) fn dump_llm_request(
             ))
         })?;
     let payload = super::api::LlmRequestPayload::from(opts);
+    if let Some(schema) = payload.output_schema.as_ref() {
+        crate::schema::reject_unsatisfiable_output_schema(schema).map_err(|error| {
+            crate::llm::call::invalid_request_error(
+                error.to_string(),
+                &payload.provider,
+                &payload.model,
+            )
+        })?;
+    }
     let served_manifest = opts
         .context_manifest
         .for_request_payload_egress(payload.system.as_deref())

@@ -1,5 +1,6 @@
 use crate::value::VmValue;
 
+mod admit;
 mod api;
 mod canonicalize;
 mod jsonschema_validate;
@@ -8,6 +9,8 @@ mod result;
 mod transform;
 mod type_check;
 mod validate;
+
+pub(crate) use admit::reject_unsatisfiable_output_schema;
 
 pub(crate) use api::{
     canonical_param_schema, first_schema_validation_issue, schema_assert_canonical_param,
