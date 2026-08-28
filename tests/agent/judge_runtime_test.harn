@@ -567,7 +567,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
         done_sentinel: "##DONE##",
         loop_until_done: true,
         max_iterations: 3,
-        verify_completion_judge: {provider: "mock", max_invocations: 1, fail_open_on_error: false},
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -604,7 +604,7 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
         done_sentinel: "##DONE##",
         loop_until_done: true,
         max_iterations: 1,
-        verify_completion_judge: {provider: "mock", max_invocations: 1, fail_open_on_error: false},
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,

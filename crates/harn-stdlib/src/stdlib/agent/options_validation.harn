@@ -127,8 +127,11 @@ fn __validate_removed_judge_options(label: string, value: dict | bool | nil) {
   if type_of(value) != "dict" {
     return
   }
-  if __has_key(value, "fail_open") {
-    throw "agent_loop: `" + label + ".fail_open` was removed; use `fail_open_on_error`"
+  for key in ["fail_open", "fail_open_on_error"] {
+    if __has_key(value, key) {
+      throw "agent_loop: `" + label + "." + key
+        + "` was removed; completion judges always fail closed"
+    }
   }
   if __has_key(value, "max_feedback") {
     throw "agent_loop: `" + label + ".max_feedback` was removed; use `max_invocations`"

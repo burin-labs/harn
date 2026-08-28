@@ -1,4 +1,8 @@
-import { agent_has_done_judge, agent_judge_config } from "std/agent/judge"
+import {
+  agent_completion_adjudicator_declared,
+  agent_has_done_judge,
+  agent_judge_config,
+} from "std/agent/judge"
 import {
   AgentToolDispatch,
   __dispatch_results_list,
@@ -142,11 +146,15 @@ fn __interpret_verdict(verdict: any, opts: any) {
   return {kind: "none"}
 }
 
-fn __post_turn_stop_needs_verify(verdict: dict) {
-  if verdict?.needs_verify == nil {
-    return false
+fn __post_turn_stop_needs_verify(verdict: dict, opts: dict, stop_reason: string) {
+  if verdict?.needs_verify != nil {
+    return verdict.needs_verify ? true : false
   }
-  return verdict.needs_verify ? true : false
+  // A callback stop is a completion proposal, not an implicit second
+  // completion authority. When the run declared an adjudicator, omission must
+  // route through it; otherwise an ordinary `{stop: true}` silently bypasses a
+  // prior `continue` verdict and turns unaccepted work into `done`.
+  return agent_completion_adjudicator_declared(opts, stop_reason)
 }
 
 fn __terminal_callback_verdict(opts: dict, payload: dict) {
@@ -882,7 +890,12 @@ fn __post_turn_verdict_result(
   feedback_kind: string = "post_turn",
 ) {
   if verdict.kind == "stop" {
-    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: false}
+    const stop_reason = "post_turn_stop"
+    return {
+      kind: "break",
+      stop_reason: stop_reason,
+      needs_verify: __post_turn_stop_needs_verify(verdict, _opts, stop_reason),
+    }
   }
   const effective_feedback_kind = verdict?.feedback_kind ?? feedback_kind
   if verdict.kind == "inject" {
@@ -916,7 +929,7 @@ fn __post_turn_verdict_result(
     return {
       kind: "break",
       stop_reason: stop_reason,
-      needs_verify: __post_turn_stop_needs_verify(verdict),
+      needs_verify: __post_turn_stop_needs_verify(verdict, _opts, stop_reason),
       next_options: verdict?.next_options,
       llm_options: verdict?.llm_options,
     }

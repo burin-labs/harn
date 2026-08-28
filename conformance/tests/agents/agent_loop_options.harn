@@ -103,7 +103,12 @@ pipeline default(harness: Harness) {
     {
       options: {provider: "mock", done_judge: {fail_open: true}},
       removed: "done_judge.fail_open",
-      replacement: "fail_open_on_error",
+      replacement: "completion judges always fail closed",
+    },
+    {
+      options: {provider: "mock", done_judge: {fail_open_on_error: true}},
+      removed: "done_judge.fail_open_on_error",
+      replacement: "completion judges always fail closed",
     },
     {
       options: {provider: "mock", done_judge: {max_feedback: 2}},
@@ -113,7 +118,12 @@ pipeline default(harness: Harness) {
     {
       options: {provider: "mock", verify_completion_judge: {fail_open: true}},
       removed: "verify_completion_judge.fail_open",
-      replacement: "fail_open_on_error",
+      replacement: "completion judges always fail closed",
+    },
+    {
+      options: {provider: "mock", verify_completion_judge: {fail_open_on_error: true}},
+      removed: "verify_completion_judge.fail_open_on_error",
+      replacement: "completion judges always fail closed",
     },
     {
       options: {provider: "mock", verify_completion_judge: {max_feedback: 2}},
