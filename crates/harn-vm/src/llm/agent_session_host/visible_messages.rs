@@ -46,18 +46,24 @@ pub(crate) fn visible_messages_with_lineage(
     let compaction_receipt_ref = latest_compaction_receipt_ref(session_id);
     for (position, message) in visible.iter_mut().enumerate() {
         let semantic_kind = semantic_kind(message);
-        let existing = message
+        let metadata = message
             .get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY)
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok());
-        let mut attached: crate::llm::message_lineage::AttachedMessageLineage = existing
-            .unwrap_or_else(|| crate::llm::message_lineage::AttachedMessageLineage {
+            .cloned();
+        let mut attached: crate::llm::message_lineage::AttachedMessageLineage = match metadata {
+            None => crate::llm::message_lineage::AttachedMessageLineage {
                 projection: crate::llm::message_lineage::raw_projection(),
                 message: crate::llm::message_lineage::MessageLineageEntry {
                     source_message_index: (position < source_count).then_some(position),
                     ..crate::llm::message_lineage::MessageLineageEntry::default()
                 },
-            });
+            },
+            Some(metadata) => serde_json::from_value(metadata).unwrap_or_else(|_| {
+                crate::llm::message_lineage::AttachedMessageLineage {
+                    projection: crate::llm::message_lineage::unknown_projection(),
+                    message: crate::llm::message_lineage::MessageLineageEntry::default(),
+                }
+            }),
+        };
         attached.message.semantic_kind = semantic_kind;
         if attached.message.source_message_index == Some(0) {
             attached.message.compaction_receipt_ref = compaction_receipt_ref.clone();

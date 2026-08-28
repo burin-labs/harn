@@ -176,7 +176,7 @@ pub(super) fn served_context_receipt(
     payload: &super::super::api::LlmRequestPayload,
     manifest: &crate::llm::prompt::ContextAssemblyManifest,
     tool_schemas: &[crate::llm::tools::ToolSchema],
-    lineage: Option<&crate::llm::message_lineage::MessageLineageManifest>,
+    opts: &super::super::api::LlmCallOptions,
     iteration: usize,
     call_id: &str,
     session_id: Option<&str>,
@@ -190,8 +190,13 @@ pub(super) fn served_context_receipt(
         .map(|tools| serde_json::Value::Array(tools.clone()))
         .unwrap_or(serde_json::Value::Null);
     let manifest_value = manifest.as_json();
-    let message_lineage =
-        message_lineage_manifest(&payload.messages, lineage, iteration, call_id, session_id);
+    let message_lineage = message_lineage_manifest(
+        &payload.messages,
+        payload.aligned_message_lineage(opts),
+        iteration,
+        call_id,
+        session_id,
+    );
 
     serde_json::json!({
         "schema": "harn.llm.served_context.v1",
@@ -871,6 +876,33 @@ mod tests {
     }
 
     #[test]
+    fn visible_messages_preserve_malformed_lineage_as_unknown() {
+        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+            "served-context-malformed-lineage-{}",
+            uuid::Uuid::now_v7()
+        )));
+        let mut malformed = serde_json::json!({"role": "user", "content": "continue"});
+        malformed[crate::llm::message_lineage::MESSAGE_LINEAGE_KEY] =
+            serde_json::json!("malformed");
+        let mut messages = crate::llm::agent_session_host::visible_messages_with_lineage(
+            &session_id,
+            vec![malformed],
+        );
+        let lineage = crate::llm::message_lineage::take_from_messages(&mut messages)
+            .expect("unknown lineage remains structurally available");
+
+        assert_eq!(lineage.projection.policy, "unknown");
+        assert_eq!(lineage.messages[0].source_message_index, None);
+        assert_eq!(
+            lineage.messages[0].semantic_kind,
+            crate::llm::message_lineage::MessageSemanticKind::User
+        );
+        assert!(messages[0]
+            .get(crate::llm::message_lineage::MESSAGE_LINEAGE_KEY)
+            .is_none());
+    }
+
+    #[test]
     fn canonical_directive_is_classified_before_private_metadata_is_stripped() {
         let session_id = crate::agent_sessions::open_or_create(Some(format!(
             "served-context-directive-{}",
@@ -902,7 +934,7 @@ mod tests {
             &payload,
             &opts.context_manifest,
             &[],
-            opts.message_lineage.as_ref(),
+            &opts,
             3,
             "directive-call",
             Some(&session_id),
@@ -952,7 +984,7 @@ mod tests {
             &payload,
             &opts.context_manifest,
             &[],
-            opts.message_lineage.as_ref(),
+            &opts,
             4,
             "replacement-call",
             None,
@@ -970,6 +1002,74 @@ mod tests {
         assert!(manifest["messages"][0]
             .get("source_message_index")
             .is_none());
+    }
+
+    #[test]
+    fn native_directive_egress_reorder_downgrades_positional_lineage_to_unknown() {
+        use crate::llm::message_lineage::{
+            MessageLineageEntry, MessageLineageManifest, MessageSemanticKind,
+        };
+
+        let mut opts = crate::llm::api::options::base_opts("anthropic");
+        opts.model = "claude-opus-4-8".to_string();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "work"}),
+            serde_json::json!({"role": "assistant", "content": [
+                {"type": "tool_use", "id": "toolu_01", "name": "read", "input": {}},
+                {"type": "server_tool_use", "id": "srvtoolu_01", "name": "search", "input": {}},
+            ]}),
+            serde_json::json!({"role": "system", "content": "constraint"}),
+            serde_json::json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_01", "content": "result"},
+            ]}),
+            serde_json::json!({"role": "assistant", "content": "continue"}),
+        ];
+        opts.message_lineage = Some(MessageLineageManifest {
+            projection: crate::llm::message_lineage::raw_projection(),
+            messages: [
+                MessageSemanticKind::User,
+                MessageSemanticKind::AssistantToolCall,
+                MessageSemanticKind::Instruction,
+                MessageSemanticKind::ToolResult,
+                MessageSemanticKind::Assistant,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(
+                |(source_message_index, semantic_kind)| MessageLineageEntry {
+                    semantic_kind,
+                    source_message_index: Some(source_message_index),
+                    ..Default::default()
+                },
+            )
+            .collect(),
+        });
+
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        assert_eq!(payload.messages.len(), opts.messages.len());
+        assert_eq!(payload.messages[2], opts.messages[3]);
+        assert_eq!(payload.messages[3]["role"], serde_json::json!("system"));
+        assert!(payload.aligned_message_lineage(&opts).is_none());
+
+        let receipt = served_context_receipt(
+            &payload,
+            &opts.context_manifest,
+            &[],
+            &opts,
+            5,
+            "native-reordered-call",
+            None,
+        );
+        let manifest = &receipt["message_lineage"];
+        assert_eq!(
+            manifest["projection"]["policy"],
+            serde_json::json!("unknown")
+        );
+        assert!(manifest["messages"]
+            .as_array()
+            .expect("message lineage")
+            .iter()
+            .all(|message| message.get("source_message_index").is_none()));
     }
 
     #[tokio::test(flavor = "current_thread")]

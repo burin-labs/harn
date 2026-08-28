@@ -903,6 +903,19 @@ pub(crate) struct LlmRequestPayload {
 }
 
 impl LlmRequestPayload {
+    /// Return message lineage only when provider egress preserved the exact
+    /// ordered message array it describes. Route-specific placement may remove,
+    /// merge, rewrite, or reorder messages; byte-for-byte correspondence is the
+    /// conservative proof that positional provenance still names the payload.
+    pub(crate) fn aligned_message_lineage<'a>(
+        &self,
+        opts: &'a LlmCallOptions,
+    ) -> Option<&'a crate::llm::message_lineage::MessageLineageManifest> {
+        (self.messages == opts.messages)
+            .then_some(opts.message_lineage.as_ref())
+            .flatten()
+    }
+
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout, &self.model)
     }
