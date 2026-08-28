@@ -202,7 +202,7 @@ pub(crate) struct ReplayArgs {
         conflicts_with_all = ["fixture", "session_id"]
     )]
     pub path: Option<String>,
-    /// Path to a run record or replay-oracle fixture.
+    /// Path to a run record, replay-oracle fixture, or offline coding replay fixture.
     #[arg(long, value_name = "PATH", conflicts_with_all = ["path", "session_id"])]
     pub fixture: Option<String>,
     /// Reconstruct replay input from the agent-session events in `--events-db`.
@@ -224,7 +224,7 @@ pub(crate) struct ReplayArgs {
     /// tree are never mutated. Requires `--session-id`.
     #[arg(long, value_name = "PLAN", requires = "session_id")]
     pub counterfactual: Vec<String>,
-    /// Number of replay reads to compare for deterministic output.
+    /// Number of replay projections or clean-room executions to compare.
     #[arg(long, default_value_t = 1)]
     pub runs: usize,
     /// Emit a structured `JsonEnvelope` replay summary instead of human-readable output.

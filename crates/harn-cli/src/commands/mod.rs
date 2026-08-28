@@ -85,6 +85,7 @@ pub(crate) use provider_tool_calibrate::run as run_tool_calibrate;
 pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub(crate) mod replay;
+pub(crate) mod replay_offline_coding;
 pub(crate) mod routes;
 pub(crate) mod rule;
 pub(crate) mod rules_cli;

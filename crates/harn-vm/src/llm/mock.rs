@@ -667,7 +667,12 @@ fn build_mock_result(
 
         let mut tool_calls = Vec::new();
         for tc in &mock.tool_calls {
-            let id = allocate_mock_tool_call_id(next_tool_call_id);
+            let id = tc
+                .get("id")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| allocate_mock_tool_call_id(next_tool_call_id));
             let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let arguments = tc
                 .get("arguments")

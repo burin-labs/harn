@@ -124,6 +124,10 @@ enum ReplaySource {
         /// the workspace state at the cutoff. `None` for a plain replay.
         counterfactual: Vec<PathBuf>,
     },
+    OfflineCoding {
+        path: PathBuf,
+        fixture: Box<crate::commands::replay_offline_coding::OfflineCodingReplayFixture>,
+    },
 }
 
 impl ReplaySource {
@@ -155,13 +159,22 @@ impl ReplaySource {
                 events_db: Some(events_db.to_string_lossy().into_owned()),
                 at_event_id: *at,
             },
+            Self::OfflineCoding { path, .. } => ReplaySourceSummary {
+                kind: "offline_coding".to_string(),
+                path: Some(path.to_string_lossy().into_owned()),
+                session_id: None,
+                events_db: None,
+                at_event_id: None,
+            },
         }
     }
 
     fn allowlist(&self) -> Vec<ReplayAllowlistRule> {
         match self {
             Self::ReplayTrace { trace, .. } => trace.allowlist.clone(),
-            Self::RunRecord { .. } | Self::Session { .. } => default_replay_allowlist(),
+            Self::RunRecord { .. } | Self::Session { .. } | Self::OfflineCoding { .. } => {
+                default_replay_allowlist()
+            }
         }
     }
 
@@ -170,6 +183,7 @@ impl ReplaySource {
             Self::RunRecord { .. } => "run_record_load_failed",
             Self::ReplayTrace { .. } => "replay_fixture_load_failed",
             Self::Session { .. } => "replay_load_failed",
+            Self::OfflineCoding { .. } => "offline_coding_replay_failed",
         }
     }
 
@@ -178,12 +192,12 @@ impl ReplaySource {
     fn counterfactual_plans(&self) -> &[PathBuf] {
         match self {
             Self::Session { counterfactual, .. } => counterfactual,
-            _ => &[],
+            Self::RunRecord { .. } | Self::ReplayTrace { .. } | Self::OfflineCoding { .. } => &[],
         }
     }
 }
 
-pub(crate) fn run(args: ReplayArgs) -> i32 {
+pub(crate) async fn run(args: ReplayArgs) -> i32 {
     if args.runs == 0 {
         if args.json {
             print_json_error("invalid_runs", "--runs must be at least 1");
@@ -204,6 +218,11 @@ pub(crate) fn run(args: ReplayArgs) -> i32 {
             return 1;
         }
     };
+
+    if let ReplaySource::OfflineCoding { path, fixture } = source {
+        return crate::commands::replay_offline_coding::run(&path, &fixture, args.runs, args.json)
+            .await;
+    }
 
     if args.json {
         run_json(source, args.runs)
@@ -375,6 +394,13 @@ fn resolve_fixture_source(path: &Path) -> Result<ReplaySource, String> {
         .map_err(|error| format!("failed to read fixture {}: {error}", path.display()))?;
     let value: JsonValue = serde_json::from_str(&raw)
         .map_err(|error| format!("failed to parse fixture {}: {error}", path.display()))?;
+    if crate::commands::replay_offline_coding::is_offline_coding_fixture(&value) {
+        let fixture = crate::commands::replay_offline_coding::parse_fixture(value, path)?;
+        return Ok(ReplaySource::OfflineCoding {
+            path: path.to_path_buf(),
+            fixture: Box::new(fixture),
+        });
+    }
     if value
         .get("schema_version")
         .and_then(JsonValue::as_str)
@@ -406,6 +432,9 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
             at,
             ..
         } => execute_session_replay(session_id, events_db, *at),
+        ReplaySource::OfflineCoding { .. } => {
+            Err("offline coding replay must execute through its owning runner".to_string())
+        }
     }
 }
 
