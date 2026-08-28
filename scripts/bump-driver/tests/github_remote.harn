@@ -65,6 +65,33 @@ fn signed_commit_body(oid: string) -> string {
   )
 }
 
+fn mock_publication_branch(harness: Harness, attempts: int) -> dict {
+  if attempts != 1 && attempts != 2 {
+    throw "publication fixture supports one or two attempts"
+  }
+  const fixture = publication_repo({fs: harness.fs, process: harness.process})
+  const ref_url = API
+    + "/repos/octo-org/octo-repo/git/ref/heads/automation/bump-harn-runtime"
+  const reference = {
+    status: 200,
+    body: json_stringify(
+      {ref: "refs/heads/automation/bump-harn-runtime", object: {sha: fixture.base, type: "commit"}},
+    ),
+  }
+  harness.testing.http_mock(
+    "GET",
+    ref_url,
+    {
+      responses: if attempts == 2 {
+        [reference, reference]
+      } else {
+        [reference]
+      },
+    },
+  )
+  return {fixture: fixture, ref_url: ref_url}
+}
+
 fn pull(head_oid: string) {
   return {
     number: 42,
@@ -236,16 +263,9 @@ pipeline test_signed_worktree_publication_retries_one_github_502_in_place(
   task: unknown,
 ) {
   harness.testing.http_mock_clear()
-  const fixture = publication_repo({fs: harness.fs, process: harness.process})
-  const ref_url = API
-    + "/repos/octo-org/octo-repo/git/ref/heads/automation/bump-harn-runtime"
-  const reference = {
-    status: 200,
-    body: json_stringify(
-      {ref: "refs/heads/automation/bump-harn-runtime", object: {sha: fixture.base, type: "commit"}},
-    ),
-  }
-  harness.testing.http_mock("GET", ref_url, {responses: [reference, reference]})
+  const publication = mock_publication_branch(harness, 2)
+  const fixture = publication.fixture
+  const ref_url = publication.ref_url
   const commit_oid = "cccccccccccccccccccccccccccccccccccccccc"
   harness.testing.http_mock(
     "POST",
@@ -270,6 +290,87 @@ pipeline test_signed_worktree_publication_retries_one_github_502_in_place(
       {method: "GET", url: ref_url},
       {method: "POST", url: API + "/graphql"},
     ],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_signed_worktree_publication_retries_graphql_server_failure_in_place(
+  harness: Harness,
+  task: unknown,
+) {
+  harness.testing.http_mock_clear()
+  const publication = mock_publication_branch(harness, 2)
+  const fixture = publication.fixture
+  const ref_url = publication.ref_url
+  const commit_oid = "dddddddddddddddddddddddddddddddddddddddd"
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {
+      responses: [
+        {
+          status: 200,
+          body: json_stringify(
+            {
+              errors: [
+                {type: "INTERNAL", message: "GitHub could not complete this GraphQL operation"},
+              ],
+            },
+          ),
+        },
+        {status: 200, body: signed_commit_body(commit_oid)},
+      ],
+    },
+  )
+  const receipt = remote(harness, fixture.dir).publish_commit(
+    {branch: "automation/bump-harn-runtime", headline: "Bump Harn runtime", base_sha: fixture.base},
+  )
+  assert_eq(receipt.oid, commit_oid)
+  assert_eq(
+    harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
+      .to_list(),
+    [
+      {method: "GET", url: ref_url},
+      {method: "POST", url: API + "/graphql"},
+      {method: "GET", url: ref_url},
+      {method: "POST", url: API + "/graphql"},
+    ],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_signed_worktree_publication_does_not_retry_semantic_graphql_failure(
+  harness: Harness,
+  task: unknown,
+) {
+  harness.testing.http_mock_clear()
+  const publication = mock_publication_branch(harness, 1)
+  const fixture = publication.fixture
+  const ref_url = publication.ref_url
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {
+      status: 200,
+      body: json_stringify(
+        {errors: [{type: "FORBIDDEN", message: "Resource not accessible by integration"}]},
+      ),
+    },
+  )
+  const outcome = try {
+    remote(harness, fixture.dir).publish_commit(
+      {
+        branch: "automation/bump-harn-runtime",
+        headline: "Bump Harn runtime",
+        base_sha: fixture.base,
+      },
+    )
+  }
+  assert(is_err(outcome), "semantic GraphQL publication failure remains terminal")
+  assert_eq(
+    harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
+      .to_list(),
+    [{method: "GET", url: ref_url}, {method: "POST", url: API + "/graphql"}],
   )
   harness.testing.http_mock_clear()
 }
