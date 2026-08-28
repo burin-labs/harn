@@ -289,14 +289,17 @@ fn constrained_request_for_discriminated_union_after_rejected_call() {
         "properties": {
             "name": {"enum": ["edit"]},
             "args": {
+                "type": "object",
                 "properties": {
                     "action": {
                         "anyOf": [],
                         "x-harn-collapsed-branches": ["create", "replace_range"]
                     }
-                }
+                },
+                "required": ["action"]
             }
-        }
+        },
+        "required": ["args"]
     }));
     opts.output_format = OutputFormat::JsonSchema {
         schema: opts.output_schema.clone().expect("collapsed schema"),
