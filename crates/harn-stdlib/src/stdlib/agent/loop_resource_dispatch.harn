@@ -467,6 +467,16 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     cap,
     selected_indices,
   )
+  let explicit_terminal_succeeded = false
+  if plan.selected_phase == "terminal" {
+    for result in raw_selected {
+      const name = to_string(result?.tool_name ?? result?.name ?? "")
+      if contains(options?._stop_after_successful_tools ?? [], name)
+        && __tool_result_ok(result) {
+        explicit_terminal_succeeded = true
+      }
+    }
+  }
   // Results are re-sorted to the model's original call order before they are
   // returned. Selected and deferred calls are now interleaved rather than
   // split at a boundary, and on the text channel a tool result carries no
@@ -527,11 +537,11 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       schema: "harn.agent_tool_batch_state.v1",
       batch_id: plan.batch_id,
       selected_phase: plan.selected_phase,
-      deferred_signatures: __tool_batch_merge_deferred_signatures(
-        plan.previous,
-        deferred,
-        selected,
-      ),
+      deferred_signatures: if explicit_terminal_succeeded {
+        []
+      } else {
+        __tool_batch_merge_deferred_signatures(plan.previous, deferred, selected)
+      },
       blocking_result: blocking_result,
     },
   }

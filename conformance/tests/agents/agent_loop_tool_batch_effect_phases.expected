@@ -14,3 +14,7 @@ status.status=done
 status.executed=4
 durable.status=done
 durable.reproposed=2
+retired.status=done
+retired.iterations=2
+failed_terminal.status=done
+failed_terminal.reproposed=2

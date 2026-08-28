@@ -127,11 +127,14 @@ fn phase_tools(runtime: HarnessRuntime, counters: dict) {
     "done",
     "Certify terminal completion.",
     {
-      handler: { _args ->
+      handler: { args ->
+        if args?.fail ?? false {
+          throw "terminal rejected"
+        }
         runtime.atomic_add(counters.done, 1)
         return "done"
       },
-      parameters: {},
+      parameters: {fail: {type: "boolean", required: false}},
       annotations: {kind: "terminal", side_effect_level: "none"},
     },
   )
@@ -168,8 +171,8 @@ fn verify_call(id: string = "verify") {
   return {id: id, name: "verify_state", arguments: {}}
 }
 
-fn done_call(id: string = "done") {
-  return {id: id, name: "done", arguments: {}}
+fn done_call(id: string = "done", fail: bool = false) {
+  return {id: id, name: "done", arguments: {fail: fail}}
 }
 
 fn receipt_counts(events: list) {
@@ -481,6 +484,88 @@ fn run_durable_reproposal(harness: Harness, counters: dict) {
   return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
+fn run_terminal_retires_abandoned_proposals(harness: Harness, counters: dict) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-terminal-retirement-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {tool_calls: [read_call("retire-read"), edit_call(false, "abandoned-edit")]},
+          {tool_calls: [done_call("terminal-done")]},
+          {text: "this provider response must remain unused"},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(harness, "Observe once, then choose whether to finish.", nil, opts)
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
+fn run_failed_terminal_fanout_retains_deferred(harness: Harness, counters: dict) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-terminal-fanout-" + harness.random.uuid()
+  let failing_done_calls = []
+  let index = 0
+  while index < 6 {
+    failing_done_calls = failing_done_calls.appending(
+      done_call("failed-terminal-" + to_string(index), true),
+    )
+    index = index + 1
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {tool_calls: [read_call("fanout-read"), edit_call(false, "fanout-edit-deferred")]},
+          {tool_calls: failing_done_calls},
+          {
+            tool_calls: [
+              edit_call(false, "fanout-edit-reproposed"),
+              done_call("fanout-done-deferred"),
+            ],
+          },
+          {tool_calls: [done_call("fanout-done-success")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 5,
+            max_concurrent_tools: 1,
+            stop_after_successful_tools: ["done"],
+            intra_turn_failure_fanout_cap: 3,
+            intra_turn_resource_fail_fast: false,
+            session_id: session,
+          }
+          return agent_loop(harness, "Retry a deferred edit after terminal rejection.", nil, opts)
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
+}
+
 fn run_rearmed_barrier(harness: Harness, counters: dict) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-rearmed-" + harness.random.uuid()
@@ -624,4 +709,29 @@ pipeline main(harness: Harness) {
     + json_stringify(durable.receipts.reproposed_names)
   harness.stdio.println("durable.status=" + durable.result.status)
   harness.stdio.println("durable.reproposed=" + to_string(durable.receipts.reproposed))
+  const retired = run_terminal_retires_abandoned_proposals(harness, counters)
+  require retired.result.status == "done", "the explicit terminal tool should finish the loop"
+  require retired.result.llm.iterations == 2,
+    "a successful terminal tool must not request another provider response"
+  require harness.runtime.atomic_get(counters.read) == 1, "the selected observation should run"
+  require harness.runtime.atomic_get(counters.edit) == 0,
+    "the model may abandon a deferred proposal after observing the prior phase"
+  require harness.runtime.atomic_get(counters.done) == 1, "the terminal tool should run once"
+  harness.stdio.println("retired.status=" + retired.result.status)
+  harness.stdio.println("retired.iterations=" + to_string(retired.result.llm.iterations))
+  const failed_terminal = run_failed_terminal_fanout_retains_deferred(harness, counters)
+  require failed_terminal.result.status == "done",
+    "a capped batch of rejected terminal tools must not crash the loop"
+  require contains(failed_terminal.receipts.reproposed_names, "edit_state"),
+    "terminal rejection must retain the earlier deferred mutation"
+  require failed_terminal.receipts.skipped == 1,
+    "the repeated terminal failures must reach the serial collapse boundary"
+  require harness.runtime.atomic_get(counters.edit) == 1,
+    "the retained mutation should execute once when re-proposed"
+  require harness.runtime.atomic_get(counters.done) == 1,
+    "only the later successful terminal tool should complete"
+  harness.stdio.println("failed_terminal.status=" + failed_terminal.result.status)
+  harness.stdio.println(
+    "failed_terminal.reproposed=" + to_string(failed_terminal.receipts.reproposed),
+  )
 }
