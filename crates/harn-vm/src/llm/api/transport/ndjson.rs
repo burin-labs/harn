@@ -1,3 +1,4 @@
+use super::blocks::append_coalesced_text_block;
 use super::*;
 use crate::llm::usage::ProviderUsageReceipt;
 
@@ -171,9 +172,7 @@ where
         if !content.is_empty() {
             text.push_str(content);
             let _ = delta_tx.send(content.to_string());
-            blocks.push(
-                serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}),
-            );
+            append_coalesced_text_block(&mut blocks, "output_text", content, "public");
             if let Some(watch) = schema_watch.as_mut() {
                 if let Some(abort) = watch.observe(content) {
                     return Err(abort.into_vm_error());
@@ -181,9 +180,7 @@ where
             }
         } else if !thinking.is_empty() {
             thinking_text.push_str(thinking);
-            blocks.push(
-                serde_json::json!({"type": "reasoning", "text": thinking, "visibility": "private"}),
-            );
+            append_coalesced_text_block(&mut blocks, "reasoning", thinking, "private");
         }
         append_ollama_tool_calls(&json["message"], &mut tool_calls, &mut blocks);
 

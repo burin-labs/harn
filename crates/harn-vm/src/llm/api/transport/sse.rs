@@ -1,3 +1,4 @@
+use super::blocks::append_coalesced_text_block;
 use super::*;
 use crate::llm::usage::ProviderUsageReceipt;
 
@@ -853,7 +854,12 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             if let Some(t) = delta["text"].as_str() {
                                 text.push_str(t);
                                 let _ = delta_tx.send(t.to_string());
-                                blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
+                                append_coalesced_text_block(
+                                    &mut blocks,
+                                    "output_text",
+                                    t,
+                                    "public",
+                                );
                                 if let Some(watch) = schema_watch.as_mut() {
                                     if let Some(abort) = watch.observe(t) {
                                         return Err(abort.into_vm_error());
@@ -980,7 +986,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 if !visible.is_empty() {
                     text.push_str(&visible);
                     let _ = delta_tx.send(visible.clone());
-                    blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
+                    append_coalesced_text_block(&mut blocks, "output_text", &visible, "public");
                     if let Some(watch) = schema_watch.as_mut() {
                         if let Some(abort) = watch.observe(&visible) {
                             return Err(abort.into_vm_error());
@@ -1006,7 +1012,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             );
             if !reasoning_delta.is_empty() {
                 thinking_text.push_str(reasoning_delta);
-                blocks.push(serde_json::json!({"type": "reasoning", "text": reasoning_delta, "visibility": "private"}));
+                append_coalesced_text_block(&mut blocks, "reasoning", reasoning_delta, "private");
             }
 
             // Only capture finish_reason once; OpenRouter can send
@@ -1279,7 +1285,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     if !final_visible.is_empty() {
         text.push_str(&final_visible);
         let _ = delta_tx.send(final_visible.clone());
-        blocks.push(serde_json::json!({"type": "output_text", "text": final_visible, "visibility": "public"}));
+        append_coalesced_text_block(&mut blocks, "output_text", &final_visible, "public");
         if let Some(watch) = schema_watch.as_mut() {
             if let Some(abort) = watch.observe(&final_visible) {
                 return Err(abort.into_vm_error());
@@ -1314,8 +1320,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         && !thinking_text.is_empty()
     {
         text = thinking_text.clone();
-        blocks
-            .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
+        append_coalesced_text_block(&mut blocks, "output_text", &text, "public");
     }
     let has_tool_search_block = blocks.iter().any(|b| {
         matches!(

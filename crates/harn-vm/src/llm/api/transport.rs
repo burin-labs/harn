@@ -25,6 +25,7 @@ use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry
 use super::thinking::ThinkingStreamSplitter;
 use super::{DialectContract, StreamProtocol};
 
+mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
@@ -612,6 +613,8 @@ mod schema_stream_abort_tests;
 mod sse_read_error_tests;
 #[cfg(test)]
 mod sse_telemetry_tests;
+#[cfg(test)]
+mod stream_block_coalesce_tests;
 #[cfg(test)]
 mod streaming_tool_call_tests;
 #[cfg(test)]
