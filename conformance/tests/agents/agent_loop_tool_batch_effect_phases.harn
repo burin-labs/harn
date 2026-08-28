@@ -537,7 +537,12 @@ fn run_failed_terminal_fanout_retains_deferred(harness: Harness, counters: dict)
         [
           {tool_calls: [read_call("fanout-read"), edit_call(false, "fanout-edit-deferred")]},
           {tool_calls: failing_done_calls},
-          {tool_calls: [edit_call(false, "fanout-edit-reproposed"), done_call("fanout-done-deferred")]},
+          {
+            tool_calls: [
+              edit_call(false, "fanout-edit-reproposed"),
+              done_call("fanout-done-deferred"),
+            ],
+          },
           {tool_calls: [done_call("fanout-done-success")]},
         ],
         { ->
@@ -547,7 +552,7 @@ fn run_failed_terminal_fanout_retains_deferred(harness: Harness, counters: dict)
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 5,
-            max_concurrent_tools: 6,
+            max_concurrent_tools: 1,
             stop_after_successful_tools: ["done"],
             intra_turn_failure_fanout_cap: 3,
             intra_turn_resource_fail_fast: false,
@@ -719,6 +724,8 @@ pipeline main(harness: Harness) {
     "a capped batch of rejected terminal tools must not crash the loop"
   require contains(failed_terminal.receipts.reproposed_names, "edit_state"),
     "terminal rejection must retain the earlier deferred mutation"
+  require failed_terminal.receipts.skipped == 1,
+    "the repeated terminal failures must reach the serial collapse boundary"
   require harness.runtime.atomic_get(counters.edit) == 1,
     "the retained mutation should execute once when re-proposed"
   require harness.runtime.atomic_get(counters.done) == 1,
