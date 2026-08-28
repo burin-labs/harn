@@ -131,7 +131,7 @@ pub(super) fn sandboxed_output(
             "managed child-process egress requires a proxy-only Windows network boundary; this build cannot enforce it",
         ));
     }
-    if policy.process_sandbox.allow_tcp_loopback && !policy_allows_network(policy) {
+    if policy.process_sandbox.allow_tcp_loopback {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "TCP loopback-only child networking is not enforceable by AppContainer capabilities",

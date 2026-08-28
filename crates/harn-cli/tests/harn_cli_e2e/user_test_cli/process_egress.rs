@@ -169,6 +169,65 @@ mod macos {
     }
 
     #[test]
+    fn loopback_only_process_network_binds_locally_and_denies_remote_sockets() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let python = r#"import errno
+import socket
+
+for family, host in [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")]:
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    listener.bind((host, 0))
+    listener.listen(1)
+    client = socket.socket(family, socket.SOCK_STREAM)
+    client.connect(listener.getsockname())
+    accepted, _ = listener.accept()
+    accepted.close()
+    client.close()
+    listener.close()
+
+remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+remote.settimeout(0.25)
+try:
+    remote.connect(("198.51.100.1", 9))
+except OSError as error:
+    assert error.errno == errno.EPERM, error
+else:
+    raise AssertionError("remote socket unexpectedly connected")
+finally:
+    remote.close()
+"#;
+        let script = root.path().join("loopback_only_process_network.harn");
+        fs::write(
+            &script,
+            format!(
+                r#"fn main(harness: Harness) {{
+  const probe = harness.process.run({{
+    program: "/usr/bin/python3",
+    args: ["-c", {}]
+  }})
+  assert(probe.success)
+}}
+"#,
+                serde_json::to_string(python).expect("encode Python probe")
+            ),
+        )
+        .expect("write script");
+
+        let output = isolated_harn(root.path())
+            .args(["run", "--allow-process-network", "--allow-process-loopback"])
+            .arg(&script)
+            .output()
+            .expect("spawn harn");
+
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
     fn malformed_managed_process_policy_fails_before_script_execution() {
         let root = tempfile::TempDir::new().expect("tempdir");
         let marker = root.path().join("executed");

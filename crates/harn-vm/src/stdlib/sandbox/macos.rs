@@ -345,7 +345,10 @@ fn render_profile_with_extra_read_roots(
         // it, which is a confusing way to learn a read root was too wide.
         profile.push_str(standard_device_profile_rules());
     }
-    if policy_allows_network(policy) {
+    // An explicit loopback-only grant is narrower than the ambient tool
+    // ceiling. ACP code mode may allow network-capable Harn tools, but that
+    // must not widen arbitrary child sockets beyond localhost.
+    if policy_allows_network(policy) && !policy.process_sandbox.allow_tcp_loopback {
         if let Some(proxy) = policy.process_network_proxy {
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
@@ -1061,7 +1064,7 @@ mod tests {
     #[test]
     fn tcp_loopback_policy_does_not_open_remote_network() {
         let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
-        policy.side_effect_level = Some("process_exec".to_string());
+        policy.side_effect_level = Some("network".to_string());
         policy.process_sandbox.allow_tcp_loopback = true;
 
         let profile = render_profile(&policy);
