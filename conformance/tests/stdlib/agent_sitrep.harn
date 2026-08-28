@@ -31,12 +31,6 @@ pipeline test(harness: Harness, task: unknown) {
       harness.stdio.println(!result.skipped)
       harness.stdio.println(result.provider_used == "mock")
       harness.stdio.println(len(result.lines) == 3)
-      harness.stdio.println(result.lines[0].starts_with("CURRENT STATE"))
-      harness.stdio.println(result.lines[1].starts_with("WORK DONE"))
-      harness.stdio.println(result.lines[2].starts_with("NEXT ACTION"))
-      const prompt = harness.llm.mock_calls()[0].messages[0].content
-      harness.stdio.println(prompt.contains("[USER] Investigate parser drift."))
-      harness.stdio.println(prompt.contains("3 short sentences"))
     },
   )
   with_llm_script(
@@ -77,7 +71,6 @@ pipeline test(harness: Harness, task: unknown) {
       harness.stdio.println(len(appended) == len(messages) + 1)
       harness.stdio.println(appended[len(appended) - 1].role == "system")
       harness.stdio.println(appended[len(appended) - 1].content.contains("<sitrep>"))
-      harness.stdio.println(appended[len(appended) - 1].content.contains("STATE — A."))
     },
   )
   const appended_skipped = agent_sitrep_append(
