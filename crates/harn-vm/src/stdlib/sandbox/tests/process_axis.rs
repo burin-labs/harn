@@ -36,6 +36,35 @@ fn a_process_only_root_is_launchable_without_becoming_writable() {
 }
 
 #[test]
+fn a_read_only_root_is_launchable_without_becoming_writable() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("workspace");
+    let read_only = dir.path().join("persona");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&read_only).unwrap();
+
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![workspace.display().to_string()],
+        read_only_roots: vec![read_only.display().to_string()],
+        sandbox_profile: SandboxProfile::Worktree,
+        ..CapabilityPolicy::default()
+    };
+
+    enforce_process_cwd_for_policy(&read_only, &policy)
+        .expect("a read-only root is somewhere a subprocess may start");
+
+    push_execution_policy(policy);
+    let read = check_fs_path_scope(&read_only.join("persona.md"), FsAccess::Read);
+    let write = check_fs_path_scope(&read_only.join("out.txt"), FsAccess::Write);
+    pop_execution_policy();
+    assert!(read.is_ok(), "file builtins retain declared read authority");
+    assert!(
+        write.is_err(),
+        "making a read-only root launchable must not make it writable"
+    );
+}
+
+#[test]
 fn a_root_on_neither_axis_is_not_launchable() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("workspace");

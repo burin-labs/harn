@@ -637,7 +637,11 @@ mod tests {
 
     // Exercises a real `sh -c` invocation with POSIX env expansion and
     // `printf`, so it only runs where a POSIX shell exists.
-    #[cfg(unix)]
+    // This proof executes the OS sandbox. The Linux CI runner intentionally
+    // lacks Landlock, and OsHardened must fail closed there rather than weaken
+    // the profile. Portable cwd admission is covered at the policy seam in
+    // harn-vm; this real-process proof runs where the hardened backend exists.
+    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn local_backend_execs_inside_session_outputs() {
         let backend = LocalSandbox::default();
