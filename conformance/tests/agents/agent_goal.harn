@@ -58,7 +58,10 @@ pipeline test(harness: Harness) {
     judge_system.contains("action: \"accept\""),
     "judge system uses the completion action contract",
   )
-  assert(!(judge.fail_open_on_error ?? true), "goal judge fails closed by default")
+  assert(
+    !contains(judge.keys(), "fail_open_on_error"),
+    "goal judge has no configurable fail-open path",
+  )
   assert(judge.max_invocations == 3, "bounded done-judge veto cap")
   // Rendering + pin bridge.
   assert(goal_text(g).contains("## Goal"), "renders the goal block")

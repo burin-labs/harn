@@ -1,0 +1,5 @@
+status=completion_unverified
+stop_reason=done_judge_cap_reached
+judge_invocations=1
+judge_cap_reached=true
+provider_calls=3

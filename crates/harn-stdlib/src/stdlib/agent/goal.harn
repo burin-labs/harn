@@ -53,7 +53,6 @@ pub type GoalJudgeOptions = {
   model?: string,
   provider?: string,
   max_invocations?: int,
-  fail_open_on_error?: bool,
   feedback_fallback?: string,
 }
 
@@ -265,7 +264,8 @@ fn __goal_judge_system(g: any) {
  * agent_loop options as `done_judge:` — it composes with the existing
  * `agent_evaluate_completion` done-judge seam (the semantic ceiling). Pair with
  * `goal_check` host-fact callbacks for the deterministic floor. `opts` may carry
- * `model`, `provider`, `max_invocations`, and `fail_open_on_error`.
+ * `model`, `provider`, and `max_invocations`. Completion judges always fail
+ * closed when their model call is unavailable or invalid.
  *
  * @effects: []
  * @errors: []
@@ -275,7 +275,6 @@ fn __goal_judge_system(g: any) {
 pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
   const o = opts ?? {}
   let config: JudgeConfig = {
-    fail_open_on_error: o?.fail_open_on_error ?? false,
     feedback_fallback: o?.feedback_fallback
       ?? "The goal is not yet met; keep working toward the success criteria.",
     max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,
