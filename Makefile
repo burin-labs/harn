@@ -627,7 +627,6 @@ test-pr-gate-scripts:
 	./scripts/tests/check_release_warm_build_budget_test.sh
 	./scripts/tests/ci_wait_for_run_artifacts_test.sh
 	./scripts/tests/ci_write_walltime_report_test.sh
-	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
@@ -675,6 +674,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/connector_scaffold_strict_package_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
