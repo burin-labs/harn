@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    normalize_for_policy, normalized_process_roots, normalized_workspace_roots, path_is_within,
-    sandbox_rejection,
+    normalize_for_policy, normalized_process_roots, normalized_read_only_roots,
+    normalized_workspace_roots, path_is_within, sandbox_rejection,
 };
 use crate::orchestration::CapabilityPolicy;
 use crate::value::VmError;
@@ -17,16 +17,17 @@ use crate::value::VmError;
 /// The directories a subprocess may be launched from.
 ///
 /// Where a child starts is a process-axis question, so this accepts the
-/// process-only roots alongside the workspace roots. `ProcessSandboxPolicy`
-/// exists to hand a child a directory *without* also handing Harn's file
-/// builtins read or write access to it; a policy that could grant a subprocess
-/// a root but could not start the subprocess there would make that grant
-/// unusable for its stated purpose. Reading a directory is what launching from
-/// it needs, so a read root is enough.
+/// read-only and process-only roots alongside the workspace roots. Both
+/// policies exist to hand a child a directory without also handing Harn's file
+/// builtins write access to it; a policy that could grant a subprocess read
+/// access to a root but could not start the subprocess there would make that
+/// grant unusable for its stated purpose. Reading a directory is what launching
+/// from it needs, so a read root is enough.
 fn process_cwd_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = normalized_workspace_roots(policy);
-    for root in normalized_process_roots(&policy.process_sandbox.read_roots)
+    for root in normalized_read_only_roots(policy)
         .into_iter()
+        .chain(normalized_process_roots(&policy.process_sandbox.read_roots))
         .chain(normalized_process_roots(
             &policy.process_sandbox.write_roots,
         ))
