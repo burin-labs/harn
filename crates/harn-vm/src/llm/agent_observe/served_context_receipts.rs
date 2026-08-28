@@ -77,7 +77,7 @@ fn message_lineage_manifest(
         session_id: session_id.map(str::to_string),
         projection: lineage
             .map(|lineage| lineage.projection.clone())
-            .unwrap_or_else(crate::llm::message_lineage::raw_projection),
+            .unwrap_or_else(crate::llm::message_lineage::unknown_projection),
         messages,
     }
 }
@@ -911,6 +911,65 @@ mod tests {
             receipt["message_lineage"]["messages"][0]["semantic_kind"],
             serde_json::json!("context_directive")
         );
+    }
+
+    #[test]
+    fn replacement_egress_downgrades_unaligned_summary_lineage_to_unknown() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.system = Some("replacement root".to_string());
+        opts.system_prompt_root = crate::llm::prompt::PromptRoot::Replacement;
+        opts.messages = vec![
+            serde_json::json!({"role": "system", "content": "condensed"}),
+            serde_json::json!({"role": "user", "content": "continue"}),
+        ];
+        opts.message_lineage = Some(crate::llm::message_lineage::MessageLineageManifest {
+            projection: crate::llm::message_lineage::ProjectionLineage {
+                policy: "summary_prefix".to_string(),
+                event_ref: Some("projection-event".to_string()),
+                prefix_hash: Some("sha256:projected".to_string()),
+            },
+            messages: vec![
+                crate::llm::message_lineage::MessageLineageEntry {
+                    semantic_kind:
+                        crate::llm::message_lineage::MessageSemanticKind::CondensedMemory,
+                    ..Default::default()
+                },
+                crate::llm::message_lineage::MessageLineageEntry {
+                    semantic_kind: crate::llm::message_lineage::MessageSemanticKind::User,
+                    source_message_index: Some(2),
+                    ..Default::default()
+                },
+            ],
+        });
+
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        assert_eq!(
+            payload.messages.len(),
+            1,
+            "replacement root removes system history"
+        );
+        let receipt = served_context_receipt(
+            &payload,
+            &opts.context_manifest,
+            &[],
+            opts.message_lineage.as_ref(),
+            4,
+            "replacement-call",
+            None,
+        );
+        let manifest = &receipt["message_lineage"];
+        assert_eq!(
+            manifest["projection"]["policy"],
+            serde_json::json!("unknown")
+        );
+        assert!(manifest["projection"].get("event_ref").is_none());
+        assert_eq!(
+            manifest["messages"][0]["semantic_kind"],
+            serde_json::json!("unknown")
+        );
+        assert!(manifest["messages"][0]
+            .get("source_message_index")
+            .is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]

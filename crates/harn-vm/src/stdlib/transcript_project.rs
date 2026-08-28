@@ -798,19 +798,11 @@ fn parse_custom_projector_result(
                     _ => None,
                 })
                 .unwrap_or_else(|| "custom".to_string());
-            let supplied_kept_indices = dict.get("kept_indices").is_some();
-            let kept_indices = dict
-                .get("kept_indices")
-                .and_then(|v| match v {
-                    VmValue::List(items) => Some(
-                        items
-                            .iter()
-                            .filter_map(|item| item.as_int().map(|n| n.max(0) as usize))
-                            .collect::<Vec<_>>(),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or_else(|| derive_kept_indices(raw, &messages));
+            let exact_kept_indices =
+                validated_exact_kept_indices(dict.get("kept_indices"), raw.len(), messages.len());
+            let source_indices_are_exact = exact_kept_indices.is_some();
+            let kept_indices =
+                exact_kept_indices.unwrap_or_else(|| derive_kept_indices(raw, &messages));
             let dropped_indices = dict
                 .get("dropped_indices")
                 .and_then(|v| match v {
@@ -833,13 +825,34 @@ fn parse_custom_projector_result(
                 redaction_pointers: Vec::new(),
                 root_labels: Vec::new(),
                 reason,
-                source_indices_are_exact: supplied_kept_indices,
+                source_indices_are_exact,
             })
         }
         _ => Err(VmError::Runtime(
             "transcript_project: custom projector must return a list or dict".into(),
         )),
     }
+}
+
+fn validated_exact_kept_indices(
+    value: Option<&VmValue>,
+    source_len: usize,
+    projected_len: usize,
+) -> Option<Vec<usize>> {
+    let VmValue::List(items) = value? else {
+        return None;
+    };
+    let indices = items
+        .iter()
+        .map(|item| usize::try_from(item.as_int()?).ok())
+        .collect::<Option<Vec<_>>>()?;
+    if indices.len() != projected_len
+        || indices.iter().any(|index| *index >= source_len)
+        || indices.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return None;
+    }
+    Some(indices)
 }
 
 /// Best-effort recovery of the kept index map for custom projectors:

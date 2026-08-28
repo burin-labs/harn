@@ -61,6 +61,36 @@ fn explicit_custom_indices_distinguish_a_later_duplicate_message() {
     );
 }
 
+#[test]
+fn malformed_custom_indices_never_claim_exact_source_lineage() {
+    let repeated = serde_json::json!({"role": "user", "content": "X"});
+    let raw = vec![
+        repeated.clone(),
+        serde_json::json!({"role": "assistant", "content": "Y"}),
+        repeated.clone(),
+    ];
+    for invalid in [
+        serde_json::json!([999]),
+        serde_json::json!([-1]),
+        serde_json::json!(["2"]),
+        serde_json::json!([0, 1]),
+        serde_json::json!("not-a-list"),
+    ] {
+        let projected = json_to_vm_value(&serde_json::json!({
+            "messages": [repeated.clone()],
+            "kept_indices": invalid,
+        }));
+        let decision = parse_custom_projector_result(&raw, &projected)
+            .expect("custom projection remains usable");
+
+        assert_eq!(
+            projected_source_indices(&decision, &PolicyKind::Custom),
+            vec![None],
+            "invalid custom indices must downgrade provenance instead of guessing"
+        );
+    }
+}
+
 #[tokio::test]
 async fn clean_tool_repair_drops_failed_then_success_pair() {
     let transcript = transcript_with(

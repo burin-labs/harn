@@ -78,8 +78,9 @@ pub(crate) fn take_from_messages(
         }
         entries.push(attached.message);
     }
+    let projection = projection?;
     Some(MessageLineageManifest {
-        projection: projection.unwrap_or_else(raw_projection),
+        projection,
         messages: entries,
     })
 }
@@ -87,6 +88,14 @@ pub(crate) fn take_from_messages(
 pub(crate) fn raw_projection() -> ProjectionLineage {
     ProjectionLineage {
         policy: "raw".to_string(),
+        event_ref: None,
+        prefix_hash: None,
+    }
+}
+
+pub(crate) fn unknown_projection() -> ProjectionLineage {
+    ProjectionLineage {
+        policy: "unknown".to_string(),
         event_ref: None,
         prefix_hash: None,
     }
@@ -112,5 +121,28 @@ pub(crate) fn attach_projection(
             MESSAGE_LINEAGE_KEY.to_string(),
             serde_json::to_value(attached).expect("message lineage is JSON representable"),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_attachments_are_removed_and_report_unavailable() {
+        let mut valid = serde_json::json!({"role": "user"});
+        valid[MESSAGE_LINEAGE_KEY] = serde_json::to_value(AttachedMessageLineage {
+            projection: raw_projection(),
+            message: MessageLineageEntry::default(),
+        })
+        .unwrap();
+        let mut malformed = serde_json::json!({"role": "assistant"});
+        malformed[MESSAGE_LINEAGE_KEY] = serde_json::json!("malformed");
+        let mut messages = vec![valid, malformed];
+
+        assert!(take_from_messages(&mut messages).is_none());
+        assert!(messages
+            .iter()
+            .all(|message| message.get(MESSAGE_LINEAGE_KEY).is_none()));
     }
 }
