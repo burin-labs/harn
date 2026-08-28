@@ -13,6 +13,11 @@ import { agent_loop } from "std/agent/loop"
  * configured number of siblings has arrived, so overlap is deterministic
  * instead of depending on cooperative-yield scheduling. The invariant is
  * genuine overlap bounded by the configured cap.
+ *
+ * Named controls are exact peaks. No-middleware overlap is the same
+ * shared-gate proof without a tool_caller; host-batch sibling handlers
+ * share runtime atomics but are not wait-for-graph senders, so the
+ * channel gate stays on the agent_loop dispatch path.
  */
 import { compose_tool_callers, with_audit_log, with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
@@ -283,13 +288,16 @@ pipeline default(harness: Harness) {
   harness.stdio.println("capped.status=" + capped.status)
   harness.stdio.println("capped.observed=" + to_string(capped.observed))
   harness.stdio.println("capped.peak=" + to_string(capped.peak))
-  // The host batch path honors the same cap even without tool middleware.
+  // No-middleware: exact serial, capped, and full-overlap peaks.
+  const no_middleware_serial = run_without_middleware(harness, state, 1)
+  harness.stdio.println("no_middleware_serial.status=" + no_middleware_serial.status)
+  harness.stdio.println("no_middleware_serial.peak=" + to_string(no_middleware_serial.peak))
+  const no_middleware_capped = run_without_middleware(harness, state, 2)
+  harness.stdio.println("no_middleware_capped.status=" + no_middleware_capped.status)
+  harness.stdio.println("no_middleware_capped.peak=" + to_string(no_middleware_capped.peak))
   const no_middleware = run_without_middleware(harness, state, 4)
   harness.stdio.println("no_middleware.status=" + no_middleware.status)
-  harness.stdio.println(
-    "no_middleware.peak_bounded="
-      + to_string(no_middleware.peak > 1 && no_middleware.peak <= 4),
-  )
+  harness.stdio.println("no_middleware.peak=" + to_string(no_middleware.peak))
   // `with_audit_log` receipts carry each call's source-batch position
   // as `emit_order`. With 3 parallel calls we should see all three
   // distinct positions (bits 0, 1, 2 -> bitmask 7), regardless of
