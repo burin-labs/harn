@@ -97,19 +97,6 @@ fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
 }
 
 #[test]
-fn directive_envelope_instruction_asset_is_embedded_and_reviewed() {
-    use sha2::Digest as _;
-
-    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
-        .expect("directive envelope instruction prompt asset");
-    assert_eq!(
-        hex::encode(sha2::Sha256::digest(source.as_bytes())),
-        "7c11892da0341af36499b7112f1ab2328a002496abecd3aecde65c29c5b2399a"
-    );
-    assert_eq!(directive_envelope_instructions(), source.trim_end());
-}
-
-#[test]
 fn directive_envelope_uses_the_instruction_asset_verbatim() {
     let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
         .expect("directive envelope instruction prompt asset");

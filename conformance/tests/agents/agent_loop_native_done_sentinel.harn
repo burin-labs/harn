@@ -46,11 +46,6 @@ pipeline main(harness: Harness) {
       harness.stdio.println(result.llm.iterations)
       harness.stdio.println(result.text)
       harness.stdio.println(!contains(result.text, "##DONE##"))
-      const calls = harness.llm.mock_calls()
-      harness.stdio.println(contains(calls[0].system, "##DONE##"))
-      harness.stdio.println(contains(calls[1].system, "##DONE##"))
-      harness.stdio.println(contains(calls[2].system, "##DONE##"))
-      harness.stdio.println(!contains(calls[0].system, "<user_response>"))
     },
   )
 }

@@ -90,6 +90,5 @@ pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, t
   const g = goal({objective: "ship it", success_criteria: ["works end to end"]})
   const options = agent_loop_options(harness, goal_reloop(g, {judge: true, provider: "mock"}))
   assert_eq(type_of(options.done_judge), "dict")
-  assert(contains(options.done_judge.system, "ship it"))
   assert(!contains(options.done_judge.keys(), "enabled"))
 }

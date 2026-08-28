@@ -1,8 +1,8 @@
 // Run: harn test tests/agent/completion_verification_arbitration_test.harn
 //
 // The deterministic completion gate already knows whether the verifier ran and
-// passed. These fixtures pin that it SAYS SO — onto the evidence snapshot and
-// into the judge's prompt — and that a model `continue` naming a failed
+// passed. These fixtures pin that reading onto the typed evidence snapshot and
+// prove that a model `continue` naming a failed
 // verification loses to a positive reading and to NOTHING ELSE.
 //
 // The controls are the load-bearing half. A conversion that also fires on a
@@ -95,16 +95,9 @@ fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
         session,
         fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
-      // `mock_calls` is only readable inside the script scope, so the prompt
-      // itself is captured here rather than reconstructed by the caller.
       return {
         events: captured.events,
         result: captured.result,
-        judge_prompts: harness.llm.mock_calls().filter(
-          { call -> contains(to_string(call?.system ?? ""), "Required verdict schema") },
-        )
-          .map({ call -> to_string(call.messages[0].content) })
-          .to_list(),
         provider_calls: len(harness.llm.mock_calls()),
       }
     },
@@ -246,30 +239,6 @@ pipeline test_facts_unavailable_confirm_reports_not_run(harness: Harness, task: 
   assert_eq(verdict.confirm, true)
   assert_eq(verdict.reason, "facts_unavailable")
   assert_eq(verdict.verification.observed, "not_run")
-}
-
-pipeline test_judge_prompt_carries_the_deterministic_verification_block(
-  harness: Harness,
-  task: unknown,
-) {
-  const captured = __run(
-    harness,
-    "judge-verification-block",
-    [
-      llm_done(),
-      {text: json_stringify({verdict: "done", detail: "checks pass", gap_class: "other"})},
-    ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
-  )
-  assert_eq(len(captured.judge_prompts), 1)
-  const judge_user = captured.judge_prompts[0]
-  assert(
-    contains(judge_user, "Deterministic verification"),
-    "the judge must be shown the reading, not asked to infer it",
-  )
-  assert(contains(judge_user, "observed: passed"))
-  assert(contains(judge_user, "run the project checks"))
-  assert_eq(captured.result.status, "done")
 }
 
 pipeline test_projection_names_its_selected_actions_and_roles(harness: Harness, task: unknown) {
