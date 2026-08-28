@@ -12,6 +12,66 @@
     { "name": "Check Harn sources and generated files", "match": "exact" },
     { "name": "Check repository policies", "match": "exact" }
   ],
+  "observed_baseline": {
+    "schema_version": 2,
+    "generator": "ci-latency-baseline-v2",
+    "topology_epoch": "2026-08-09T02:24:48Z",
+    "runs": [
+      {
+        "id": 33210336019,
+        "wall_ms": 957000,
+        "event": "merge_group",
+        "conclusion": "success",
+        "started_at": "2026-08-28T20:55:55Z",
+        "completed_at": "2026-08-28T21:11:52Z",
+        "head_sha": "09f3997259524951934d30e49e1475edc4c26bd8"
+      },
+      {
+        "id": 33209874357,
+        "wall_ms": 1052000,
+        "event": "merge_group",
+        "conclusion": "success",
+        "started_at": "2026-08-28T20:49:26Z",
+        "completed_at": "2026-08-28T21:06:58Z",
+        "head_sha": "5720f30a93ca8be9cabfebb9f7dcae1dd2aea87a"
+      },
+      {
+        "id": 33208546827,
+        "wall_ms": 1067000,
+        "event": "merge_group",
+        "conclusion": "success",
+        "started_at": "2026-08-28T20:30:47Z",
+        "completed_at": "2026-08-28T20:48:34Z",
+        "head_sha": "7c2197c1be2c923fed06b08e39853946fcef4466"
+      },
+      {
+        "id": 33206902927,
+        "wall_ms": 760000,
+        "event": "merge_group",
+        "conclusion": "success",
+        "started_at": "2026-08-28T20:07:57Z",
+        "completed_at": "2026-08-28T20:20:37Z",
+        "head_sha": "7d1f1b70ce14f9cc896dde609af74a1fb2c33f41"
+      },
+      {
+        "id": 33206817803,
+        "wall_ms": 1061000,
+        "event": "merge_group",
+        "conclusion": "success",
+        "started_at": "2026-08-28T20:06:47Z",
+        "completed_at": "2026-08-28T20:24:28Z",
+        "head_sha": "f0318e3e1753a0ce2dcbca4d93b4a20468ab56d1"
+      }
+    ],
+    "wall": {
+      "sample_count": 5,
+      "p50_ms": 1052000,
+      "p90_ms": 1067000,
+      "max_ms": 1067000,
+      "p90_regression_limit_ms": 1173700,
+      "max_regression_limit_ms": 1173700
+    }
+  },
   "slo": {
     "warning_ms": 540000,
     "p90_ms": 600000,
