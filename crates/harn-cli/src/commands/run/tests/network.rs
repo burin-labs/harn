@@ -108,7 +108,7 @@ async fn canonical_run_allows_tcp_loopback_but_denies_remote_egress() {
     let outside_file = hostile_cwd.path().join("denied.txt");
     std::fs::write(&outside_file, "outside").expect("write outside fixture");
     let script = temp.path().join("main.harn");
-    let python = r#"import os
+    let python = r"import os
 import socket
 print('CWD=' + os.getcwd())
 try:
@@ -137,7 +137,7 @@ try:
 except PermissionError:
     print('REMOTE_DENIED')
 else:
-    raise SystemExit('remote network unexpectedly allowed')"#;
+    raise SystemExit('remote network unexpectedly allowed')";
     let source = format!(
         r#"
 fn main(harness: Harness) -> int {{
