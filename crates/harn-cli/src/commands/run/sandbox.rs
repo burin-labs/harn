@@ -24,6 +24,8 @@ pub struct RunSandboxOptions {
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
+    /// Permit child TCP loopback servers without granting remote egress.
+    pub allow_process_loopback: bool,
     /// Session environment policy for this run. Always present: the default
     /// captures the launcher environment at launch.
     ///
@@ -42,6 +44,7 @@ impl Default for RunSandboxOptions {
             process_read_roots: Vec::new(),
             process_write_roots: Vec::new(),
             allow_process_network: false,
+            allow_process_loopback: false,
             environment: EnvironmentPolicyConfig::default(),
         }
     }
@@ -57,6 +60,12 @@ impl RunSandboxOptions {
     /// rest of the direct-run sandbox remains active.
     pub fn with_process_network(mut self, enabled: bool) -> Self {
         self.allow_process_network = enabled;
+        self
+    }
+
+    /// Permit confined child processes to run TCP loopback servers and clients.
+    pub fn with_process_loopback(mut self, enabled: bool) -> Self {
+        self.allow_process_loopback = enabled;
         self
     }
 
@@ -134,6 +143,7 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
         RunSandboxOptions::sandboxed(args.allow_process_network)
     };
     options
+        .with_process_loopback(args.allow_process_loopback)
         .with_write_roots(args.write_root.iter().cloned())
         .with_read_only_roots(args.read_only_root.iter().cloned())
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
@@ -224,6 +234,7 @@ pub(super) fn install_run_sandbox_scope(
             &options.process_read_roots,
             &options.process_write_roots,
             options.allow_process_network,
+            options.allow_process_loopback,
         );
         policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
         harn_vm::orchestration::push_execution_policy(policy);
@@ -298,6 +309,9 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
             );
         }
     }
+    if options.allow_process_loopback {
+        deltas.push("subprocess TCP loopback allowed".to_string());
+    }
     if deltas.is_empty() {
         return None;
     }
@@ -356,6 +370,7 @@ pub(super) fn default_run_capability_policy(
     process_read_roots: &[PathBuf],
     process_write_roots: &[PathBuf],
     allow_process_network: bool,
+    allow_process_loopback: bool,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
     workspace_roots.push(
@@ -409,6 +424,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            allow_tcp_loopback: allow_process_loopback,
         },
         side_effect_level: Some(
             if allow_process_network {
@@ -513,6 +529,10 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "process_network_requested": sandbox.allow_process_network,
         "process_network_enabled": process_network_enabled,
         "process_network_mode": process_network_mode,
+        "process_loopback_requested": sandbox.allow_process_loopback,
+        "process_loopback_enabled": active_policy
+            .as_ref()
+            .is_some_and(|policy| policy.process_sandbox.allow_tcp_loopback),
         "side_effect_level": side_effect_level,
         "egress": egress,
     })
@@ -639,6 +659,7 @@ mod tests {
             &[],
             &options.process_read_roots,
             &options.process_write_roots,
+            false,
             false,
         );
 

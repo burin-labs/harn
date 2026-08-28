@@ -59,6 +59,12 @@ starts. That policy:
 So a script can read and write inside its own project and nowhere else, and
 neither it nor anything it spawns can open a socket.
 
+Pass `--allow-process-loopback` when a confined child needs a local TCP server,
+as test runners commonly do. On macOS this admits TCP bind, accept, and connect
+only on IPv4 or IPv6 loopback; remote destinations remain denied. Other local
+sandbox backends currently reject this grant rather than silently opening the
+network.
+
 Pass `--allow-process-network` to allow network access for the Harn run and its
 child processes under the run's egress policy. Filesystem and process
 confinement remain active. Supported local sandboxes route child HTTP, HTTPS,
@@ -225,7 +231,8 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
       "user_temp"
     ],
     "read_roots": ["/opt/vendor-sdk"],
-    "write_roots": ["/opt/vendor-cache"]
+    "write_roots": ["/opt/vendor-cache"],
+    "allow_tcp_loopback": false
   }
 }
 ```
@@ -248,7 +255,10 @@ An explicit empty `presets: []` disables every named preset. `read_roots` and
 `write_roots` are for subprocesses only; `write_roots` are also gated by the
 workspace-write capability. `CapabilityPolicy::intersect` narrows presets and
 roots to their common set, so managed or parent ceilings can prevent a child
-policy from adding host filesystem reach.
+policy from adding host filesystem reach. `allow_tcp_loopback` defaults to
+`false` and is host-owned authority: a nested policy can neither introduce it
+nor erase an outer host grant. Stage-policy validation also rejects a flattened
+child that tries to introduce it beyond its ceiling.
 
 ### Running real toolchains in the sandbox
 
@@ -510,6 +520,7 @@ falls back to the warn/enforce decision documented above.
 | always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | `process_sandbox.presets` | named read/write rules for `system_runtime`, `developer_toolchains`, `package_manager_config`, and `user_temp` | default process reach for system binaries, Xcode/Homebrew/toolchains, read-only package-manager home config, and per-user developer-tool caches without granting Harn file builtin access |
+| `process_sandbox.allow_tcp_loopback` | bind/inbound on local `localhost:*`; outbound to remote `localhost:*` | IPv4 and IPv6 loopback servers and clients work without opening remote egress |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
 | `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | writable `user_temp`, `process_sandbox.write_roots`, and `workspace_roots`, followed by `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs, explicit process-write roots, and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |

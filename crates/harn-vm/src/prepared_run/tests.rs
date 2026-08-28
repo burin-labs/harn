@@ -179,6 +179,7 @@ fn capability_policy() -> CapabilityPolicy {
             ]),
             read_roots: vec!["/opt/sdk".to_string()],
             write_roots: vec!["/workspace/.cache".to_string()],
+            ..Default::default()
         },
         process_network_proxy: None,
     }

@@ -728,6 +728,7 @@ mod tests {
                 ]),
                 read_roots: Vec::new(),
                 write_roots: Vec::new(),
+                ..Default::default()
             });
         sandbox.read_only_roots = vec!["/work/project".to_string()];
         assert!(sandbox.is_configured());
@@ -747,6 +748,25 @@ mod tests {
     }
 
     #[test]
+    fn policy_for_code_with_loopback_only_applies_worktree_confinement() {
+        let sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                allow_tcp_loopback: true,
+                ..Default::default()
+            });
+
+        assert!(sandbox.is_configured());
+        assert!(sandbox.has_process_confinement());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("loopback capability must install the process sandbox policy");
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+        assert!(policy.process_sandbox.allow_tcp_loopback);
+    }
+
+    #[test]
     fn policy_for_code_with_process_config_applies_confinement() {
         let process = harn_vm::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![
@@ -754,6 +774,7 @@ mod tests {
             ]),
             read_roots: vec!["/opt/sdk".to_string()],
             write_roots: Vec::new(),
+            ..Default::default()
         };
         let sandbox = AcpSandboxConfig::with_process(process);
         assert!(sandbox.is_configured());
@@ -834,6 +855,7 @@ mod tests {
             ]),
             read_roots: vec!["/opt/vendor-sdk".to_string()],
             write_roots: vec!["/opt/vendor-cache".to_string()],
+            ..Default::default()
         };
         let sandbox = AcpSandboxConfig::with_process(process);
         let policy = policy_for_mode("architect", &sandbox).expect("architect has policy");
@@ -868,6 +890,7 @@ mod tests {
                 ]),
                 read_roots: Vec::new(),
                 write_roots: Vec::new(),
+                ..Default::default()
             });
         sandbox.read_only_roots = vec!["/opt/burin/pipelines".to_string()];
         let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
@@ -899,6 +922,7 @@ mod tests {
             presets: None,
             read_roots: vec!["/dep/sdk".to_string()],
             write_roots: Vec::new(),
+            ..Default::default()
         };
         let outer = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
         let requested = CapabilityPolicy {
@@ -976,6 +1000,7 @@ mod tests {
                 ]),
                 read_roots: Vec::new(),
                 write_roots: Vec::new(),
+                ..Default::default()
             });
         let guard = ModePolicyGuard::enter("code", &sandbox);
         assert!(

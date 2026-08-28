@@ -272,17 +272,23 @@ impl ProcessSandboxPreset {
     }
 }
 
-/// Process-only filesystem policy layered onto the active sandbox profile.
+/// Process-only policy layered onto the active sandbox profile.
 ///
 /// `presets: None` means "use the runtime defaults"; `Some([])` is an
 /// explicit request for no named presets. Extra roots are process-only:
-/// they do not allow Harn file tools to read or write those paths.
+/// they do not allow Harn file tools to read or write those paths. TCP
+/// loopback is a separate capability from external network access so local
+/// test servers do not require a remote-egress grant.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ProcessSandboxPolicy {
     pub presets: Option<Vec<ProcessSandboxPreset>>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
+    /// Permit a confined child to bind and connect TCP loopback sockets while
+    /// retaining the deny on non-loopback destinations. Backends that cannot
+    /// enforce this distinction reject the spawn rather than widening it.
+    pub allow_tcp_loopback: bool,
 }
 
 /// Runtime-owned forwarding endpoints for a managed child-process egress
@@ -308,6 +314,7 @@ impl ProcessSandboxPolicy {
         }
         extend_unique(&mut self.read_roots, &other.read_roots);
         extend_unique(&mut self.write_roots, &other.write_roots);
+        self.allow_tcp_loopback |= other.allow_tcp_loopback;
     }
 
     fn intersect(&self, requested: &Self) -> Self {
@@ -322,6 +329,10 @@ impl ProcessSandboxPolicy {
             presets,
             read_roots: intersect_roots(&self.read_roots, &requested.read_roots),
             write_roots: intersect_roots(&self.write_roots, &requested.write_roots),
+            // Loopback is host-owned authority like `process_network_proxy`:
+            // a nested request may neither invent it nor erase an outer grant.
+            // Host configuration still composes additively through `extend`.
+            allow_tcp_loopback: self.allow_tcp_loopback,
         }
     }
 }
@@ -931,6 +942,11 @@ impl CapabilityPolicy {
                 "flattened stage policy widened process_sandbox presets beyond the stage grant: {}",
                 widened_presets.join(", ")
             ));
+        }
+        if requested_ps.allow_tcp_loopback && !ceiling_ps.allow_tcp_loopback {
+            return Err(
+                "flattened stage policy enabled TCP loopback beyond the stage grant".to_string(),
+            );
         }
 
         // Argument-level constraints (e.g. edit scoped to `src/**`) compose by

@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use super::execute_run_with_sandbox_options;
 use super::harnpack::HarnpackRunOptions;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
@@ -317,10 +319,11 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 }
 
 #[test]
-fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
+fn default_run_policy_keeps_loopback_separate_from_remote_network() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], false);
-    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], true);
+    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], false, false);
+    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], true, false);
+    let loopback = default_run_capability_policy(workspace, &[], &[], &[], &[], false, true);
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -330,6 +333,9 @@ fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
     assert_eq!(network.sandbox_profile, default.sandbox_profile);
     assert_eq!(network.process_sandbox, default.process_sandbox);
     assert_eq!(network.process_network_proxy, None);
+    assert_eq!(loopback.side_effect_level, default.side_effect_level);
+    assert!(loopback.process_sandbox.allow_tcp_loopback);
+    assert!(!default.process_sandbox.allow_tcp_loopback);
 }
 
 #[test]
@@ -351,6 +357,10 @@ fn run_sandbox_attestation_reports_effective_policy() {
             http_port: 3128,
             socks_port: 1080,
         }),
+        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            ..harn_vm::orchestration::ProcessSandboxPolicy::default()
+        },
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
     harn_vm::orchestration::push_execution_policy(policy);
@@ -377,6 +387,8 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["process_network_requested"], false);
     assert_eq!(metadata["process_network_enabled"], true);
+    assert_eq!(metadata["process_loopback_requested"], false);
+    assert_eq!(metadata["process_loopback_enabled"], true);
     assert_eq!(
         metadata["process_network_mode"],
         if cfg!(target_os = "macos") {
@@ -604,6 +616,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
         &[],
         &[],
         false,
+        false,
     );
 
     assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
@@ -641,6 +654,8 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
     assert_eq!(metadata["run_default_enabled"], true);
     assert_eq!(metadata["egress"], "explicit_policy_required");
     assert_eq!(metadata["process_network_requested"], false);
+    assert_eq!(metadata["process_loopback_requested"], false);
+    assert_eq!(metadata["process_loopback_enabled"], false);
     // The receipt reports the enforced jail path, not the raw grant string.
     assert_eq!(
         metadata["write_roots"][0],

@@ -713,7 +713,7 @@ pub struct AcpServerConfig {
     pub sandbox: AcpSandboxConfig,
 }
 
-/// Filesystem policy the ACP embedder contributes to each sandboxed turn.
+/// Process policy the ACP embedder contributes to each sandboxed turn.
 ///
 /// `read_only_roots` widens Harn file reads for host-owned assets such as
 /// bundled pipelines. `process` is process-only and affects the OS child
@@ -831,7 +831,7 @@ impl AcpServerConfig {
 }
 
 impl AcpSandboxConfig {
-    /// Whether the embedder contributed any filesystem policy.
+    /// Whether the embedder contributed any sandbox policy.
     ///
     /// Read-only roots are Harn file-read authority even when the embedder did
     /// not request OS process confinement. Keep that distinction explicit via
@@ -847,6 +847,7 @@ impl AcpSandboxConfig {
         self.process.presets.is_some()
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()
+            || self.process.allow_tcp_loopback
     }
 
     pub fn with_read_only_roots(roots: Vec<String>) -> Self {
