@@ -124,7 +124,7 @@ const _: [(&str, fn()); 7] = [
     ),
     (
         required_pr_e2e::CASES[1],
-        models_dispatch::batch_execution::rejoin_quarantines_each_non_consumable_result_shape,
+        models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts,
     ),
     (
         required_pr_e2e::CASES[2],
