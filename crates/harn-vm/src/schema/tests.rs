@@ -7,8 +7,9 @@ use super::limits::{DEFAULT_SCHEMA_MAX_DEPTH, DEFAULT_SCHEMA_MAX_REF_EXPANSIONS}
 use super::transform::{merge_schema_dicts, schema_partial_dict};
 use super::validate::{validate_schema_value, ValidationOptions};
 use super::{
-    schema_assert_param, schema_is_value, schema_report_value, schema_result_value,
-    schema_to_json_schema_value, schema_to_openapi_schema_value,
+    normalize_provider_json_schema, reject_unsatisfiable_output_schema, schema_assert_param,
+    schema_is_value, schema_report_value, schema_result_value, schema_to_json_schema_value,
+    schema_to_openapi_schema_value,
 };
 
 fn s(v: &str) -> VmValue {
@@ -782,4 +783,168 @@ fn invalid_pattern_surfaces_a_clear_error() {
     // Calling again hits the cached error path and must produce the same
     // error rather than panicking on a re-compile.
     let _ = schema_result_value(&s("anything"), &schema, false);
+}
+
+fn edit_tool_call_schema(actions: &[&str]) -> serde_json::Value {
+    let branches: Vec<serde_json::Value> = actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "action": {"const": action},
+                    "path": {"type": "string"}
+                },
+                "required": ["action", "path"]
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "name": {"type": "string", "enum": ["edit"]},
+            "args": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "action": {"union": branches}
+                },
+                "required": ["action"]
+            }
+        },
+        "required": ["name", "args"]
+    })
+}
+
+fn collapse_edit_action_branches(
+    mut schema: serde_json::Value,
+    collapsed: &[&str],
+) -> serde_json::Value {
+    schema["properties"]["args"]["properties"]["action"] = serde_json::json!({
+        "anyOf": [],
+        "x-harn-collapsed-branches": collapsed,
+    });
+    schema
+}
+
+fn serialized_union_branch_count(schema: &serde_json::Value) -> usize {
+    schema
+        .pointer("/properties/args/properties/action/anyOf")
+        .or_else(|| schema.pointer("/properties/args/properties/action/oneOf"))
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
+}
+
+/// After a rejected `edit` call (missing `action`), the next constrained
+/// request must still admit at least one branch — or refuse to emit.
+#[test]
+fn discriminated_union_tool_after_rejected_call_keeps_or_rejects_empty_schema() {
+    let actions = ["create", "replace_range", "append"];
+    let mut admissible = edit_tool_call_schema(&actions);
+    normalize_provider_json_schema(&mut admissible);
+    reject_unsatisfiable_output_schema(&admissible)
+        .expect("a live edit union must remain satisfiable");
+    assert!(
+        serialized_union_branch_count(&admissible) >= 1,
+        "serialized schema must keep at least one action branch: {admissible}"
+    );
+
+    let mut collapsed = collapse_edit_action_branches(edit_tool_call_schema(&actions), &actions);
+    normalize_provider_json_schema(&mut collapsed);
+    let error = reject_unsatisfiable_output_schema(&collapsed)
+        .expect_err("empty anyOf after branch collapse must be rejected before emit");
+    assert_eq!(error.tool.as_deref(), Some("edit"));
+    assert_eq!(
+        error.collapsed_branches,
+        actions.iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+    assert_eq!(error.path, "#/properties/args/properties/action/anyOf");
+    assert_eq!(error.keyword, "anyOf");
+}
+
+#[test]
+fn empty_union_rewrite_is_rejected_as_unsatisfiable() {
+    let mut schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "name": {"enum": ["edit"]},
+            "args": {"union": []}
+        },
+        "required": ["args"]
+    });
+    normalize_provider_json_schema(&mut schema);
+    assert_eq!(schema["properties"]["args"]["anyOf"], serde_json::json!([]));
+    let error = reject_unsatisfiable_output_schema(&schema)
+        .expect_err("union: [] rewritten to anyOf: [] must not be emitted");
+    assert_eq!(error.tool.as_deref(), Some("edit"));
+    assert_eq!(error.keyword, "anyOf");
+}
+
+#[test]
+fn empty_enum_and_impossible_required_are_rejected() {
+    let empty_enum = serde_json::json!({"type": "string", "enum": []});
+    let error = reject_unsatisfiable_output_schema(&empty_enum).expect_err("empty enum");
+    assert_eq!(error.keyword, "enum");
+
+    let impossible = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": ["action"]
+    });
+    let error = reject_unsatisfiable_output_schema(&impossible).expect_err("impossible required");
+    assert_eq!(error.keyword, "required");
+    assert_eq!(error.collapsed_branches, ["action"]);
+}
+
+#[test]
+fn unsatisfiable_analysis_does_not_reject_live_alternatives() {
+    let admissible = [
+        serde_json::json!({
+            "type": "object",
+            "properties": {"optional": false}
+        }),
+        serde_json::json!({
+            "type": "object",
+            "$defs": {"unused": false}
+        }),
+        serde_json::json!({"not": false}),
+        serde_json::json!({"if": true, "then": false, "else": false}),
+        serde_json::json!({"anyOf": [false, {"type": "string"}]}),
+        serde_json::json!({"oneOf": [false, {"type": "string"}]}),
+        serde_json::json!({
+            "properties": {"required_but_not_object_only": false},
+            "required": ["required_but_not_object_only"]
+        }),
+    ];
+
+    for schema in admissible {
+        reject_unsatisfiable_output_schema(&schema)
+            .unwrap_or_else(|error| panic!("live schema was rejected: {schema}: {error}"));
+    }
+}
+
+#[test]
+fn unsatisfiable_analysis_proves_only_structural_contradictions() {
+    let unsatisfiable = [
+        serde_json::json!(false),
+        serde_json::json!({"anyOf": [false, {"enum": []}]}),
+        serde_json::json!({"oneOf": [false, {"enum": []}]}),
+        serde_json::json!({"allOf": [{"type": "string"}, false]}),
+        serde_json::json!({
+            "type": "object",
+            "properties": {"required_child": false},
+            "required": ["required_child"]
+        }),
+    ];
+
+    for schema in unsatisfiable {
+        assert!(
+            reject_unsatisfiable_output_schema(&schema).is_err(),
+            "structural contradiction was admitted: {schema}"
+        );
+    }
 }
