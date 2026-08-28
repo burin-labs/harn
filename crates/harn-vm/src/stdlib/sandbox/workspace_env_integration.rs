@@ -19,6 +19,13 @@ impl Drop for PolicyGuard {
 }
 
 fn enter_policy(workspace: &Path) -> PolicyGuard {
+    enter_policy_with_environment(workspace, crate::security::SessionEnvironment::isolated())
+}
+
+fn enter_policy_with_environment(
+    workspace: &Path,
+    environment: crate::security::SessionEnvironment,
+) -> PolicyGuard {
     push_execution_policy(CapabilityPolicy {
         workspace_roots: vec![workspace.display().to_string()],
         side_effect_level: Some(SideEffectLevel::ProcessExec.as_str().to_string()),
@@ -33,10 +40,20 @@ fn enter_policy(workspace: &Path) -> PolicyGuard {
         },
         ..CapabilityPolicy::default()
     });
-    crate::stdlib::process::set_session_environment(Some(
-        crate::security::SessionEnvironment::isolated(),
-    ));
+    crate::stdlib::process::set_session_environment(Some(environment));
     PolicyGuard
+}
+
+fn isolated_environment(
+    entries: impl IntoIterator<Item = (String, String)>,
+) -> crate::security::SessionEnvironment {
+    crate::security::SessionEnvironment::launch_from_snapshot(
+        crate::security::EnvironmentPolicyKind::Isolated,
+        Vec::new(),
+        entries.into_iter().collect(),
+        &|_| None,
+    )
+    .unwrap()
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
@@ -111,6 +128,15 @@ fn run(program: &Path, args: &[&str], workspace: &Path) -> std::process::Output 
     output
 }
 
+fn output_environment(output: std::process::Output) -> BTreeMap<String, String> {
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn absolute_executable_outside_workspace_runs_without_widening_its_parent() {
@@ -145,12 +171,7 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     let _policy = enter_policy(workspace.path());
     let env = find_program("env").expect("env executable");
     let output = run(&env, &[], workspace.path());
-    let values = String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .filter_map(|line| line.split_once('='))
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect::<BTreeMap<_, _>>();
+    let values = output_environment(output);
 
     let root = workspace.path().canonicalize().unwrap();
     let cache = root.join(".harn-toolchain-cache");
@@ -178,6 +199,77 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     assert_eq!(
         PathBuf::from(values.get("TMPDIR").unwrap()),
         root.join(WORKSPACE_TMPDIR_NAME)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn safe_inherited_workspace_cache_reaches_sandboxed_child() {
+    let workspace = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let cache = workspace.join(".outer-harness-cache/go-mod");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("prewarmed"), "cache-hit\n").unwrap();
+
+    let environment =
+        isolated_environment([("GOMODCACHE".to_string(), cache.display().to_string())]);
+    let _policy = enter_policy_with_environment(&workspace, environment);
+
+    let shell = find_program("sh").expect("shell executable");
+    let output = run(&shell, &["-c", "cat \"$GOMODCACHE/prewarmed\""], &workspace);
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "cache-hit\n");
+}
+
+#[test]
+fn external_inherited_cache_is_relocated_inside_workspace() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let outside = outside.path().canonicalize().unwrap();
+
+    let environment =
+        isolated_environment([("GOMODCACHE".to_string(), outside.display().to_string())]);
+    let _policy = enter_policy_with_environment(&workspace, environment);
+
+    let env = find_program("env").expect("env executable");
+    let values = output_environment(run(&env, &[], &workspace));
+    let observed = PathBuf::from(values.get("GOMODCACHE").expect("GOMODCACHE missing"));
+    assert_eq!(
+        observed,
+        workspace.join(".harn-toolchain-cache").join("go-mod")
+    );
+    assert!(!observed.starts_with(outside));
+}
+
+#[test]
+fn explicit_process_cache_env_wins_over_safe_inherited_cache() {
+    let workspace = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let inherited = workspace.join("inherited-go-mod");
+    let explicit = workspace.join("explicit-go-mod");
+    std::fs::create_dir_all(&inherited).unwrap();
+    std::fs::create_dir_all(&explicit).unwrap();
+
+    let environment =
+        isolated_environment([("GOMODCACHE".to_string(), inherited.display().to_string())]);
+    let _policy = enter_policy_with_environment(&workspace, environment);
+
+    let env = find_program("env").expect("env executable");
+    let output = command_output(
+        &env.display().to_string(),
+        &[],
+        &ProcessCommandConfig {
+            cwd: Some(workspace.clone()),
+            env: vec![("GOMODCACHE".to_string(), explicit.display().to_string())],
+            ..ProcessCommandConfig::default()
+        },
+    )
+    .unwrap();
+    assert!(output.status.success());
+    let values = output_environment(output);
+    assert_eq!(
+        PathBuf::from(values.get("GOMODCACHE").expect("GOMODCACHE missing")),
+        explicit
     );
 }
 
