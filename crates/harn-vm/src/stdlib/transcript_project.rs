@@ -399,6 +399,9 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 #[derive(Clone, Debug)]
 pub(crate) struct ProjectionResult {
     pub messages: Vec<JsonValue>,
+    /// Exact source index for each projected message. Synthetic messages and
+    /// custom projections without caller-supplied indices remain `None`.
+    pub source_message_indices: Vec<Option<usize>>,
     /// Indices into the source `messages` list that survived (in order).
     pub kept_indices: Vec<usize>,
     /// Source indices that were hidden from the projected prefix.
@@ -480,6 +483,7 @@ pub(crate) async fn project_messages(
     }
 
     let prefix_hash = hash_messages(&decision.messages);
+    let source_message_indices = projected_source_indices(&decision, &policy.kind);
     let reason = policy
         .reason
         .clone()
@@ -487,6 +491,7 @@ pub(crate) async fn project_messages(
         .unwrap_or(decision.reason);
 
     Ok(ProjectionResult {
+        source_message_indices,
         messages: decision.messages,
         kept_indices: decision.kept_indices,
         dropped_indices: decision.dropped_indices,
@@ -512,6 +517,27 @@ struct ProjectionDecision {
     redaction_pointers: Vec<JsonValue>,
     root_labels: Vec<String>,
     reason: String,
+    source_indices_are_exact: bool,
+}
+
+fn projected_source_indices(
+    decision: &ProjectionDecision,
+    policy: &PolicyKind,
+) -> Vec<Option<usize>> {
+    if !decision.source_indices_are_exact {
+        return vec![None; decision.messages.len()];
+    }
+    if policy == &PolicyKind::SummaryPrefix
+        && decision.messages.len() == decision.kept_indices.len() + 1
+    {
+        return std::iter::once(None)
+            .chain(decision.kept_indices.iter().copied().map(Some))
+            .collect();
+    }
+    if decision.messages.len() == decision.kept_indices.len() {
+        return decision.kept_indices.iter().copied().map(Some).collect();
+    }
+    vec![None; decision.messages.len()]
 }
 
 fn project_raw(raw: &[JsonValue]) -> ProjectionDecision {
@@ -525,6 +551,7 @@ fn project_raw(raw: &[JsonValue]) -> ProjectionDecision {
         redaction_pointers: Vec::new(),
         root_labels: Vec::new(),
         reason: "raw_passthrough".to_string(),
+        source_indices_are_exact: true,
     }
 }
 
@@ -704,6 +731,7 @@ fn project_summary_prefix(
         redaction_pointers: Vec::new(),
         root_labels: Vec::new(),
         reason: "summary_prefix".to_string(),
+        source_indices_are_exact: true,
     }
 }
 
@@ -746,6 +774,7 @@ fn parse_custom_projector_result(
                 redaction_pointers: Vec::new(),
                 root_labels: Vec::new(),
                 reason: "custom".to_string(),
+                source_indices_are_exact: false,
             })
         }
         VmValue::Dict(dict) => {
@@ -769,18 +798,11 @@ fn parse_custom_projector_result(
                     _ => None,
                 })
                 .unwrap_or_else(|| "custom".to_string());
-            let kept_indices = dict
-                .get("kept_indices")
-                .and_then(|v| match v {
-                    VmValue::List(items) => Some(
-                        items
-                            .iter()
-                            .filter_map(|item| item.as_int().map(|n| n.max(0) as usize))
-                            .collect::<Vec<_>>(),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or_else(|| derive_kept_indices(raw, &messages));
+            let exact_kept_indices =
+                validated_exact_kept_indices(dict.get("kept_indices"), raw.len(), messages.len());
+            let source_indices_are_exact = exact_kept_indices.is_some();
+            let kept_indices =
+                exact_kept_indices.unwrap_or_else(|| derive_kept_indices(raw, &messages));
             let dropped_indices = dict
                 .get("dropped_indices")
                 .and_then(|v| match v {
@@ -803,12 +825,34 @@ fn parse_custom_projector_result(
                 redaction_pointers: Vec::new(),
                 root_labels: Vec::new(),
                 reason,
+                source_indices_are_exact,
             })
         }
         _ => Err(VmError::Runtime(
             "transcript_project: custom projector must return a list or dict".into(),
         )),
     }
+}
+
+fn validated_exact_kept_indices(
+    value: Option<&VmValue>,
+    source_len: usize,
+    projected_len: usize,
+) -> Option<Vec<usize>> {
+    let VmValue::List(items) = value? else {
+        return None;
+    };
+    let indices = items
+        .iter()
+        .map(|item| usize::try_from(item.as_int()?).ok())
+        .collect::<Option<Vec<_>>>()?;
+    if indices.len() != projected_len
+        || indices.iter().any(|index| *index >= source_len)
+        || indices.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return None;
+    }
+    Some(indices)
 }
 
 /// Best-effort recovery of the kept index map for custom projectors:
@@ -860,6 +904,7 @@ fn project_with_drops(raw: &[JsonValue], dropped: &[usize], reason: &str) -> Pro
         redaction_pointers: Vec::new(),
         root_labels: Vec::new(),
         reason: reason.to_string(),
+        source_indices_are_exact: true,
     }
 }
 

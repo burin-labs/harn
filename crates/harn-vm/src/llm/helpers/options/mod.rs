@@ -25,9 +25,11 @@ mod validate;
 
 pub(crate) use directive_placement::uncommitted_directives;
 pub(crate) use reminders::{
-    apply_rendered_reminder_messages, directive_envelope_message, pending_reminders_from_session,
-    render_pending_reminders,
+    apply_rendered_reminder_messages, directive_envelope_message, has_directive_commit_metadata,
+    pending_reminders_from_session, render_pending_reminders,
 };
+#[cfg(test)]
+pub(crate) use reminders::{strip_directive_commit_metadata, tracked_directive_envelope_message};
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]

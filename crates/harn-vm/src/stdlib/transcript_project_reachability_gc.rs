@@ -58,6 +58,7 @@ pub(super) fn project(raw: &[JsonValue], policy: &ProjectionPolicy) -> Projectio
         redaction_pointers,
         root_labels,
         reason: "reachability_gc".to_string(),
+        source_indices_are_exact: true,
     }
 }
 
