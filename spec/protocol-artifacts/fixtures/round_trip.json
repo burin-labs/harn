@@ -16,7 +16,7 @@
       "state": "working"
     }
   },
-  "artifactVersion": "0.10.119",
+  "artifactVersion": "0.10.120-dev",
   "envelopes": {
     "agentEventNotification": {
       "jsonrpc": "2.0",
@@ -195,7 +195,7 @@
     "_meta": {
       "io.modelcontextprotocol/serverInfo": {
         "name": "harn",
-        "version": "0.10.119"
+        "version": "0.10.120-dev"
       }
     },
     "cacheScope": "private",
