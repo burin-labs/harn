@@ -1,12 +1,15 @@
 // Run: harn test tests/agent/post_turn_callback_stop_test.harn
 //
 // Post-turn callbacks are host-policy decisions, not ordinary model completion
-// proposals. A stop verdict from a policy callback must terminate the loop
-// without letting `verify_completion` convert the stop into repair feedback.
+// proposals. A policy callback can explicitly bypass completion verification
+// when the host already owns the terminal decision.
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
-pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness, task: unknown) {
+pipeline test_post_turn_policy_stop_can_explicitly_bypass_completion_verify(
+  harness: Harness,
+  task: unknown,
+) {
   with_llm_script(
     harness.llm,
     [
@@ -39,6 +42,7 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
               return {
                 stop: true,
                 stop_reason: "pace_cutoff",
+                needs_verify: false,
                 message: "Run stopped by host policy.",
               }
             }
