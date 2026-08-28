@@ -168,7 +168,11 @@ pub fn execution_root_path() -> PathBuf {
 /// exact cwd they will pass to the child without reimplementing it.
 pub fn inherited_process_cwd() -> Result<PathBuf, VmError> {
     if let Some((policy, _profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
-        crate::stdlib::sandbox::policy_process_cwd(&policy)
+        let preferred = current_execution_context()
+            .and_then(|context| context.cwd)
+            .filter(|cwd| !cwd.is_empty())
+            .map(PathBuf::from);
+        crate::stdlib::sandbox::policy_process_cwd(&policy, preferred.as_deref())
     } else {
         Ok(execution_root_path())
     }
@@ -1090,13 +1094,12 @@ fn process_command_config(
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
         config.cwd = Some(resolved);
-    } else if let Some(context) = current_execution_context() {
-        if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
-            crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
-            config.cwd = Some(std::path::PathBuf::from(cwd));
-        }
-        if !context.env.is_empty() {
-            config.env.extend(context.env);
+    } else {
+        config.cwd = Some(inherited_process_cwd()?);
+        if let Some(context) = current_execution_context() {
+            if !context.env.is_empty() {
+                config.env.extend(context.env);
+            }
         }
     }
     config.env.extend(runtime_child_env_overlay());
