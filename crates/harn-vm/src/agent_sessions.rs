@@ -330,6 +330,7 @@ impl<T: Copy> SharedValue<T> {
 
 pub(crate) struct AgentSessionRuntime {
     sessions: SharedCell<HashMap<String, SessionState>>,
+    unknown_host_event_warnings: SharedCell<HashSet<(String, String)>>,
     session_cap: SharedValue<usize>,
     default_transcript_budget_policy: SharedCell<SessionTranscriptBudgetPolicy>,
 }
@@ -338,6 +339,7 @@ impl Default for AgentSessionRuntime {
     fn default() -> Self {
         Self {
             sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
+            unknown_host_event_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
             session_cap: SharedValue(parking_lot::Mutex::new(DEFAULT_SESSION_CAP)),
             default_transcript_budget_policy: SharedCell(parking_lot::RwLock::new(
                 SessionTranscriptBudgetPolicy::default(),
@@ -359,6 +361,23 @@ pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
 
 pub(crate) fn active_session_runtime() -> Arc<AgentSessionRuntime> {
     ACTIVE_SESSION_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
+}
+
+/// Record an unknown host event name in the runtime that owns the session.
+/// The runtime is shared across worker-thread migration, unlike ambient
+/// thread-local storage.
+pub(crate) fn mark_unknown_host_event_warning(session_id: &str, event_type: &str) -> bool {
+    active_session_runtime()
+        .unknown_host_event_warnings
+        .borrow_mut()
+        .insert((session_id.to_string(), event_type.to_string()))
+}
+
+fn clear_unknown_host_event_warnings(session_id: &str) {
+    active_session_runtime()
+        .unknown_host_event_warnings
+        .borrow_mut()
+        .retain(|(warned_session_id, _)| warned_session_id != session_id);
 }
 
 pub(crate) fn swap_active_session_runtime(
@@ -498,6 +517,10 @@ pub fn reset_session_store() {
     for session_id in owned_session_ids {
         clear_session_changed_paths(&session_id);
     }
+    active_session_runtime()
+        .unknown_host_event_warnings
+        .borrow_mut()
+        .clear();
     reset_default_transcript_budget_policy();
 }
 
@@ -980,6 +1003,7 @@ pub fn close(id: &str) {
     // happens to reuse the same id.
     crate::orchestration::agent_inbox::clear_session(id);
     crate::agent_events::clear_session_sinks(id);
+    clear_unknown_host_event_warnings(id);
 }
 
 pub fn close_with_status(

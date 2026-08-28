@@ -35,8 +35,7 @@
 //! `AgentEvent` variants (`worker_update`, `handoff`, `artifact`, …) are
 //! constructed elsewhere and are *not* emittable through this host path.
 
-use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
@@ -164,32 +163,22 @@ pub(super) fn registered_host_event_types() -> impl Iterator<Item = &'static str
     HOST_EVENT_POLICIES.iter().map(|policy| policy.event_type)
 }
 
-thread_local! {
-    /// Dedup set for unknown-type warnings, keyed by `(session_id, event_type)`.
-    /// One warning per unknown name per session; a later session or a different
-    /// name warns again. Thread-local so parallel VM threads stay independent
-    /// and `reset_thread_local_state` can observe a clean slate.
-    static WARNED_UNKNOWN_HOST_EVENTS: RefCell<BTreeSet<(String, String)>> =
-        const { RefCell::new(BTreeSet::new()) };
-}
-
-/// Clear the unknown-type warn-once set. Called from [`super::reset_all_sinks`]
-/// so a fresh test (or reused runtime thread) starts with no suppressed
-/// diagnostics.
-pub(crate) fn reset_unknown_host_event_warnings() {
-    WARNED_UNKNOWN_HOST_EVENTS.with(|warned| warned.borrow_mut().clear());
-}
-
 fn warn_unknown_host_event_once(session_id: &str, event_type: &str) {
-    let first = WARNED_UNKNOWN_HOST_EVENTS.with(|warned| {
-        warned
-            .borrow_mut()
-            .insert((session_id.to_string(), event_type.to_string()))
-    });
+    let first = crate::agent_sessions::mark_unknown_host_event_warning(session_id, event_type);
     if first {
-        crate::events::log_warn(
+        crate::events::log_warn_meta(
             "host_event_ingest",
             &format!("unsupported event type `{event_type}`"),
+            BTreeMap::from([
+                (
+                    "session_id".to_string(),
+                    serde_json::Value::String(session_id.to_string()),
+                ),
+                (
+                    "event_type".to_string(),
+                    serde_json::Value::String(event_type.to_string()),
+                ),
+            ]),
         );
     }
 }

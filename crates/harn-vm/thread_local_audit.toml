@@ -92,12 +92,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/agent_events/from_host.rs"
-statics = ["WARNED_UNKNOWN_HOST_EVENTS"]
-category = "thread_private"
-plan = "thread_private_cache"
-
-[[thread_local]]
 path = "src/agent_sessions.rs"
 statics = ["ACTIVE_SESSION_RUNTIME", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
 category = "runtime_registry"

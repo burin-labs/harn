@@ -723,7 +723,7 @@ fn documented_stdlib_events_are_typed_and_journaled() {
 
 #[test]
 fn from_host_drops_non_host_and_unknown_event_types_without_failing() {
-    super::from_host::reset_unknown_host_event_warnings();
+    crate::agent_sessions::reset_session_store();
     // A real `AgentEvent` variant that is never emitted through the host
     // path is the same class as a never-seen name: drop, do not fail.
     assert!(
@@ -885,7 +885,7 @@ fn a_malformed_known_host_event_reports_through_the_funnel() {
 
 #[test]
 fn an_unknown_host_event_type_warns_once_per_session_and_is_not_a_boundary_failure() {
-    super::from_host::reset_unknown_host_event_warnings();
+    crate::agent_sessions::reset_session_store();
     let captured = crate::boundary::tests::CapturedEvents::install();
     let warnings = capture_host_ingest_warnings(|| {
         for _ in 0..2 {
@@ -914,20 +914,49 @@ fn an_unknown_host_event_type_warns_once_per_session_and_is_not_a_boundary_failu
         "one warning per unknown type per session, got {warnings:?}"
     );
     assert_eq!(warnings[0].level, crate::events::EventLevel::Warn);
-    assert!(
-        warnings[0].message.contains("`totally_made_up`"),
-        "first warning must name the type: {}",
-        warnings[0].message
+    assert_eq!(
+        warnings[0].metadata.get("event_type"),
+        Some(&json!("totally_made_up"))
     );
-    assert!(
-        warnings[1].message.contains("`totally_made_up`"),
-        "session s2 must warn again: {}",
-        warnings[1].message
+    assert_eq!(warnings[1].metadata.get("session_id"), Some(&json!("s2")));
+    assert_eq!(
+        warnings[2].metadata.get("event_type"),
+        Some(&json!("also_made_up"))
     );
-    assert!(
-        warnings[2].message.contains("`also_made_up`"),
-        "a second unknown type must warn: {}",
-        warnings[2].message
+}
+
+#[test]
+fn an_unknown_host_event_warns_once_when_a_session_moves_threads() {
+    fn call_on_thread(
+        runtime: std::sync::Arc<crate::agent_sessions::AgentSessionRuntime>,
+    ) -> Vec<crate::events::LogEvent> {
+        std::thread::spawn(move || {
+            let previous = crate::agent_sessions::swap_active_session_runtime(runtime);
+            let warnings = capture_host_ingest_warnings(|| {
+                let dropped =
+                    AgentEvent::from_host_payload("migrating", "future_event", &json!({}))
+                        .expect("unknown type must not fail ingest");
+                assert!(dropped.is_none());
+            });
+            crate::agent_sessions::swap_active_session_runtime(previous);
+            warnings
+        })
+        .join()
+        .expect("warning worker thread must finish")
+    }
+
+    let runtime = crate::agent_sessions::fresh_session_runtime();
+    let mut warnings = call_on_thread(runtime.clone());
+    warnings.extend(call_on_thread(runtime));
+
+    assert_eq!(warnings.len(), 1, "session migration warned more than once");
+    assert_eq!(
+        warnings[0].metadata.get("session_id"),
+        Some(&json!("migrating"))
+    );
+    assert_eq!(
+        warnings[0].metadata.get("event_type"),
+        Some(&json!("future_event"))
     );
 }
 
