@@ -126,9 +126,17 @@ arbitrary orchestration ref.
   the typed refresh outcome, the workflow's per-run success sentinel still
   makes validation fail closed.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
-  exact PR-head and base-head leases. The connector then derives the local
-  worktree delta, creates or resets the branch, and publishes the GitHub-signed
-  commit as one typed operation. Stale actors fail closed.
+  exact PR-head and base-head leases before refresh begins. The runtime checks
+  the checkout's exact base against the remote branch before refresh, after
+  validation, and again immediately before arming. A mismatch or unavailable
+  lookup returns `outcome: base_advanced`, records the expected and observed
+  identities, leaves any published PR unarmed, and requests a
+  `fresh_base_retry`. The fleet controller already treats the failed workflow
+  as retryable: its bounded successor run checks out the declared base again
+  and reruns refresh and validation on that composition. A standalone
+  scheduled caller gets the same fresh-checkout recovery on its next tick.
+  The connector derives and publishes a GitHub-signed commit only while the
+  measured lease is current. Stale actors fail closed.
 
 ## Version availability
 

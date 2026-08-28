@@ -48,6 +48,12 @@ pub type BumpValidation = {ok: bool, steps: list<BumpValidationStep>, detail: st
 /** The working-tree delta a signed commit would carry. */
 pub type BumpChangeSet = {additions: list<string>, deletions: list<string>}
 
+/** Current remote identity of the declared base branch. */
+pub type BumpBaseHead = {available: bool, oid: string?, detail: string}
+
+/** Machine-readable recovery requested after a non-ready bump attempt. */
+pub type BumpRecovery = {kind: "none" | "fresh_base_retry", base_oid: string?}
+
 /** Observed state of an already-open bump PR, or nil when none exists. */
 pub type BumpPrState = {
   number: int,
@@ -88,6 +94,7 @@ pub type BumpAdapter = {
   apply_version: fn(string) -> BumpApplyOutcome,
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
+  remote_base_head: fn() -> BumpBaseHead,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -106,6 +113,7 @@ pub type BumpOutcome = "not_ready" \
   | "refresh_failed" \
   | "no_changes" \
   | "validation_failed" \
+  | "base_advanced" \
   | "closed_noop" \
   | "committed"
 
@@ -130,6 +138,11 @@ pub type BumpReceipt = {
   refresh_detail: string,
   validation: BumpValidation,
   changeset: BumpChangeSet,
+  expected_base_oid: string?,
+  observed_base_oid: string?,
+  base_current: bool?,
+  base_check_phase: "before_refresh" | "before_publication" | "before_arming" | nil,
+  recovery: BumpRecovery,
   lease_recovered: bool,
   commit_oid: string?,
   pr_action: BumpPrAction,
@@ -234,6 +247,11 @@ fn __bump_receipt_base(
     refresh_detail: "",
     validation: __bump_default_validation(),
     changeset: __bump_empty_changeset(),
+    expected_base_oid: nil,
+    observed_base_oid: nil,
+    base_current: nil,
+    base_check_phase: nil,
+    recovery: {kind: "none", base_oid: nil},
     lease_recovered: false,
     commit_oid: nil,
     pr_action: "none",
@@ -242,6 +260,78 @@ fn __bump_receipt_base(
     auto_merge: nil,
     notes: [],
   }
+}
+
+type BumpBaseCheckPhase = "before_refresh" | "before_publication" | "before_arming"
+
+type BumpBaseReconciliation = {current: bool, receipt: BumpReceipt, detail: string}
+
+fn __observe_base_lease(
+  adapter: BumpAdapter,
+  receipt: BumpReceipt,
+  phase: BumpBaseCheckPhase,
+) -> BumpBaseReconciliation {
+  const expected_oid = trim(receipt.expected_base_oid ?? adapter.base_sha())
+  const observed = adapter.remote_base_head()
+  const observed_value = trim(observed.oid ?? "")
+  const observed_oid = if observed.available && observed_value != "" {
+    observed_value
+  } else {
+    nil
+  }
+  const current = expected_oid != "" && observed_oid != nil && observed_oid == expected_oid
+  const next_receipt = receipt
+    + {
+      expected_base_oid: if expected_oid == "" {
+        nil
+      } else {
+        expected_oid
+      },
+      observed_base_oid: observed_oid,
+      base_current: current,
+      base_check_phase: phase,
+    }
+  if current {
+    return {current: true, receipt: next_receipt, detail: ""}
+  }
+  const detail = if expected_oid == "" {
+    "local base identity unavailable"
+  } else if observed_oid == nil {
+    "remote base identity unavailable: ${observed.detail}"
+  } else {
+    "remote base advanced from ${expected_oid} to ${observed_oid}"
+  }
+  return {current: false, receipt: next_receipt, detail: detail}
+}
+
+fn __base_advanced_receipt(options: BumpOptions, base: BumpBaseReconciliation) -> BumpReceipt {
+  return base.receipt
+    + {
+      outcome: "base_advanced",
+      ok: false,
+      recovery: {kind: "fresh_base_retry", base_oid: base.receipt.observed_base_oid},
+      notes: base.receipt.notes
+        + [base.detail, "retry the bump from a fresh checkout of ${options.base}"],
+    }
+}
+
+type BumpBasePreparation = {existing: BumpPrState?, base: BumpBaseReconciliation}
+
+fn __prepare_base_lease(adapter: BumpAdapter, receipt: BumpReceipt) -> BumpBasePreparation {
+  const existing = adapter.find_bump_pr()
+  let next_receipt = receipt
+  if existing != nil && existing.auto_merge_enabled {
+    if !adapter.disable_auto_merge(existing, existing.base_oid) {
+      throw "std/bump/runtime: failed to disable stale auto-merge on #${existing.number}"
+    }
+    next_receipt = receipt
+      + {
+        lease_recovered: true,
+        notes: receipt.notes
+          + ["disarmed stale auto-merge on #${existing.number} before refresh"],
+      }
+  }
+  return {existing: existing, base: __observe_base_lease(adapter, next_receipt, "before_refresh")}
 }
 
 /**
@@ -282,6 +372,17 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
       }
   }
+  // Any previously armed bump must stop before the long refresh begins. It
+  // could otherwise merge while this attempt is validating a replacement.
+  const preparation = __prepare_base_lease(adapter, receipt)
+  const existing = preparation.existing
+  // Refuse a stale checkout before spending on refresh and validation. The
+  // later checks close the races introduced by those long-running phases.
+  const initial_base = preparation.base
+  receipt = initial_base.receipt
+  if !initial_base.current {
+    return __base_advanced_receipt(options, initial_base)
+  }
   // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
   const apply = adapter.apply_version(target)
   receipt = receipt
@@ -293,11 +394,19 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     }
   if !apply.ok && (!options.publish_failure_for_repair || !apply.changed) {
     return receipt
-      + {outcome: "refresh_failed", ok: false, notes: ["refresh failed: ${apply.detail}"]}
+      + {
+        outcome: "refresh_failed",
+        ok: false,
+        notes: receipt.notes + ["refresh failed: ${apply.detail}"],
+      }
   }
   if !apply.changed {
     return receipt
-      + {outcome: "already_current", ok: true, notes: ["writing ${target} produced no change"]}
+      + {
+        outcome: "already_current",
+        ok: true,
+        notes: receipt.notes + ["writing ${target} produced no change"],
+      }
   }
   // Phase 4 — the caller's single declared validation entrypoint. By default,
   // any failed mutation stops before publication. Fleet controllers may opt
@@ -318,7 +427,7 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         + {
           outcome: "validation_failed",
           ok: false,
-          notes: ["validation failed: ${validation.detail}"],
+          notes: receipt.notes + ["validation failed: ${validation.detail}"],
         }
     }
     if !validation.ok {
@@ -338,27 +447,22 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
         + {
           outcome: repair_failure,
           ok: false,
-          notes: ["${repair_failure} without a repairable file delta: ${repair_detail}"],
+          notes: receipt.notes
+            + ["${repair_failure} without a repairable file delta: ${repair_detail}"],
         }
     }
     return receipt
-      + {outcome: "no_changes", ok: true, notes: ["no file changes after refresh"]}
+      + {outcome: "no_changes", ok: true, notes: receipt.notes + ["no file changes after refresh"]}
   }
-  // Phase 6 — branch/PR lease reconciliation. Observe base before touching
-  // remote state, then disarm a stale PR under exact head + base leases. This
-  // prevents a stale actor from disabling or replacing a newer publication.
-  const existing = adapter.find_bump_pr()
-  const base_sha = trim(adapter.base_sha())
-  let notes = []
-  let lease_recovered = false
-  if existing != nil && existing.auto_merge_enabled {
-    if !adapter.disable_auto_merge(existing, base_sha) {
-      throw "std/bump/runtime: failed to disable stale auto-merge on #${existing.number}"
-    }
-    lease_recovered = true
-    notes = notes + ["disarmed stale auto-merge on #${existing.number} before refresh"]
+  // Phase 6 — refresh and validation can take long enough for the remote base
+  // to advance. Refuse publication of a tree proved against an older base.
+  const base = __observe_base_lease(adapter, receipt, "before_publication")
+  receipt = base.receipt
+  if !base.current {
+    return __base_advanced_receipt(options, base)
   }
-  receipt = receipt + {lease_recovered: lease_recovered}
+  const base_sha = receipt.expected_base_oid ?? ""
+  let notes = receipt.notes
   // Phase 7 — atomically create/reset the branch and publish one signed commit
   // under the observed base lease. The provider adapter owns the worktree
   // encoding and branch mutation as one deep operation.
@@ -431,6 +535,14 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
             "published #${upsert.number} for bounded repair with auto-merge disabled",
           ],
       }
+  }
+  // PR creation can itself race the base branch. Re-read immediately before
+  // arming so any stale publication remains visible but cannot enter the
+  // merge queue. The controller retries from a fresh base checkout.
+  const arm_base = __observe_base_lease(adapter, receipt, "before_arming")
+  receipt = arm_base.receipt
+  if !arm_base.current {
+    return __base_advanced_receipt(options, arm_base)
   }
   // Phase 10 — arm auto-merge so the merge queue owns the final landing.
   let auto_merge = nil
