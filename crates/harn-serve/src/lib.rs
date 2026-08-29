@@ -8,6 +8,8 @@ mod core;
 pub mod embed;
 mod error;
 mod exports;
+#[cfg(feature = "hostlib")]
+mod harn_reference_resolver;
 pub mod http_codec;
 pub mod limits;
 mod mcp_context;
@@ -90,6 +92,8 @@ pub use exports::{
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
     ScheduleSpec, ToolAnnotations,
 };
+#[cfg(feature = "hostlib")]
+pub use harn_reference_resolver::resolver as harn_reference_resolver;
 /// Install the process-lifetime shared Postgres pool registry.
 ///
 /// Call this **once** at server startup (e.g. from the `SiteServer`/embedder

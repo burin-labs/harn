@@ -89,6 +89,7 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
+pub use crate::{HarnReferenceInput, HarnReferenceResolver, ResolvedHarnReference};
 pub use agents::{AgentId, AgentInfo, AgentRegistry, AgentState, RegistryConfig};
 pub use builtins::SharedIndex;
 pub use cypher::{CypherError, CypherRow, CypherValue};
@@ -122,6 +123,7 @@ pub struct CodeIndexCapability {
     current_agent: Arc<Mutex<Option<AgentId>>>,
     /// Single-flight gate shared by [`Self::warm_session`] and sync rebuild.
     warm: Arc<warm::WarmCoordinator>,
+    harn_reference_resolver: Option<HarnReferenceResolver>,
 }
 
 impl CodeIndexCapability {
@@ -133,7 +135,14 @@ impl CodeIndexCapability {
             readonly: Arc::new(Mutex::new(Vec::new())),
             current_agent: Arc::new(Mutex::new(None)),
             warm: Arc::new(warm::WarmCoordinator::default()),
+            harn_reference_resolver: None,
         }
+    }
+
+    /// Install the integration-owned Harn resolver projection.
+    pub fn with_harn_reference_resolver(mut self, resolver: HarnReferenceResolver) -> Self {
+        self.harn_reference_resolver = Some(resolver);
+        self
     }
 
     /// Borrow the underlying shared cell. Useful for tests and embedders
@@ -177,6 +186,7 @@ impl CodeIndexCapability {
                 // stored path string.
                 state.root = state::canonicalize(workspace_root);
                 state.reap_after_recovery(state::now_unix_ms());
+                state.relink_harn_references(self.harn_reference_resolver.as_ref());
                 let mut guard = self.index.lock().expect("code_index mutex poisoned");
                 *guard = Some(state);
                 Ok(true)
@@ -245,8 +255,12 @@ impl HostlibCapability for CodeIndexCapability {
         {
             let index = self.index.clone();
             let warm = self.warm.clone();
-            let handler: SyncHandler =
-                Arc::new(move |args| warm::run_rebuild_single_flight(&index, &warm, args));
+            let handler: SyncHandler = {
+                let resolver = self.harn_reference_resolver.clone();
+                Arc::new(move |args| {
+                    warm::run_rebuild_single_flight(&index, &warm, resolver.as_ref(), args)
+                })
+            };
             registry.register(RegisteredBuiltin {
                 name: builtins::BUILTIN_REBUILD,
                 module: "code_index",
@@ -351,13 +365,18 @@ impl HostlibCapability for CodeIndexCapability {
                 handler,
             });
         }
-        register(
-            registry,
-            self.index.clone(),
-            builtins::BUILTIN_REINDEX_FILE,
-            "reindex_file",
-            builtins::run_reindex_file,
-        );
+        {
+            let index = self.index.clone();
+            let resolver = self.harn_reference_resolver.clone();
+            let handler: SyncHandler =
+                Arc::new(move |args| builtins::run_reindex_file(&index, resolver.as_ref(), args));
+            registry.register(RegisteredBuiltin {
+                name: builtins::BUILTIN_REINDEX_FILE,
+                module: "code_index",
+                method: "reindex_file",
+                handler,
+            });
+        }
         register(
             registry,
             self.index.clone(),

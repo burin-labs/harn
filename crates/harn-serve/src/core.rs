@@ -56,9 +56,7 @@ fn install_dispatch_vm_runtime(
 ) {
     harn_vm::register_vm_stdlib(vm);
     #[cfg(feature = "hostlib")]
-    {
-        let _ = harn_hostlib::install_default(vm);
-    }
+    crate::harn_reference_resolver::install(vm);
     let store_base = script_path.parent().unwrap_or(Path::new("."));
     harn_vm::register_store_builtins(vm, store_base);
     harn_vm::register_metadata_builtins(vm, store_base);

@@ -19,6 +19,7 @@ use super::state::{canonicalize, IndexState};
 use super::CodeIndexCapability;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_bool, optional_string};
+use crate::HarnReferenceResolver;
 
 /// Outcome of [`CodeIndexCapability::warm_session`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,13 +237,15 @@ impl CodeIndexCapability {
         };
 
         let index = self.index.clone();
+        let resolver = self.harn_reference_resolver.clone();
         let thread_root = root.clone();
         match thread::Builder::new()
             .name("harn-code-index-warm".to_string())
             .spawn(move || {
                 let _flight = flight;
                 let started = Instant::now();
-                let (state, outcome) = IndexState::build_from_root(&thread_root);
+                let (mut state, outcome) = IndexState::build_from_root(&thread_root);
+                state.relink_harn_references(resolver.as_ref());
                 {
                     let mut guard = index.lock().expect("code_index mutex poisoned");
                     // Prefer an already-installed index (e.g. a finished sync
@@ -307,6 +310,7 @@ fn live_stats_for_root(
 pub(super) fn run_rebuild_single_flight(
     index: &SharedIndex,
     warm: &Arc<WarmCoordinator>,
+    resolver: Option<&HarnReferenceResolver>,
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     use super::builtins::BUILTIN_REBUILD;
@@ -354,7 +358,8 @@ pub(super) fn run_rebuild_single_flight(
             root = %canonical.display(),
             "code-index rebuild starting",
         );
-        let (state, outcome) = IndexState::build_from_root(&canonical);
+        let (mut state, outcome) = IndexState::build_from_root(&canonical);
+        state.relink_harn_references(resolver);
         {
             let mut guard = index.lock().expect("code_index mutex poisoned");
             *guard = Some(state);
@@ -476,7 +481,7 @@ mod tests {
         let dir = fixture_tree();
         let cap = CodeIndexCapability::new();
         let args = [root_arg(dir.path())];
-        run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("rebuild");
+        run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &args).expect("rebuild");
         assert!(
             CodeIndexSnapshot::path_for(dir.path()).exists(),
             "sync rebuild is the path that always completes, so it must persist"
@@ -488,7 +493,7 @@ mod tests {
         let dir = fixture_tree();
         let cap = CodeIndexCapability::new();
         let args = [root_arg(dir.path())];
-        run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("seed");
+        run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &args).expect("seed");
         let canonical = canonicalize(dir.path());
         let stats = live_stats_for_root(&cap.shared(), &canonical, Duration::from_millis(41_100))
             .expect("live stats");
@@ -527,7 +532,8 @@ mod tests {
 
         let args = [root_arg(dir.path())];
         let started = Instant::now();
-        let result = run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("rebuild");
+        let result =
+            run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &args).expect("rebuild");
         let elapsed = started.elapsed();
         let dict = match result {
             VmValue::Dict(d) => d,
@@ -549,7 +555,7 @@ mod tests {
         let dir = fixture_tree();
         let cap = CodeIndexCapability::new();
         let args = [root_arg(dir.path())];
-        let first = run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("seed");
+        let first = run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &args).expect("seed");
         let first_files = match first {
             VmValue::Dict(d) => match d.get(&harn_vm::value::intern_key("files_indexed")) {
                 Some(VmValue::Int(n)) => *n,
@@ -565,7 +571,8 @@ mod tests {
         )
         .unwrap();
 
-        let second = run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("refresh");
+        let second =
+            run_rebuild_single_flight(&cap.shared(), &cap.warm, None, &args).expect("refresh");
         let second_files = match second {
             VmValue::Dict(d) => match d.get(&harn_vm::value::intern_key("files_indexed")) {
                 Some(VmValue::Int(n)) => *n,

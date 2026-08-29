@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 use tree_sitter::{Node as TsNode, Tree};
 
 use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
+use crate::ResolvedHarnReference;
 
 use super::file_table::FileId;
 
@@ -470,6 +471,74 @@ impl SymbolGraph {
         }
     }
 
+    /// Replace every resolver-backed Harn `REFS` edge with `references`.
+    ///
+    /// The projection is path-qualified, so same-named declarations in
+    /// separate modules remain distinct. Clearing first is intentional:
+    /// rebuilds, editor reindexes, and branch overlays must remove stale
+    /// answers rather than accumulate them.
+    pub fn replace_harn_references(&mut self, references: &[ResolvedHarnReference]) {
+        let harn_modules: BTreeSet<NodeId> = self
+            .nodes
+            .values()
+            .filter(|node| node.kind == NodeKind::Module && node.language == "harn")
+            .map(|node| node.id)
+            .collect();
+        for module in &harn_modules {
+            if let Some(edges) = self.out_edges.get_mut(module) {
+                let removed: Vec<Edge> = edges
+                    .iter()
+                    .copied()
+                    .filter(|edge| edge.kind == EdgeKind::Refs)
+                    .collect();
+                edges.retain(|edge| edge.kind != EdgeKind::Refs);
+                for edge in removed {
+                    if let Some(incoming) = self.in_edges.get_mut(&edge.to) {
+                        incoming.retain(|candidate| {
+                            !(candidate.from == edge.from
+                                && candidate.to == edge.to
+                                && candidate.kind == EdgeKind::Refs)
+                        });
+                    }
+                }
+            }
+        }
+
+        for reference in references {
+            let Some(from) = self
+                .nodes
+                .values()
+                .find(|node| {
+                    node.kind == NodeKind::Module
+                        && node.language == "harn"
+                        && node.path == reference.from_path
+                })
+                .map(|node| node.id)
+            else {
+                continue;
+            };
+            let targets: Vec<NodeId> = self
+                .nodes
+                .values()
+                .filter(|node| {
+                    node.path == reference.to_path
+                        && node.name == reference.to_name
+                        && node.kind != NodeKind::Module
+                })
+                .map(|node| node.id)
+                .collect();
+            for target in targets {
+                let duplicate = self
+                    .outgoing(from)
+                    .iter()
+                    .any(|edge| edge.kind == EdgeKind::Refs && edge.to == target);
+                if !duplicate {
+                    self.add_edge(from, target, EdgeKind::Refs);
+                }
+            }
+        }
+    }
+
     /// Find the Module node owned by `file_id`, if one exists.
     pub fn module_node_for_file(&self, file_id: FileId) -> Option<NodeId> {
         let ids = self.by_file.get(&file_id)?;
@@ -792,5 +861,35 @@ mod tests {
             module_import_edges, 1,
             "Module→Module IMPORTS edge must not duplicate across relinks"
         );
+    }
+
+    #[test]
+    fn harn_reference_projection_replaces_stale_edges_and_keeps_names_separate() {
+        let mut graph = SymbolGraph::new();
+        graph.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[]);
+        graph.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[]);
+        graph.rebuild_file(3, "use.harn", Language::Harn, "fn use_it() { run() }", &[]);
+        graph.replace_harn_references(&[ResolvedHarnReference {
+            from_path: "use.harn".into(),
+            to_path: "a.harn".into(),
+            to_name: "run".into(),
+        }]);
+        let module = graph.module_node_for_file(3).unwrap();
+        let target_path = |graph: &SymbolGraph| {
+            graph
+                .outgoing(module)
+                .iter()
+                .filter(|edge| edge.kind == EdgeKind::Refs)
+                .map(|edge| graph.node(edge.to).unwrap().path.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(target_path(&graph), vec!["a.harn"]);
+
+        graph.replace_harn_references(&[ResolvedHarnReference {
+            from_path: "use.harn".into(),
+            to_path: "b.harn".into(),
+            to_name: "run".into(),
+        }]);
+        assert_eq!(target_path(&graph), vec!["b.harn"]);
     }
 }

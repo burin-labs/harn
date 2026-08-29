@@ -24,6 +24,7 @@ use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
 use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
 use super::words::WordIndex;
+use crate::{HarnReferenceInput, HarnReferenceResolver};
 
 use crate::ast::{Language as AstLanguage, Symbol as AstSymbol};
 
@@ -273,6 +274,32 @@ impl IndexState {
             resolved.insert(*id, self.deps.imports_of(*id));
         }
         self.symbols.link_imports(&resolved);
+    }
+
+    /// Replace Harn reference edges from the integration-owned resolver.
+    pub(super) fn relink_harn_references(&mut self, resolver: Option<&HarnReferenceResolver>) {
+        let Some(resolver) = resolver else {
+            return;
+        };
+        let mut files: Vec<PathBuf> = self
+            .files
+            .values()
+            .filter(|file| file.language == "harn")
+            .map(|file| self.root.join(&file.relative_path))
+            .collect();
+        files.sort();
+        let input = HarnReferenceInput {
+            root: self.root.clone(),
+            files,
+            source_overrides: HashMap::new(),
+        };
+        match resolver(&input) {
+            Ok(references) => self.symbols.replace_harn_references(&references),
+            Err(error) => {
+                self.symbols.replace_harn_references(&[]);
+                tracing::warn!(%error, "Harn reference relink failed; cleared stale REFS edges");
+            }
+        }
     }
 
     /// Look up a file by either its workspace-relative path or its
