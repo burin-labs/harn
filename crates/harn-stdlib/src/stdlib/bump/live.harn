@@ -200,7 +200,12 @@ fn __adopt_base(
 ) -> BumpBaseAdoption {
   const to_oid = lowercase(trim(request.to_oid))
   if to_oid == "" {
-    return {ok: false, adopted_oid: nil, conflicts: [], detail: "no advanced base identity to adopt"}
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: [],
+      detail: "no advanced base identity to adopt",
+    }
   }
   const fetch = remote.fetch_base(to_oid)
   if !fetch.ok {
@@ -235,7 +240,8 @@ fn __adopt_base(
       ok: false,
       adopted_oid: nil,
       conflicts: conflicts,
-      detail: "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
+      detail:
+        "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
     }
   }
   const reset = __git(tools, cfg.repo_dir, ["reset", "--hard", to_oid])
