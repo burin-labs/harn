@@ -14,6 +14,7 @@ use crate::orchestration::{
 use super::*;
 
 mod executor_failures;
+mod identity_session;
 
 const NOW_MS: u64 = 1_000;
 const DEADLINE_MS: u64 = 61_000;
@@ -25,11 +26,12 @@ struct FixtureExecutor {
     model_calls: Arc<AtomicUsize>,
 }
 
+#[async_trait::async_trait]
 impl PreparedRunExecutor for FixtureExecutor {
     type Output = &'static str;
     type Error = String;
 
-    fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
+    async fn execute(&self, authority: &AuthorityUse) -> Result<Self::Output, String> {
         for requirement in &self.requirements {
             authority.authorize(requirement)?;
         }
@@ -43,11 +45,12 @@ struct ExpiringExecutor {
     model_calls: Arc<AtomicUsize>,
 }
 
+#[async_trait::async_trait]
 impl PreparedRunExecutor for ExpiringExecutor {
     type Output = ();
     type Error = String;
 
-    fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, String> {
+    async fn execute(&self, authority: &AuthorityUse) -> Result<Self::Output, String> {
         authority.authorize(&AuthorityRequirement::FilesystemWrite {
             root: "/workspace".to_string(),
         })?;
@@ -382,8 +385,8 @@ fn unattended_policy(workspace_trust: WorkspaceTrust) -> RunApprovalPolicy {
     )
 }
 
-#[test]
-fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
+#[tokio::test]
+async fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let run = PreparedRun::with_clock(
         FixtureExecutor {
@@ -415,7 +418,7 @@ fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
         lease.posture().workspace_trust,
         WorkspaceTrust::HostMaterialized
     );
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::Completed { .. } => {}
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -491,8 +494,8 @@ fn prepared_run_rejects_policy_constructed_for_another_interactivity_posture() {
     }
 }
 
-#[test]
-fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_authority() {
+#[tokio::test]
+async fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_authority() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let executor = FixtureExecutor {
         requirements: executor_requirements(),
@@ -502,7 +505,7 @@ fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_author
     let plan_fingerprint = lease.plan_fingerprint().to_string();
     let lease_fingerprint = lease.fingerprint().to_string();
 
-    let terminal = match run.execute(lease) {
+    let terminal = match run.execute(lease).await {
         ExecutionOutcome::Completed { output, receipt } => {
             assert_eq!(output, "completed");
             receipt
@@ -534,8 +537,8 @@ fn steel_thread_batches_once_executes_without_prompts_and_receipts_unused_author
     assert!(!serialized.contains(SECRET_CANARY));
 }
 
-#[test]
-fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
+#[tokio::test]
+async fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
     for changed in [
         AuthorityRequirement::Network(network("other.example.test")),
         AuthorityRequirement::FilesystemWrite {
@@ -549,7 +552,7 @@ fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
             model_calls: model_calls.clone(),
         };
         let (run, lease, _) = prepared(executor);
-        let receipt = match run.execute(lease) {
+        let receipt = match run.execute(lease).await {
             ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
             ExecutionOutcome::AuthorityFailed { .. } => {
                 panic!("executor denial must remain an executor failure")
@@ -564,8 +567,8 @@ fn changed_destination_path_and_secret_consumer_block_before_model_spend() {
     }
 }
 
-#[test]
-fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
+#[tokio::test]
+async fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     let executor = FixtureExecutor {
         requirements: vec![AuthorityRequirement::FilesystemWrite {
@@ -574,7 +577,7 @@ fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
         model_calls: model_calls.clone(),
     };
     let (run, lease, _) = prepared(executor);
-    let terminal = match run.execute(lease) {
+    let terminal = match run.execute(lease).await {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -586,8 +589,8 @@ fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
     assert!(terminal.denied.is_empty());
 }
 
-#[test]
-fn read_use_attenuates_existing_write_root_grants() {
+#[tokio::test]
+async fn read_use_attenuates_existing_write_root_grants() {
     let requirements = vec![
         AuthorityRequirement::FilesystemRead {
             root: "/workspace/src".to_string(),
@@ -621,7 +624,7 @@ fn read_use_attenuates_existing_write_root_grants() {
         } => authority_lease,
         other => panic!("expected ready, got {other:?}"),
     };
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::Completed { receipt, .. } => {
             assert_eq!(receipt.used.len(), 2);
             assert!(receipt.denied.is_empty());
@@ -633,8 +636,8 @@ fn read_use_attenuates_existing_write_root_grants() {
     }
 }
 
-#[test]
-fn lease_expiry_is_rechecked_at_each_material_operation() {
+#[tokio::test]
+async fn lease_expiry_is_rechecked_at_each_material_operation() {
     let clock = Arc::new(AtomicU64::new(NOW_MS));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
@@ -659,7 +662,7 @@ fn lease_expiry_is_rechecked_at_each_material_operation() {
         } => authority_lease,
         other => panic!("expected ready, got {other:?}"),
     };
-    let receipt = match run.execute(lease) {
+    let receipt = match run.execute(lease).await {
         ExecutionOutcome::ExecutorFailed { receipt, .. } => receipt,
         ExecutionOutcome::AuthorityFailed { .. } => {
             panic!("mid-execution expiry must remain an executor failure")
@@ -810,8 +813,8 @@ fn typed_delta_rejects_parent_traversal_that_lexically_starts_inside_the_grant()
     }
 }
 
-#[test]
-fn ten_noninteractive_preparations_and_executions_complete() {
+#[tokio::test]
+async fn ten_noninteractive_preparations_and_executions_complete() {
     let model_calls = Arc::new(AtomicUsize::new(0));
     for _ in 0..10 {
         let executor = FixtureExecutor {
@@ -819,7 +822,7 @@ fn ten_noninteractive_preparations_and_executions_complete() {
             model_calls: model_calls.clone(),
         };
         let (run, lease, _) = prepared(executor);
-        match run.execute(lease) {
+        match run.execute(lease).await {
             ExecutionOutcome::Completed { .. } => {}
             ExecutionOutcome::ExecutorFailed { error, .. }
             | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -830,8 +833,8 @@ fn ten_noninteractive_preparations_and_executions_complete() {
     assert_eq!(model_calls.load(Ordering::SeqCst), 10);
 }
 
-#[test]
-fn ndjson_sink_persists_startup_before_ready_and_terminal() {
+#[tokio::test]
+async fn ndjson_sink_persists_startup_before_ready_and_terminal() {
     let directory = tempfile::tempdir().expect("receipt directory");
     let path = directory.path().join("authority.ndjson");
     let sink = Arc::new(NdjsonAuthorityReceiptSink::new(&path));
@@ -864,7 +867,7 @@ fn ndjson_sink_persists_startup_before_ready_and_terminal() {
         } => authority_lease,
         other => panic!("expected ready, got {other:?}"),
     };
-    let _ = run.execute(lease);
+    let _ = run.execute(lease).await;
     let text = std::fs::read_to_string(&path).expect("complete receipts");
     let rows = text.lines().collect::<Vec<_>>();
     assert_eq!(rows.len(), 5);
@@ -972,8 +975,8 @@ impl ToolchainProbeRunner for FixtureProbeRunner {
     }
 }
 
-#[test]
-fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
+#[tokio::test]
+async fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
     let probe = toolchain_probe("/toolchains");
     let discovered = AuthorityRequirement::ProcessReadRoot {
         root: native_fixture_path("/toolchains/rust/stable"),
@@ -1030,7 +1033,7 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
         .iter()
         .any(|authority| { authority.requirement == discovered }));
 
-    let terminal = match run.execute(lease) {
+    let terminal = match run.execute(lease).await {
         ExecutionOutcome::Completed { receipt, .. } => receipt,
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -1050,8 +1053,8 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
     }));
 }
 
-#[test]
-fn denied_toolchain_discovery_leaves_parent_lease_executable() {
+#[tokio::test]
+async fn denied_toolchain_discovery_leaves_parent_lease_executable() {
     let probe = toolchain_probe("/toolchains");
     let model_calls = Arc::new(AtomicUsize::new(0));
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
@@ -1106,7 +1109,7 @@ fn denied_toolchain_discovery_leaves_parent_lease_executable() {
     assert!(!serde_json::to_string(&receipt)
         .expect("serialize refusal receipt")
         .contains(SECRET_CANARY));
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::Completed { .. } => {}
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -1116,8 +1119,8 @@ fn denied_toolchain_discovery_leaves_parent_lease_executable() {
     assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
+#[tokio::test]
+async fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
     let probe = toolchain_probe("/toolchains");
     let model_calls = Arc::new(AtomicUsize::new(0));
     let run = PreparedRun::with_clock(
@@ -1171,7 +1174,7 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
         }
         other => panic!("interactive widening must return one batch, got {other:?}"),
     }
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::Completed { .. } => {}
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
@@ -1214,8 +1217,8 @@ impl ToolchainProbeRunner for RealRustcProbeRunner {
 }
 
 #[cfg(unix)]
-#[test]
-fn real_rustc_toolchain_probe_runs_on_macos_and_linux_after_readiness() {
+#[tokio::test]
+async fn real_rustc_toolchain_probe_runs_on_macos_and_linux_after_readiness() {
     let cwd = std::env::current_dir()
         .expect("current directory")
         .to_string_lossy()
@@ -1251,181 +1254,4 @@ fn real_rustc_toolchain_probe_runs_on_macos_and_linux_after_readiness() {
         }
         other => panic!("real rustc discovery must succeed, got {other:?}"),
     }
-}
-
-#[derive(Clone)]
-struct FixtureIdentityBroker {
-    requirement: IdentityBrokerRequirement,
-}
-
-#[async_trait::async_trait]
-impl ConsumerBoundIdentityBroker for FixtureIdentityBroker {
-    fn facts(&self) -> IdentityBrokerFacts {
-        identity_facts(&self.requirement)
-    }
-
-    async fn acquire(
-        &self,
-        requirement: &IdentityBrokerRequirement,
-    ) -> Result<OpaqueIdentityHandle, IdentityBrokerError> {
-        if requirement != &self.requirement {
-            return Err(IdentityBrokerError::new(
-                "identity_binding_mismatch",
-                "fixture broker binding mismatch",
-            ));
-        }
-        Ok(OpaqueIdentityHandle::new(
-            requirement,
-            crate::secrets::SecretBytes::from(SECRET_CANARY),
-            Some(DEADLINE_MS),
-        ))
-    }
-}
-
-#[tokio::test]
-async fn identity_broker_is_readiness_bound_and_handle_is_opaque_and_consumer_exact() {
-    let identity = identity_requirement();
-    let mut run_intent = intent();
-    run_intent.identity_brokers = vec![identity.clone()];
-    let mut host = host_facts();
-    host.identity_brokers
-        .insert(identity.broker_id.clone(), identity_facts(&identity));
-    let model_calls = Arc::new(AtomicUsize::new(0));
-    let run = PreparedRun::with_clock(
-        FixtureExecutor {
-            requirements: vec![AuthorityRequirement::IdentityBroker(identity.clone())],
-            model_calls: model_calls.clone(),
-        },
-        Arc::new(MemoryAuthorityReceiptSink::default()),
-        Arc::new(|| NOW_MS),
-    );
-    let lease = approved_lease(&run, &run_intent, &host);
-    let broker = FixtureIdentityBroker {
-        requirement: identity.clone(),
-    };
-    assert_eq!(broker.facts(), identity_facts(&identity));
-    let handle = broker.acquire(&identity).await.expect("opaque handle");
-    assert!(!format!("{handle:?}").contains(SECRET_CANARY));
-    let exposed_len = handle
-        .consume(&identity, NOW_MS, |material| material.as_ref().len())
-        .expect("exact consumer may use the handle once");
-    assert_eq!(exposed_len, SECRET_CANARY.len());
-    match run.execute(lease) {
-        ExecutionOutcome::Completed { receipt, .. } => {
-            assert!(receipt.used.iter().any(|authority| {
-                authority.requirement == AuthorityRequirement::IdentityBroker(identity.clone())
-            }));
-            let serialized = serde_json::to_string(&receipt).expect("receipt JSON");
-            assert!(!serialized.contains(SECRET_CANARY));
-            assert!(serialized.contains("burin-workload"));
-        }
-        ExecutionOutcome::ExecutorFailed { error, .. }
-        | ExecutionOutcome::AuthorityFailed { error, .. } => {
-            panic!("identity run failed: {error}")
-        }
-    }
-    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn opaque_identity_handle_rejects_a_different_consumer_binding() {
-    let identity = identity_requirement();
-    let broker = FixtureIdentityBroker {
-        requirement: identity.clone(),
-    };
-    let handle = broker.acquire(&identity).await.expect("opaque handle");
-    let mut drifted = identity;
-    drifted.binding.consumer.id = "different-consumer".to_string();
-    let error = handle
-        .consume(&drifted, NOW_MS, |_| ())
-        .expect_err("a handle cannot cross consumer bindings");
-    assert_eq!(error.code, "identity_binding_mismatch");
-}
-
-#[test]
-fn identity_broker_host_properties_are_readiness_facts() {
-    let identity = identity_requirement();
-    let cases = [
-        ("noninteractive", "identity_broker_interactivity"),
-        ("gui", "identity_broker_interactivity"),
-        ("sandbox", "identity_broker_sandbox_boundary"),
-        ("opaque", "identity_broker_sandbox_boundary"),
-        ("source", "identity_source_mismatch"),
-        ("renewal", "identity_renewal_mismatch"),
-    ];
-    for (case, expected_code) in cases {
-        let mut facts = identity_facts(&identity);
-        match case {
-            "noninteractive" => facts.supports_non_interactive = false,
-            "gui" => facts.may_prompt_gui = true,
-            "sandbox" => facts.material_outside_sandbox = false,
-            "opaque" => facts.opaque_process_local_handles = false,
-            "source" => facts.sources.clear(),
-            "renewal" => facts.renewal_modes.clear(),
-            _ => unreachable!(),
-        }
-        let mut run_intent = intent();
-        run_intent.identity_brokers = vec![identity.clone()];
-        let mut host = host_facts();
-        host.identity_brokers
-            .insert(identity.broker_id.clone(), facts);
-        let run = PreparedRun::with_clock(
-            FixtureExecutor {
-                requirements: Vec::new(),
-                model_calls: Arc::new(AtomicUsize::new(0)),
-            },
-            Arc::new(MemoryAuthorityReceiptSink::default()),
-            Arc::new(|| NOW_MS),
-        );
-        match run.prepare(run_intent, host) {
-            PreparationOutcome::Blocked { diagnostics, .. } => assert!(
-                diagnostics.iter().any(|item| item.code == expected_code),
-                "{case} must emit {expected_code}: {diagnostics:#?}"
-            ),
-            other => panic!("{case} must block readiness, got {other:?}"),
-        }
-    }
-}
-
-#[test]
-fn provider_audience_tenant_and_consumer_drift_each_block_before_spend() {
-    let original = identity_requirement();
-    for drift in ["provider", "audience", "tenant", "consumer"] {
-        let mut changed = original.clone();
-        match drift {
-            "provider" => changed.binding.provider = "other-provider".to_string(),
-            "audience" => changed.binding.audience = "https://other.invalid".to_string(),
-            "tenant" => changed.binding.tenant = Some("tenant-b".to_string()),
-            "consumer" => changed.binding.consumer.id = "other-consumer".to_string(),
-            _ => unreachable!(),
-        }
-        let mut run_intent = intent();
-        run_intent.identity_brokers = vec![changed];
-        let mut host = host_facts();
-        host.identity_brokers
-            .insert(original.broker_id.clone(), identity_facts(&original));
-        let model_calls = Arc::new(AtomicUsize::new(0));
-        let run = PreparedRun::with_clock(
-            FixtureExecutor {
-                requirements: Vec::new(),
-                model_calls: model_calls.clone(),
-            },
-            Arc::new(MemoryAuthorityReceiptSink::default()),
-            Arc::new(|| NOW_MS),
-        );
-        match run.prepare(run_intent, host) {
-            PreparationOutcome::Blocked { diagnostics, .. } => assert!(diagnostics
-                .iter()
-                .any(|item| item.code == "identity_consumer_binding")),
-            other => panic!("{drift} drift must block readiness, got {other:?}"),
-        }
-        assert_eq!(model_calls.load(Ordering::SeqCst), 0);
-    }
-}
-
-#[test]
-fn platform_identity_reference_rejects_values_and_ambiguous_paths() {
-    assert!(PlatformIdentityReference::parse(SECRET_CANARY).is_err());
-    assert!(PlatformIdentityReference::parse("harn-identity://tenant/name/extra").is_err());
-    assert!(serde_json::from_value::<PlatformIdentityReference>(json!(SECRET_CANARY)).is_err());
 }

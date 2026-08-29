@@ -1840,6 +1840,22 @@ export interface HarnSessionTimelineUpdate {
   node: HarnSessionTimelineNode
 }
 
+export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
+export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"
+export type HarnPreparedSessionCommand = "approval_decision" | "attach" | "turn" | "request_delta" | "stop" | "pivot" | "finish"
+export interface HarnPreparedSessionApprovalDecision { batch_fingerprint: string; approved: boolean; decider: string }
+export interface HarnPreparedSessionBinding { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
+export interface HarnPreparedRuntimeAttachment { session_id: string; workspace_fingerprint: string; runtime: ACPValue; consumer: ACPValue }
+export interface HarnPreparedSessionLease {
+  schema: typeof HARN_PREPARED_SESSION_SCHEMA; session_id: string; session_fingerprint: string
+  plan_fingerprint: string; binding: HarnPreparedSessionBinding; intent: ACPValue
+  approval?: HarnPreparedSessionApprovalDecision | null; issued_at_ms: number; expires_at_ms: number
+}
+export interface HarnPreparedSessionUpdate {
+  state: HarnPreparedSessionState; session_id: string; batch?: ACPValue; lease?: HarnPreparedSessionLease
+  diagnostics?: ACPValue[]; receipt?: ACPValue; outcome?: ACPValue
+}
+
 export const HARN_SESSION_RECAP_QUERY_METHOD = "harn.session_recap.query" as const
 export const HARN_SESSION_RECAP_SCHEMA_VERSION = 1 as const
 

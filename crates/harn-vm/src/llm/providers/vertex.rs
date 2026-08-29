@@ -75,7 +75,13 @@ impl VertexProvider {
         body
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn endpoint_url(request: &LlmRequestPayload) -> Result<String, VmError> {
+        Self::endpoint_url_and_tenant(request).map(|(url, _)| url)
+    }
+
+    fn endpoint_url_and_tenant(request: &LlmRequestPayload) -> Result<(String, String), VmError> {
         let project = crate::stdlib::process::session_env_var("VERTEX_AI_PROJECT")?
             .or(crate::stdlib::process::session_env_var(
                 "GOOGLE_CLOUD_PROJECT",
@@ -103,7 +109,7 @@ impl VertexProvider {
                 percent_encode_component(&wire_model)
             )
         };
-        Ok(format!("{base_url}/{model}:generateContent"))
+        Ok((format!("{base_url}/{model}:generateContent"), project))
     }
 
     async fn bearer_token(api_key: &str) -> Result<String, VmError> {
@@ -135,8 +141,8 @@ impl VertexProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let dialect = Self::dialect();
-        let url = Self::endpoint_url(request)?;
-        let token = Self::bearer_token(&request.api_key).await?;
+        let (url, tenant) = Self::endpoint_url_and_tenant(request)?;
+        let token = resolve_vertex_token(&request.api_key, &tenant).await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         let response = crate::llm::blocking_client_for_base_url(&url)
@@ -166,6 +172,33 @@ impl VertexProvider {
         let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
+    }
+}
+
+pub(crate) async fn resolve_vertex_token(api_key: &str, tenant: &str) -> Result<String, VmError> {
+    match crate::prepared_run::consume_provider_identity(
+        "vertex",
+        "https://www.googleapis.com/auth/cloud-platform",
+        Some(tenant),
+        |material| {
+            let token = std::str::from_utf8(material.as_ref())
+                .ok()
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .ok_or_else(|| {
+                    crate::prepared_run::IdentityBrokerError::new(
+                        "vertex_identity_malformed",
+                        "brokered Vertex identity is malformed",
+                    )
+                })?;
+            Ok(token.to_string())
+        },
+    )
+    .await
+    .map_err(|error| vm_err(format!("vertex prepared identity failed ({})", error.code)))?
+    {
+        Some(token) => Ok(token),
+        None => VertexProvider::bearer_token(api_key).await,
     }
 }
 
