@@ -606,8 +606,30 @@ pub(super) fn mark_cancelled_session(
     let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
         return false;
     };
-    cancellation.cancel();
+    if cancellation.cancel() {
+        cancel_session_command_handles(session_id);
+    }
     true
+}
+
+/// Terminate the long-running command handles this session owns, after a cancel
+/// has been accepted for it.
+///
+/// The long-running command tool lets a backgrounded child outlive the tool
+/// call that started it, which is the point of a background handle — but it also
+/// means unwinding the agent loop does not reach those children. Foreground
+/// children die with the dispatch future through the cancel-on-drop path;
+/// backgrounded ones are exempt from it, so without this a stop leaves the
+/// session's own processes running and their survival depends on the model
+/// choosing to call the kill tool.
+///
+/// Scoped to handles whose `session_id` matches: one session's stop must never
+/// reach into a sibling's children.
+pub(super) fn cancel_session_command_handles(session_id: &str) {
+    #[cfg(feature = "hostlib")]
+    harn_hostlib::tools::long_running::cancel_session_handles(session_id);
+    #[cfg(not(feature = "hostlib"))]
+    let _ = session_id;
 }
 
 pub(super) fn mark_cancelled_session_for_routed_request(

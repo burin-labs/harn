@@ -72,6 +72,12 @@ impl AcpServer {
         } else {
             cancellation.cancel()
         };
+        if newly_cancelled {
+            // A stop has to reach the processes the session started, not just
+            // its loop. Backgrounded command handles outlive the tool call by
+            // design, so unwinding the loop never reaches them.
+            cancel_session_command_handles(&session_id);
+        }
         let status = if newly_cancelled {
             "cancelled"
         } else {

@@ -518,3 +518,132 @@ pipeline default(harness: Harness, task: unknown) {{
         })
         .await;
 }
+
+/// The guardian a backgrounded command handle re-execs into.
+///
+/// `spawn_long_running` re-runs `current_exe` with the guardian argv marker, so
+/// inside a test binary that target has to be a test that runs the guardian —
+/// otherwise every background spawn dies with "guardian exited before payload
+/// startup" and the kill test below would fail for a reason that has nothing to
+/// do with cancel.
+#[cfg(feature = "hostlib")]
+#[test]
+fn stop_controls_owner_death_guardian_fixture() {
+    if !harn_hostlib::process::owner_death::guardian_requested() {
+        return;
+    }
+    harn_hostlib::process::owner_death::run_guardian_from_pipe().expect("run owner-death guardian");
+}
+
+/// An accepted cancel must reach the processes the session started, not just
+/// its loop — and must stop at that session's own children.
+///
+/// Backgrounded command handles outlive the tool call that started them by
+/// design, so unwinding the agent loop never reaches them. Before the fix a
+/// stop left them running, and in a long-lived host (which does not exit and so
+/// never triggers the owner-death guardian) their death depended on the model
+/// choosing to call the kill tool.
+///
+/// The second session is the scope control: without it this test would pass
+/// just as happily if a cancel killed every background child on the host.
+#[cfg(feature = "hostlib")]
+#[test]
+fn accepted_cancel_kills_only_the_cancelled_sessions_background_children() {
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "adapters::acp::tests::stop_controls::stop_controls_owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
+
+    fn spawn_sleeper(session_id: &str) -> u32 {
+        harn_hostlib::tools::long_running::spawn_long_running(
+            "run",
+            "sleep".to_string(),
+            vec!["300".to_string()],
+            Some(std::env::temp_dir()),
+            BTreeMap::new(),
+            session_id.to_string(),
+        )
+        .expect("spawn a backgrounded sleep")
+        .pid
+    }
+
+    // A pid is gone once it is neither live nor a reaped-but-listed zombie.
+    fn is_running(pid: u32) -> bool {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .expect("ps");
+        let stat = String::from_utf8_lossy(&output.stdout);
+        let stat = stat.trim();
+        !stat.is_empty() && !stat.starts_with('Z')
+    }
+
+    let cancelled_session = format!("cancel-me-{}", std::process::id());
+    let bystander_session = format!("leave-me-{}", std::process::id());
+    let cancelled_pid = spawn_sleeper(&cancelled_session);
+    let bystander_pid = spawn_sleeper(&bystander_session);
+    assert!(is_running(cancelled_pid), "target child should start");
+    assert!(is_running(bystander_pid), "bystander child should start");
+
+    let cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>> =
+        Arc::new(std::sync::Mutex::new(HashMap::new()));
+    for session in [&cancelled_session, &bystander_session] {
+        cancellations
+            .lock()
+            .unwrap()
+            .insert(session.clone(), SessionCancellation::default());
+    }
+
+    // The notification form, exactly as a host sends it.
+    let consumed = preempt_session_interruption(
+        &cancellations,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/cancel",
+            "params": {"sessionId": cancelled_session},
+        }),
+    );
+    assert!(consumed, "a cancel that lands is consumed by the router");
+
+    // Bounded poll: the kill is a signal, so a single immediate reading races
+    // the child's teardown and would report a working stop as a leak.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while is_running(cancelled_pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        !is_running(cancelled_pid),
+        "session/cancel must kill the session's backgrounded child within 2s \
+         (pid {cancelled_pid} still running)"
+    );
+    assert!(
+        is_running(bystander_pid),
+        "a cancel must not reach another session's children (pid {bystander_pid} died)"
+    );
+
+    harn_hostlib::tools::long_running::cancel_session_handles(&bystander_session);
+}
+
+/// The identity `cancel_session_handles` depends on, asserted rather than assumed.
+///
+/// Backgrounded command handles are keyed by `current_agent_session_id()`, while
+/// a cancel arrives naming the ACP session id. `handle_session_prompt` registers
+/// the cancellation under the ACP session id and then enters the agent-session
+/// guard with that same id, which is what makes
+/// `cancel_session_command_handles(acp_session_id)` address the session's real
+/// children. If those two id spaces ever diverge, the call still "succeeds" and
+/// silently matches nothing — a stop that reads as working and kills nobody.
+#[test]
+fn agent_session_guard_binds_the_id_backgrounded_handles_are_keyed_by() {
+    let session_id = format!("acp-identity-{}", std::process::id());
+    let _guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    assert_eq!(
+        harn_vm::current_agent_session_id().as_deref(),
+        Some(session_id.as_str()),
+        "handles keyed by current_agent_session_id must be addressable by the ACP session id"
+    );
+}
