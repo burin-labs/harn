@@ -243,8 +243,9 @@ mod tests {
         let workspace = workspace.path().canonicalize().unwrap();
         let cache = workspace.join(WORKSPACE_TOOLCHAIN_CACHE_NAME);
         let tmp = workspace.join(WORKSPACE_TMPDIR_NAME);
+        // PURE CACHES relocate. These are derived and reproducible, so
+        // confining them keeps a run from polluting the user's real caches.
         for key in [
-            "HOME",
             "XDG_CACHE_HOME",
             "GOCACHE",
             "GOMODCACHE",
@@ -255,10 +256,22 @@ mod tests {
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
             "PNPM_HOME",
-            "PYTHONUSERBASE",
         ] {
             let value = PathBuf::from(env.get(key).unwrap());
             assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
+        }
+        // IDENTITY AND INSTALL ROOTS DO NOT. Relocating these moved the user's
+        // installed toolchain out from under the agent: a `pip install --user`
+        // package lives under $HOME and is found through PYTHONUSERBASE, so
+        // moving both made `python3 -m pytest` report "No module named pytest"
+        // for a pytest that worked in the user's own terminal. Nothing was
+        // refused; the interpreter never looked. The agent should see what the
+        // user's terminal sees.
+        for key in ["HOME", "PYTHONUSERBASE"] {
+            assert!(
+                !env.contains_key(key),
+                "{key} must NOT be relocated; the child inherits the real one"
+            );
         }
         assert!(
             !env.contains_key("NPM_CONFIG_STORE_DIR"),

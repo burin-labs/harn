@@ -176,7 +176,6 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     let root = workspace.path().canonicalize().unwrap();
     let cache = root.join(".harn-toolchain-cache");
     for key in [
-        "HOME",
         "XDG_CACHE_HOME",
         "GOCACHE",
         "GOMODCACHE",
@@ -187,10 +186,18 @@ fn spawned_process_observes_workspace_toolchain_environment() {
         "NPM_CONFIG_CACHE",
         "YARN_CACHE_FOLDER",
         "PNPM_HOME",
-        "PYTHONUSERBASE",
     ] {
         let value = PathBuf::from(values.get(key).unwrap_or_else(|| panic!("{key} missing")));
         assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
+    }
+    // The child must inherit the user's real HOME and user-site. See the
+    // matching unit test in `workspace_env.rs` for why.
+    for key in ["HOME", "PYTHONUSERBASE"] {
+        let value = PathBuf::from(values.get(key).map(String::as_str).unwrap_or_default());
+        assert!(
+            !value.starts_with(&cache),
+            "{key} must NOT be relocated into the toolchain cache: {value:?}"
+        );
     }
     assert!(
         !values.contains_key("NPM_CONFIG_STORE_DIR"),
@@ -348,12 +355,15 @@ fn installed_toolchains_use_the_workspace_owned_state() {
     if let Some(python) = find_program("python3") {
         let output = run(&python, &["-m", "site", "--user-site"], workspace.path());
         let user_site = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-        assert!(user_site.starts_with(cache.join("python-user")));
-        let pytest = user_site.join("pytest");
-        std::fs::create_dir_all(&pytest).unwrap();
-        std::fs::write(pytest.join("__init__.py"), "").unwrap();
-        std::fs::write(pytest.join("__main__.py"), "print('workspace pytest')\n").unwrap();
-        run(&python, &["-m", "pytest"], workspace.path());
+        // The user site must be the REAL one. This is the assertion that would
+        // have caught the py-smoke failure: a relocated user site is a directory
+        // the user never installed anything into, so every `pip install --user`
+        // package is invisible to the agent while remaining visible in the
+        // user's terminal.
+        assert!(
+            !user_site.starts_with(cache.join("python-user")),
+            "python's user site must not be relocated into the toolchain cache: {user_site:?}"
+        );
     }
 
     if let Some(npm) = find_program("npm") {
