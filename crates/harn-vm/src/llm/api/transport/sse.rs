@@ -330,8 +330,16 @@ pub(super) fn non_stream_send_error(provider: &str, error: reqwest::Error) -> Vm
     reqwest_send_error(provider, "request", error)
 }
 
-/// Shared reqwest-`Error`-kind classifier for both the streaming and
-/// non-streaming send paths. Maps the reqwest kind to an explicit
+/// Classify a non-streaming response-body read failure through the same typed
+/// reqwest-kind boundary as request dispatch. A timeout remains a timeout;
+/// another body failure is a transient network error rather than an untyped
+/// response-parse string.
+pub(super) fn non_stream_body_error(provider: &str, error: reqwest::Error) -> VmError {
+    reqwest_send_error(provider, "response body", error)
+}
+
+/// Shared reqwest-`Error`-kind classifier for streaming sends, non-streaming
+/// sends, and non-streaming response-body reads. Maps the reqwest kind to an explicit
 /// [`crate::value::ErrorCategory`] (carried on a `CategorizedError`) so the
 /// retry/observability layer reads a typed category rather than re-deriving it
 /// from the message text. `phase` ("stream" / "request") only flavors the
@@ -346,7 +354,10 @@ pub(super) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Er
         // A malformed request build is the caller's fault, not a transient
         // network blip — leave it uncategorized so it is not blindly retried.
         ("request_build", None)
-    } else if error.is_body() {
+    } else if error.is_body() || error.is_decode() {
+        // `Response::text()` drains bytes through reqwest's decode wrapper, so
+        // a connection reset or truncated body reports `is_decode()` even
+        // though no application-level parsing has started yet.
         ("body", Some(ErrorCategory::TransientNetwork))
     } else {
         ("unknown", None)

@@ -4023,6 +4023,7 @@ dependencies = [
  "hex",
  "hkdf 0.13.0",
  "hmac 0.13.0",
+ "http 1.4.2",
  "httpdate",
  "ignore",
  "imbl",

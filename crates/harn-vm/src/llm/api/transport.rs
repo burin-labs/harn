@@ -43,6 +43,61 @@ fn response_content_type(response: &reqwest::Response) -> Option<String> {
         .map(str::to_string)
 }
 
+fn response_header_id(response: &reqwest::Response, name: &'static str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(crate::egress::redact_diagnostic_text)
+        .map(|value| crate::text::truncate_end(&value, 256))
+}
+
+#[derive(Debug)]
+struct NonStreamResponseBody {
+    status: reqwest::StatusCode,
+    content_type: Option<String>,
+    body: String,
+}
+
+async fn read_non_stream_response_body(
+    response: reqwest::Response,
+    raw_capture_context: Option<&crate::llm::agent_observe::RawProviderCaptureContext>,
+    provider: &str,
+    model: &str,
+) -> Result<NonStreamResponseBody, VmError> {
+    let status = response.status();
+    let content_type = response_content_type(&response);
+    let request_id = response_header_id(&response, "x-request-id");
+    let generation_id = response_header_id(&response, "x-generation-id");
+    match response.text().await {
+        Ok(body) => Ok(NonStreamResponseBody {
+            status,
+            content_type,
+            body,
+        }),
+        Err(error) => {
+            let error = non_stream_body_error(provider, error);
+            crate::llm::agent_observe::persist_raw_provider_response_failure(
+                raw_capture_context,
+                provider,
+                model,
+                crate::llm::agent_observe::RawProviderResponseFailureCapture {
+                    transport: "json",
+                    attempt: None,
+                    status: status.as_u16(),
+                    content_type: content_type.as_deref(),
+                    request_id: request_id.as_deref(),
+                    generation_id: generation_id.as_deref(),
+                    error: &error,
+                },
+            );
+            Err(error)
+        }
+    }
+}
+
 fn append_ollama_tool_calls(
     message: &serde_json::Value,
     tool_calls: &mut Vec<serde_json::Value>,
@@ -480,13 +535,8 @@ async fn vm_call_llm_api_with_body_inner(
                 &body,
             ));
         }
-        let provider_request_id = response
-            .headers()
-            .get("x-generation-id")
-            .or_else(|| response.headers().get("x-request-id"))
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
+        let provider_request_id = response_header_id(&response, "x-generation-id")
+            .or_else(|| response_header_id(&response, "x-request-id"));
         // The outer observer creates a new transport attempt for each retry.
         // This watcher therefore belongs to this one physical request.
         let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
@@ -569,24 +619,20 @@ async fn vm_call_llm_api_with_body_inner(
         ));
     }
 
-    let status = response.status();
-    let content_type = response_content_type(&response);
-    let body = response.text().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{provider} response parse error: {e}"
-        ))))
-    })?;
+    let response =
+        read_non_stream_response_body(response, raw_capture_context.as_ref(), provider, model)
+            .await?;
     crate::llm::agent_observe::persist_raw_provider_response(
         raw_capture_context.as_ref(),
         provider,
         model,
         "json",
         None,
-        status.as_u16(),
-        content_type.as_deref(),
-        &body,
+        response.status.as_u16(),
+        response.content_type.as_deref(),
+        &response.body,
     );
-    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+    let json: serde_json::Value = serde_json::from_str(&response.body).map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{provider} response parse error: {e}"
         ))))
@@ -599,7 +645,7 @@ async fn vm_call_llm_api_with_body_inner(
 
 use ndjson::{emit_ollama_warmup_progress, vm_call_llm_api_ndjson_from_response};
 use sse::{
-    non_stream_send_error, send_stream_request_with_ollama_warmup,
+    non_stream_body_error, non_stream_send_error, send_stream_request_with_ollama_warmup,
     vm_call_llm_api_sse_from_response,
 };
 
@@ -607,6 +653,8 @@ use sse::{
 mod dialect_golden_stream_tests;
 #[cfg(test)]
 mod liveness_tests;
+#[cfg(test)]
+mod non_stream_body_error_tests;
 #[cfg(test)]
 mod schema_stream_abort_tests;
 #[cfg(test)]

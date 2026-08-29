@@ -256,6 +256,66 @@ pub(crate) fn persist_raw_provider_response(
     )
 }
 
+/// Safe response-envelope facts retained when reqwest fails while draining a
+/// non-streaming provider body. The response already exists, so dropping its
+/// status and opaque provider ids would make a transport failure impossible to
+/// join back to provider-side logs. Body bytes are deliberately absent because
+/// reqwest did not yield a complete body.
+pub(crate) struct RawProviderResponseFailureCapture<'a> {
+    pub(crate) transport: &'a str,
+    pub(crate) attempt: Option<usize>,
+    pub(crate) status: u16,
+    pub(crate) content_type: Option<&'a str>,
+    pub(crate) request_id: Option<&'a str>,
+    pub(crate) generation_id: Option<&'a str>,
+    pub(crate) error: &'a VmError,
+}
+
+pub(crate) fn persist_raw_provider_response_failure(
+    context: Option<&RawProviderCaptureContext>,
+    provider: &str,
+    model: &str,
+    capture: RawProviderResponseFailureCapture<'_>,
+) -> Option<String> {
+    let context = context?;
+    if !raw_provider_capture_enabled(Some(context)) {
+        return None;
+    }
+    let category = crate::value::error_to_category(capture.error);
+    let message = crate::egress::redact_diagnostic_text(&capture.error.to_string());
+    let classified = super::api::classify_llm_error(category.clone(), &message);
+    let envelope = serde_json::json!({
+        "schema_version": "harn.llm.raw_provider_response_failure.v1",
+        "kind": "response_failure",
+        "captured_at": chrono_now(),
+        "call_id": context.call_id,
+        "iteration": context.iteration,
+        "attempt": capture.attempt,
+        "provider": provider,
+        "model": model,
+        "transport": capture.transport,
+        "status": capture.status,
+        "content_type": capture.content_type,
+        "request_id": capture.request_id,
+        "generation_id": capture.generation_id,
+        "failure": {
+            "category": category.as_str(),
+            "kind": classified.kind.as_str(),
+            "reason": classified.reason.as_str(),
+            "retryable": classified.kind == super::api::LlmErrorKind::Transient,
+            "message": message,
+        },
+    });
+    write_raw_provider_sidecar(
+        context,
+        &format!("response-{}-failure", capture.transport),
+        provider,
+        model,
+        capture.attempt,
+        envelope,
+    )
+}
+
 fn write_raw_provider_sidecar(
     context: &RawProviderCaptureContext,
     suffix: &str,
