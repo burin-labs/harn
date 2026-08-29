@@ -1,11 +1,11 @@
-import { format_speed_line, format_speed_report } from "std/llm/speed"
+import { LlmSpeedUsage, format_speed_line, format_speed_report } from "std/llm/speed"
 
 /**
  * Speed reporting against a realistic llama.cpp `usage` dict: the provider
  * reported its own load, prefill, and generation timings, so every rate must
  * come from those rather than from the caller's wall clock.
  */
-fn __served_usage() -> dict {
+fn __served_usage() -> LlmSpeedUsage {
   return {
     input_tokens: 18,
     output_tokens: 143,
@@ -31,15 +31,16 @@ pipeline default(harness: Harness) {
   // A provider that reported token counts but no timings: the decode rate
   // falls back to wall time, and every server-timing line disappears rather
   // than printing zeros.
-  const untimed = {input_tokens: 18, output_tokens: 100}
+  const untimed: LlmSpeedUsage = {input_tokens: 18, output_tokens: 100}
   harness.stdio.println(format_speed_line(untimed, nil, 2000))
   for line in format_speed_report(untimed, nil, 2000) {
     harness.stdio.println(line)
   }
   harness.stdio.println("---")
   // Nothing reported at all: no rate, no counts, just the wall clock.
-  harness.stdio.println(format_speed_line({}, nil, 850))
-  for line in format_speed_report({}, nil, 850) {
+  const unreported: LlmSpeedUsage = {}
+  harness.stdio.println(format_speed_line(unreported, nil, 850))
+  for line in format_speed_report(unreported, nil, 850) {
     harness.stdio.println(line)
   }
 }
