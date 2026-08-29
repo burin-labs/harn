@@ -165,6 +165,41 @@ fn resolve_routing_inner(
     })
 }
 
+/// Check the route before the user types anything, so an unreachable local
+/// server is reported as itself instead of surfacing as a failed first
+/// message. Only definite verdicts block: a provider that cannot be probed at
+/// all is not evidence of a problem.
+async fn unreachable_provider_message(routing: &ChatRouting) -> Option<String> {
+    use harn_vm::llm::readiness::ReadinessStatus;
+
+    let readiness = harn_vm::llm::readiness::probe_provider_readiness(
+        &routing.provider,
+        Some(routing.model.as_str()),
+        None,
+    )
+    .await;
+    if readiness.ok {
+        return None;
+    }
+    if !matches!(
+        readiness.status,
+        ReadinessStatus::Unreachable | ReadinessStatus::ModelMissing
+    ) {
+        return None;
+    }
+    // Point at the local-runtime commands only when they are the fix. Telling
+    // someone whose cloud provider is unreachable to run `harn local launch`
+    // sends them somewhere that cannot help.
+    if harn_vm::llm_config::provider_is_self_hosted(&routing.provider) {
+        return Some(format!(
+            "{}\n`harn local list` shows which local models are available; \
+             `harn local launch` starts one.",
+            readiness.message
+        ));
+    }
+    Some(readiness.message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,39 +365,4 @@ mod tests {
             let _ = std::env::set_current_dir(previous);
         }
     }
-}
-
-/// Check the route before the user types anything, so an unreachable local
-/// server is reported as itself instead of surfacing as a failed first
-/// message. Only definite verdicts block: a provider that cannot be probed at
-/// all is not evidence of a problem.
-async fn unreachable_provider_message(routing: &ChatRouting) -> Option<String> {
-    use harn_vm::llm::readiness::ReadinessStatus;
-
-    let readiness = harn_vm::llm::readiness::probe_provider_readiness(
-        &routing.provider,
-        Some(routing.model.as_str()),
-        None,
-    )
-    .await;
-    if readiness.ok {
-        return None;
-    }
-    if !matches!(
-        readiness.status,
-        ReadinessStatus::Unreachable | ReadinessStatus::ModelMissing
-    ) {
-        return None;
-    }
-    // Point at the local-runtime commands only when they are the fix. Telling
-    // someone whose cloud provider is unreachable to run `harn local launch`
-    // sends them somewhere that cannot help.
-    if harn_vm::llm_config::provider_is_self_hosted(&routing.provider) {
-        return Some(format!(
-            "{}\n`harn local list` shows which local models are available; \
-             `harn local launch` starts one.",
-            readiness.message
-        ));
-    }
-    Some(readiness.message)
 }
