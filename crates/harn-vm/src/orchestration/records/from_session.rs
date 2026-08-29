@@ -104,9 +104,11 @@ async fn project_run_record_from_session_with_writer_observation(
             other => VmError::Runtime(format!("runs: failed to describe session: {other}")),
         })?;
     let events = drain_events(store, session_id).await?;
-    let children = child_records(store, session_id).await?;
+    let fold = SessionFold::from_events(&events);
+    let current_children = fold.run_started_at.as_ref().map(|_| &fold.child_runs);
+    let children = child_records(store, session_id, current_children).await?;
     let root = root_session_id(store, &meta).await?;
-    assemble(meta, events, children, root, writer_observation)
+    assemble(meta, fold, children, root, writer_observation)
 }
 
 /// Walk `parent_session_id` to the top of the delegation chain.
@@ -285,14 +287,18 @@ async fn drain_events(
     Ok(all)
 }
 
-/// Direct children of this session, as the store's own lineage records them.
+/// Direct children of this run, resolved through the store's session lineage.
 ///
-/// `sessions.parent_session_id` is the delegation edge, so children come back
-/// without re-deriving lineage from worker metadata the way a recorder-written
-/// record has to.
+/// A durable session can contain several invocations. For current data,
+/// `current_children` is the set of typed `sub_agent_start` identities folded
+/// after the latest `agent_run_started`; this prevents a prior invocation's
+/// children from leaking into the latest run record. A session without any run
+/// boundary predates that contract, so `None` preserves its session-wide
+/// lineage as the only honest compatibility projection available.
 async fn child_records(
     store: &dyn SessionStore,
     session_id: &str,
+    current_children: Option<&BTreeMap<String, String>>,
 ) -> Result<Vec<RunChildRecord>, VmError> {
     let children = store
         .list(ListFilter {
@@ -305,23 +311,29 @@ async fn child_records(
         })?;
     Ok(children
         .into_iter()
-        .map(|child| RunChildRecord {
-            worker_id: child.id.clone(),
-            worker_name: child.persona.clone().unwrap_or_default(),
-            session_id: Some(child.id.clone()),
-            parent_session_id: Some(session_id.to_string()),
-            task: child.title.clone().unwrap_or_default(),
-            status: run_status_for(
-                &child.status,
-                None,
-                None,
-                RunWriterObservation::for_session(&child.id, None),
-            )
-            .to_string(),
-            started_at: child.created_at.clone(),
-            finished_at: child.closed_at.clone(),
-            run_id: Some(child.id.clone()),
-            ..RunChildRecord::default()
+        .filter_map(|child| {
+            let child_run_id = match current_children {
+                Some(current) => current.get(&child.id)?.clone(),
+                None => child.id.clone(),
+            };
+            Some(RunChildRecord {
+                worker_id: child.id.clone(),
+                worker_name: child.persona.clone().unwrap_or_default(),
+                session_id: Some(child.id.clone()),
+                parent_session_id: Some(session_id.to_string()),
+                task: child.title.clone().unwrap_or_default(),
+                status: run_status_for(
+                    &child.status,
+                    None,
+                    None,
+                    RunWriterObservation::for_session(&child.id, None),
+                )
+                .to_string(),
+                started_at: child.created_at.clone(),
+                finished_at: child.closed_at.clone(),
+                run_id: Some(child_run_id),
+                ..RunChildRecord::default()
+            })
         })
         .collect())
 }
@@ -361,6 +373,9 @@ struct SessionFold {
     max_iteration: usize,
     terminal: Option<TerminalFacts>,
     llm_calls: Vec<LlmCallFacts>,
+    /// Child session -> child run for this invocation only. Reset with every
+    /// `agent_run_started`, like the transcript and accounting aggregates.
+    child_runs: BTreeMap<String, String>,
 }
 
 /// One provider call as the session recorded it.
@@ -588,15 +603,11 @@ fn projected_transcript(
 
 fn assemble(
     meta: SessionMeta,
-    events: Vec<StoredEvent>,
+    fold: SessionFold,
     children: Vec<RunChildRecord>,
     root_run_id: String,
     writer_observation: Option<RunWriterObservation>,
 ) -> Result<RunRecord, VmError> {
-    let mut fold = SessionFold::default();
-    for event in &events {
-        fold.absorb(event);
-    }
     let writer_observation =
         writer_observation.unwrap_or_else(|| RunWriterObservation::for_session(&meta.id, None));
 
@@ -763,6 +774,14 @@ fn build_from_session_attributes(
 }
 
 impl SessionFold {
+    fn from_events(events: &[StoredEvent]) -> Self {
+        let mut fold = Self::default();
+        for event in events {
+            fold.absorb(event);
+        }
+        fold
+    }
+
     fn absorb(&mut self, event: &StoredEvent) {
         if event.kind.discriminator() == "agent_run_started" {
             self.absorb_run_started(event);
@@ -780,9 +799,23 @@ impl SessionFold {
             "tool_result" => self.absorb_tool_result(event),
             "llm_call" => self.absorb_llm_call(event),
             "loop_checkpoint" => self.absorb_checkpoint(event),
+            "sub_agent_start" => self.absorb_sub_agent_start(event),
             "agent_run_terminal" => self.absorb_terminal(event),
             _ => {}
         }
+    }
+
+    fn absorb_sub_agent_start(&mut self, event: &StoredEvent) {
+        let Some(session_id) = facts::string_at(&event.payload, facts::CHILD_SESSION_ID) else {
+            return;
+        };
+        // Older start events persisted only the child session id. Keeping that
+        // child in the correct parent invocation is still exact; only its
+        // narrower child-run identity is unavailable, so use the historical
+        // session-id compatibility projection for that field.
+        let run_id = facts::string_at(&event.payload, facts::CHILD_RUN_ID)
+            .unwrap_or_else(|| session_id.clone());
+        self.child_runs.insert(session_id, run_id);
     }
 
     fn absorb_run_started(&mut self, event: &StoredEvent) {

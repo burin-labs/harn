@@ -112,6 +112,19 @@ fn run_started() -> AppendEvent {
     )
 }
 
+fn sub_agent_start(child_session_id: &str, child_run_id: &str) -> AppendEvent {
+    AppendEvent::new(
+        custom("sub_agent_start"),
+        transcript_event(
+            "sub_agent_start",
+            json!({
+                "child_session_id": child_session_id,
+                "child_run_id": child_run_id,
+            }),
+        ),
+    )
+}
+
 fn terminal(final_status: &str, stop_reason: &str) -> AppendEvent {
     let kind = crate::agent_events::classify_agent_terminal(
         final_status,
@@ -646,6 +659,67 @@ async fn child_sessions_project_as_child_runs_from_the_stores_own_lineage() {
 }
 
 #[tokio::test]
+async fn reused_session_projects_only_the_latest_invocations_children() {
+    let store = MemorySessionStore::default();
+    let parent = store
+        .create(CreateSession::default())
+        .await
+        .expect("create parent");
+    let old_child = store
+        .create(CreateSession {
+            parent_session_id: Some(parent.id.clone()),
+            persona: Some("old-worker".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create old child");
+    let current_child = store
+        .create(CreateSession {
+            parent_session_id: Some(parent.id.clone()),
+            persona: Some("current-worker".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create current child");
+
+    store
+        .append(&parent.id, run_started())
+        .await
+        .expect("append old start");
+    store
+        .append(
+            &parent.id,
+            sub_agent_start(&old_child.id, "agent_run_old_child"),
+        )
+        .await
+        .expect("append old child start");
+    store
+        .append(&parent.id, run_started())
+        .await
+        .expect("append current start");
+    store
+        .append(
+            &parent.id,
+            sub_agent_start(&current_child.id, "agent_run_current_child"),
+        )
+        .await
+        .expect("append current child start");
+
+    let run = project_run_record_from_session(&store, &parent.id)
+        .await
+        .expect("project");
+    assert_eq!(run.child_runs.len(), 1);
+    assert_eq!(
+        run.child_runs[0].session_id.as_deref(),
+        Some(current_child.id.as_str())
+    );
+    assert_eq!(
+        run.child_runs[0].run_id.as_deref(),
+        Some("agent_run_current_child")
+    );
+}
+
+#[tokio::test]
 async fn a_loop_that_ended_in_error_projects_as_a_failed_run() {
     let store = MemorySessionStore::default();
     let meta = store
@@ -927,7 +1001,7 @@ async fn terminal_run_clock_does_not_move_with_later_session_metadata() {
 
     let run = assemble(
         mutated_meta,
-        events,
+        SessionFold::from_events(&events),
         Vec::new(),
         meta.id.clone(),
         Some(RunWriterObservation::NotObserved),

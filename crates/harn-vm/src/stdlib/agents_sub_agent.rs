@@ -504,6 +504,8 @@ fn sub_agent_start_event(spec: &SubAgentRunSpec) -> VmValue {
         Some(serde_json::json!({
             "name": spec.name,
             "child_session_id": spec.session_id,
+            "child_run_id": spec.run_id,
+            "parent_run_id": spec.parent_run_id,
             "task": spec.task,
         })),
     )
