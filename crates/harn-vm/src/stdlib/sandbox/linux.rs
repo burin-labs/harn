@@ -1661,4 +1661,80 @@ mod tests {
              expose the very subtree we could not enumerate around"
         );
     }
+
+    /// The live Landlock falsifier.
+    ///
+    /// Every other test here checks the SUBSTITUTION — which paths we decided to
+    /// grant. On this backend that is not the same claim as "the denied file is
+    /// refused", because the enforcement is the absence of a grant, and absence
+    /// is exactly what a careless test reads as success. So this spawns a real
+    /// confined child and reads two files that differ only in whether a denial
+    /// covers them.
+    ///
+    /// Structure mirrors the macOS live test:
+    ///   * control  - the sibling inside the same granted root is readable, so a
+    ///                refusal cannot be explained by an absent grant;
+    ///   * claim    - the denied file is refused;
+    ///   * revert   - with `read_deny_roots` cleared the same file is readable,
+    ///                which is what proves the refusal was the denylist.
+    #[test]
+    fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
+        if landlock_abi_version() == 0 {
+            eprintln!("[landlock-live] SKIPPED: no Landlock on this kernel");
+            return;
+        }
+        let home = tempfile::TempDir::new().expect("temp home");
+        let home_path = home.path().canonicalize().expect("canonical home");
+
+        let secrets = home_path.join("secrets");
+        std::fs::create_dir_all(&secrets).expect("secrets dir");
+        let denied_file = secrets.join("id_ed25519");
+        std::fs::write(&denied_file, "NOT-A-REAL-KEY\n").expect("dummy key");
+        let allowed_file = home_path.join("readable.txt");
+        std::fs::write(&allowed_file, "READABLE\n").expect("control file");
+
+        let read_under = |deny: &[String], target: &std::path::Path| -> std::io::Result<bool> {
+            let policy = CapabilityPolicy {
+                workspace_roots: vec![home_path.display().to_string()],
+                sandbox_profile: SandboxProfile::Worktree,
+                process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+                    read_deny_roots: deny.to_vec(),
+                    ..Default::default()
+                },
+                ..CapabilityPolicy::default()
+            };
+            let _scope = crate::orchestration::push_execution_policy(policy);
+            let output = super::command_output(
+                "/bin/cat",
+                &[target.display().to_string()],
+                &crate::stdlib::process::ProcessCommandConfig::default(),
+            );
+            Ok(matches!(output, Ok(out) if out.status.success()))
+        };
+
+        let deny = vec![secrets.display().to_string()];
+
+        // Control first: the grant works, so a later refusal is attributable.
+        let control = read_under(&deny, &allowed_file).expect("control read");
+        assert!(
+            control,
+            "the control file inside the same workspace root must be readable, or the denial \
+             below proves nothing"
+        );
+
+        let denied = read_under(&deny, &denied_file).expect("denied read");
+        assert!(
+            !denied,
+            "a denied file must be refused even though its parent root is granted; it was read"
+        );
+
+        // Revert the fix: same policy, same files, denial removed.
+        let ungated = read_under(&[], &denied_file).expect("ungated read");
+        assert!(
+            ungated,
+            "with the denial removed the same file must become readable, which is what proves \
+             the refusal was the denylist and not an unrelated accident"
+        );
+        eprintln!("[landlock-live] denied refused, sibling readable, revert readable");
+    }
 }
