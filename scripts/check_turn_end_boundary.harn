@@ -46,6 +46,7 @@ const MEASUREMENT_TOKENS = [
 
 /** Trees that measure finished sessions rather than run them. */
 const MEASUREMENT_GLOBS = [
+  "crates/harn-stdlib/src/stdlib/cli/eval/*.harn",
   "crates/harn-stdlib/src/stdlib/cli/eval/**/*.harn",
   "evals/**/*.harn",
   "bench/**/*.harn",
@@ -74,10 +75,10 @@ fn repo_root(fs: HarnessFs) -> string {
  * instead of only that something did.
  */
 pub fn tokens_present(source: string, tokens: list<string>) -> list<string> {
-  const haystack = lower(source)
+  const haystack = source.lower()
   let hits: list<string> = []
   for token in tokens {
-    if haystack.contains(lower(token)) {
+    if haystack.contains(token.lower()) {
       hits = hits.appending(token)
     }
   }
@@ -120,7 +121,7 @@ fn matcher_is_live() -> bool {
   return product_control && measurement_control
 }
 
-fn main(harness: Harness) -> int {
+pipeline main(harness: Harness, task: unknown) {
   const root = repo_root(harness.fs)
   if !matcher_is_live() {
     harness.stdio.eprintln(
@@ -141,13 +142,17 @@ fn main(harness: Harness) -> int {
     return 1
   }
   let findings = product_findings(product_source)
-  let scanned = 0
+  let measurement_paths: list<string> = []
   for glob in MEASUREMENT_GLOBS {
-    for path in harness.fs.glob("${root}/${glob}").sorted() {
-      scanned = scanned + 1
-      const relative = path[len(root) + 1:]
-      findings = findings + measurement_findings(relative, harness.fs.read_text(path))
+    for path in harness.fs.glob(glob, root) {
+      measurement_paths = measurement_paths.appending(to_string(path))
     }
+  }
+  measurement_paths = measurement_paths.unique().sorted()
+  const scanned = measurement_paths.count
+  for relative in measurement_paths {
+    findings = findings
+      + measurement_findings(relative, harness.fs.read_text(path_join(root, relative)))
   }
   if scanned == 0 {
     harness.stdio.eprintln(
