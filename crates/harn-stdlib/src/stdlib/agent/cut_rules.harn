@@ -1,0 +1,145 @@
+// std/agent/cut_rules.harn
+//
+// Pure rules for deciding whether a progressing run should keep its wall-clock
+// budget, extend it, receive a wrap-up check, or stop. The caller owns clocks,
+// counters, feedback, and loop actuation. This module only maps supplied facts
+// to a decision.
+const PACE_CUT_RULE_CHECK_MAX_INJECTIONS = 2
+
+const PACE_CUT_RULE_EXTEND_MAX = 6
+
+/** Policy caps for pace_cut_rule_decision. */
+pub type PaceCutRulePolicy = {extend_max?: int, pace_check_max?: int}
+
+/** Facts supplied by the caller at a pace checkpoint. */
+pub type PaceCutRuleObservation = {
+  armed_budget_ms?: int,
+  checkpoint_ms?: int,
+  done?: bool,
+  elapsed_ms?: int,
+  env_blame_without_infra?: bool,
+  expected_total_ms?: int,
+  extends_used?: int,
+  made_progress?: bool,
+  pace_checks_used?: int,
+  verifier_signature_unchanged?: bool,
+}
+
+/** A pace cut-rule decision returned to the caller. */
+pub type PaceCutRuleDecision = {action: string, new_budget_ms?: int, reason?: string}
+
+/**
+ * Return the default number of wrap-up checks allowed before a cut.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pace_cut_rule_check_max_injections() -> int {
+  return PACE_CUT_RULE_CHECK_MAX_INJECTIONS
+}
+
+/**
+ * Return the default number of silent budget extensions allowed before a cut.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pace_cut_rule_extend_max() -> int {
+  return PACE_CUT_RULE_EXTEND_MAX
+}
+
+fn __pace_cut_rule_checkpoint_ms(obs: PaceCutRuleObservation, armed: int) -> int {
+  const raw = to_int(obs.checkpoint_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+fn __pace_cut_rule_expected_total_ms(obs: PaceCutRuleObservation, armed: int) -> int {
+  const raw = to_int(obs.expected_total_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+/**
+ * Decide whether a run should proceed, extend its budget, receive a pace
+ * check, or stop. Every input is supplied by the caller, so this function does
+ * no I/O and keeps no session state.
+ *
+ * `obs` accepts `armed_budget_ms`, `elapsed_ms`, `checkpoint_ms`,
+ * `expected_total_ms`, `made_progress`, `verifier_signature_unchanged`,
+ * `done`, `extends_used`, `pace_checks_used`, and
+ * `env_blame_without_infra`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pace_cut_rule_decision(
+  policy: PaceCutRulePolicy,
+  obs: PaceCutRuleObservation,
+) -> PaceCutRuleDecision {
+  const armed = to_int(obs.armed_budget_ms ?? 0) ?? 0
+  if armed <= 0 || (obs.done ?? false) {
+    return {action: "proceed"}
+  }
+  const elapsed = to_int(obs.elapsed_ms ?? 0) ?? 0
+  const checkpoint = __pace_cut_rule_checkpoint_ms(obs, armed)
+  if elapsed < checkpoint {
+    return {action: "proceed"}
+  }
+  if !(obs.made_progress ?? false) {
+    return {action: "cut", reason: "no_progress_at_checkpoint"}
+  }
+  if obs.verifier_signature_unchanged ?? false {
+    return {action: "cut", reason: "no_verifier_progress"}
+  }
+  if obs.env_blame_without_infra ?? false {
+    return {action: "cut", reason: "env_blame_without_infra"}
+  }
+  const expected_total = __pace_cut_rule_expected_total_ms(obs, armed)
+  const over_estimate = elapsed >= expected_total + checkpoint
+  const extends_used = to_int(obs.extends_used ?? 0) ?? 0
+  const pace_checks_used = to_int(obs.pace_checks_used ?? 0) ?? 0
+  const extend_max = to_int(policy.extend_max ?? PACE_CUT_RULE_EXTEND_MAX)
+    ?? PACE_CUT_RULE_EXTEND_MAX
+  const pace_check_max = to_int(policy.pace_check_max ?? PACE_CUT_RULE_CHECK_MAX_INJECTIONS)
+    ?? PACE_CUT_RULE_CHECK_MAX_INJECTIONS
+  if !over_estimate {
+    if extends_used >= extend_max {
+      return {action: "cut", reason: "extend_budget_exhausted"}
+    }
+    return {
+      action: "extend",
+      new_budget_ms: elapsed + checkpoint,
+      reason: "progress_within_estimate",
+    }
+  }
+  if pace_checks_used >= pace_check_max {
+    return {action: "cut", reason: "pace_check_budget_exhausted"}
+  }
+  return {action: "pace_check", reason: "over_estimate_while_progressing"}
+}
+
+/**
+ * Map a pace cut-rule decision onto the shared proceed, warn, or abort
+ * vocabulary. This mapping is lossy: both `extend` and `proceed` map to
+ * `proceed`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pace_cut_rule_action_of(decision: PaceCutRuleDecision?) -> string {
+  const action = to_string(decision?.action ?? "proceed")
+  if action == "cut" {
+    return "abort"
+  }
+  if action == "pace_check" {
+    return "warn"
+  }
+  return "proceed"
+}

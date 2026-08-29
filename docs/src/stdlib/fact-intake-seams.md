@@ -11,14 +11,11 @@ run that's spinning in place. Your host owns the *facts* that mechanism runs on.
 You supply those facts through three callbacks. Each one gets the loop's
 per-turn payload and returns one small answer; Harn does the rest.
 
-This is the pattern the Burin coding agent runs on: Harn decides *whether*
-progress stalled, Burin answers *did the build get closer to green*.
-
 | Callback | Lives on | You answer | Harn decides |
 |---|---|---|---|
 | `progress_signal` | `stall_diagnostics` | "did verification advance this turn?" | whether the run stopped making net progress |
 | `remediation_delivered` | `stall_diagnostics` | "did the fix we just sent actually get applied?" | whether a delivered-but-ineffective fix is a stall |
-| `governor_pace_decision` | pure function you call | (the observation of budget + progress) | proceed / extend / pace-check / cut |
+| `pace_cut_rule_decision` | pure function you call | budget and progress facts | proceed / extend / pace-check / cut |
 
 ## `progress_signal`: writes are not progress
 
@@ -99,20 +96,20 @@ Harn owns only the trigger. What to do about a delivered-but-ineffective fix
 (switch strategy, escalate to a human, widen the tool surface) is your host's
 call. It fires whether or not the loop is otherwise repair-aware.
 
-## `governor_pace_decision`: a smart timeout
+## `pace_cut_rule_decision`: a smart timeout
 
 The problem this fixes: a fixed wall-clock timeout is dumb. It cuts a run that's
 one turn from done and lets a run that stalled at the checkpoint keep burning. A
 pace decision looks at progress and budget together and decides.
 
-`governor_pace_decision` is a pure function. You feed it a policy and an
+`pace_cut_rule_decision` is a pure function. You feed it a policy and an
 observation of the current run, and it returns an action. Nothing about it
 touches the loop directly. You call it and act on the verdict.
 
 ```harn,ignore
-import { governor_pace_decision } from "std/agent/governors"
+import { pace_cut_rule_decision } from "std/agent/cut_rules"
 
-const decision = governor_pace_decision(
+const decision = pace_cut_rule_decision(
   {extend_max: 6, pace_check_max: 2},
   {
     armed_budget_ms: 60000,
@@ -130,8 +127,8 @@ const decision = governor_pace_decision(
 // decision.action -> "proceed" | "extend" | "pace_check" | "cut"
 ```
 
-**Signature.** `governor_pace_decision(policy: GovernorPolicy, obs: dict) ->
-dict`.
+**Signature.** `pace_cut_rule_decision(policy: PaceCutRulePolicy, obs:
+PaceCutRuleObservation) -> PaceCutRuleDecision`.
 
 **Policy.** Two bounded caps: `extend_max` (default 6) limits how many silent
 extensions a run can earn, and `pace_check_max` (default 2) limits how many
@@ -165,11 +162,12 @@ that's stalled gets cut at the checkpoint instead of at the wall.
 
 ## See also
 
-- [Agent governors and detectors](./governors.md) — the mechanism side: the
-  budget governor and the unified detector surface these facts feed.
-- [Steering seams](../concepts/steering-seams.md) — the broader picture of
+- [Pace cut rules](./cut-rules.md) covers the decision contract.
+- [Agent governors and detectors](./governors.md) covers the budget governor
+  and detector surface these facts feed.
+- [Steering seams](../concepts/steering-seams.md) covers the broader picture of
   out-of-band influence on a running loop, and where host-supplied facts fit.
-- [Typed facts](../memory.md#typed-facts) — durable, queryable claims an agent
+- [Typed facts](../memory.md#typed-facts) covers durable, queryable claims an agent
   stores, distinct from these per-turn signals.
-- [The expressiveness spectrum](../concepts/expressiveness-spectrum.md) — where
+- [The expressiveness spectrum](../concepts/expressiveness-spectrum.md) shows where
   host-supplied facts sit on the ladder from a three-line call to full control.

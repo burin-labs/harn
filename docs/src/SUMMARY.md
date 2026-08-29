@@ -170,6 +170,7 @@
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent governors and detectors](./stdlib/governors.md)
+- [Pace cut rules](./stdlib/cut-rules.md)
 - [Agent guardrails](./stdlib/agent-guardrails.md)
 - [Completion gate](./stdlib/agent-judge.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)
