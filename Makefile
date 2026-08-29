@@ -605,6 +605,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ref_matcher_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/e2e_workflow_trigger_test.sh
+	./scripts/tests/check_sdk_release_artifacts_test.sh
+	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_pr_drift_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
