@@ -36,10 +36,9 @@ demonstrates correctness.
 
 Mechanism-contract gate (onramp tier): if this PR adds or changes a
 termination / escalation / judge / guard / routing mechanism, a mechanism
-contract must be present and GREEN — a manufactured mini-eval under
-`conformance/tests/mechanisms/*.contract.harn` proving the mechanism fires on
-its trigger, emits its observable effect, and does NOT fire on the negative
-case. A GREEN contract is a precondition to starting an N>=5 meter run — not
-a replacement for it (the meter still owns convergence claims; see
-docs/eval/meter-stick.md). See conformance/tests/mechanisms/README.md.
+contract must be present and GREEN. The contract is a manufactured mini-eval
+under `conformance/tests/mechanisms/*.contract.harn` proving the mechanism fires
+on its trigger, emits its observable effect, and does NOT fire on the negative
+case. A GREEN contract proves only the mechanism contract, not end-to-end
+quality or convergence. See conformance/tests/mechanisms/README.md.
 -->
