@@ -683,6 +683,7 @@ export const TOOL_PERMISSION_DECIDERS = [
   "managed_policy",
   "runtime_policy",
   "host_unavailable",
+  "auto_reviewer",
 ] as const
 export type HarnToolPermissionDecider = (typeof TOOL_PERMISSION_DECIDERS)[number]
 
