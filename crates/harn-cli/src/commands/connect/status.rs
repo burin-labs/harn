@@ -156,6 +156,10 @@ pub(super) async fn connector_status(
         .required_secret_ids()
         .map(str::to_string)
         .collect::<Vec<_>>();
+    let outbound_credentials = setup
+        .outbound_credentials()
+        .map(|requirement| requirement.id.clone())
+        .collect::<Vec<_>>();
     let credential_environment = setup.credential_environment.clone();
     let configuration_environment = setup.configuration_environment.clone();
     let entry = index
@@ -188,12 +192,14 @@ pub(super) async fn connector_status(
         )
     };
 
-    let environment_covers_required_secrets = !required_secrets.is_empty()
-        && required_secrets.iter().all(|secret| {
+    let environment_covers_outbound_credentials = !outbound_credentials.is_empty()
+        && outbound_credentials.iter().all(|secret| {
             package::available_process_credential_environment_name(&credential_environment, secret)
                 .is_some()
         });
-    if let Some(error) = credential_backend_error.filter(|_| !environment_covers_required_secrets) {
+    if let Some(error) =
+        credential_backend_error.filter(|_| !environment_covers_outbound_credentials)
+    {
         status = "transient_provider_outage".to_string();
         reason = format!("credential backend was unavailable: {error}");
     }
@@ -201,7 +207,7 @@ pub(super) async fn connector_status(
     if status == "healthy"
         && auth_type.as_deref().is_some_and(|kind| kind != "none")
         && entry.is_none()
-        && required_secrets.is_empty()
+        && outbound_credentials.is_empty()
     {
         status = "missing_auth".to_string();
         reason = format!("no stored credentials found for connector '{connector_id}'");
@@ -210,7 +216,7 @@ pub(super) async fn connector_status(
     let secret_id = entry.map(|entry| entry.secret_id.clone());
     let secret_ids = entry.map(normalized_secret_ids).unwrap_or_default();
     let expires_at_unix = entry.and_then(|entry| entry.expires_at_unix);
-    if status == "healthy" && !environment_covers_required_secrets {
+    if status == "healthy" && !environment_covers_outbound_credentials {
         if let Some(expires_at) = expires_at_unix {
             if expires_at <= now {
                 status = "expired_credentials".to_string();
@@ -218,7 +224,7 @@ pub(super) async fn connector_status(
             }
         }
     }
-    if status == "healthy" && !environment_covers_required_secrets {
+    if status == "healthy" && !environment_covers_outbound_credentials {
         if let Some(entry) = entry {
             match parse_secret_id(&entry.secret_id) {
                 Some(id) => match provider.get(&id).await {
@@ -247,7 +253,7 @@ pub(super) async fn connector_status(
     }
 
     if status == "healthy" {
-        for secret in &required_secrets {
+        for secret in &outbound_credentials {
             if let Some(environment_name) = package::available_process_credential_environment_name(
                 &credential_environment,
                 secret,

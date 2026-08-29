@@ -349,6 +349,35 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn status_health_requires_only_outbound_credentials() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
+        harn_vm::secrets::SecretId::new("github", "access-token"),
+        "token",
+    );
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec![
+        package::ConnectorRequiredSecretManifest::inbound("github/webhook-secret"),
+        package::ConnectorRequiredSecretManifest::outbound("github/access-token"),
+    ];
+    let config = status_config(setup);
+
+    let status =
+        connector_status("github", Some(&config), &secrets, &index, 100, false, None).await;
+
+    assert_eq!(status.status, "healthy");
+    assert!(status.usable);
+    assert_eq!(
+        status.required_secrets,
+        ["github/webhook-secret", "github/access-token"]
+    );
+    assert!(status.missing_secrets.is_empty());
+    assert_eq!(status.health_checks.len(), 1);
+    assert_eq!(status.health_checks[0].id, "secret:github/access-token");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn status_accepts_only_declared_nonempty_credential_environment() {
     const ENV_NAME: &str = "CONNECTOR_STATUS_TEST_TOKEN_6530";
     let _environment = crate::env_guard::ScopedEnvVar::set(ENV_NAME, "test-token");
