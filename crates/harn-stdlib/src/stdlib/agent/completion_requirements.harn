@@ -328,8 +328,15 @@ fn completion_requirement_refs_supported(
       return false
     }
     if len(matches) == 1 {
-      if !completion_requirement_record_qualifies(matches[0], allowed_roles) {
-        return false
+      // Indexing is fallible to the checker even where the length is known, and
+      // qualification takes a record rather than a maybe-record. Iterating the
+      // one-element list binds the element at its declared type instead of
+      // re-validating what `completion_requirement_evidence_matches` already
+      // guarantees.
+      for record in matches {
+        if !completion_requirement_record_qualifies(record, allowed_roles) {
+          return false
+        }
       }
       qualifying = qualifying + 1
       continue
