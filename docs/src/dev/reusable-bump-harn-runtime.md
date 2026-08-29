@@ -136,15 +136,18 @@ arbitrary orchestration ref.
   and the target release. So a moved base is re-derived, not discarded. Before
   refresh and before publication, the runtime adopts the observed base head
   into the checkout (an authenticated fetch through the provider capability,
-  then a hard reset onto that head) and re-runs apply and validation against
-  it, holding the disarm lease. Three adoptions are allowed per attempt;
+  exact cleanup of the discarded refresh paths, then a detached checkout of
+  that head) and re-runs apply and validation against it, holding the disarm
+  lease. Unrelated untracked files survive, and any unreadable comparison or
+  incomplete cleanup aborts the adoption before the checkout moves. Three
+  adoptions are allowed per attempt;
   `base_adoptions` in the receipt reports how many were made. After that, or
   when the remote head cannot be read at all, the attempt returns
   `outcome: base_advanced` with a `fresh_base_retry` recovery, and the fleet
   controller's bounded successor run — or a standalone caller's next scheduled
   tick — starts again from a fresh checkout of the declared base.
 - Contested refresh output: an adoption is refused when the incoming commits
-  changed a path this bump's refresh also authors. Resetting would silently
+  changed a path this bump's refresh also authors. Adopting would silently
   decide a contest between two writers of one artifact, so the attempt returns
   `outcome: base_conflict` and names the contested paths for a human. This is
   the only base-race exit a fresh retry cannot clear on its own.
