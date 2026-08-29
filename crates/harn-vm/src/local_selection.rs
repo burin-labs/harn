@@ -20,7 +20,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const LOCAL_SUBDIR: &str = "local";
 const SELECTION_FILE: &str = "selection.json";
@@ -55,9 +54,7 @@ impl LocalSelection {
             base_url: base_url.into(),
             ctx,
             keep_alive,
-            switched_at: OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| String::new()),
+            switched_at: harn_clock::system_now_rfc3339(),
         }
     }
 }
