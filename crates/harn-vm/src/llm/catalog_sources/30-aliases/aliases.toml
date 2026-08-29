@@ -573,12 +573,24 @@ provider = "zai"
 id = "glm-5.3"
 provider = "zai"
 
+[aliases."glm-5.3-flash"]
+id = "glm-5.3-flash"
+provider = "zai"
+
+[aliases."glm-flash"]
+id = "glm-5.3-flash"
+provider = "zai"
+
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"
 provider = "openrouter"
 
 [aliases."openrouter-glm-5.3"]
 id = "z-ai/glm-5.3"
+provider = "openrouter"
+
+[aliases."openrouter-glm-5.3-flash"]
+id = "z-ai/glm-5.3-flash"
 provider = "openrouter"
 
 # DeepSeek V4 direct API aliases.

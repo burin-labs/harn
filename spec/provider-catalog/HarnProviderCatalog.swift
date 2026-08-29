@@ -522,7 +522,9 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
 public struct HarnPromotionalPricing: Codable, Sendable, Equatable {
     public let id: String
     public let startsOn: String
+    public let startsAt: String?
     public let endsOn: String?
+    public let endsAt: String?
     public let reviewAfter: String?
     public let sourceURL: String
     public let inputPerMTok: Double
@@ -533,7 +535,9 @@ public struct HarnPromotionalPricing: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case startsOn = "starts_on"
+        case startsAt = "starts_at"
         case endsOn = "ends_on"
+        case endsAt = "ends_at"
         case reviewAfter = "review_after"
         case sourceURL = "source_url"
         case inputPerMTok = "input_per_mtok"

@@ -292,12 +292,14 @@ pub type HarnProviderCatalogPricing = {
 pub type HarnProviderCatalogPromotionalPricing = {
   cache_read_per_mtok?: float?,
   cache_write_per_mtok?: float?,
+  ends_at?: string,
   ends_on?: string,
   id: string,
   input_per_mtok: float,
   output_per_mtok: float,
   review_after?: string,
   source_url: string,
+  starts_at?: string,
   starts_on: string,
 }
 

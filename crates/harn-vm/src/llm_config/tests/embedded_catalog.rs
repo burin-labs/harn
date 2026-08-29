@@ -3,6 +3,7 @@
 //! and dedicated routes stay out of the tier aliases.
 
 use super::super::*;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 // ── Embedded providers.toml invariants ───────────────────────────────────
 // These tests pin properties of the *system* — TOML parses, every
@@ -102,6 +103,48 @@ fn embedded_catalog_pricing_rates_are_non_negative() {
             assert!(rate >= 0.0, "{id}: negative cache_write rate {rate}");
         }
     }
+}
+
+#[test]
+fn glm_5_3_flash_routes_and_launch_pricing_are_live() {
+    let config = default_config();
+    let direct = config
+        .models
+        .get("glm-5.3-flash")
+        .expect("direct Z.AI GLM-5.3-Flash route is catalogued");
+    let openrouter = config
+        .models
+        .get("z-ai/glm-5.3-flash")
+        .expect("OpenRouter GLM-5.3-Flash route is catalogued");
+    assert_eq!(direct.provider, "zai");
+    assert_eq!(openrouter.provider, "openrouter");
+    assert!(direct.capabilities.iter().any(|value| value == "vision"));
+    assert!(direct.capabilities.iter().any(|value| value == "video"));
+
+    let pricing = direct.pricing.as_ref().expect("direct route is priced");
+    let at = |value| OffsetDateTime::parse(value, &Rfc3339).unwrap();
+    let promotional = pricing.effective_at(at("2026-08-28T12:00:00Z"));
+    assert_eq!(promotional.input_per_mtok, 0.075);
+    assert_eq!(promotional.output_per_mtok, 0.25);
+    assert_eq!(promotional.cache_read_per_mtok, Some(0.015));
+    let restored = pricing.effective_at(at("2026-09-09T16:00:00Z"));
+    assert_eq!(restored.input_per_mtok, 0.15);
+    assert_eq!(restored.output_per_mtok, 0.50);
+    assert_eq!(restored.cache_read_per_mtok, Some(0.03));
+
+    let glm = config
+        .aliases
+        .get("glm")
+        .expect("flagship GLM alias exists");
+    assert_eq!(
+        glm.id, "glm-5.3",
+        "Flash does not retarget the flagship alias"
+    );
+    let flash = config
+        .aliases
+        .get("glm-flash")
+        .expect("stable Flash alias exists");
+    assert_eq!(flash.id, "glm-5.3-flash");
 }
 
 #[test]
