@@ -1,6 +1,6 @@
 // Parity fixture for the unified detector subsystem's token-runaway core and
 // the DetectorSpec -> native stall_diagnostics lowering
-// (std/agent/stall). Derived by reading burin-code's
+// (std/agent/stall). Derived from a downstream host's
 // lib/runtime/token-runaway-guard.harn (sigma 2.0, thin-history margin 0.6,
 // hard overshoot multiple 3.0).
 import {

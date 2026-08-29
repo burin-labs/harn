@@ -1,4 +1,3 @@
-- **Public contract files no longer name a specific downstream host product.**
-  Security policy, workflow comments, and `.gitignore` use host-neutral wording,
-  and `make check-public-product-names` fails if those files grow a product
-  identifier again.
+Public source, tooling, and documentation now use host-neutral names for
+downstream integrations, with a repository-wide drift check protecting the
+boundary.

@@ -149,7 +149,7 @@ fn every_builtin_the_adapter_replaces_is_declared() {
          `register_builtin` inserts by name, so this DETACHES the builtin from whatever harn-vm \
          does inside its own dispatch — silently, and with no test failure. That is precisely how \
          the per-turn memo was inert on the ACP route for a full release (harn#5190 -> \
-         burin-labs/burin-code#5432).\n\n\
+         a downstream host regression).\n\n\
          Declare it here with `shadows_host_dispatch` set honestly. If it is true, the stdlib \
          version's behaviour needs classifying in harn-vm's ACP host_call census too. See \
          harn#5562 / harn#5523."

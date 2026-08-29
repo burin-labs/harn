@@ -1,4 +1,4 @@
-# The first Rule Engine customer (#2824 / burin-labs/burin-code#1629):
+# The first Rule Engine customer's migration shape:
 # find every `src?.key ?? default` shape so the codemod can fold it into a
 # destructuring bind. `fix` makes this a codemod; `transform` + interpolation
 # of the bound metavars into the replacement land in #2834.

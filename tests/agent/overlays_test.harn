@@ -1,6 +1,6 @@
 // Run: harn test tests/agent/overlays_test.harn
 //
-// Parity fixtures for `std/agent/overlays` against burin-code's
+// Parity fixtures for `std/agent/overlays` against a downstream host's
 // `mode_overlay_lines` shape (`lib/runtime/agent-loop.harn`): a per-mode base
 // row, a narrower per-(mode, lane) row that takes priority when the lane
 // matches, and an explicit `overrides` entry that always wins over both. Pure

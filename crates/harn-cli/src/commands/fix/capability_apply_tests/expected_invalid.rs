@@ -5,11 +5,11 @@
 //! a repo-wide codemod always meets them. Treating that as a run failure made
 //! every consuming repo that tests its own parser errors permanently
 //! un-bumpable — the reusable bump workflow runs the codemod repo-wide under
-//! `set -euo pipefail`, and burin-code sat nine patch releases behind on
+//! `set -euo pipefail`, and a downstream host sat nine patch releases behind on
 //! exactly this.
 //!
 //! The declaration already existed: the expected diagnostic lives in a sibling
-//! `.error` file, a convention this repo and burin-code both use.
+//! `.error` file, a convention this repo and downstream hosts both use.
 
 use super::*;
 

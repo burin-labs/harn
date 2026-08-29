@@ -95,7 +95,7 @@ pub(crate) fn extract_llm_options(
     // the exact transport-failover classification, the routing envelope
     // trace, and the schema-retry composition rather than hand-rolling a
     // fallback loop (subsumes the copies in harn-bump-fleet / harn-cloud /
-    // burin-code). The `models:`/`ladder:` + explicit `routing:` combination is
+    // a downstream host). The `models:`/`ladder:` + explicit `routing:` combination is
     // already rejected above, so this `is_none()` guard is a belt-and-suspenders
     // check — the ladder never coexists with an explicit routing policy.
     if routing_policy.is_none() {

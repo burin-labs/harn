@@ -184,7 +184,7 @@ Strip every comment that a senior engineer would not have written:
   below it, delete it.
 - **References to private / cross-org repos by name:** this repo is
   open-source, and external integrators read this code. Replace
-  `burin-code`, `burin-labs/...`, or internal product names with
+  downstream repository names, internal organization paths, or internal product names with
   neutral phrasing. Use "a Harn integrator", "a Harn host", "a Harn
   Cloud workspace", or "a downstream Harn consumer."
 - **Task-bound or PR-bound comments:** "added for ticket #1234", "see

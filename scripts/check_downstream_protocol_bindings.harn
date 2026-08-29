@@ -31,7 +31,7 @@ pub fn normalize_protocol_text(text: string) -> string {
   return text.replace("\r\n", "\n").replace("\r", "\n")
 }
 
-/** Apply the same canonicalization Burin uses before vendoring each target. */
+/** Apply the same canonicalization the downstream host uses when vendoring each target. */
 pub fn normalize_protocol_target(
   process: HarnessProcess,
   source: string,
@@ -78,28 +78,25 @@ fn is_file(fs: HarnessFs, path: string) -> bool {
   return fs.stat(path).is_file
 }
 
-pub fn discover_burin_root(env: HarnessEnv, fs: HarnessFs, explicit_root: string = "") -> string {
+pub fn discover_downstream_root(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  explicit_root: string = "",
+) -> string {
   if explicit_root != "" {
     return path_normalize(expand_user(env, explicit_root))
   }
-  const env_root = env.get("BURIN_CODE_ROOT") ?? ""
+  const env_root = env.get("DOWNSTREAM_HOST_ROOT") ?? ""
   if env_root != "" {
     return path_normalize(expand_user(env, env_root))
-  }
-  const home = env.get("HOME") ?? ""
-  if home != "" {
-    const candidate = path_join(home, "projects", "burin-code")
-    if is_dir(fs, candidate) {
-      return candidate
-    }
   }
   return ""
 }
 
-pub fn stale_burin_protocol_bindings(
+pub fn stale_downstream_protocol_bindings(
   process: HarnessProcess,
   fs: HarnessFs,
-  burin_root: string,
+  downstream_root: string,
   harn_root: string = "",
 ) -> list<string> {
   let stale: list<string> = []
@@ -107,7 +104,7 @@ pub fn stale_burin_protocol_bindings(
   for target in TARGETS {
     const source = path_join(source_root, to_string(target.source))
     const destination_rel = to_string(target.destination)
-    const destination = path_join(burin_root, destination_rel)
+    const destination = path_join(downstream_root, destination_rel)
     if !is_file(fs, destination) {
       stale = stale + [destination_rel + " (missing)"]
       continue
@@ -126,28 +123,28 @@ pub fn stale_burin_protocol_bindings(
   return stale
 }
 
-pub fn check_burin_protocol_bindings(
+pub fn check_downstream_protocol_bindings(
   env: HarnessEnv,
   process: HarnessProcess,
   fs: HarnessFs,
-  burin_root_arg: string = "",
+  downstream_root_arg: string = "",
   required: bool = false,
   harn_root: string = "",
 ) -> dict {
-  const burin_root = discover_burin_root(env, fs, burin_root_arg)
+  const downstream_root = discover_downstream_root(env, fs, downstream_root_arg)
   const artifacts = artifact_root(fs, harn_root)
-  if !is_dir(fs, burin_root) {
+  if !is_dir(fs, downstream_root) {
     return {
       ok: !required,
       skipped: !required,
       status: "missing_root",
-      burin_root: burin_root,
+      downstream_root: downstream_root,
       artifacts: artifacts,
       stale: [],
       stale_count: 0,
     }
   }
-  const stale = stale_burin_protocol_bindings(process, fs, burin_root, harn_root)
+  const stale = stale_downstream_protocol_bindings(process, fs, downstream_root, harn_root)
   return {
     ok: len(stale) == 0,
     skipped: false,
@@ -156,7 +153,7 @@ pub fn check_burin_protocol_bindings(
     } else {
       "stale"
     },
-    burin_root: burin_root,
+    downstream_root: downstream_root,
     artifacts: artifacts,
     stale: stale,
     stale_count: len(stale),
@@ -166,9 +163,9 @@ pub fn check_burin_protocol_bindings(
 fn arg_spec() {
   return parser(
     {
-      name: "check_burin_protocol_bindings",
+      name: "check_downstream_protocol_bindings",
       args: [
-        {kind: "flag", name: "burin_root", long: "--burin-root", parse: "string", default: ""},
+        {kind: "flag", name: "host_root", long: "--host-root", parse: "string", default: ""},
         {kind: "switch", name: "required", long: "--required", default: false},
       ],
     },
@@ -178,7 +175,7 @@ fn arg_spec() {
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/check_burin_protocol_bindings.harn -- [--burin-root PATH] [--required]",
+      "usage: harn run scripts/check_downstream_protocol_bindings.harn -- [--host-root PATH] [--required]",
     )
     return nil
   }
@@ -188,35 +185,35 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_burin_protocol_bindings(
+  const report = check_downstream_protocol_bindings(
     harness.env,
     harness.process,
     harness.fs,
-    to_string(parsed?.burin_root ?? ""),
+    to_string(parsed?.host_root ?? ""),
     parsed?.required ?? false,
   )
   if report.status == "missing_root" {
     if parsed?.required ?? false {
-      harness.stdio.eprintln("error: Burin Code checkout not found")
+      harness.stdio.eprintln("error: downstream host checkout not found")
       harness.runtime.exit(1)
     }
     harness.stdio.println(
-      "skipping Burin protocol binding drift check (no Burin Code checkout found)",
+      "skipping downstream protocol binding drift check (no host checkout found)",
     )
     return nil
   }
   if report.stale_count > 0 {
     harness.stdio.eprintln(
-      "error: Burin Code protocol bindings diverge from " + to_string(report.artifacts) + ":",
+      "error: downstream protocol bindings diverge from " + to_string(report.artifacts) + ":",
     )
     for path in report.stale {
       harness.stdio.eprintln("  " + to_string(path))
     }
     harness.stdio.eprintln(
-      "hint: regenerate Burin's vendored bindings from this Harn checkout or the matching Harn release.",
+      "hint: regenerate the host's vendored bindings from this Harn checkout or its matching release.",
     )
     harness.runtime.exit(1)
   }
-  harness.stdio.println("Burin protocol bindings match " + to_string(report.artifacts))
+  harness.stdio.println("downstream protocol bindings match " + to_string(report.artifacts))
   return nil
 }

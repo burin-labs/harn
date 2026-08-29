@@ -1,7 +1,7 @@
 # Burin mini
 
 Throwaway playground experiment for the DFS sub-agent research-queue architecture
-tracked by `burin-code#144`.
+tracked by the downstream experiment owner.
 
 This version stays deliberately small:
 
@@ -164,7 +164,7 @@ BURIN_MINI_MATRIX_POLICIES="off auto high" \
 ./experiments/burin-mini/run_reasoning_matrix.sh
 ```
 
-The runner sources `~/projects/burin-code/.env` by default when it exists, but
+The runner sources `${HARN_EXPERIMENT_ENV_FILE}` when configured, but
 never copies credentials into outputs. It probes local Ollama models, reuses an
 already-running llama.cpp OpenAI-compatible server at `LLAMACPP_BASE_URL`
 (`http://127.0.0.1:8001` by default), and filters Together candidates to
@@ -199,5 +199,5 @@ requests were not stable enough in this harness during the May 2026 tuning pass.
   playground host+pipeline flow, while `make lint-harn` checks the standalone
   host/lib modules and `make fmt-harn` checks formatting for the full
   experiment tree.
-- Baseline comparison against current `burin-code` pipelines is documented at a
+- Baseline comparison against current downstream pipelines is documented at a
   qualitative level in `DECISION.md`.

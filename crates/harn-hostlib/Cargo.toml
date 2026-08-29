@@ -28,7 +28,7 @@ default = ["full"]
 # Distributed product surface: AST mechanism + PTY sessions + every grammar
 # family. Grammar families used to ride on `ast`; they live on `full` now so
 # lean embedders can enable `ast` (and pick families) without compiling ~27
-# C grammars (#6416 / burin-code#4067).
+# C grammars (#6416 / a downstream host regression).
 full = ["ast", "native-secret-store", "terminal-session", "grammars-all"]
 
 # Operating-system credential-store adapters. The secret-store contract and

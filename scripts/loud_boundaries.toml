@@ -81,7 +81,7 @@ was_silent = true
 event = "agent_event:boundary_failure"
 anchors = ["crates/harn-vm/src/agent_events/from_host.rs"]
 test = "crates/harn-vm/src/agent_events/from_host_tests.rs"
-notes = "Unknown types are additive vocabulary and must not kill a run (harn#7541 / burin-code#6556). Malformed payloads of a known type still report through the funnel because every stdlib emit site wraps agent_emit_event in `try { }` and would otherwise swallow the VmError."
+notes = "Unknown types are additive vocabulary and must not kill a run. Malformed payloads of a known type still report through the funnel because every stdlib emit site wraps agent_emit_event in `try { }` and would otherwise swallow the VmError."
 
 [[boundary]]
 id = "provider_admission_gate"

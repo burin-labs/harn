@@ -9,20 +9,25 @@ if ! "$script"; then
   exit 1
 fi
 
-tmp="$(mktemp "${TMPDIR:-/tmp}/harn-public-product-names-test.XXXXXX.md")"
-trap 'rm -f "$tmp"' EXIT
-printf '%s\n' "see burin-code#1" >"$tmp"
-
-# Point the scanner at a fixture by swapping SECURITY.md via a copy root.
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-public-product-names-fix.XXXXXX")"
-trap 'rm -rf "$fixture_root" "$tmp"' EXIT
-mkdir -p "$fixture_root/.github/workflows" "$fixture_root/.github/actions" "$fixture_root/scripts"
+trap 'rm -rf "$fixture_root"' EXIT
+mkdir -p "$fixture_root/docs" "$fixture_root/scripts"
 cp "$script" "$fixture_root/scripts/check_public_product_names.sh"
-cp "$root/.github/SECURITY.md" "$fixture_root/.github/SECURITY.md"
-printf '%s\n' "see burin-code#1" >>"$fixture_root/.github/SECURITY.md"
-: >"$fixture_root/.gitignore"
+git -C "$fixture_root" init -q
+product="burin"
+printf 'see %s-code#1\n' "$product" >"$fixture_root/docs/public.md"
+git -C "$fixture_root" add docs/public.md scripts/check_public_product_names.sh
 if "$fixture_root/scripts/check_public_product_names.sh"; then
   echo "error: a planted downstream product name must fail the scan" >&2
+  exit 1
+fi
+
+git -C "$fixture_root" reset -q
+rm -f "$fixture_root/docs/public.md"
+printf 'historical %s-code#1\n' "$product" >"$fixture_root/CHANGELOG.md"
+git -C "$fixture_root" add CHANGELOG.md scripts/check_public_product_names.sh
+if ! "$fixture_root/scripts/check_public_product_names.sh"; then
+  echo "error: immutable changelog history must remain allowlisted" >&2
   exit 1
 fi
 

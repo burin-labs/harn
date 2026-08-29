@@ -3,7 +3,7 @@ import { agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 
 // The taught grammar must be the parsed grammar — on the exact shape that
-// dropped six edit calls in burin-code#6388.
+// dropped six edit calls in a downstream regression.
 //
 // That run pinned `tool_format: "json"` on fireworks/gpt-oss-120b, a route the
 // capability matrix pins to heredoc `text`. Both channel gates classify `json`

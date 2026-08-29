@@ -807,7 +807,7 @@ pipeline default(harness: Harness) {
             author: Some(AnnotationAuthor {
                 id: Some("alice".into()),
                 kind: AuthorKind::Human,
-                surface: Some("burin-code".into()),
+                surface: Some("downstream-host".into()),
             }),
             timestamp: Some("2026-05-10T17:00:00Z".into()),
             span: None,

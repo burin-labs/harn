@@ -6,7 +6,7 @@
 //! what capability argument they receive. When it supplies one it is the root
 //! `Harness`.
 //!
-//! Found in burin-code, whose five hook handlers all take `(event)`. The
+//! Found in a downstream host whose five hook handlers all take `(event)`. The
 //! migration rewrote each to take a capability parameter of its own choosing —
 //! including `enforce_stage_tool_gate({agent: HarnessAgent, runtime:
 //! HarnessRuntime}, event)`, a record no dispatcher constructs — and would have
@@ -173,7 +173,7 @@ fn a_trigger_handler_reached_through_an_export_is_frozen() {
 /// migration is worse than none, because it does not parse as the code anyone
 /// wrote.
 ///
-/// This is `enforce_stage_tool_gate` in burin-code, reduced.
+/// This is a reduced downstream `enforce_stage_tool_gate`.
 #[test]
 fn a_frozen_handler_with_two_ambient_calls_is_not_half_rewritten() {
     const TWO_AMBIENT_CALLS: &str = concat!(

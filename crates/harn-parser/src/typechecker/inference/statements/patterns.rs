@@ -116,7 +116,7 @@ impl TypeChecker {
     /// `probe` exactly as the desugared `flag = source?.flag ?? (false ||
     /// probe(info))` would. This used to run only `check_binops`, so every
     /// other diagnostic was blind inside a default: a call with too few
-    /// arguments, an unknown callee, a bad capability method. On burin-code's
+    /// arguments, an unknown callee, a bad capability method. On a downstream host's
     /// pipelines that hid a real one-argument call to a two-argument function
     /// which then threw at run time, with `harn check` reporting nothing.
     pub(super) fn check_pattern_defaults(

@@ -43,7 +43,7 @@ fn apply_repairs_with_options_inner(
     // Capability migration converges across passes. Dry-run must walk the same
     // pass loop as a real apply: stopping after pass one reports the first
     // wave's repair count against the untouched tree, which is how
-    // `--apply --dry-run` invented a net-negative on burin-code `scripts/`
+    // `--apply --dry-run` invented a net-negative on a downstream script corpus
     // (551 repairs, "post-apply" 8993) while a real apply reached 365.
     let max_passes = if options.capability_migrations_only {
         CAPABILITY_MIGRATION_MAX_PASSES
