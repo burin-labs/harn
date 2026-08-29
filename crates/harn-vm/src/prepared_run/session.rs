@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use super::evidence::{approval_batch, fingerprint};
 use super::*;
 
 pub const PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";

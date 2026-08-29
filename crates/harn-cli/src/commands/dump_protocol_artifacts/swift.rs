@@ -1492,11 +1492,9 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
 }
 "#,
     );
-
     append_session_timeline_types(&mut out);
     append_swift_session_update_payloads(&mut out);
     append_swift_prepared_session_types(&mut out);
     append_swift_session_recap_types(&mut out);
-
     out
 }

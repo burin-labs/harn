@@ -2,9 +2,8 @@ use serde_json::json;
 
 use crate::orchestration::PolicyEvaluation;
 
-use super::engine::{
-    approval_batch, diagnostic, evaluate_requirement, policy_evidence, receipted_requirements,
-};
+use super::engine::evaluate_requirement;
+use super::evidence::{approval_batch, diagnostic, policy_evidence, receipted_requirements};
 use super::*;
 
 #[derive(Clone, Copy)]
