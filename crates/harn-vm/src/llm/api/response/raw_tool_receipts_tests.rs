@@ -118,7 +118,7 @@ fn openai_parser_preserves_harmony_wrapper_before_normalizing() {
 fn openai_parser_recovers_look_from_harmony_recipient_to_wrapper() {
     // Fireworks Harmony demux can lift the recipient token `to` into
     // function.name while leaving clean look args and no real tool name
-    // (burin-code#4809 Face 2).
+    // (the downstream raw-receipt regression's second failure mode).
     let response = serde_json::json!({
         "choices": [{
             "message": {

@@ -3,7 +3,7 @@
 //! Burin observed that `harn fix --capability-migrations-only` rewrote ACP
 //! fixtures from the ambient `emit_response` builtin to
 //! `harness.runtime.emit_response`, which then routed through `host/call` and
-//! produced no `agent_message_chunk` (harn#6374 / burin-code env_passthrough).
+//! produced no `agent_message_chunk` (harn#6374 / downstream env passthrough).
 
 use super::*;
 

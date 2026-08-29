@@ -106,7 +106,7 @@ pub fn peek_total_tokens() -> u64 {
 /// each call ([`record_llm_usage`]). A supervisor on the dispatch
 /// thread can therefore tighten or loosen the ceiling mid-run and have the next
 /// LLM call observe it — the basis for ACP `session/set_budget` re-arm
-/// (burin-labs/burin-code#1561). Callers that want fresh per-scope accounting
+/// in a downstream host. Callers that want fresh per-scope accounting
 /// (HTTP `@budget`, per-turn guards) keep using `install_*` instead.
 pub fn set_llm_cost_budget(max_cost_usd: Option<f64>) {
     LLM_BUDGET.with(|b| *b.borrow_mut() = max_cost_usd.map(|max| max.max(0.0)));

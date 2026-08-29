@@ -665,7 +665,7 @@ pub(super) fn preempt_session_interruption(
 
 /// Re-arm the live LLM `call_budget` ceilings on the engine thread out-of-band,
 /// so a prompt turn already in flight observes the new cap on its next LLM
-/// dispatch (burin-labs/burin-code#1561). Returns `true` when `msg` was a
+/// dispatch in a downstream host. Returns `true` when `msg` was a
 /// `session/set_budget` control frame (so the router drops it instead of
 /// queueing it behind the active turn).
 ///

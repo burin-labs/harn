@@ -51,7 +51,7 @@ fn empty_workspace_roots_default_to_execution_root_for_fs_paths() {
     crate::stdlib::process::set_thread_execution_context(None);
 }
 
-/// Regression for burin-labs/burin-code#4266. When a restricted policy has
+/// Downstream regression: when a restricted policy has
 /// no explicit `workspace_roots`, the write jail must follow the typed
 /// execution `project_root` before env/cwd fallbacks.
 #[test]
@@ -108,7 +108,7 @@ fn empty_workspace_roots_prefer_execution_project_root_over_env_and_execution_ro
     std::env::remove_var("HARN_PROJECT_ROOT");
 }
 
-/// Regression for burin-labs/burin-code#3288. When a restricted policy has
+/// Downstream regression: when a restricted policy has
 /// no explicit `workspace_roots`, the write jail must follow the
 /// host-declared `HARN_PROJECT_ROOT` project — NOT the process/execution
 /// cwd. This is the eval/dispatch pattern: `burin-headless` runs from the

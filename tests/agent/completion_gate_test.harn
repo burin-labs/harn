@@ -1,7 +1,7 @@
 // Run: harn test tests/agent/completion_gate_test.harn
 //
 // Parity fixtures for the completion-gate veto arithmetic in
-// `std/agent/judge_internals`. These pin burin-code's completion-judge
+// `std/agent/judge_internals`. These pin a downstream completion-judge
 // decisions (lib/runtime/completion-judge.harn) on synthetic verdict sets:
 // the source-vs-cosmetic evidence gate (ledger ⛔#5), the strict post-write-red
 // class that the budget may never convert, the per-session veto budget

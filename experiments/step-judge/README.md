@@ -67,7 +67,7 @@ decision is about whether to recommend it.
 
 ## Running the experiment
 
-Requires OpenRouter API key in env (or `~/projects/burin-code/.env`).
+Requires an OpenRouter API key in the environment or `HARN_EXPERIMENT_ENV_FILE`.
 
 ```sh
 # Mock smoke test first (no credits)

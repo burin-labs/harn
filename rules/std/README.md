@@ -18,7 +18,7 @@ harn codemod --rule rules/std/destructure-defaults.toml src      # dry-run
 
 ### `destructure-defaults`
 
-The flagship — powers the #2824 / burin-code#1629 migration. The unified `$K`
+The flagship rule powers a downstream host migration. The unified `$K`
 means it only rewrites the **non-alias** case (binding name == property name);
 aliases (`const t = cfg?.timeout ?? d`) are left alone.
 

@@ -425,7 +425,7 @@ pub(super) fn repair_for_ambient_capability_plan(
 /// Names this file binds locally are excluded. Reading `repo_root` where the
 /// file says `const repo_root = ...` is a read of that local, not of some
 /// same-named callable in another module, and freezing on it costs the whole
-/// migration rather than one edit: on burin-code's `scripts/` corpus this
+/// migration rather than one edit: on a downstream `scripts/` corpus this
 /// distinction is the difference between 6 repairs and hundreds.
 ///
 /// Erring toward freezing is still the right default for a genuine ambiguity —

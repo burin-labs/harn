@@ -183,7 +183,7 @@ pub async fn materialize_session_run_record(
 ///
 /// Deterministic by session id so a host can resolve the record for a session
 /// without threading a path back through its own state — which is the join
-/// burin-code#5831 needs and the `sessions` table has no column for.
+/// downstream hosts need and the `sessions` table has no column for.
 pub fn default_projection_path(root: &Path, session_id: &str) -> PathBuf {
     crate::runtime_paths::run_root(root).join(format!("{session_id}.json"))
 }

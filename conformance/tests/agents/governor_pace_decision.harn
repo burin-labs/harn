@@ -1,5 +1,5 @@
 // Parity fixture for the pace/budget governor's PURE decision core
-// (std/agent/governors::governor_decision), derived by reading burin-code's
+// (std/agent/governors::governor_decision), derived from a downstream host's
 // lib/runtime/pace-governor.harn `pace_decision`. Each row maps a burin outcome
 // onto the generalized proceed/warn/abort vocabulary:
 //   below checkpoint                         -> proceed  (burin proceed)

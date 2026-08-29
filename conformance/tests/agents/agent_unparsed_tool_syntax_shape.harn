@@ -96,7 +96,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     shapes(harness.agent, "```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"),
   )
-  // burin-code#6388. The model was TAUGHT the ```tool fence, wrote well-formed
+  // A downstream regression. The model was TAUGHT the ```tool fence, wrote well-formed
   // calls into it, and the parser ran the heredoc grammar — so every call was
   // dropped. The near-miss detector then stayed silent too, because `tool` is a
   // language-shaped label and the labeled-fence rule read Harn's own call fence

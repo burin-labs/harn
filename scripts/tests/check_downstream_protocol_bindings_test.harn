@@ -1,5 +1,5 @@
 import { with_temp_dir } from "std/testing"
-import "../check_burin_protocol_bindings.harn"
+import "../check_downstream_protocol_bindings.harn"
 
 fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
@@ -38,7 +38,7 @@ fn write_sources(fs: HarnessFs, root: string, swift: string, rust: string, ts: s
   return nil
 }
 
-fn write_burin(fs: HarnessFs, root: string, swift: string, rust: string, ts: string) -> nil {
+fn write_downstream(fs: HarnessFs, root: string, swift: string, rust: string, ts: string) -> nil {
   write_text(fs, root, "Sources/BurinCore/ACP/HarnProtocol.generated.swift", swift)
   write_text(fs, root, "crates/burin-tui/protocol/src/harn_protocol_generated.rs", rust)
   write_text(fs, root, "server/src/generated/harn-protocol.ts", ts)
@@ -58,16 +58,22 @@ pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harne
     harness.fs,
     { root ->
       const harn_root = path_join(root, "harn")
-      const burin_root = path_join(root, "burin-code")
+      const downstream_root = path_join(root, "downstream-host")
       const rust_source = "pub enum Receipt { Confirmed, Rejected }\n"
       const rust_destination = "pub enum Receipt {\r\n    Confirmed,\r\n    Rejected,\r\n}\r\n"
       write_sources(harness.fs, harn_root, "swift\n", rust_source, "type Foo = string\n")
-      write_burin(harness.fs, burin_root, "swift\r\n", rust_destination, "type Foo = string\r\n")
-      const report = check_burin_protocol_bindings(
+      write_downstream(
+        harness.fs,
+        downstream_root,
+        "swift\r\n",
+        rust_destination,
+        "type Foo = string\r\n",
+      )
+      const report = check_downstream_protocol_bindings(
         harness.env,
         harness.process,
         harness.fs,
-        burin_root,
+        downstream_root,
         true,
         harn_root,
       )
@@ -89,20 +95,20 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(
     harness.fs,
     { root ->
       const harn_root = path_join(root, "harn")
-      const burin_root = path_join(root, "burin-code")
+      const downstream_root = path_join(root, "downstream-host")
       write_sources(harness.fs, harn_root, "swift source\n", "rust source\n", "ts source\n")
       write_text(
         harness.fs,
-        burin_root,
+        downstream_root,
         "Sources/BurinCore/ACP/HarnProtocol.generated.swift",
         "swift stale\n",
       )
-      mkdirs(harness.fs, path_join(burin_root, "server/src/generated"))
-      const report = check_burin_protocol_bindings(
+      mkdirs(harness.fs, path_join(downstream_root, "server/src/generated"))
+      const report = check_downstream_protocol_bindings(
         harness.env,
         harness.process,
         harness.fs,
-        burin_root,
+        downstream_root,
         true,
         harn_root,
       )
@@ -126,7 +132,7 @@ pipeline test_missing_root_respects_required_flag(harness: Harness, task: unknow
     harness.fs,
     { root ->
       const missing = path_join(root, "missing-burin")
-      const optional = check_burin_protocol_bindings(
+      const optional = check_downstream_protocol_bindings(
         harness.env,
         harness.process,
         harness.fs,
@@ -137,7 +143,7 @@ pipeline test_missing_root_respects_required_flag(harness: Harness, task: unknow
       assert_eq(optional.ok, true)
       assert_eq(optional.skipped, true)
       assert_eq(optional.status, "missing_root")
-      const required = check_burin_protocol_bindings(
+      const required = check_downstream_protocol_bindings(
         harness.env,
         harness.process,
         harness.fs,

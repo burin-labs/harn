@@ -315,7 +315,7 @@ mod tests {
         ));
     }
 
-    /// burin-code#6388. Fireworks ends a streamed completion with a trailing
+    /// A downstream regression showed Fireworks ends a streamed completion with a trailing
     /// accounting frame after the finish-reason frame. Without this catalog
     /// fact the parser treats finish-reason as terminal and drops the usage,
     /// so every streamed agent call prices as `unknown` while non-streamed

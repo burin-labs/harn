@@ -3,7 +3,7 @@
  * without declaring it.
  *
  * `spec/protocol-artifacts/` is a downstream contract, not an internal file.
- * Burin Code, and any integrator generating against these bindings, compiles
+ * Downstream hosts and any integrator generating against these bindings compile
  * against the exported names. `check-protocol-artifacts` cannot see a removal:
  * it regenerates the artifacts and compares, so a constant the generator stops
  * emitting simply disappears from both sides and the check stays green.
