@@ -30,21 +30,23 @@ impl AuthorityReceiptSink for ToggleReceiptSink {
     }
 }
 
-#[test]
-fn missing_toolchain_discovery_leaves_parent_lease_executable() {
+#[tokio::test]
+async fn missing_toolchain_discovery_leaves_parent_lease_executable() {
     failed_optional_discovery_leaves_parent_lease_executable(&format!(
         "toolchain executable was not found: {SECRET_CANARY}"
-    ));
+    ))
+    .await;
 }
 
-#[test]
-fn malformed_toolchain_discovery_leaves_parent_lease_executable() {
+#[tokio::test]
+async fn malformed_toolchain_discovery_leaves_parent_lease_executable() {
     failed_optional_discovery_leaves_parent_lease_executable(&format!(
         "toolchain probe returned malformed output: {SECRET_CANARY}"
-    ));
+    ))
+    .await;
 }
 
-fn failed_optional_discovery_leaves_parent_lease_executable(error: &str) {
+async fn failed_optional_discovery_leaves_parent_lease_executable(error: &str) {
     let probe = toolchain_probe("/toolchains");
     let model_calls = Arc::new(AtomicUsize::new(0));
     let run = PreparedRun::with_clock(
@@ -74,7 +76,7 @@ fn failed_optional_discovery_leaves_parent_lease_executable(error: &str) {
         }
         other => panic!("failed optional probe must be receipted, got {other:?}"),
     }
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::Completed { .. } => {}
         ExecutionOutcome::ExecutorFailed { error, .. }
         | ExecutionOutcome::AuthorityFailed { error, .. } => {
