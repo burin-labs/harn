@@ -54,6 +54,29 @@ pub type BumpBaseHead = {available: bool, oid: string?, detail: string}
 /** Machine-readable recovery requested after a non-ready bump attempt. */
 pub type BumpRecovery = {kind: "none" | "fresh_base_retry", base_oid: string?}
 
+/**
+ * One request to adopt an advanced base branch head into the local checkout.
+ *
+ * `refreshed` is the path set this bump's refresh has already authored, so the
+ * adapter can refuse an adoption whose incoming commits touch the same files
+ * instead of silently deciding which writer wins.
+ */
+pub type BumpBaseAdoptionRequest = {
+  base: string,
+  from_oid: string?,
+  to_oid: string,
+  refreshed: list<string>,
+  attempt: int,
+}
+
+/** Verdict of adopting an advanced base. `conflicts` names the contested paths. */
+pub type BumpBaseAdoption = {
+  ok: bool,
+  adopted_oid: string?,
+  conflicts: list<string>,
+  detail: string,
+}
+
 /** Observed state of an already-open bump PR, or nil when none exists. */
 pub type BumpPrState = {
   number: int,
@@ -95,6 +118,7 @@ pub type BumpAdapter = {
   run_validation: fn() -> BumpValidation,
   working_changes: fn() -> BumpChangeSet,
   remote_base_head: fn() -> BumpBaseHead,
+  adopt_base: fn(BumpBaseAdoptionRequest) -> BumpBaseAdoption,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -114,6 +138,7 @@ pub type BumpOutcome = "not_ready" \
   | "no_changes" \
   | "validation_failed" \
   | "base_advanced" \
+  | "base_conflict" \
   | "closed_noop" \
   | "committed"
 
@@ -143,6 +168,7 @@ pub type BumpReceipt = {
   base_current: bool?,
   base_check_phase: "before_refresh" | "before_publication" | "before_arming" | nil,
   recovery: BumpRecovery,
+  base_adoptions: int,
   lease_recovered: bool,
   commit_oid: string?,
   pr_action: BumpPrAction,
@@ -252,6 +278,7 @@ fn __bump_receipt_base(
     base_current: nil,
     base_check_phase: nil,
     recovery: {kind: "none", base_oid: nil},
+    base_adoptions: 0,
     lease_recovered: false,
     commit_oid: nil,
     pr_action: "none",
@@ -304,14 +331,61 @@ fn __observe_base_lease(
   return {current: false, receipt: next_receipt, detail: detail}
 }
 
-fn __base_advanced_receipt(options: BumpOptions, base: BumpBaseReconciliation) -> BumpReceipt {
+/**
+ * Bounded number of advanced-base adoptions one attempt may make before it
+ * hands the race back to the controller. Each adoption costs a full refresh
+ * and validation, so the ceiling is small and the lease is held throughout.
+ */
+const BUMP_MAX_BASE_ADOPTIONS = 3
+
+fn __base_advanced_receipt(
+  options: BumpOptions,
+  base: BumpBaseReconciliation,
+  adoptions: int,
+  extra: list<string> = [],
+) -> BumpReceipt {
+  const exhausted = if adoptions >= BUMP_MAX_BASE_ADOPTIONS {
+    ["exhausted ${BUMP_MAX_BASE_ADOPTIONS} base adoptions without a stable ${options.base}"]
+  } else {
+    []
+  }
   return base.receipt
     + {
       outcome: "base_advanced",
       ok: false,
+      base_adoptions: adoptions,
       recovery: {kind: "fresh_base_retry", base_oid: base.receipt.observed_base_oid},
       notes: base.receipt.notes
-        + [base.detail, "retry the bump from a fresh checkout of ${options.base}"],
+        + [base.detail]
+        + extra
+        + exhausted
+        + ["retry the bump from a fresh checkout of ${options.base}"],
+    }
+}
+
+/**
+ * The one abort a fresh retry cannot fix: the advanced base changed a path this
+ * bump's refresh also authors, so adopting it would decide a contest between
+ * two writers of the same artifact. Name the paths and stop.
+ */
+fn __base_conflict_receipt(
+  options: BumpOptions,
+  base: BumpBaseReconciliation,
+  adoption: BumpBaseAdoption,
+) -> BumpReceipt {
+  const contested = if len(adoption.conflicts) > 0 {
+    ["the advanced ${options.base} changed refreshed paths: ${join(adoption.conflicts, ", ")}"]
+  } else {
+    []
+  }
+  return base.receipt
+    + {
+      outcome: "base_conflict",
+      ok: false,
+      recovery: {kind: "none", base_oid: base.receipt.observed_base_oid},
+      notes: base.receipt.notes
+        + [base.detail, "cannot adopt the advanced ${options.base}: ${adoption.detail}"]
+        + contested,
     }
 }
 
@@ -376,91 +450,151 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // could otherwise merge while this attempt is validating a replacement.
   const preparation = __prepare_base_lease(adapter, receipt)
   const existing = preparation.existing
-  // Refuse a stale checkout before spending on refresh and validation. The
-  // later checks close the races introduced by those long-running phases.
-  const initial_base = preparation.base
-  receipt = initial_base.receipt
-  if !initial_base.current {
-    return __base_advanced_receipt(options, initial_base)
-  }
-  // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
-  const apply = adapter.apply_version(target)
-  receipt = receipt
-    + {
-      changed: apply.changed,
-      refreshed: apply.refreshed,
-      refresh_ok: apply.ok,
-      refresh_detail: apply.detail,
-    }
-  if !apply.ok && (!options.publish_failure_for_repair || !apply.changed) {
-    return receipt
-      + {
-        outcome: "refresh_failed",
-        ok: false,
-        notes: receipt.notes + ["refresh failed: ${apply.detail}"],
-      }
-  }
-  if !apply.changed {
-    return receipt
-      + {
-        outcome: "already_current",
-        ok: true,
-        notes: receipt.notes + ["writing ${target} produced no change"],
-      }
-  }
-  // Phase 4 — the caller's single declared validation entrypoint. By default,
-  // any failed mutation stops before publication. Fleet controllers may opt
-  // into a leased repair PR for either a refresh or validation failure; that
-  // path preserves the exact failed outcome and can never arm auto-merge.
-  // Validation is skipped after a failed refresh because its preconditions no
-  // longer hold; the bounded repair lane must rerun the complete bump gate.
+  let base = preparation.base
+  receipt = base.receipt
+  let adoptions = 0
   let repair_outcome: BumpOutcome? = nil
   let repair_detail = ""
-  if !apply.ok {
-    repair_outcome = "refresh_failed"
-    repair_detail = apply.detail
-  } else {
-    const validation = adapter.run_validation()
-    receipt = receipt + {validation: validation}
-    if !validation.ok && !options.publish_failure_for_repair {
+  // Refresh and validation run long enough for the base branch to move under
+  // them. The refreshed content is a pure function of (base content, target),
+  // so a moved base is re-derivable rather than fatal: adopt the observed head
+  // into the checkout and re-enter the mutation phases against it, under the
+  // same auto-merge disarm lease. The loop is bounded and leaves only on a base
+  // the adapter has proved is the local checkout's own head.
+  while true {
+    if !base.current {
+      const observed = base.receipt.observed_base_oid
+      // An unreadable remote head is not an identity that can be adopted, and
+      // absence must never read as "still current".
+      if observed == nil || adoptions >= BUMP_MAX_BASE_ADOPTIONS {
+        return __base_advanced_receipt(options, base, adoptions)
+      }
+      const adoption = adapter.adopt_base(
+        {
+          base: options.base,
+          from_oid: base.receipt.expected_base_oid,
+          to_oid: observed,
+          refreshed: receipt.refreshed,
+          attempt: adoptions + 1,
+        },
+      )
+      if !adoption.ok {
+        // Contested paths need a human. Everything else — an unreachable oid,
+        // a failed fetch — stays a retryable race for the controller.
+        if len(adoption.conflicts) > 0 {
+          return __base_conflict_receipt(options, base, adoption)
+        }
+        return __base_advanced_receipt(
+          options,
+          base,
+          adoptions,
+          ["could not adopt the advanced ${options.base}: ${adoption.detail}"],
+        )
+      }
+      adoptions = adoptions + 1
+      receipt = receipt
+        + {
+          base_adoptions: adoptions,
+          expected_base_oid: adoption.adopted_oid,
+          notes: receipt.notes
+            + [
+              "adopted advanced base ${observed} for re-application "
+                + "(adoption ${adoptions} of ${BUMP_MAX_BASE_ADOPTIONS})",
+            ],
+        }
+      // The adoption itself can lose the race again; re-read before spending.
+      base = __observe_base_lease(adapter, receipt, "before_refresh")
+      receipt = base.receipt
+      continue
+    }
+    // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
+    const apply = adapter.apply_version(target)
+    receipt = receipt
+      + {
+        changed: apply.changed,
+        refreshed: apply.refreshed,
+        refresh_ok: apply.ok,
+        refresh_detail: apply.detail,
+      }
+    if !apply.ok && (!options.publish_failure_for_repair || !apply.changed) {
       return receipt
         + {
-          outcome: "validation_failed",
+          outcome: "refresh_failed",
           ok: false,
-          notes: receipt.notes + ["validation failed: ${validation.detail}"],
+          notes: receipt.notes + ["refresh failed: ${apply.detail}"],
         }
     }
-    if !validation.ok {
-      repair_outcome = "validation_failed"
-      repair_detail = validation.detail
+    if !apply.changed {
+      return receipt
+        + {
+          outcome: "already_current",
+          ok: true,
+          notes: receipt.notes + ["writing ${target} produced no change"],
+        }
+    }
+    // Phase 4 — the caller's single declared validation entrypoint. By default,
+    // any failed mutation stops before publication. Fleet controllers may opt
+    // into a leased repair PR for either a refresh or validation failure; that
+    // path preserves the exact failed outcome and can never arm auto-merge.
+    // Validation is skipped after a failed refresh because its preconditions no
+    // longer hold; the bounded repair lane must rerun the complete bump gate.
+    repair_outcome = nil
+    repair_detail = ""
+    if !apply.ok {
+      repair_outcome = "refresh_failed"
+      repair_detail = apply.detail
+    } else {
+      const validation = adapter.run_validation()
+      receipt = receipt + {validation: validation}
+      if !validation.ok && !options.publish_failure_for_repair {
+        return receipt
+          + {
+            outcome: "validation_failed",
+            ok: false,
+            notes: receipt.notes + ["validation failed: ${validation.detail}"],
+          }
+      }
+      if !validation.ok {
+        repair_outcome = "validation_failed"
+        repair_detail = validation.detail
+      }
+    }
+    // Phase 5 — nothing to commit? Never manufacture an empty PR. A failed
+    // mutation remains failed even when it produced no file delta.
+    const changeset = adapter.working_changes()
+    receipt = receipt + {changeset: changeset}
+    if bump_changeset_empty(changeset) {
+      if repair_outcome != nil {
+        return receipt
+          + {
+            outcome: repair_outcome ?? "validation_failed",
+            ok: false,
+            notes: receipt.notes
+              + [
+                "${repair_outcome ?? "validation_failed"} without a repairable file delta: "
+                  + repair_detail,
+              ],
+          }
+      }
+      return receipt
+        + {
+          outcome: "no_changes",
+          ok: true,
+          notes: receipt.notes + ["no file changes after refresh"],
+        }
+    }
+    // Phase 6 — re-read the base immediately before publication. The connector
+    // derives its payload against the local HEAD, so a tree proved against an
+    // older base can never be published as-is; the loop head decides whether
+    // this attempt adopts the new base or hands the race back.
+    base = __observe_base_lease(adapter, receipt, "before_publication")
+    receipt = base.receipt
+    if base.current {
+      break
     }
   }
   const repair_publication = repair_outcome != nil
   const repair_failure: BumpOutcome = repair_outcome ?? "validation_failed"
-  // Phase 5 — nothing to commit? Never manufacture an empty PR. A failed
-  // mutation remains failed even when it produced no file delta.
-  const changeset = adapter.working_changes()
-  receipt = receipt + {changeset: changeset}
-  if bump_changeset_empty(changeset) {
-    if repair_publication {
-      return receipt
-        + {
-          outcome: repair_failure,
-          ok: false,
-          notes: receipt.notes
-            + ["${repair_failure} without a repairable file delta: ${repair_detail}"],
-        }
-    }
-    return receipt
-      + {outcome: "no_changes", ok: true, notes: receipt.notes + ["no file changes after refresh"]}
-  }
-  // Phase 6 — refresh and validation can take long enough for the remote base
-  // to advance. Refuse publication of a tree proved against an older base.
-  const base = __observe_base_lease(adapter, receipt, "before_publication")
-  receipt = base.receipt
-  if !base.current {
-    return __base_advanced_receipt(options, base)
-  }
   const base_sha = receipt.expected_base_oid ?? ""
   let notes = receipt.notes
   // Phase 7 — atomically create/reset the branch and publish one signed commit
@@ -542,7 +676,7 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const arm_base = __observe_base_lease(adapter, receipt, "before_arming")
   receipt = arm_base.receipt
   if !arm_base.current {
-    return __base_advanced_receipt(options, arm_base)
+    return __base_advanced_receipt(options, arm_base, adoptions)
   }
   // Phase 10 — arm auto-merge so the merge queue owns the final landing.
   let auto_merge = nil

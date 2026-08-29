@@ -2,7 +2,7 @@
 name = "harn-bump-driver"
 version = "0.1.0"
 description = "Package-backed GitHub driver for Harn's provider-neutral runtime bump state machine."
-harn = ">=0.10.51,<0.11"
+harn = ">=0.10.121,<0.11"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn"
 docs_url = "https://github.com/burin-labs/harn/blob/main/scripts/bump-driver/README.md"

@@ -128,15 +128,29 @@ arbitrary orchestration ref.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
   exact PR-head and base-head leases before refresh begins. The runtime checks
   the checkout's exact base against the remote branch before refresh, after
-  validation, and again immediately before arming. A mismatch or unavailable
-  lookup returns `outcome: base_advanced`, records the expected and observed
-  identities, leaves any published PR unarmed, and requests a
-  `fresh_base_retry`. The fleet controller already treats the failed workflow
-  as retryable: its bounded successor run checks out the declared base again
-  and reruns refresh and validation on that composition. A standalone
-  scheduled caller gets the same fresh-checkout recovery on its next tick.
-  The connector derives and publishes a GitHub-signed commit only while the
-  measured lease is current. Stale actors fail closed.
+  validation, and again immediately before arming. The connector derives and
+  publishes a GitHub-signed commit only while the measured lease is current.
+  Stale actors fail closed.
+- Advanced base: a refresh takes long enough that the base branch can move
+  under it, and the refreshed content is a pure function of the base content
+  and the target release. So a moved base is re-derived, not discarded. Before
+  refresh and before publication, the runtime adopts the observed base head
+  into the checkout (an authenticated fetch through the provider capability,
+  then a hard reset onto that head) and re-runs apply and validation against
+  it, holding the disarm lease. Three adoptions are allowed per attempt;
+  `base_adoptions` in the receipt reports how many were made. After that, or
+  when the remote head cannot be read at all, the attempt returns
+  `outcome: base_advanced` with a `fresh_base_retry` recovery, and the fleet
+  controller's bounded successor run — or a standalone caller's next scheduled
+  tick — starts again from a fresh checkout of the declared base.
+- Contested refresh output: an adoption is refused when the incoming commits
+  changed a path this bump's refresh also authors. Resetting would silently
+  decide a contest between two writers of one artifact, so the attempt returns
+  `outcome: base_conflict` and names the contested paths for a human. This is
+  the only base-race exit a fresh retry cannot clear on its own.
+- Base advance immediately before arming: the PR is already published, so the
+  attempt stops rather than redoing the refresh. It returns `base_advanced`
+  and leaves the PR unarmed; the next run refreshes that PR head and arms it.
 
 ## Version availability
 
@@ -145,6 +159,11 @@ workflow runs the state machine under the **target** Harn release. The feature
 ships in the release identified in `changelog.d/5299.added.md`; bumping to any
 release at or after that version works. (Bumps are always forward to the latest
 release, so this holds in practice.)
+
+The driver package declares the runtime floor it needs in
+`scripts/bump-driver/harn.toml`. A caller that repins `orchestration-sha` ahead
+of its runtime gets that floor as a diagnostic rather than a missing-capability
+failure part-way through a bump.
 
 ## Security boundary
 
