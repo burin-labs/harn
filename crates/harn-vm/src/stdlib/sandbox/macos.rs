@@ -1632,4 +1632,74 @@ let package = Package(
             "adding a denial must not displace the defaults:\n{profile}"
         );
     }
+
+    /// The load-bearing falsifier: a real confined child, a real read.
+    ///
+    /// Every other denylist test above asserts on generated PROFILE TEXT, which
+    /// proves what was written, never what the kernel did with it. This spawns
+    /// `sandbox-exec` for real and reads two files that differ in exactly one
+    /// respect — whether a denial covers them.
+    ///
+    /// Both files live inside a directory the policy grants read access to, so
+    /// the refusal cannot be explained by the grant being absent. The sibling is
+    /// the control: if it were also refused, the denial would be incidental
+    /// rather than the cause, and this test would fail.
+    #[test]
+    fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
+        let home = tempfile::TempDir::new().expect("temp home");
+        let home_path = std::fs::canonicalize(home.path()).expect("canonical home");
+
+        let secrets = home_path.join(".ssh");
+        std::fs::create_dir_all(&secrets).expect("secrets dir");
+        let denied_file = secrets.join("id_ed25519");
+        std::fs::write(&denied_file, "NOT-A-REAL-KEY\n").expect("dummy key");
+
+        // The control, deliberately inside the SAME granted root.
+        let allowed_file = home_path.join("readable.txt");
+        std::fs::write(&allowed_file, "READABLE\n").expect("control file");
+
+        let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+        policy.workspace_roots.clear();
+        policy.read_only_roots = vec![home_path.display().to_string()];
+        policy.process_sandbox.read_deny_roots = vec![secrets.display().to_string()];
+        let with_denial = render_profile(&policy);
+
+        let read = |profile: &str, path: &std::path::Path| {
+            Command::new(SANDBOX_EXEC_PATH)
+                .args(["-p", profile, "--"])
+                .arg("/bin/cat")
+                .arg(path)
+                .output()
+                .expect("run read probe")
+        };
+
+        // Control first: the grant works, so a later refusal is attributable.
+        let control = read(&with_denial, &allowed_file);
+        assert!(
+            control.status.success(),
+            "the control file inside the same granted root must be readable, or the denial \
+             below proves nothing: {}",
+            String::from_utf8_lossy(&control.stderr)
+        );
+
+        let denied = read(&with_denial, &denied_file);
+        assert!(
+            !denied.status.success(),
+            "a denied file must be refused even though its parent root is granted; it was read: {}",
+            String::from_utf8_lossy(&denied.stdout)
+        );
+
+        // Revert the fix: same policy, same files, denial removed. If this does
+        // not flip to readable, the refusal above was caused by something else
+        // and the denylist is not doing the work this test claims.
+        policy.process_sandbox.read_deny_roots.clear();
+        let without_denial = render_profile(&policy);
+        let ungated = read(&without_denial, &denied_file);
+        assert!(
+            ungated.status.success(),
+            "with the denial removed the same file must become readable, which is what proves \
+             the refusal was the denylist and not an unrelated accident: {}",
+            String::from_utf8_lossy(&ungated.stderr)
+        );
+    }
 }
