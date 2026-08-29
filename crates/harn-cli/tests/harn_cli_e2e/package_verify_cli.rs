@@ -156,6 +156,61 @@ fn strict_connector_package_receipt_proves_all_gates_fired() {
 }
 
 #[test]
+fn connector_package_verify_rejects_inbound_credential_sources() {
+    let (_temp, package) = scaffold_and_install("connector");
+    let manifest_path = package.join("harn.toml");
+    let manifest = fs::read_to_string(&manifest_path).expect("connector manifest");
+    let unauthenticated = "auth_type = \"none\"\nflow = \"none\"\n";
+    assert!(
+        manifest.contains(unauthenticated),
+        "connector scaffold setup contract changed"
+    );
+    let directed = r#"auth_type = "api-key"
+flow = "api-key"
+required_secrets = [
+  { id = "echo/webhook-secret", direction = "inbound" },
+  { id = "echo/api-token", direction = "outbound" },
+]
+credential_environment = [
+  { secret = "echo/webhook-secret", environment_names = ["ECHO_API_TOKEN"] },
+]
+"#;
+    fs::write(
+        &manifest_path,
+        manifest.replacen(unauthenticated, directed, 1),
+    )
+    .expect("write directed connector manifest");
+
+    let output = run(Command::new(harn_e2e_binary())
+        .current_dir(&package)
+        .args(["package", "verify", ".", "--json"]));
+    assert!(
+        !output.status.success(),
+        "inbound credential source unexpectedly passed package verification"
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("JSON verification receipt");
+    assert_eq!(receipt["ok"], false);
+    let connector = receipt
+        .pointer("/error/details/checks")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|checks| {
+            checks
+                .iter()
+                .find(|check| check["name"] == "connector contract")
+        })
+        .unwrap_or_else(|| panic!("connector contract gate receipt missing: {receipt}"));
+    assert_eq!(connector["reached"], true);
+    assert_eq!(connector["status"], "fail");
+    assert!(
+        connector["stderr"]
+            .as_str()
+            .is_some_and(|stderr| stderr.contains("must be outbound, but is declared inbound")),
+        "connector receipt did not record the direction failure: {connector}"
+    );
+}
+
+#[test]
 fn connector_test_namespace_is_removed() {
     let output = run(Command::new(harn_e2e_binary()).args(["connector", "test"]));
     assert!(!output.status.success());

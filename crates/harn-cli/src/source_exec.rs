@@ -385,15 +385,20 @@ pub(crate) fn is_conformance_path(path: &Path) -> bool {
         .any(|component| component.as_os_str() == "conformance")
 }
 
-/// The credentials a provider's manifest declared it needs, as secret ids the
-/// runtime resolves at dispatch.
+/// The outbound credentials a provider's manifest declared, as secret ids the
+/// runtime resolves at dispatch. Inbound verification secrets never cross the
+/// outbound connector-call boundary.
 pub(crate) fn declared_connector_secrets(
     config: &package::ResolvedProviderConnectorConfig,
 ) -> Vec<harn_vm::secrets::SecretId> {
     let Some(setup) = config.setup.as_ref() else {
         return Vec::new();
     };
-    harn_vm::declared_secret_ids(setup.required_secrets.iter().map(String::as_str))
+    harn_vm::declared_secret_ids(
+        setup
+            .outbound_credentials()
+            .map(|requirement| requirement.id.as_str()),
+    )
 }
 
 pub(crate) async fn install_connector_clients_for_vm(
@@ -831,7 +836,7 @@ pub fn call(_harness: Harness, method, _args) { return method }
     }
 
     #[tokio::test]
-    async fn builtin_manifest_provider_keeps_its_declared_credentials() {
+    async fn builtin_manifest_provider_injects_only_outbound_credentials() {
         let project = tempfile::tempdir().expect("temp project");
         std::fs::write(
             project.path().join("harn.toml"),
@@ -844,7 +849,10 @@ id = "webhook"
 connector = { rust = "builtin" }
 
 [providers.setup]
-required_secrets = ["webhook/signing-secret"]
+required_secrets = [
+  { id = "webhook/signing-secret", direction = "inbound" },
+  { id = "webhook/api-token", direction = "outbound" },
+]
 "#,
         )
         .expect("write manifest");
@@ -862,7 +870,7 @@ required_secrets = ["webhook/signing-secret"]
         assert!(registry.get(&config.id).is_some());
         assert_eq!(
             registry.declared_secrets_for(&config.id),
-            harn_vm::declared_secret_ids(["webhook/signing-secret"])
+            harn_vm::declared_secret_ids(["webhook/api-token"])
         );
     }
 

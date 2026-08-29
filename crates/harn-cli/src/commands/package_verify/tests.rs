@@ -57,7 +57,7 @@ connector = {{ harn = "./lib.harn" }}
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["echo/api-token"]
+required_secrets = [{{ id = "echo/api-token", direction = "outbound" }}]
 setup_command = ["harn", "connect", "echo"]
 validation_command = ["harn", "connect", "status", "--connector", "echo", "--json"]
 
@@ -106,7 +106,9 @@ fn package_dir_from_anchor_finds_manifest_for_nested_file() {
 #[test]
 fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
     let valid = package::ProviderSetupManifest {
-        required_secrets: vec!["echo/api-token".to_string()],
+        required_secrets: vec![package::ConnectorRequiredSecretManifest::outbound(
+            "echo/api-token",
+        )],
         credential_environment: vec![package::ConnectorCredentialEnvironmentManifest {
             secret: "echo/api-token".to_string(),
             environment_names: vec!["ECHO_API_TOKEN".to_string()],
@@ -117,7 +119,10 @@ fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
     assert!(issues.is_empty(), "issues={issues:?}");
 
     let invalid = package::ProviderSetupManifest {
-        required_secrets: vec!["echo/api-token".to_string(), "echo/other-token".to_string()],
+        required_secrets: vec![
+            package::ConnectorRequiredSecretManifest::outbound("echo/api-token"),
+            package::ConnectorRequiredSecretManifest::outbound("echo/other-token"),
+        ],
         credential_environment: vec![
             package::ConnectorCredentialEnvironmentManifest {
                 secret: "echo/undeclared".to_string(),
@@ -144,6 +149,82 @@ fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
     assert!(joined.contains("name 'bad-name' must use uppercase"));
     assert!(joined.contains("repeats environment name 'DUPLICATE'"));
     assert!(joined.contains("name 'SHARED_TOKEN' is assigned to both"));
+}
+
+#[test]
+fn connector_credential_environment_rejects_inbound_secret_bindings() {
+    let setup = package::ProviderSetupManifest {
+        required_secrets: vec![
+            package::ConnectorRequiredSecretManifest::inbound("echo/webhook-secret"),
+            package::ConnectorRequiredSecretManifest::outbound("echo/api-token"),
+        ],
+        credential_environment: vec![package::ConnectorCredentialEnvironmentManifest {
+            secret: "echo/webhook-secret".to_string(),
+            environment_names: vec!["ECHO_API_TOKEN".to_string()],
+        }],
+        ..package::ProviderSetupManifest::default()
+    };
+
+    let issues = package::credential_environment_issues(&setup)
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        issues.contains("secret 'echo/webhook-secret' must be outbound"),
+        "issues={issues:?}"
+    );
+}
+
+#[test]
+fn authenticated_service_operation_requires_a_declared_outbound_credential() {
+    let service: package::ConnectorServiceManifest = toml::from_str(
+        r#"
+name = "Echo"
+description = "Reads Echo state."
+
+[[operations]]
+id = "messages.read"
+capability = "messages"
+purpose = "Read messages."
+effect = "read"
+environments = ["live"]
+"#,
+    )
+    .expect("service manifest");
+    let inbound_only = package::ProviderSetupManifest {
+        auth_type: Some("api-key".to_string()),
+        required_secrets: vec![package::ConnectorRequiredSecretManifest::inbound(
+            "echo/webhook-secret",
+        )],
+        ..package::ProviderSetupManifest::default()
+    };
+    let mut failures = Vec::new();
+    validate_setup_metadata("echo", Some(&inbound_only), Some(&service), &mut failures);
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("no outbound required secret")),
+        "failures={failures:?}"
+    );
+
+    let directed = package::ProviderSetupManifest {
+        auth_type: Some("api-key".to_string()),
+        required_secrets: vec![
+            package::ConnectorRequiredSecretManifest::inbound("echo/webhook-secret"),
+            package::ConnectorRequiredSecretManifest::outbound("echo/api-token"),
+        ],
+        ..package::ProviderSetupManifest::default()
+    };
+    failures.clear();
+    validate_setup_metadata("echo", Some(&directed), Some(&service), &mut failures);
+    assert!(
+        failures
+            .iter()
+            .all(|failure| !failure.contains("outbound required secret")),
+        "failures={failures:?}"
+    );
 }
 
 #[test]

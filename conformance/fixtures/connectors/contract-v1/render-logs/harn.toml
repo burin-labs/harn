@@ -11,7 +11,7 @@ capabilities = ["webhook", "rate_limit", "streaming"]
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["render/api-key"]
+required_secrets = [{ id = "render/api-key", direction = "outbound" }]
 setup_command = ["harn", "connect", "api-key", "--connector", "render-logs", "--secret-id", "render/api-key"]
 validation_command = ["harn", "connect", "status", "--connector", "render-logs", "--json"]
 

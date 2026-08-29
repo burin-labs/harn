@@ -336,6 +336,7 @@ fn row_from_provider(
     let setup = provider.setup.clone().unwrap_or_default();
     let credential_environment_names = credential_environment_names(&setup);
     let configuration_environment_names = configuration_environment_names(&setup);
+    let required_secrets = setup.required_secret_ids().map(str::to_string).collect();
     let fixtures = fixtures
         .iter()
         .filter(|fixture| fixture.provider == provider.id)
@@ -347,7 +348,7 @@ fn row_from_provider(
         harn_version: harn_version.to_string(),
         repository,
         auth_type: setup.auth_type.unwrap_or_else(|| "unspecified".to_string()),
-        required_secrets: setup.required_secrets,
+        required_secrets,
         credential_environment_names,
         configuration_environment_names,
         setup_command: setup.setup_command,

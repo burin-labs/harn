@@ -17,7 +17,10 @@ capabilities = ["webhook", "rate_limit", "pagination"]
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["buildkite/webhook-token", "buildkite/api-token"]
+required_secrets = [
+  { id = "buildkite/webhook-token", direction = "inbound" },
+  { id = "buildkite/api-token", direction = "outbound" },
+]
 setup_command = ["harn", "connect", "buildkite"]
 validation_command = ["harn", "connect", "status", "--connector", "buildkite", "--json"]
 

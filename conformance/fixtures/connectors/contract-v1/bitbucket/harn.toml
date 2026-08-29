@@ -12,7 +12,10 @@ capabilities = ["webhook", "rate_limit", "pagination"]
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["bitbucket/api-token", "bitbucket/webhook-secret"]
+required_secrets = [
+  { id = "bitbucket/api-token", direction = "outbound" },
+  { id = "bitbucket/webhook-secret", direction = "inbound" },
+]
 setup_command = ["harn", "connect", "bitbucket"]
 validation_command = ["harn", "connect", "status", "--connector", "bitbucket", "--json"]
 

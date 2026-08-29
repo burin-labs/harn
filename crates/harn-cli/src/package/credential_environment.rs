@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use super::{
-    ConnectorCredentialEnvironmentManifest, ConnectorSetupConfigurationField, ProviderSetupManifest,
+    ConnectorCredentialEnvironmentManifest, ConnectorSecretDirection,
+    ConnectorSetupConfigurationField, ProviderSetupManifest,
 };
 
 const MAX_ENTRIES: usize = 16;
@@ -14,6 +15,10 @@ pub enum CredentialEnvironmentIssue {
     TooManyEntries,
     SecretNotRequired {
         secret: String,
+    },
+    SecretNotOutbound {
+        secret: String,
+        direction: ConnectorSecretDirection,
     },
     DuplicateSecret {
         secret: String,
@@ -48,6 +53,11 @@ impl fmt::Display for CredentialEnvironmentIssue {
                     "secret '{secret}' must also appear in required_secrets"
                 )
             }
+            Self::SecretNotOutbound { secret, direction } => write!(
+                formatter,
+                "secret '{secret}' must be outbound, but is declared {}",
+                direction.as_str()
+            ),
             Self::DuplicateSecret { secret } => write!(formatter, "repeats secret '{secret}'"),
             Self::NoNames { secret } => {
                 write!(
@@ -88,14 +98,20 @@ pub fn credential_environment_issues(
     if setup.credential_environment.len() > MAX_ENTRIES {
         issues.push(CredentialEnvironmentIssue::TooManyEntries);
     }
-    let required = setup.required_secrets.iter().collect::<BTreeSet<_>>();
     let mut declared_secrets = BTreeSet::new();
     let mut environment_owners = BTreeMap::new();
     for source in &setup.credential_environment {
-        if !required.contains(&source.secret) {
-            issues.push(CredentialEnvironmentIssue::SecretNotRequired {
+        match setup.required_secret(&source.secret) {
+            None => issues.push(CredentialEnvironmentIssue::SecretNotRequired {
                 secret: source.secret.clone(),
-            });
+            }),
+            Some(requirement) if requirement.direction != ConnectorSecretDirection::Outbound => {
+                issues.push(CredentialEnvironmentIssue::SecretNotOutbound {
+                    secret: source.secret.clone(),
+                    direction: requirement.direction,
+                });
+            }
+            Some(_) => {}
         }
         if !declared_secrets.insert(source.secret.as_str()) {
             issues.push(CredentialEnvironmentIssue::DuplicateSecret {
@@ -324,7 +340,7 @@ mod tests {
         let setup: ProviderSetupManifest = toml::from_str(
             r#"
 auth_type = "api-key"
-required_secrets = ["duffel/test-access-token"]
+required_secrets = [{ id = "duffel/test-access-token", direction = "outbound" }]
 credential_environment = [
   { secret = "duffel/test-access-token", environment_names = ["DUFFEL_TEST_KEY"] },
 ]

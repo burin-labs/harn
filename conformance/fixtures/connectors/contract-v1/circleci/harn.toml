@@ -17,7 +17,10 @@ capabilities = ["webhook", "rate_limit", "pagination"]
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["circleci/webhook-secret", "circleci/api-token"]
+required_secrets = [
+  { id = "circleci/webhook-secret", direction = "inbound" },
+  { id = "circleci/api-token", direction = "outbound" },
+]
 setup_command = ["harn", "connect", "circleci"]
 validation_command = ["harn", "connect", "status", "--connector", "circleci", "--json"]
 

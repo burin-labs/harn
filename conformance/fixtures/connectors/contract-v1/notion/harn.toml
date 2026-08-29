@@ -13,7 +13,10 @@ capabilities = ["webhook", "rate_limit", "pagination"]
 auth_type = "oauth2"
 flow = "browser"
 required_scopes = ["read_content", "update_content"]
-required_secrets = ["notion/api-token", "notion/verification-token"]
+required_secrets = [
+  { id = "notion/api-token", direction = "outbound" },
+  { id = "notion/verification-token", direction = "inbound" },
+]
 setup_command = ["harn", "connect", "notion"]
 validation_command = ["harn", "connect", "status", "--connector", "notion", "--json"]
 

@@ -148,7 +148,7 @@ pub(super) async fn run_connect_registered_provider(
         }
     }
     Err(format!(
-        "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one required secret"
+        "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one outbound credential"
     ))
 }
 
@@ -183,13 +183,17 @@ pub(super) fn api_key_secret_for_provider<'a>(
     if auth_type != "api-key" {
         return Ok(None);
     }
-    if setup.required_secrets.len() != 1 {
+    let outbound_credentials = setup
+        .outbound_credentials()
+        .map(|requirement| requirement.id.as_str())
+        .collect::<Vec<_>>();
+    if outbound_credentials.len() != 1 {
         return Err(manual_connector_setup_error(
             provider,
-            &setup.required_secrets,
+            &outbound_credentials,
         ));
     }
-    Ok(setup.required_secrets.first().map(String::as_str))
+    Ok(outbound_credentials.first().copied())
 }
 
 fn reject_manual_secret_options(
@@ -225,20 +229,20 @@ fn reject_oauth_options_for_manual_provider(
     Ok(())
 }
 
-fn manual_connector_setup_error(provider: &str, required_secrets: &[String]) -> String {
-    if required_secrets.is_empty() {
+fn manual_connector_setup_error(provider: &str, outbound_credentials: &[&str]) -> String {
+    if outbound_credentials.is_empty() {
         return format!(
-            "provider '{provider}' declares API-key authentication but no required secret"
+            "provider '{provider}' declares API-key authentication but no outbound credential"
         );
     }
-    let commands = required_secrets
+    let commands = outbound_credentials
         .iter()
         .map(|secret| format!("`harn connect api-key --connector {provider} --secret-id {secret}`"))
         .collect::<Vec<_>>()
         .join(", then ");
     format!(
-        "provider '{provider}' requires {} separate secrets; store them with {commands}",
-        required_secrets.len()
+        "provider '{provider}' requires {} separate outbound credentials; store them with {commands}",
+        outbound_credentials.len()
     )
 }
 

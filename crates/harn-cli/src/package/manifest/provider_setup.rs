@@ -398,7 +398,7 @@ pub struct ProviderSetupManifest {
     #[serde(default, alias = "required-scopes", alias = "scopes")]
     pub required_scopes: Vec<String>,
     #[serde(default, alias = "required-secrets")]
-    pub required_secrets: Vec<String>,
+    pub required_secrets: Vec<ConnectorRequiredSecretManifest>,
     #[serde(default, alias = "credential-environment")]
     pub credential_environment: Vec<ConnectorCredentialEnvironmentManifest>,
     #[serde(default, alias = "configuration-environment")]
@@ -411,6 +411,75 @@ pub struct ProviderSetupManifest {
     pub health_checks: Vec<ConnectorHealthCheckManifest>,
     #[serde(default)]
     pub recovery: ConnectorRecoveryCopy,
+}
+
+impl ProviderSetupManifest {
+    /// Every logical secret id required by the connector, independent of how
+    /// trust flows across the provider seam.
+    pub fn required_secret_ids(&self) -> impl Iterator<Item = &str> {
+        self.required_secrets
+            .iter()
+            .map(|requirement| requirement.id.as_str())
+    }
+
+    /// Required secrets that the connector sends to the provider when it
+    /// performs an authenticated operation.
+    pub fn outbound_credentials(&self) -> impl Iterator<Item = &ConnectorRequiredSecretManifest> {
+        self.required_secrets
+            .iter()
+            .filter(|requirement| requirement.direction == ConnectorSecretDirection::Outbound)
+    }
+
+    pub fn required_secret(&self, id: &str) -> Option<&ConnectorRequiredSecretManifest> {
+        self.required_secrets
+            .iter()
+            .find(|requirement| requirement.id == id)
+    }
+}
+
+/// The direction of trust for one connector secret.
+///
+/// Outbound credentials authenticate requests the connector sends. Inbound
+/// verification secrets authenticate provider callbacks before their payloads
+/// enter the connector. The manifest must declare this distinction; callers
+/// never infer it from an id or list position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorSecretDirection {
+    Outbound,
+    Inbound,
+}
+
+impl ConnectorSecretDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Outbound => "outbound",
+            Self::Inbound => "inbound",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorRequiredSecretManifest {
+    pub id: String,
+    pub direction: ConnectorSecretDirection,
+}
+
+impl ConnectorRequiredSecretManifest {
+    pub fn outbound(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            direction: ConnectorSecretDirection::Outbound,
+        }
+    }
+
+    pub fn inbound(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            direction: ConnectorSecretDirection::Inbound,
+        }
+    }
 }
 
 /// Non-secret setup input that a connector may read from an explicit process
@@ -734,7 +803,7 @@ automatic_approval = true
             let document = format!(
                 r#"
 auth_type = "api-key"
-required_secrets = ["demo/api-token"]
+required_secrets = [{{ id = "demo/api-token", direction = "outbound" }}]
 {unknown}
 "#
             );

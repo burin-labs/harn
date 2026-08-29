@@ -215,10 +215,12 @@ fn registered_provider_parser_accepts_secret_safe_manual_input() {
 }
 
 #[test]
-fn registered_api_key_provider_requires_one_typed_secret_target() {
+fn registered_api_key_provider_selects_only_the_outbound_credential() {
     let setup = package::ProviderSetupManifest {
         auth_type: Some("api_key".to_string()),
-        required_secrets: vec!["duffel/test-access-token".to_string()],
+        required_secrets: vec![package::ConnectorRequiredSecretManifest::outbound(
+            "duffel/test-access-token",
+        )],
         ..package::ProviderSetupManifest::default()
     };
     assert_eq!(
@@ -226,19 +228,32 @@ fn registered_api_key_provider_requires_one_typed_secret_target() {
         Some("duffel/test-access-token")
     );
 
-    let ambiguous = package::ProviderSetupManifest {
+    let directed = package::ProviderSetupManifest {
         auth_type: Some("api-key".to_string()),
         required_secrets: vec![
-            "buildkite/webhook-token".to_string(),
-            "buildkite/api-token".to_string(),
+            package::ConnectorRequiredSecretManifest::inbound("buildkite/webhook-token"),
+            package::ConnectorRequiredSecretManifest::outbound("buildkite/api-token"),
         ],
         ..package::ProviderSetupManifest::default()
     };
-    let error = api_key_secret_for_provider("buildkite", &ambiguous)
+    assert_eq!(
+        api_key_secret_for_provider("buildkite", &directed).expect("directed setup"),
+        Some("buildkite/api-token")
+    );
+
+    let ambiguous = package::ProviderSetupManifest {
+        auth_type: Some("api-key".to_string()),
+        required_secrets: vec![
+            package::ConnectorRequiredSecretManifest::outbound("svn/username"),
+            package::ConnectorRequiredSecretManifest::outbound("svn/password"),
+        ],
+        ..package::ProviderSetupManifest::default()
+    };
+    let error = api_key_secret_for_provider("svn", &ambiguous)
         .expect_err("multiple secrets need explicit commands");
-    assert!(error.contains("requires 2 separate secrets"));
-    assert!(error.contains("--secret-id buildkite/webhook-token"));
-    assert!(error.contains("--secret-id buildkite/api-token"));
+    assert!(error.contains("requires 2 separate outbound credentials"));
+    assert!(error.contains("--secret-id svn/username"));
+    assert!(error.contains("--secret-id svn/password"));
 }
 
 #[test]
@@ -321,7 +336,9 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
     );
     let index = ConnectIndex::default();
     let mut setup = oauth_setup();
-    setup.required_secrets = vec!["github/access-token".to_string()];
+    setup.required_secrets = vec![package::ConnectorRequiredSecretManifest::outbound(
+        "github/access-token",
+    )];
     let config = status_config(setup);
     let status =
         connector_status("github", Some(&config), &secrets, &index, 100, false, None).await;
@@ -329,6 +346,35 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
     assert_eq!(status.status, "missing_auth");
     assert_eq!(status.missing_secrets, vec!["github/access-token"]);
     assert_eq!(status.health_checks[0].detail, "missing secret");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn status_health_requires_only_outbound_credentials() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty().with_secret(
+        harn_vm::secrets::SecretId::new("github", "access-token"),
+        "token",
+    );
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec![
+        package::ConnectorRequiredSecretManifest::inbound("github/webhook-secret"),
+        package::ConnectorRequiredSecretManifest::outbound("github/access-token"),
+    ];
+    let config = status_config(setup);
+
+    let status =
+        connector_status("github", Some(&config), &secrets, &index, 100, false, None).await;
+
+    assert_eq!(status.status, "healthy");
+    assert!(status.usable);
+    assert_eq!(
+        status.required_secrets,
+        ["github/webhook-secret", "github/access-token"]
+    );
+    assert!(status.missing_secrets.is_empty());
+    assert_eq!(status.health_checks.len(), 1);
+    assert_eq!(status.health_checks[0].id, "secret:github/access-token");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -351,7 +397,9 @@ async fn status_accepts_only_declared_nonempty_credential_environment() {
     let mut setup = oauth_setup();
     setup.auth_type = Some("api_key".to_string());
     setup.required_scopes = Vec::new();
-    setup.required_secrets = vec!["duffel/test-access-token".to_string()];
+    setup.required_secrets = vec![package::ConnectorRequiredSecretManifest::outbound(
+        "duffel/test-access-token",
+    )];
     setup.credential_environment = vec![package::ConnectorCredentialEnvironmentManifest {
         secret: "duffel/test-access-token".to_string(),
         environment_names: vec![ENV_NAME.to_string()],
@@ -391,7 +439,9 @@ async fn status_rejects_empty_declared_credential_environment() {
     let mut setup = oauth_setup();
     setup.auth_type = Some("api_key".to_string());
     setup.required_scopes = Vec::new();
-    setup.required_secrets = vec!["duffel/test-access-token".to_string()];
+    setup.required_secrets = vec![package::ConnectorRequiredSecretManifest::outbound(
+        "duffel/test-access-token",
+    )];
     setup.credential_environment = vec![package::ConnectorCredentialEnvironmentManifest {
         secret: "duffel/test-access-token".to_string(),
         environment_names: vec![ENV_NAME.to_string()],

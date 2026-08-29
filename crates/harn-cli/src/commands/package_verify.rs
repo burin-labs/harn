@@ -188,7 +188,12 @@ pub(crate) async fn check_connector_package(
             }
             continue;
         };
-        validate_setup_metadata(provider.id.as_str(), provider.setup.as_ref(), &mut failures);
+        validate_setup_metadata(
+            provider.id.as_str(),
+            provider.setup.as_ref(),
+            provider.service.as_ref(),
+            &mut failures,
+        );
         validate_service_metadata(
             provider.id.as_str(),
             provider.service.as_ref(),
@@ -501,6 +506,7 @@ fn validate_connector_package_metadata(anchor: &Path) -> PackageVerifyCheck {
                 validate_setup_metadata(
                     provider.id.as_str(),
                     provider.setup.as_ref(),
+                    provider.service.as_ref(),
                     &mut failures,
                 );
                 validate_service_metadata(
@@ -537,6 +543,7 @@ fn require_metadata_field(value: Option<&str>, field: &str, failures: &mut Vec<S
 fn validate_setup_metadata(
     provider_id: &str,
     setup: Option<&package::ProviderSetupManifest>,
+    service: Option<&package::ConnectorServiceManifest>,
     failures: &mut Vec<String>,
 ) {
     let Some(setup) = setup else {
@@ -575,12 +582,32 @@ fn validate_setup_metadata(
             ));
         }
     }
+    let mut required_secret_ids = BTreeSet::new();
     for secret in &setup.required_secrets {
-        if secret.split_once('/').is_none() {
+        if secret.id.split_once('/').is_none() {
             failures.push(format!(
-                "provider '{provider_id}' setup.required_secrets entry '{secret}' must use namespace/name form"
+                "provider '{provider_id}' setup.required_secrets entry '{}' must use namespace/name form",
+                secret.id
             ));
         }
+        if !required_secret_ids.insert(secret.id.as_str()) {
+            failures.push(format!(
+                "provider '{provider_id}' setup.required_secrets repeats entry '{}'",
+                secret.id
+            ));
+        }
+    }
+    let authenticated = setup
+        .auth_type
+        .as_deref()
+        .is_some_and(|auth_type| !auth_type.eq_ignore_ascii_case("none"));
+    if authenticated
+        && service.is_some_and(|service| !service.operations.is_empty())
+        && setup.outbound_credentials().next().is_none()
+    {
+        failures.push(format!(
+            "provider '{provider_id}' declares outbound service operations but no outbound required secret"
+        ));
     }
     for issue in package::credential_environment_issues(setup) {
         failures.push(format!(

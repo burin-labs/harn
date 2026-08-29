@@ -13,7 +13,10 @@ capabilities = ["webhook", "rate_limit", "pagination", "graphql"]
 auth_type = "github-app"
 flow = "browser"
 required_scopes = ["issues:read", "pull_requests:read", "contents:read", "metadata:read"]
-required_secrets = ["github/app-private-key", "github/webhook-secret"]
+required_secrets = [
+  { id = "github/app-private-key", direction = "outbound" },
+  { id = "github/webhook-secret", direction = "inbound" },
+]
 setup_command = ["harn", "connect", "github"]
 validation_command = ["harn", "connect", "status", "--connector", "github", "--json"]
 

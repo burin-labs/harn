@@ -366,7 +366,10 @@ capabilities = ["webhook", "oauth"]
 auth_type = "oauth2"
 flow = "browser"
 required_scopes = ["example.read", "example.write"]
-required_secrets = []
+required_secrets = [
+  { id = "example/api-key", direction = "outbound" },
+  { id = "example/webhook-secret", direction = "inbound" },
+]
 setup_command = ["harn", "connect", "example"]
 validation_command = ["harn", "connect", "status", "--connector", "example", "--json"]
 
@@ -501,31 +504,34 @@ credential_environment = [
 ]
 ```
 
-Every mapped `secret` must also appear in `required_secrets`. Names must use
-the portable `A_Z`, `0_9`, and `_` environment-variable form. This manifest
-mapping is the connector's source of truth; hosts must not guess names from a
-provider id.
+Every mapped `secret` must appear in `required_secrets` with
+`direction = "outbound"`; inbound webhook verification secrets cannot be
+credential sources. Names must use the portable `A_Z`, `0_9`, and `_`
+environment-variable form. This manifest mapping is the connector's source of
+truth; hosts must not guess direction or names from a provider id.
 
 ### Declared secrets arrive in `args.secrets`
 
-When an operation dispatches, the runtime resolves the provider's
-`required_secrets` from the secret store and passes them in `args.secrets`,
-keyed by the secret name with `-` replaced by `_`. A manifest declaring
-`required_secrets = ["example/api-key"]` reaches the connector as
-`args.secrets.api_key`, so `call` should read that first:
+When an operation dispatches, the runtime resolves the provider's outbound
+credentials from the secret store and passes them in `args.secrets`, keyed by
+the secret name with `-` replaced by `_`. Inbound verification secrets never
+cross this outbound call boundary. A manifest declaring
+`required_secrets = [{ id = "example/api-key", direction = "outbound" }]`
+reaches the connector as `args.secrets.api_key`, so `call` should read that
+first:
 
 ```harn
 const api_key = args?.api_key ?? args?.secrets?.api_key
   ?? env.get("EXAMPLE_API_KEY")
 ```
 
-A credential the caller passed explicitly wins over the stored one, and a
-declared secret the store cannot produce is simply absent rather than an error
-— manifests list inbound webhook secrets beside outbound API credentials, and
-no single operation needs all of them. Report the specific missing credential
-from the operation that needed it.
+A credential the caller passed explicitly wins over the stored one. A declared
+outbound credential the store cannot produce is simply absent rather than an
+error. A connector may declare several outbound credentials, and no single
+operation needs all of them. Report the specific missing credential from the
+operation that needed it.
 
-When an `api-key` provider declares exactly one required secret,
+When an `api-key` provider declares exactly one outbound credential,
 `harn connect <provider>` prompts for that value and stores it at the declared
 secret id. It also accepts `--from-env NAME` and `--value-file PATH`. Providers
 with several independent secrets should keep explicit `harn connect api-key`

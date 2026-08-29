@@ -40,11 +40,9 @@ impl SecretInjectingClient {
     /// Merge store-resolved credentials into `args.secrets`.
     ///
     /// An entry the caller supplied explicitly always wins, so a script can
-    /// still override a stored credential. A declared secret that the store
-    /// cannot produce is skipped rather than failing the call: manifests list
-    /// inbound webhook secrets and outbound API credentials in the same
-    /// `required_secrets`, so a single operation never needs all of them, and
-    /// the connector reports precisely which credential its operation missed.
+    /// still override a stored credential. A declared credential that the
+    /// store cannot produce is skipped rather than failing the call, and the
+    /// connector reports precisely which credential its operation missed.
     async fn resolve_args(&self, args: JsonValue) -> JsonValue {
         let mut args = match args {
             JsonValue::Object(map) => map,
@@ -203,8 +201,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_declared_secret_the_store_lacks_does_not_fail_dispatch() {
-        // Manifests list inbound webhook secrets beside outbound credentials,
-        // so an absent one must not block an operation that does not need it.
+        // A package may declare several outbound credentials, while an
+        // individual operation needs only a subset of them.
         let store = store_with(&[("gitlab/access-token", "stored-token")]);
         let client = with_declared_secrets(
             Arc::new(RecordingClient {
