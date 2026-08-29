@@ -710,7 +710,13 @@ fn __judge_requirement_evidence_without(
   return records.filter({ record -> record.evidence_index != evidence_index }).to_list()
 }
 
-/** Project Harn-owned final-output and deterministic readings onto one evidence model. */
+/**
+ * Project Harn-owned final-output and deterministic readings onto one evidence model.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
 pub fn __judge_requirement_evidence_packet(
   packet: CompletionEvidencePacket,
   final_text: string,
