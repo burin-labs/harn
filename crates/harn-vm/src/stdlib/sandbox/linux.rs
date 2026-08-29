@@ -1529,9 +1529,9 @@ mod tests {
         };
         let denied: Vec<PathBuf> = crate::orchestration::default_read_deny_home_paths()
             .iter()
-            .map(|relative| super::normalize_for_policy(&home.join(relative)))
+            .map(|relative| home.join(relative))
             .collect();
-        let home = super::normalize_for_policy(&home);
+        let home = home.canonicalize().unwrap_or(home);
 
         let started = std::time::Instant::now();
         let granted = expand_around_denied(&home, &denied).expect("expand around home");
@@ -1704,10 +1704,10 @@ mod tests {
                 ..CapabilityPolicy::default()
             };
             let _scope = crate::orchestration::push_execution_policy(policy);
-            let output = super::command_output(
+            let output = crate::stdlib::sandbox::command_output(
                 "/bin/cat",
                 &[target.display().to_string()],
-                &crate::stdlib::process::ProcessCommandConfig::default(),
+                &crate::stdlib::sandbox::ProcessCommandConfig::default(),
             );
             Ok(matches!(output, Ok(out) if out.status.success()))
         };
