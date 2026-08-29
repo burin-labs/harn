@@ -375,14 +375,28 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
         })?;
         let mut cursor = root.to_path_buf();
         for component in relative.components() {
-            let entries = std::fs::read_dir(&cursor).map_err(|error| {
-                sandbox_rejection(format!(
-                    "cannot enumerate '{}' to exclude denied path '{}': {error}; refusing the \
-                     spawn rather than granting a root that would expose it",
-                    cursor.display(),
-                    deny.display()
-                ))
-            })?;
+            // A MISSING directory is not a failure to enumerate: if an
+            // ancestor of the denied path does not exist, nothing below it
+            // exists either, so there is nothing to subtract and the walk is
+            // finished. Treating this as an error refused every spawn on any
+            // host that simply had no `~/.kube` (measured on cattrick, where it
+            // would have blocked the whole eval fleet).
+            //
+            // Every OTHER error still fails closed: a directory we are not
+            // permitted to list is one whose contents we cannot prove exclude
+            // the denial.
+            let entries = match std::fs::read_dir(&cursor) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+                Err(error) => {
+                    return Err(sandbox_rejection(format!(
+                        "cannot enumerate '{}' to exclude denied path '{}': {error}; refusing \
+                         the spawn rather than granting a root that would expose it",
+                        cursor.display(),
+                        deny.display()
+                    )));
+                }
+            };
             let step = cursor.join(component.as_os_str());
             for entry in entries.flatten() {
                 let sibling = entry.path();
@@ -1736,5 +1750,50 @@ mod tests {
              the refusal was the denylist and not an unrelated accident"
         );
         eprintln!("[landlock-live] denied refused, sibling readable, revert readable");
+    }
+
+    /// The defect the cost measurement caught on cattrick: a denied path whose
+    /// ancestor does not exist must cost nothing, not refuse the spawn.
+    ///
+    /// `~/.kube/config` is on the default denylist and `~/.kube` is absent on
+    /// most machines. Treating a missing directory as "cannot enumerate" made
+    /// `expand_around_denied` fail closed for every spawn on any such host,
+    /// which would have taken the eval fleet down while looking like a working
+    /// security feature.
+    #[test]
+    fn a_denial_under_a_missing_directory_costs_nothing() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["present"]);
+
+        let granted = expand_around_denied(&root, &[root.join("absent/config")])
+            .expect("a denial under a missing directory must not refuse the spawn");
+
+        assert!(
+            granted.contains(&root.join("present")),
+            "the siblings must still be granted: {granted:?}"
+        );
+    }
+
+    /// The other half: an ancestor that exists but cannot be listed still fails
+    /// closed. Without this, the NotFound relaxation above could be widened
+    /// into "any error means nothing to exclude", which is the failure it was
+    /// introduced to avoid.
+    #[test]
+    fn an_unlistable_ancestor_still_refuses_the_spawn() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["locked/inner"]);
+        let locked = root.join("locked");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("lock");
+
+        let result = expand_around_denied(&root, &[locked.join("inner/secret")]);
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+        assert!(
+            result.is_err(),
+            "an ancestor that exists but cannot be listed must still fail closed"
+        );
     }
 }
