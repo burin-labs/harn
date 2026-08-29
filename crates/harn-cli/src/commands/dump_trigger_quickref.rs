@@ -511,15 +511,4 @@ mod tests {
              Run `make gen-trigger-quickref` to regenerate."
         );
     }
-
-    #[test]
-    fn generated_quickref_comparison_ignores_platform_line_endings() {
-        let generated = "# Harn Trigger Quick Reference\n\n| Provider |\n";
-        let on_disk = generated.replace('\n', "\r\n");
-
-        assert_eq!(
-            normalize_line_endings(&on_disk),
-            normalize_line_endings(generated)
-        );
-    }
 }

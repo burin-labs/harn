@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::response::Response;
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
@@ -32,6 +33,13 @@ mod capability_snapshot_tests;
 
 fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     test_portal_state_with_mutations(run_dir, true)
+}
+
+async fn response_json(response: Response) -> serde_json::Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    serde_json::from_slice(&body).expect("response body is JSON")
 }
 
 fn test_portal_state_with_mutations(
@@ -741,6 +749,11 @@ async fn api_runs_returns_json() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["filtered_count"], 1);
+    assert_eq!(payload["pagination"]["total_runs"], 1);
+    assert_eq!(payload["runs"][0]["id"], "run-1");
+    assert_eq!(payload["runs"][0]["status"], "complete");
 }
 
 #[tokio::test]
@@ -1099,6 +1112,10 @@ async fn api_meta_returns_workspace_and_run_dir() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let expected = temp.path().display().to_string();
+    assert_eq!(payload["workspace_root"], expected);
+    assert_eq!(payload["run_dir"], expected);
 }
 
 #[tokio::test]
@@ -1116,6 +1133,16 @@ async fn api_highlight_keywords_returns_payload() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload["keyword"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+    assert!(payload["literal"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "nil")));
+    assert!(payload["built_in"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "uuid")));
 }
 
 #[tokio::test]
@@ -1133,6 +1160,16 @@ async fn api_llm_options_returns_payload() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let providers = payload["providers"]
+        .as_array()
+        .expect("provider options array");
+    assert!(!providers.is_empty());
+    assert!(providers.iter().all(|provider| {
+        provider["name"].is_string()
+            && provider["auth_envs"].is_array()
+            && provider["models"].is_array()
+    }));
 }
 
 #[tokio::test]
