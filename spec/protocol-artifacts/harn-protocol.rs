@@ -2668,7 +2668,7 @@ pub const HARN_TYPED_SESSION_UPDATE_PAYLOADS: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPArtifactUpdate {
     pub session_update: String,
@@ -2681,7 +2681,7 @@ pub struct ACPArtifactUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPAvailableCommandsUpdate {
     pub session_update: String,
@@ -2690,7 +2690,7 @@ pub struct ACPAvailableCommandsUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPFsWatchUpdate {
     pub session_update: String,
@@ -2700,7 +2700,7 @@ pub struct ACPFsWatchUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPHandoffUpdate {
     pub session_update: String,
@@ -2711,7 +2711,7 @@ pub struct ACPHandoffUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPHitlRequestUpdate {
     pub session_update: String,
@@ -2722,7 +2722,7 @@ pub struct ACPHitlRequestUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPHitlResolvedUpdate {
     pub session_update: String,
@@ -2733,7 +2733,7 @@ pub struct ACPHitlResolvedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPLiveSessionClientUpdate {
     pub session_update: String,
@@ -2744,7 +2744,7 @@ pub struct ACPLiveSessionClientUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPLogUpdate {
     pub session_update: String,
@@ -2757,7 +2757,7 @@ pub struct ACPLogUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPProgressUpdate {
     pub session_update: String,
@@ -2774,7 +2774,7 @@ pub struct ACPProgressUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPReminderEmittedUpdate {
     pub session_update: String,
@@ -2785,7 +2785,7 @@ pub struct ACPReminderEmittedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPSkillActivatedUpdate {
     pub session_update: String,
@@ -2798,7 +2798,7 @@ pub struct ACPSkillActivatedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPSkillDeactivatedUpdate {
     pub session_update: String,
@@ -2809,7 +2809,7 @@ pub struct ACPSkillDeactivatedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPSkillNarrowUpdate {
     pub session_update: String,
@@ -2821,7 +2821,7 @@ pub struct ACPSkillNarrowUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPSkillScopeToolsUpdate {
     pub session_update: String,
@@ -2831,7 +2831,7 @@ pub struct ACPSkillScopeToolsUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPStanceTransitionUpdate {
     pub session_update: String,
@@ -2850,7 +2850,7 @@ pub struct ACPStanceTransitionUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPToolSearchQueryUpdate {
     pub session_update: String,
@@ -2865,7 +2865,7 @@ pub struct ACPToolSearchQueryUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPToolSearchResultUpdate {
     pub session_update: String,
@@ -2879,7 +2879,7 @@ pub struct ACPToolSearchResultUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPTranscriptCompactedUpdate {
     pub session_update: String,
@@ -2889,7 +2889,7 @@ pub struct ACPTranscriptCompactedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPTranscriptProjectedUpdate {
     pub session_update: String,
@@ -2899,7 +2899,7 @@ pub struct ACPTranscriptProjectedUpdate {
     pub meta: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ACPWorkerUpdate {
     pub session_update: String,

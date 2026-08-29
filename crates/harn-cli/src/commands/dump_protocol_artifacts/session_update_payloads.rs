@@ -503,7 +503,7 @@ pub(super) fn append_rust_session_update_payloads(out: &mut String) {
     out.push_str("];\n");
     for payload in TYPED_SESSION_UPDATE_PAYLOADS {
         out.push_str(&format!(
-            "\n#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n\
+            "\n#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
              #[serde(rename_all = \"camelCase\")]\n\
              pub struct {} {{\n\
              \x20   pub session_update: String,\n",

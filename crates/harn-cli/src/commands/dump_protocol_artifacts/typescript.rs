@@ -800,7 +800,7 @@ export interface ACPSessionTruncatedUpdate {
     );
     append_typescript_session_update_payloads(&mut out);
     out.push_str(
-        r#"
+        r"
 export interface ACPHarnExtensionUpdate {
   sessionUpdate: HarnACPSessionUpdateExtension
   _meta?: ACPExtensionMeta<ACPObject>
@@ -813,7 +813,7 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolCallUpdate
   | ACPPlanUpdate
   | ACPSessionTruncatedUpdate
-"#,
+",
     );
     out.push_str(&typescript_session_update_union_members());
     out.push_str(
