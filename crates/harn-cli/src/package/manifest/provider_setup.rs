@@ -459,11 +459,85 @@ impl ConnectorSecretDirection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// One logical secret a connector requires, plus the direction of trust.
+///
+/// Published connector packages predate the typed form and still write
+/// `required_secrets = ["namespace/name"]`. Consumers pin those packages by
+/// git rev, so refusing the bare string turns a Harn upgrade into a load
+/// failure for an already-installed package cache that nothing in the
+/// consumer can migrate. The bare string is therefore accepted here, at the
+/// one seam that owns this shape, and every reader above this type sees the
+/// typed struct. There is no second representation to keep in sync.
+///
+/// A legacy entry resolves to `outbound`, which is exactly the behavior the
+/// package was published against: before the direction became typed, the
+/// dispatch seam injected every declared secret into `args.secrets`, inbound
+/// webhook secrets included. Some legacy lists do name a webhook secret, so
+/// outbound is a faithful replay of the old semantics rather than a claim
+/// about that secret's trust direction. Migrating the package to the typed
+/// form is what earns the tightened guarantee; nothing here loosens a
+/// manifest that already declares its directions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConnectorRequiredSecretManifest {
     pub id: String,
     pub direction: ConnectorSecretDirection,
+}
+
+impl<'de> Deserialize<'de> for ConnectorRequiredSecretManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct RequiredSecretVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RequiredSecretVisitor {
+            type Value = ConnectorRequiredSecretManifest;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter
+                    .write_str("a legacy secret id string, or a table with `id` and `direction`")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ConnectorRequiredSecretManifest::outbound(value))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ConnectorRequiredSecretManifest::outbound(value))
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                /// The typed spelling. Kept a separate private struct so the
+                /// derive still enforces required keys and rejects unknown
+                /// ones; the outer type only chooses between spellings.
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct TypedRequiredSecret {
+                    id: String,
+                    direction: ConnectorSecretDirection,
+                }
+
+                let typed = TypedRequiredSecret::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )?;
+                Ok(ConnectorRequiredSecretManifest {
+                    id: typed.id,
+                    direction: typed.direction,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(RequiredSecretVisitor)
+    }
 }
 
 impl ConnectorRequiredSecretManifest {
@@ -557,6 +631,142 @@ pub struct ConnectorRecoveryCopy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact line shipped by every connector package published before the
+    /// direction became typed. Refusing it turns a Harn upgrade into a load
+    /// failure for every consumer that pins those packages by git rev.
+    #[test]
+    fn legacy_string_required_secret_parses_as_outbound() {
+        let setup: ProviderSetupManifest = toml::from_str(
+            r#"
+required_secrets = ["duffel/test-access-token"]
+"#,
+        )
+        .expect("legacy string form must load");
+
+        assert_eq!(
+            setup.required_secrets,
+            vec![ConnectorRequiredSecretManifest::outbound(
+                "duffel/test-access-token"
+            )]
+        );
+        assert_eq!(
+            setup.outbound_credentials().count(),
+            1,
+            "a legacy entry must reach outbound credential readers"
+        );
+    }
+
+    #[test]
+    fn typed_table_required_secret_keeps_its_declared_direction() {
+        let setup: ProviderSetupManifest = toml::from_str(
+            r#"
+required_secrets = [
+  { id = "github/app-token", direction = "outbound" },
+  { id = "github/webhook-signing-secret", direction = "inbound" },
+]
+"#,
+        )
+        .expect("typed form must load");
+
+        assert_eq!(
+            setup.required_secrets,
+            vec![
+                ConnectorRequiredSecretManifest::outbound("github/app-token"),
+                ConnectorRequiredSecretManifest::inbound("github/webhook-signing-secret"),
+            ]
+        );
+        assert_eq!(setup.outbound_credentials().count(), 1);
+    }
+
+    /// A package mid-migration writes both spellings in one list. Neither
+    /// entry may be dropped or reclassified.
+    #[test]
+    fn mixed_required_secret_spellings_load_together() {
+        let setup: ProviderSetupManifest = toml::from_str(
+            r#"
+required_secrets = [
+  "gitlab/api-token",
+  { id = "gitlab/webhook-token", direction = "inbound" },
+  "gitlab/registry-token",
+]
+"#,
+        )
+        .expect("mixed list must load");
+
+        assert_eq!(
+            setup.required_secrets,
+            vec![
+                ConnectorRequiredSecretManifest::outbound("gitlab/api-token"),
+                ConnectorRequiredSecretManifest::inbound("gitlab/webhook-token"),
+                ConnectorRequiredSecretManifest::outbound("gitlab/registry-token"),
+            ]
+        );
+        assert_eq!(
+            setup.required_secret_ids().collect::<Vec<_>>(),
+            vec![
+                "gitlab/api-token",
+                "gitlab/webhook-token",
+                "gitlab/registry-token"
+            ]
+        );
+    }
+
+    /// Negative control. Accepting the bare string must not turn the table
+    /// spelling permissive: a table is still checked key by key, so a missing
+    /// `id`, a missing `direction`, an unknown key, and an unknown direction
+    /// each still fail the load.
+    #[test]
+    fn malformed_required_secret_tables_still_fail_the_load() {
+        let cases = [
+            (
+                "missing id",
+                r#"required_secrets = [{ direction = "outbound" }]"#,
+                "missing field",
+            ),
+            (
+                "missing direction",
+                r#"required_secrets = [{ id = "duffel/test-access-token" }]"#,
+                "missing field",
+            ),
+            (
+                "unknown key",
+                r#"required_secrets = [{ id = "a/b", direction = "outbound", scope = "x" }]"#,
+                "unknown field",
+            ),
+            (
+                "unknown direction",
+                r#"required_secrets = [{ id = "a/b", direction = "sideways" }]"#,
+                "unknown variant",
+            ),
+        ];
+
+        for (label, document, expected) in cases {
+            let Err(error) = toml::from_str::<ProviderSetupManifest>(document) else {
+                panic!("{label} was silently accepted");
+            };
+            assert!(
+                error.to_string().contains(expected),
+                "{label}: expected `{expected}` in: {error}"
+            );
+        }
+    }
+
+    /// The legacy spelling may not leak past this seam. Anything that
+    /// re-encodes the parsed contract writes the typed table.
+    #[test]
+    fn legacy_entries_reserialize_in_the_typed_form() {
+        let setup: ProviderSetupManifest =
+            toml::from_str(r#"required_secrets = ["duffel/test-access-token"]"#)
+                .expect("legacy string form must load");
+        let encoded = toml::to_string(&setup).expect("setup manifest must encode");
+
+        assert!(
+            encoded.contains(r#"id = "duffel/test-access-token""#)
+                && encoded.contains(r#"direction = "outbound""#),
+            "{encoded}"
+        );
+    }
 
     #[test]
     fn protected_profile_contract_is_typed_and_complete() {
