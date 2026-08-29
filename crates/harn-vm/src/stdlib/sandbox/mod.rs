@@ -41,6 +41,8 @@ use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+use serde::{Deserialize, Serialize};
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
@@ -458,6 +460,20 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     }
     let candidate = normalize_for_policy(path);
     let roots = normalized_workspace_roots(&policy);
+    // The denylist is checked BEFORE any grant, because it must beat all of
+    // them. A workspace root, a read-only root, and a preset are each a reason
+    // to allow; this is the one reason to refuse, and a subtraction that ran
+    // after the grants would never fire on the paths that matter (a credential
+    // under a preset-granted `~/.config` is exactly that case).
+    if access == FsAccess::Read && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
+    {
+        return Err(SandboxViolation {
+            attempted: candidate,
+            roots,
+            access,
+            read_only: false,
+        });
+    }
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
@@ -1546,6 +1562,76 @@ fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
     }
 }
 
+/// How a child-process refusal was determined, and therefore how much its
+/// `refused_paths` can be trusted.
+///
+/// This field exists because the three tiers are not interchangeable and a
+/// consumer that treats them alike will draw a false conclusion. In particular
+/// an empty `refused_paths` means "not recoverable on this platform" under
+/// `Unobservable`, and means "none were refused" under nothing at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefusalObservability {
+    /// The OS named the path. `refused_paths` is trustworthy.
+    Observed,
+    /// The mechanism refused but exposes nothing retrievable. `refused_paths`
+    /// is empty and that is NOT evidence about what was refused. Linux
+    /// Landlock is this tier: it refuses in-kernel, per syscall, with no
+    /// userspace callback.
+    Unobservable,
+    /// Classified by matching the child's own output. Lossy in both
+    /// directions: a tool that localizes its errors is a refusal that never
+    /// counts, and any failing child that merely prints one of the phrases is
+    /// attributed to the sandbox.
+    Inferred,
+}
+
+/// A typed child-process sandbox refusal.
+///
+/// Replaces reading the identity back out of an error message string. The
+/// detector is still the substring heuristic below on every platform that
+/// cannot do better; what changes is that its uncertainty is now a field
+/// (`observability`) instead of something a consumer has to know by folklore.
+///
+/// Consumed by the approval ladder to offer a re-exec with widened scope, which
+/// is why `command` and `cwd` are mandatory and `refused_paths` is not: those
+/// two are known at spawn on every platform, and the path is not.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessSandboxRefusal {
+    pub schema: String,
+    pub command: Vec<String>,
+    pub cwd: String,
+    /// May be empty even on a real refusal. Read `observability` first.
+    pub refused_paths: Vec<String>,
+    pub observability: RefusalObservability,
+    /// Bounded excerpt of the child's own output that triggered an `Inferred`
+    /// classification. Diagnostic only; never parse it.
+    pub stderr_excerpt: String,
+    pub count: u32,
+}
+
+impl ProcessSandboxRefusal {
+    pub const SCHEMA: &'static str = "harn.process.sandbox_refusal.v1";
+    /// Keep the excerpt small enough to sit in a receipt without becoming a log.
+    const MAX_EXCERPT: usize = 512;
+
+    pub fn inferred(command: Vec<String>, cwd: String, evidence: &str) -> Self {
+        let mut stderr_excerpt: String = evidence.chars().take(Self::MAX_EXCERPT).collect();
+        if evidence.chars().count() > Self::MAX_EXCERPT {
+            stderr_excerpt.push_str("…");
+        }
+        Self {
+            schema: Self::SCHEMA.to_string(),
+            command,
+            cwd,
+            refused_paths: Vec::new(),
+            observability: RefusalObservability::Inferred,
+            stderr_excerpt,
+            count: 1,
+        }
+    }
+}
+
 pub fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
     let policy = crate::orchestration::current_execution_policy()?;
     // Only a profile that actually confined the process may attribute the
@@ -1984,6 +2070,33 @@ pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<P
 ))]
 pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_process_roots(&policy.process_sandbox.read_roots)
+}
+
+/// Every subtree a confined child must not read: the non-removable credential
+/// defaults, resolved against this user's home, plus whatever the policy added.
+///
+/// Unlike the additive root lists this is NOT existence-filtered. A denial for a
+/// path that does not exist yet must survive that path being created between
+/// profile generation and the child's read, so the rule is emitted regardless.
+pub(crate) fn process_sandbox_read_deny_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut denied: Vec<PathBuf> = Vec::new();
+    if let Some(home) = sandbox_user_home_dir() {
+        for relative in crate::orchestration::DEFAULT_READ_DENY_HOME_PATHS {
+            denied.push(normalize_for_policy(&home.join(relative)));
+        }
+    }
+    for root in &policy.process_sandbox.read_deny_roots {
+        let normalized = normalize_for_policy(Path::new(root));
+        if !denied.contains(&normalized) {
+            denied.push(normalized);
+        }
+    }
+    denied
+}
+
+/// True when `candidate` is inside any denied subtree.
+pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
+    denied.iter().any(|root| path_is_within(candidate, root))
 }
 
 #[cfg(any(
