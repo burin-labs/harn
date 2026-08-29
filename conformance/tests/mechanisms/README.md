@@ -31,10 +31,11 @@ qualities. That stays the gauntlet's job.
 
 ## Relationship to the meter gate
 
-A GREEN contract is a **precondition to starting a meter run, never a
-replacement** for it. The N≥5 paired-CI meter (`docs/eval/meter-stick.md`) still
-owns every convergence claim. The onramp just refuses to spend gauntlet hours on
-a mechanism that has not been shown to engage.
+A GREEN contract is a **precondition to starting a quality run, never a
+replacement** for it. A GREEN contract proves only the mechanism contract, not
+end-to-end quality; consumer evaluation programs gate on their own metrics. The
+onramp just refuses to spend gauntlet hours on a mechanism that has not been
+shown to engage.
 
 ## Authoring a contract
 

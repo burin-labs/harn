@@ -1973,7 +1973,8 @@ mod tests {
     // policy and read back the `$TMPDIR` the child actually saw. This is the
     // agent-facing path; the assertion is OS-independent (it observes the
     // injected env, not OS-sandbox enforcement), so it pins the mechanism on
-    // every CI host while the live OS-level link proof runs on tornadough.
+    // every CI host while the live OS-level link proof runs on a Linux host
+    // with Landlock available.
     #[cfg(unix)]
     async fn process_exec_tmpdir_probe(
         workspace: &std::path::Path,
@@ -2001,7 +2002,8 @@ mod tests {
             workspace_roots: vec![workspace.to_string_lossy().into_owned()],
             // Keep OS confinement out of this unit assertion regardless of host
             // Landlock/seatbelt availability; we are pinning the env injection,
-            // not OS enforcement (which the tornadough run proves end-to-end).
+            // not OS enforcement (which the Linux Landlock run proves
+            // end-to-end).
             ..crate::orchestration::CapabilityPolicy::default()
         });
         std::env::set_var("HARN_HANDLER_SANDBOX", "off");
