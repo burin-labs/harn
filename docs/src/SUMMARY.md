@@ -186,6 +186,7 @@
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
   - [Autonomy tiers](./autonomy.md)
+- [Approval review](./approval-review.md)
 - [Audit receipts](./audit-receipts.md)
 - [Redaction policy](./redaction.md)
 - [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md)
