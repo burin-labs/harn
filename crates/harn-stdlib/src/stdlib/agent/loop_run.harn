@@ -522,6 +522,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           iteration_index + 1,
         )
         const stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
+        // Raw emission, not sanitized visible text. Verdict JSON suffixes
+        // strip to a shared prefix and would collide distinct turns.
         const stall_observation = agent_stall_observe_tool_calls(
           harness.agent,
           session.session_id,
@@ -531,7 +533,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stall_state,
           stall_judge_due,
           stall_prev_dispatch,
-          visible_text,
+          raw_text,
           had_full_parse_rejection,
           stall_prev_turn_made_edit,
           llm_result?.stop_reason ?? "",
