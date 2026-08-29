@@ -1,5 +1,6 @@
 use super::*;
 use crate::value::{ErrorCategory, VmError, VmValue};
+use std::path::PathBuf;
 
 fn thrown(s: &str) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(s)))
@@ -727,6 +728,69 @@ fn raw_provider_capture_writes_sidecars_and_pointer_events() {
     assert!(transcript.contains("\"type\":\"provider_raw_capture\""));
     assert!(transcript.contains(&request_path));
     assert!(transcript.contains(&response_path));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn raw_provider_body_failure_retains_safe_response_identity_and_typed_cause() {
+    let _guard = crate::llm::env_guard();
+    let previous_raw = set_env_for_test("HARN_LLM_TRANSCRIPT_RAW", Some("1"));
+    let dir = temp_transcript_dir("harn-raw-provider-body-failure");
+    let dir_string = dir.to_string_lossy().to_string();
+    push_llm_transcript_dir(&dir_string);
+
+    let context = RawProviderCaptureContext::new("call-body-failure".to_string(), 5);
+    let error = VmError::CategorizedError {
+        message: "openai response body error (timeout): request timed out".to_string(),
+        category: ErrorCategory::Timeout,
+    };
+    let relative_path = persist_raw_provider_response_failure(
+        Some(&context),
+        "openai",
+        "test-model",
+        RawProviderResponseFailureCapture {
+            transport: "json",
+            attempt: None,
+            status: 200,
+            content_type: Some("application/json"),
+            request_id: Some("req-body-read"),
+            generation_id: Some("gen-body-read"),
+            error: &error,
+        },
+    )
+    .expect("response failure sidecar path");
+
+    pop_llm_transcript_dir();
+    restore_env_for_test("HARN_LLM_TRANSCRIPT_RAW", previous_raw);
+
+    let sidecar = std::fs::read_to_string(dir.join(&relative_path)).expect("failure sidecar");
+    let receipt: serde_json::Value = serde_json::from_str(&sidecar).expect("failure receipt");
+    assert_eq!(
+        receipt["schema_version"],
+        "harn.llm.raw_provider_response_failure.v1"
+    );
+    assert_eq!(receipt["status"], 200);
+    assert_eq!(receipt["content_type"], "application/json");
+    assert_eq!(receipt["request_id"], "req-body-read");
+    assert_eq!(receipt["generation_id"], "gen-body-read");
+    assert_eq!(receipt["failure"]["category"], "timeout");
+    assert_eq!(receipt["failure"]["reason"], "timeout");
+    assert_eq!(receipt["failure"]["retryable"], true);
+    assert!(receipt.get("body_text").is_none());
+
+    let transcript = std::fs::read_to_string(dir.join("llm_transcript.jsonl"))
+        .expect("capture pointer transcript");
+    let pointer = transcript
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|entry| entry["type"] == "provider_raw_capture" && entry["path"] == relative_path)
+        .expect("structured response-failure capture pointer");
+    assert_eq!(pointer["call_id"], "call-body-failure");
+    assert_eq!(pointer["iteration"], 5);
+    assert_eq!(pointer["provider"], "openai");
+    assert_eq!(pointer["model"], "test-model");
+    assert_eq!(pointer["capture"], "response-json-failure");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
