@@ -1483,4 +1483,120 @@ mod tests {
             );
         }
     }
+
+    // ---- complement enumeration: how a denial is expressed without a deny rule
+
+    /// Landlock is allow-only. A denial is therefore enforced by NOT granting,
+    /// which means a grant containing a denied subtree must be replaced by the
+    /// siblings that do not lead to it. These assert the substitution, because
+    /// on this backend there is no deny rule to look for in a rendered profile:
+    /// the ABSENCE of a grant IS the enforcement, and absence is exactly what a
+    /// careless test reads as success.
+    fn tree(root: &std::path::Path, names: &[&str]) {
+        for name in names {
+            std::fs::create_dir_all(root.join(name)).expect("tree");
+        }
+    }
+
+    #[test]
+    fn a_root_with_no_denial_inside_it_is_granted_whole() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["a", "b"]);
+
+        let granted = expand_around_denied(&root, &[root.join("elsewhere")]).expect("expand");
+
+        assert_eq!(
+            granted,
+            vec![root.clone()],
+            "a denial that is not inside the root must cost nothing and leave it intact"
+        );
+    }
+
+    #[test]
+    fn a_denied_child_is_replaced_by_its_siblings_and_never_granted() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["projects", "documents", ".ssh"]);
+        let denied = root.join(".ssh");
+
+        let granted = expand_around_denied(&root, std::slice::from_ref(&denied)).expect("expand");
+
+        assert!(
+            !granted.contains(&root),
+            "the root itself must NOT be granted; granting it would include the denied \
+             subtree, which is the whole failure this function exists to prevent: {granted:?}"
+        );
+        assert!(
+            !granted.iter().any(|path| path.starts_with(&denied)),
+            "no grant may lead into the denied subtree: {granted:?}"
+        );
+        assert!(
+            granted.contains(&root.join("projects")) && granted.contains(&root.join("documents")),
+            "the siblings must still be reachable, or the subtraction has silently removed \
+             access the policy granted: {granted:?}"
+        );
+    }
+
+    #[test]
+    fn a_nested_denial_keeps_siblings_at_every_level() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["keep-me", ".config/gh", ".config/keep-this"]);
+        let denied = root.join(".config/gh");
+
+        let granted = expand_around_denied(&root, std::slice::from_ref(&denied)).expect("expand");
+
+        assert!(
+            granted.contains(&root.join("keep-me")),
+            "a sibling at the top level must survive: {granted:?}"
+        );
+        assert!(
+            granted.contains(&root.join(".config/keep-this")),
+            "a sibling INSIDE the denied path's parent must survive, which is what makes this \
+             a subtraction rather than denying the whole parent: {granted:?}"
+        );
+        assert!(
+            !granted.contains(&denied) && !granted.contains(&root.join(".config")),
+            "neither the denial nor any ancestor that contains it may be granted: {granted:?}"
+        );
+    }
+
+    #[test]
+    fn a_root_that_is_itself_denied_grants_nothing() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["inside"]);
+
+        let granted = expand_around_denied(&root, std::slice::from_ref(&root)).expect("expand");
+
+        assert!(
+            granted.is_empty(),
+            "a root that IS the denial must grant nothing at all: {granted:?}"
+        );
+    }
+
+    /// Fail closed. If a directory on the path to a denial cannot be listed we
+    /// cannot prove the subtraction, so the spawn is refused rather than
+    /// granting the root unsubtracted.
+    #[test]
+    fn an_unreadable_ancestor_refuses_the_spawn_instead_of_granting_the_root() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::TempDir::new().expect("temp");
+        let root = temp.path().canonicalize().expect("canonical");
+        tree(&root, &["locked/.ssh"]);
+        let locked = root.join("locked");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("lock dir");
+
+        let result = expand_around_denied(&root, &[locked.join(".ssh")]);
+
+        // Restore before asserting so a failure cannot leave an unremovable dir.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+        assert!(
+            result.is_err(),
+            "an unreadable ancestor must refuse the spawn; granting the root here would \
+             expose the very subtree we could not enumerate around"
+        );
+    }
 }
