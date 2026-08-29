@@ -181,6 +181,10 @@ fn __apply_version(
   }
 }
 
+fn __adoption_failure(detail: string, conflicts: list<string> = []) -> BumpBaseAdoption {
+  return {ok: false, adopted_oid: nil, conflicts: conflicts, detail: detail}
+}
+
 /**
  * Adopt an advanced base branch head into the local checkout.
  *
@@ -188,11 +192,13 @@ fn __apply_version(
  * local git. The adoption refuses before it mutates when the incoming commits
  * changed a path this bump's refresh already authored: that is a contest
  * between two writers of one artifact, and resetting would silently pick a
- * winner. Otherwise the checkout is hard-reset onto the observed head, which is
- * what `harn-github-connector` requires before it will derive a payload — it
- * refuses any base oid that is not the local HEAD.
+ * winner. Otherwise the adapter discards only the refresh paths it owns and
+ * checks out the observed head detached, which is what
+ * `harn-github-connector` requires before it will derive a payload — it refuses
+ * any base oid that is not the local HEAD.
  */
 fn __adopt_base(
+  fs: HarnessFs?,
   tools: HarnessTools,
   remote: LiveBumpRemote,
   cfg: LiveBumpConfig,
@@ -200,29 +206,16 @@ fn __adopt_base(
 ) -> BumpBaseAdoption {
   const to_oid = lowercase(trim(request.to_oid))
   if to_oid == "" {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: [],
-      detail: "no advanced base identity to adopt",
-    }
+    return __adoption_failure("no advanced base identity to adopt")
   }
   const fetch = remote.fetch_base(to_oid)
   if !fetch.ok {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: [],
-      detail: "fetching ${request.base} failed: ${fetch.detail}",
-    }
+    return __adoption_failure("fetching ${request.base} failed: ${fetch.detail}")
   }
   if !__git(tools, cfg.repo_dir, ["cat-file", "-e", "${to_oid}^{commit}"]).success {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: [],
-      detail: "advanced base ${to_oid} is still not present after fetching ${request.base}",
-    }
+    return __adoption_failure(
+      "advanced base ${to_oid} is still not present after fetching ${request.base}",
+    )
   }
   const declared_from = lowercase(trim(request.from_oid ?? ""))
   const from_oid = if declared_from != "" {
@@ -230,41 +223,100 @@ fn __adopt_base(
   } else {
     lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
   }
-  const incoming = __lines(
-    __git(tools, cfg.repo_dir, ["diff", "--name-only", "${from_oid}..${to_oid}"]).stdout,
-  )
+  const comparison = __git(tools, cfg.repo_dir, ["diff", "--name-only", "${from_oid}..${to_oid}"])
+  if !comparison.success {
+    return __adoption_failure(
+      "comparing ${from_oid} with ${to_oid} failed: "
+        + trim((comparison.stderr ?? "") + (comparison.stdout ?? "")),
+    )
+  }
+  const incoming = __lines(comparison.stdout)
   const authored = set(request.refreshed ?? [])
   const conflicts = incoming.filter({ path -> set_contains(authored, path) }).to_list()
   if len(conflicts) > 0 {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: conflicts,
-      detail:
-        "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
+    return __adoption_failure(
+      "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
+      conflicts,
+    )
+  }
+  // Remove only untracked output the discarded refresh reported. Discovering
+  // the untracked intersection through git prevents tracked paths from being
+  // deleted, while typed filesystem deletion avoids an unrestricted git-clean
+  // capability. Running this before checkout leaves the tree on its proven
+  // base if cleanup fails.
+  const cleanup_paths = (request.refreshed ?? []).filter({ path -> path != "" }).to_list()
+  if len(cleanup_paths) > 0 {
+    const untracked_result = __git(
+      tools,
+      cfg.repo_dir,
+      ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "--"] + cleanup_paths,
+    )
+    if !untracked_result.success {
+      return __adoption_failure(
+        "discovering discarded refresh output failed: "
+          + trim((untracked_result.stderr ?? "") + (untracked_result.stdout ?? "")),
+      )
+    }
+    const untracked = __lines(untracked_result.stdout)
+    if len(untracked) > 0 {
+      if fs == nil {
+        return __adoption_failure("cleaning discarded refresh output requires HarnessFs")
+      }
+      for path in untracked {
+        const deletion = try {
+          fs.delete(path_join(cfg.repo_dir, path))
+          nil
+        }
+        if !is_ok(deletion) {
+          return __adoption_failure(
+            "cleaning discarded refresh output failed: " + to_string(unwrap_err(deletion)),
+          )
+        }
+      }
+    }
+    const tracked_result = __git(
+      tools,
+      cfg.repo_dir,
+      ["--literal-pathspecs", "ls-files", "--"] + cleanup_paths,
+    )
+    if !tracked_result.success {
+      return __adoption_failure(
+        "discovering tracked refresh output failed: "
+          + trim((tracked_result.stderr ?? "") + (tracked_result.stdout ?? "")),
+      )
+    }
+    const tracked = __lines(tracked_result.stdout)
+    if len(tracked) > 0 {
+      const restore = __git(
+        tools,
+        cfg.repo_dir,
+        ["--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"]
+          + tracked,
+      )
+      if !restore.success {
+        return __adoption_failure(
+          "restoring discarded refresh output failed: "
+            + trim((restore.stderr ?? "") + (restore.stdout ?? "")),
+        )
+      }
     }
   }
-  const reset = __git(tools, cfg.repo_dir, ["reset", "--hard", to_oid])
-  if !reset.success {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: [],
-      detail: trim((reset.stderr ?? "") + (reset.stdout ?? "")),
-    }
+  const remaining = __git(tools, cfg.repo_dir, ["status", "--porcelain", "--untracked-files=no"])
+  if !remaining.success || trim(remaining.stdout ?? "") != "" {
+    return __adoption_failure(
+      "tracked checkout cleanup was incomplete: "
+        + trim((remaining.stderr ?? "") + (remaining.stdout ?? "")),
+    )
   }
-  // Regenerated-but-untracked output from the discarded attempt would otherwise
-  // survive the reset and land in the next delta. Ignored paths (toolchain
-  // caches, installed dependencies) are deliberately left alone.
-  __git(tools, cfg.repo_dir, ["clean", "-fd"])
+  const checkout = __git(tools, cfg.repo_dir, ["checkout", "--detach", to_oid])
+  if !checkout.success {
+    return __adoption_failure(
+      "checking out ${to_oid} failed: " + trim((checkout.stderr ?? "") + (checkout.stdout ?? "")),
+    )
+  }
   const head = lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
   if head != to_oid {
-    return {
-      ok: false,
-      adopted_oid: nil,
-      conflicts: [],
-      detail: "reset onto ${to_oid} left HEAD at ${head}",
-    }
+    return __adoption_failure("checkout of ${to_oid} left HEAD at ${head}")
   }
   return {
     ok: true,
@@ -362,7 +414,7 @@ pub fn live_bump_adapter(
     },
     working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
     remote_base_head: remote.base_head,
-    adopt_base: fn(request) { return __adopt_base(tools, remote, cfg, request) },
+    adopt_base: fn(request) { return __adopt_base(fs, tools, remote, cfg, request) },
     find_bump_pr: remote.find_bump_pr,
     disable_auto_merge: remote.disable_auto_merge,
     publish_commit: remote.publish_commit,

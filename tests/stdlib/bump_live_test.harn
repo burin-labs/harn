@@ -10,6 +10,7 @@ fn unreachable_remote() -> LiveBumpRemote {
     latest_release_tag: unreachable,
     release_view: fn(_tag) { return unreachable() },
     base_head: unreachable,
+    fetch_base: fn(_oid) { return unreachable() },
     find_bump_pr: unreachable,
     disable_auto_merge: fn(_pr, _base_sha) { return unreachable() },
     publish_commit: fn(_request) { return unreachable() },
@@ -18,6 +19,43 @@ fn unreachable_remote() -> LiveBumpRemote {
     close_pr: fn(_number, _comment) { return unreachable() },
     enable_auto_merge: fn(_number, _head_oid) { return unreachable() },
   }
+}
+
+fn adoption_remote() -> LiveBumpRemote {
+  const remote = unreachable_remote()
+  return remote + {fetch_base: fn(_oid) { return {ok: true, detail: ""} }}
+}
+
+fn git_ok(tools: HarnessTools, root: string, args: list<string>) {
+  const result = command_run(tools, ["git", "-C", root] + args)
+  if !result.success {
+    throw "git fixture command failed: " + trim((result.stderr ?? "") + (result.stdout ?? ""))
+  }
+  return trim(result.stdout ?? "")
+}
+
+fn adoption_fixture(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("harn-bump-adopt-")
+  git_ok(harness.tools, root, ["init", "--quiet"])
+  git_ok(harness.tools, root, ["config", "user.email", "harn-test@example.invalid"])
+  git_ok(harness.tools, root, ["config", "user.name", "Harn Test"])
+  harness.fs.write_text(path_join(root, "base.txt"), "first\n")
+  git_ok(harness.tools, root, ["add", "base.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "first"])
+  const from_oid = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  harness.fs.write_text(path_join(root, "base.txt"), "second\n")
+  git_ok(harness.tools, root, ["add", "base.txt"])
+  git_ok(harness.tools, root, ["commit", "--quiet", "-m", "second"])
+  const to_oid = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
+  git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", from_oid])
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    adoption_remote(),
+    {repo_dir: root},
+    harness.fs,
+  )
+  return {root: root, from_oid: from_oid, to_oid: to_oid, adapter: adapter}
 }
 
 pipeline test_apply_version_writes_bare_semver(harness: Harness) {
@@ -97,4 +135,63 @@ pipeline test_apply_version_includes_untracked_generated_files(harness: Harness)
     {additions: [".harn-version", "generated.json"], deletions: []},
   )
   harness.fs.delete(root)
+}
+
+pipeline test_adopt_base_failed_comparison_does_not_move_head(harness: Harness) {
+  const fixture = adoption_fixture(harness)
+  const outcome = fixture.adapter.adopt_base(
+    {base: "main", from_oid: "not-a-commit", to_oid: fixture.to_oid, refreshed: [], attempt: 1},
+  )
+  assert_eq(outcome.ok, false)
+  assert_eq(outcome.adopted_oid, nil)
+  assert_eq(git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"]), fixture.from_oid)
+  harness.fs.delete(fixture.root)
+}
+
+pipeline test_adopt_base_cleans_only_reported_refresh_output(harness: Harness) {
+  const fixture = adoption_fixture(harness)
+  const generated = path_join(fixture.root, "generated.json")
+  const personal = path_join(fixture.root, "personal-notes.txt")
+  harness.fs.write_text(generated, "{}\n")
+  harness.fs.write_text(personal, "keep me\n")
+  const outcome = fixture.adapter.adopt_base(
+    {
+      base: "main",
+      from_oid: fixture.from_oid,
+      to_oid: fixture.to_oid,
+      refreshed: ["generated.json"],
+      attempt: 1,
+    },
+  )
+  assert_eq(outcome.ok, true)
+  assert_eq(outcome.adopted_oid, fixture.to_oid)
+  assert_eq(harness.fs.exists(generated), false)
+  assert_eq(harness.fs.read_text(personal), "keep me\n")
+  harness.fs.delete(fixture.root)
+}
+
+pipeline test_adopt_base_missing_cleanup_authority_does_not_move_head(harness: Harness) {
+  const fixture = adoption_fixture(harness)
+  const generated = path_join(fixture.root, "generated.json")
+  harness.fs.write_text(generated, "{}\n")
+  const adapter_without_fs = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    adoption_remote(),
+    {repo_dir: fixture.root},
+  )
+  const outcome = adapter_without_fs.adopt_base(
+    {
+      base: "main",
+      from_oid: fixture.from_oid,
+      to_oid: fixture.to_oid,
+      refreshed: ["generated.json"],
+      attempt: 1,
+    },
+  )
+  assert_eq(outcome.ok, false)
+  assert_eq(outcome.adopted_oid, nil)
+  assert_eq(git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"]), fixture.from_oid)
+  assert_eq(harness.fs.read_text(generated), "{}\n")
+  harness.fs.delete(fixture.root)
 }
