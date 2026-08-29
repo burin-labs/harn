@@ -25,11 +25,6 @@ pub import {
   agent_evaluate_completion,
   agent_verify_completion_judge_cap,
 } from "std/agent/judge"
-pub import {
-  agent_has_turn_end_condition,
-  agent_stall_turn_end_judge_due,
-  agent_turn_end_judge_cap,
-} from "std/agent/turn_end"
 pub import { agent_invoke_llm } from "std/agent/llm_dispatch"
 pub import {
   agent_mcp_admit_bootstrap,
@@ -124,6 +119,11 @@ pub import {
   agent_apply_tool_surface_narrowing,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/tool_surface"
+pub import {
+  agent_has_turn_end_condition,
+  agent_stall_turn_end_judge_due,
+  agent_turn_end_judge_cap,
+} from "std/agent/turn_end"
 pub import {
   AgentAwaitResumptionRequest,
   __agent_await_resumption_from_tool,

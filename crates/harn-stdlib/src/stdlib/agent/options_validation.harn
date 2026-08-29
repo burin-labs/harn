@@ -208,7 +208,11 @@ pub fn __validate_judge_cadence(label: string, value: dict?) {
 
 pub fn __validate_turn_end_judge_cadence(value: dict | bool | nil) {
   if type_of(value) == "dict" {
-    __validate_optional_nonnegative_int("turn_end_condition", "max_invocations", value?.max_invocations)
+    __validate_optional_nonnegative_int(
+      "turn_end_condition",
+      "max_invocations",
+      value?.max_invocations,
+    )
     __validate_judge_cadence("turn_end_condition.cadence", value?.cadence)
   }
 }
@@ -633,7 +637,11 @@ pub fn __validate_agent_loop_completion_options(opts: dict) {
         "turn_end_condition",
         opts.turn_end_condition?.requirement_contract,
       )
-      __validate_optional_positive_int("turn_end_condition", "timeout_ms", opts.turn_end_condition?.timeout_ms)
+      __validate_optional_positive_int(
+        "turn_end_condition",
+        "timeout_ms",
+        opts.turn_end_condition?.timeout_ms,
+      )
       __validate_optional_positive_int(
         "turn_end_condition",
         "operation_timeout_ms",

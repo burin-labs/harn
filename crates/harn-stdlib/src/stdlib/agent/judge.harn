@@ -29,7 +29,6 @@ pub import {
   agent_completion_review_should_skip_llm,
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
-pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 import { agent_feedback_emit } from "std/agent/feedback"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -55,6 +54,7 @@ import {
   AgentTranscriptToolLifecycleReport,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
+pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 
 // The completion judge is a terminal checkpoint, not a second agent loop. Give
 // it the latest effect-bearing actions and their observations without replaying

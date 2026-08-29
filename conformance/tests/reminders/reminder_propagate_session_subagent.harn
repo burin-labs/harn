@@ -13,7 +13,12 @@ fn child_tools(harness: Harness, grandchild_session: string) {
         sub_agent_run(
           harness,
           "Grandchild task.",
-          {provider: "mock", session_id: grandchild_session, max_iterations: 1, turn_end_condition: nil},
+          {
+            provider: "mock",
+            session_id: grandchild_session,
+            max_iterations: 1,
+            turn_end_condition: nil,
+          },
         )
       },
       parameters: {},

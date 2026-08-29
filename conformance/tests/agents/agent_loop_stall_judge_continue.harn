@@ -97,7 +97,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(
         "completion.cap_reached=" + to_string(captured.result.completion_judge.cap_reached),
       )
-      harness.stdio.println("done.cap_reached=" + to_string(captured.result.turn_end_condition.cap_reached))
+      harness.stdio.println(
+        "done.cap_reached=" + to_string(captured.result.turn_end_condition.cap_reached),
+      )
       harness.stdio.println(tool_message_count(harness.agent, session))
       harness.stdio.println(dispatches)
       harness.stdio.println(contains(messages, "Stall diagnostic"))

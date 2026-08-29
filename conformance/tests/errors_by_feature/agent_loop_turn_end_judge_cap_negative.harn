@@ -10,6 +10,11 @@ pipeline test(harness: Harness, task: unknown) {
     harness,
     "do work",
     nil,
-    {provider: "mock", loop_until_done: true, max_iterations: 1, turn_end_condition: {max_invocations: -1}},
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 1,
+      turn_end_condition: {max_invocations: -1},
+    },
   )
 }

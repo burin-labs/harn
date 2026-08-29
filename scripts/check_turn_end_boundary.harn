@@ -23,7 +23,6 @@
 // is only trustworthy when the same path has just returned a non-zero.
 //
 // Source-tier: reads committed files only.
-
 const PRODUCT_MODULE = "crates/harn-stdlib/src/stdlib/agent/turn_end.harn"
 
 /**
@@ -113,12 +112,10 @@ pub fn measurement_findings(path: string, source: string) -> list<BoundaryFindin
  * otherwise report a clean tree forever.
  */
 fn matcher_is_live() -> bool {
-  const product_control = product_findings("const system = judge_cfg?.rubric").count > 0
-  const measurement_control = measurement_findings(
-    "evals/control.harn",
-    "__turn_end_judge_due(opts, payload, true)",
-  ).count > 0
-  return product_control && measurement_control
+  const product = product_findings("const system = judge_cfg?.rubric")
+  const reach_in = "__turn_end_judge_due(opts, payload, true)"
+  const measurement = measurement_findings("evals/control.harn", reach_in)
+  return product.count > 0 && measurement.count > 0
 }
 
 pipeline main(harness: Harness, task: unknown) {
