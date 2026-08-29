@@ -1,5 +1,6 @@
 use super::*;
 use crate::value::{ErrorCategory, VmError, VmValue};
+use std::path::PathBuf;
 
 fn thrown(s: &str) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(s)))
