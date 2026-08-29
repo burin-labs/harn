@@ -1503,8 +1503,13 @@ mod tests {
         let temp = tempfile::TempDir::new().expect("temp");
         let root = temp.path().canonicalize().expect("canonical");
         tree(&root, &["a", "b"]);
+        // Genuinely outside `root`. A path like `root.join("elsewhere")` would
+        // be INSIDE it and would exercise the subtraction instead, which is the
+        // opposite of what this test claims to check.
+        let unrelated = tempfile::TempDir::new().expect("unrelated");
+        let unrelated = unrelated.path().canonicalize().expect("canonical");
 
-        let granted = expand_around_denied(&root, &[root.join("elsewhere")]).expect("expand");
+        let granted = expand_around_denied(&root, &[unrelated]).expect("expand");
 
         assert_eq!(
             granted,
