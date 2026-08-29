@@ -632,18 +632,6 @@ pipeline test_action_citation_alongside_typed_evidence_is_not_a_veto(
   assert_eq(report.pending_count, 0)
 }
 
-pipeline test_mutation_summary_record_is_citable_by_default(harness: Harness, task: unknown) {
-  // The runtime emits a `mutation_summary` record marked supports_completion.
-  // The default role set has to admit it, or the packet contradicts itself.
-  const report = completion_requirement_report(
-    catch_all_contract(),
-    [{requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57", met: true, evidence_refs: [-3]}],
-    trial_shaped_packet("passed"),
-  )
-  assert_eq(report.rows[0].status, "met")
-  assert(report.complete)
-}
-
 pipeline test_execution_item_is_satisfied_by_the_passing_receipt(harness: Harness, task: unknown) {
   const contract: CompletionRequirementContract = {
     requirements: [

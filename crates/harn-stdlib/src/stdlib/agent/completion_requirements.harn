@@ -73,13 +73,12 @@ fn completion_requirement_evidence_role(value: unknown) -> CompletionRequirement
 
 fn completion_requirement_evidence_roles(raw: unknown) -> list<CompletionRequirementEvidenceRole> {
   if raw == nil {
-    // The default has to admit every role the packet can actually ship. A
-    // default narrower than the producer makes a record the runtime supplied,
-    // marked `supports_completion`, unciteable — the citation fails on a rule
-    // no author wrote.
+    // `mutation_summary` is deliberately NOT in the default. The packet ships
+    // one so a requirement that opts in via `evidence_roles` can cite it;
+    // having changed a file is not evidence that an undeclared requirement was
+    // met. See `test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement`.
     let all_roles: list<CompletionRequirementEvidenceRole> = []
     all_roles = all_roles + ["assistant_output"]
-    all_roles = all_roles + ["mutation_summary"]
     return all_roles + ["deterministic_verification"]
   }
   let roles: list<CompletionRequirementEvidenceRole> = []
@@ -354,7 +353,16 @@ fn completion_requirement_verified_by_receipt(
   packet: CompletionRequirementEvidencePacket,
 ) -> bool {
   const allowed_roles = completion_requirement_evidence_roles(requirement.evidence_roles)
-  if !allowed_roles.contains("deterministic_verification") {
+  // The receipt settles an item whose evidence kind IS verification, never one
+  // that merely permits verification among other kinds. The default role set
+  // contains `deterministic_verification` alongside `assistant_output`, so
+  // testing only for its presence would let a passing verifier anywhere in the
+  // session satisfy "Answer the question." — an item the verifier says nothing
+  // about. Requiring the author to have narrowed the item to verification
+  // evidence is the opt-in that keeps this a binding, not a bypass.
+  // See `test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement`.
+  if !allowed_roles.contains("deterministic_verification")
+    || allowed_roles.contains("assistant_output") {
     return false
   }
   for record in packet.requirement_evidence ?? [] {
