@@ -1,7 +1,7 @@
 # Z.AI GLM family, served via the OpenAI-compatible `/api/paas/v4` endpoint
 # (the `.../v1` base 404s). The live `/models` listing on 2026-08-22 reports:
 # glm-4.5, glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1,
-# glm-5.2, and glm-5.3. The GLM-4.x line stays catalogued as the
+# glm-5.2, glm-5.3, and glm-5.3-flash. The GLM-4.x line stays catalogued as the
 # cheap independent-bucket coding/judge routes (glm-4.6 is confirmed serving
 # 200 at paas/v4). Pricing per docs.z.ai.
 #
@@ -120,6 +120,26 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
+# GLM-5.3-Flash is the natively multimodal, efficiency-focused sibling of
+# GLM-5.3. Z.AI's 2026-08-26 model card documents 320B total / 18B active
+# parameters, 1M context, native image/video/file input, mandatory reasoning,
+# tools, structured output, streaming, caching, and MIT-licensed weights.
+# The 50% launch promotion expires at 24:00 Singapore time on September 9,
+# which is the exclusive UTC instant 2026-09-09T16:00:00Z.
+[models."glm-5.3-flash"]
+name = "GLM 5.3 Flash"
+provider = "zai"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "zai-direct"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03, promotions = [{ id = "zai-glm-5.3-flash-launch", starts_on = "2026-08-26", ends_at = "2026-09-09T16:00:00Z", source_url = "https://docs.z.ai/guides/overview/pricing", input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }] }
+architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://docs.z.ai/guides/vlm/glm-5.3-flash", last_verified = "2026-08-28" }
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
+
 # OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
 # resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
 # are the GLM-5 generation.
@@ -162,6 +182,22 @@ pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok =
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."z-ai/glm-5.3-flash"]
+name = "GLM 5.3 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "glm-5.3-flash"
+equivalence_group = "glm-5.3-flash"
+served_variant = "openrouter"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+# OpenRouter's public model endpoint reports the direct launch rates and the
+# same 1M-token serving window. Preserve Z.AI's list price as the durable base
+# so cost accounting restores it automatically when the promotion expires.
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.50, cache_read_per_mtok = 0.03, promotions = [{ id = "zai-glm-5.3-flash-launch", starts_on = "2026-08-26", ends_at = "2026-09-09T16:00:00Z", source_url = "https://docs.z.ai/guides/overview/pricing", input_per_mtok = 0.075, output_per_mtok = 0.25, cache_read_per_mtok = 0.015 }] }
+architecture = { parameter_count_b = 320.0, active_parameter_count_b = 18.0, moe = true, license = "MIT", source_url = "https://openrouter.ai/api/v1/models", last_verified = "2026-08-28" }
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "agentic", "tool_use", "reasoning", "long_context", "vision", "speed"]
 [models."z-ai/glm-5v-turbo"]
 name = "GLM 5V Turbo (via OpenRouter)"
 provider = "openrouter"

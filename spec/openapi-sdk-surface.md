@@ -44,12 +44,42 @@ scripts/generate_sdk_clients.sh --language all --output-dir target/generated-sdk
 
 `.github/workflows/sdk-codegen.yml` runs this generator matrix on PRs that
 touch the spec or generator, on `main`, through the merge queue, and for every
-published release. Release runs upload generated Python and TypeScript client
-artifacts for `burin-labs/harn-sdk-python` and
-`burin-labs/harn-sdk-typescript` to consume.
+published release. A required `Both SDK language artifacts` job fail-closes
+when either language is missing. Published releases also attach both clients
+as durable GitHub release assets for `burin-labs/harn-sdk-python` and
+`burin-labs/harn-sdk-typescript`.
 
 The generator pins its complete toolchain, including the TypeScript compiler
 peer used by `@hey-api/openapi-ts`. The generated artifact manifest records the
 toolchain versions alongside the exact Harn release and SDK package versions.
 SDK package versions follow Harn's minor line: Harn `X.Y.Z` produces SDK
 version `X.Y.0`.
+
+## Retrieval
+
+Downstream CI pins a released Harn tag. Do not generate clients from Harn
+`main`.
+
+```sh
+gh release download vX.Y.Z \
+  --repo burin-labs/harn \
+  --pattern 'harn-sdk-*.tar.gz' \
+  --dir generated-sdks
+```
+
+Each archive is the generated client tree plus `harn-sdk-generation.txt`.
+That manifest always records `harn_version` and `openapi_sha256`.
+
+```sh
+tar -tzf generated-sdks/harn-sdk-typescript.tar.gz | grep harn-sdk-generation.txt
+tar -xOf generated-sdks/harn-sdk-typescript.tar.gz ./harn-sdk-generation.txt
+```
+
+`scripts/check_sdk_release_artifacts.sh --release vX.Y.Z` fails if either
+`harn-sdk-python.tar.gz` or `harn-sdk-typescript.tar.gz` is absent from the
+GitHub release. The same check accepts a local `--dir` of extracted
+`python/` and `typescript/` trees.
+
+Workflow-run artifacts named `harn-sdk-<language>-<sha>` remain available
+for 30 days as a recovery path. They are not the pin: the GitHub release
+assets named above survive after the workflow-run artifacts expire.

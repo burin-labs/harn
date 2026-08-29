@@ -49,6 +49,13 @@ structured_output = "delimited"
 # OpenRouter normalizes effort itself, so this is a wider ladder than the direct
 # Z.AI route (`low`/`high`/`max`) for the same model.
 [[provider.openrouter]]
+model_match = "z-ai/glm-5.3-flash"
+extends = true
+vision = true
+vision_supported = true
+video_supported = true
+
+[[provider.openrouter]]
 model_match = "z-ai/glm-5.3*"
 extends = true
 thinking_modes = ["effort"]

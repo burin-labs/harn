@@ -21149,6 +21149,121 @@
       ]
     },
     {
+      "id": "z-ai/glm-5.3-flash",
+      "name": "GLM 5.3 Flash (via OpenRouter)",
+      "display_name": "GLM 5.3 Flash",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-glm-5.3-flash"
+      ],
+      "context_window": 1048576,
+      "logical_model": "glm-5.3-flash",
+      "equivalence_group": "glm-5.3-flash",
+      "served_variant": "openrouter",
+      "architecture": {
+        "parameter_count_b": 320.0,
+        "active_parameter_count_b": 18.0,
+        "moe": true,
+        "license": "MIT",
+        "source_url": "https://openrouter.ai/api/v1/models",
+        "last_verified": "2026-08-28"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.03,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "zai-glm-5.3-flash-launch",
+            "starts_on": "2026-08-26",
+            "ends_at": "2026-09-09T16:00:00Z",
+            "source_url": "https://docs.z.ai/guides/overview/pricing",
+            "input_per_mtok": 0.075,
+            "output_per_mtok": 0.25,
+            "cache_read_per_mtok": 0.015,
+            "cache_write_per_mtok": null
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "speed"
+      ]
+    },
+    {
       "id": "z-ai/glm-5v-turbo",
       "name": "GLM 5V Turbo (via OpenRouter)",
       "display_name": "GLM 5V Turbo",
@@ -25064,6 +25179,118 @@
         "reasoning",
         "long_context"
       ]
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM 5.3 Flash",
+      "display_name": "GLM 5.3 Flash",
+      "provider": "zai",
+      "aliases": [
+        "glm-5.3-flash",
+        "glm-flash"
+      ],
+      "context_window": 1048576,
+      "logical_model": "glm-5.3-flash",
+      "equivalence_group": "glm-5.3-flash",
+      "served_variant": "zai-direct",
+      "architecture": {
+        "parameter_count_b": 320.0,
+        "active_parameter_count_b": 18.0,
+        "moe": true,
+        "license": "MIT",
+        "source_url": "https://docs.z.ai/guides/vlm/glm-5.3-flash",
+        "last_verified": "2026-08-28"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "high",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": 0.03,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "zai-glm-5.3-flash-launch",
+            "starts_on": "2026-08-26",
+            "ends_at": "2026-09-09T16:00:00Z",
+            "source_url": "https://docs.z.ai/guides/overview/pricing",
+            "input_per_mtok": 0.075,
+            "output_per_mtok": 0.25,
+            "cache_read_per_mtok": 0.015,
+            "cache_write_per_mtok": null
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "speed"
+      ]
     }
   ],
   "aliases": [
@@ -25267,6 +25494,16 @@
     {
       "name": "glm-5.3",
       "model_id": "glm-5.3",
+      "provider": "zai"
+    },
+    {
+      "name": "glm-5.3-flash",
+      "model_id": "glm-5.3-flash",
+      "provider": "zai"
+    },
+    {
+      "name": "glm-flash",
+      "model_id": "glm-5.3-flash",
       "provider": "zai"
     },
     {
@@ -25650,6 +25887,11 @@
     {
       "name": "openrouter-glm-5.3",
       "model_id": "z-ai/glm-5.3",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-glm-5.3-flash",
+      "model_id": "z-ai/glm-5.3-flash",
       "provider": "openrouter"
     },
     {
@@ -29976,6 +30218,29 @@
     },
     {
       "provider": "openrouter",
+      "model": "z-ai/glm-5.3-flash",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GLM 5.3 Flash (via OpenRouter)",
+      "family": "glm",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "z-ai/glm-5v-turbo",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
@@ -30802,6 +31067,29 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5.3-flash",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "secret_env": "ZAI_API_KEY",
+      "label": "GLM 5.3 Flash",
+      "family": "glm",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "video",
+        "vision"
       ]
     }
   ],

@@ -51,6 +51,13 @@
 # level onto this list for exactly that reason; an explicit caller `effort`
 # still fails against it loudly.
 [[provider.zai]]
+model_match = "glm-5.3-flash"
+extends = true
+vision = true
+vision_supported = true
+video_supported = true
+
+[[provider.zai]]
 model_match = "glm-5.3*"
 native_tools = true
 preferred_tool_format = "native"

@@ -68,6 +68,12 @@ container image uses for its distroless health check. Installer scripts
 may ignore that extra binary unless they are assembling the container
 root filesystem.
 
+Generated Agents API SDK clients are a separate release contract. They are
+not entries in `release-assets.json`. Downstream SDK repositories pin a
+Harn tag and download `harn-sdk-python.tar.gz` plus
+`harn-sdk-typescript.tar.gz` from that GitHub release. The retrieval path
+and fail-closed missing-language check live in `spec/openapi-sdk-surface.md`.
+
 The currently published target triples are:
 
 - `aarch64-apple-darwin`

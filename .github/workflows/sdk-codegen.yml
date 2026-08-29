@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - ".github/workflows/sdk-codegen.yml"
+      - "scripts/check_sdk_release_artifacts.sh"
       - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/check_sdk_release_artifacts_test.sh"
       - "scripts/tests/generate_sdk_clients_test.sh"
       - "spec/openapi.yaml"
       - "spec/openapi.snapshot"
@@ -14,7 +16,9 @@ on:
       - main
     paths:
       - ".github/workflows/sdk-codegen.yml"
+      - "scripts/check_sdk_release_artifacts.sh"
       - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/check_sdk_release_artifacts_test.sh"
       - "scripts/tests/generate_sdk_clients_test.sh"
       - "spec/openapi.yaml"
       - "spec/openapi.snapshot"
@@ -68,6 +72,70 @@ jobs:
           name: harn-sdk-${{ matrix.language }}-${{ github.sha }}
           path: ${{ runner.temp }}/generated-sdks/${{ matrix.language }}
           if-no-files-found: error
-          # Inspected by hand when SDK codegen drifts; no job downloads it.
+          # Downstream SDKs and the require-both job download this.
           # Declared at the current effective window rather than shortened.
           retention-days: 30
+
+  require-both:
+    name: Both SDK language artifacts
+    if: always() && !cancelled()
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download Python SDK artifact
+        continue-on-error: true
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-sdk-python-${{ github.sha }}
+          path: ${{ runner.temp }}/sdk-artifacts/python
+
+      - name: Download TypeScript SDK artifact
+        continue-on-error: true
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-sdk-typescript-${{ github.sha }}
+          path: ${{ runner.temp }}/sdk-artifacts/typescript
+
+      - name: Require both language artifacts
+        run: scripts/check_sdk_release_artifacts.sh --dir "${RUNNER_TEMP}/sdk-artifacts"
+
+  publish-release-assets:
+    name: Attach SDK artifacts to the GitHub release
+    if: github.event_name == 'release'
+    needs: require-both
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download Python SDK artifact
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-sdk-python-${{ github.sha }}
+          path: ${{ runner.temp }}/sdk-artifacts/python
+
+      - name: Download TypeScript SDK artifact
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-sdk-typescript-${{ github.sha }}
+          path: ${{ runner.temp }}/sdk-artifacts/typescript
+
+      - name: Package and attach durable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          python_tar="${RUNNER_TEMP}/harn-sdk-python.tar.gz"
+          typescript_tar="${RUNNER_TEMP}/harn-sdk-typescript.tar.gz"
+          tar -C "${RUNNER_TEMP}/sdk-artifacts/python" -czf "$python_tar" .
+          tar -C "${RUNNER_TEMP}/sdk-artifacts/typescript" -czf "$typescript_tar" .
+          gh release upload "$TAG" \
+            "$python_tar" \
+            "$typescript_tar" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+          scripts/check_sdk_release_artifacts.sh --release "$TAG" --repo "${GITHUB_REPOSITORY}"

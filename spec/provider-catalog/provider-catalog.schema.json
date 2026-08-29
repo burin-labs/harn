@@ -1171,6 +1171,10 @@
             "null"
           ]
         },
+        "ends_at": {
+          "format": "date-time",
+          "type": "string"
+        },
         "ends_on": {
           "format": "date",
           "type": "string"
@@ -1193,6 +1197,10 @@
         },
         "source_url": {
           "minLength": 1,
+          "type": "string"
+        },
+        "starts_at": {
+          "format": "date-time",
           "type": "string"
         },
         "starts_on": {

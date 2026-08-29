@@ -134,6 +134,7 @@ pipeline test_python_invocation_pattern_ignores_mentions_but_catches_shell_comma
 ) {
   assert_eq(line_invokes_python("echo \"python3 must not run\""), false)
   assert_eq(line_invokes_python("cat > \"$fake_bin/python3\" <<'SH'"), false)
+  assert_eq(line_invokes_python("REQUIRED_LANGUAGES=(\"python\" \"typescript\")"), false)
   assert_eq(line_invokes_python("python3 -c 'print(1)'"), true)
   assert_eq(line_invokes_python("value | python -"), true)
   assert_eq(line_invokes_python("run && python3.12 tool.py"), true)
