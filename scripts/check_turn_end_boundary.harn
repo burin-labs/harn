@@ -150,9 +150,14 @@ pipeline main(harness: Harness, task: unknown) {
   }
   measurement_paths = measurement_paths.unique().sorted()
   const scanned = measurement_paths.count
-  for relative in measurement_paths {
-    findings = findings
-      + measurement_findings(relative, harness.fs.read_text(path_join(root, relative)))
+  for path in measurement_paths {
+    // `glob` answers with absolute paths; the report reads better repo-relative.
+    const relative = if path.starts_with("${root}/") {
+      path[len(root) + 1:]
+    } else {
+      path
+    }
+    findings = findings + measurement_findings(relative, harness.fs.read_text(path))
   }
   if scanned == 0 {
     harness.stdio.eprintln(
