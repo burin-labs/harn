@@ -66,7 +66,7 @@ pub fn format_rate(tokens: int | float, ms: int | float) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn has_rate(tokens: int | float, ms: int | float) -> bool {
+pub fn has_rate(tokens: int | float | nil, ms: int | float | nil) -> bool {
   return (to_float(tokens) ?? 0.0) > 0.0 && (to_float(ms) ?? 0.0) > 0.0
 }
 
