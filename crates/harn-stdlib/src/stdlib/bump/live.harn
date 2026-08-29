@@ -13,6 +13,8 @@
 import {
   BumpAdapter,
   BumpAutoMerge,
+  BumpBaseAdoption,
+  BumpBaseAdoptionRequest,
   BumpBaseHead,
   BumpChangeSet,
   BumpCommitRequest,
@@ -36,6 +38,9 @@ pub type LiveBumpConfig = {
   readiness_timeout_ms: int,
 }
 
+/** Verdict of an authenticated fetch of the base branch into the local checkout. */
+pub type LiveBumpFetch = {ok: bool, detail: string}
+
 /** Closed release projection needed by the readiness gate. */
 pub type LiveBumpRelease = {found: bool, draft: bool, prerelease: bool, asset_names: list<string>}
 
@@ -50,6 +55,7 @@ pub type LiveBumpRemote = {
   latest_release_tag: fn() -> string,
   release_view: fn(string) -> LiveBumpRelease,
   base_head: fn() -> BumpBaseHead,
+  fetch_base: fn(string) -> LiveBumpFetch,
   find_bump_pr: fn() -> BumpPrState?,
   disable_auto_merge: fn(BumpPrState, string) -> bool,
   publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
@@ -175,6 +181,93 @@ fn __apply_version(
   }
 }
 
+/**
+ * Adopt an advanced base branch head into the local checkout.
+ *
+ * The provider capability owns the authenticated fetch; everything after it is
+ * local git. The adoption refuses before it mutates when the incoming commits
+ * changed a path this bump's refresh already authored: that is a contest
+ * between two writers of one artifact, and resetting would silently pick a
+ * winner. Otherwise the checkout is hard-reset onto the observed head, which is
+ * what `harn-github-connector` requires before it will derive a payload — it
+ * refuses any base oid that is not the local HEAD.
+ */
+fn __adopt_base(
+  tools: HarnessTools,
+  remote: LiveBumpRemote,
+  cfg: LiveBumpConfig,
+  request: BumpBaseAdoptionRequest,
+) -> BumpBaseAdoption {
+  const to_oid = lowercase(trim(request.to_oid))
+  if to_oid == "" {
+    return {ok: false, adopted_oid: nil, conflicts: [], detail: "no advanced base identity to adopt"}
+  }
+  const fetch = remote.fetch_base(to_oid)
+  if !fetch.ok {
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: [],
+      detail: "fetching ${request.base} failed: ${fetch.detail}",
+    }
+  }
+  if !__git(tools, cfg.repo_dir, ["cat-file", "-e", "${to_oid}^{commit}"]).success {
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: [],
+      detail: "advanced base ${to_oid} is still not present after fetching ${request.base}",
+    }
+  }
+  const declared_from = lowercase(trim(request.from_oid ?? ""))
+  const from_oid = if declared_from != "" {
+    declared_from
+  } else {
+    lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
+  }
+  const incoming = __lines(
+    __git(tools, cfg.repo_dir, ["diff", "--name-only", "${from_oid}..${to_oid}"]).stdout,
+  )
+  const authored = set(request.refreshed ?? [])
+  const conflicts = incoming.filter({ path -> set_contains(authored, path) }).to_list()
+  if len(conflicts) > 0 {
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: conflicts,
+      detail: "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
+    }
+  }
+  const reset = __git(tools, cfg.repo_dir, ["reset", "--hard", to_oid])
+  if !reset.success {
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: [],
+      detail: trim((reset.stderr ?? "") + (reset.stdout ?? "")),
+    }
+  }
+  // Regenerated-but-untracked output from the discarded attempt would otherwise
+  // survive the reset and land in the next delta. Ignored paths (toolchain
+  // caches, installed dependencies) are deliberately left alone.
+  __git(tools, cfg.repo_dir, ["clean", "-fd"])
+  const head = lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
+  if head != to_oid {
+    return {
+      ok: false,
+      adopted_oid: nil,
+      conflicts: [],
+      detail: "reset onto ${to_oid} left HEAD at ${head}",
+    }
+  }
+  return {
+    ok: true,
+    adopted_oid: head,
+    conflicts: [],
+    detail: "adopted ${to_oid} for adoption ${request.attempt}",
+  }
+}
+
 fn __release_finalized(release: LiveBumpRelease) -> bool {
   const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(release.asset_names, name) })
     .to_list()
@@ -263,6 +356,7 @@ pub fn live_bump_adapter(
     },
     working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
     remote_base_head: remote.base_head,
+    adopt_base: fn(request) { return __adopt_base(tools, remote, cfg, request) },
     find_bump_pr: remote.find_bump_pr,
     disable_auto_merge: remote.disable_auto_merge,
     publish_commit: remote.publish_commit,

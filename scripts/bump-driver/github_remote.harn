@@ -1,4 +1,5 @@
-import { LiveBumpRemote } from "std/bump/live"
+import { LiveBumpFetch, LiveBumpRemote } from "std/bump/live"
+import { command_run } from "std/command"
 /** GitHub package implementation of std/bump/live's remote capability. */
 import {
   GithubBranchHeadRequest,
@@ -139,6 +140,44 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       }
       const head = unwrap(result)
       return {available: true, oid: head.oid, detail: ""}
+    },
+    fetch_base: fn(oid) {
+      // The runner checks the package repo out with `persist-credentials:
+      // false`, so `origin` carries no authentication. Supply the installation
+      // token through a credential helper reading one environment variable:
+      // the secret never reaches argv, the process table, or a log line.
+      const helper = "!f() { echo username=x-access-token; "
+        + "echo \"password=$HARN_BUMP_FETCH_TOKEN\"; }; f"
+      const result = command_run(
+        harness.tools,
+        {
+          mode: "argv",
+          argv: [
+            "git",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "credential.helper=" + helper,
+            "fetch",
+            "--no-tags",
+            "--force",
+            "origin",
+            config.base,
+          ],
+          cwd: config.repo_dir ?? ".",
+          env: {HARN_BUMP_FETCH_TOKEN: config.token},
+        },
+      )
+      const ok: bool = result.success ?? false
+      const outcome: LiveBumpFetch = {
+        ok: ok,
+        detail: if ok {
+          "fetched ${config.base} while adopting ${oid}"
+        } else {
+          trim(to_string(result.stderr ?? ""))
+        },
+      }
+      return outcome
     },
     find_bump_pr: fn() {
       const found = github_find_open_pr(
