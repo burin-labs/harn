@@ -187,7 +187,15 @@ pub(crate) async fn windows_command_output(
     .map_err(|error| {
         crate::value::VmError::Runtime(format!("Windows process worker failed: {error}"))
     })??;
-    if let Some(error) = super::process_violation_error(&output) {
+    let refusal_command: Vec<String> = std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    let refusal_cwd = config
+        .cwd
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    if let Some(error) = super::process_violation_error(&output, &refusal_command, &refusal_cwd) {
         return Err(error);
     }
     Ok(output)
