@@ -226,7 +226,7 @@ fn run_natural_after_veto_cap(harness: Harness) {
           max_nudges: 10,
           done_sentinel: "##DONE##",
           verify_completion_judge: {max_invocations: 2},
-          done_judge: {max_invocations: 2},
+          turn_end_condition: {max_invocations: 2},
           post_turn_callback: { _info -> return {stop: true, stop_reason: "natural"} },
         },
       )

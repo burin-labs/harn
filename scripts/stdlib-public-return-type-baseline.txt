@@ -439,7 +439,7 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_aggr
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_safe_defaults
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_callback_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_completion_options
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_done_judge_cadence
+crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_turn_end_judge_cadence
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_done_sentinel
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_input_guardrail
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_judge_cadence
@@ -554,7 +554,7 @@ crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_clip_head_ta
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_delta_previous
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_maybe_emit
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_turn_result
-crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::__agent_done_judge_stall_cadence
+crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::__agent_turn_end_judge_stall_cadence
 crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::agent_stall_current_failure
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_apply
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_default_consent_check

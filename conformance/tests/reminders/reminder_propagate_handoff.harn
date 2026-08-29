@@ -79,7 +79,7 @@ pipeline main(harness: Harness) {
           tools: tools(harness.stdio),
           tool_format: "native",
           max_iterations: 2,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
     },

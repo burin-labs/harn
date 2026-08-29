@@ -82,7 +82,7 @@ pipeline main(harness: Harness) {
           tools: truncating_tools(),
           tool_format: "native",
           max_iterations: 1,
-          done_judge: nil,
+          turn_end_condition: nil,
           session_id: "reminder-provider-tool-output-loop-enabled",
         },
       )
@@ -99,7 +99,7 @@ pipeline main(harness: Harness) {
           tools: truncating_tools(),
           tool_format: "native",
           max_iterations: 1,
-          done_judge: nil,
+          turn_end_condition: nil,
           session_id: "reminder-provider-tool-output-loop-disabled",
           reminders: {providers: ["-tool_output_truncated"]},
         },

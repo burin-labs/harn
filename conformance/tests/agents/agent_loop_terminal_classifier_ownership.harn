@@ -94,7 +94,7 @@ pipeline default(harness: Harness) {
             max_iterations: 2,
             session_id: session,
             tools: edit_tools(),
-            done_judge: true,
+            turn_end_condition: true,
             missing_tool_call_recovery: always_claims_edit(),
           },
         ) },

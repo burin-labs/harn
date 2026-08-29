@@ -15,7 +15,7 @@ pipeline default(harness: Harness) {
           harness,
           "Say captured",
           nil,
-          {provider: "mock", max_iterations: 1, session_id: session, done_judge: false},
+          {provider: "mock", max_iterations: 1, session_id: session, turn_end_condition: false},
         ) },
       )
       const types = captured.events.map({ event -> event.type })

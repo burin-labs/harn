@@ -3340,9 +3340,9 @@ explain why a tool did or did not remain visible.
 #### Agent loop completion gates
 
 `agent_loop` may gate a pending stop with `verify_completion`,
-`verify_completion_judge`, or `done_judge`. `verify_completion` is a Harn
+`verify_completion_judge`, or `turn_end_condition`. `verify_completion` is a Harn
 closure hook. `verify_completion_judge` runs the built-in structured judge for
-any natural stop. `done_judge` runs after a native-tool loop naturally
+any natural stop. `turn_end_condition` runs after a native-tool loop naturally
 completes or after the model emits the configured done sentinel. The structured
 judge returns exactly `{verdict: "done" | "continue", detail}`. On `done`,
 `detail` states the strongest supporting evidence. On `continue`, it states the
@@ -3356,9 +3356,9 @@ Each built-in judge call and deterministic `verify_completion` decision emits a
 `next_step` because the same event represents LLM and deterministic decisions;
 the completion directive receipt remains the authoritative action contract. The
 optional `trigger` is `"stalled"` when a
-`done_judge.cadence.when: "stalled"` judge fires from an
+`turn_end_condition.cadence.when: "stalled"` judge fires from an
 `agent_loop_stall_warning`; a `done` verdict stops the loop with
-`stalled_done_judge` before the repeated tool call dispatches, and a
+`stalled_turn_end_judge` before the repeated tool call dispatches, and a
 `continue` action leaves the stall feedback path in place.
 
 #### Agent progress events

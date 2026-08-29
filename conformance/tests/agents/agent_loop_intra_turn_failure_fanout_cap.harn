@@ -111,7 +111,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
+          turn_end_condition: nil,
           intra_turn_failure_fanout_cap: 3,
           // Probe the fanout-cap mechanism in isolation. Same-resource fail-fast
           // (default-on) would otherwise pre-empt the identical-`a.swift` batch
@@ -143,7 +143,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
       const calls = harness.llm.mock_calls()
@@ -170,7 +170,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
+          turn_end_condition: nil,
           intra_turn_failure_fanout_cap: 3,
         },
       )
@@ -202,7 +202,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
+          turn_end_condition: nil,
           intra_turn_failure_fanout_cap: 3,
           // Isolate the fanout-cap mechanism from same-resource fail-fast so the
           // two distinct identical-failure groups each emit their own collapse

@@ -95,7 +95,7 @@ fn options(session: any, actuation: any = nil, tool_format: string = "text", ext
     tool_format: tool_format,
     loop_until_done: true,
     done_sentinel: "##DONE##",
-    done_judge: nil,
+    turn_end_condition: nil,
     final_wrapup: false,
     max_iterations: 10,
     max_nudges: 10,

@@ -84,8 +84,8 @@ pub type AgentLoopCompletionState = {
   stall_enabled_seen: bool,
   verify_completion_judge_invocations: int,
   verify_completion_judge_vetoes: int,
-  done_judge_invocations: int,
-  done_judge_vetoes: int,
+  turn_end_judge_invocations: int,
+  turn_end_judge_vetoes: int,
 }
 
 /**
@@ -123,8 +123,8 @@ pub fn agent_loop_complete(
       stall_enabled_seen: state.stall_enabled_seen,
       verify_completion_judge_invocations: state.verify_completion_judge_invocations,
       verify_completion_judge_vetoes: state.verify_completion_judge_vetoes,
-      done_judge_invocations: state.done_judge_invocations,
-      done_judge_vetoes: state.done_judge_vetoes,
+      turn_end_judge_invocations: state.turn_end_judge_invocations,
+      turn_end_judge_vetoes: state.turn_end_judge_vetoes,
     },
   )
   return __agent_loop_project_final_result(
@@ -147,8 +147,8 @@ pub fn agent_loop_complete(
       stall_enabled_seen: state.stall_enabled_seen,
       verify_completion_judge_invocations: state.verify_completion_judge_invocations,
       verify_completion_judge_vetoes: state.verify_completion_judge_vetoes,
-      done_judge_invocations: state.done_judge_invocations,
-      done_judge_vetoes: state.done_judge_vetoes,
+      turn_end_judge_invocations: state.turn_end_judge_invocations,
+      turn_end_judge_vetoes: state.turn_end_judge_vetoes,
     },
   )
 }

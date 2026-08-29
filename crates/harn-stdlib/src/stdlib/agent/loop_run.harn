@@ -20,6 +20,7 @@ import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
+import "std/agent/turn_end"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
@@ -38,8 +39,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let final_status = ""
     let terminal_error = nil
     let verify_attempts = 0
-    let done_judge_invocations = 0
-    let done_judge_vetoes = 0
+    let turn_end_judge_invocations = 0
+    let turn_end_judge_vetoes = 0
     let verify_completion_judge_invocations = 0
     let verify_completion_judge_vetoes = 0
     let feedback_history = {}
@@ -516,9 +517,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stop_reason = "suspended"
           break
         }
-        const stall_judge_due = agent_stall_done_judge_due(
+        const stall_judge_due = agent_stall_turn_end_judge_due(
           turn_opts,
-          done_judge_invocations,
+          turn_end_judge_invocations,
           iteration_index + 1,
         )
         const stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
@@ -643,7 +644,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           const stall_verify_opts = __stall_judge_opts(
             turn_opts,
             verify_completion_judge_invocations,
-            done_judge_invocations,
+            turn_end_judge_invocations,
           )
             + {_feedback_history: feedback_history}
           const stall_verdict = agent_evaluate_completion(
@@ -655,7 +656,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             iteration_index + 1,
             raw_text,
           )
-          done_judge_invocations += __done_judge_hit(stall_verdict)
+          turn_end_judge_invocations += __turn_end_judge_hit(stall_verdict)
           verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
           feedback_history = stall_verdict?.feedback_history ?? feedback_history
           if stall_verdict.action == "stop_unverified" {
@@ -669,7 +670,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             stop_reason = __completion_stop_reason(stall_verdict)
             break
           } else if stall_verdict.action == "continue" {
-            done_judge_vetoes += __done_judge_hit(stall_verdict)
+            turn_end_judge_vetoes += __turn_end_judge_hit(stall_verdict)
             verify_completion_judge_vetoes += __completion_judge_hit(stall_verdict)
             stall_state = __agent_loop_apply_stall_judge_veto(
               harness.agent,
@@ -756,7 +757,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               continue
             }
             final_status = "done"
-            stop_reason = "stalled_done_judge"
+            stop_reason = "stalled_turn_end_judge"
             break
           }
         }
@@ -863,7 +864,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           const stall_arbitration_opts = __stall_judge_opts(
             turn_opts,
             verify_completion_judge_invocations,
-            done_judge_invocations,
+            turn_end_judge_invocations,
           )
             + {_feedback_history: feedback_history}
           if trim(visible_text) != ""
@@ -876,7 +877,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               visible_text,
               iteration_index + 1,
             )
-            done_judge_invocations += __done_judge_hit(governor_verdict)
+            turn_end_judge_invocations += __turn_end_judge_hit(governor_verdict)
             verify_completion_judge_invocations += __completion_judge_hit(governor_verdict)
             feedback_history = governor_verdict?.feedback_history ?? feedback_history
             // A judge that hit its invocation cap is marked capped without ever
@@ -918,7 +919,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
                 },
               )
               final_status = "done"
-              stop_reason = "stalled_done_judge"
+              stop_reason = "stalled_turn_end_judge"
               break
             } else if governor_verdict.action == "stop_unverified" {
               __close_stall_calls(
@@ -1297,8 +1298,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             budget_decisions: budget_decisions,
             consecutive_text_only: consecutive_text_only,
             current_max: current_max,
-            done_judge_invocations: done_judge_invocations,
-            done_judge_vetoes: done_judge_vetoes,
+            turn_end_judge_invocations: turn_end_judge_invocations,
+            turn_end_judge_vetoes: turn_end_judge_vetoes,
             extensions_used: extensions_used,
             feedback_history: feedback_history,
             final_status: final_status,
@@ -1319,8 +1320,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         budget_decisions = post_turn_state.budget_decisions
         consecutive_text_only = post_turn_state.consecutive_text_only
         current_max = post_turn_state.current_max
-        done_judge_invocations = post_turn_state.done_judge_invocations
-        done_judge_vetoes = post_turn_state.done_judge_vetoes
+        turn_end_judge_invocations = post_turn_state.turn_end_judge_invocations
+        turn_end_judge_vetoes = post_turn_state.turn_end_judge_vetoes
         extensions_used = post_turn_state.extensions_used
         feedback_history = post_turn_state.feedback_history
         final_status = post_turn_state.final_status
@@ -1354,7 +1355,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           max_verify_attempts: max_verify_attempts,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           verify_completion_judge_vetoes: verify_completion_judge_vetoes,
-          done_judge_invocations: done_judge_invocations,
+          turn_end_judge_invocations: turn_end_judge_invocations,
           iteration: iteration,
           current_max: current_max,
           budget: budget,
@@ -1413,8 +1414,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         stall_enabled_seen: stall_enabled_seen,
         verify_completion_judge_invocations: verify_completion_judge_invocations,
         verify_completion_judge_vetoes: verify_completion_judge_vetoes,
-        done_judge_invocations: done_judge_invocations,
-        done_judge_vetoes: done_judge_vetoes,
+        turn_end_judge_invocations: turn_end_judge_invocations,
+        turn_end_judge_vetoes: turn_end_judge_vetoes,
       },
     )
     session_finalized = true
@@ -1438,8 +1439,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         stall_enabled_seen: stall_enabled_seen,
         verify_completion_judge_invocations: verify_completion_judge_invocations,
         verify_completion_judge_vetoes: verify_completion_judge_vetoes,
-        done_judge_invocations: done_judge_invocations,
-        done_judge_vetoes: done_judge_vetoes,
+        turn_end_judge_invocations: turn_end_judge_invocations,
+        turn_end_judge_vetoes: turn_end_judge_vetoes,
       },
     )
     final_result

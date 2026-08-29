@@ -20,7 +20,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: {max_invocations: 1},
+          turn_end_condition: {max_invocations: 1},
         },
       )
       const result = agent_loop(
@@ -31,8 +31,8 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println("status=${result.status}")
       harness.stdio.println("stop_reason=${result.stop_reason}")
-      harness.stdio.println("judge_invocations=${result.done_judge.invocations}")
-      harness.stdio.println("judge_cap_reached=${result.done_judge.cap_reached}")
+      harness.stdio.println("judge_invocations=${result.turn_end_condition.invocations}")
+      harness.stdio.println("judge_cap_reached=${result.turn_end_condition.cap_reached}")
       harness.stdio.println("provider_calls=${len(harness.llm.mock_calls())}")
     },
   )

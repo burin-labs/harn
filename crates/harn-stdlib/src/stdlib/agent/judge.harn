@@ -27,9 +27,9 @@ pub import {
   CompletionReview,
   agent_completion_review,
   agent_completion_review_should_skip_llm,
-  agent_done_judge_cap,
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
+pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 import { agent_feedback_emit } from "std/agent/feedback"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -78,7 +78,7 @@ pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
 pub type CompletionJudgeInvocations = {
   deterministic: bool,
   verify_completion_judge: bool,
-  done_judge: bool,
+  turn_end_condition: bool,
 }
 
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
@@ -1002,7 +1002,7 @@ fn __judge_invoke_structured(
 /**
  * agent_judge_config.
  *
- * Normalize a `done_judge` or `verify_completion_judge` option. Returns nil when
+ * Normalize a `turn_end_condition` or `verify_completion_judge` option. Returns nil when
  * no judge can run — absent, `false`, or a value of a type the judge seam
  * cannot invoke — and the configuration dict otherwise. `true` normalizes to an
  * empty dict, meaning "a judge with default settings".
@@ -1010,28 +1010,10 @@ fn __judge_invoke_structured(
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: agent_judge_config(opts?.done_judge)
+ * @example: agent_judge_config(opts?.turn_end_condition)
  */
 pub fn agent_judge_config(judge_cfg: JudgeConfig?) -> JudgeConfig? {
   return __normalize_judge_config(judge_cfg)
-}
-
-/**
- * agent_has_done_judge.
- *
- * Does this run have a completion judge that can actually run? Every consumer
- * asking that question must ask here rather than testing `done_judge != nil`
- * itself: the raw test answers `true` for `done_judge: false`, which is a
- * different question, and two notions of judge presence in one loop is how a
- * judge ends up governing behavior for a run that disabled it.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_has_done_judge(opts?.done_judge)
- */
-pub fn agent_has_done_judge(judge_cfg: JudgeConfig?) -> bool {
-  return agent_judge_config(judge_cfg) != nil
 }
 
 fn __done_contract_primary_prompt(opts: dict) {
@@ -1069,8 +1051,8 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
  *
  * Build an agent_loop option bundle for a bidirectional done contract:
  * the primary agent must state a concise completion claim before yielding, and
- * the done judge must return one bounded evidence detail on approval or one
- * bounded gap-and-action detail on veto. The helper rides the existing `done_judge`
+ * the turn-end judge must return one bounded evidence detail on approval or one
+ * bounded gap-and-action detail on veto. The helper rides the existing `turn_end_condition`
  * seam and context-profile prompt-fragment channel; it does not add a new loop
  * hook. Compose it with base options:
  *
@@ -1095,7 +1077,7 @@ pub fn agent_done_contract(options: dict = {}) -> dict {
   }
   const max_invocations = opts?.max_invocations ?? judge?.max_invocations ?? 3
   const bundle = {
-    done_judge: judge
+    turn_end_condition: judge
       + {
         feedback_fallback: opts?.feedback_fallback
           ?? judge?.feedback_fallback
@@ -1118,7 +1100,7 @@ fn __judge_directive(
   payload: dict,
   invoked: any,
   completion_judge_cap_reached: any,
-  done_judge_cap_reached: any,
+  turn_end_judge_cap_reached: any,
   feedback_composition: any,
   feedback_history: dict,
   defer_feedback: bool,
@@ -1128,14 +1110,14 @@ fn __judge_directive(
     terminal_reason
   } else if completion_judge_cap_reached {
     "completion_judge_cap_reached"
-  } else if done_judge_cap_reached {
-    "done_judge_cap_reached"
+  } else if turn_end_judge_cap_reached {
+    "turn_end_judge_cap_reached"
   } else {
     to_string(verdict?.reason ?? verdict?.reasoning ?? "")
   }
   const action = if terminal_reason != ""
     || completion_judge_cap_reached
-    || done_judge_cap_reached {
+    || turn_end_judge_cap_reached {
     "stop_unverified"
   } else if verdict.vetoed {
     "continue"
@@ -1210,17 +1192,17 @@ fn __completion_policy_plan(
         ),
       ]
   }
-  const completion_config = agent_judge_config(opts?.done_judge)
+  const completion_config = agent_judge_config(opts?.turn_end_condition)
   if completion_config != nil
-    && __completion_judge_applies(stop_reason, opts?._done_judge_due ?? true) {
+    && __completion_judge_applies(stop_reason, opts?._turn_end_judge_due ?? true) {
     stages = stages
       + [
         CompletionPolicyStage.ModelJudge(
           CompletionJudgeSlot.Completion(),
           completion_config,
-          opts?._done_judge_trigger,
-          opts?._done_judge_invocations ?? 0,
-          agent_done_judge_cap(completion_config),
+          opts?._turn_end_judge_trigger,
+          opts?._turn_end_judge_invocations ?? 0,
+          agent_turn_end_judge_cap(completion_config),
         ),
       ]
   }
@@ -1254,7 +1236,7 @@ fn __completion_policy_initial_evaluation(
 ) -> CompletionPolicyEvaluation {
   return {
     verdict: {vetoed: false},
-    invoked: {deterministic: false, verify_completion_judge: false, done_judge: false},
+    invoked: {deterministic: false, verify_completion_judge: false, turn_end_condition: false},
     verification_judge_cap_reached: false,
     completion_judge_cap_reached: false,
     payload: payload,
@@ -1289,7 +1271,7 @@ fn __completion_policy_mark_model_invoked(
   match slot {
     Verification() -> { return evaluation
       + {invoked: prior + {verify_completion_judge: invoked}} }
-    Completion() -> { return evaluation + {invoked: prior + {done_judge: invoked}} }
+    Completion() -> { return evaluation + {invoked: prior + {turn_end_condition: invoked}} }
   }
 }
 

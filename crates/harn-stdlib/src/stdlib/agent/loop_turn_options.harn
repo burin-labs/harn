@@ -559,24 +559,17 @@ pub fn __agent_loop_record_budget_stop(
 pub fn __stall_judge_opts(
   turn_opts: dict,
   completion_judge_invocations: int,
-  done_judge_invocations: int,
+  turn_end_judge_invocations: int,
 ) -> dict {
   return turn_opts
     + {
-      _done_judge_due: true,
-      _done_judge_trigger: "stalled",
-      _done_judge_invocations: done_judge_invocations,
+      _turn_end_judge_due: true,
+      _turn_end_judge_trigger: "stalled",
+      _turn_end_judge_invocations: turn_end_judge_invocations,
       _verify_completion_judge_trigger: "stalled",
       _verify_completion_judge_invocations: completion_judge_invocations,
       _defer_judge_feedback: true,
     }
-}
-
-pub fn __done_judge_hit(verdict: dict) -> int {
-  if verdict?.receipt?.invoked?.done_judge ?? false {
-    return 1
-  }
-  return 0
 }
 
 pub fn __completion_judge_hit(verdict: dict) -> int {
@@ -607,7 +600,7 @@ pub fn __completion_directive_adjudicated(verdict: dict) -> bool {
   const invoked = verdict?.receipt?.invoked
   return (invoked?.deterministic ?? false)
     || (invoked?.verify_completion_judge ?? false)
-    || (invoked?.done_judge ?? false)
+    || (invoked?.turn_end_condition ?? false)
 }
 
 pub fn __completion_stop_reason(verdict: dict) -> string {
@@ -1001,7 +994,7 @@ pub fn __agent_stage_modes(kind: AgentStage) {
  * cancelled and the loop iterates once more so the LLM sees the
  * injection before the tool would have fired). Callers branch on
  * `delivered` for the "continue if a steer arrived" behavior the
- * stalled-done-judge and post-turn paths rely on.
+ * stalled-turn-end-judge and post-turn paths rely on.
  *
  * @effects: [host, agent]
  * @errors: []

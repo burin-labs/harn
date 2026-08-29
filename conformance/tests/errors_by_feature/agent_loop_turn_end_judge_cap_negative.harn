@@ -1,7 +1,7 @@
 import { agent_loop } from "std/agent/loop"
 
 /**
- * `done_judge.max_invocations` caps the per-session veto loop and must be a
+ * `turn_end_condition.max_invocations` caps the per-session veto loop and must be a
  * non-negative integer (0 disables the cap). A negative value is a
  * configuration error, surfaced loudly rather than silently clamped.
  */
@@ -10,6 +10,6 @@ pipeline test(harness: Harness, task: unknown) {
     harness,
     "do work",
     nil,
-    {provider: "mock", loop_until_done: true, max_iterations: 1, done_judge: {max_invocations: -1}},
+    {provider: "mock", loop_until_done: true, max_iterations: 1, turn_end_condition: {max_invocations: -1}},
   )
 }

@@ -1,0 +1,174 @@
+// Turn-end / measurement boundary gate.
+//
+// The product loop's terminal check (`turn_end_condition`, and its LLM-backed
+// turn-end judge) decides one thing: may this turn end? Measurement surfaces
+// decide a different thing: how good was the agent? Those two questions used
+// to share the word "judge", and a shared word is how a grading concern ends
+// up steering a live session, or how a measurement surface starts depending on
+// loop internals it cannot see change.
+//
+// This gate makes the seam structural in both directions:
+//
+//   1. PRODUCT SIDE. `crates/harn-stdlib/src/stdlib/agent/turn_end.harn` may
+//      not name measurement vocabulary at all — not in code, not in prose.
+//   2. MEASUREMENT SIDE. No module under the eval/bench trees may reference
+//      the turn-end module's internals: the `__turn_end_*` private symbols or
+//      the `_turn_end_judge_*` loop-state keys. Reading the public
+//      `result.turn_end_condition` block off a finished session is fine; that
+//      is observation from outside, which is the whole point.
+//
+// The gate refuses to pass vacuously. It fails if the product module is
+// missing or empty, if the measurement file set it scanned is empty, or if its
+// own matcher cannot fire on a known-positive control string. A measured zero
+// is only trustworthy when the same path has just returned a non-zero.
+//
+// Source-tier: reads committed files only.
+
+const PRODUCT_MODULE = "crates/harn-stdlib/src/stdlib/agent/turn_end.harn"
+
+/**
+ * Vocabulary that belongs to measurement, never to the product turn-end path.
+ *
+ * Matched case-insensitively as substrings, so `Rubric`, `rubric_block`, and
+ * `RUBRIC` all trip. Keep this list narrow and specific: a token that also has
+ * an innocent product meaning would make the gate noisy rather than sharp.
+ */
+const MEASUREMENT_TOKENS = [
+  "rubric",
+  "burinbench",
+  "burin_bench",
+  "grader",
+  "a_b_test",
+  "ab_test",
+  "std/cli/eval",
+  "std/eval",
+]
+
+/** Trees that measure finished sessions rather than run them. */
+const MEASUREMENT_GLOBS = [
+  "crates/harn-stdlib/src/stdlib/cli/eval/**/*.harn",
+  "evals/**/*.harn",
+  "bench/**/*.harn",
+]
+
+/**
+ * Turn-end internals a measurement surface may not name.
+ *
+ * Both spellings are private by convention: `__` marks a stdlib-internal
+ * function, and `_turn_end_judge_` marks a loop-state key threaded through
+ * resolved options. Neither is a contract anything outside the loop may hold.
+ */
+const TURN_END_INTERNAL_TOKENS = ["__turn_end_", "_turn_end_judge_"]
+
+/** One violation, with the file and the token that caused it. */
+pub type BoundaryFinding = {kind: string, path: string, token: string}
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+/**
+ * Every token from `tokens` present in `source`, lowercased-substring matched.
+ *
+ * Returns a list rather than a bool so the report can name what tripped
+ * instead of only that something did.
+ */
+pub fn tokens_present(source: string, tokens: list<string>) -> list<string> {
+  const haystack = lower(source)
+  let hits: list<string> = []
+  for token in tokens {
+    if haystack.contains(lower(token)) {
+      hits = hits.appending(token)
+    }
+  }
+  return hits
+}
+
+/** Product-side findings: measurement vocabulary inside the turn-end module. */
+pub fn product_findings(source: string) -> list<BoundaryFinding> {
+  let findings: list<BoundaryFinding> = []
+  for token in tokens_present(source, MEASUREMENT_TOKENS) {
+    findings = findings.appending(
+      {kind: "measurement_vocabulary_in_product_module", path: PRODUCT_MODULE, token: token},
+    )
+  }
+  return findings
+}
+
+/** Measurement-side findings: a measurement module naming turn-end internals. */
+pub fn measurement_findings(path: string, source: string) -> list<BoundaryFinding> {
+  let findings: list<BoundaryFinding> = []
+  for token in tokens_present(source, TURN_END_INTERNAL_TOKENS) {
+    findings = findings.appending(
+      {kind: "measurement_module_reaches_turn_end_internals", path: path, token: token},
+    )
+  }
+  return findings
+}
+
+/**
+ * Negative control: the matcher must fire on a string that plainly violates
+ * each direction. A gate whose matcher silently stopped matching would
+ * otherwise report a clean tree forever.
+ */
+fn matcher_is_live() -> bool {
+  const product_control = product_findings("const system = judge_cfg?.rubric").count > 0
+  const measurement_control = measurement_findings(
+    "evals/control.harn",
+    "__turn_end_judge_due(opts, payload, true)",
+  ).count > 0
+  return product_control && measurement_control
+}
+
+fn main(harness: Harness) -> int {
+  const root = repo_root(harness.fs)
+  if !matcher_is_live() {
+    harness.stdio.eprintln(
+      "::error::turn-end boundary matcher failed its own control strings; the gate would pass vacuously",
+    )
+    return 1
+  }
+  const product_path = path_join(root, PRODUCT_MODULE)
+  if !harness.fs.exists(product_path) {
+    harness.stdio.eprintln(
+      "::error::${PRODUCT_MODULE} is missing; the product turn-end mechanism must live in exactly one module",
+    )
+    return 1
+  }
+  const product_source = harness.fs.read_text(product_path)
+  if trim(product_source) == "" {
+    harness.stdio.eprintln("::error::${PRODUCT_MODULE} is empty; the gate would pass vacuously")
+    return 1
+  }
+  let findings = product_findings(product_source)
+  let scanned = 0
+  for glob in MEASUREMENT_GLOBS {
+    for path in harness.fs.glob("${root}/${glob}").sorted() {
+      scanned = scanned + 1
+      const relative = path[len(root) + 1:]
+      findings = findings + measurement_findings(relative, harness.fs.read_text(path))
+    }
+  }
+  if scanned == 0 {
+    harness.stdio.eprintln(
+      "::error::no measurement modules matched ${to_string(MEASUREMENT_GLOBS.count)} glob(s); the measurement half of the gate measured nothing, not zero violations",
+    )
+    return 1
+  }
+  if findings.count == 0 {
+    harness.stdio.println(
+      "turn-end boundary OK (1 product module, ${to_string(scanned)} measurement module(s) scanned)",
+    )
+    return 0
+  }
+  harness.stdio.eprintln(
+    "::error::turn-end boundary failed (${to_string(findings.count)} finding(s); ${to_string(scanned)} measurement module(s) scanned):",
+  )
+  for finding in findings {
+    harness.stdio.eprintln("  [${finding.kind}] ${finding.path}: `${finding.token}`")
+  }
+  harness.stdio.eprintln(
+    "hint: the product turn-end check answers `may this turn end?` and nothing else. Grading vocabulary does not belong in ${PRODUCT_MODULE}, and a measurement surface reads the public `result.turn_end_condition` block rather than loop internals.",
+  )
+  return 1
+}

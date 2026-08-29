@@ -22,11 +22,14 @@ pub import {
 pub import {
   agent_completion_adjudicator_declared,
   agent_completion_review,
-  agent_done_judge_cap,
   agent_evaluate_completion,
-  agent_has_done_judge,
   agent_verify_completion_judge_cap,
 } from "std/agent/judge"
+pub import {
+  agent_has_turn_end_condition,
+  agent_stall_turn_end_judge_due,
+  agent_turn_end_judge_cap,
+} from "std/agent/turn_end"
 pub import { agent_invoke_llm } from "std/agent/llm_dispatch"
 pub import {
   agent_mcp_admit_bootstrap,
@@ -65,7 +68,6 @@ pub import { agent_skills_match } from "std/agent/skills"
 pub import {
   agent_stall_apply_result,
   agent_stall_clear_current_failure,
-  agent_stall_done_judge_due,
   agent_stall_initial_state,
   agent_stall_inject_feedback,
   agent_stall_no_net_progress,

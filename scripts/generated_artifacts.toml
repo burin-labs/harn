@@ -50,6 +50,7 @@ exempt_checks = [
   "check-harn-syntax-sensitive-scans", # source-pattern guard, not a generated artifact mirror
   "check-agent-guidance",             # canonical agent-guidance topology and principle links
   "check-loud-boundaries",          # loud-boundary invariant registry (#5142), not a generated mirror
+  "check-turn-end-boundary",        # product turn-end / measurement seam gate, not a generated mirror
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
@@ -598,6 +599,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-harn-syntax-sensitive-scans" = "source"
 "check-agent-guidance" = "source"
 "check-loud-boundaries" = "source"
+"check-turn-end-boundary" = "source"
 "check-tree-sitter-keywords" = "source"
 "check-grammar-keywords" = "source"
 "check-grammar-fitness" = "excluded"

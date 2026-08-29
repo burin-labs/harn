@@ -26,12 +26,12 @@ pub import {
   agent_stall_apply_result,
   agent_stall_clear_current_failure,
   agent_stall_current_failure,
-  agent_stall_done_judge_due,
   agent_stall_no_net_progress,
   agent_stall_repair_config,
   agent_stall_repeated_verified_pass,
   agent_stall_verified_write_satisfied,
 } from "std/agent/stall_verification"
+pub import { agent_stall_turn_end_judge_due } from "std/agent/turn_end"
 
 // Keep this public alias on the facade: runtime `pub import` re-exports carry
 // type schemas, but the type checker currently resolves consumer annotations

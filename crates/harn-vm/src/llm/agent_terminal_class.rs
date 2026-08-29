@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn completion_unverified_is_a_policy_failure_without_a_runtime_error() {
         let final_status = "completion_unverified";
-        let stop_reason = "done_judge_cap_reached";
+        let stop_reason = "turn_end_judge_cap_reached";
 
         assert!(
             !session_status_indicates_error(final_status),

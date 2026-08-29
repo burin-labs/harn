@@ -51,7 +51,7 @@ pipeline default(harness: Harness) {
             },
             tool_format: "native",
             loop_until_done: true,
-            done_judge: true,
+            turn_end_condition: true,
             max_iterations: 4,
             session_id: session_id,
           },

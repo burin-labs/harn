@@ -157,7 +157,7 @@ const NATURAL_STOP_REASONS: [&str; 9] = [
     "repeated_verified_pass",
     "required_tools_satisfied",
     "sentinel",
-    "stalled_done_judge",
+    "stalled_turn_end_judge",
     "done",
 ];
 
@@ -498,13 +498,18 @@ mod tests {
             AgentTerminalKind::PolicyBudget,
         );
         assert_eq!(
-            classify_agent_terminal("verify_exhausted", "done_judge_cap_reached", false, None),
+            classify_agent_terminal(
+                "verify_exhausted",
+                "turn_end_judge_cap_reached",
+                false,
+                None
+            ),
             AgentTerminalKind::PolicyBudget,
         );
         assert_eq!(
             classify_agent_terminal(
                 "completion_unverified",
-                "done_judge_cap_reached",
+                "turn_end_judge_cap_reached",
                 false,
                 None,
             ),

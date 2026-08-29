@@ -13,7 +13,7 @@ fn child_tools(harness: Harness, grandchild_session: string) {
         sub_agent_run(
           harness,
           "Grandchild task.",
-          {provider: "mock", session_id: grandchild_session, max_iterations: 1, done_judge: nil},
+          {provider: "mock", session_id: grandchild_session, max_iterations: 1, turn_end_condition: nil},
         )
       },
       parameters: {},
@@ -40,7 +40,7 @@ fn parent_tools(harness: Harness, child_session: string, grandchild_session: str
             tools: child_tools(harness, grandchild_session),
             tool_format: "native",
             max_iterations: 2,
-            done_judge: nil,
+            turn_end_condition: nil,
           },
         )
       },
@@ -91,7 +91,7 @@ pipeline main(harness: Harness) {
           tools: parent_tools(harness, child, grandchild),
           tool_format: "native",
           max_iterations: 2,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
       const child_reminders = transcript_events_by_kind(

@@ -41,7 +41,7 @@ knobs. Every field is optional.
 | `max_vetoes` | int | `3` | Per-session soft-veto budget; `0` disables. |
 | `veto_combine` | `fn(verdicts) -> CompletionVerifyVerdict` | AND-of-oracles | Override how multiple verifier verdicts combine. |
 | `judge` | bool / dict | off | Attach a bounded LLM judge (`true` or a judge-config dict). |
-| `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"done_judge"`). |
+| `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"turn_end_condition"`). |
 | `feedback_templates` | dict | defaults | Override feedback by ladder key; repeated failures support `{attempts}` and `{findings}`. |
 | `escalation_threshold` | int | `3` | Failed-after-write streak required to recommend escalation. |
 | `escalation_target` | string | — | Host routing channel copied onto an escalated verdict and event. |
@@ -111,7 +111,7 @@ judge still runs, so this is judge-only mode, not no-op mode.
 Set `judge` to add an LLM check after the deterministic ladder. `judge: true`
 uses defaults. A dict may set the provider, model, system prompt, timeouts, and
 invocation cap. The judge uses `verify_completion_judge` by default; set
-`judge_seam: "done_judge"` to use that completion trigger instead. The default
+`judge_seam: "turn_end_condition"` to use that completion trigger instead. The default
 cap is 5 calls per session. Past the cap, the loop ends with status
 `completion_unverified`. Set `max_invocations: 0` to disable the cap. Two
 helpers expose the catalog review and the resolved cap:
@@ -119,8 +119,16 @@ helpers expose the catalog review and the resolved cap:
 ```text
 agent_completion_review(llm, opts) -> dict
 agent_verify_completion_judge_cap(judge_cfg, review?) -> int | nil
-agent_done_judge_cap(judge_cfg) -> int | nil
+agent_turn_end_judge_cap(judge_cfg) -> int | nil
 ```
+
+`agent_turn_end_judge_cap` is exported by `std/agent/turn_end`, which owns the
+turn-end condition end to end: whether one is configured, whether its bounded
+judge is due at this boundary, and how its caps and invocation counts are
+resolved. This module holds the product question "may this turn end?" and
+nothing else; `make check-turn-end-boundary` fails if grading vocabulary
+appears in it, or if an eval or bench module reaches into its internals instead
+of reading the public `result.turn_end_condition` block off a finished session.
 
 `agent_completion_review` reads the session model's catalog row and returns
 `{scrutiny: "standard"}` when the row omits `completion_review`. The
@@ -168,7 +176,7 @@ counts.
   stop before the first main model turn.
 - [Completion control](../llm/completion-control.md#completion-gate-agent_completion_gate)
   — the same gate in the context of the loop's other completion seams
-  (`verify_completion`, `verify_completion_judge`, `done_judge`).
+  (`verify_completion`, `verify_completion_judge`, `turn_end_condition`).
 - [Host-supplied facts](./fact-intake-seams.md) — the broader
   Harn-owns-mechanism / host-owns-facts pattern this gate follows.
 - [Agent governors and detectors](./governors.md) — the budget and stall side of

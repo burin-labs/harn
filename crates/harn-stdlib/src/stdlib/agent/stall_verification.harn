@@ -295,46 +295,6 @@ pub fn agent_stall_apply_result(
   return base + {current_failure: current_failure}
 }
 
-pub fn __agent_done_judge_stall_cadence(opts: dict) {
-  const judge = opts?.done_judge
-  if type_of(judge) != "dict" {
-    return nil
-  }
-  const cadence = judge?.cadence
-  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
-    return nil
-  }
-  return cadence
-}
-
-/**
- * agent_stall_done_judge_due decides whether the stall done judge is due.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_stall_done_judge_due(opts, 0, 3)
- */
-pub fn agent_stall_done_judge_due(opts: dict, invocations: int, turn_number: int) -> bool {
-  const cadence = __agent_done_judge_stall_cadence(opts)
-  if cadence == nil {
-    return false
-  }
-  const max_invocations = cadence?.max_invocations
-  if max_invocations != nil && invocations >= max_invocations {
-    return false
-  }
-  const min_iterations = cadence?.min_iterations_before_first
-  if min_iterations != nil && turn_number <= min_iterations {
-    return false
-  }
-  const every = cadence?.every
-  if every != nil && turn_number % every != 0 {
-    return false
-  }
-  return true
-}
-
 // -------------------------------------------------------------------------------------------------
 
 //
