@@ -565,3 +565,225 @@ fn mock_provider_has_an_authoritative_zero_cost() {
         Some(0.0)
     );
 }
+
+// --- Session-observed budget projection -------------------------------------
+//
+// Reproduces a measured defect: a cached, short-answer session was stopped by
+// `total_budget_usd` at roughly half its cap because the pre-call projection
+// priced every input token uncached and assumed the whole output budget was
+// spent. These tests drive the production recording path
+// (`record_llm_usage`) so both the session cost and the observed statistics
+// come from real call ledgers, not from a hand-set counter.
+
+/// One cached haiku-style call: a large cache read, a small uncached
+/// remainder, and a short answer.
+fn cached_call_result() -> crate::llm::api::LlmResult {
+    crate::llm::api::LlmResult {
+        attempts: Default::default(),
+        text_projection: None,
+        text: "ok".to_string(),
+        tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
+        input_tokens: 91,
+        output_tokens: 470,
+        cache_read_tokens: 28_410,
+        cache_write_tokens: 2_468,
+        cache_supported: true,
+        model: "claude-haiku-4-5-20251001".to_string(),
+        provider: "anthropic".to_string(),
+        thinking: None,
+        thinking_summary: None,
+        stop_reason: Some("stop".to_string()),
+        served_fast: false,
+        blocks: Vec::new(),
+        logprobs: Vec::new(),
+        telemetry: crate::llm::api::ProviderTelemetry::default(),
+    }
+}
+
+/// A request whose uncached worst case is ~$0.15 on this model: a long
+/// transcript plus a 16k output budget.
+fn long_transcript_opts(total_budget_usd: f64) -> crate::llm::api::LlmCallOptions {
+    let mut opts = crate::llm::api::options::base_opts("anthropic");
+    opts.model = "claude-haiku-4-5-20251001".to_string();
+    opts.max_tokens = 16_000;
+    opts.system = None;
+    opts.transcript_summary = None;
+    opts.native_tools = None;
+    opts.provider_tools = Vec::new();
+    opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": "token ".repeat(70_000),
+    })];
+    opts.budget = Some(LlmBudgetEnvelope {
+        total_budget_usd: Some(total_budget_usd),
+        ..LlmBudgetEnvelope::default()
+    });
+    opts
+}
+
+fn record_cached_calls(count: usize) {
+    for _ in 0..count {
+        record_llm_usage(&cached_call_result()).expect("recording a completed call");
+    }
+}
+
+fn dict_float(dict: &DictMap, key: &str) -> f64 {
+    match dict.get(key) {
+        Some(VmValue::Float(value)) => *value,
+        other => panic!("expected float at {key}, got {other:?}"),
+    }
+}
+
+fn dict_str(dict: &DictMap, key: &str) -> String {
+    match dict.get(key) {
+        Some(value) => value.display(),
+        None => panic!("missing {key} in the budget error"),
+    }
+}
+
+fn thrown_dict(error: VmError) -> DictMap {
+    match error {
+        VmError::Thrown(VmValue::Dict(dict)) => (*dict).clone(),
+        other => panic!("expected a thrown dict, got {other:?}"),
+    }
+}
+
+#[test]
+fn cached_session_is_not_stopped_by_an_uncached_worst_case_projection() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    // 22 completed calls, cache-heavy, ~470 output tokens each.
+    record_cached_calls(22);
+    let session_cost = peek_total_cost();
+    let observed_mean_call_cost = session_cost / 22.0;
+    assert!(
+        (0.15..0.22).contains(&session_cost),
+        "fixture drifted from the measured session: {session_cost}"
+    );
+
+    let opts = long_transcript_opts(0.33);
+    let projection = project_llm_call_cost(&opts, session_cost);
+
+    assert_eq!(projection.basis, ProjectionBasis::Observed);
+    assert!(
+        projection.costed_output_tokens < projection.projected_output_tokens,
+        "observed mean output must replace the full output budget: {} vs {}",
+        projection.costed_output_tokens,
+        projection.projected_output_tokens
+    );
+    assert!(
+        projection.projected_cost_usd <= observed_mean_call_cost * 3.0,
+        "projection {} is more than 3x the observed mean call cost {}",
+        projection.projected_cost_usd,
+        observed_mean_call_cost
+    );
+
+    // The reader-facing outcome: this session keeps running.
+    check_llm_preflight_budget(&opts).expect("a cached session under its cap must not be stopped");
+    reset_cost_state();
+}
+
+#[test]
+fn first_call_of_a_session_keeps_the_worst_case_projection() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    let opts = long_transcript_opts(0.33);
+    let projection = project_llm_call_cost(&opts, 0.0);
+
+    assert_eq!(projection.basis, ProjectionBasis::WorstCase);
+    assert_eq!(
+        projection.costed_output_tokens,
+        projection.projected_output_tokens
+    );
+    assert_eq!(
+        projection.projected_cost_usd,
+        calculate_cost_for_provider(
+            &opts.provider,
+            &opts.model,
+            projection.projected_input_tokens,
+            projection.projected_output_tokens,
+        ),
+        "with no evidence the projection must stay uncached and full-output"
+    );
+
+    // Negative control for the test above: the same request, priced with no
+    // evidence, is an order of magnitude more expensive.
+    record_cached_calls(22);
+    let session_cost = peek_total_cost();
+    let observed = project_llm_call_cost(&opts, session_cost);
+    assert!(
+        observed.projected_cost_usd * 5.0 < projection.projected_cost_usd,
+        "worst case {} should dwarf the observed projection {}",
+        projection.projected_cost_usd,
+        observed.projected_cost_usd
+    );
+    // The defect this fixes, stated as arithmetic: pricing this call
+    // worst-case would have stopped the measured session at roughly half its
+    // cap, while pricing it from the session's own calls does not.
+    let cap = 0.33;
+    assert!(
+        session_cost + projection.projected_cost_usd > cap,
+        "worst case must overrun the cap: spent {session_cost}, projected {}",
+        projection.projected_cost_usd
+    );
+    assert!(
+        session_cost + observed.projected_cost_usd < cap,
+        "observed projection must fit under the cap: spent {session_cost}, projected {}",
+        observed.projected_cost_usd
+    );
+    assert!(
+        session_cost < cap * 0.6,
+        "the measured session was stopped at about half its cap: {session_cost}"
+    );
+    reset_cost_state();
+}
+
+#[test]
+fn observed_projection_that_exceeds_the_cap_still_stops_and_says_so() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    record_cached_calls(22);
+    let session_cost = peek_total_cost();
+    // A cap only a cent above what the session already spent: even the
+    // observed projection cannot fit.
+    let limit = session_cost + 0.01;
+    let opts = long_transcript_opts(limit);
+    let projection = project_llm_call_cost(&opts, session_cost);
+    assert_eq!(projection.basis, ProjectionBasis::Observed);
+    assert!(projection.projected_cost_usd > 0.01);
+
+    let error = check_llm_preflight_budget(&opts).expect_err("the observed projection must stop");
+    let dict = thrown_dict(error);
+    assert_eq!(dict_str(&dict, "projection_basis"), "observed");
+    assert_eq!(dict_str(&dict, "limit"), "total_budget_usd");
+    let reported_session_cost = dict_float(&dict, "session_cost_usd");
+    let headroom = dict_float(&dict, "headroom_usd");
+    assert!((reported_session_cost - session_cost).abs() < 1e-9);
+    assert!(
+        (headroom - 0.01).abs() < 1e-6,
+        "headroom must be limit minus session cost, got {headroom}"
+    );
+    reset_cost_state();
+}
+
+#[test]
+fn budget_error_reports_the_worst_case_basis_before_any_call() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    let opts = long_transcript_opts(0.01);
+    let error = check_llm_preflight_budget(&opts).expect_err("worst case exceeds a 1c cap");
+    let dict = thrown_dict(error);
+    assert_eq!(dict_str(&dict, "projection_basis"), "worst_case");
+    let headroom = dict_float(&dict, "headroom_usd");
+    assert!((headroom - 0.01).abs() < 1e-9, "unspent cap: {headroom}");
+    reset_cost_state();
+}

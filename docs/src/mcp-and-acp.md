@@ -1227,6 +1227,8 @@ the next model call:
   "sessionCostUsd": 0.69,
   "projectedInputTokens": 12000,
   "projectedOutputTokens": 4000,
+  "projectionBasis": "observed",
+  "headroomUsd": 0.56,
   "provider": "openai",
   "model": "gpt-5.6-sol"
 }
@@ -1235,6 +1237,20 @@ the next model call:
 `limit` is the machine-readable stop reason. Cost and token projections describe
 the rejected call; `sessionCostUsd` is the spend already recorded for the
 session. Fields that do not apply are omitted.
+
+`projectionBasis` says where `projectedCostUsd` came from, and `headroomUsd` is
+the limit minus the spend already recorded. Together they separate two stops a
+host would otherwise render identically:
+
+- `"worst_case"` — no call has completed in this session yet, so every
+  projected input token is priced uncached and the whole output budget is
+  assumed spent.
+- `"observed"` — priced from this session's own completed calls: their
+  cache-hit ratio applied to the projected input, and their mean output tokens
+  per call (never above the output budget).
+
+A stop with a large `headroomUsd` means an estimate for the next call crossed
+the ceiling, not that the session spent it.
 
 ### Queued user messages and reminders during agent execution
 
