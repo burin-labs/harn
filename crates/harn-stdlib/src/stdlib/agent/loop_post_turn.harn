@@ -6,6 +6,7 @@ import {
   command_ledger_release,
   command_ledger_should_hold,
 } from "std/agent/command_ledger"
+import { CompletionProgressState, completion_progress_update } from "std/agent/completion_progress"
 import {
   AgentLoopBudget,
   AgentLoopBudgetDecision,
@@ -98,6 +99,7 @@ pub type AgentLoopPostTurnContext = {
 pub type AgentLoopPostTurnState = {
   budget_decisions: list<AgentLoopBudgetDecision>,
   consecutive_text_only: int,
+  completion_progress: CompletionProgressState?,
   current_max: int,
   done_judge_invocations: int,
   done_judge_vetoes: int,
@@ -352,6 +354,7 @@ pub fn agent_loop_post_turn_transition(
         + {
           _done_judge_due: false,
           _done_judge_invocations: next.done_judge_invocations,
+          _completion_progress: next.completion_progress,
           _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
           _feedback_history: next.feedback_history,
         },
@@ -363,6 +366,14 @@ pub fn agent_loop_post_turn_transition(
     verdict_record = reverdict
     next = next
       + {
+        completion_progress: completion_progress_update(
+          next.completion_progress,
+          {
+            done_judge_invoked: reverdict.receipt.invoked.done_judge,
+            directive_reason: reverdict.receipt.reason,
+            next: reverdict.receipt.completion_progress,
+          },
+        ),
         feedback_history: reverdict.feedback_history ?? next.feedback_history,
         verify_completion_judge_invocations: next.verify_completion_judge_invocations
           + __completion_judge_hit(reverdict),
@@ -409,6 +420,7 @@ pub fn agent_loop_post_turn_transition(
           + {
             _done_judge_due: outcome?.done_judge_due ?? true,
             _done_judge_invocations: next.done_judge_invocations,
+            _completion_progress: next.completion_progress,
             _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
             _feedback_history: next.feedback_history,
           },
@@ -420,6 +432,14 @@ pub fn agent_loop_post_turn_transition(
       verdict_record = verdict
       next = next
         + {
+          completion_progress: completion_progress_update(
+            next.completion_progress,
+            {
+              done_judge_invoked: verdict.receipt.invoked.done_judge,
+              directive_reason: verdict.receipt.reason,
+              next: verdict.receipt.completion_progress,
+            },
+          ),
           feedback_history: verdict.feedback_history ?? next.feedback_history,
           done_judge_invocations: next.done_judge_invocations + __done_judge_hit(verdict),
           verify_completion_judge_invocations: next.verify_completion_judge_invocations

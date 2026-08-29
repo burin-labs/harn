@@ -1,0 +1,295 @@
+// std/agent/completion_progress — typed no-evidence-progress completion state.
+import {
+  CompletionEvidencePacket,
+  CompletionEvidenceProjectionStats,
+  CompletionEvidenceSnapshot,
+  completion_evidence_progress_id,
+} from "std/agent/completion_evidence"
+import {
+  CompletionRequirementGap,
+  CompletionRequirementReport,
+  completion_requirement_contract,
+  completion_requirement_contract_id,
+  completion_requirement_gap,
+  completion_requirement_gap_has_output_only_evidence,
+} from "std/agent/completion_requirements"
+import { CompletionJudgeAdmission, CompletionVerificationState } from "std/agent/judge_internals"
+
+pub type CompletionJudgeAction = "accept" | "continue"
+
+pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
+
+pub type CompletionJudgeInvocations = {
+  deterministic: bool,
+  verify_completion_judge: bool,
+  done_judge: bool,
+}
+
+pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
+
+pub type CompletionFeedbackComposition = {messages: list}
+
+pub type CompletionGapProgress = {
+  gap: CompletionRequirementGap,
+  evidence_progress_id: string,
+  repair_delivery: CompletionFeedbackDelivery,
+  requirements: CompletionRequirementReport,
+}
+
+pub type CompletionProgressState = {
+  schema: "harn.completion_progress.v1",
+  contract_id: string,
+  gap: CompletionGapProgress,
+}
+
+pub type CompletionProgressObservation = {
+  done_judge_invoked: bool,
+  vetoed: bool,
+  feedback_delivery: CompletionFeedbackDelivery,
+  requirements: CompletionRequirementReport?,
+  requirement_contract: unknown,
+  evidence: CompletionEvidencePacket,
+}
+
+pub type CompletionProgressUpdate = {
+  done_judge_invoked: bool,
+  directive_reason: string,
+  next: CompletionProgressState?,
+}
+
+pub type CompletionDirectiveReceipt = {
+  schema: "harn.completion_directive_receipt.v1",
+  evidence_id: string,
+  action: CompletionDirectiveAction,
+  trigger: string,
+  source: string,
+  outcome: string,
+  reason: string,
+  invoked: CompletionJudgeInvocations,
+  feedback_delivery: CompletionFeedbackDelivery,
+  projection: CompletionEvidenceProjectionStats,
+  pending_tool_batch_effect_count: int,
+  converted_from?: string?,
+  gap_class?: string?,
+  verification?: CompletionVerificationState?,
+  admission?: CompletionJudgeAdmission?,
+  checkpoint?: dict?,
+  requirements?: CompletionRequirementReport?,
+  completion_progress?: CompletionProgressState?,
+}
+
+pub type CompletionDirective = {
+  action: CompletionDirectiveAction,
+  evidence_id: string,
+  feedback?: string?,
+  repair?: string?,
+  receipt: CompletionDirectiveReceipt,
+  feedback_history: dict,
+}
+
+pub type CompletionDirectiveInput = {
+  verdict: dict,
+  payload: CompletionEvidenceSnapshot,
+  opts: dict,
+  invoked: CompletionJudgeInvocations,
+  completion_judge_cap_reached: bool,
+  done_judge_cap_reached: bool,
+  feedback_composition: CompletionFeedbackComposition?,
+  feedback_history: dict,
+  defer_feedback: bool,
+}
+
+/**
+ * Record one typed completion gap and the evidence adjudicated with it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_progress_observe(
+  observation: CompletionProgressObservation,
+) -> CompletionProgressState? {
+  if !observation.done_judge_invoked || !observation.vetoed || observation.requirements == nil {
+    return nil
+  }
+  const requirements = observation.requirements
+  const gap = completion_requirement_gap(requirements)
+  const contract = completion_requirement_contract(observation.requirement_contract)
+  const contract_id = completion_requirement_contract_id(contract)
+  if gap == nil || contract_id == nil {
+    return nil
+  }
+  return {
+    schema: "harn.completion_progress.v1",
+    contract_id: contract_id,
+    gap: {
+      gap: gap,
+      evidence_progress_id: completion_evidence_progress_id(
+        observation.evidence,
+        completion_requirement_gap_has_output_only_evidence(gap, contract),
+      ),
+      repair_delivery: observation.feedback_delivery,
+      requirements: requirements,
+    },
+  }
+}
+
+/**
+ * Whether the prior delivered repair produced no evidence relevant to its pending rows.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_progress_repeated_gap(
+  prior: CompletionProgressState?,
+  raw_contract: unknown,
+  evidence: CompletionEvidencePacket,
+) -> bool {
+  if prior == nil || prior.schema != "harn.completion_progress.v1"
+    || prior.gap.repair_delivery != "delivered" {
+    return false
+  }
+  const contract = completion_requirement_contract(raw_contract)
+  const contract_id = completion_requirement_contract_id(contract)
+  if contract_id == nil || contract_id != prior.contract_id {
+    return false
+  }
+  return completion_evidence_progress_id(
+    evidence,
+    completion_requirement_gap_has_output_only_evidence(prior.gap.gap, contract),
+  )
+    == prior.gap.evidence_progress_id
+}
+
+/**
+ * Return the fail-closed policy verdict, or nil when evidence advanced.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_progress_terminal_verdict(
+  prior: CompletionProgressState?,
+  raw_contract: unknown,
+  evidence: CompletionEvidencePacket,
+) -> dict? {
+  if prior == nil || !completion_progress_repeated_gap(prior, raw_contract, evidence) {
+    return nil
+  }
+  return {
+    vetoed: false,
+    verdict: "unavailable",
+    source: "policy",
+    judge_outcome: "repeated_gap_no_progress",
+    reason: "done_judge_repeated_gap_no_progress",
+    terminal_judge_reason: "done_judge_repeated_gap_no_progress",
+    terminal_evidence_preserved: true,
+    requirement_report: prior.gap.requirements,
+    completion_progress: prior,
+  }
+}
+
+/**
+ * Project a directive onto the loop's single typed completion-progress state.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_progress_update(
+  prior: CompletionProgressState?,
+  update: CompletionProgressUpdate,
+) -> CompletionProgressState? {
+  if update.directive_reason == "done_judge_repeated_gap_no_progress" {
+    return update.next
+  }
+  if !update.done_judge_invoked {
+    return prior
+  }
+  return update.next
+}
+
+/**
+ * Seal one completion policy evaluation into its durable directive receipt.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_directive(input: CompletionDirectiveInput) -> CompletionDirective {
+  const verdict = input.verdict
+  const payload = input.payload
+  const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
+  const reason = if terminal_reason != "" {
+    terminal_reason
+  } else if input.completion_judge_cap_reached {
+    "completion_judge_cap_reached"
+  } else if input.done_judge_cap_reached {
+    "done_judge_cap_reached"
+  } else {
+    to_string(verdict?.reason ?? verdict?.reasoning ?? "")
+  }
+  const action = if terminal_reason != ""
+    || input.completion_judge_cap_reached
+    || input.done_judge_cap_reached {
+    "stop_unverified"
+  } else if verdict.vetoed {
+    "continue"
+  } else {
+    "accept"
+  }
+  const has_feedback = verdict.vetoed && trim(to_string(verdict?.feedback ?? "")) != ""
+  const feedback_delivery = if len(input.feedback_composition?.messages ?? []) > 0 {
+    "delivered"
+  } else if has_feedback && input.defer_feedback {
+    "deferred"
+  } else {
+    "none"
+  }
+  const raw_judge = input.opts?.done_judge
+  const raw_contract = if type_of(raw_judge) == "dict" {
+    raw_judge?.requirement_contract
+  } else {
+    nil
+  }
+  const completion_progress = verdict?.completion_progress
+    ?? completion_progress_observe(
+      {
+        done_judge_invoked: input.invoked.done_judge,
+        vetoed: verdict.vetoed,
+        feedback_delivery: feedback_delivery,
+        requirements: verdict?.requirement_report,
+        requirement_contract: raw_contract,
+        evidence: payload.judge_evidence_packet,
+      },
+    )
+  const receipt: CompletionDirectiveReceipt = {
+    schema: "harn.completion_directive_receipt.v1",
+    evidence_id: payload.evidence_id,
+    action: action,
+    trigger: verdict?.trigger ?? payload.stop_reason,
+    source: verdict?.source ?? "policy",
+    outcome: verdict?.judge_outcome ?? verdict?.verdict ?? action,
+    reason: reason,
+    invoked: input.invoked,
+    feedback_delivery: feedback_delivery,
+    projection: payload.judge_evidence_projection,
+    pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
+    converted_from: verdict?.converted_from,
+    gap_class: verdict?.gap_class,
+    verification: payload.verification,
+    admission: verdict?.admission,
+    checkpoint: verdict?.typed_checkpoint,
+    requirements: verdict?.requirement_report,
+    completion_progress: completion_progress,
+  }
+  return {
+    action: action,
+    evidence_id: payload.evidence_id,
+    feedback: verdict?.feedback,
+    repair: verdict?.next_step,
+    receipt: receipt,
+    feedback_history: input.feedback_history,
+  }
+}

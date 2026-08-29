@@ -4,7 +4,6 @@ import {
   CompletionEvidenceAction,
   CompletionEvidenceIssue,
   CompletionEvidenceProjection,
-  CompletionEvidenceProjectionStats,
   CompletionEvidenceRole,
   CompletionEvidenceSelection,
   CompletionEvidenceSnapshot,
@@ -12,6 +11,19 @@ import {
   completion_evidence_id,
   completion_requirement_evidence_packet,
 } from "std/agent/completion_evidence"
+pub import {
+  CompletionDirective,
+  CompletionDirectiveAction,
+  CompletionDirectiveReceipt,
+  CompletionFeedbackDelivery,
+  CompletionJudgeAction,
+  CompletionJudgeInvocations,
+  CompletionProgressState,
+} from "std/agent/completion_progress"
+import {
+  completion_directive,
+  completion_progress_terminal_verdict,
+} from "std/agent/completion_progress"
 import {
   CompletionRequirementEvidencePacket,
   CompletionRequirementEvidenceRecord,
@@ -69,55 +81,6 @@ const __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX = -3
 
 const __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT = 12
 
-/** Action the completion-judge model is allowed to return. */
-pub type CompletionJudgeAction = "accept" | "continue"
-
-/** Runtime completion decision after deadline and policy enforcement. */
-pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
-
-pub type CompletionJudgeInvocations = {
-  deterministic: bool,
-  verify_completion_judge: bool,
-  done_judge: bool,
-}
-
-pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
-
-pub type CompletionDirectiveReceipt = {
-  schema: "harn.completion_directive_receipt.v1",
-  evidence_id: string,
-  action: CompletionDirectiveAction,
-  trigger: string,
-  source: string,
-  outcome: string,
-  reason: string,
-  invoked: CompletionJudgeInvocations,
-  feedback_delivery: CompletionFeedbackDelivery,
-  projection: CompletionEvidenceProjectionStats,
-  pending_tool_batch_effect_count: int,
-  // The gap the model judge named, and — when an adjudication was overruled —
-  // WHAT overruled it. `trigger` names whichever adjudicator ANSWERED, not the
-  // boundary that asked, so a reader counting conversions must count
-  // `converted_from` and never filter by `trigger`. The completion gate also
-  // writes `converted_from`, but only ever a bare ladder reason
-  // (`failed_verification`), never an arbitration name, so the two never alias.
-  converted_from?: string?,
-  gap_class?: string?,
-  verification?: CompletionVerificationState?,
-  admission?: CompletionJudgeAdmission?,
-  checkpoint?: dict?,
-  requirements?: CompletionRequirementReport?,
-}
-
-pub type CompletionDirective = {
-  action: CompletionDirectiveAction,
-  evidence_id: string,
-  feedback?: string?,
-  repair?: string?,
-  receipt: CompletionDirectiveReceipt,
-  feedback_history: dict,
-}
-
 /**
  * Decoded completion decision. The schema admits `done` and `continue` only;
  * an out-of-contract value is preserved verbatim so telemetry can show what
@@ -153,6 +116,7 @@ type CompletionStageVerdict = {
   admission?: CompletionJudgeAdmission?,
   typed_checkpoint?: dict?,
   requirement_report?: CompletionRequirementReport?,
+  completion_progress?: CompletionProgressState?,
 }
 
 /** Stable identity for the two model-judge positions in the completion plan. */
@@ -413,6 +377,19 @@ fn __judge_lifecycle_action(
     evidence_index: lifecycle.evidence_index,
     tool_call_id: __judge_clip_evidence(lifecycle.tool_call_id, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
     name: descriptor.name,
+    action_digest: "sha256:"
+      + sha256(
+        json_stringify(
+          {
+            name: lifecycle.name,
+            args: lifecycle.args,
+            status: lifecycle.status,
+            results: lifecycle.results.map(
+              { matched -> {outcome: matched.outcome, data: matched.data} },
+            ),
+          },
+        ),
+      ),
     semantics: descriptor,
     lifecycle_status: lifecycle.status,
     arguments: __judge_clip_evidence(lifecycle.args, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
@@ -1113,73 +1090,6 @@ pub fn agent_done_contract(options: dict = {}) -> dict {
   )
 }
 
-fn __judge_directive(
-  verdict: dict,
-  payload: dict,
-  invoked: any,
-  completion_judge_cap_reached: any,
-  done_judge_cap_reached: any,
-  feedback_composition: any,
-  feedback_history: dict,
-  defer_feedback: bool,
-) -> CompletionDirective {
-  const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
-  const reason = if terminal_reason != "" {
-    terminal_reason
-  } else if completion_judge_cap_reached {
-    "completion_judge_cap_reached"
-  } else if done_judge_cap_reached {
-    "done_judge_cap_reached"
-  } else {
-    to_string(verdict?.reason ?? verdict?.reasoning ?? "")
-  }
-  const action = if terminal_reason != ""
-    || completion_judge_cap_reached
-    || done_judge_cap_reached {
-    "stop_unverified"
-  } else if verdict.vetoed {
-    "continue"
-  } else {
-    "accept"
-  }
-  const has_feedback = verdict.vetoed
-    && trim(to_string(verdict?.feedback ?? "")) != ""
-  const feedback_delivery = if len(feedback_composition?.messages ?? []) > 0 {
-    "delivered"
-  } else if has_feedback && defer_feedback {
-    "deferred"
-  } else {
-    "none"
-  }
-  const receipt = {
-    schema: "harn.completion_directive_receipt.v1",
-    evidence_id: payload.evidence_id,
-    action: action,
-    trigger: verdict?.trigger ?? payload.stop_reason,
-    source: verdict?.source ?? "policy",
-    outcome: verdict?.judge_outcome ?? verdict?.verdict ?? action,
-    reason: reason,
-    invoked: invoked,
-    feedback_delivery: feedback_delivery,
-    projection: payload.judge_evidence_projection,
-    pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
-    converted_from: verdict?.converted_from,
-    gap_class: verdict?.gap_class,
-    verification: payload.verification,
-    admission: verdict?.admission,
-    checkpoint: verdict?.typed_checkpoint,
-    requirements: verdict?.requirement_report,
-  }
-  return {
-    action: action,
-    evidence_id: payload.evidence_id,
-    feedback: verdict?.feedback,
-    repair: verdict?.next_step,
-    receipt: receipt,
-    feedback_history: feedback_history,
-  }
-}
-
 fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
   if !due {
     return false
@@ -1358,6 +1268,20 @@ fn __completion_policy_run_stage(
         }
     }
     ModelJudge(slot, config, trigger, prior_invocations, max_invocations) -> {
+      match slot {
+        Completion() -> {
+          const repeated_gap = completion_progress_terminal_verdict(
+            opts?._completion_progress,
+            config.requirement_contract,
+            payload.judge_evidence_packet,
+          )
+          if repeated_gap != nil {
+            return evaluation + {verdict: repeated_gap}
+          }
+        }
+        Verification() -> {
+        }
+      }
       if max_invocations != nil && prior_invocations >= max_invocations {
         return __completion_policy_mark_cap(evaluation, slot)
       }
@@ -1479,15 +1403,18 @@ pub fn agent_evaluate_completion(
       {history: opts?._feedback_history ?? {}, knowledge_state: evaluated.knowledge_state},
     )
   }
-  const directive = __judge_directive(
-    verdict,
-    evaluated,
-    evaluation.invoked,
-    evaluation.verification_judge_cap_reached,
-    evaluation.completion_judge_cap_reached,
-    feedback_composition,
-    feedback_composition?.history ?? opts?._feedback_history ?? {},
-    opts?._defer_judge_feedback ?? false,
+  const directive = completion_directive(
+    {
+      verdict: verdict,
+      payload: evaluated,
+      opts: opts,
+      invoked: evaluation.invoked,
+      completion_judge_cap_reached: evaluation.verification_judge_cap_reached,
+      done_judge_cap_reached: evaluation.completion_judge_cap_reached,
+      feedback_composition: feedback_composition,
+      feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
+      defer_feedback: opts?._defer_judge_feedback ?? false,
+    },
   )
   agent_emit_event(harness.agent, session.session_id, "typed_checkpoint", directive.receipt)
   return directive

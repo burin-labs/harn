@@ -1,6 +1,7 @@
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { CompletionVerificationState } from "std/agent/judge_internals"
+import { CompletionRequirementEvidenceRole } from "std/agent/options_types"
 import { AgentTranscriptToolLifecycleStatus } from "std/agent/transcript"
 
 const COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT = 4500
@@ -24,6 +25,7 @@ pub type CompletionEvidenceAction = {
   evidence_index: int,
   tool_call_id: string,
   name: string,
+  action_digest: string,
   semantics: CompletionToolSemantics,
   lifecycle_status: AgentTranscriptToolLifecycleStatus,
   arguments: string,
@@ -106,6 +108,17 @@ pub type CompletionEvidenceSnapshot = {
   verification?: CompletionVerificationState?,
 }
 
+pub type CompletionEvidenceProgressRecord = {
+  role: CompletionRequirementEvidenceRole,
+  supports_completion: bool,
+  action_digest?: string,
+  evidence_digest?: string,
+  measurement?: string,
+  artifact_count?: int,
+  artifact_set_digest?: string,
+  output_digest?: string,
+}
+
 fn completion_evidence_clip(value: string) -> string {
   if len(value) <= COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT {
     return value
@@ -166,6 +179,16 @@ pub fn completion_requirement_evidence_packet(
           summary: "Deterministic verification observed `" + verification.observed + "`.",
           representative_artifact_ids: [],
           measurement: verification.observed,
+          evidence_digest: "sha256:"
+            + sha256(
+              json_stringify(
+                {
+                  oracle_expected: verification.oracle_expected,
+                  command: verification.command,
+                  observed: verification.observed,
+                },
+              ),
+            ),
         },
       ]
   }
@@ -203,4 +226,78 @@ pub fn completion_evidence_id(
         },
       ),
     )
+}
+
+/**
+ * Stable identity for evidence that can advance a typed requirement.
+ *
+ * Generated summaries and representative samples are display projections, not
+ * progress. Final prose participates only when a pending requirement declares
+ * assistant output as its sole evidence role.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_evidence_progress_id(
+  packet: CompletionEvidencePacket,
+  include_output_only_evidence: bool,
+) -> string {
+  let records: list<CompletionEvidenceProgressRecord> = []
+  for action in packet.actions {
+    const role = if action.semantics.evidence_role == "mutation" {
+      "mutation_summary"
+    } else if action.semantics.evidence_role == "verification" {
+      "deterministic_verification"
+    } else {
+      nil
+    }
+    if role != nil {
+      records = records
+        + [
+          {
+            role: role,
+            supports_completion: action.lifecycle_status == "completed" && !action.has_error_result,
+            action_digest: action.action_digest,
+          },
+        ]
+    }
+  }
+  for record in packet.requirement_evidence {
+    if record.role == "assistant_output" {
+      if include_output_only_evidence {
+        records = records
+          + [
+            {
+              role: record.role,
+              supports_completion: record.supports_completion,
+              output_digest: "sha256:" + sha256(record.summary),
+            },
+          ]
+      }
+    } else if record.role == "deterministic_verification" {
+      records = records
+        + [
+          {
+            role: record.role,
+            supports_completion: record.supports_completion,
+            measurement: record.measurement,
+            evidence_digest: record.evidence_digest,
+          },
+        ]
+    } else if record.role == "mutation_summary" {
+      records = records
+        + [
+          {
+            role: record.role,
+            supports_completion: record.supports_completion,
+            measurement: record.measurement,
+            artifact_count: record.artifact_count,
+            artifact_set_digest: record.artifact_set_digest,
+          },
+        ]
+    }
+  }
+  return "sha256:"
+    + sha256(json_stringify(records.sorted_by({ record -> json_stringify(record) })))
 }

@@ -4,6 +4,7 @@ import {
   command_ledger_new,
   command_wait_normalize,
 } from "std/agent/command_ledger"
+import { CompletionProgressState, completion_progress_update } from "std/agent/completion_progress"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
 import "std/agent/loop_finalize"
@@ -43,6 +44,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let verify_completion_judge_invocations = 0
     let verify_completion_judge_vetoes = 0
     let feedback_history = {}
+    let completion_progress: CompletionProgressState? = nil
     let step_judge_attempts = 0
     let structural_validator_attempts = 0
     let last_turn_parse_dropped = false
@@ -645,7 +647,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             verify_completion_judge_invocations,
             done_judge_invocations,
           )
-            + {_feedback_history: feedback_history}
+            + {_completion_progress: completion_progress, _feedback_history: feedback_history}
           const stall_verdict = agent_evaluate_completion(
             harness,
             session,
@@ -657,7 +659,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           )
           done_judge_invocations += __done_judge_hit(stall_verdict)
           verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
-          feedback_history = stall_verdict?.feedback_history ?? feedback_history
+          feedback_history = stall_verdict.feedback_history ?? feedback_history
+          completion_progress = completion_progress_update(
+            completion_progress,
+            {
+              done_judge_invoked: stall_verdict.receipt.invoked.done_judge,
+              directive_reason: stall_verdict.receipt.reason,
+              next: stall_verdict.receipt.completion_progress,
+            },
+          )
           if stall_verdict.action == "stop_unverified" {
             __close_stall_calls(
               harness.agent,
@@ -865,7 +875,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             verify_completion_judge_invocations,
             done_judge_invocations,
           )
-            + {_feedback_history: feedback_history}
+            + {_completion_progress: completion_progress, _feedback_history: feedback_history}
           if trim(visible_text) != ""
             && agent_completion_adjudicator_declared(stall_arbitration_opts, "stalled") {
             const governor_verdict = agent_evaluate_completion(
@@ -878,7 +888,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             )
             done_judge_invocations += __done_judge_hit(governor_verdict)
             verify_completion_judge_invocations += __completion_judge_hit(governor_verdict)
-            feedback_history = governor_verdict?.feedback_history ?? feedback_history
+            feedback_history = governor_verdict.feedback_history ?? feedback_history
+            completion_progress = completion_progress_update(
+              completion_progress,
+              {
+                done_judge_invoked: governor_verdict.receipt.invoked.done_judge,
+                directive_reason: governor_verdict.receipt.reason,
+                next: governor_verdict.receipt.completion_progress,
+              },
+            )
             // A judge that hit its invocation cap is marked capped without ever
             // being asked, so a plan alone is not proof that anyone answered.
             // Only an adjudicator that actually ran may convert a stop into a
@@ -1295,6 +1313,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           },
           {
             budget_decisions: budget_decisions,
+            completion_progress: completion_progress,
             consecutive_text_only: consecutive_text_only,
             current_max: current_max,
             done_judge_invocations: done_judge_invocations,
@@ -1317,6 +1336,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         )
         const post_turn_state = post_turn_transition.state
         budget_decisions = post_turn_state.budget_decisions
+        completion_progress = post_turn_state.completion_progress
         consecutive_text_only = post_turn_state.consecutive_text_only
         current_max = post_turn_state.current_max
         done_judge_invocations = post_turn_state.done_judge_invocations
@@ -1368,6 +1388,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           successful_tools_seen: successful_tools_seen,
           rejected_tools_seen: rejected_tools_seen,
           feedback_history: feedback_history,
+          completion_progress: completion_progress,
         },
       )
       opts = terminal_boundary.opts
@@ -1385,6 +1406,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       terminal_callback_continues = terminal_boundary.terminal_callback_continues
       terminal_error = terminal_boundary.terminal_error
       feedback_history = terminal_boundary.feedback_history ?? feedback_history
+      completion_progress = terminal_boundary.completion_progress
       if terminal_boundary.action == "continue" {
         continue
       }

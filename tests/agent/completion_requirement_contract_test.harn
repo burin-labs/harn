@@ -1,4 +1,13 @@
-import { completion_requirement_evidence_packet } from "std/agent/completion_evidence"
+import {
+  completion_evidence_progress_id,
+  completion_requirement_evidence_packet,
+} from "std/agent/completion_evidence"
+import {
+  CompletionFeedbackDelivery,
+  completion_progress_observe,
+  completion_progress_terminal_verdict,
+  completion_progress_update,
+} from "std/agent/completion_progress"
 // Run: harn test tests/agent/completion_requirement_contract_test.harn
 import {
   CompletionRequirementEvidencePacket,
@@ -13,7 +22,7 @@ import {
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { llm_done, with_llm_script } from "std/testing"
+import { llm_done, llm_text, with_llm_script } from "std/testing"
 
 fn requirement_contract() -> CompletionRequirementContract {
   return {
@@ -39,6 +48,30 @@ fn artifact_contract() -> CompletionRequirementContract {
         requirement_id: "artifact",
         name: "Create the requested artifact.",
         evidence_roles: ["mutation_summary"],
+      },
+    ],
+  }
+}
+
+fn verification_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "verified",
+        name: "Verify the requested behavior.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+}
+
+fn output_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "answer",
+        name: "Provide the requested answer.",
+        evidence_roles: ["assistant_output"],
       },
     ],
   }
@@ -96,6 +129,123 @@ fn edit_tools() {
       parameters: {content: {type: "string", required: true}},
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
     },
+  )
+}
+
+fn action_messages(
+  name: string,
+  args: dict,
+  data: dict,
+  id: string = "action-1",
+  result_text: string = "ok",
+) -> list {
+  return [
+    {
+      role: "assistant",
+      content: "",
+      _harn: {kind: "assistant", tool_calls: [{id: id, name: name, arguments: args}]},
+    },
+    {
+      role: "user",
+      content: result_text,
+      _harn: {kind: "tool_result", tool_call_id: id, tool_name: name, outcome: "ok", data: data},
+    },
+  ]
+}
+
+pipeline test_progress_identity_tracks_typed_action_changes_without_volatile_indices(
+  harness: Harness,
+  task: unknown,
+) {
+  const edit_opts = {
+    tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}],
+  }
+  const first_edit = action_messages(
+    "edit",
+    {path: "src/artifact.harn", content: "first"},
+    {mutation_status: "applied", changed_paths: ["src/artifact.harn"]},
+  )
+  const identical_edit = action_messages(
+    "edit",
+    {path: "src/artifact.harn", content: "first"},
+    {mutation_status: "applied", changed_paths: ["src/artifact.harn"]},
+    "action-2",
+    "different display prose",
+  )
+  const changed_edit = action_messages(
+    "edit",
+    {path: "src/artifact.harn", content: "second"},
+    {mutation_status: "applied", changed_paths: ["src/artifact.harn"]},
+    "action-3",
+  )
+  const first_edit_id = completion_evidence_progress_id(
+    __judge_evidence_projection(first_edit, edit_opts).packet,
+    false,
+  )
+  assert_eq(
+    completion_evidence_progress_id(
+      __judge_evidence_projection(first_edit + identical_edit, edit_opts).packet,
+      false,
+    ),
+    first_edit_id,
+    "tool-call identity, evidence position, and result prose are not progress",
+  )
+  assert_ne(
+    completion_evidence_progress_id(
+      __judge_evidence_projection(first_edit + changed_edit, edit_opts).packet,
+      false,
+    ),
+    first_edit_id,
+    "changed typed arguments on the same artifact are progress",
+  )
+  const verify_opts = {
+    tools: [
+      {
+        name: "verify",
+        annotations: {
+          kind: "execute",
+          side_effect_level: "process_exec",
+          completion_evidence_role: "verification",
+        },
+      },
+    ],
+  }
+  const unit_id = completion_evidence_progress_id(
+    __judge_evidence_projection(
+      action_messages("verify", {command: "unit"}, {passed: 11, failed: 0}),
+      verify_opts,
+    ).packet,
+    false,
+  )
+  const integration_id = completion_evidence_progress_id(
+    __judge_evidence_projection(
+      action_messages("verify", {command: "integration"}, {passed: 11, failed: 0}),
+      verify_opts,
+    ).packet,
+    false,
+  )
+  assert_ne(integration_id, unit_id, "a stronger typed verifier action is progress")
+  const empty_packet = __judge_evidence_projection([], {}).packet
+  const deterministic_unit_id = completion_evidence_progress_id(
+    completion_requirement_evidence_packet(
+      empty_packet,
+      "",
+      {oracle_expected: true, command: "unit", observed: "passed"},
+    ),
+    false,
+  )
+  const deterministic_integration_id = completion_evidence_progress_id(
+    completion_requirement_evidence_packet(
+      empty_packet,
+      "",
+      {oracle_expected: true, command: "integration", observed: "passed"},
+    ),
+    false,
+  )
+  assert_ne(
+    deterministic_integration_id,
+    deterministic_unit_id,
+    "deterministic closure includes the stable oracle command, not only its outcome",
   )
 }
 
@@ -358,6 +508,297 @@ pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
       const receipts = completion_receipts(captured.events)
       assert_eq(receipts[len(receipts) - 1].action, "accept")
       assert(receipts[len(receipts) - 1].requirements.complete)
+    },
+  )
+}
+
+pipeline test_repeated_done_gap_without_evidence_progress_stops_before_second_judge(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "Run deterministic verification before finishing.",
+            requirement_report: [{requirement_id: "verified", met: false, evidence_refs: []}],
+          },
+        ),
+      },
+      llm_text("I changed only my explanation. ##DONE##"),
+    ],
+    { ->
+      const session = "requirement-gap-no-progress-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish only after deterministic verification passes.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 3,
+            done_judge: {
+              provider: "mock",
+              max_invocations: 3,
+              requirement_contract: verification_contract(),
+            },
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 3, "the second judge call is cut off")
+      assert_eq(captured.result.status, "completion_unverified")
+      assert_eq(captured.result.stop_reason, "done_judge_repeated_gap_no_progress")
+      const receipts = completion_receipts(captured.events)
+      assert_eq(len(receipts), 2)
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].feedback_delivery, "delivered")
+      assert(receipts[0].invoked.done_judge)
+      assert_eq(receipts[1].action, "stop_unverified")
+      assert_eq(receipts[1].reason, "done_judge_repeated_gap_no_progress")
+      assert(!receipts[1].invoked.done_judge)
+      assert_eq(
+        receipts[1].completion_progress.gap.gap.gap_id,
+        receipts[0].completion_progress.gap.gap.gap_id,
+      )
+      assert_eq(
+        receipts[1].completion_progress.gap.evidence_progress_id,
+        receipts[0].completion_progress.gap.evidence_progress_id,
+      )
+    },
+  )
+}
+
+pipeline test_done_judge_cap_remains_absolute_after_structured_progress(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "Create the requested artifact before finishing.",
+            requirement_report: [{requirement_id: "artifact", met: false, evidence_refs: []}],
+          },
+        ),
+      },
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      llm_done(),
+    ],
+    { ->
+      const session = "requirement-gap-hard-cap-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Create the requested artifact.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: edit_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 4,
+            done_judge: {
+              provider: "mock",
+              max_invocations: 1,
+              requirement_contract: artifact_contract(),
+            },
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 4, "the hard cap suppresses a second judge call")
+      assert_eq(captured.result.status, "completion_unverified")
+      assert_eq(captured.result.stop_reason, "done_judge_cap_reached")
+      const receipts = completion_receipts(captured.events)
+      assert_eq(len(receipts), 2)
+      assert(receipts[0].invoked.done_judge)
+      assert(!receipts[1].invoked.done_judge)
+      assert_eq(receipts[1].reason, "done_judge_cap_reached")
+    },
+  )
+}
+
+pipeline test_undelivered_feedback_does_not_arm_repeated_gap_cutoff(
+  harness: Harness,
+  task: unknown,
+) {
+  const contract = verification_contract()
+  const packet = __judge_evidence_projection([], {}).packet
+  const requirements = completion_requirement_report(
+    contract,
+    [{requirement_id: "verified", met: false, evidence_refs: []}],
+    packet,
+  )
+  const undelivered: list<CompletionFeedbackDelivery> = ["none", "deferred"]
+  for delivery in undelivered {
+    const observed = completion_progress_observe(
+      {
+        done_judge_invoked: true,
+        vetoed: true,
+        feedback_delivery: delivery,
+        requirements: requirements,
+        requirement_contract: contract,
+        evidence: packet,
+      },
+    )
+    const state = completion_progress_update(
+      nil,
+      {done_judge_invoked: true, directive_reason: "", next: observed},
+    )
+    assert_eq(state?.gap?.repair_delivery, delivery)
+    assert_eq(
+      completion_progress_terminal_verdict(state, contract, packet),
+      nil,
+      "undelivered repair feedback cannot arm the cutoff",
+    )
+  }
+}
+
+pipeline test_changed_structured_evidence_allows_second_done_judge(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "Create the requested artifact before finishing.",
+            requirement_report: [{requirement_id: "artifact", met: false, evidence_refs: []}],
+          },
+        ),
+      },
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The requested artifact is present.",
+            requirement_report: [{requirement_id: "artifact", met: true, evidence_refs: [-3]}],
+          },
+        ),
+      },
+    ],
+    { ->
+      const session = "requirement-gap-mutation-progress-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Create the requested artifact.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: edit_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 4,
+            done_judge: {
+              provider: "mock",
+              max_invocations: 3,
+              requirement_contract: artifact_contract(),
+            },
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 5)
+      assert_eq(captured.result.status, "done")
+      const receipts = completion_receipts(captured.events)
+      assert_eq(len(receipts), 2)
+      assert(receipts[0].invoked.done_judge)
+      assert(receipts[1].invoked.done_judge)
+      assert_eq(receipts[1].action, "accept")
+    },
+  )
+}
+
+pipeline test_changed_output_only_evidence_allows_second_done_judge(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Draft answer. ##DONE##"),
+      {
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "Correct the answer before finishing.",
+            requirement_report: [{requirement_id: "answer", met: false, evidence_refs: []}],
+          },
+        ),
+      },
+      llm_text("Corrected final answer. ##DONE##"),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The corrected answer addresses the request.",
+            requirement_report: [{requirement_id: "answer", met: true, evidence_refs: [-1]}],
+          },
+        ),
+      },
+    ],
+    { ->
+      const session = "requirement-gap-output-progress-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Provide the requested answer.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 3,
+            done_judge: {
+              provider: "mock",
+              max_invocations: 3,
+              requirement_contract: output_contract(),
+            },
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 4)
+      assert_eq(captured.result.status, "done")
+      const receipts = completion_receipts(captured.events)
+      assert_eq(len(receipts), 2)
+      assert(receipts[0].invoked.done_judge)
+      assert(receipts[1].invoked.done_judge)
+      assert_eq(receipts[1].action, "accept")
     },
   )
 }

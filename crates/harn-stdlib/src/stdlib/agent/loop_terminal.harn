@@ -74,6 +74,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
         + {
           _done_judge_due: false,
           _done_judge_invocations: state.done_judge_invocations,
+          _completion_progress: state.completion_progress,
           _verify_completion_judge_invocations: verify_completion_judge_invocations,
           _feedback_history: feedback_history,
         },
@@ -81,7 +82,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       "",
       state.iteration,
     )
-    feedback_history = terminal_verdict?.feedback_history ?? feedback_history
+    feedback_history = terminal_verdict.feedback_history ?? feedback_history
     verify_completion_judge_invocations += __completion_judge_hit(terminal_verdict)
     if terminal_verdict.action == "stop_unverified" {
       return state

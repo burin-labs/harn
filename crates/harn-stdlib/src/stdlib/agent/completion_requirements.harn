@@ -30,6 +30,17 @@ pub type CompletionRequirementReport = {
   rows: list<CompletionRequirementStatus>,
 }
 
+pub type CompletionPendingRequirementRow = {
+  requirement_id: string,
+  status: CompletionRequirementRowStatus,
+}
+
+pub type CompletionRequirementGap = {
+  schema: "harn.completion_requirement_gap.v1",
+  gap_id: string,
+  pending_rows: list<CompletionPendingRequirementRow>,
+}
+
 /** One typed, bounded fact a requirement assessment may cite. */
 pub type CompletionRequirementEvidenceRecord = {
   evidence_index: int,
@@ -39,6 +50,7 @@ pub type CompletionRequirementEvidenceRecord = {
   representative_artifact_ids: list<string>,
   artifact_count?: int,
   artifact_set_digest?: string,
+  evidence_digest?: string,
   measurement?: string,
 }
 
@@ -107,6 +119,89 @@ pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementC
     return nil
   }
   return {requirements: requirements}
+}
+
+/**
+ * Stable identity for the semantic contract, excluding display names.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_requirement_contract_id(contract: CompletionRequirementContract?) -> string? {
+  if contract == nil || len(contract.requirements) == 0 {
+    return nil
+  }
+  let rows = []
+  for requirement in contract.requirements {
+    rows = rows
+      + [
+        {
+          requirement_id: requirement.requirement_id,
+          evidence_roles:
+            completion_requirement_evidence_roles(requirement.evidence_roles).sorted(),
+        },
+      ]
+  }
+  return "sha256:" + sha256(json_stringify(rows.sorted_by({ row -> row.requirement_id })))
+}
+
+/**
+ * Stable identity for the typed requirement rows that remain unresolved.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_requirement_gap(
+  report: CompletionRequirementReport?,
+) -> CompletionRequirementGap? {
+  if report == nil || report.complete {
+    return nil
+  }
+  let pending_rows: list<CompletionPendingRequirementRow> = []
+  for row in report.rows {
+    if !row.met {
+      pending_rows = pending_rows
+        + [{requirement_id: row.requirement_id, status: row.status}]
+    }
+  }
+  if len(pending_rows) == 0 {
+    return nil
+  }
+  pending_rows = pending_rows.sorted_by({ row -> row.requirement_id })
+  return {
+    schema: "harn.completion_requirement_gap.v1",
+    gap_id: "sha256:" + sha256(json_stringify(pending_rows)),
+    pending_rows: pending_rows,
+  }
+}
+
+/**
+ * Whether changing final assistant output can advance any pending row by itself.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_requirement_gap_has_output_only_evidence(
+  gap: CompletionRequirementGap,
+  contract: CompletionRequirementContract?,
+) -> bool {
+  if contract == nil {
+    return false
+  }
+  for pending in gap.pending_rows {
+    for requirement in contract.requirements {
+      if requirement.requirement_id == pending.requirement_id {
+        const roles = completion_requirement_evidence_roles(requirement.evidence_roles)
+        if len(roles) == 1 && roles[0] == "assistant_output" {
+          return true
+        }
+      }
+    }
+  }
+  return false
 }
 
 /**
