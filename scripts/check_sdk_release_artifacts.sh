@@ -9,7 +9,9 @@
 #                   harn-sdk-python.tar.gz and harn-sdk-typescript.tar.gz
 set -euo pipefail
 
-REQUIRED_LANGUAGES=(python typescript)
+# Quote language names so the python-boundary scan does not treat this as a
+# `python` invocation (it matches `(` + `python`).
+REQUIRED_LANGUAGES=("python" "typescript")
 MANIFEST_NAME="harn-sdk-generation.txt"
 
 usage() {
