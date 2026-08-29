@@ -1,0 +1,28 @@
+import { workflow_result_text } from "std/agent/result_text"
+import { graphql_execute_operation, graphql_operation } from "std/graphql"
+import { audio_content, document_content, image_content, video_content } from "std/llm/media"
+
+pipeline test_public_result_and_media_inputs_match_their_implemented_branches(harness: Harness) {
+  assert_eq(workflow_result_text("ready"), "ready")
+  assert_eq(workflow_result_text({visible_text: "shown"}), "shown")
+  const image = {type: "image", media_type: "image/png", base64: "AAAA"}
+  const video = {type: "video", media_type: "video/mp4", url: "https://example.test/v.mp4"}
+  const document = {type: "document", media_type: "application/pdf", base64: "JVBER"}
+  const audio = {type: "audio", media_type: "audio/mpeg", url: "https://example.test/a.mp3"}
+  assert_eq(image_content(harness.fs, image), image)
+  assert_eq(video_content(harness.fs, video), video)
+  assert_eq(document_content(harness.fs, document), document)
+  assert_eq(audio_content(harness.fs, audio), audio)
+  const url_image = image_content(harness.fs, "https://example.test/pic.png")
+  assert_eq(url_image.type, "image")
+  assert_eq(url_image.url, "https://example.test/pic.png")
+}
+
+pipeline test_graphql_accepts_a_bare_endpoint(harness: Harness) {
+  const endpoint = "https://example.test/graphql"
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock("POST", endpoint, {status: 200, body: "{\"data\":{\"ping\":\"pong\"}}"})
+  const operation = graphql_operation("Smoke", "query Smoke { ping }")
+  const response = graphql_execute_operation(harness.net, endpoint, operation)
+  assert_eq(response.result, "pong")
+}

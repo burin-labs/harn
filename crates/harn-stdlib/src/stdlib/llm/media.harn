@@ -79,7 +79,7 @@ pub fn text_content(text: any) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn image_content(fs: HarnessFs, source: string?, options: dict? = nil) {
+pub fn image_content(fs: HarnessFs, source: string | dict, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -101,7 +101,7 @@ pub fn image_content(fs: HarnessFs, source: string?, options: dict? = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn video_content(fs: HarnessFs, source: string?, options: dict? = nil) {
+pub fn video_content(fs: HarnessFs, source: string | dict, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -120,7 +120,7 @@ pub fn video_content(fs: HarnessFs, source: string?, options: dict? = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn document_content(fs: HarnessFs, source: string?, options: dict? = nil) {
+pub fn document_content(fs: HarnessFs, source: string | dict, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -143,7 +143,7 @@ pub fn document_content(fs: HarnessFs, source: string?, options: dict? = nil) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn audio_content(fs: HarnessFs, source: string?, options: dict? = nil) {
+pub fn audio_content(fs: HarnessFs, source: string | dict, options: dict? = nil) {
   if type_of(source) == "dict" {
     return source
   }
@@ -165,7 +165,12 @@ pub fn audio_content(fs: HarnessFs, source: string?, options: dict? = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn image_message(fs: HarnessFs, source: string?, prompt: string = "", options: dict? = nil) {
+pub fn image_message(
+  fs: HarnessFs,
+  source: string | dict,
+  prompt: string = "",
+  options: dict? = nil,
+) {
   const text = if prompt == nil || prompt == "" {
     "Analyze this image."
   } else {
@@ -180,7 +185,12 @@ pub fn image_message(fs: HarnessFs, source: string?, prompt: string = "", option
  * @effects: []
  * @errors: []
  */
-pub fn video_message(fs: HarnessFs, source: string?, prompt: string = "", options: dict? = nil) {
+pub fn video_message(
+  fs: HarnessFs,
+  source: string | dict,
+  prompt: string = "",
+  options: dict? = nil,
+) {
   const text = if prompt == nil || prompt == "" {
     "Analyze this video."
   } else {

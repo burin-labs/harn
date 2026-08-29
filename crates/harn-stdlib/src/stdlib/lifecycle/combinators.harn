@@ -66,7 +66,7 @@ fn __summarize_result(value: any) -> string {
   return kind
 }
 
-fn __stringify_error(err: string) -> string {
+fn __stringify_error(err: any) -> string {
   if err == nil {
     return ""
   }

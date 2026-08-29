@@ -333,7 +333,7 @@ pub fn workflow_stages(spec: any = nil) {
   return workflow_graph({name: cfg?.name ?? "stages", entry: entry, nodes: nodes, edges: edges})
 }
 
-fn __failover_disposition(value: dict, fallback_action: string) {
+fn __failover_disposition(value: any, fallback_action: string) {
   if value == nil {
     return {action: fallback_action}
   }
