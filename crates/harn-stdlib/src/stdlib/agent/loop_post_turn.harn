@@ -28,6 +28,7 @@ import {
   __next_progress_count,
   __next_text_only_count,
   __sync_tool_search_state,
+  __turn_end_judge_hit,
   __turn_made_edit,
   agent_stage,
 } from "std/agent/loop_turn_options"
@@ -46,7 +47,6 @@ import {
 } from "std/agent/stall_verification"
 import { agent_stance_post_turn } from "std/agent/stance"
 import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
-import { __turn_end_judge_hit } from "std/agent/turn_end"
 
 pub type AgentLoopPostTurnAction = "break" | "continue"
 

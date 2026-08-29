@@ -180,7 +180,7 @@ pub fn agent_turn_end_judge_cap(judge_cfg: TurnEndConditionConfig) -> int? {
  * @api_stability: experimental
  * @example: __agent_turn_end_judge_stall_cadence(opts)
  */
-pub fn __agent_turn_end_judge_stall_cadence(opts: dict) {
+pub fn __agent_turn_end_judge_stall_cadence(opts: dict) -> dict? {
   const judge = opts?.turn_end_condition
   if type_of(judge) != "dict" {
     return nil

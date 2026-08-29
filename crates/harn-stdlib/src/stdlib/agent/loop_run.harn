@@ -20,7 +20,6 @@ import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
-import "std/agent/turn_end"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {

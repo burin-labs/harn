@@ -4,6 +4,7 @@ import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
 import { AgentStallState } from "std/agent/stall_types"
+pub import { __turn_end_judge_hit } from "std/agent/turn_end"
 
 pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
 
