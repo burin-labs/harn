@@ -125,6 +125,25 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         .collect();
     assert!(event_kinds.iter().any(|kind| kind == "sub_agent_start"));
     assert!(event_kinds.iter().any(|kind| kind == "sub_agent_result"));
+    let start_metadata = parent_events
+        .iter()
+        .filter_map(|event| event.as_dict())
+        .find(|event| event.get("kind").map(VmValue::display).as_deref() == Some("sub_agent_start"))
+        .and_then(|event| event.get("metadata"))
+        .and_then(VmValue::as_dict)
+        .expect("sub-agent start metadata");
+    assert_eq!(
+        start_metadata.get("child_session_id").map(VmValue::display),
+        Some("child-subagent".to_string())
+    );
+    assert_eq!(
+        start_metadata.get("child_run_id").map(VmValue::display),
+        Some(child_run_id.clone())
+    );
+    assert_eq!(
+        start_metadata.get("parent_run_id").map(VmValue::display),
+        Some("agent_run_parent_subagent".to_string())
+    );
 
     crate::agent_events::flush_session_sinks(&parent)
         .await

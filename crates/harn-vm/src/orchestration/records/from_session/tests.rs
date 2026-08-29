@@ -105,6 +105,26 @@ fn iteration_start(iteration: i64) -> AppendEvent {
     )
 }
 
+fn run_started() -> AppendEvent {
+    AppendEvent::new(
+        custom("agent_run_started"),
+        transcript_event("agent_run_started", json!({"lifecycle_state": "running"})),
+    )
+}
+
+fn sub_agent_start(child_session_id: &str, child_run_id: &str) -> AppendEvent {
+    AppendEvent::new(
+        custom("sub_agent_start"),
+        transcript_event(
+            "sub_agent_start",
+            json!({
+                "child_session_id": child_session_id,
+                "child_run_id": child_run_id,
+            }),
+        ),
+    )
+}
+
 fn terminal(final_status: &str, stop_reason: &str) -> AppendEvent {
     let kind = crate::agent_events::classify_agent_terminal(
         final_status,
@@ -639,6 +659,67 @@ async fn child_sessions_project_as_child_runs_from_the_stores_own_lineage() {
 }
 
 #[tokio::test]
+async fn reused_session_projects_only_the_latest_invocations_children() {
+    let store = MemorySessionStore::default();
+    let parent = store
+        .create(CreateSession::default())
+        .await
+        .expect("create parent");
+    let old_child = store
+        .create(CreateSession {
+            parent_session_id: Some(parent.id.clone()),
+            persona: Some("old-worker".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create old child");
+    let current_child = store
+        .create(CreateSession {
+            parent_session_id: Some(parent.id.clone()),
+            persona: Some("current-worker".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create current child");
+
+    store
+        .append(&parent.id, run_started())
+        .await
+        .expect("append old start");
+    store
+        .append(
+            &parent.id,
+            sub_agent_start(&old_child.id, "agent_run_old_child"),
+        )
+        .await
+        .expect("append old child start");
+    store
+        .append(&parent.id, run_started())
+        .await
+        .expect("append current start");
+    store
+        .append(
+            &parent.id,
+            sub_agent_start(&current_child.id, "agent_run_current_child"),
+        )
+        .await
+        .expect("append current child start");
+
+    let run = project_run_record_from_session(&store, &parent.id)
+        .await
+        .expect("project");
+    assert_eq!(run.child_runs.len(), 1);
+    assert_eq!(
+        run.child_runs[0].session_id.as_deref(),
+        Some(current_child.id.as_str())
+    );
+    assert_eq!(
+        run.child_runs[0].run_id.as_deref(),
+        Some("agent_run_current_child")
+    );
+}
+
+#[tokio::test]
 async fn a_loop_that_ended_in_error_projects_as_a_failed_run() {
     let store = MemorySessionStore::default();
     let meta = store
@@ -756,14 +837,213 @@ async fn a_still_running_session_projects_as_running_rather_than_complete() {
         .await
         .expect("append");
 
-    let run = project_run_record_from_session(&store, &meta.id)
-        .await
-        .expect("project");
+    let run = project_run_record_from_session_with_writer_observation(
+        &store,
+        &meta.id,
+        Some(RunWriterObservation::Active),
+    )
+    .await
+    .expect("project");
     assert_eq!(run.status, "running");
     assert!(run.finished_at.is_none());
     assert!(
         run.usage.is_none(),
         "a run with no LLM calls reports no usage rather than a zeroed envelope"
+    );
+}
+
+#[tokio::test]
+async fn an_open_session_without_an_observable_writer_is_not_reported_as_running() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, iteration_start(1))
+        .await
+        .expect("append");
+
+    let run = project_run_record_from_session_with_writer_observation(
+        &store,
+        &meta.id,
+        Some(RunWriterObservation::NotObserved),
+    )
+    .await
+    .expect("project");
+    assert_eq!(run.status, "unknown");
+    assert_eq!(
+        run.metadata["projected_from"]["writer_observation"],
+        "not_observed"
+    );
+    assert!(run.metadata["projected_from"]["last_observed_at"].is_string());
+}
+
+#[tokio::test]
+async fn a_durable_writer_lease_distinguishes_a_live_writer_from_an_abandoned_run() {
+    let root = tempfile::tempdir().expect("temporary lease root");
+    let state_dir = crate::stdlib::session_store::SessionStoreDir::under_root(root.path());
+    std::fs::create_dir_all(state_dir.as_path()).expect("create state dir");
+    let store = crate::stdlib::session_store::open_canonical_store(root.path())
+        .expect("open canonical store");
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let lease_path =
+        crate::agent_session_journal::run_writer_lease_path(state_dir.as_path(), &meta.id);
+    std::fs::create_dir_all(lease_path.parent().expect("lease parent")).expect("create lease dir");
+    let writer = std::fs::File::create(&lease_path).expect("create writer lease");
+    writer.lock().expect("hold writer lease");
+    store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append run start");
+
+    let live_path = root.path().join("live-run.json");
+    materialize_session_run_record(root.path(), &meta.id, Some(&live_path))
+        .await
+        .expect("materialize live writer");
+    let live = super::super::persistence::load_run_record(&live_path).expect("load live record");
+    assert_eq!(live.status, "running");
+    assert_eq!(
+        live.metadata["projected_from"]["writer_observation"],
+        "active"
+    );
+
+    drop(writer);
+    let abandoned_path = root.path().join("abandoned-run.json");
+    materialize_session_run_record(root.path(), &meta.id, Some(&abandoned_path))
+        .await
+        .expect("materialize abandoned writer");
+    let abandoned =
+        super::super::persistence::load_run_record(&abandoned_path).expect("load abandoned record");
+    assert_eq!(abandoned.status, "unknown");
+    assert_eq!(
+        abandoned.metadata["projected_from"]["writer_observation"],
+        "not_observed"
+    );
+}
+
+#[tokio::test]
+async fn a_reused_session_projects_only_its_latest_run_invocation() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession {
+            title: Some("stable session title".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create session");
+    for event in [
+        run_started(),
+        user_message("old task"),
+        iteration_start(7),
+        llm_call(100, 50, 0.25),
+        tool_call("old-call", "old-tool"),
+        terminal("done", "natural"),
+    ] {
+        store.append(&meta.id, event).await.expect("append event");
+    }
+    let current_start = store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append current start");
+    for event in [
+        user_message("current task"),
+        iteration_start(1),
+        llm_call(3, 2, 0.01),
+        tool_call("current-call", "current-tool"),
+    ] {
+        store.append(&meta.id, event).await.expect("append event");
+    }
+    let current_terminal = store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append current terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project latest invocation");
+    assert_eq!(run.task, "current task");
+    assert_eq!(run.started_at, current_start.ts);
+    assert_eq!(
+        run.finished_at.as_deref(),
+        Some(current_terminal.ts.as_str())
+    );
+    assert_eq!(run.metadata["iterations"], 1);
+    assert_eq!(run.usage.as_ref().expect("usage").call_count, 1);
+    assert_eq!(run.usage.as_ref().expect("usage").input_tokens, 3);
+    assert_eq!(run.tool_recordings.len(), 1);
+    assert_eq!(run.tool_recordings[0].tool_name, "current-tool");
+    assert_eq!(run.trace_spans.len(), 1);
+}
+
+#[tokio::test]
+async fn terminal_run_clock_does_not_move_with_later_session_metadata() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let start = store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append start");
+    let finish = store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append terminal");
+    let events = drain_events(&store, &meta.id).await.expect("read events");
+    let mut mutated_meta = store.describe(&meta.id).await.expect("describe");
+    mutated_meta.updated_at_ms = finish.ts_ms.saturating_add(600_000);
+    mutated_meta.updated_at = "2026-12-31T23:59:59Z".to_string();
+
+    let run = assemble(
+        mutated_meta,
+        SessionFold::from_events(&events),
+        Vec::new(),
+        meta.id.clone(),
+        Some(RunWriterObservation::NotObserved),
+    )
+    .expect("assemble");
+    assert_eq!(run.started_at, start.ts);
+    assert_eq!(run.finished_at.as_deref(), Some(finish.ts.as_str()));
+    assert_eq!(
+        run.metadata["wall_clock_ms"].as_u64(),
+        super::super::time::timestamp_delta_ms(&start.ts, &finish.ts)
+    );
+    assert_eq!(
+        run.metadata["run_clock"],
+        json!({
+            "started_at_source": "agent_run_started",
+            "finished_at_source": "agent_run_terminal",
+        })
+    );
+}
+
+#[tokio::test]
+async fn legacy_session_timestamps_do_not_masquerade_as_a_measured_run() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert!(run.metadata["wall_clock_ms"].is_null());
+    assert_eq!(
+        run.metadata["run_clock"],
+        json!({
+            "started_at_source": "session_created",
+            "finished_at_source": "agent_run_terminal",
+        })
     );
 }
 

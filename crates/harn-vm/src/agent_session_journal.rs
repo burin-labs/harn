@@ -6,6 +6,9 @@
 //! observability-only: a filtered or failed sink can never alter durability.
 
 use std::collections::VecDeque;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use harn_session_store::{
     AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
@@ -51,6 +54,7 @@ pub(crate) struct JournalState {
     config: JournalConfig,
     pending: VecDeque<TranscriptMutation>,
     first_event_id: Option<u64>,
+    _writer_lease: RunWriterLease,
 }
 
 impl JournalState {
@@ -85,6 +89,63 @@ impl JournalState {
         self.first_event_id.get_or_insert(event_id);
         self.pop_front();
     }
+}
+
+/// Process-owned proof that one durable session still has a writer.
+///
+/// The file handle holds an OS advisory lock for exactly the journal lifetime.
+/// A reader in another process can try the same lock: contention proves a live
+/// writer, while an unlocked file proves only that no writer is observable.
+struct RunWriterLease {
+    _file: File,
+}
+
+impl RunWriterLease {
+    fn acquire(store_dir: &Path, session_id: &str) -> Result<Self, VmError> {
+        let path = run_writer_lease_path(store_dir, session_id);
+        let lease_dir = path
+            .parent()
+            .expect("run writer lease path always has a parent");
+        std::fs::create_dir_all(lease_dir).map_err(|error| {
+            VmError::Runtime(format!(
+                "agent transcript journal: cannot create writer lease directory {}: {error}",
+                lease_dir.display()
+            ))
+        })?;
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|error| {
+                VmError::Runtime(format!(
+                    "agent transcript journal: cannot open writer lease {}: {error}",
+                    path.display()
+                ))
+            })?;
+        harn_flock::lock_with_deadline(
+            &file,
+            &path,
+            harn_flock::LockMode::Exclusive,
+            Duration::ZERO,
+        )
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+        Ok(Self { _file: file })
+    }
+}
+
+/// Stable lease location for one durable session.
+///
+/// The session, rather than the invocation, is the lock key because two
+/// processes must never write different invocations into the same transcript
+/// concurrently. Lease files remain after normal exit so unlocking and
+/// unlinking cannot race a successor that has already acquired the same path.
+pub(crate) fn run_writer_lease_path(store_dir: &Path, session_id: &str) -> PathBuf {
+    let identity = blake3::hash(session_id.as_bytes()).to_hex();
+    store_dir
+        .join("agent-run-writers")
+        .join(format!("{identity}.lock"))
 }
 
 #[derive(Default)]
@@ -136,6 +197,7 @@ pub(crate) async fn prepare(
         session_type,
     )
     .await?;
+    let writer_lease = RunWriterLease::acquire(state_dir.as_path(), session_id)?;
     let events = session_store::read_all_events(&store, session_id).await?;
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
@@ -148,6 +210,7 @@ pub(crate) async fn prepare(
             },
             pending: VecDeque::new(),
             first_event_id: None,
+            _writer_lease: writer_lease,
         },
     })
 }
@@ -704,6 +767,7 @@ mod tests {
         let events = session_store::read_all_events(&store, session_id)
             .await
             .expect("read canonical events");
+
         assert_eq!(events.len(), 2);
         let identity = events[0].identity().expect("identity");
         assert_eq!(identity.get(EventIdentityField::RunId), Some("run-first"));
@@ -833,7 +897,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_run_identity_cannot_be_overwritten() {
+    async fn a_second_writer_cannot_prepare_the_same_session_until_the_first_exits() {
         crate::agent_sessions::reset_session_store();
         let root = tempfile::tempdir().expect("temp root");
         let options = options(root.path());
@@ -846,22 +910,31 @@ mod tests {
         )
         .await
         .expect("prepare first journal");
-        let second = prepare(
+        let error = match prepare(
             &session_id,
             &options,
             "run-second".to_string(),
             "turn-second".to_string(),
         )
         .await
-        .expect("prepare second journal");
+        {
+            Ok(_) => panic!("a live writer must exclude a second process before either appends"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("agent-run-writers"));
 
         crate::agent_sessions::install_journal(&session_id, first.state)
             .expect("install first journal");
-        let error = crate::agent_sessions::install_journal(&session_id, second.state)
-            .expect_err("a second active run must not replace the first run identity");
-        assert!(error.to_string().contains("already has an active journal"));
-
         crate::agent_sessions::reset_session_store();
+
+        prepare(
+            &session_id,
+            &options,
+            "run-second".to_string(),
+            "turn-second".to_string(),
+        )
+        .await
+        .expect("the next invocation can acquire the released session lease");
     }
 
     #[test]
@@ -1076,6 +1149,18 @@ pipeline main(harness: Harness, task: unknown) {{
             .await
             .expect("read canonical events");
 
+        let run_started = events
+            .iter()
+            .find(|event| {
+                matches!(
+                    &event.kind,
+                    SessionEventKind::Custom { custom_type }
+                        if custom_type == "agent_run_started"
+                )
+            })
+            .expect("run start must be durable");
+        assert_eq!(run_started.event_id, expected_first_event_id);
+
         let user_message = events
             .iter()
             .find(|event| {
@@ -1158,6 +1243,15 @@ pipeline main(harness: Harness, task: unknown) {{
         let projected = crate::orchestration::project_run_record_from_session(&store, session_id)
             .await
             .expect("project live session");
+        assert_eq!(projected.started_at, run_started.ts);
+        assert_eq!(
+            projected.metadata["run_clock"]["started_at_source"],
+            "agent_run_started"
+        );
+        assert_eq!(
+            projected.metadata["run_clock"]["finished_at_source"],
+            "agent_run_terminal"
+        );
         assert_eq!(projected.tool_recordings.len(), 1);
         assert!(
             projected.tool_recordings[0].duration_ms.is_some(),

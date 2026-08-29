@@ -10,6 +10,22 @@ fn annotate_subagent_session(options: &mut DictMap, name: &str, parent_session_i
     options.put_str("session_type", "subagent");
 }
 
+pub(super) fn sub_agent_start_event(spec: &SubAgentRunSpec) -> VmValue {
+    crate::llm::helpers::transcript_event(
+        "sub_agent_start",
+        "system",
+        "internal",
+        &spec.task,
+        Some(serde_json::json!({
+            "name": spec.name,
+            "child_session_id": spec.session_id,
+            "child_run_id": spec.run_id,
+            "parent_run_id": spec.parent_run_id,
+            "task": spec.task,
+        })),
+    )
+}
+
 pub(super) fn initialize_run_identity(
     options: &mut DictMap,
     name: &str,

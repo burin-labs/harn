@@ -1,5 +1,89 @@
 use super::*;
 
+/// Append a transcript event to the session without mutating its message list.
+/// Used for orchestration-side lineage events (sub-agent spawn/completion,
+/// workflow hooks, etc.) that should survive persistence and replay without
+/// becoming model-visible conversation.
+pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_event")?;
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let Some(state) = sessions.get_mut(id) else {
+            return Err(format!(
+                "agent_session_append_event: unknown session id '{id}'"
+            ));
+        };
+        append_event_to_state(state, event, "append_event")
+    })
+}
+
+/// Queue an orchestration fact for durable session storage without projecting
+/// it into the caller-visible transcript.
+///
+/// Lifecycle boundaries belong in the persisted event stream so run readers
+/// can measure them, but they are not conversational transcript events and
+/// must not reorder the system prompt or model-visible history.
+pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_journal_event")?;
+    let journal_event = crate::llm::helpers::vm_value_to_json(&event);
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let Some(state) = sessions.get_mut(id) else {
+            return Err(format!(
+                "agent_session_append_journal_event: unknown session id '{id}'"
+            ));
+        };
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            journal_event,
+        );
+        Ok(())
+    })
+}
+
+fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
+    let Some(event_dict) = event.as_dict() else {
+        return Err(format!("{action}: event must be a dict"));
+    };
+    if !matches!(event_dict.get("kind"), Some(VmValue::String(_))) {
+        return Err(format!("{action}: event must have a string `kind`"));
+    }
+    Ok(())
+}
+
+pub(crate) fn append_event_to_state(
+    state: &mut SessionState,
+    event: VmValue,
+    action: &str,
+) -> Result<(), String> {
+    let journal_event = crate::llm::helpers::vm_value_to_json(&event);
+    let dict = state
+        .transcript
+        .as_dict()
+        .cloned()
+        .unwrap_or_else(crate::value::DictMap::new);
+    let mut events: Vec<VmValue> = match dict.get("events") {
+        Some(VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => dict
+            .get("messages")
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list.iter().cloned().collect::<Vec<_>>()),
+                _ => None,
+            })
+            .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
+            .unwrap_or_default(),
+    };
+    events.push(event);
+    let mut next = dict;
+    next.insert(
+        crate::value::intern_key("events"),
+        VmValue::List(std::sync::Arc::new(events)),
+    );
+    apply_transcript_with_budget(state, VmValue::dict(next), action)?;
+    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
+    Ok(())
+}
+
 pub fn messages_json(id: &str) -> Vec<serde_json::Value> {
     SESSIONS.with(|s| {
         let map = s.borrow();

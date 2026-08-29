@@ -81,6 +81,12 @@ pub(crate) const CHECKPOINT_KIND: &str = "/transcript_event/metadata/kind";
 /// Zero-or-one-based iteration counter carried by a `loop_checkpoint`.
 pub(crate) const ITERATION: &str = "/transcript_event/metadata/iteration";
 
+/// Durable child identity recorded when a parent invocation starts a sub-agent.
+/// The session id locates the child's transcript; the run id identifies the
+/// exact child invocation represented by the parent's projected run record.
+pub(crate) const CHILD_SESSION_ID: &str = "/transcript_event/metadata/child_session_id";
+pub(crate) const CHILD_RUN_ID: &str = "/transcript_event/metadata/child_run_id";
+
 /// The common transcript metadata object carried by audit events.
 pub(crate) const TRANSCRIPT_METADATA: &str = "/transcript_event/metadata";
 /// Canonical plan document and mutation carried by a `plan_document` event.

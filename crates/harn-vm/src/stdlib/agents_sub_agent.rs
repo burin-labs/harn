@@ -495,20 +495,6 @@ fn seed_child_reminder_propagation(spec: &SubAgentRunSpec) -> Result<(), VmError
     Ok(())
 }
 
-fn sub_agent_start_event(spec: &SubAgentRunSpec) -> VmValue {
-    crate::llm::helpers::transcript_event(
-        "sub_agent_start",
-        "system",
-        "internal",
-        &spec.task,
-        Some(serde_json::json!({
-            "name": spec.name,
-            "child_session_id": spec.session_id,
-            "task": spec.task,
-        })),
-    )
-}
-
 fn sub_agent_result_event(
     spec: &SubAgentRunSpec,
     ok: bool,
@@ -834,7 +820,7 @@ pub(super) async fn execute_sub_agent(
     seed_child_reminder_propagation(&spec)?;
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
-        sub_agent_start_event(&spec),
+        lifecycle::sub_agent_start_event(&spec),
     );
 
     let mut loop_options = spec.options.clone();
