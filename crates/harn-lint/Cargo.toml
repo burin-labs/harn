@@ -9,19 +9,19 @@ homepage.workspace = true
 description = "Linter for the Harn programming language"
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.120" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.120" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.120" }
-harn-parser = { path = "../harn-parser", version = "=0.10.120" }
-harn-glob = { path = "../harn-glob", version = "=0.10.120" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.121-dev" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.121-dev" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.121-dev" }
+harn-parser = { path = "../harn-parser", version = "=0.10.121-dev" }
+harn-glob = { path = "../harn-glob", version = "=0.10.121-dev" }
 # Lean by default so in-process embedders (Burin TUI, #6416) can drop
 # postgres/sqlx and other `harn-vm/full` families without Cargo unifying them
 # back on through the lint/rules edge.
-harn-vm = { path = "../harn-vm", version = "=0.10.120", default-features = false }
-harn-modules = { path = "../harn-modules", version = "=0.10.120" }
+harn-vm = { path = "../harn-vm", version = "=0.10.121-dev", default-features = false }
+harn-modules = { path = "../harn-modules", version = "=0.10.121-dev" }
 # The rule engine, run as lint rules through the registry (#2849). Default
 # features off keeps the build lean — only the `ast` matching surface is needed.
-harn-rules = { path = "../harn-rules", version = "=0.10.120" }
+harn-rules = { path = "../harn-rules", version = "=0.10.121-dev" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9"
