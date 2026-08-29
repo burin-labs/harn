@@ -766,7 +766,7 @@ async fn a_still_running_session_projects_as_running_rather_than_complete() {
     let run = project_run_record_from_session_with_writer_observation(
         &store,
         &meta.id,
-        RunWriterObservation::Active,
+        Some(RunWriterObservation::Active),
     )
     .await
     .expect("project");
@@ -793,7 +793,7 @@ async fn an_open_session_without_an_observable_writer_is_not_reported_as_running
     let run = project_run_record_from_session_with_writer_observation(
         &store,
         &meta.id,
-        RunWriterObservation::NotObserved,
+        Some(RunWriterObservation::NotObserved),
     )
     .await
     .expect("project");
@@ -803,6 +803,106 @@ async fn an_open_session_without_an_observable_writer_is_not_reported_as_running
         "not_observed"
     );
     assert!(run.metadata["projected_from"]["last_observed_at"].is_string());
+}
+
+#[tokio::test]
+async fn a_durable_writer_lease_distinguishes_a_live_writer_from_an_abandoned_run() {
+    let root = tempfile::tempdir().expect("temporary lease root");
+    let state_dir = crate::stdlib::session_store::SessionStoreDir::under_root(root.path());
+    std::fs::create_dir_all(state_dir.as_path()).expect("create state dir");
+    let store = crate::stdlib::session_store::open_canonical_store(root.path())
+        .expect("open canonical store");
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let lease_path =
+        crate::agent_session_journal::run_writer_lease_path(state_dir.as_path(), &meta.id);
+    std::fs::create_dir_all(lease_path.parent().expect("lease parent")).expect("create lease dir");
+    let writer = std::fs::File::create(&lease_path).expect("create writer lease");
+    writer.lock().expect("hold writer lease");
+    store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append run start");
+
+    let live_path = root.path().join("live-run.json");
+    materialize_session_run_record(root.path(), &meta.id, Some(&live_path))
+        .await
+        .expect("materialize live writer");
+    let live = super::super::persistence::load_run_record(&live_path).expect("load live record");
+    assert_eq!(live.status, "running");
+    assert_eq!(
+        live.metadata["projected_from"]["writer_observation"],
+        "active"
+    );
+
+    drop(writer);
+    let abandoned_path = root.path().join("abandoned-run.json");
+    materialize_session_run_record(root.path(), &meta.id, Some(&abandoned_path))
+        .await
+        .expect("materialize abandoned writer");
+    let abandoned =
+        super::super::persistence::load_run_record(&abandoned_path).expect("load abandoned record");
+    assert_eq!(abandoned.status, "unknown");
+    assert_eq!(
+        abandoned.metadata["projected_from"]["writer_observation"],
+        "not_observed"
+    );
+}
+
+#[tokio::test]
+async fn a_reused_session_projects_only_its_latest_run_invocation() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession {
+            title: Some("stable session title".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create session");
+    for event in [
+        run_started(),
+        user_message("old task"),
+        iteration_start(7),
+        llm_call(100, 50, 0.25),
+        tool_call("old-call", "old-tool"),
+        terminal("done", "natural"),
+    ] {
+        store.append(&meta.id, event).await.expect("append event");
+    }
+    let current_start = store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append current start");
+    for event in [
+        user_message("current task"),
+        iteration_start(1),
+        llm_call(3, 2, 0.01),
+        tool_call("current-call", "current-tool"),
+    ] {
+        store.append(&meta.id, event).await.expect("append event");
+    }
+    let current_terminal = store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append current terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project latest invocation");
+    assert_eq!(run.task, "current task");
+    assert_eq!(run.started_at, current_start.ts);
+    assert_eq!(
+        run.finished_at.as_deref(),
+        Some(current_terminal.ts.as_str())
+    );
+    assert_eq!(run.metadata["iterations"], 1);
+    assert_eq!(run.usage.as_ref().expect("usage").call_count, 1);
+    assert_eq!(run.usage.as_ref().expect("usage").input_tokens, 3);
+    assert_eq!(run.tool_recordings.len(), 1);
+    assert_eq!(run.tool_recordings[0].tool_name, "current-tool");
+    assert_eq!(run.trace_spans.len(), 1);
 }
 
 #[tokio::test]
@@ -830,7 +930,7 @@ async fn terminal_run_clock_does_not_move_with_later_session_metadata() {
         events,
         Vec::new(),
         meta.id.clone(),
-        RunWriterObservation::NotObserved,
+        Some(RunWriterObservation::NotObserved),
     )
     .expect("assemble");
     assert_eq!(run.started_at, start.ts);

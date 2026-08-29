@@ -1340,13 +1340,7 @@ pub fn seed_from_messages(
 /// persistence/replay without being replayed back into the model as
 /// conversational messages.
 pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
-    let Some(event_dict) = event.as_dict() else {
-        return Err("agent_session_append_event: event must be a dict".into());
-    };
-    let kind_ok = matches!(event_dict.get("kind"), Some(VmValue::String(_)));
-    if !kind_ok {
-        return Err("agent_session_append_event: event must have a string `kind`".into());
-    }
+    validate_session_event(&event, "agent_session_append_event")?;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -1357,6 +1351,40 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
         append_event_to_state(state, event, "append_event")?;
         Ok(())
     })
+}
+
+/// Queue an orchestration fact for durable session storage without projecting
+/// it into the caller-visible transcript.
+///
+/// Lifecycle boundaries belong in the persisted event stream so run readers
+/// can measure them, but they are not conversational transcript events and
+/// must not reorder the system prompt or model-visible history.
+pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_journal_event")?;
+    let journal_event = crate::llm::helpers::vm_value_to_json(&event);
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let Some(state) = sessions.get_mut(id) else {
+            return Err(format!(
+                "agent_session_append_journal_event: unknown session id '{id}'"
+            ));
+        };
+        crate::agent_session_journal::enqueue_audit_event(
+            &mut state.transcript_journal,
+            journal_event,
+        );
+        Ok(())
+    })
+}
+
+fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
+    let Some(event_dict) = event.as_dict() else {
+        return Err(format!("{action}: event must be a dict"));
+    };
+    if !matches!(event_dict.get("kind"), Some(VmValue::String(_))) {
+        return Err(format!("{action}: event must have a string `kind`"));
+    }
+    Ok(())
 }
 
 fn append_event_to_state(

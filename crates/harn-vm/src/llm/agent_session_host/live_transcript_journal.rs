@@ -82,7 +82,7 @@ async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
             "lifecycle_state": crate::agent_events::AgentLifecycleState::Running.wire_name(),
         })),
     );
-    crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
+    crate::agent_sessions::append_journal_event(session_id, event).map_err(VmError::Runtime)?;
     crate::agent_session_journal::flush(session_id).await
 }
 

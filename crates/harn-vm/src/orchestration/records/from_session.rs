@@ -53,9 +53,9 @@ pub const PROJECTION_SOURCE: &str = "harn.session_store.v1";
 
 /// Placeholder workflow id for a run that had no workflow.
 ///
-/// An agent session is a run, but not a workflow run. Naming that explicitly
-/// beats an empty string, which reads as "we forgot" rather than "there wasn't
-/// one".
+/// A session-backed agent invocation is not a workflow run. Naming that
+/// explicitly beats an empty string, which reads as "we forgot" rather than
+/// "there wasn't one".
 pub const AGENT_SESSION_WORKFLOW_ID: &str = "agent-session";
 
 /// Dotted `RunRecord` field paths a session projection cannot source.
@@ -85,15 +85,13 @@ pub async fn project_run_record_from_session(
     store: &dyn SessionStore,
     session_id: &str,
 ) -> Result<RunRecord, VmError> {
-    let writer_observation = RunWriterObservation::for_session(session_id);
-    project_run_record_from_session_with_writer_observation(store, session_id, writer_observation)
-        .await
+    project_run_record_from_session_with_writer_observation(store, session_id, None).await
 }
 
 async fn project_run_record_from_session_with_writer_observation(
     store: &dyn SessionStore,
     session_id: &str,
-    writer_observation: RunWriterObservation,
+    writer_observation: Option<RunWriterObservation>,
 ) -> Result<RunRecord, VmError> {
     let meta = store
         .describe(session_id)
@@ -164,7 +162,15 @@ pub async fn materialize_session_run_record(
                 root.display()
             ))
         })?;
-    let run = project_run_record_from_session(&store, session_id).await?;
+    let state_dir = crate::stdlib::session_store::SessionStoreDir::under_root(root);
+    let writer_observation =
+        RunWriterObservation::for_session(session_id, Some(state_dir.as_path()));
+    let run = project_run_record_from_session_with_writer_observation(
+        &store,
+        session_id,
+        Some(writer_observation),
+    )
+    .await?;
     let path = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| default_projection_path(root, session_id));
@@ -309,7 +315,7 @@ async fn child_records(
                 &child.status,
                 None,
                 None,
-                RunWriterObservation::for_session(&child.id),
+                RunWriterObservation::for_session(&child.id, None),
             )
             .to_string(),
             started_at: child.created_at.clone(),
@@ -456,11 +462,20 @@ enum RunWriterObservation {
 }
 
 impl RunWriterObservation {
-    fn for_session(session_id: &str) -> Self {
+    fn for_session(session_id: &str, store_dir: Option<&Path>) -> Self {
         if crate::agent_sessions::has_journal(session_id) {
-            Self::Active
-        } else {
-            Self::NotObserved
+            return Self::Active;
+        }
+        let Some(store_dir) = store_dir else {
+            return Self::NotObserved;
+        };
+        let path = crate::agent_session_journal::run_writer_lease_path(store_dir, session_id);
+        let Ok(file) = std::fs::File::open(path) else {
+            return Self::NotObserved;
+        };
+        match file.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => Self::Active,
+            Ok(()) | Err(std::fs::TryLockError::Error(_)) => Self::NotObserved,
         }
     }
 
@@ -576,12 +591,14 @@ fn assemble(
     events: Vec<StoredEvent>,
     children: Vec<RunChildRecord>,
     root_run_id: String,
-    writer_observation: RunWriterObservation,
+    writer_observation: Option<RunWriterObservation>,
 ) -> Result<RunRecord, VmError> {
     let mut fold = SessionFold::default();
     for event in &events {
         fold.absorb(event);
     }
+    let writer_observation =
+        writer_observation.unwrap_or_else(|| RunWriterObservation::for_session(&meta.id, None));
 
     let status = run_status_for(
         &meta.status,
@@ -696,10 +713,10 @@ fn assemble(
         id: meta.id.clone(),
         workflow_id: AGENT_SESSION_WORKFLOW_ID.to_string(),
         workflow_name: meta.persona.clone(),
-        // Title when a host or person named the run; otherwise the first thing
-        // the run was actually asked to do. Not truncated: what the run was
-        // given is the fact, and display surfaces can shorten it.
-        task: meta.title.clone().or(fold.task).unwrap_or_default(),
+        // A durable session can outlive one invocation, so its stable title
+        // cannot replace what the current run was asked to do. Legacy sessions
+        // without a persisted user message retain the title as a fallback.
+        task: fold.task.or(meta.title.clone()).unwrap_or_default(),
         status,
         started_at: run_clock.started_at.clone(),
         finished_at: run_clock.finished_at.clone(),
@@ -747,13 +764,16 @@ fn build_from_session_attributes(
 
 impl SessionFold {
     fn absorb(&mut self, event: &StoredEvent) {
+        if event.kind.discriminator() == "agent_run_started" {
+            self.absorb_run_started(event);
+            return;
+        }
         let clock = EventClock {
             text: event.ts.clone(),
             ms: event.ts_ms,
         };
         self.last_observed_at = Some(clock);
         match event.kind.discriminator() {
-            "agent_run_started" => self.absorb_run_started(event),
             "message" => self.absorb_message(event),
             "tool_call" => self.absorb_tool_call(event),
             "tool_call_update" => self.absorb_tool_update(event),
@@ -766,14 +786,16 @@ impl SessionFold {
     }
 
     fn absorb_run_started(&mut self, event: &StoredEvent) {
+        // A durable session owns transcript continuity across invocations, but
+        // a RunRecord owns exactly one invocation. Starting a new run therefore
+        // begins a new projection generation: every aggregate and transcript
+        // fact from the previous invocation is discarded together.
+        *self = Self::default();
         self.run_started_at = Some(EventClock {
             text: event.ts.clone(),
             ms: event.ts_ms,
         });
-        // A later invocation in the same durable session is active until its
-        // own terminal arrives; the previous invocation's terminal cannot
-        // label it finished.
-        self.terminal = None;
+        self.last_observed_at = self.run_started_at.clone();
     }
 
     fn absorb_message(&mut self, event: &StoredEvent) {
