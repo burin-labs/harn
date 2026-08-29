@@ -53,16 +53,22 @@ pub enum ToolPermissionDecider {
     ManagedPolicy,
     RuntimePolicy,
     HostUnavailable,
+    /// The automated reviewer answered on the operator's behalf. Distinct from
+    /// every policy layer above it: those decide from a written rule, this one
+    /// decided from a model call, and a rollup that cannot tell them apart
+    /// cannot report how often the fallback was load-bearing.
+    AutoReviewer,
 }
 
 impl ToolPermissionDecider {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Person,
         Self::RememberedRule,
         Self::UserPolicy,
         Self::ManagedPolicy,
         Self::RuntimePolicy,
         Self::HostUnavailable,
+        Self::AutoReviewer,
     ];
 }
 
@@ -402,7 +408,14 @@ fn validate_decider_evidence(
         ToolPermissionDecider::UserPolicy => ToolPermissionPolicyLayer::UserPolicy,
         ToolPermissionDecider::ManagedPolicy => ToolPermissionPolicyLayer::ManagedPolicy,
         ToolPermissionDecider::RuntimePolicy => ToolPermissionPolicyLayer::RuntimePolicy,
-        ToolPermissionDecider::Person | ToolPermissionDecider::HostUnavailable => return Ok(()),
+        // A reviewer decision corroborates no policy LAYER, so there is no
+        // layer evidence to require. It joins `Person` here for the same
+        // reason: both answered an ask that the layers had already resolved to
+        // `ApprovalRequired`, and demanding a matching layer evaluation would
+        // reject every honest reviewer record.
+        ToolPermissionDecider::Person
+        | ToolPermissionDecider::HostUnavailable
+        | ToolPermissionDecider::AutoReviewer => return Ok(()),
     };
     let expected = match outcome {
         ToolPermissionOutcome::Approved => ToolPermissionPolicyOutcome::Allowed,
