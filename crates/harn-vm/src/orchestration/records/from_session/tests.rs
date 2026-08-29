@@ -105,6 +105,13 @@ fn iteration_start(iteration: i64) -> AppendEvent {
     )
 }
 
+fn run_started() -> AppendEvent {
+    AppendEvent::new(
+        custom("agent_run_started"),
+        transcript_event("agent_run_started", json!({"lifecycle_state": "running"})),
+    )
+}
+
 fn terminal(final_status: &str, stop_reason: &str) -> AppendEvent {
     let kind = crate::agent_events::classify_agent_terminal(
         final_status,
@@ -756,14 +763,113 @@ async fn a_still_running_session_projects_as_running_rather_than_complete() {
         .await
         .expect("append");
 
-    let run = project_run_record_from_session(&store, &meta.id)
-        .await
-        .expect("project");
+    let run = project_run_record_from_session_with_writer_observation(
+        &store,
+        &meta.id,
+        RunWriterObservation::Active,
+    )
+    .await
+    .expect("project");
     assert_eq!(run.status, "running");
     assert!(run.finished_at.is_none());
     assert!(
         run.usage.is_none(),
         "a run with no LLM calls reports no usage rather than a zeroed envelope"
+    );
+}
+
+#[tokio::test]
+async fn an_open_session_without_an_observable_writer_is_not_reported_as_running() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, iteration_start(1))
+        .await
+        .expect("append");
+
+    let run = project_run_record_from_session_with_writer_observation(
+        &store,
+        &meta.id,
+        RunWriterObservation::NotObserved,
+    )
+    .await
+    .expect("project");
+    assert_eq!(run.status, "unknown");
+    assert_eq!(
+        run.metadata["projected_from"]["writer_observation"],
+        "not_observed"
+    );
+    assert!(run.metadata["projected_from"]["last_observed_at"].is_string());
+}
+
+#[tokio::test]
+async fn terminal_run_clock_does_not_move_with_later_session_metadata() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let start = store
+        .append(&meta.id, run_started())
+        .await
+        .expect("append start");
+    let finish = store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append terminal");
+    let events = drain_events(&store, &meta.id).await.expect("read events");
+    let mut mutated_meta = store.describe(&meta.id).await.expect("describe");
+    mutated_meta.updated_at_ms = finish.ts_ms.saturating_add(600_000);
+    mutated_meta.updated_at = "2026-12-31T23:59:59Z".to_string();
+
+    let run = assemble(
+        mutated_meta,
+        events,
+        Vec::new(),
+        meta.id.clone(),
+        RunWriterObservation::NotObserved,
+    )
+    .expect("assemble");
+    assert_eq!(run.started_at, start.ts);
+    assert_eq!(run.finished_at.as_deref(), Some(finish.ts.as_str()));
+    assert_eq!(
+        run.metadata["wall_clock_ms"].as_u64(),
+        super::super::time::timestamp_delta_ms(&start.ts, &finish.ts)
+    );
+    assert_eq!(
+        run.metadata["run_clock"],
+        json!({
+            "started_at_source": "agent_run_started",
+            "finished_at_source": "agent_run_terminal",
+        })
+    );
+}
+
+#[tokio::test]
+async fn legacy_session_timestamps_do_not_masquerade_as_a_measured_run() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, terminal("done", "natural"))
+        .await
+        .expect("append terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert!(run.metadata["wall_clock_ms"].is_null());
+    assert_eq!(
+        run.metadata["run_clock"],
+        json!({
+            "started_at_source": "session_created",
+            "finished_at_source": "agent_run_terminal",
+        })
     );
 }
 

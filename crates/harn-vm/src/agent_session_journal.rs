@@ -704,6 +704,7 @@ mod tests {
         let events = session_store::read_all_events(&store, session_id)
             .await
             .expect("read canonical events");
+
         assert_eq!(events.len(), 2);
         let identity = events[0].identity().expect("identity");
         assert_eq!(identity.get(EventIdentityField::RunId), Some("run-first"));
@@ -1076,6 +1077,18 @@ pipeline main(harness: Harness, task: unknown) {{
             .await
             .expect("read canonical events");
 
+        let run_started = events
+            .iter()
+            .find(|event| {
+                matches!(
+                    &event.kind,
+                    SessionEventKind::Custom { custom_type }
+                        if custom_type == "agent_run_started"
+                )
+            })
+            .expect("run start must be durable");
+        assert_eq!(run_started.event_id, expected_first_event_id);
+
         let user_message = events
             .iter()
             .find(|event| {
@@ -1158,6 +1171,15 @@ pipeline main(harness: Harness, task: unknown) {{
         let projected = crate::orchestration::project_run_record_from_session(&store, session_id)
             .await
             .expect("project live session");
+        assert_eq!(projected.started_at, run_started.ts);
+        assert_eq!(
+            projected.metadata["run_clock"]["started_at_source"],
+            "agent_run_started"
+        );
+        assert_eq!(
+            projected.metadata["run_clock"]["finished_at_source"],
+            "agent_run_terminal"
+        );
         assert_eq!(projected.tool_recordings.len(), 1);
         assert!(
             projected.tool_recordings[0].duration_ms.is_some(),

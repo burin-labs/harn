@@ -56,11 +56,34 @@ pub(super) async fn initialize(
         crate::agent_sessions::open_or_create(Some(session_id.to_string()))
     };
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
+    if let Err(error) = stamp_run_started(&session_id).await {
+        crate::agent_sessions::clear_journal(&session_id);
+        return Err(error);
+    }
     Ok(InitializedSession {
         session_id,
         run_id,
         has_canonical_history,
     })
+}
+
+/// Persist the run boundary before hooks, policy checks, or provider work.
+///
+/// The journal owns both this start stamp and the terminal stamp below. Run
+/// projections therefore read one durable clock instead of deriving elapsed
+/// time from mutable session-row metadata.
+async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
+    let event = super::super::helpers::transcript_event(
+        "agent_run_started",
+        "system",
+        "internal",
+        "Agent loop started",
+        Some(serde_json::json!({
+            "lifecycle_state": crate::agent_events::AgentLifecycleState::Running.wire_name(),
+        })),
+    );
+    crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
+    crate::agent_session_journal::flush(session_id).await
 }
 
 pub(super) async fn flush_init_terminal(

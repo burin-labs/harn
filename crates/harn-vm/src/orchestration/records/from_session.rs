@@ -85,6 +85,16 @@ pub async fn project_run_record_from_session(
     store: &dyn SessionStore,
     session_id: &str,
 ) -> Result<RunRecord, VmError> {
+    let writer_observation = RunWriterObservation::for_session(session_id);
+    project_run_record_from_session_with_writer_observation(store, session_id, writer_observation)
+        .await
+}
+
+async fn project_run_record_from_session_with_writer_observation(
+    store: &dyn SessionStore,
+    session_id: &str,
+    writer_observation: RunWriterObservation,
+) -> Result<RunRecord, VmError> {
     let meta = store
         .describe(session_id)
         .await
@@ -98,7 +108,7 @@ pub async fn project_run_record_from_session(
     let events = drain_events(store, session_id).await?;
     let children = child_records(store, session_id).await?;
     let root = root_session_id(store, &meta).await?;
-    assemble(meta, events, children, root)
+    assemble(meta, events, children, root, writer_observation)
 }
 
 /// Walk `parent_session_id` to the top of the delegation chain.
@@ -295,7 +305,13 @@ async fn child_records(
             session_id: Some(child.id.clone()),
             parent_session_id: Some(session_id.to_string()),
             task: child.title.clone().unwrap_or_default(),
-            status: run_status_for(&child.status, None, None).to_string(),
+            status: run_status_for(
+                &child.status,
+                None,
+                None,
+                RunWriterObservation::for_session(&child.id),
+            )
+            .to_string(),
             started_at: child.created_at.clone(),
             finished_at: child.closed_at.clone(),
             run_id: Some(child.id.clone()),
@@ -307,6 +323,8 @@ async fn child_records(
 /// Facts folded out of one pass over the session's events.
 #[derive(Default)]
 struct SessionFold {
+    run_started_at: Option<EventClock>,
+    last_observed_at: Option<EventClock>,
     task: Option<String>,
     messages: Vec<ProjectedMessage>,
     usage: LlmUsageRecord,
@@ -363,7 +381,95 @@ struct TerminalFacts {
     kind: Option<crate::agent_events::AgentTerminalKind>,
     owner: Option<String>,
     reason: Option<String>,
-    at: String,
+    at: EventClock,
+}
+
+#[derive(Clone)]
+struct EventClock {
+    text: String,
+    ms: i64,
+}
+
+struct RunClock {
+    started_at: String,
+    started_at_ms: i64,
+    started_at_source: &'static str,
+    finished_at: Option<String>,
+    finished_at_source: Option<&'static str>,
+    last_observed_at: Option<String>,
+    wall_clock_ms: Option<u64>,
+}
+
+impl RunClock {
+    fn from_session(meta: &SessionMeta, fold: &SessionFold) -> Self {
+        let (started_at, started_at_ms, started_at_source) = fold
+            .run_started_at
+            .as_ref()
+            .map(|clock| (clock.text.clone(), clock.ms, "agent_run_started"))
+            .unwrap_or_else(|| {
+                (
+                    meta.created_at.clone(),
+                    meta.created_at_ms,
+                    "session_created",
+                )
+            });
+        let (finished_at, finished_at_source) = fold
+            .terminal
+            .as_ref()
+            .map(|terminal| (Some(terminal.at.text.clone()), Some("agent_run_terminal")))
+            .unwrap_or_else(|| {
+                (
+                    meta.closed_at.clone(),
+                    meta.closed_at.as_ref().map(|_| "session_closed"),
+                )
+            });
+        // Only the journal-owned boundary pair measures a run. Session row
+        // timestamps remain useful display fallbacks for old data, but using
+        // them for elapsed time would recreate the plausible-wrong duration
+        // this clock exists to eliminate.
+        let wall_clock_ms = fold
+            .run_started_at
+            .as_ref()
+            .zip(fold.terminal.as_ref())
+            .and_then(|(started, terminal)| {
+                super::time::timestamp_delta_ms(&started.text, &terminal.at.text)
+            });
+        Self {
+            started_at,
+            started_at_ms,
+            started_at_source,
+            finished_at,
+            finished_at_source,
+            last_observed_at: fold
+                .last_observed_at
+                .as_ref()
+                .map(|clock| clock.text.clone()),
+            wall_clock_ms,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RunWriterObservation {
+    Active,
+    NotObserved,
+}
+
+impl RunWriterObservation {
+    fn for_session(session_id: &str) -> Self {
+        if crate::agent_sessions::has_journal(session_id) {
+            Self::Active
+        } else {
+            Self::NotObserved
+        }
+    }
+
+    const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::NotObserved => "not_observed",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -470,6 +576,7 @@ fn assemble(
     events: Vec<StoredEvent>,
     children: Vec<RunChildRecord>,
     root_run_id: String,
+    writer_observation: RunWriterObservation,
 ) -> Result<RunRecord, VmError> {
     let mut fold = SessionFold::default();
     for event in &events {
@@ -482,16 +589,10 @@ fn assemble(
         fold.terminal
             .as_ref()
             .and_then(|t| t.final_status.as_deref()),
+        writer_observation,
     )
     .to_string();
-    // A session left `open` by a host that exited without closing it still has
-    // a terminal event; that event's timestamp is when the run actually ended,
-    // and preferring `closed_at` when present keeps a cleanly closed session
-    // authoritative over it.
-    let finished_at = meta
-        .closed_at
-        .clone()
-        .or_else(|| fold.terminal.as_ref().map(|t| t.at.clone()));
+    let run_clock = RunClock::from_session(&meta, &fold);
 
     let mut metadata = BTreeMap::new();
     metadata.insert(
@@ -501,6 +602,8 @@ fn assemble(
             "session_id": meta.id,
             "session_status": status_discriminator(&meta.status),
             "session_event_count": meta.event_count,
+            "writer_observation": writer_observation.wire_name(),
+            "last_observed_at": run_clock.last_observed_at,
             // Named for the *source*, not the file: `save_run_record` derives a
             // `replay_fixture` from the assembled record on the way to disk, so
             // a persisted projection has one even though the session never
@@ -510,13 +613,17 @@ fn assemble(
             "not_recoverable_from_session": UNRECOVERABLE_FIELDS,
         }),
     );
-    // Wall clock is the session's own span. It is deliberately not folded into
+    // Wall clock is the durable run span. It is deliberately not folded into
     // `usage.total_duration_ms`, which means time spent inside LLM calls and is
     // not recoverable here — reporting one as the other would overstate model
     // time by every second the run spent running tools.
+    metadata.insert("wall_clock_ms".to_string(), json!(run_clock.wall_clock_ms));
     metadata.insert(
-        "wall_clock_ms".to_string(),
-        json!(meta.updated_at_ms.saturating_sub(meta.created_at_ms)),
+        "run_clock".to_string(),
+        json!({
+            "started_at_source": run_clock.started_at_source,
+            "finished_at_source": run_clock.finished_at_source,
+        }),
     );
     if fold.max_iteration > 0 {
         metadata.insert("iterations".to_string(), json!(fold.max_iteration));
@@ -594,14 +701,14 @@ fn assemble(
         // given is the fact, and display surfaces can shorten it.
         task: meta.title.clone().or(fold.task).unwrap_or_default(),
         status,
-        started_at: meta.created_at.clone(),
-        finished_at,
+        started_at: run_clock.started_at.clone(),
+        finished_at: run_clock.finished_at.clone(),
         parent_run_id: meta.parent_session_id.clone(),
         root_run_id: Some(root_run_id),
         child_runs: children,
         transcript: projected_transcript(&meta.id, &fold.messages)?,
         usage: (usage.call_count > 0).then_some(usage),
-        trace_spans: llm_call_spans(&meta, &fold.llm_calls),
+        trace_spans: llm_call_spans(&meta.id, run_clock.started_at_ms, &fold.llm_calls),
         tool_recordings: fold.tools,
         execution: None,
         metadata,
@@ -640,7 +747,13 @@ fn build_from_session_attributes(
 
 impl SessionFold {
     fn absorb(&mut self, event: &StoredEvent) {
+        let clock = EventClock {
+            text: event.ts.clone(),
+            ms: event.ts_ms,
+        };
+        self.last_observed_at = Some(clock);
         match event.kind.discriminator() {
+            "agent_run_started" => self.absorb_run_started(event),
             "message" => self.absorb_message(event),
             "tool_call" => self.absorb_tool_call(event),
             "tool_call_update" => self.absorb_tool_update(event),
@@ -650,6 +763,17 @@ impl SessionFold {
             "agent_run_terminal" => self.absorb_terminal(event),
             _ => {}
         }
+    }
+
+    fn absorb_run_started(&mut self, event: &StoredEvent) {
+        self.run_started_at = Some(EventClock {
+            text: event.ts.clone(),
+            ms: event.ts_ms,
+        });
+        // A later invocation in the same durable session is active until its
+        // own terminal arrives; the previous invocation's terminal cannot
+        // label it finished.
+        self.terminal = None;
     }
 
     fn absorb_message(&mut self, event: &StoredEvent) {
@@ -816,7 +940,10 @@ impl SessionFold {
                 .and_then(crate::agent_events::AgentTerminalKind::from_wire),
             owner: facts::string_at(&event.payload, facts::TERMINAL_OWNER),
             reason: facts::string_at(&event.payload, facts::TERMINAL_REASON),
-            at: event.ts.clone(),
+            at: EventClock {
+                text: event.ts.clone(),
+                ms: event.ts_ms,
+            },
         });
     }
 }
@@ -831,6 +958,7 @@ fn run_status_for(
     session_status: &SessionStatus,
     terminal_kind: Option<crate::agent_events::AgentTerminalKind>,
     final_status: Option<&str>,
+    writer_observation: RunWriterObservation,
 ) -> &'static str {
     if let Some(kind) = terminal_kind {
         return kind.lifecycle_state().wire_name();
@@ -839,7 +967,10 @@ fn run_status_for(
         return run_status_from_final_status(final_status);
     }
     match session_status {
-        SessionStatus::Open => "running",
+        SessionStatus::Open => match writer_observation {
+            RunWriterObservation::Active => "running",
+            RunWriterObservation::NotObserved => "unknown",
+        },
         SessionStatus::Closed => "completed",
         SessionStatus::SoftDeleted | SessionStatus::HardDeleted => "deleted",
     }
@@ -902,10 +1033,14 @@ fn status_discriminator(status: &SessionStatus) -> &'static str {
 /// `--events-db` is the seam that carries real timing, and
 /// [`UNRECOVERABLE_FIELDS`] names this alongside `usage.total_duration_ms`.
 ///
-/// `start_ms` is relative to the session's creation, matching the collector's
-/// epoch-relative convention. Absolute epoch milliseconds would be a different
-/// unit in the same field.
-fn llm_call_spans(meta: &SessionMeta, calls: &[LlmCallFacts]) -> Vec<RunTraceSpanRecord> {
+/// `start_ms` is relative to the durable run-start stamp, matching the
+/// collector's epoch-relative convention. Absolute epoch milliseconds would
+/// be a different unit in the same field.
+fn llm_call_spans(
+    session_id: &str,
+    run_started_at_ms: i64,
+    calls: &[LlmCallFacts],
+) -> Vec<RunTraceSpanRecord> {
     calls
         .iter()
         .enumerate()
@@ -936,14 +1071,14 @@ fn llm_call_spans(meta: &SessionMeta, calls: &[LlmCallFacts]) -> Vec<RunTraceSpa
                 metadata.insert(crate::tracing::meta::PROVIDER.to_string(), json!(provider));
             }
             RunTraceSpanRecord {
-                trace_id: meta.id.clone(),
+                trace_id: session_id.to_string(),
                 // One-based so span ids stay distinguishable from the absent
                 // parent, which is `None` rather than 0.
                 span_id: index as u64 + 1,
                 parent_id: None,
                 kind: "llm_call".to_string(),
                 name: call.model.clone().unwrap_or_else(|| "llm_call".to_string()),
-                start_ms: u64::try_from(call.at_ms.saturating_sub(meta.created_at_ms)).unwrap_or(0),
+                start_ms: u64::try_from(call.at_ms.saturating_sub(run_started_at_ms)).unwrap_or(0),
                 duration_ms: 0,
                 ttft_ms: None,
                 metadata,
