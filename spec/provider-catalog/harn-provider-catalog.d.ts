@@ -231,7 +231,9 @@ export interface HarnModelPricing {
 export interface HarnPromotionalPricing {
   id: string
   starts_on: string
+  starts_at?: string
   ends_on?: string
+  ends_at?: string
   review_after?: string
   source_url: string
   input_per_mtok: number

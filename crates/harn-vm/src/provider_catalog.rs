@@ -13,6 +13,7 @@ use crate::llm_config::{
     ModelDef, ModelPricing, ProviderDef, RateLimitsDef, ServingPerformanceDef,
 };
 use chrono::{NaiveDate, Utc};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
@@ -912,6 +913,19 @@ fn validate_pricing(
             ));
             continue;
         };
+        let starts_at = match promotion.starts_at.as_deref() {
+            Some(value) => match OffsetDateTime::parse(value, &Rfc3339) {
+                Ok(value) => value.unix_timestamp_nanos(),
+                Err(_) => {
+                    result.errors.push(format!(
+                        "model {} pricing.promotions[{}].starts_at must be RFC 3339",
+                        model.id, promotion.id
+                    ));
+                    continue;
+                }
+            },
+            None => catalog_date_start_nanos(starts_on),
+        };
         let ends_on = match promotion.ends_on.as_deref() {
             Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
                 Ok(date) => Some(date),
@@ -925,9 +939,24 @@ fn validate_pricing(
             },
             None => None,
         };
-        if ends_on.is_some_and(|end| end < starts_on) {
+        let ends_at = match promotion.ends_at.as_deref() {
+            Some(value) => match OffsetDateTime::parse(value, &Rfc3339) {
+                Ok(value) => Some(value.unix_timestamp_nanos()),
+                Err(_) => {
+                    result.errors.push(format!(
+                        "model {} pricing.promotions[{}].ends_at must be RFC 3339",
+                        model.id, promotion.id
+                    ));
+                    continue;
+                }
+            },
+            None => ends_on
+                .and_then(|end| end.succ_opt())
+                .map(catalog_date_start_nanos),
+        };
+        if ends_at.is_some_and(|end| end <= starts_at) {
             result.errors.push(format!(
-                "model {} pricing.promotions[{}].ends_on precedes starts_on",
+                "model {} pricing.promotions[{}] ends before it starts",
                 model.id, promotion.id
             ));
         }
@@ -944,12 +973,12 @@ fn validate_pricing(
                 )),
             }
         }
-        promotion_windows.push((promotion.id.as_str(), starts_on, ends_on));
+        promotion_windows.push((promotion.id.as_str(), starts_at, ends_at));
     }
     for (index, (left_id, left_start, left_end)) in promotion_windows.iter().enumerate() {
         for (right_id, right_start, right_end) in promotion_windows.iter().skip(index + 1) {
-            let left_reaches_right = left_end.is_none_or(|end| *right_start <= end);
-            let right_reaches_left = right_end.is_none_or(|end| *left_start <= end);
+            let left_reaches_right = left_end.is_none_or(|end| *right_start < end);
+            let right_reaches_left = right_end.is_none_or(|end| *left_start < end);
             if left_reaches_right && right_reaches_left {
                 result.errors.push(format!(
                     "model {} pricing promotions {:?} and {:?} overlap",
@@ -958,6 +987,15 @@ fn validate_pricing(
             }
         }
     }
+}
+
+fn catalog_date_start_nanos(date: NaiveDate) -> i128 {
+    i128::from(
+        date.and_hms_opt(0, 0, 0)
+            .expect("a valid date has a midnight")
+            .and_utc()
+            .timestamp(),
+    ) * 1_000_000_000
 }
 
 fn validate_batch_support(

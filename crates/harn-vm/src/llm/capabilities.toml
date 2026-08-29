@@ -6282,6 +6282,13 @@ requires_tool_result_adjacency = true
 # level onto this list for exactly that reason; an explicit caller `effort`
 # still fails against it loudly.
 [[provider.zai]]
+model_match = "glm-5.3-flash"
+extends = true
+vision = true
+vision_supported = true
+video_supported = true
+
+[[provider.zai]]
 model_match = "glm-5.3*"
 native_tools = true
 preferred_tool_format = "native"
@@ -6422,6 +6429,13 @@ structured_output = "delimited"
 # `low`, `medium`, `high`, `xhigh`, and `max` all served; only `none` refused.
 # OpenRouter normalizes effort itself, so this is a wider ladder than the direct
 # Z.AI route (`low`/`high`/`max`) for the same model.
+[[provider.openrouter]]
+model_match = "z-ai/glm-5.3-flash"
+extends = true
+vision = true
+vision_supported = true
+video_supported = true
+
 [[provider.openrouter]]
 model_match = "z-ai/glm-5.3*"
 extends = true

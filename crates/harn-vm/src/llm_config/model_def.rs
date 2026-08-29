@@ -3,8 +3,9 @@
 //! local runtime/memory, and aliases) that make up a `ModelDef`.
 use std::collections::BTreeMap;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, TimeZone as _, Utc};
 use serde::{Deserialize, Serialize};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct HealthcheckDef {
@@ -353,8 +354,16 @@ pub struct ModelPricing {
 pub struct PromotionalPricing {
     pub id: String,
     pub starts_on: String,
+    /// Exact RFC 3339 activation instant when the provider publishes one.
+    /// `starts_on` remains the date-only fallback for existing catalogs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ends_on: Option<String>,
+    /// Exact RFC 3339 exclusive expiry instant. This takes precedence over
+    /// the inclusive date-only `ends_on` boundary when both are present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<String>,
     /// Earliest date maintainers should confirm an open-ended promotion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_after: Option<String>,
@@ -376,40 +385,44 @@ pub struct InputTokenPricingBand {
 }
 
 impl ModelPricing {
-    /// Resolve the rate card for the current UTC date.
+    /// Resolve the rate card for the current UTC instant.
     ///
-    /// Deterministic callers and tests should use [`Self::effective_on`].
+    /// Deterministic callers and tests should use [`Self::effective_at`].
     pub fn effective_today(&self) -> Self {
         use harn_clock::Clock as _;
 
-        let today = harn_clock::RealClock::new().now_utc().date();
-        let date = NaiveDate::from_ymd_opt(
-            today.year(),
-            u8::from(today.month()).into(),
-            today.day().into(),
-        )
-        .expect("harn clock returned a valid UTC date");
-        self.effective_on(date)
+        self.effective_at(harn_clock::RealClock::new().now_utc())
     }
 
-    /// Resolve the rate card on a caller-supplied date. Invalid dates are
-    /// ignored here and reported by catalog validation.
+    /// Resolve the rate card at midnight UTC on a caller-supplied date.
+    /// Date-only promotion ends remain inclusive through that date.
     pub fn effective_on(&self, date: NaiveDate) -> Self {
+        let at = Utc
+            .from_utc_datetime(
+                &date
+                    .and_hms_opt(0, 0, 0)
+                    .expect("a valid date has a midnight"),
+            )
+            .timestamp();
+        self.effective_at_unix_nanos(i128::from(at) * 1_000_000_000)
+    }
+
+    /// Resolve the rate card at a caller-supplied UTC instant. Invalid
+    /// promotion windows are ignored here and reported by catalog validation.
+    pub fn effective_at(&self, at: OffsetDateTime) -> Self {
+        self.effective_at_unix_nanos(at.unix_timestamp_nanos())
+    }
+
+    fn effective_at_unix_nanos(&self, at: i128) -> Self {
         let active = self
             .promotions
             .iter()
             .filter_map(|promotion| {
-                let starts_on = NaiveDate::parse_from_str(&promotion.starts_on, "%Y-%m-%d").ok()?;
-                let ends_on = promotion
-                    .ends_on
-                    .as_deref()
-                    .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d"))
-                    .transpose()
-                    .ok()?;
-                (starts_on <= date && ends_on.is_none_or(|end| date <= end))
-                    .then_some((starts_on, promotion))
+                let (starts_at, ends_at) = promotion_window_nanos(promotion)?;
+                (starts_at <= at && ends_at.is_none_or(|end| at < end))
+                    .then_some((starts_at, promotion))
             })
-            .max_by_key(|(starts_on, _)| *starts_on)
+            .max_by_key(|(starts_at, _)| *starts_at)
             .map(|(_, promotion)| promotion);
         let Some(promotion) = active else {
             return self.clone();
@@ -475,6 +488,40 @@ impl ModelPricing {
             promotions: self.promotions.clone(),
         }
     }
+}
+
+fn promotion_window_nanos(promotion: &PromotionalPricing) -> Option<(i128, Option<i128>)> {
+    let starts_at = if let Some(value) = promotion.starts_at.as_deref() {
+        OffsetDateTime::parse(value, &Rfc3339)
+            .ok()?
+            .unix_timestamp_nanos()
+    } else {
+        date_start_nanos(&promotion.starts_on)?
+    };
+    let ends_at = if let Some(value) = promotion.ends_at.as_deref() {
+        Some(
+            OffsetDateTime::parse(value, &Rfc3339)
+                .ok()?
+                .unix_timestamp_nanos(),
+        )
+    } else if let Some(value) = promotion.ends_on.as_deref() {
+        let end = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+        let next_day = end.succ_opt()?;
+        Some(date_start_nanos(&next_day.to_string())?)
+    } else {
+        None
+    };
+    Some((starts_at, ends_at))
+}
+
+fn date_start_nanos(value: &str) -> Option<i128> {
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+    Some(
+        i128::from(
+            Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?)
+                .timestamp(),
+        ) * 1_000_000_000,
+    )
 }
 
 /// Provider or model quota metadata. Providers publish these along several

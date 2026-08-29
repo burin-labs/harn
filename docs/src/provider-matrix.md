@@ -238,6 +238,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `minimax/minimax-m3*` | `any` | `adaptive` | `none` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `minimax/minimax-m2.7*` | `any` | no | `none` | no | no | no | no | yes | no | `delimited` | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `minimax/minimax-m2*` | `any` | no | `none` | no | no | no | no | yes | no | `delimited` | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `z-ai/glm-5.3-flash` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `z-ai/glm-5.3*` | `any; extends` | `effort` | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `z-ai/glm-5*` | `any` | `enabled,effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `kwaipilot/kat-coder-pro-v2` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `interchangeable` | yes | yes |
@@ -281,6 +282,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `vertex` | `gemini-*` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `volcengine_ark` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `xai` | `grok-*` | `any` | `adaptive` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `zai` | `glm-5.3-flash` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `zai` | `glm-5.3*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-5.2*` | `any` | `enabled,effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-5.1*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -504,6 +506,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `z-ai/glm-5.1` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5.3` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
+| `openrouter` | `z-ai/glm-5.3-flash` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5v-turbo` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `sambanova` | `sambanova/DeepSeek-V3.2` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred. |
 | `sambanova` | `sambanova/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -549,3 +552,4 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `zai` | `glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-5.3-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

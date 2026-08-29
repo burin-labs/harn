@@ -450,7 +450,9 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "starts_on": {"type": "string", "format": "date"},
+                    "starts_at": {"type": "string", "format": "date-time"},
                     "ends_on": {"type": "string", "format": "date"},
+                    "ends_at": {"type": "string", "format": "date-time"},
                     "review_after": {"type": "string", "format": "date"},
                     "source_url": {"type": "string", "minLength": 1},
                     "input_per_mtok": {"type": "number", "minimum": 0},
