@@ -2663,7 +2663,7 @@ pub const HARN_TYPED_SESSION_UPDATE_PAYLOADS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "worker_update",
-        "ACPWorkerUpdateUpdate",
+        "ACPWorkerUpdate",
         &["workerId", "event", "status"],
     ),
 ];
@@ -2901,7 +2901,7 @@ pub struct ACPTranscriptProjectedUpdate {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ACPWorkerUpdateUpdate {
+pub struct ACPWorkerUpdate {
     pub session_update: String,
     pub worker_id: String,
     pub event: String,

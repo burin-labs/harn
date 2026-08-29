@@ -285,7 +285,7 @@ pub(super) const TYPED_SESSION_UPDATE_PAYLOADS: &[SessionUpdatePayload] = &[
     },
     SessionUpdatePayload {
         discriminator: "worker_update",
-        type_stem: "WorkerUpdate",
+        type_stem: "Worker",
         fields: &[
             req_id("workerId", "worker_id", PayloadFieldKind::NonEmptyString),
             req_id("event", "event", PayloadFieldKind::NonEmptyString),
@@ -396,10 +396,9 @@ pub(super) fn schema_required_identity_gaps(schema_text: &str) -> Result<Vec<Str
         ) {
             continue;
         }
-        let Some(payload) = TYPED_SESSION_UPDATE_PAYLOADS
-            .iter()
-            .find(|payload| payload.type_stem == def_name)
-        else {
+        let Some(payload) = TYPED_SESSION_UPDATE_PAYLOADS.iter().find(|payload| {
+            payload.type_stem == def_name || format!("{}Update", payload.type_stem) == def_name
+        }) else {
             gaps.push(format!(
                 "schema $defs.{def_name} is in SessionUpdate.oneOf but has no typed dump struct"
             ));

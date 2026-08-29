@@ -3321,7 +3321,7 @@ public struct HarnACPTranscriptProjectedUpdate: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnACPWorkerUpdateUpdate: Codable, Sendable, Equatable {
+public struct HarnACPWorkerUpdate: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var workerId: String
     public var event: String

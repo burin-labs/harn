@@ -1409,8 +1409,8 @@ type ACPTranscriptProjectedUpdate struct {
 	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
 }
 
-// ACPWorkerUpdateUpdate is the typed Harn `worker_update` session/update payload.
-type ACPWorkerUpdateUpdate struct {
+// ACPWorkerUpdate is the typed Harn `worker_update` session/update payload.
+type ACPWorkerUpdate struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	WorkerId      string             `json:"workerId"`
 	Event         string             `json:"event"`

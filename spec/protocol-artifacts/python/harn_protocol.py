@@ -1546,7 +1546,7 @@ class ACPTranscriptProjectedUpdate(_HarnDataclass):
     _meta: Optional[HarnExtensionMeta] = None
 
 @dataclass
-class ACPWorkerUpdateUpdate(_HarnDataclass):
+class ACPWorkerUpdate(_HarnDataclass):
     sessionUpdate: str
     workerId: str
     event: str

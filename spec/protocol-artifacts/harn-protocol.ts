@@ -1279,7 +1279,7 @@ export const HARN_TYPED_SESSION_UPDATE_PAYLOADS = {
   tool_search_result: { typeName: "ACPToolSearchResultUpdate", identity: ["toolUseId"] },
   transcript_compacted: { typeName: "ACPTranscriptCompactedUpdate", identity: ["mode", "strategy"] },
   transcript_projected: { typeName: "ACPTranscriptProjectedUpdate", identity: ["policy"] },
-  worker_update: { typeName: "ACPWorkerUpdateUpdate", identity: ["workerId", "event", "status"] },
+  worker_update: { typeName: "ACPWorkerUpdate", identity: ["workerId", "event", "status"] },
 } as const
 
 export interface ACPArtifactUpdate {
@@ -1433,7 +1433,7 @@ export interface ACPTranscriptProjectedUpdate {
   _meta?: ACPExtensionMeta<ACPObject>
 }
 
-export interface ACPWorkerUpdateUpdate {
+export interface ACPWorkerUpdate {
   sessionUpdate: "worker_update"
   workerId: string
   event: string
@@ -1478,7 +1478,7 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolSearchResultUpdate
   | ACPTranscriptCompactedUpdate
   | ACPTranscriptProjectedUpdate
-  | ACPWorkerUpdateUpdate
+  | ACPWorkerUpdate
   | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {
