@@ -65,6 +65,7 @@ pub use tool_enforcement::enforce_current_policy_for_tool;
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
+    DEFAULT_READ_DENY_HOME_PATHS,
     ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
     MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy, ProcessSandboxPolicy,
     ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy, SandboxProfile,

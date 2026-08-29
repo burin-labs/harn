@@ -84,6 +84,10 @@ struct LandlockProfile {
     ruleset_fd: libc::c_int,
     rules: Vec<LandlockRule>,
     handled_access_fs: u64,
+    /// Subtrees no grant may cover. Landlock has no deny rule, so this is
+    /// enforced by never granting a path that contains one; see
+    /// [`expand_around_denied`].
+    read_deny_roots: Vec<PathBuf>,
 }
 
 struct LandlockRule {
@@ -184,6 +188,7 @@ fn landlock_profile(
         ruleset_fd,
         rules: Vec::new(),
         handled_access_fs,
+        read_deny_roots: super::process_sandbox_read_deny_roots(policy),
     };
     for (path, access) in standard_device_rules() {
         push_rule(&mut profile, path, access, true)?;
@@ -329,6 +334,88 @@ fn standard_device_rules() -> Vec<(PathBuf, u64)> {
     .collect()
 }
 
+/// Landlock's ruleset is allow-only: `landlock_add_rule` grants, and there is no
+/// deny counterpart. A denial is therefore expressed by NOT granting — which
+/// means a grant that contains a denied subtree has to be replaced by the set of
+/// its children that do not lead to that subtree, recursively, down to the
+/// denied path's parent.
+///
+/// Returns the paths to grant in place of `root`. Fails closed: if a directory
+/// on the path to a denial cannot be enumerated, or the expansion exceeds
+/// [`MAX_DENY_EXPANSION_RULES`], the caller refuses the spawn rather than
+/// granting a root that would include the denied subtree.
+///
+/// Cost is one `read_dir` per level between `root` and each denial inside it,
+/// which for the default credential denylist is a handful of home-directory
+/// listings. A denial that is not inside `root` costs nothing.
+///
+/// Newly created siblings are NOT granted: a directory added after expansion is
+/// invisible to the child. That is the safe direction, and it is why this is
+/// done per spawn rather than cached.
+fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>, VmError> {
+    let inside: Vec<&PathBuf> = denied
+        .iter()
+        .filter(|deny| deny.starts_with(root) && deny.as_path() != root)
+        .collect();
+    if denied.iter().any(|deny| root.starts_with(deny)) {
+        // The root IS denied, or sits inside a denial. Grant nothing.
+        return Ok(Vec::new());
+    }
+    if inside.is_empty() {
+        return Ok(vec![root.to_path_buf()]);
+    }
+    let mut granted: Vec<PathBuf> = Vec::new();
+    for deny in &inside {
+        let relative = deny.strip_prefix(root).map_err(|_| {
+            sandbox_rejection(format!(
+                "cannot subtract '{}' from sandbox root '{}'",
+                deny.display(),
+                root.display()
+            ))
+        })?;
+        let mut cursor = root.to_path_buf();
+        for component in relative.components() {
+            let entries = std::fs::read_dir(&cursor).map_err(|error| {
+                sandbox_rejection(format!(
+                    "cannot enumerate '{}' to exclude denied path '{}': {error}; refusing the \
+                     spawn rather than granting a root that would expose it",
+                    cursor.display(),
+                    deny.display()
+                ))
+            })?;
+            let step = cursor.join(component.as_os_str());
+            for entry in entries.flatten() {
+                let sibling = entry.path();
+                if sibling == step {
+                    continue;
+                }
+                if denied.iter().any(|d| sibling.starts_with(d) || d.starts_with(&sibling)) {
+                    // Another denial lives here; it is handled by its own pass.
+                    continue;
+                }
+                if !granted.contains(&sibling) {
+                    granted.push(sibling);
+                }
+            }
+            cursor = step;
+            if granted.len() > MAX_DENY_EXPANSION_RULES {
+                return Err(sandbox_rejection(format!(
+                    "excluding denied paths from sandbox root '{}' needs more than {} rules; \
+                     refusing the spawn rather than granting the root unsubtracted",
+                    root.display(),
+                    MAX_DENY_EXPANSION_RULES
+                )));
+            }
+        }
+    }
+    Ok(granted)
+}
+
+/// Ceiling on complement expansion. A home directory with a pathological number
+/// of entries must fail closed, not silently produce a ruleset the kernel will
+/// reject or truncate.
+const MAX_DENY_EXPANSION_RULES: usize = 512;
+
 fn push_rule(
     profile: &mut LandlockProfile,
     path: PathBuf,
@@ -336,6 +423,27 @@ fn push_rule(
     optional: bool,
 ) -> Result<(), VmError> {
     let path = super::normalize_for_policy(&path);
+    // Every Landlock grant funnels through here, so the subtraction lives here
+    // too: no call site can add a root and forget to exclude the denylist.
+    if !profile.read_deny_roots.is_empty() {
+        let deny_roots = profile.read_deny_roots.clone();
+        let expanded = expand_around_denied(&path, &deny_roots)?;
+        if expanded.len() != 1 || expanded[0] != path {
+            for replacement in expanded {
+                push_rule_exact(profile, replacement, allowed_access, true)?;
+            }
+            return Ok(());
+        }
+    }
+    push_rule_exact(profile, path, allowed_access, optional)
+}
+
+fn push_rule_exact(
+    profile: &mut LandlockProfile,
+    path: PathBuf,
+    allowed_access: u64,
+    optional: bool,
+) -> Result<(), VmError> {
     let file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if optional && error.kind() == io::ErrorKind::NotFound => return Ok(()),
