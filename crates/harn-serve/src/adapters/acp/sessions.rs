@@ -651,8 +651,15 @@ pub(super) fn preempt_session_interruption(
                 mark_cancelled_session_for_routed_request(cancellations, params);
                 false
             } else {
-                mark_cancelled_session(cancellations, params);
-                true
+                // Consume the frame ONLY when the cancel actually landed on a
+                // registered session. A cancel naming an unknown or missing
+                // sessionId used to be swallowed here regardless, which made a
+                // miss indistinguishable on the wire from a working stop: the
+                // agent loop ran on and nothing was logged, refused, or
+                // answered. Falling through on a miss hands the frame to the
+                // normal dispatch, which records the miss as a rejected
+                // control outcome instead of dropping it.
+                mark_cancelled_session(cancellations, params)
             }
         }
         Some("session/truncate" | "session/close" | "session/stop") => {
