@@ -79,34 +79,89 @@ fn completion_requirement_evidence_roles(raw: unknown) -> list<CompletionRequire
 }
 
 /**
- * Return the optional requirement ledger, normalized to its public shape.
+ * Validate and normalize the optional requirement ledger. One owner for the
+ * acceptance-ledger policy: every surface that accepts a raw contract routes
+ * here, so a malformed ledger fails closed with one vocabulary instead of
+ * silently shrinking the set of requirements the completion gate enforces.
+ *
+ * `label` names the option the raw value arrived under, so a caller-facing
+ * message points at the field the author wrote.
  *
  * @effects: []
- * @errors: []
+ * @errors: [validation]
+ * @api_stability: internal
+ */
+pub fn __completion_requirement_contract_checked(
+  label: string,
+  value: any,
+) -> CompletionRequirementContract? {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + ".requirement_contract` must be a dict or nil; got "
+      + type_of(value)
+  }
+  const raw_requirements = value?.requirements
+  if type_of(raw_requirements) != "list" || len(raw_requirements) == 0 {
+    throw "agent_loop: `" + label
+      + ".requirement_contract.requirements` must be a non-empty list"
+  }
+  let requirements: list<CompletionRequirement> = []
+  let seen: dict = {}
+  for raw in raw_requirements {
+    if type_of(raw) != "dict" {
+      throw "agent_loop: every `" + label
+        + ".requirement_contract.requirements` item must be a dict"
+    }
+    const requirement_id = trim(to_string(raw?.requirement_id ?? ""))
+    const name = trim(to_string(raw?.name ?? ""))
+    if requirement_id == "" || name == "" {
+      throw "agent_loop: every completion requirement needs non-empty `requirement_id` and `name`"
+    }
+    if seen[requirement_id] ?? false {
+      throw "agent_loop: duplicate completion `requirement_id` `" + requirement_id + "`"
+    }
+    seen = seen + {[requirement_id]: true}
+    const raw_roles = raw?.evidence_roles
+    if raw_roles != nil {
+      if type_of(raw_roles) != "list" || len(raw_roles) == 0 {
+        throw "agent_loop: completion requirement `evidence_roles` must be a non-empty list"
+      }
+      let seen_roles: dict = {}
+      for value_role in raw_roles {
+        if completion_requirement_evidence_role(value_role) == nil {
+          throw "agent_loop: unsupported completion requirement evidence role `"
+            + to_string(value_role)
+            + "`"
+        }
+        if seen_roles[value_role] ?? false {
+          throw "agent_loop: duplicate completion requirement evidence role `"
+            + to_string(value_role)
+            + "`"
+        }
+        seen_roles = seen_roles + {[value_role]: true}
+      }
+    }
+    const roles = completion_requirement_evidence_roles(raw_roles)
+    requirements = requirements
+      + [{requirement_id: requirement_id, name: name, evidence_roles: roles}]
+  }
+  return {requirements: requirements}
+}
+
+/**
+ * Return the optional requirement ledger, normalized to its public shape.
+ * A malformed ledger throws rather than dropping requirements, so the
+ * completion gate can never be weakened by a contract it could not read.
+ *
+ * @effects: []
+ * @errors: [validation]
  * @api_stability: experimental
  * @example: completion_requirement_contract({requirements: [{requirement_id: "build", name: "Build the artifact."}]})
  */
 pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementContract? {
-  if type_of(value) != "dict" || type_of(value?.requirements) != "list"
-    || len(value.requirements) == 0 {
-    return nil
-  }
-  let requirements: list<CompletionRequirement> = []
-  for raw in value.requirements {
-    const requirement_id = trim(to_string(raw?.requirement_id ?? ""))
-    const name = trim(to_string(raw?.name ?? ""))
-    if requirement_id != "" && name != "" {
-      const roles = completion_requirement_evidence_roles(raw?.evidence_roles)
-      if len(roles) > 0 {
-        requirements = requirements
-          + [{requirement_id: requirement_id, name: name, evidence_roles: roles}]
-      }
-    }
-  }
-  if len(requirements) == 0 {
-    return nil
-  }
-  return {requirements: requirements}
+  return __completion_requirement_contract_checked("completion_judge", value)
 }
 
 /**

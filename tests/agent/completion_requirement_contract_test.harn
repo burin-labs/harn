@@ -2,6 +2,7 @@ import { completion_requirement_evidence_packet } from "std/agent/completion_evi
 // Run: harn test tests/agent/completion_requirement_contract_test.harn
 import {
   CompletionRequirementEvidencePacket,
+  completion_requirement_contract,
   completion_requirement_report,
 } from "std/agent/completion_requirements"
 import { agent_capture_events } from "std/agent/events"
@@ -13,7 +14,7 @@ import {
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { llm_done, with_llm_script } from "std/testing"
+import { assert_error_contains, llm_done, with_llm_script } from "std/testing"
 
 fn requirement_contract() -> CompletionRequirementContract {
   return {
@@ -374,4 +375,182 @@ pipeline test_requirement_schema_is_optional_for_legacy_judges(harness: Harness,
   )
   assert(decoded.requirement_report?.complete == false)
   assert_eq(decoded.requirement_report?.pending_count, 2)
+}
+
+fn unmeasured_edit_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "edit",
+    "Apply a source edit.",
+    {
+      handler: { _args ->
+        agent_tool_handler_result("write applied", {mutation_status: "applied", changed_paths: []})
+      },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+pipeline test_malformed_evidence_roles_reject_the_contract_instead_of_dropping_requirements(
+  harness: Harness,
+  task: unknown,
+) {
+  const normalized = completion_requirement_contract(artifact_contract())
+  assert_eq(len(normalized.requirements), 1)
+  assert_eq(normalized.requirements[0].evidence_roles, ["mutation_summary"])
+  assert_error_contains(
+    { ->
+      completion_requirement_contract(
+        {
+          requirements: [
+            {requirement_id: "artifact", name: "Create it.", evidence_roles: ["screenshot"]},
+          ],
+        },
+      )
+    },
+    "unsupported completion requirement evidence role",
+  )
+  assert_error_contains(
+    { ->
+      completion_requirement_contract(
+        {
+          requirements: [
+            {requirement_id: "artifact", name: "Create it.", evidence_roles: "mutation_summary"},
+          ],
+        },
+      )
+    },
+    "`evidence_roles` must be a non-empty list",
+  )
+  assert_error_contains(
+    { ->
+      completion_requirement_contract(
+        {requirements: [{requirement_id: "artifact", name: "Create it.", evidence_roles: []}]},
+      )
+    },
+    "`evidence_roles` must be a non-empty list",
+  )
+  assert_error_contains(
+    { ->
+      completion_requirement_contract(
+        {
+          requirements: [
+            {
+              requirement_id: "artifact",
+              name: "Create it.",
+              evidence_roles: ["mutation_summary", "mutation_summary"],
+            },
+          ],
+        },
+      )
+    },
+    "duplicate completion requirement evidence role",
+  )
+}
+
+pipeline test_unreadable_contract_cannot_switch_the_completion_gate_off(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(completion_requirement_contract(nil), nil)
+  assert_error_contains(
+    { -> completion_requirement_contract({requirements: [{requirement_id: "", name: ""}]}) },
+    "non-empty `requirement_id` and `name`",
+  )
+  assert_error_contains(
+    { -> completion_requirement_contract({requirements: []}) },
+    "must be a non-empty list",
+  )
+  assert_error_contains(
+    { -> completion_requirement_contract({requirements: ["artifact"]}) },
+    "item must be a dict",
+  )
+  assert_error_contains(
+    { ->
+      completion_requirement_contract(
+        {
+          requirements: [
+            {requirement_id: "artifact", name: "Create it."},
+            {requirement_id: "artifact", name: "Create it again."},
+          ],
+        },
+      )
+    },
+    "duplicate completion `requirement_id`",
+  )
+  // The judge seam is where a nil-ed contract would silently drop the
+  // requirement_report property and leave a scalar verdict in charge.
+  const contracted = __judge_completion_verdict_schema(artifact_contract())
+  assert_eq(contracted.properties.requirement_report.type, "array")
+  assert_error_contains(
+    { ->
+      __judge_completion_verdict_schema(
+        {
+          requirements: [
+            {requirement_id: "artifact", name: "Create it.", evidence_roles: ["screenshot"]},
+          ],
+        },
+      )
+    },
+    "unsupported completion requirement evidence role",
+  )
+}
+
+pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The artifact was written.",
+            requirement_report: [{requirement_id: "artifact", met: true, evidence_refs: [-3]}],
+          },
+        ),
+      },
+      llm_done(),
+    ],
+    { ->
+      const session = "requirement-unmeasured-mutation-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: unmeasured_edit_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {
+          provider: "mock",
+          max_invocations: 1,
+          requirement_contract: artifact_contract(),
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Create the requested artifact.", nil, opts) },
+      )
+      const requirement_receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(requirement_receipts), 1)
+      assert_eq(requirement_receipts[0].action, "continue")
+      assert_eq(requirement_receipts[0].reason, "completion_requirements_pending")
+      assert_eq(requirement_receipts[0].requirements.pending_count, 1)
+      assert_eq(requirement_receipts[0].requirements.rows[0].status, "unsupported")
+    },
+  )
 }
