@@ -198,6 +198,7 @@ fn render_profile_with_extra_read_roots(
     // `/var/folders` and `/private/var/folders` cannot make a broad preset
     // allow miss a narrower read-only deny.
     let developer_toolchain_read_roots = normalize_profile_roots(developer_toolchain_read_roots);
+    let read_deny_roots = super::process_sandbox_read_deny_roots(policy);
     let package_manager_read_roots = normalize_profile_roots(package_manager_read_roots);
     let developer_toolchain_cache_roots = normalize_profile_roots(developer_toolchain_cache_roots);
     let roots = process_sandbox_roots(policy);
@@ -369,6 +370,28 @@ fn render_profile_with_extra_read_roots(
         profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
         profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
         profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+    }
+    // The read denylist is emitted LAST, after every allow in this function.
+    //
+    // `sandbox-exec` is last-match-wins, so position is the enforcement: a deny
+    // written here beats the preset allows, the workspace and read-only allows,
+    // the policy read roots, and the write block's read re-grants. That ordering
+    // is the requirement, not an optimization — `PackageManagerConfig` grants
+    // `~/.config`, `~/.cache`, and `~/.netrc` wholesale, so a denial that
+    // competed with presets instead of beating them would never fire on the
+    // paths it exists for.
+    //
+    // `file-read*` covers metadata as well as data, so this also narrows the
+    // global `(allow file-read-metadata)` at the top of the profile. Without
+    // that, a denied path's existence and size would still leak to a child that
+    // cannot open it.
+    for root in read_deny_roots {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            profile.push_str(&format!(
+                "(deny file-read* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
     }
     profile
 }
@@ -1490,5 +1513,123 @@ let package = Package(
 "#,
         )
         .expect("write package manifest");
+    }
+
+    // ---- read denylist: it must beat the presets ---------------------------
+    //
+    // `PackageManagerConfig` grants child reads of `~/.netrc`, `~/.config`, and
+    // `~/.cache` wholesale. A denylist that merely competed with presets would
+    // never fire on the paths it exists for, because the credential is INSIDE a
+    // directory the preset already opened. Composition order is the feature, so
+    // it is what these assert.
+
+    fn package_manager_preset_policy() -> CapabilityPolicy {
+        CapabilityPolicy {
+            workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+            sandbox_profile: SandboxProfile::Worktree,
+            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
+                ..Default::default()
+            },
+            ..CapabilityPolicy::default()
+        }
+    }
+
+    fn denylist_home() -> std::path::PathBuf {
+        super::super::sandbox_user_home_dir().expect("home dir")
+    }
+
+    /// Positive control. Without it the deny assertions could pass because the
+    /// preset granted nothing, rather than because the deny outranked it.
+    #[test]
+    fn the_package_manager_preset_really_grants_the_parent_directory() {
+        let profile = render_profile(&package_manager_preset_policy());
+        let config = denylist_home().join(".config");
+        assert!(
+            profile.contains(&format!(
+                "(allow file-read* (subpath \"{}\"))",
+                config.display()
+            )),
+            "PackageManagerConfig must grant ~/.config, or the denial below proves nothing:\n{profile}"
+        );
+    }
+
+    /// The requirement, and it is positional: `sandbox-exec` is last-match-wins,
+    /// so a deny emitted before a broad allow covering the same path is a no-op.
+    #[test]
+    fn a_denied_credential_is_refused_even_though_a_preset_granted_its_parent() {
+        let profile = render_profile(&package_manager_preset_policy());
+        let home = denylist_home();
+        let last_allow = profile
+            .rmatch_indices("(allow file-read")
+            .next()
+            .map(|(index, _)| index)
+            .expect("the profile must contain read allows");
+
+        for relative in [
+            ".netrc",
+            ".config/gh/hosts.yml",
+            ".config/gcloud",
+            ".aws",
+            ".docker/config.json",
+            ".ssh",
+        ] {
+            let denied = home.join(relative);
+            let rule = format!("(deny file-read* (subpath \"{}\"))", denied.display());
+            let deny_at = profile
+                .find(&rule)
+                .unwrap_or_else(|| panic!("`{relative}` must be denied by default:\n{profile}"));
+            assert!(
+                deny_at > last_allow,
+                "`{relative}`'s deny is at {deny_at}, before the last read allow at {last_allow}. \
+                 Under last-match-wins that deny is overridden and the credential stays \
+                 readable:\n{profile}"
+            );
+        }
+    }
+
+    /// The global `(allow file-read-metadata)` would otherwise leak a denied
+    /// file's existence and size to a child that cannot open it. `file-read*`
+    /// subsumes metadata, so the trailing deny closes that too.
+    #[test]
+    fn a_denied_path_leaks_neither_content_nor_metadata() {
+        let profile = render_profile(&package_manager_preset_policy());
+        let metadata_at = profile
+            .find("(allow file-read-metadata)")
+            .expect("precondition: the profile grants global metadata reads");
+        let deny_at = profile
+            .find(&format!(
+                "(deny file-read* (subpath \"{}\"))",
+                denylist_home().join(".ssh").display()
+            ))
+            .expect("~/.ssh denied");
+        assert!(
+            deny_at > metadata_at,
+            "the deny must outrank the global metadata allow, or a denied path's existence \
+             still leaks:\n{profile}"
+        );
+    }
+
+    /// A host may add denials; it may not remove the defaults.
+    #[test]
+    fn a_host_added_denial_composes_with_the_defaults() {
+        let mut policy = package_manager_preset_policy();
+        policy
+            .process_sandbox
+            .read_deny_roots
+            .push("/opt/company-secrets".to_string());
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(deny file-read* (subpath \"/opt/company-secrets\"))"),
+            "a host-added denial must be emitted:\n{profile}"
+        );
+        assert!(
+            profile.contains(&format!(
+                "(deny file-read* (subpath \"{}\"))",
+                denylist_home().join(".ssh").display()
+            )),
+            "adding a denial must not displace the defaults:\n{profile}"
+        );
     }
 }

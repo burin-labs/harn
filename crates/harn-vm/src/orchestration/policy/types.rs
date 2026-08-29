@@ -285,11 +285,48 @@ pub struct ProcessSandboxPolicy {
     pub presets: Option<Vec<ProcessSandboxPreset>>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
+    /// Subtrees a confined child may never read, whatever else grants them.
+    ///
+    /// This is the ONLY subtractive term in the policy. It composes
+    /// most-restrictive over every additive source: a preset, a workspace root,
+    /// a `read_only_root`, and an explicit `read_roots` entry all lose to it.
+    /// That ordering is the point — `PackageManagerConfig` grants `~/.config`,
+    /// `~/.cache`, and `~/.netrc` wholesale, so a denylist that merely competed
+    /// with presets would leave credentials readable by default.
+    ///
+    /// Backends that cannot express a subtraction refuse the spawn rather than
+    /// widening it, exactly as `allow_tcp_loopback` does.
+    pub read_deny_roots: Vec<String>,
     /// Permit a confined child to bind and connect TCP loopback sockets while
     /// retaining the deny on non-loopback destinations. Backends that cannot
     /// enforce this distinction reject the spawn rather than widening it.
     pub allow_tcp_loopback: bool,
 }
+
+/// Credential material that is denied to confined children by default.
+///
+/// These are subtrees whose only purpose is to hold secrets, and every one of
+/// them sits under a directory some preset already grants: `~/.netrc`,
+/// `~/.config`, and `~/.cache` come from `PackageManagerConfig`, and the home
+/// toolchain roots come from `DeveloperToolchains`. Naming a parent as readable
+/// is not consent to read the credentials inside it.
+///
+/// Paths are home-relative. A host may add to this list but the defaults are
+/// not removable through configuration.
+pub const DEFAULT_READ_DENY_HOME_PATHS: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".netrc",
+    ".docker/config.json",
+    ".config/gh/hosts.yml",
+    ".config/gcloud",
+    ".kube/config",
+    ".npmrc",
+    ".pypirc",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+];
 
 /// Runtime-owned forwarding endpoints for a managed child-process egress
 /// proxy. Naming a loopback endpoint is authority because the OS sandbox grants
@@ -314,6 +351,7 @@ impl ProcessSandboxPolicy {
         }
         extend_unique(&mut self.read_roots, &other.read_roots);
         extend_unique(&mut self.write_roots, &other.write_roots);
+        extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
     }
 
@@ -329,6 +367,15 @@ impl ProcessSandboxPolicy {
             presets,
             read_roots: intersect_roots(&self.read_roots, &requested.read_roots),
             write_roots: intersect_roots(&self.write_roots, &requested.write_roots),
+            // UNION, not intersection, and deliberately so. Every other field
+            // here narrows as it nests; this one is a denial, so narrowing it
+            // would WIDEN the resulting authority. A nested request may add a
+            // denial and may never drop one the outer policy made.
+            read_deny_roots: {
+                let mut denied = self.read_deny_roots.clone();
+                extend_unique(&mut denied, &requested.read_deny_roots);
+                denied
+            },
             // Loopback is host-owned authority like `process_network_proxy`:
             // a nested request may neither invent it nor erase an outer grant.
             // Host configuration still composes additively through `extend`.

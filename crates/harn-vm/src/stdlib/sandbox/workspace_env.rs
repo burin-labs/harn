@@ -94,8 +94,28 @@ fn workspace_toolchain_env_with_package_cache(
         inherited_workspace_cache_path(policy, key)
             .unwrap_or_else(|| root.join(suffix).display().to_string())
     };
+    // HOME and PYTHONUSERBASE are deliberately NOT relocated.
+    //
+    // Relocating them was hermetic but wrong for an agent: it moved the user's
+    // installed toolchain out from under every command the agent ran. A
+    // `pip install --user` package lives at `$HOME/.local/lib/...` and is found
+    // through `site.getusersitepackages()`, which follows PYTHONUSERBASE — so
+    // with both moved, `python3 -m pytest` reported "No module named pytest"
+    // for a pytest that was installed, readable, and working in the user's own
+    // terminal. Nothing was refused; the interpreter simply never looked. The
+    // agent had no way to learn that, and retried the same command twenty
+    // times.
+    //
+    // The rule is that the agent should see what works in the user's terminal.
+    // PURE CACHES stay relocated below — those are derived, reproducible, and
+    // writable, so confining them keeps a run from polluting the user's real
+    // caches without hiding anything the user installed. Identity and install
+    // roots do not move.
+    //
+    // Read confinement of `$HOME` is a separate axis and still applies: the
+    // credential denylist (`ProcessSandboxPolicy::read_deny_roots`) refuses
+    // `~/.ssh`, `~/.aws`, and friends whether or not HOME points there.
     let mut env = vec![
-        ("HOME".to_string(), root.display().to_string()),
         (
             "XDG_CACHE_HOME".to_string(),
             root.join("xdg-cache").display().to_string(),
@@ -118,10 +138,6 @@ fn workspace_toolchain_env_with_package_cache(
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
         ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
-        (
-            "PYTHONUSERBASE".to_string(),
-            root.join("python-user").display().to_string(),
-        ),
     ];
 
     // Harn's package cache is resolved before HOME/XDG are relocated. In
