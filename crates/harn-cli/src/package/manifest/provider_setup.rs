@@ -657,6 +657,44 @@ required_secrets = ["duffel/test-access-token"]
         );
     }
 
+    /// The exact input that broke the fleet bump. `harn-bump-fleet` pins
+    /// `harn-github-connector` v0.8.6 at commit 3649fd06aae1b0669771ecad5ed1b68
+    /// 31fd2e76b, whose `harn.toml` line 23 is reproduced verbatim below. The
+    /// released v0.10.121 CLI could not install its own locked dependencies
+    /// against it (run 33261340737, exit 1 then 125).
+    ///
+    /// `github/webhook-secret` resolving to outbound is deliberate, not an
+    /// oversight, and is asserted here so the choice stays visible. Harn's own
+    /// typed fixtures classify that name inbound, but they govern manifests
+    /// that declare a direction. This one does not, and pre-#7570
+    /// `commands/connect/status.rs:155` cloned `required_secrets` whole with no
+    /// direction filter, so the package required both secrets to report
+    /// healthy. Dropping the webhook secret here would let an unconfigured
+    /// connector report healthy, contradicting the package's own
+    /// `missing_auth` text.
+    #[test]
+    fn fleet_github_connector_legacy_secrets_both_resolve_outbound() {
+        let setup: ProviderSetupManifest = toml::from_str(
+            r#"
+required_secrets = ["github/app-private-key", "github/webhook-secret"]
+"#,
+        )
+        .expect("the pinned fleet manifest's secret list must load");
+
+        assert_eq!(
+            setup.required_secrets,
+            vec![
+                ConnectorRequiredSecretManifest::outbound("github/app-private-key"),
+                ConnectorRequiredSecretManifest::outbound("github/webhook-secret"),
+            ]
+        );
+        assert_eq!(
+            setup.outbound_credentials().count(),
+            2,
+            "both legacy entries must reach the outbound credential seam, as they did before the direction became typed"
+        );
+    }
+
     #[test]
     fn typed_table_required_secret_keeps_its_declared_direction() {
         let setup: ProviderSetupManifest = toml::from_str(
