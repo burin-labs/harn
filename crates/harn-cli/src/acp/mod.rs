@@ -21,7 +21,7 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
         // `crates/harn-hostlib/README.md` for the boundary contract.
         #[cfg(feature = "hostlib")]
         {
-            let _ = harn_hostlib::install_default(vm);
+            crate::install_default_hostlib(vm);
         }
 
         // Install the lazy neural injection-classifier loader (Layer 2, guard

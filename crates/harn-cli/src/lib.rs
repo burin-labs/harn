@@ -78,7 +78,11 @@ static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
     let embed = crate::local_embed::resolve_embed_capability();
-    let _ = harn_hostlib::install_default_with_embed(vm, embed);
+    let _ = harn_hostlib::install_default_with_embed_and_harn_reference_resolver(
+        vm,
+        embed,
+        Some(harn_serve::harn_reference_resolver()),
+    );
     // The `rules` capability lives in its own crate (it depends on
     // `harn-rules`, which depends on `harn-hostlib`, so it can't ship inside
     // `install_default`). Wire it in alongside the defaults.

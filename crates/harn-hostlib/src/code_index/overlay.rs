@@ -25,6 +25,7 @@ use crate::ast::Language;
 
 use super::file_table::FileId;
 use super::symbol_graph::SymbolGraph;
+use crate::ResolvedHarnReference;
 
 /// Cap on the number of branch overlays kept in memory at once.
 ///
@@ -124,6 +125,11 @@ impl BranchOverlay {
     /// [`Self::materialize`] first or this returns an empty graph.
     pub fn graph(&self) -> &SymbolGraph {
         &self.materialized
+    }
+
+    /// Replace resolver-backed Harn references in this branch view.
+    pub fn relink_harn_references(&mut self, references: &[ResolvedHarnReference]) {
+        self.materialized.replace_harn_references(references);
     }
 }
 
@@ -353,5 +359,35 @@ mod tests {
         state.set(overlay);
         state.activate(Some("topic/del".into()));
         assert!(state.graph(&base).nodes_named("c").is_empty());
+    }
+
+    #[test]
+    fn overlay_relink_replaces_stale_harn_reference_edges() {
+        let mut base = SymbolGraph::new();
+        base.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[]);
+        base.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[]);
+        base.rebuild_file(3, "use.harn", Language::Harn, "fn use_it() { run() }", &[]);
+        let mut overlay = BranchOverlay::new("topic/refs");
+        overlay.materialize(&base);
+        overlay.relink_harn_references(&[ResolvedHarnReference {
+            from_path: "use.harn".into(),
+            to_path: "a.harn".into(),
+            to_name: "run".into(),
+        }]);
+        overlay.relink_harn_references(&[ResolvedHarnReference {
+            from_path: "use.harn".into(),
+            to_path: "b.harn".into(),
+            to_name: "run".into(),
+        }]);
+
+        let use_module = overlay.graph().module_node_for_file(3).unwrap();
+        let targets = overlay
+            .graph()
+            .outgoing(use_module)
+            .iter()
+            .filter(|edge| edge.kind == super::super::symbol_graph::EdgeKind::Refs)
+            .map(|edge| overlay.graph().node(edge.to).unwrap().path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(targets, vec!["b.harn"]);
     }
 }

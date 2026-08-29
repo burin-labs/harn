@@ -27,6 +27,10 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_docs)]
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
 #[cfg(feature = "ast")]
 pub mod ast;
 #[cfg(feature = "ast")]
@@ -77,6 +81,34 @@ pub use host_lease::{
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 
+/// A resolved Harn use projected by an integration layer that owns access to
+/// both `harn-modules` and the host symbol graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedHarnReference {
+    /// Workspace-relative path containing the use.
+    pub from_path: String,
+    /// Workspace-relative path containing the resolved definition.
+    pub to_path: String,
+    /// Name of the resolved definition.
+    pub to_name: String,
+}
+
+/// Input supplied to the integration-owned Harn reference resolver.
+#[derive(Debug, Clone)]
+pub struct HarnReferenceInput {
+    /// Canonical workspace root.
+    pub root: PathBuf,
+    /// Canonical Harn files participating in this graph view.
+    pub files: Vec<PathBuf>,
+    /// Unsaved or branch-overlay source bytes keyed by canonical path.
+    pub source_overrides: HashMap<PathBuf, String>,
+}
+
+/// Integration callback that projects the shared `harn-modules` resolver into
+/// hostlib without introducing a reverse crate dependency.
+pub type HarnReferenceResolver =
+    Arc<dyn Fn(&HarnReferenceInput) -> Result<Vec<ResolvedHarnReference>, String> + Send + Sync>;
+
 /// Handles retained from [`install_default_with_handles`] so embedders can
 /// warm or introspect capabilities out-of-band of the VM.
 pub struct DefaultHostlibHandles {
@@ -124,6 +156,16 @@ pub fn install_default_with_embed(
     vm: &mut harn_vm::Vm,
     embed: embed::EmbedCapability,
 ) -> (HostlibRegistry, DefaultHostlibHandles) {
+    install_default_with_embed_and_harn_reference_resolver(vm, embed, None)
+}
+
+/// Like [`install_default_with_embed`], with a resolver projection supplied by
+/// an integration layer that can depend on both hostlib and `harn-modules`.
+pub fn install_default_with_embed_and_harn_reference_resolver(
+    vm: &mut harn_vm::Vm,
+    embed: embed::EmbedCapability,
+    harn_reference_resolver: Option<HarnReferenceResolver>,
+) -> (HostlibRegistry, DefaultHostlibHandles) {
     let mut registry = HostlibRegistry::new();
     let session = session::SessionCapability::with_embedder(embed.embedder().clone());
     // The code-intelligence capabilities (`ast` + `code_index`) are only
@@ -131,13 +173,18 @@ pub fn install_default_with_embed(
     // the deterministic tool surface without tree-sitter or any grammar.
     #[cfg(feature = "ast")]
     let code_index_handle = {
-        let code_index = code_index::CodeIndexCapability::new();
+        let mut code_index = code_index::CodeIndexCapability::new();
+        if let Some(resolver) = harn_reference_resolver {
+            code_index = code_index.with_harn_reference_resolver(resolver);
+        }
         let handle = code_index.clone();
         registry = registry
             .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
             .with(code_index);
         handle
     };
+    #[cfg(not(feature = "ast"))]
+    let _ = harn_reference_resolver;
     registry = registry
         .with(scanner::ScannerCapability)
         .with(embed)
