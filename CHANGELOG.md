@@ -9,6 +9,89 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.120
+
+### Added
+
+- `harn replay` can now re-execute recorded coding turns in fresh offline
+  workspaces and fail closed on tool, file-effect, or terminal-outcome drift.
+- Confined subprocesses can opt into TCP loopback servers without gaining remote
+  network access, and omitted working directories resolve to a sandbox-accessible
+  workspace root instead of inheriting an inaccessible host directory.
+- Provider request traces now retain ordered, content-addressed message lineage
+  with projection and compaction provenance, so exact model-visible context stays
+  reconstructable after long-session context changes.
+- Catalog GLM-5.3-Flash on direct Z.AI and OpenRouter routes with multimodal capabilities, stable aliases, and
+  exact time-bounded launch pricing.
+- Provider catalog model deprecations can now include a machine-readable
+  `sunset_date`, so clients can warn about route shutdowns without parsing prose.
+
+### Changed
+
+- Run the exhaustive batch-rejoin result matrix through Harn's typed in-process owner while retaining one canonical CLI
+  lifecycle smoke.
+- Agent loops now review the final work product for brittle assumptions,
+  incomplete integration, and unsupported completion claims before yielding.
+
+### Fixed
+
+- **Structured-output requests no longer emit a schema that admits no
+  value.** Empty `anyOf` / `oneOf` / `enum` combinators and closed objects
+  with impossible `required` names are rejected at the normalize/emit seam
+  with a diagnostic that names the tool and the collapsed branch set. This
+  stops llama.cpp from compiling `anyOf: []` into `root ::=` and 500ing
+  the run after a rejected discriminated-union tool call (#7543,
+  burin-labs/burin-code#7153).
+- **Published releases now fail closed if either SDK language artifact is
+  missing (#7308).** SDK codegen requires both generated Python and
+  TypeScript clients, attaches `harn-sdk-python.tar.gz` and
+  `harn-sdk-typescript.tar.gz` to the GitHub release, and documents the
+  tag-pinned retrieval path for downstream CI.
+- **No-middleware tool overlap is now a causal named-peak proof (#7437).**
+  Serial, capped, and full-overlap cases share one runtime in-flight count
+  instead of a timing-bounded boolean.
+- **Streamed SSE/NDJSON completions now keep one semantic text block per
+  adjacent same-type run (#7501).** Token-sized OpenAI-compatible reasoning
+  and content deltas, Anthropic text deltas, and Ollama thinking/content
+  fragments still arrive live per fragment, but the finished `llm_call`
+  block list merges adjacent same-type/same-visibility text instead of
+  storing one JSON object per token. Tool calls and provider-signed
+  reasoning stay on their existing boundaries.
+- Retry transient GitHub GraphQL server failures during signed runtime-bump
+  publication without replaying semantic GraphQL errors.
+- Completion gates and judges now arbitrate a final response even when an older
+  effect-phased tool proposal remains deferred, preventing valid completions from
+  stalling indefinitely. Loops without a completion adjudicator remain
+  conservative and still require exact re-proposal.
+- Runtime bump automation now disarms an existing bump before refresh, refuses
+  to publish or arm work validated against an older or unobservable base
+  revision, and emits a typed fresh-checkout retry receipt for bounded
+  controllers.
+- Offline coding replay now compares equivalent native path and newline forms consistently across operating systems.
+- **Unknown host event types no longer kill a run (#7541).**
+  `__host_agent_emit_event` now drops an unrecognized `event_type` after
+  one warning per type per session. The drop is not journaled. A malformed
+  payload of a registered type is still fatal.
+- CI recovery now recognizes configured job timeouts separately from source
+  failures and retries only failures with complete transient-cause evidence.
+- Completion and done judges now fail closed when their model call fails. An
+  unavailable judge can no longer convert an unverified completion claim into
+  `done`; the bounded judge cap ends the run as `completion_unverified` instead.
+- Completion judges can now account for every host-supplied acceptance item with
+  evidence-indexed rows, and reject incomplete reports with an inspectable
+  pending-item receipt.
+- Keep loopback-only subprocess grants narrow even when the surrounding agent
+  may use network-capable tools; unsupported platforms reject the grant instead
+  of widening it to unrestricted sockets.
+- Prevent Harn-only optional-field metadata from producing invalid nested tool schemas on provider APIs.
+- Local sandbox sessions can now start hosted workloads inside read-only mounts
+  without granting those workloads write access to the mounted files.
+- Sandboxed tool processes now reuse prewarmed workspace-local toolchain caches
+  instead of replacing them with empty per-run caches.
+- Stop agent loops immediately after a configured terminal tool succeeds, even when an earlier tool proposal was deferred
+  and later abandoned.
+- Preserve an explicit typed result returned by a custom agent host-tool formatter instead of wrapping it a second time.
+
 ## v0.10.119
 
 ### Added
