@@ -115,3 +115,90 @@ pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harne
     },
   )
 }
+
+/**
+ * A sentinel terminal is a natural terminal like any other, so a host that has
+ * already adjudicated the turn can claim it.
+ *
+ * Before the post-turn callback was consulted above the sentinel branch, this
+ * case could not be expressed at all: the sentinel terminal returned before the
+ * callback was ever invoked, and the completion result it returned hardcoded
+ * `needs_verify: true`, so no field a host set could survive.
+ */
+pipeline test_a_host_verdict_can_waive_verification_on_a_sentinel_terminal(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("The declared verifier already passed after my last write. ##DONE##")],
+    { ->
+      const verify_calls = harness.runtime.shared_cell(
+        {scope: "task_group", key: "sentinel-waived-verify-calls", initial: 0},
+      )
+      const result = agent_loop(
+        harness,
+        "Finish the task.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_sentinel: "##DONE##",
+          verify_completion: { info ->
+            let count = harness.runtime.shared_snapshot(verify_calls)
+            harness.runtime.shared_set(verify_calls, count.value + 1)
+            return nil
+          },
+          post_turn_callback: { info ->
+            return {stop: true, needs_verify: false}
+          },
+        },
+      )
+      assert_eq(result?.stop_reason, "sentinel")
+      assert_eq(result?.llm?.iterations, 1)
+      assert_eq(harness.runtime.shared_snapshot(verify_calls).value, 0)
+    },
+  )
+}
+
+/**
+ * Direction control for the case above. The SAME sentinel turn and the same
+ * callback, with `needs_verify` omitted, still verifies. Without this control a
+ * waiver that suppressed verification unconditionally would read as a pass.
+ */
+pipeline test_a_sentinel_terminal_still_verifies_when_the_host_says_nothing(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("The declared verifier already passed after my last write. ##DONE##")],
+    { ->
+      const verify_calls = harness.runtime.shared_cell(
+        {scope: "task_group", key: "sentinel-unwaived-verify-calls", initial: 0},
+      )
+      const result = agent_loop(
+        harness,
+        "Finish the task.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_sentinel: "##DONE##",
+          verify_completion: { info ->
+            let count = harness.runtime.shared_snapshot(verify_calls)
+            harness.runtime.shared_set(verify_calls, count.value + 1)
+            return nil
+          },
+          post_turn_callback: { info ->
+            return {stop: true}
+          },
+        },
+      )
+      assert_eq(result?.stop_reason, "sentinel")
+      assert_eq(harness.runtime.shared_snapshot(verify_calls).value, 1)
+    },
+  )
+}
