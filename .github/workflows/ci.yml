@@ -98,6 +98,7 @@ jobs:
       vscode: ${{ steps.surface_filter.outputs.vscode }}
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
       setup_action: ${{ steps.surface_filter.outputs.setup_action }}
+      release_contract: ${{ steps.surface_filter.outputs.release_contract }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,6 +163,22 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'scripts/bootstrap_harn.mjs'
               - 'scripts/tests/bootstrap_harn.test.mjs'
+            # Everything that can move release semantics out of agreement with
+            # the orchestrator that drives cuts. A release pull request always
+            # touches `Cargo.toml` and `CHANGELOG.md`, so this fires on every
+            # release candidate; that is the case the gate exists for.
+            release_contract:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/build-release-binaries.yml'
+              - '.github/workflows/bump-release.yml'
+              - '.github/workflows/publish-release.yml'
+              - 'CHANGELOG.md'
+              - 'Cargo.toml'
+              - 'scripts/lib/release_version.sh'
+              - 'scripts/prepare_development_version.sh'
+              - 'scripts/publish*'
+              - 'scripts/release_*'
+              - 'scripts/verify_release_*'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -422,6 +439,81 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+
+  # Release semantics have two enforcers: this repository's release scripts and
+  # workflows, and the release orchestrator that drives cuts. When they
+  # disagree, nothing in either repository's own test suite notices — the
+  # orchestrator's checks run against fixed version fixtures, and this
+  # repository never evaluates the orchestrator's gates at all. The
+  # disagreement therefore surfaces for the first time at a live cut, which is
+  # the most expensive place to learn about it.
+  #
+  # This job evaluates the orchestrator's release-semantics gates against this
+  # repository's REAL current version, tag, and changelog. It is read-only: it
+  # fetches refs, reads two files out of `origin/<base>`, and evaluates pure
+  # decision functions. It performs no writes, needs no credentials, and never
+  # dispatches a release.
+  #
+  # It lives in ci.yml, and is a `needs` of the required `CI status` aggregate,
+  # because a verdict nothing consumes is decorative. As its own workflow it
+  # could only ever become load-bearing by adding a second required check;
+  # here the existing aggregate carries it. It must run on `merge_group` as
+  # well as `pull_request`, because a candidate superseded by a fragment that
+  # landed after the release branch was cut is a merge-queue-time fact.
+  release-contract:
+    name: Release contract holds
+    needs: [changes]
+    # Skipped when nothing that can move release semantics was touched.
+    # ci-status below treats that skip as PASS only when this filter agrees it
+    # was not touched, so a skip cannot stand in for a missing verdict.
+    if: needs.changes.outputs.release_contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The release orchestrator, pinned by commit. Moving this pin is a
+      # deliberate change to which release semantics this repository is
+      # checked against.
+      ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
+      ORCHESTRATOR_REF: 82d9e847b658f921672048608d5aa0fc4100c01c
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the pinned release orchestrator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.ORCHESTRATOR_REPOSITORY }}
+          ref: ${{ env.ORCHESTRATOR_REF }}
+          path: .release-orchestrator
+          persist-credentials: false
+
+      # The orchestrator's modules are written against the Harn runtime it
+      # pins, not the one this repository is currently building.
+      - name: Install the orchestrator's pinned Harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .release-orchestrator/.harn-version
+          token: ${{ github.token }}
+
+      # The check reads `origin/<base>:Cargo.toml` and
+      # `origin/<base>:CHANGELOG.md`. A PR checkout does not necessarily carry
+      # the base branch as a local ref.
+      - name: Fetch the base branch and release tags
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Evaluate the release contract
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: |
+          harn run --no-sandbox \
+            .release-orchestrator/check_release_contract.harn \
+            -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}"
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
@@ -2074,6 +2166,7 @@ jobs:
         fmt,
         package-audit,
         lint-md,
+        release-contract,
         rust-checks,
         rust-check-inputs,
         rust-artifacts-ready,
@@ -2139,6 +2232,26 @@ jobs:
               :
             else
               echo "::error::Publishable crate checks failed or skipped when required."
+              exit 1
+            fi
+          fi
+
+          # The release contract is the gate that decides whether this
+          # repository's release semantics still agree with the orchestrator
+          # that drives cuts. A skip is acceptable ONLY when the `changes`
+          # filter agrees nothing release-relevant was touched — otherwise a
+          # skipped job would stand in for a verdict that was never reached,
+          # which is the exact way this gate failed before it was required.
+          # A cancellation is not a skip and is not tolerated here.
+          release_contract_result="${{ needs['release-contract'].result }}"
+          release_contract_expected="${{ needs.changes.outputs.release_contract }}"
+          echo "Release contract: $release_contract_result (expected=$release_contract_expected)"
+          if [ "$release_contract_result" != "success" ]; then
+            if [ "$release_contract_result" = "skipped" ] \
+              && [ "$release_contract_expected" != "true" ]; then
+              :
+            else
+              echo "::error::Release contract failed, or did not report a verdict while release-relevant paths were touched."
               exit 1
             fi
           fi
