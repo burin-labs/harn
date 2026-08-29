@@ -186,6 +186,8 @@ fn spawned_process_observes_workspace_toolchain_environment() {
         "NPM_CONFIG_CACHE",
         "YARN_CACHE_FOLDER",
         "PNPM_HOME",
+        "CCACHE_DIR",
+        "CCACHE_TEMPDIR",
     ] {
         let value = PathBuf::from(values.get(key).unwrap_or_else(|| panic!("{key} missing")));
         assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
