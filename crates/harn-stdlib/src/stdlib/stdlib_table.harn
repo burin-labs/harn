@@ -31,7 +31,7 @@ fn __table_cell(value: any, max_width: int?) -> string {
   return normalized
 }
 
-fn __table_column_from(raw: dict?, idx: int, headers: any) {
+fn __table_column_from(raw: dict | string | nil, idx: int, headers: any) {
   if type_of(raw) == "string" {
     return {key: raw, header: raw, align: "left", index: idx}
   }

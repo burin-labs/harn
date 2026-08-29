@@ -9,6 +9,42 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.121
+
+### Breaking
+
+- Move wall-clock pace decisions from `std/agent/governors` to
+  `std/agent/cut_rules`. The new public names start with `pace_cut_rule_`; update
+  the import and function names together because the old exports were removed.
+
+### Changed
+
+- Connector manifests now declare whether each required secret is an outbound
+  credential or an inbound verification secret, so hosts no longer infer trust
+  direction from names or list order.
+
+### Fixed
+
+- Run reports now use durable agent-run start and terminal events for elapsed
+  time, and no longer report an abandoned open session as actively running.
+- Completion requirements now cite typed final-answer, verification, or bounded whole-session mutation evidence,
+  so missing measurements and unsupported evidence roles cannot approve completion. A requirement contract the
+  runtime cannot read is now rejected with a named error instead of being silently reduced to fewer requirements
+  or to no completion gate at all.
+- **Non-streaming provider body failures retain typed transport evidence
+  (#7561).** Timeouts and dropped connections while reading a JSON response now
+  remain retryable transport errors, and raw response capture retains safe
+  status and request identifiers without storing an incomplete body.
+- A base branch that advances while a Harn runtime bump is refreshing no longer
+  discards the attempt. `std/bump/runtime` adopts the observed base head, then
+  re-applies and re-validates against it, up to three times with the auto-merge
+  disarm lease held. Only a contested path aborts: when the advanced base changed
+  a file the bump's own refresh authors, the new `base_conflict` outcome names it
+  instead of choosing a winner. A base head that cannot be read still aborts.
+- The reusable bump runtime now fails closed when it cannot compare or discard a
+  stale refresh, and adopting an advanced base preserves unrelated untracked
+  files instead of cleaning the entire checkout.
+
 ## v0.10.120
 
 ### Added

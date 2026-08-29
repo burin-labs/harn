@@ -391,7 +391,7 @@ pub fn graphql_operation(name: any, document: string?, options: dict? = nil) {
  */
 pub fn graphql_execute_operation(
   net: HarnessNet,
-  client: dict,
+  client: dict | string,
   operation: dict,
   variables: dict? = nil,
   options: dict? = nil,

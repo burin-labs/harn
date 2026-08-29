@@ -680,7 +680,7 @@ fn __catalog_query_apply_where(query: dict, raw: list) {
   return out
 }
 
-fn __catalog_query_columns(raw: string?) {
+fn __catalog_query_columns(raw: string | list | nil) {
   if raw == nil {
     return []
   }
