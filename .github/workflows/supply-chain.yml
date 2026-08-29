@@ -68,7 +68,7 @@ jobs:
           # alarm rather than the network blip it is. --max-time covers the
           # other half — a stalled-but-alive connection never errors, so
           # retrying alone never escapes it.
-          # Flags match burin-code's .github/actions/run-actionlint.
+          # Flags match the host-repo actionlint wrapper.
           curl -fsSL --retry 3 --retry-all-errors \
             --connect-timeout 15 --max-time 120 \
             -o "${archive}" \

@@ -58,7 +58,7 @@ conformance/tests/**/.harn/test-timings.json
 !.claude/skills/harn-scripting/SKILL.md
 
 # `merge-captain` covers the Harn triad, including private harn-cloud context,
-# so it lives only in burin-code's local `.claude/commands/`.
+# so it lives only in the downstream host's local `.claude/commands/`.
 .claude/commands/merge-captain.md
 
 # Codex local environment config is reviewed repo setup; other generated
