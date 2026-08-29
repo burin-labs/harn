@@ -256,6 +256,13 @@ fn __workflow_existing_transcript(result: dict) {
   return result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
 }
 
+fn __workflow_result_dict(result: dict | string) -> dict {
+  if type_of(result) == "dict" {
+    return result
+  }
+  return {}
+}
+
 fn __workflow_build_transcript(task: any, workflow_name: any, text: string, metadata: dict?) {
   const base_metadata = metadata ?? {}
   const transcript_metadata = base_metadata + {workflow: workflow_name}
@@ -310,8 +317,14 @@ fn __workflow_result_metadata(base_run: dict, options: dict) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_transcript(task: any, workflow_name: any, result: dict, metadata: dict?) {
-  const existing = __workflow_existing_transcript(result)
+pub fn workflow_result_transcript(
+  task: any,
+  workflow_name: any,
+  result: dict | string,
+  metadata: dict?,
+) {
+  const result_dict = __workflow_result_dict(result)
+  const existing = __workflow_existing_transcript(result_dict)
   if existing {
     return existing
   }
@@ -329,24 +342,25 @@ pub fn workflow_result_run(
   obs: HarnessObs,
   task: any,
   workflow_name: any,
-  result: dict,
+  result: dict | string,
   artifacts: any,
   options: dict,
 ) {
-  const base_run = if result?._type == "run_record" {
-    result
+  const result_dict = __workflow_result_dict(result)
+  const base_run = if result_dict?._type == "run_record" {
+    result_dict
   } else {
-    result?.run ?? {}
+    result_dict?.run ?? {}
   }
   const text = workflow_result_text(result)
   const metadata = __workflow_result_metadata(base_run, options)
-  const transcript = if __workflow_existing_transcript(result) {
-    __workflow_existing_transcript(result)
+  const transcript = if __workflow_existing_transcript(result_dict) {
+    __workflow_existing_transcript(result_dict)
   } else {
     __workflow_build_transcript(task, workflow_name, text, metadata)
   }
   const run_artifacts = __workflow_result_artifacts(
-    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    base_run?.artifacts ?? result_dict?.artifacts ?? artifacts,
     text,
     workflow_name,
   )
@@ -376,24 +390,25 @@ pub fn workflow_result_persist(
   obs: HarnessObs,
   task: any,
   workflow_name: any,
-  result: dict,
+  result: dict | string,
   artifacts: any,
   options: dict,
 ) {
-  const base_run = if result?._type == "run_record" {
-    result
+  const result_dict = __workflow_result_dict(result)
+  const base_run = if result_dict?._type == "run_record" {
+    result_dict
   } else {
-    result?.run ?? {}
+    result_dict?.run ?? {}
   }
   const text = workflow_result_text(result)
   const metadata = __workflow_result_metadata(base_run, options)
-  const transcript = if __workflow_existing_transcript(result) {
-    __workflow_existing_transcript(result)
+  const transcript = if __workflow_existing_transcript(result_dict) {
+    __workflow_existing_transcript(result_dict)
   } else {
     __workflow_build_transcript(task, workflow_name, text, metadata)
   }
   const run_artifacts = __workflow_result_artifacts(
-    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    base_run?.artifacts ?? result_dict?.artifacts ?? artifacts,
     text,
     workflow_name,
   )

@@ -42,7 +42,7 @@ pub fn stream_validator(runtime: HarnessRuntime, schema: any) -> JsonStreamValid
   }
 }
 
-fn __stream_object_text(chunk: string) -> string {
+fn __stream_object_text(chunk: any) -> string {
   if type_of(chunk) == "string" {
     return chunk
   }

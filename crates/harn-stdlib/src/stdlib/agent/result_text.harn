@@ -4,7 +4,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn workflow_result_text(result: dict) {
+pub fn workflow_result_text(result: dict | string) {
   const raw = if type_of(result) == "string" {
     result
   } else {

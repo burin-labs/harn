@@ -253,7 +253,7 @@ pub fn __verification_duration_label(ms_value: any) -> string {
   return to_string(minutes) + "m" + to_string(remainder) + "s"
 }
 
-pub fn __verification_command_label(command: dict) -> string {
+pub fn __verification_command_label(command: any) -> string {
   if command == nil {
     return ""
   }

@@ -32,7 +32,7 @@ fn __demo_sets(config: dict) {
   return [demos]
 }
 
-fn __demo_text(demo: dict) {
+fn __demo_text(demo: dict | string) {
   if type_of(demo) == "string" {
     return demo
   }

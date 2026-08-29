@@ -187,7 +187,7 @@ fn __top_scored(scored: list, limit: int) {
   return out
 }
 
-fn __conversation_text(conversation: dict) {
+fn __conversation_text(conversation: dict | string) {
   if type_of(conversation) == "string" {
     return conversation
   }

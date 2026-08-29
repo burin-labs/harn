@@ -575,6 +575,7 @@ test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/models_batch_rejoin_test.harn
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/polymorphic_param_widening_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/diagnostics-timing/tests/ --parallel
 	@echo "    Harn script tests OK."
