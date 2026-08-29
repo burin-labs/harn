@@ -129,6 +129,55 @@ fn cypher_returns_function_by_name() {
 }
 
 #[test]
+fn harn_cypher_refs_follow_the_resolved_definition() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("exported.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(
+        dir.path().join("importer.harn"),
+        "import { run } from \"./exported\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("local.harn"),
+        "fn run() { 2 }\nfn helper() { run() }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("shadowed.harn"),
+        "import { run } from \"./exported\"\nfn helper() {\n  let run = 2\n  run\n}\n",
+    )
+    .unwrap();
+
+    let (reg, _cap) = registry();
+    rebuild(&reg, dir.path());
+
+    let result = call(
+        &reg,
+        "hostlib_code_index_cypher",
+        dict(&[(
+            "query",
+            VmValue::String(arcstr::ArcStr::from(
+                "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN m.path AS source, f.path AS target",
+            )),
+        )]),
+    );
+    let rows = list_field(&extract_dict(&result), "rows");
+    let edges: Vec<(String, String)> = rows
+        .iter()
+        .map(|row| {
+            let row = extract_dict(row);
+            (string_field(&row, "source"), string_field(&row, "target"))
+        })
+        .collect();
+
+    assert_eq!(
+        edges,
+        vec![("importer.harn".into(), "exported.harn".into())],
+        "only the imported call may resolve to exported.run"
+    );
+}
+
+#[test]
 fn repo_map_prioritizes_task_named_symbols() {
     let dir = build_workspace();
     let (reg, _cap) = registry();
