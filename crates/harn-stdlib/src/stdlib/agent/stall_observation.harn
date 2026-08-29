@@ -653,7 +653,9 @@ pub fn __agent_stall_observe_no_progress(
   // An agent message breaks any action-repeat / ping-pong run.
   let next_state = __agent_stall_reset_action(state)
   const tokens = __agent_stall_monologue_tokens(turn_text)
-  const signature = "monologue:" + sha256(join(tokens, " "))
+  // Hash the raw emission, not the token join. Token overlap still drives the
+  // paraphrase streak; distinct bytes must keep distinct signatures.
+  const signature = "monologue:" + sha256(to_string(turn_text))
   const similar = next_state.no_progress_streak > 0
     && (next_state.last_no_progress_signature == signature
       || __agent_stall_monologue_similarity(next_state.last_no_progress_tokens, tokens) >= 0.8)
