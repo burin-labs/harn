@@ -349,8 +349,6 @@ pub fn default_read_deny_home_paths() -> &'static [String] {
     })
 }
 
-
-
 /// Runtime-owned forwarding endpoints for a managed child-process egress
 /// proxy. Naming a loopback endpoint is authority because the OS sandbox grants
 /// it; only the host may install this transport state. Destination decisions
