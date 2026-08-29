@@ -1,4 +1,4 @@
-import { format_speed_line, format_speed_report } from "std/llm/speed"
+import { LlmSpeedUsage, format_speed_line, format_speed_report } from "std/llm/speed"
 
 /**
  * std/llm/chat_session - an interactive chat loop against one model.
@@ -48,7 +48,13 @@ fn __help_text() -> string {
     + " to send several lines at once."
 }
 
-fn __print_stats(stdio: HarnessStdio, mode: string, usage: dict, ttft_ms, wall_ms) {
+fn __print_stats(
+  stdio: HarnessStdio,
+  mode: string,
+  usage: LlmSpeedUsage,
+  ttft_ms: int?,
+  wall_ms: int,
+) {
   if mode == "off" {
     return
   }
@@ -249,7 +255,7 @@ fn __call_options(state: dict) -> dict {
  * The session survives: one failed turn returns to the prompt instead of
  * ending the conversation.
  */
-fn __report_turn_error(stdio: HarnessStdio, state: dict, error) {
+fn __report_turn_error(stdio: HarnessStdio, state: dict, error: any) {
   stdio.eprintln("")
   stdio.eprintln("The model did not answer: " + to_string(error?.message ?? error))
   if state["provider"] != nil {
@@ -273,7 +279,7 @@ fn __stream_reply(harness: Harness, state: dict) -> dict {
   const started_ms = harness.clock.monotonic_ms()
   let ttft_ms = nil
   let text = ""
-  let usage = {}
+  let usage: LlmSpeedUsage = {input_tokens: nil, output_tokens: nil, provider_telemetry: nil}
   try {
     const chunks = harness.llm.stream_call(
       __last_user_text(state),

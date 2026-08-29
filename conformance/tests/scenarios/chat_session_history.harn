@@ -11,7 +11,14 @@ import { with_llm_script } from "std/testing"
  * falsifier, not the printed output.
  */
 fn __config() -> ChatSessionConfig {
-  return {provider: "mock", model: "mock-model", label: "mock-model", stats: "off"}
+  return {
+    provider: "mock",
+    model: "mock-model",
+    label: "mock-model",
+    endpoint: nil,
+    system: nil,
+    stats: "off",
+  }
 }
 
 pipeline default(harness: Harness) {

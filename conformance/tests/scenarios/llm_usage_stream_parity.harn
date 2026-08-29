@@ -39,12 +39,9 @@ pipeline default(harness: Harness) {
       )
       const terminal = streamed[len(streamed) - 1]
       const direct = harness.llm.call("same prompt", nil, {provider: "mock"})
-
       // Compare the whole dict, not a hand-picked field list: a field added
       // to one path and not the other is exactly the drift this guards.
-      harness.stdio.println(
-        json_stringify(terminal.usage) == json_stringify(direct.usage),
-      )
+      harness.stdio.println(json_stringify(terminal.usage) == json_stringify(direct.usage))
       // Print one side so a failure shows what the shared value actually is.
       harness.stdio.println(json_stringify(direct.usage))
     },

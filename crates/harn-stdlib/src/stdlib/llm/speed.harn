@@ -16,6 +16,20 @@
  * provider did not report, and every line here is omitted rather than
  * rendered as `0`, so a missing measurement never reads as a slow one.
  */
+pub type LlmSpeedTelemetry = {
+  server_load_ms?: int,
+  server_prompt_eval_ms?: int,
+  server_generation_ms?: int,
+  server_prompt_tokens?: int,
+  server_output_tokens?: int,
+}
+
+pub type LlmSpeedUsage = {
+  input_tokens?: int,
+  output_tokens?: int,
+  provider_telemetry?: LlmSpeedTelemetry,
+}
+
 /**
  * Render a duration the way a person reads it: sub-second stays in
  * milliseconds, past a second switches to seconds with one decimal.
@@ -23,7 +37,7 @@
  * @effects: []
  * @errors: []
  */
-pub fn format_duration(ms) -> string {
+pub fn format_duration(ms: int | float) -> string {
   const value = to_float(ms) ?? 0.0
   if value < 1000.0 {
     return to_string(round(value)) + "ms"
@@ -37,7 +51,7 @@ pub fn format_duration(ms) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn format_rate(tokens, ms) -> string {
+pub fn format_rate(tokens: int | float, ms: int | float) -> string {
   const count = to_float(tokens) ?? 0.0
   const duration = to_float(ms) ?? 0.0
   const per_second = count / (duration / 1000.0)
@@ -52,7 +66,7 @@ pub fn format_rate(tokens, ms) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn has_rate(tokens, ms) -> bool {
+pub fn has_rate(tokens: int | float, ms: int | float) -> bool {
   return (to_float(tokens) ?? 0.0) > 0.0 && (to_float(ms) ?? 0.0) > 0.0
 }
 
@@ -65,14 +79,15 @@ pub fn has_rate(tokens, ms) -> bool {
  * @effects: []
  * @errors: []
  */
-pub fn decode_rate(usage: dict, wall_ms) -> string? {
+pub fn decode_rate(usage: LlmSpeedUsage, wall_ms: int | float) -> string? {
   const telemetry = usage["provider_telemetry"] ?? {}
   const server_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
   if has_rate(server_tokens, telemetry["server_generation_ms"]) {
     return format_rate(server_tokens, telemetry["server_generation_ms"])
   }
-  if has_rate(usage["output_tokens"], wall_ms) {
-    return format_rate(usage["output_tokens"], wall_ms)
+  const output_tokens = usage["output_tokens"] ?? 0
+  if has_rate(output_tokens, wall_ms) {
+    return format_rate(output_tokens, wall_ms)
   }
   return nil
 }
@@ -84,7 +99,7 @@ pub fn decode_rate(usage: dict, wall_ms) -> string? {
  * @effects: []
  * @errors: []
  */
-pub fn format_speed_line(usage: dict, ttft_ms, wall_ms) -> string {
+pub fn format_speed_line(usage: LlmSpeedUsage, ttft_ms: int?, wall_ms: int | float) -> string {
   let parts = []
   const rate = decode_rate(usage, wall_ms)
   if rate != nil {
@@ -113,7 +128,11 @@ fn __stat_line(label: string, value: string) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn format_speed_report(usage: dict, ttft_ms, wall_ms) -> list {
+pub fn format_speed_report(
+  usage: LlmSpeedUsage,
+  ttft_ms: int?,
+  wall_ms: int | float,
+) -> list<string> {
   const telemetry = usage["provider_telemetry"] ?? {}
   let lines = [__stat_line("total duration:", format_duration(wall_ms))]
   if telemetry["server_load_ms"] != nil {
