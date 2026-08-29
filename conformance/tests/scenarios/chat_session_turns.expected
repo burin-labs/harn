@@ -1,0 +1,37 @@
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+Hi. How can I help?
+
+
+exit=0
+=== slash commands never reach the model ===
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+Commands:
+  /help, /?                show this message
+  /bye                     exit (or Ctrl-D)
+  /model [name]            show the current model, or switch to another
+  /system [text]           show the system prompt, or set it for this session
+  /stats [off|on|verbose]  show or change the per-response speed line
+  /clear                   forget the conversation so far
+
+Wrap a message in """ to send several lines at once.
+Talking to mock-model on mock.
+Speed stats are verbose.
+exit=0
+=== a fenced message arrives as one turn ===
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+got both lines
+
+
+exit=0
+=== an unknown command is refused, not sent ===
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+
+exit=0

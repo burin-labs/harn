@@ -140,8 +140,10 @@ pub type LlmResponse = {
 
 /**
  * One streamed chunk from `llm_stream_call`. The terminal chunk carries the
- * envelope's `stop_reason` (same spelling as `LlmResponse.stop_reason`);
- * non-terminal chunks carry nil.
+ * envelope's `stop_reason` (same spelling as `LlmResponse.stop_reason`) and
+ * its `usage`; non-terminal chunks carry nil for both. `usage` is the same
+ * value `llm_call` publishes, so a streaming caller reports tokens, cost, and
+ * `provider_telemetry` timings identically to a non-streaming one.
  */
 pub type LlmStreamChunk = {
   delta: string,
@@ -149,6 +151,7 @@ pub type LlmStreamChunk = {
   partial: string,
   role: string,
   stop_reason?: string,
+  usage?: LlmUsage,
 }
 
 // -------------------------------------------------------------------------------------------------

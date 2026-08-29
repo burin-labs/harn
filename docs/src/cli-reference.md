@@ -791,6 +791,79 @@ The REPL keeps incomplete blocks open until braces, brackets, parentheses, and
 quoted strings are balanced, so you can paste or type multi-line pipelines and
 control-flow blocks directly.
 
+## harn chat
+
+Talk to a model and see how fast it answers.
+
+```bash
+harn chat
+```
+
+By default this talks to whatever local model `harn local switch` last
+selected, falling back to the configured provider when there is no selection.
+Name a model to talk to another one; the catalog resolves aliases and picks the
+provider.
+
+The session prints the route it resolved — model, provider, and endpoint —
+before the first prompt, so you always know which model your timings describe.
+If you name a model or provider explicitly and resolution lands somewhere else,
+the command refuses to start rather than talking to something you did not ask
+for.
+
+### Which model gets picked
+
+In order, first match wins:
+
+1. the `MODEL` argument and `--provider` flag
+2. the active `harn local switch` selection
+3. `HARN_LLM_PROVIDER` / `HARN_LLM_MODEL`
+4. the configured default provider and its default model
+
+Note that the stored selection deliberately outranks the environment
+variables, which is the opposite of what most commands do. `harn chat` exists
+to talk to the model you currently have running, and `harn local switch` is how
+you say which one that is; an exported `HARN_LLM_MODEL` from some earlier task
+should not quietly redirect it. Name the model as an argument to override both.
+
+Changing the selection does not affect any other command: nothing else reads
+it, so `harn run` and `harn try` keep resolving their own routing from the
+environment and the catalog.
+
+```bash
+harn chat qwen36-coder
+harn chat --provider ollama --system "Answer in one sentence."
+```
+
+Each turn streams tokens as they arrive and then reports one speed line on
+stderr:
+
+```text
+49.31 tok/s · 143 tokens · first token 210ms · 3.1s total
+```
+
+Use `--verbose` for the full breakdown (load, prompt eval, eval counts,
+durations, and rates) or `--no-stats` for none. Rates come from the server's
+own timings when the provider reports them, so they measure the model rather
+than the round trip; a measurement the provider did not send is left out
+rather than shown as zero.
+
+This is a plain-completions surface, not an agent: no tools, and no system
+prompt unless you set one. That keeps a speed reading about the model instead
+of about scaffolding it never asked for.
+
+Commands inside the session:
+
+| Command | Effect |
+| --- | --- |
+| `/help`, `/?` | list the commands |
+| `/bye` | exit (Ctrl-D also works) |
+| `/model [name]` | show the current model, or switch |
+| `/system [text]` | show the system prompt, or set it |
+| `/stats [off\|on\|verbose]` | change the speed line |
+| `/clear` | forget the conversation so far |
+
+Wrap a message in `"""` to send several lines at once.
+
 ## harn bench
 
 Benchmark a `.harn` file over repeated runs, or score deterministic replay
