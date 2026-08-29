@@ -13,6 +13,7 @@ use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_swift_external_action_types;
 use super::session_recap::append_swift_session_recap_types;
+use super::session_update_payloads::append_swift_session_update_payloads;
 use super::support::*;
 use super::values::*;
 
@@ -1492,6 +1493,7 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     );
 
     append_session_timeline_types(&mut out);
+    append_swift_session_update_payloads(&mut out);
     append_swift_session_recap_types(&mut out);
 
     out
