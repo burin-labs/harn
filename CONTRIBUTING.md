@@ -534,9 +534,11 @@ Harn's own and send a public reader to files this repository does not have.
   corpus"), not by its path or its internal metric names. Consumer evaluation
   programs gate on their own metrics; Harn does not name them.
 
-A named integration fact is fine where behavior depends on it — for example
-`.burin-evals` in the code-index ignore list, which is a real directory the
-walker must skip.
+A named integration fact is fine where behavior depends on it — a downstream
+host's artifact directory in the code-index ignore list is a real directory the
+walker must skip. `scripts/check_public_product_names.sh` enforces the naming
+half of this rule and carries the allowlist of those deliberate exceptions; add
+to that allowlist rather than working around the scan.
 
 ## Maintaining the changelog
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fail if the tracked public source tree names a specific downstream product.
+# Fail if the tracked public source tree names a specific downstream product or
+# a contributor's private infrastructure (fleet hostname, home-LAN address).
 # Immutable history, captured measurements, provenance, and compatibility paths
 # are an explicit allowlist so the exception surface remains inspectable.
 set -euo pipefail
@@ -7,7 +8,20 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 product="burin"
 brand="Burin"
-pattern="${product}-code|${product}-evals|${product}-commerce|${brand} Code"
+# Downstream product names.
+name_pattern="${product}-code|${product}-evals|${product}-commerce|${brand} Code"
+# Contributor-private INFRASTRUCTURE. A product name is not the only way a
+# downstream leaks into this repo: a fleet hostname or one specific machine's
+# LAN address in a fixture, comment, doc example or script is just as specific,
+# and reads as Harn's own. These are the values this repo has actually carried
+# (harn#7592); extend the list rather than re-deriving it after the next one.
+#
+# Deliberately NOT a whole-subnet rule. RFC-1918 addresses are legitimate and
+# common in the net-policy and SSRF fixtures, so matching 192.168.0.0/16 would
+# flag a dozen correct uses and force an allowlist longer than the rule. Match
+# the exact addresses that belong to a real machine instead.
+host_pattern="tornadough|cattrick|${product}-mac-mini|192\.168\.86\.250"
+pattern="${name_pattern}|${host_pattern}"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-public-product-names.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -34,9 +48,10 @@ while IFS= read -r hit; do
       ;;
     scripts/agent_shell_guard_policy.harn|scripts/tests/agent_shell_guard_test.harn)
       ;;
-    crates/harn-hostlib/src/code_index/walker.rs|crates/harn-hostlib/tests/harn_hostlib/code_index.rs)
+    # This file defines the patterns, so it necessarily contains them.
+    scripts/check_public_product_names.sh)
       ;;
-    docs/rfcs/tool-calling-north-star.md)
+    crates/harn-hostlib/src/code_index/walker.rs|crates/harn-hostlib/tests/harn_hostlib/code_index.rs)
       ;;
     *)
       printf '%s\n' "$hit" >>"$tmp_dir/hits.txt"
