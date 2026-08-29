@@ -2228,9 +2228,9 @@ jobs:
 
       - name: Generate release-assets.json
         # Per-target download manifest consumed by downstream packagers
-        # (burin-code's fetch-harn.sh, the @burin/cli npm postinstall,
-        # Scoop). See docs/src/dev/release-assets-manifest.md for the
-        # schema and consumer contract.
+        # (host fetch scripts, the CLI npm postinstall, Scoop). See
+        # docs/src/dev/release-assets-manifest.md for the schema and
+        # consumer contract.
         run: |
           set -euo pipefail
           start=$SECONDS

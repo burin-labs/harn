@@ -1201,6 +1201,7 @@ jobs:
       # Generic embedded stdlib behavior must not acquire product-host naming;
       # reviewed compatibility/provenance literals are held to an exact baseline.
       - run: make check-stdlib-host-neutral
+      - run: make check-public-product-names
       # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
       # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
       - run: make check-stdlib-strict-types
@@ -1986,7 +1987,7 @@ jobs:
           # alarm rather than the network blip it is. --max-time covers the
           # other half — a stalled-but-alive connection never errors, so
           # retrying alone never escapes it.
-          # Flags match burin-code's .github/actions/run-actionlint.
+          # Flags match the host-repo actionlint wrapper.
           curl -fsSL --retry 3 --retry-all-errors \
             --connect-timeout 15 --max-time 120 \
             -o "${archive}" \
