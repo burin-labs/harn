@@ -561,14 +561,10 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
 // judge calls each returned `done` with `met: true` and were each forced to
 // `continue` because the cited evidence included the tool actions the packet
 // itself had listed.
-
 fn trial_shaped_packet(verification_measurement: string) -> CompletionRequirementEvidencePacket {
   return {
     // Positive indices: the actions the packet showed the judge.
-    actions: [
-      {evidence_index: 12, name: "edit"},
-      {evidence_index: 15, name: "verify"},
-    ],
+    actions: [{evidence_index: 12, name: "edit"}, {evidence_index: 15, name: "verify"}],
     fallback_observations: [],
     // Negative indices: the typed records the runtime appended.
     requirement_evidence: [
@@ -608,7 +604,8 @@ fn catch_all_contract() -> CompletionRequirementContract {
     requirements: [
       {
         requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57",
-        name: "Extend tests/test_calc.py so multiply and divide are covered alongside the existing add tests. Follow the existing pytest style: one top-level test function per case, two cases each — positive and negative — and add a third top-level test for divide that uses pytest.raises(ZeroDivisionError) to cover the error path.",
+        name:
+          "Extend tests/test_calc.py so multiply and divide are covered alongside the existing add tests. Follow the existing pytest style: one top-level test function per case, two cases each — positive and negative — and add a third top-level test for divide that uses pytest.raises(ZeroDivisionError) to cover the error path.",
       },
     ],
   }
@@ -640,13 +637,7 @@ pipeline test_mutation_summary_record_is_citable_by_default(harness: Harness, ta
   // The default role set has to admit it, or the packet contradicts itself.
   const report = completion_requirement_report(
     catch_all_contract(),
-    [
-      {
-        requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57",
-        met: true,
-        evidence_refs: [-3],
-      },
-    ],
+    [{requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57", met: true, evidence_refs: [-3]}],
     trial_shaped_packet("passed"),
   )
   assert_eq(report.rows[0].status, "met")

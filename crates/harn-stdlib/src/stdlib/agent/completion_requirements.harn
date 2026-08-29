@@ -359,7 +359,8 @@ fn completion_requirement_verified_by_receipt(
   }
   for record in packet.requirement_evidence ?? [] {
     if completion_requirement_evidence_role(record?.role) == "deterministic_verification"
-      && record?.measurement == "passed" && record?.supports_completion == true {
+      && record?.measurement == "passed"
+      && record?.supports_completion == true {
       return true
     }
   }
@@ -482,6 +483,16 @@ fn completion_requirement_status_phrase(status: CompletionRequirementRowStatus) 
   return "met"
 }
 
+fn completion_requirement_role_names(
+  roles: list<CompletionRequirementEvidenceRole>,
+) -> list<string> {
+  let names: list<string> = []
+  for role in roles {
+    names = names + [to_string(role)]
+  }
+  return names
+}
+
 fn completion_requirement_clip_name(name: string) -> string {
   const limit = 180
   if len(name) <= limit {
@@ -501,8 +512,11 @@ pub fn completion_requirement_pending_feedback(report: CompletionRequirementRepo
     parts = parts
       + [
         "`" + row.requirement_id + "` is " + completion_requirement_status_phrase(row.status)
-          + " — " + completion_requirement_clip_name(row.name) + " Accepted evidence kinds: "
-          + join(row.evidence_roles, ", ") + ".",
+          + " — "
+          + completion_requirement_clip_name(row.name)
+          + " Accepted evidence kinds: "
+          + join(completion_requirement_role_names(row.evidence_roles), ", ")
+          + ".",
       ]
   }
   for name in report.pending_names {
