@@ -28,12 +28,22 @@ pub type PaceCutRuleObservation = {
 /** A pace cut-rule decision returned to the caller. */
 pub type PaceCutRuleDecision = {action: string, new_budget_ms?: int, reason?: string}
 
-/** Return the default number of wrap-up checks allowed before a cut. */
+/**
+ * Return the default number of wrap-up checks allowed before a cut.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn pace_cut_rule_check_max_injections() -> int {
   return PACE_CUT_RULE_CHECK_MAX_INJECTIONS
 }
 
-/** Return the default number of silent budget extensions allowed before a cut. */
+/**
+ * Return the default number of silent budget extensions allowed before a cut.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn pace_cut_rule_extend_max() -> int {
   return PACE_CUT_RULE_EXTEND_MAX
 }
