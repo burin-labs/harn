@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::json;
 
@@ -10,20 +11,23 @@ use crate::orchestration::{PolicyEvaluation, ProcessSandboxPreset, ToolApprovalR
 
 use super::*;
 
-pub trait PreparedRunExecutor {
+#[async_trait]
+pub trait PreparedRunExecutor: Send + Sync {
     type Output;
     /// Host-owned failure evidence returned without rendering or erasure.
     type Error;
 
     /// Perform the run. Every material operation must call
     /// AuthorityUse::authorize immediately before its side effect.
-    fn execute(&self, authority: &mut AuthorityUse<'_>) -> Result<Self::Output, Self::Error>;
+    async fn execute(&self, authority: &AuthorityUse) -> Result<Self::Output, Self::Error>;
 }
 
 pub struct PreparedRun<E> {
     pub(super) executor: E,
     pub(super) receipts: Arc<dyn AuthorityReceiptSink>,
     pub(super) now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    pub(super) identity_brokers: IdentityBrokerRegistry,
+    pub(super) identity_consumer: SecretConsumerBinding,
 }
 
 impl<E> PreparedRun<E> {
@@ -32,6 +36,12 @@ impl<E> PreparedRun<E> {
             executor,
             receipts,
             now_ms: Arc::new(|| crate::clock_mock::now_ms().max(0) as u64),
+            identity_brokers: IdentityBrokerRegistry::default(),
+            identity_consumer: SecretConsumerBinding {
+                kind: SecretConsumerKind::Provider,
+                id: "prepared-run".to_string(),
+                environment_name: None,
+            },
         }
     }
 
@@ -45,7 +55,23 @@ impl<E> PreparedRun<E> {
             executor,
             receipts,
             now_ms,
+            identity_brokers: IdentityBrokerRegistry::default(),
+            identity_consumer: SecretConsumerBinding {
+                kind: SecretConsumerKind::Provider,
+                id: "prepared-run".to_string(),
+                environment_name: None,
+            },
         }
+    }
+
+    pub fn with_identity_brokers(
+        mut self,
+        brokers: IdentityBrokerRegistry,
+        consumer: SecretConsumerBinding,
+    ) -> Self {
+        self.identity_brokers = brokers;
+        self.identity_consumer = consumer;
+        self
     }
 
     pub fn prepare(&self, intent: RunIntent, host_facts: HostFacts) -> PreparationOutcome {
@@ -321,22 +347,30 @@ impl<E> PreparedRun<E> {
 }
 
 impl<E: PreparedRunExecutor> PreparedRun<E> {
-    pub fn execute(
+    pub async fn execute(
         &self,
         authority_lease: Box<AuthorityLease>,
     ) -> ExecutionOutcome<E::Output, E::Error> {
         let now_ms = (self.now_ms)();
-        let mut authority = AuthorityUse::new(&authority_lease, self.now_ms.clone());
-        let result = if let Some(diagnostic) = &authority_lease.invalidated {
+        let invalidated = authority_lease.invalidated.clone();
+        let expired = now_ms > authority_lease.expires_at_ms;
+        let authority = AuthorityUse::new(authority_lease, self.now_ms.clone());
+        let result = if let Some(diagnostic) = &invalidated {
             Err(format!(
                 "authority lease invalidated during discovery: {}",
                 diagnostic.message
             ))
-        } else if now_ms > authority_lease.expires_at_ms {
+        } else if expired {
             Err("authority lease expired before execution".to_string())
         } else {
-            authority.executor_invoked = true;
-            Ok(self.executor.execute(&mut authority))
+            authority.mark_executor_invoked();
+            Ok(scope_prepared_identity(
+                authority.clone(),
+                self.identity_brokers.clone(),
+                self.identity_consumer.clone(),
+                self.executor.execute(&authority),
+            )
+            .await)
         };
         let succeeded = matches!(result, Ok(Ok(_)));
         let mut receipt = authority.terminal_receipt(succeeded, (self.now_ms)());
@@ -385,28 +419,49 @@ pub enum ExecutionOutcome<T, E> {
     },
 }
 
-pub struct AuthorityUse<'a> {
-    lease: &'a AuthorityLease,
+#[derive(Clone)]
+pub struct AuthorityUse {
+    lease: Arc<AuthorityLease>,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    state: Arc<std::sync::Mutex<AuthorityUseState>>,
+}
+
+struct AuthorityUseState {
+    dynamic_requirements: BTreeMap<String, AuthorityRequirement>,
+    dynamic_deciders: BTreeMap<String, AuthorityDecider>,
     used: BTreeSet<String>,
     denied: Vec<DeniedAuthority>,
     policy_decisions: Vec<PolicyDecisionEvidence>,
     executor_invoked: bool,
 }
 
-impl<'a> AuthorityUse<'a> {
-    fn new(lease: &'a AuthorityLease, now_ms: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
+impl AuthorityUse {
+    pub(super) fn new(
+        lease: Box<AuthorityLease>,
+        now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    ) -> Self {
+        let lease: Arc<AuthorityLease> = Arc::from(lease);
         Self {
-            lease,
+            lease: lease.clone(),
             now_ms,
-            used: lease.prior_used.clone(),
-            denied: lease.prior_denied.clone(),
-            policy_decisions: lease.prior_policy_decisions.clone(),
-            executor_invoked: false,
+            state: Arc::new(std::sync::Mutex::new(AuthorityUseState {
+                dynamic_requirements: BTreeMap::new(),
+                dynamic_deciders: BTreeMap::new(),
+                used: lease.prior_used.clone(),
+                denied: lease.prior_denied.clone(),
+                policy_decisions: lease.prior_policy_decisions.clone(),
+                executor_invoked: false,
+            })),
         }
     }
 
-    pub fn authorize(&mut self, requirement: &AuthorityRequirement) -> Result<(), String> {
+    pub fn authorize(&self, requirement: &AuthorityRequirement) -> Result<(), String> {
+        let granted_fingerprint = self.check(requirement)?;
+        self.mark_used(granted_fingerprint);
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, requirement: &AuthorityRequirement) -> Result<String, String> {
         let requested_fingerprint = requirement_fingerprint(requirement);
         if (self.now_ms)() > self.lease.expires_at_ms {
             return self.deny(
@@ -415,14 +470,21 @@ impl<'a> AuthorityUse<'a> {
                 "authority lease expired before use".to_string(),
             );
         }
-        let granted_fingerprint =
-            self.lease
-                .requirement_fingerprints
-                .iter()
-                .find_map(|(fingerprint, granted)| {
-                    (granted == requirement || requirement_attenuates(granted, requirement))
-                        .then(|| fingerprint.clone())
-                });
+        let dynamic_requirements = self
+            .state
+            .lock()
+            .expect("authority use state poisoned")
+            .dynamic_requirements
+            .clone();
+        let granted_fingerprint = self
+            .lease
+            .requirement_fingerprints
+            .iter()
+            .chain(dynamic_requirements.iter())
+            .find_map(|(fingerprint, granted)| {
+                (granted == requirement || requirement_attenuates(granted, requirement))
+                    .then(|| fingerprint.clone())
+            });
         let Some(granted_fingerprint) = granted_fingerprint else {
             return self.deny(
                 requirement,
@@ -438,40 +500,130 @@ impl<'a> AuthorityUse<'a> {
             Ok(evaluation) => evaluation,
             Err(error) => return self.deny(requirement, requested_fingerprint, error),
         };
-        self.policy_decisions
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .policy_decisions
             .push(policy_evidence(&requested_fingerprint, &evaluation));
         if evaluation.is_deny() {
             return self.deny(requirement, requested_fingerprint, evaluation.reason);
         }
-        if evaluation.is_ask() && !self.lease.deciders.contains_key(&granted_fingerprint) {
+        if evaluation.is_ask()
+            && !self.lease.deciders.contains_key(&granted_fingerprint)
+            && !self
+                .state
+                .lock()
+                .expect("authority use state poisoned")
+                .dynamic_deciders
+                .contains_key(&granted_fingerprint)
+        {
             return self.deny(
                 requirement,
                 requested_fingerprint,
                 "canonical policy still requires approval and the lease has no decider".to_string(),
             );
         }
-        self.used.insert(granted_fingerprint);
-        Ok(())
+        Ok(granted_fingerprint)
     }
 
-    fn deny(
-        &mut self,
+    pub(crate) fn mark_used(&self, granted_fingerprint: String) {
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .used
+            .insert(granted_fingerprint);
+    }
+
+    pub(super) fn grant_delta(&self, delta: &AuthorityLeaseDelta, decider: AuthorityDecider) {
+        let mut state = self.state.lock().expect("authority use state poisoned");
+        state.dynamic_requirements.insert(
+            delta.requirement_fingerprint.clone(),
+            delta.requirement.clone(),
+        );
+        state
+            .dynamic_deciders
+            .insert(delta.requirement_fingerprint.clone(), decider);
+    }
+
+    pub(crate) fn mark_executor_invoked(&self) {
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .executor_invoked = true;
+    }
+
+    pub(crate) fn identity_requirements(&self) -> Vec<IdentityBrokerRequirement> {
+        let mut requirements = self
+            .lease
+            .requirement_fingerprints
+            .values()
+            .filter_map(|requirement| match requirement {
+                AuthorityRequirement::IdentityBroker(identity) => Some(identity.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        requirements.extend(
+            self.state
+                .lock()
+                .expect("authority use state poisoned")
+                .dynamic_requirements
+                .values()
+                .filter_map(|requirement| match requirement {
+                    AuthorityRequirement::IdentityBroker(identity) => Some(identity.clone()),
+                    _ => None,
+                }),
+        );
+        requirements
+    }
+
+    pub(crate) fn now_ms(&self) -> u64 {
+        (self.now_ms)()
+    }
+
+    pub(super) fn lease(&self) -> &AuthorityLease {
+        &self.lease
+    }
+
+    pub(crate) fn record_denial(
+        &self,
+        requirement: &IdentityBrokerRequirement,
+        reason: impl Into<String>,
+    ) {
+        let authority = AuthorityRequirement::IdentityBroker(requirement.clone());
+        let _ = self.deny::<()>(
+            &authority,
+            requirement_fingerprint(&authority),
+            reason.into(),
+        );
+    }
+
+    fn deny<T>(
+        &self,
         requirement: &AuthorityRequirement,
         fingerprint: String,
         reason: String,
-    ) -> Result<(), String> {
-        self.denied.push(DeniedAuthority {
-            authority: ReceiptedAuthority {
-                fingerprint,
-                requirement: requirement.clone(),
-            },
-            reason: reason.clone(),
-            decider: AuthorityDecider::RuntimePolicy,
-        });
+    ) -> Result<T, String> {
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .denied
+            .push(DeniedAuthority {
+                authority: ReceiptedAuthority {
+                    fingerprint,
+                    requirement: requirement.clone(),
+                },
+                reason: reason.clone(),
+                decider: AuthorityDecider::RuntimePolicy,
+            });
         Err(reason)
     }
 
-    fn terminal_receipt(&self, completed: bool, observed_at_ms: u64) -> RunAuthorityReceipt {
+    pub(super) fn terminal_receipt(
+        &self,
+        completed: bool,
+        observed_at_ms: u64,
+    ) -> RunAuthorityReceipt {
+        let state = self.state.lock().expect("authority use state poisoned");
         let requested = receipted_requirements(
             &self
                 .lease
@@ -480,22 +632,22 @@ impl<'a> AuthorityUse<'a> {
                 .cloned()
                 .collect::<Vec<_>>(),
         );
-        let granted = receipted_requirements(
-            &self
-                .lease
-                .requirement_fingerprints
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
+        let mut granted_requirements = self
+            .lease
+            .requirement_fingerprints
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        granted_requirements.extend(state.dynamic_requirements.values().cloned());
+        let granted = receipted_requirements(&granted_requirements);
         let used = granted
             .iter()
-            .filter(|authority| self.used.contains(&authority.fingerprint))
+            .filter(|authority| state.used.contains(&authority.fingerprint))
             .cloned()
             .collect::<Vec<_>>();
         let unused = granted
             .iter()
-            .filter(|authority| !self.used.contains(&authority.fingerprint))
+            .filter(|authority| !state.used.contains(&authority.fingerprint))
             .cloned()
             .collect::<Vec<_>>();
         RunAuthorityReceipt {
@@ -513,12 +665,18 @@ impl<'a> AuthorityUse<'a> {
             requested,
             granted,
             used,
-            denied: self.denied.clone(),
+            denied: state.denied.clone(),
             unused,
-            deciders: self.lease.deciders.clone(),
-            policy_decisions: self.policy_decisions.clone(),
+            deciders: self
+                .lease
+                .deciders
+                .iter()
+                .chain(state.dynamic_deciders.iter())
+                .map(|(fingerprint, decider)| (fingerprint.clone(), *decider))
+                .collect(),
+            policy_decisions: state.policy_decisions.clone(),
             diagnostics: Vec::new(),
-            executor_invoked: self.executor_invoked,
+            executor_invoked: state.executor_invoked,
         }
     }
 }
@@ -1353,7 +1511,7 @@ pub fn requirement_fingerprint(requirement: &AuthorityRequirement) -> String {
         .expect("authority requirements are serializable")
 }
 
-fn fingerprint(domain: &str, value: &impl Serialize) -> Result<String, String> {
+pub(super) fn fingerprint(domain: &str, value: &impl Serialize) -> Result<String, String> {
     let canonical = crate::canonical_json::of(value).map_err(|error| error.to_string())?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(domain.as_bytes());

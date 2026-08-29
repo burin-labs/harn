@@ -11,12 +11,14 @@ mod discovery;
 mod engine;
 mod identity;
 mod receipt;
+mod session;
 
 pub use contracts::*;
 pub use discovery::*;
 pub use engine::*;
 pub use identity::*;
 pub use receipt::*;
+pub use session::*;
 
 #[cfg(test)]
 mod tests;

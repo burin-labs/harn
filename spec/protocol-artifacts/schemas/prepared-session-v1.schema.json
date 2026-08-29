@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/prepared-session-v1.schema.json",
+  "title": "Harn prepared-session protocol v1",
+  "description": "Value-free host protocol for preparing, approving, attaching, controlling, and accounting for one authority-bound interactive session.",
+  "oneOf": [
+    { "$ref": "#/$defs/PreparedSessionLease" },
+    { "$ref": "#/$defs/PreparedSessionUpdate" },
+    { "$ref": "#/$defs/PreparedRuntimeAttachment" },
+    { "$ref": "#/$defs/ApprovalDecision" }
+  ],
+  "$defs": {
+    "RuntimeProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harn_version", "harn_revision", "host_name", "host_version", "host_revision", "contracts_version", "runtime_digest"],
+      "properties": {
+        "harn_version": { "type": "string", "minLength": 1 },
+        "harn_revision": { "type": "string", "minLength": 1 },
+        "host_name": { "type": "string", "minLength": 1 },
+        "host_version": { "type": "string", "minLength": 1 },
+        "host_revision": { "type": "string", "minLength": 1 },
+        "contracts_version": { "type": "string", "minLength": 1 },
+        "runtime_digest": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ConsumerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["provider", "process", "mcp", "connector"] },
+        "id": { "type": "string", "minLength": 1 },
+        "environment_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PreparedSessionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "workspace_fingerprint", "runtime", "consumer"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "workspace_fingerprint": { "type": "string", "minLength": 1 },
+        "runtime": { "$ref": "#/$defs/RuntimeProvenance" },
+        "consumer": { "$ref": "#/$defs/ConsumerBinding" }
+      }
+    },
+    "PreparedRuntimeAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "workspace_fingerprint", "runtime", "consumer"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "workspace_fingerprint": { "type": "string", "minLength": 1 },
+        "runtime": { "$ref": "#/$defs/RuntimeProvenance" },
+        "consumer": { "$ref": "#/$defs/ConsumerBinding" }
+      }
+    },
+    "ApprovalDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_fingerprint", "approved", "decider"],
+      "properties": {
+        "batch_fingerprint": { "type": "string", "minLength": 1 },
+        "approved": { "type": "boolean" },
+        "decider": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PreparedSessionLease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "session_id", "session_fingerprint", "plan_fingerprint", "binding", "intent", "issued_at_ms", "expires_at_ms"],
+      "properties": {
+        "schema": { "const": "harn.prepared_session.v1" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "session_fingerprint": { "type": "string", "minLength": 1 },
+        "plan_fingerprint": { "type": "string", "minLength": 1 },
+        "binding": { "$ref": "#/$defs/PreparedSessionBinding" },
+        "intent": { "type": "object" },
+        "approval": { "$ref": "#/$defs/ApprovalDecision" },
+        "issued_at_ms": { "type": "integer", "minimum": 0 },
+        "expires_at_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PreparedSessionDelta": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["outcome"], "properties": { "outcome": { "const": "covered" } } },
+        { "type": "object", "additionalProperties": false, "required": ["outcome", "delta"], "properties": { "outcome": { "const": "attenuated" }, "delta": { "type": "object" } } },
+        { "type": "object", "additionalProperties": false, "required": ["outcome", "batch"], "properties": { "outcome": { "const": "needs_approval" }, "batch": { "type": "object" } } },
+        { "type": "object", "additionalProperties": false, "required": ["outcome", "delta"], "properties": { "outcome": { "const": "granted" }, "delta": { "type": "object" } } },
+        { "type": "object", "additionalProperties": false, "required": ["outcome", "diagnostic"], "properties": { "outcome": { "const": "blocked" }, "diagnostic": { "type": "object" } } }
+      ]
+    },
+    "PreparedSessionUpdate": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["needs_approval", "ready", "blocked", "delta", "stopped", "pivoted", "terminal"] },
+        "session_id": { "type": "string", "minLength": 1 },
+        "batch": { "type": "object" },
+        "lease": { "$ref": "#/$defs/PreparedSessionLease" },
+        "diagnostics": { "type": "array", "items": { "type": "object" } },
+        "receipt": { "type": "object" },
+        "outcome": { "$ref": "#/$defs/PreparedSessionDelta" }
+      }
+    }
+  },
+  "x-harn-provenance": {
+    "owner": "harn-vm::prepared_run::PreparedSession",
+    "schema": "harn.prepared_session.v1"
+  }
+}

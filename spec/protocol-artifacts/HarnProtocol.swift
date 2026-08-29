@@ -3349,6 +3349,22 @@ public struct HarnACPWorkerUpdate: Codable, Sendable, Equatable {
     }
 }
 
+public let harnPreparedSessionSchema = "harn.prepared_session.v1"
+public enum HarnPreparedSessionState: String, Codable, Sendable { case needsApproval = "needs_approval", ready, blocked, active, delta, stopped, pivoted, terminal }
+public enum HarnPreparedSessionCommand: String, Codable, Sendable { case approvalDecision = "approval_decision", attach, turn, requestDelta = "request_delta", stop, pivot, finish }
+public struct HarnPreparedSessionApprovalDecision: Codable, Sendable, Equatable { public var batch_fingerprint: String; public var approved: Bool; public var decider: String }
+public struct HarnPreparedSessionBinding: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
+public struct HarnPreparedRuntimeAttachment: Codable, Sendable, Equatable { public var session_id: String; public var workspace_fingerprint: String; public var runtime: HarnACPValue; public var consumer: HarnACPValue }
+public struct HarnPreparedSessionLease: Codable, Sendable, Equatable {
+    public var schema: String; public var session_id: String; public var session_fingerprint: String; public var plan_fingerprint: String
+    public var binding: HarnPreparedSessionBinding; public var intent: HarnACPValue; public var approval: HarnPreparedSessionApprovalDecision?
+    public var issued_at_ms: Int; public var expires_at_ms: Int
+}
+public struct HarnPreparedSessionUpdate: Codable, Sendable, Equatable {
+    public var state: HarnPreparedSessionState; public var session_id: String; public var batch: HarnACPValue?
+    public var lease: HarnPreparedSessionLease?; public var diagnostics: [HarnACPValue]?; public var receipt: HarnACPValue?; public var outcome: HarnACPValue?
+}
+
 public enum HarnSessionRecapProtocol {
     public static let queryMethod = "harn.session_recap.query"
     public static let schemaVersion = 1
