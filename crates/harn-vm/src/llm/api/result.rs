@@ -265,12 +265,7 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     result.usage().to_vm_dict(&result.attempts)
 }
 
-/// Build the `usage` value that every envelope publishes: the accounting
-/// ledger plus provider-side timings under `provider_telemetry`.
-///
-/// One owner for one value. `llm_call`'s envelope and `llm_stream_call`'s
-/// terminal chunk both call this, so a streamed turn and a non-streamed turn
-/// report accounting identically instead of drifting apart.
+/// Build the accounting value shared by call and streaming envelopes.
 pub(crate) fn build_usage_value(result: &LlmResult) -> VmValue {
     let mut usage = build_usage_dict(result);
     // Provider-side timings (Ollama load_duration, prompt_eval_duration,
