@@ -422,10 +422,20 @@ pub(super) fn policy_for_mode(
         if sandbox.has_process_confinement() {
             policy.sandbox_profile = harn_vm::orchestration::SandboxProfile::Worktree;
         }
+        // An explicit request wins over the inference above. Inference can only
+        // ever arm confinement, so without this an embedder that deliberately
+        // wanted an unconfined run got a confined one and no error — the
+        // request was simply dropped.
+        if let Some(requested) = sandbox.requested_profile {
+            policy.sandbox_profile = requested;
+        }
         apply_sandbox_config(&mut policy, sandbox);
         return Some(policy);
     }
     let mut policy = harn_vm::policy_for_autonomy_tier(mode.autonomy_tier);
+    if let Some(requested) = sandbox.requested_profile {
+        policy.sandbox_profile = requested;
+    }
     apply_sandbox_config(&mut policy, sandbox);
     Some(policy)
 }
@@ -1006,6 +1016,78 @@ mod tests {
         assert!(
             guard._ssrf_guard.is_some(),
             "configured code mode must retain an SSRF guard scope"
+        );
+    }
+
+    // ---- an embedder may DECLINE confinement, not only arm it --------------
+
+    /// Inference can only ever arm confinement. Before `requested_profile`, an
+    /// embedder that wanted a deliberately unconfined run had no way to say so:
+    /// the request did not exist, so it could not be dropped loudly either. It
+    /// simply got a confined policy and no error.
+    #[test]
+    fn an_explicit_unrestricted_request_overrides_the_confinement_inference() {
+        let sandbox = AcpSandboxConfig {
+            // Process config present, so the inference below WOULD select
+            // Worktree. That is the point: the request has to beat it.
+            process: harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime,
+                ]),
+                ..Default::default()
+            },
+            requested_profile: Some(harn_vm::orchestration::SandboxProfile::Unrestricted),
+            ..AcpSandboxConfig::default()
+        };
+
+        let policy = policy_for_mode("code", &sandbox).expect("policy");
+
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted,
+            "an explicit request must beat the inference that would otherwise confine"
+        );
+    }
+
+    /// Control: the same config WITHOUT the request still confines, so the test
+    /// above is measuring the request and not a policy that was unconfined all
+    /// along.
+    #[test]
+    fn the_same_config_without_a_request_still_confines() {
+        let sandbox = AcpSandboxConfig {
+            process: harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime,
+                ]),
+                ..Default::default()
+            },
+            ..AcpSandboxConfig::default()
+        };
+
+        let policy = policy_for_mode("code", &sandbox).expect("policy");
+
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree,
+            "without a request the historical inference must be unchanged"
+        );
+    }
+
+    /// A request on its own is enough to produce a policy. Otherwise
+    /// `is_configured()` would return false for a host whose ONLY instruction
+    /// was the profile, `policy_for_mode` would return None, and the request
+    /// would vanish into ambient policy.
+    #[test]
+    fn a_request_alone_is_enough_to_produce_a_policy() {
+        let sandbox = AcpSandboxConfig {
+            requested_profile: Some(harn_vm::orchestration::SandboxProfile::Unrestricted),
+            ..AcpSandboxConfig::default()
+        };
+        assert!(sandbox.is_configured());
+        let policy = policy_for_mode("code", &sandbox).expect("a request alone must configure");
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted
         );
     }
 }
