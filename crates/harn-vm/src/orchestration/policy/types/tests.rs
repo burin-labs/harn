@@ -345,11 +345,15 @@ fn a_nested_policy_may_add_a_denial_and_may_never_drop_one() {
     let nested = outer.intersect(&inner);
 
     assert!(
-        nested.read_deny_roots.contains(&"/outer-secret".to_string()),
+        nested
+            .read_deny_roots
+            .contains(&"/outer-secret".to_string()),
         "a nested request must not be able to drop an outer denial: {nested:?}"
     );
     assert!(
-        nested.read_deny_roots.contains(&"/inner-secret".to_string()),
+        nested
+            .read_deny_roots
+            .contains(&"/inner-secret".to_string()),
         "a nested request may add its own denial: {nested:?}"
     );
 }
