@@ -1451,7 +1451,15 @@ pub fn command_output(
             })?
         }
     };
-    if let Some(error) = process_violation_error(&output) {
+    let refusal_command: Vec<String> = std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    let refusal_cwd = config
+        .cwd
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    if let Some(error) = process_violation_error(&output, &refusal_command, &refusal_cwd) {
         return Err(error);
     }
     if let Some(span) = recording {
@@ -1615,6 +1623,32 @@ impl ProcessSandboxRefusal {
     /// Keep the excerpt small enough to sit in a receipt without becoming a log.
     const MAX_EXCERPT: usize = 512;
 
+    /// Emit the refusal as a structured event.
+    ///
+    /// This is the carrier the approval ladder consumes to offer a re-exec with
+    /// widened scope, so it is emitted at the moment of classification rather
+    /// than reconstructed later from an error string.
+    pub fn emit(&self) {
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert("schema".to_string(), serde_json::json!(self.schema));
+        metadata.insert("command".to_string(), serde_json::json!(self.command));
+        metadata.insert("cwd".to_string(), serde_json::json!(self.cwd));
+        metadata.insert(
+            "refused_paths".to_string(),
+            serde_json::json!(self.refused_paths),
+        );
+        metadata.insert(
+            "observability".to_string(),
+            serde_json::to_value(self.observability).unwrap_or(serde_json::Value::Null),
+        );
+        metadata.insert("count".to_string(), serde_json::json!(self.count));
+        crate::events::log_warn_meta(
+            "process_sandbox_refusal",
+            "a child process was refused by the OS sandbox",
+            metadata,
+        );
+    }
+
     pub fn inferred(command: Vec<String>, cwd: String, evidence: &str) -> Self {
         let mut stderr_excerpt: String = evidence.chars().take(Self::MAX_EXCERPT).collect();
         if evidence.chars().count() > Self::MAX_EXCERPT {
@@ -1632,7 +1666,11 @@ impl ProcessSandboxRefusal {
     }
 }
 
-pub fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
+pub fn process_violation_error(
+    output: &std::process::Output,
+    command: &[String],
+    cwd: &str,
+) -> Option<VmError> {
     let policy = crate::orchestration::current_execution_policy()?;
     // Only a profile that actually confined the process may attribute the
     // child's failure to the OS sandbox. Under a profile that spawned it
@@ -1653,6 +1691,12 @@ pub fn process_violation_error(output: &std::process::Output) -> Option<VmError>
             || stderr.contains("access is denied")
             || stdout.contains("operation not permitted"))
     {
+        // The substring match above is still the detector on every platform
+        // that cannot do better. What changes is that its uncertainty now
+        // travels as a typed field instead of being something a consumer has to
+        // know by folklore: `Inferred` says the paths are unavailable and the
+        // classification is lossy in both directions.
+        ProcessSandboxRefusal::inferred(command.to_vec(), cwd.to_string(), &stderr).emit();
         return Some(sandbox_denial_error(
             format!(
                 "sandbox violation: process was denied by the OS sandbox (status {})",
