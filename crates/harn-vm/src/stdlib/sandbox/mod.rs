@@ -465,7 +465,8 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     // to allow; this is the one reason to refuse, and a subtraction that ran
     // after the grants would never fire on the paths that matter (a credential
     // under a preset-granted `~/.config` is exactly that case).
-    if access == FsAccess::Read && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
+    if access == FsAccess::Read
+        && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
     {
         return Err(SandboxViolation {
             attempted: candidate,
@@ -1573,24 +1574,22 @@ fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
 /// How a child-process refusal was determined, and therefore how much its
 /// `refused_paths` can be trusted.
 ///
-/// This field exists because the three tiers are not interchangeable and a
-/// consumer that treats them alike will draw a false conclusion. In particular
-/// an empty `refused_paths` means "not recoverable on this platform" under
-/// `Unobservable`, and means "none were refused" under nothing at all.
+/// One variant, because there is one producer. A consumer should still match on
+/// this rather than assume: the field exists so that when a platform learns to
+/// name refused paths (macOS can, via the unified log, asynchronously) the new
+/// tier arrives as a variant a consumer already handles, instead of silently
+/// changing what an existing value means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum RefusalObservability {
-    /// The OS named the path. `refused_paths` is trustworthy.
-    Observed,
-    /// The mechanism refused but exposes nothing retrievable. `refused_paths`
-    /// is empty and that is NOT evidence about what was refused. Linux
-    /// Landlock is this tier: it refuses in-kernel, per syscall, with no
-    /// userspace callback.
-    Unobservable,
-    /// Classified by matching the child's own output. Lossy in both
-    /// directions: a tool that localizes its errors is a refusal that never
-    /// counts, and any failing child that merely prints one of the phrases is
-    /// attributed to the sandbox.
+    /// Classified by matching the child's own output, which is all any current
+    /// backend can do. `refused_paths` is therefore always EMPTY under this
+    /// tier, and that emptiness says nothing about what was refused.
+    ///
+    /// Lossy in both directions: a tool that localizes its errors is a refusal
+    /// that never counts, and any failing child that merely prints one of the
+    /// phrases is attributed to the sandbox.
     Inferred,
 }
 
@@ -2125,7 +2124,7 @@ pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Ve
 pub(crate) fn process_sandbox_read_deny_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut denied: Vec<PathBuf> = Vec::new();
     if let Some(home) = sandbox_user_home_dir() {
-        for relative in crate::orchestration::DEFAULT_READ_DENY_HOME_PATHS {
+        for relative in crate::orchestration::default_read_deny_home_paths() {
             denied.push(normalize_for_policy(&home.join(relative)));
         }
     }

@@ -140,6 +140,11 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     "GOMODCACHE",
     "GOPATH",
     "GOROOT",
+    // C/C++ compiler cache. ccache defaults its tempdir to XDG_RUNTIME_DIR
+    // (`/run/user/<uid>`), which is outside every workspace write root, so a
+    // cgo or C build fails "Permission denied" before it compiles anything.
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
     // JVM
     "JAVA_HOME",
 ];
@@ -154,6 +159,8 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
     "GOCACHE",
     "GOMODCACHE",
     "GOPATH",
