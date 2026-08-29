@@ -39,6 +39,7 @@ mod generated_rust_binding;
 
 mod external_action_roundtrip;
 mod session_recap;
+mod session_update_payloads;
 
 fn protocol_source() -> ProtocolArtifactSource {
     ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))

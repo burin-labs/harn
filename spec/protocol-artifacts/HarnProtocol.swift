@@ -3017,6 +3017,338 @@ public struct HarnSessionTimelineUpdate: Codable, Sendable, Equatable {
     public var node: HarnSessionTimelineNode
 }
 
+/// Harn-owned `session/update` extension payloads. Identity fields are first-class.
+
+public struct HarnACPArtifactUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var artifactId: String
+    public var kind: String?
+    public var title: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case artifactId
+        case kind
+        case title
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPAvailableCommandsUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var availableCommands: HarnACPValue
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case availableCommands
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPFsWatchUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var subscriptionId: String
+    public var events: HarnACPValue
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case subscriptionId
+        case events
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPHandoffUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var handoffId: String
+    public var artifactId: String
+    public var handoff: HarnACPValue
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case handoffId
+        case artifactId
+        case handoff
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPHitlRequestUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var requestId: String
+    public var kind: String
+    public var payload: HarnACPValue
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case requestId
+        case kind
+        case payload
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPHitlResolvedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var requestId: String
+    public var kind: String
+    public var outcome: HarnACPValue
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case requestId
+        case kind
+        case outcome
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPLiveSessionClientUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var action: String
+    public var state: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case action
+        case state
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPLogUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var message: String
+    public var level: String?
+    public var fields: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case message
+        case level
+        case fields
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPProgressUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var message: String
+    public var phase: String?
+    public var progress: Int?
+    public var total: Int?
+    public var data: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case message
+        case phase
+        case progress
+        case total
+        case data
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPReminderEmittedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var reminderId: String
+    public var reminder: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case reminderId
+        case reminder
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPSkillActivatedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var skillName: String
+    public var iteration: Int?
+    public var reason: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case skillName
+        case iteration
+        case reason
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPSkillDeactivatedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var skillName: String
+    public var iteration: Int?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case skillName
+        case iteration
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPSkillNarrowUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var removedTools: [String]
+    public var remainingTools: [String]
+    public var reason: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case removedTools
+        case remainingTools
+        case reason
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPSkillScopeToolsUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var skillName: String
+    public var allowedTools: [String]
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case skillName
+        case allowedTools
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPStanceTransitionUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var phase: String
+    public var escapeTool: String?
+    public var allowedTools: [String]?
+    public var justification: String?
+    public var consent: String?
+    public var reason: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case phase
+        case escapeTool
+        case allowedTools
+        case justification
+        case consent
+        case reason
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPToolSearchQueryUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var toolUseId: String
+    public var name: String
+    public var query: HarnACPValue
+    public var strategy: String?
+    public var mode: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case toolUseId
+        case name
+        case query
+        case strategy
+        case mode
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPToolSearchResultUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var toolUseId: String
+    public var promoted: HarnACPValue
+    public var strategy: String?
+    public var mode: String?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case toolUseId
+        case promoted
+        case strategy
+        case mode
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPTranscriptCompactedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var mode: String
+    public var strategy: String
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case mode
+        case strategy
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPTranscriptProjectedUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var policy: String
+    public var reason: String
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case policy
+        case reason
+        case meta = "_meta"
+    }
+}
+
+public struct HarnACPWorkerUpdate: Codable, Sendable, Equatable {
+    public var sessionUpdate: HarnACPSessionUpdate
+    public var workerId: String
+    public var event: String
+    public var status: String
+    public var terminal: Bool
+    public var workerName: String?
+    public var workerTask: String?
+    public var workerMode: String?
+    public var metadata: HarnACPValue?
+    public var audit: HarnACPValue?
+    public var meta: HarnACPExtensionMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUpdate
+        case workerId
+        case event
+        case status
+        case terminal
+        case workerName
+        case workerTask
+        case workerMode
+        case metadata
+        case audit
+        case meta = "_meta"
+    }
+}
+
 public enum HarnSessionRecapProtocol {
     public static let queryMethod = "harn.session_recap.query"
     public static let schemaVersion = 1

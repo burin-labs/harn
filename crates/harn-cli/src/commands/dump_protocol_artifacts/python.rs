@@ -9,6 +9,7 @@ use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STAT
 
 use super::constants::*;
 use super::session_recap::append_python_session_recap_types;
+use super::session_update_payloads::append_python_session_update_payloads;
 use super::support::*;
 use super::values::*;
 
@@ -246,6 +247,7 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_str_enum("MCPLoggingLevel", MCP_LOGGING_LEVELS));
 
     out.push_str(PYTHON_TYPE_DEFINITIONS);
+    append_python_session_update_payloads(&mut out);
     append_python_session_recap_types(&mut out);
     out
 }
