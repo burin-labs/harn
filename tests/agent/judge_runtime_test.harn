@@ -197,16 +197,20 @@ pipeline test_completion_evidence_retains_every_mutated_artifact_across_session(
     {tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}]},
   )
   assert_eq(len(projected.packet.actions), 1)
-  assert_eq(projected.packet.actions[0].tool_call_id, "edit-2")
+  const latest_action = projected.packet.actions[0]
+  assert(latest_action != nil)
+  assert_eq(latest_action.tool_call_id, "edit-2")
   assert_eq(len(projected.packet.requirement_evidence), 1)
-  assert_eq(projected.packet.requirement_evidence[0].role, "mutation_summary")
-  assert_eq(projected.packet.requirement_evidence[0].artifact_count, 3)
+  const mutation_evidence = projected.packet.requirement_evidence[0]
+  assert(mutation_evidence != nil)
+  assert_eq(mutation_evidence.role, "mutation_summary")
+  assert_eq(mutation_evidence.artifact_count, 3)
   assert_eq(
-    projected.packet.requirement_evidence[0].representative_artifact_ids,
+    mutation_evidence.representative_artifact_ids,
     ["src/first.rs", "src/second.rs", "tests/first.rs"],
   )
   assert_eq(
-    projected.packet.requirement_evidence[0].artifact_set_digest,
+    mutation_evidence.artifact_set_digest,
     "sha256:" + sha256(json_stringify(["src/first.rs", "src/second.rs", "tests/first.rs"])),
   )
 }
@@ -254,15 +258,26 @@ pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
     {id: "edit-1", name: "edit", arguments: {path: "src/lib.rs"}},
     {id: "verify-1", name: "verify", arguments: {command: "make test"}},
   ]
-  const text_messages = [
-    __assistant_facts("<tool_call>...</tool_call>", calls),
-    __result_facts("edit", "edit-1", "0 errors, 0 failed", "ok", {mutation_status: "applied"}),
-    __result_facts("verify", "verify-1", "command completed", "error", {exit_code: 1}),
-  ]
+  const assistant_message = __assistant_facts("<tool_call>...</tool_call>", calls)
+  const edit_result = __result_facts(
+    "edit",
+    "edit-1",
+    "0 errors, 0 failed",
+    "ok",
+    {mutation_status: "applied"},
+  )
+  const verify_result = __result_facts(
+    "verify",
+    "verify-1",
+    "command completed",
+    "error",
+    {exit_code: 1},
+  )
+  const text_messages = [assistant_message, edit_result, verify_result]
   const native_messages = [
-    text_messages[0] + {tool_calls: calls},
-    text_messages[1] + {role: "tool", name: "edit", tool_call_id: "edit-1"},
-    text_messages[2] + {role: "tool", name: "verify", tool_call_id: "verify-1"},
+    assistant_message + {tool_calls: calls},
+    edit_result + {role: "tool", name: "edit", tool_call_id: "edit-1"},
+    verify_result + {role: "tool", name: "verify", tool_call_id: "verify-1"},
   ]
   const opts = {
     tools: [
@@ -281,8 +296,12 @@ pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
   const native_projection = __judge_evidence_projection(native_messages, opts)
   assert_eq(text_projection.packet.actions, native_projection.packet.actions)
   assert_eq(text_projection.packet.lifecycle_issues, native_projection.packet.lifecycle_issues)
-  assert(!text_projection.packet.actions[0].has_error_result)
-  assert(text_projection.packet.actions[1].has_error_result)
+  const first_action = text_projection.packet.actions[0]
+  const second_action = text_projection.packet.actions[1]
+  assert(first_action != nil)
+  assert(second_action != nil)
+  assert(!first_action.has_error_result)
+  assert(second_action.has_error_result)
 }
 
 pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(
@@ -470,7 +489,9 @@ pipeline test_completion_judge_preserves_ambiguous_result_evidence(
     ],
     {tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}]},
   )
-  assert_eq(projected.packet.actions[0].lifecycle_status, "ambiguous")
+  const action = projected.packet.actions[0]
+  assert(action != nil)
+  assert_eq(action.lifecycle_status, "ambiguous")
   assert(contains(projected.serialized, "MUTATION_BODY"))
   assert(contains(projected.serialized, "FIRST_RECEIPT"))
   assert(contains(projected.serialized, "SECOND_RECEIPT"))

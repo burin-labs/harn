@@ -1,5 +1,18 @@
 import { canon_event_paths } from "std/agent/canon"
 import {
+  COMPLETION_VERIFICATION_EVIDENCE_INDEX,
+  CompletionEvidenceAction,
+  CompletionEvidenceIssue,
+  CompletionEvidenceProjection,
+  CompletionEvidenceProjectionStats,
+  CompletionEvidenceRole,
+  CompletionEvidenceSelection,
+  CompletionEvidenceSnapshot,
+  CompletionToolSemantics,
+  completion_evidence_id,
+  completion_requirement_evidence_packet,
+} from "std/agent/completion_evidence"
+import {
   CompletionRequirementEvidencePacket,
   CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
@@ -40,7 +53,6 @@ import {
   AgentTranscriptIssue,
   AgentTranscriptToolLifecycle,
   AgentTranscriptToolLifecycleReport,
-  AgentTranscriptToolLifecycleStatus,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 
@@ -53,10 +65,6 @@ const __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT = 160
 
 // Negative indices are reserved for Harn-owned session summaries. Transcript
 // lifecycle indices are non-negative, so the two namespaces cannot alias.
-const __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX = -1
-
-const __JUDGE_VERIFICATION_EVIDENCE_INDEX = -2
-
 const __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX = -3
 
 const __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT = 12
@@ -66,115 +74,6 @@ pub type CompletionJudgeAction = "accept" | "continue"
 
 /** Runtime completion decision after deadline and policy enforcement. */
 pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
-
-pub type CompletionEvidenceRole = "observation" | "mutation" | "verification" | "other"
-
-pub type CompletionToolSemantics = {
-  name: string,
-  kind: string,
-  side_effect_level: string,
-  read_only: bool,
-  evidence_role: CompletionEvidenceRole,
-}
-
-pub type CompletionEvidenceAction = {
-  ordinal: int,
-  evidence_index: int,
-  tool_call_id: string,
-  name: string,
-  semantics: CompletionToolSemantics,
-  lifecycle_status: AgentTranscriptToolLifecycleStatus,
-  arguments: string,
-  observation: string,
-  result_facts: string,
-  has_error_result: bool,
-}
-
-pub type CompletionEvidenceIssue = {
-  code: string,
-  record_index: int,
-  message: string,
-  details: string,
-}
-
-pub type CompletionEvidencePacket = {
-  schema: "harn.completion_judge_evidence.v2",
-  raw_message_count: int,
-  raw_transcript_digest: string,
-  relevant_action_count: int,
-  omitted_read_only_call_count: int,
-  omitted_older_action_count: int,
-  lifecycle_issue_count: int,
-  lifecycle_issues: list<CompletionEvidenceIssue>,
-  actions: list<CompletionEvidenceAction>,
-  fallback_observations: list<CompletionEvidenceAction>,
-  requirement_evidence: list<CompletionRequirementEvidenceRecord>,
-}
-
-/**
- * One selected action, named on the projection receipt. Recovering WHICH action
- * a packet dropped used to take arithmetic on the counts; a host that declared
- * no verification role anywhere is visible here at a glance instead.
- */
-pub type CompletionEvidenceSelection = {
-  name: string,
-  evidence_role: CompletionEvidenceRole,
-  evidence_index: int,
-}
-
-pub type CompletionEvidenceProjectionStats = {
-  schema: "harn.completion_judge_evidence_projection.v1",
-  raw_message_count: int,
-  relevant_call_count: int,
-  included_action_count: int,
-  included_fallback_observation_count: int,
-  omitted_read_only_call_count: int,
-  omitted_older_action_count: int,
-  lifecycle_issue_count: int,
-  serialized_chars: int,
-  raw_transcript_digest: string,
-  selected_actions: list<CompletionEvidenceSelection>,
-}
-
-pub type CompletionEvidenceProjection = {
-  packet: CompletionEvidencePacket,
-  serialized: string,
-  stats: CompletionEvidenceProjectionStats,
-}
-
-pub type CompletionEvidenceSnapshot = {
-  schema: "harn.completion_evidence_snapshot.v1",
-  evidence_id: string,
-  session_id: string,
-  task: string,
-  stop_reason: string,
-  text: string,
-  visible_text: string,
-  last_text: string,
-  // `text`, `visible_text`, and `last_text` are all the same PROJECTION of the
-  // candidate turn: completion markers and structural tags are already gone.
-  // `raw_text` is the unprojected emission for that same turn. A policy asking
-  // "did the model declare completion?" must read `raw_text`; the projected
-  // fields answer "what should a reader be shown?" and cannot answer the first
-  // question at all.
-  raw_text: string,
-  transcript: string,
-  judge_evidence: string,
-  judge_evidence_packet: CompletionEvidencePacket,
-  judge_evidence_projection: CompletionEvidenceProjectionStats,
-  all_tools_used: string,
-  successful_tools_used: string,
-  iteration: int,
-  knowledge_state: string,
-  // Effect-phased proposals survive turns so an exact re-proposal can be
-  // recognized. A completion policy is the only authority allowed to decide
-  // that later evidence superseded one, so expose the pending count instead
-  // of making that lifecycle state an invisible terminal veto.
-  pending_tool_batch_effect_count: int,
-  // Absent until a deterministic gate has actually run and reported. A judge
-  // stage reads it; nothing else may synthesize one.
-  verification?: CompletionVerificationState?,
-}
 
 pub type CompletionJudgeInvocations = {
   deterministic: bool,
@@ -703,84 +602,6 @@ fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: 
   return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
 }
 
-fn __judge_requirement_evidence_without(
-  records: list<CompletionRequirementEvidenceRecord>,
-  evidence_index: int,
-) -> list<CompletionRequirementEvidenceRecord> {
-  return records.filter({ record -> record.evidence_index != evidence_index }).to_list()
-}
-
-/**
- * Project Harn-owned final-output and deterministic readings onto one evidence model.
- *
- * @effects: []
- * @errors: []
- * @api_stability: internal
- */
-pub fn __judge_requirement_evidence_packet(
-  packet: CompletionEvidencePacket,
-  final_text: string,
-  verification: CompletionVerificationState? = nil,
-) -> CompletionEvidencePacket {
-  let records = packet.requirement_evidence
-  records = __judge_requirement_evidence_without(records, __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX)
-  records = __judge_requirement_evidence_without(records, __JUDGE_VERIFICATION_EVIDENCE_INDEX)
-  const answer = trim(final_text)
-  if answer != "" {
-    records = records
-      + [
-        {
-          evidence_index: __JUDGE_FINAL_OUTPUT_EVIDENCE_INDEX,
-          role: "assistant_output",
-          supports_completion: true,
-          summary: __judge_clip_evidence(answer, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-          representative_artifact_ids: [],
-          measurement: "present",
-        },
-      ]
-  }
-  if verification != nil {
-    records = records
-      + [
-        {
-          evidence_index: __JUDGE_VERIFICATION_EVIDENCE_INDEX,
-          role: "deterministic_verification",
-          supports_completion: verification.observed == "passed",
-          summary: "Deterministic verification observed `" + verification.observed + "`.",
-          representative_artifact_ids: [],
-          measurement: verification.observed,
-        },
-      ]
-  }
-  return packet + {requirement_evidence: records}
-}
-
-fn __judge_evidence_id(
-  task: string,
-  stop_reason: string,
-  text: string,
-  packet: CompletionEvidencePacket,
-  pending_tool_batch_effect_count: int,
-  verification: CompletionVerificationState? = nil,
-) -> string {
-  return "sha256:"
-    + sha256(
-      json_stringify(
-        {
-          task: task,
-          trigger: stop_reason,
-          candidate_text: text,
-          actions: packet.actions,
-          fallback_observations: packet.fallback_observations,
-          requirement_evidence: packet.requirement_evidence,
-          lifecycle_issues: packet.lifecycle_issues,
-          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
-          verification: verification,
-        },
-      ),
-    )
-}
-
 fn __judge_payload(
   agent: HarnessAgent,
   session: dict,
@@ -801,13 +622,13 @@ fn __judge_payload(
     opts,
     "sha256:" + sha256(transcript),
   )
-  const evidence_packet = __judge_requirement_evidence_packet(projected.packet, text)
+  const evidence_packet = completion_requirement_evidence_packet(projected.packet, text)
   const evidence_serialized = json_stringify(evidence_packet)
   const evidence_stats = projected.stats + {serialized_chars: len(evidence_serialized)}
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
-  const evidence_id = __judge_evidence_id(
+  const evidence_id = completion_evidence_id(
     session?.task ?? "",
     stop_reason,
     text,
@@ -846,8 +667,8 @@ fn __judge_payload_with_verification(
     return payload
   }
   const verification = state
-    + {observed_at_evidence_index: __JUDGE_VERIFICATION_EVIDENCE_INDEX}
-  const evidence_packet = __judge_requirement_evidence_packet(
+    + {observed_at_evidence_index: COMPLETION_VERIFICATION_EVIDENCE_INDEX}
+  const evidence_packet = completion_requirement_evidence_packet(
     payload.judge_evidence_packet,
     payload.last_text,
     verification,
@@ -855,7 +676,7 @@ fn __judge_payload_with_verification(
   const evidence_serialized = json_stringify(evidence_packet)
   return payload
     + {
-      evidence_id: __judge_evidence_id(
+      evidence_id: completion_evidence_id(
         payload.task,
         payload.stop_reason,
         payload.last_text,

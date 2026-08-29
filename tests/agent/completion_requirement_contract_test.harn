@@ -1,3 +1,4 @@
+import { completion_requirement_evidence_packet } from "std/agent/completion_evidence"
 // Run: harn test tests/agent/completion_requirement_contract_test.harn
 import {
   CompletionRequirementEvidencePacket,
@@ -8,7 +9,6 @@ import {
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
   __judge_evidence_projection,
-  __judge_requirement_evidence_packet,
 } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
@@ -173,7 +173,7 @@ pipeline test_requirement_report_fails_closed_on_missing_duplicate_and_unsupport
 
 pipeline test_tool_free_answer_can_cite_final_assistant_output(harness: Harness, task: unknown) {
   const projected = __judge_evidence_projection([], {})
-  const packet = __judge_requirement_evidence_packet(
+  const packet = completion_requirement_evidence_packet(
     projected.packet,
     "The answer follows from the supplied facts.",
   )
@@ -191,7 +191,9 @@ pipeline test_tool_free_answer_can_cite_final_assistant_output(harness: Harness,
     packet,
   )
   assert(report.complete)
-  assert_eq(packet.requirement_evidence[0].role, "assistant_output")
+  const final_evidence = packet.requirement_evidence[0]
+  assert(final_evidence != nil)
+  assert_eq(final_evidence.role, "assistant_output")
 }
 
 pipeline test_requirement_refs_reject_wrong_role_and_missing_measurement(
@@ -199,7 +201,10 @@ pipeline test_requirement_refs_reject_wrong_role_and_missing_measurement(
   task: unknown,
 ) {
   const projected = __judge_evidence_projection([], {})
-  const assistant_packet = __judge_requirement_evidence_packet(projected.packet, "A final answer.")
+  const assistant_packet = completion_requirement_evidence_packet(
+    projected.packet,
+    "A final answer.",
+  )
   const verification_contract = {
     requirements: [
       {
@@ -216,7 +221,7 @@ pipeline test_requirement_refs_reject_wrong_role_and_missing_measurement(
   )
   assert(!wrong_role.complete)
   assert_eq(wrong_role.rows[0].status, "unsupported")
-  const unmeasured_packet = __judge_requirement_evidence_packet(
+  const unmeasured_packet = completion_requirement_evidence_packet(
     projected.packet,
     "A final answer.",
     {oracle_expected: true, command: "check", observed: "not_run"},
