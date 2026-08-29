@@ -1,4 +1,8 @@
-import { CompletionRequirement, CompletionRequirementContract } from "std/agent/options_types"
+import {
+  CompletionRequirement,
+  CompletionRequirementContract,
+  CompletionRequirementEvidenceRole,
+} from "std/agent/options_types"
 
 pub type CompletionRequirementAssessment = {
   requirement_id: string,
@@ -26,33 +30,138 @@ pub type CompletionRequirementReport = {
   rows: list<CompletionRequirementStatus>,
 }
 
-pub type CompletionRequirementEvidencePacket = {actions?: list, fallback_observations?: list}
+/** One typed, bounded fact a requirement assessment may cite. */
+pub type CompletionRequirementEvidenceRecord = {
+  evidence_index: int,
+  role: CompletionRequirementEvidenceRole,
+  supports_completion: bool,
+  summary: string,
+  representative_artifact_ids: list<string>,
+  artifact_count?: int,
+  artifact_set_digest?: string,
+  measurement?: string,
+}
+
+pub type CompletionRequirementEvidencePacket = {
+  requirement_evidence?: list<CompletionRequirementEvidenceRecord>,
+}
+
+fn completion_requirement_evidence_role(value: unknown) -> CompletionRequirementEvidenceRole? {
+  if value == "assistant_output" {
+    return "assistant_output"
+  }
+  if value == "deterministic_verification" {
+    return "deterministic_verification"
+  }
+  if value == "mutation_summary" {
+    return "mutation_summary"
+  }
+  return nil
+}
+
+fn completion_requirement_evidence_roles(raw: unknown) -> list<CompletionRequirementEvidenceRole> {
+  if raw == nil {
+    let all_roles: list<CompletionRequirementEvidenceRole> = []
+    all_roles = all_roles + ["assistant_output"]
+    return all_roles + ["deterministic_verification"]
+  }
+  let roles: list<CompletionRequirementEvidenceRole> = []
+  if type_of(raw) != "list" {
+    return roles
+  }
+  for value in raw {
+    const role = completion_requirement_evidence_role(value)
+    if role != nil && !roles.contains(role) {
+      roles = roles + [role]
+    }
+  }
+  return roles
+}
+
+/**
+ * Validate and normalize the optional requirement ledger. One owner for the
+ * acceptance-ledger policy: every surface that accepts a raw contract routes
+ * here, so a malformed ledger fails closed with one vocabulary instead of
+ * silently shrinking the set of requirements the completion gate enforces.
+ *
+ * `label` names the option the raw value arrived under, so a caller-facing
+ * message points at the field the author wrote.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: internal
+ */
+pub fn __completion_requirement_contract_checked(
+  label: string,
+  value: any,
+) -> CompletionRequirementContract? {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + ".requirement_contract` must be a dict or nil; got "
+      + type_of(value)
+  }
+  const raw_requirements = value?.requirements
+  if type_of(raw_requirements) != "list" || len(raw_requirements) == 0 {
+    throw "agent_loop: `" + label
+      + ".requirement_contract.requirements` must be a non-empty list"
+  }
+  let requirements: list<CompletionRequirement> = []
+  let seen: dict = {}
+  for raw in raw_requirements {
+    if type_of(raw) != "dict" {
+      throw "agent_loop: every `" + label
+        + ".requirement_contract.requirements` item must be a dict"
+    }
+    const requirement_id = trim(to_string(raw?.requirement_id ?? ""))
+    const name = trim(to_string(raw?.name ?? ""))
+    if requirement_id == "" || name == "" {
+      throw "agent_loop: every completion requirement needs non-empty `requirement_id` and `name`"
+    }
+    if seen[requirement_id] ?? false {
+      throw "agent_loop: duplicate completion `requirement_id` `" + requirement_id + "`"
+    }
+    seen = seen + {[requirement_id]: true}
+    const raw_roles = raw?.evidence_roles
+    if raw_roles != nil {
+      if type_of(raw_roles) != "list" || len(raw_roles) == 0 {
+        throw "agent_loop: completion requirement `evidence_roles` must be a non-empty list"
+      }
+      let seen_roles: dict = {}
+      for value_role in raw_roles {
+        if completion_requirement_evidence_role(value_role) == nil {
+          throw "agent_loop: unsupported completion requirement evidence role `"
+            + to_string(value_role)
+            + "`"
+        }
+        if seen_roles[value_role] ?? false {
+          throw "agent_loop: duplicate completion requirement evidence role `"
+            + to_string(value_role)
+            + "`"
+        }
+        seen_roles = seen_roles + {[value_role]: true}
+      }
+    }
+    const roles = completion_requirement_evidence_roles(raw_roles)
+    requirements = requirements
+      + [{requirement_id: requirement_id, name: name, evidence_roles: roles}]
+  }
+  return {requirements: requirements}
+}
 
 /**
  * Return the optional requirement ledger, normalized to its public shape.
+ * A malformed ledger throws rather than dropping requirements, so the
+ * completion gate can never be weakened by a contract it could not read.
  *
  * @effects: []
- * @errors: []
+ * @errors: [validation]
  * @api_stability: experimental
  * @example: completion_requirement_contract({requirements: [{requirement_id: "build", name: "Build the artifact."}]})
  */
 pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementContract? {
-  if type_of(value) != "dict" || type_of(value?.requirements) != "list"
-    || len(value.requirements) == 0 {
-    return nil
-  }
-  let requirements: list<CompletionRequirement> = []
-  for raw in value.requirements {
-    const requirement_id = trim(to_string(raw?.requirement_id ?? ""))
-    const name = trim(to_string(raw?.name ?? ""))
-    if requirement_id != "" && name != "" {
-      requirements = requirements + [{requirement_id: requirement_id, name: name}]
-    }
-  }
-  if len(requirements) == 0 {
-    return nil
-  }
-  return {requirements: requirements}
+  return __completion_requirement_contract_checked("completion_judge", value)
 }
 
 /**
@@ -72,7 +181,7 @@ pub fn completion_requirement_assessments_schema(
   return {
     type: "array",
     description:
-      "One assessment per required item. Cite only evidence_index values from the supplied completion evidence packet.",
+      "One assessment per required item. Cite only requirement_evidence indices whose role is allowed by that item.",
     items: {
       type: "object",
       properties: {
@@ -100,19 +209,7 @@ pub fn completion_requirement_contract_prompt(contract: CompletionRequirementCon
   }
   return "\n\nAtomic completion requirements:\n"
     + json_stringify(contract.requirements)
-    + "\nReturn one requirement_report row for every requirement_id. Mark met only when the supplied evidence packet directly supports that item, and cite the supporting evidence_index values."
-}
-
-fn completion_requirement_supported_evidence_indices(
-  packet: CompletionRequirementEvidencePacket,
-) -> list<int> {
-  let indices: list<int> = []
-  for action in (packet.actions ?? []) + (packet.fallback_observations ?? []) {
-    if type_of(action?.evidence_index) == "int" && !indices.contains(action.evidence_index) {
-      indices = indices + [action.evidence_index]
-    }
-  }
-  return indices
+    + "\nReturn one requirement_report row for every requirement_id. Mark met only when requirement_evidence semantically supports that item, and cite indices with an allowed evidence role."
 }
 
 fn completion_requirement_strict_refs(raw: unknown) -> list<int> {
@@ -140,12 +237,51 @@ fn completion_requirement_refs_well_formed(raw: unknown) -> bool {
   return true
 }
 
-fn completion_requirement_refs_supported(refs: list<int>, supported: list<int>) -> bool {
+fn completion_requirement_evidence_matches(
+  packet: CompletionRequirementEvidencePacket,
+  evidence_index: int,
+) -> list<CompletionRequirementEvidenceRecord> {
+  let matches: list<CompletionRequirementEvidenceRecord> = []
+  for record in packet.requirement_evidence ?? [] {
+    if type_of(record?.evidence_index) == "int" && record.evidence_index == evidence_index {
+      matches = matches + [record]
+    }
+  }
+  return matches
+}
+
+fn completion_requirement_refs_supported(
+  refs: list<int>,
+  requirement: CompletionRequirement,
+  packet: CompletionRequirementEvidencePacket,
+) -> bool {
   if len(refs) == 0 {
     return false
   }
+  const allowed_roles = completion_requirement_evidence_roles(requirement.evidence_roles)
+  if len(allowed_roles) == 0 {
+    return false
+  }
   for evidence_index in refs {
-    if !supported.contains(evidence_index) {
+    const matches = completion_requirement_evidence_matches(packet, evidence_index)
+    if len(matches) != 1 {
+      return false
+    }
+    const record = matches[0]
+    const role = completion_requirement_evidence_role(record?.role)
+    if role == nil || !allowed_roles.contains(role) || record?.supports_completion != true
+      || type_of(record?.summary) != "string"
+      || trim(record.summary) == ""
+      || type_of(record?.representative_artifact_ids) != "list" {
+      return false
+    }
+    if role == "deterministic_verification" && record?.measurement != "passed" {
+      return false
+    }
+    if role == "mutation_summary"
+      && (type_of(record?.artifact_count) != "int" || record.artifact_count < 1
+        || type_of(record?.artifact_set_digest) != "string"
+        || trim(record.artifact_set_digest) == "") {
       return false
     }
   }
@@ -182,7 +318,6 @@ pub fn completion_requirement_report(
   if contract == nil || len(contract.requirements) == 0 {
     return nil
   }
-  const supported = completion_requirement_supported_evidence_indices(evidence_packet)
   let rows: list<CompletionRequirementStatus> = []
   let pending_names: list<string> = []
   let authoritative_ids: list<string> = []
@@ -199,7 +334,7 @@ pub fn completion_requirement_report(
       if type_of(raw?.met) != "bool" || raw.met != true {
         status = "unmet"
       } else if !completion_requirement_refs_well_formed(raw?.evidence_refs)
-        || !completion_requirement_refs_supported(refs, supported) {
+        || !completion_requirement_refs_supported(refs, requirement, evidence_packet) {
         status = "unsupported"
       } else {
         status = "met"

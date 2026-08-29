@@ -3,6 +3,7 @@ import {
   __normalize_llm_caller_transport,
   __validate_llm_caller,
 } from "std/agent/caller_transport"
+import { __completion_requirement_contract_checked } from "std/agent/completion_requirements"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import "std/agent/options_formats"
 import "std/agent/options_types"
@@ -123,36 +124,13 @@ pub fn __validate_judge_dict_or_bool(label: string, value: any) {
   }
 }
 
-/** Validate the optional atomic-requirement ledger at the judge boundary. */
+/**
+ * Validate the optional atomic-requirement ledger at the judge boundary.
+ * The policy itself lives with the ledger in `std/agent/completion_requirements`
+ * so the option boundary and the judge normalizer cannot drift apart.
+ */
 fn __validate_completion_requirement_contract(label: string, value: any) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "dict" {
-    throw "agent_loop: `" + label + ".requirement_contract` must be a dict or nil; got "
-      + type_of(value)
-  }
-  const requirements = value?.requirements
-  if type_of(requirements) != "list" || len(requirements) == 0 {
-    throw "agent_loop: `" + label
-      + ".requirement_contract.requirements` must be a non-empty list"
-  }
-  let seen: dict = {}
-  for requirement in requirements {
-    if type_of(requirement) != "dict" {
-      throw "agent_loop: every `" + label
-        + ".requirement_contract.requirements` item must be a dict"
-    }
-    const requirement_id = trim(to_string(requirement?.requirement_id ?? ""))
-    const name = trim(to_string(requirement?.name ?? ""))
-    if requirement_id == "" || name == "" {
-      throw "agent_loop: every completion requirement needs non-empty `requirement_id` and `name`"
-    }
-    if seen[requirement_id] ?? false {
-      throw "agent_loop: duplicate completion `requirement_id` `" + requirement_id + "`"
-    }
-    seen = seen + {[requirement_id]: true}
-  }
+  __completion_requirement_contract_checked(label, value)
 }
 
 fn __validate_removed_judge_options(label: string, value: dict | bool | nil) {

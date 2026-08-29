@@ -1,5 +1,20 @@
+import { canon_event_paths } from "std/agent/canon"
+import {
+  COMPLETION_VERIFICATION_EVIDENCE_INDEX,
+  CompletionEvidenceAction,
+  CompletionEvidenceIssue,
+  CompletionEvidenceProjection,
+  CompletionEvidenceProjectionStats,
+  CompletionEvidenceRole,
+  CompletionEvidenceSelection,
+  CompletionEvidenceSnapshot,
+  CompletionToolSemantics,
+  completion_evidence_id,
+  completion_requirement_evidence_packet,
+} from "std/agent/completion_evidence"
 import {
   CompletionRequirementEvidencePacket,
+  CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
   completion_requirement_assessments_schema,
   completion_requirement_contract,
@@ -23,7 +38,6 @@ import {
   CompletionVerificationState,
   __completion_arbitration_converts,
   __completion_judge_gap_class,
-  __completion_verification_evidence_index,
   __completion_verification_state_read,
   __judge_emit_decision,
   __judge_emit_started,
@@ -39,7 +53,6 @@ import {
   AgentTranscriptIssue,
   AgentTranscriptToolLifecycle,
   AgentTranscriptToolLifecycleReport,
-  AgentTranscriptToolLifecycleStatus,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 
@@ -50,119 +63,17 @@ const __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT = 4500
 
 const __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT = 160
 
+// Negative indices are reserved for Harn-owned session summaries. Transcript
+// lifecycle indices are non-negative, so the two namespaces cannot alias.
+const __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX = -3
+
+const __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT = 12
+
 /** Action the completion-judge model is allowed to return. */
 pub type CompletionJudgeAction = "accept" | "continue"
 
 /** Runtime completion decision after deadline and policy enforcement. */
 pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
-
-pub type CompletionEvidenceRole = "observation" | "mutation" | "verification" | "other"
-
-pub type CompletionToolSemantics = {
-  name: string,
-  kind: string,
-  side_effect_level: string,
-  read_only: bool,
-  evidence_role: CompletionEvidenceRole,
-}
-
-pub type CompletionEvidenceAction = {
-  ordinal: int,
-  evidence_index: int,
-  tool_call_id: string,
-  name: string,
-  semantics: CompletionToolSemantics,
-  lifecycle_status: AgentTranscriptToolLifecycleStatus,
-  arguments: string,
-  observation: string,
-  result_facts: string,
-  has_error_result: bool,
-}
-
-pub type CompletionEvidenceIssue = {
-  code: string,
-  record_index: int,
-  message: string,
-  details: string,
-}
-
-pub type CompletionEvidencePacket = {
-  schema: "harn.completion_judge_evidence.v2",
-  raw_message_count: int,
-  raw_transcript_digest: string,
-  relevant_action_count: int,
-  omitted_read_only_call_count: int,
-  omitted_older_action_count: int,
-  lifecycle_issue_count: int,
-  lifecycle_issues: list<CompletionEvidenceIssue>,
-  actions: list<CompletionEvidenceAction>,
-  fallback_observations: list<CompletionEvidenceAction>,
-}
-
-/**
- * One selected action, named on the projection receipt. Recovering WHICH action
- * a packet dropped used to take arithmetic on the counts; a host that declared
- * no verification role anywhere is visible here at a glance instead.
- */
-pub type CompletionEvidenceSelection = {
-  name: string,
-  evidence_role: CompletionEvidenceRole,
-  evidence_index: int,
-}
-
-pub type CompletionEvidenceProjectionStats = {
-  schema: "harn.completion_judge_evidence_projection.v1",
-  raw_message_count: int,
-  relevant_call_count: int,
-  included_action_count: int,
-  included_fallback_observation_count: int,
-  omitted_read_only_call_count: int,
-  omitted_older_action_count: int,
-  lifecycle_issue_count: int,
-  serialized_chars: int,
-  raw_transcript_digest: string,
-  selected_actions: list<CompletionEvidenceSelection>,
-}
-
-pub type CompletionEvidenceProjection = {
-  packet: CompletionEvidencePacket,
-  serialized: string,
-  stats: CompletionEvidenceProjectionStats,
-}
-
-pub type CompletionEvidenceSnapshot = {
-  schema: "harn.completion_evidence_snapshot.v1",
-  evidence_id: string,
-  session_id: string,
-  task: string,
-  stop_reason: string,
-  text: string,
-  visible_text: string,
-  last_text: string,
-  // `text`, `visible_text`, and `last_text` are all the same PROJECTION of the
-  // candidate turn: completion markers and structural tags are already gone.
-  // `raw_text` is the unprojected emission for that same turn. A policy asking
-  // "did the model declare completion?" must read `raw_text`; the projected
-  // fields answer "what should a reader be shown?" and cannot answer the first
-  // question at all.
-  raw_text: string,
-  transcript: string,
-  judge_evidence: string,
-  judge_evidence_packet: CompletionEvidencePacket,
-  judge_evidence_projection: CompletionEvidenceProjectionStats,
-  all_tools_used: string,
-  successful_tools_used: string,
-  iteration: int,
-  knowledge_state: string,
-  // Effect-phased proposals survive turns so an exact re-proposal can be
-  // recognized. A completion policy is the only authority allowed to decide
-  // that later evidence superseded one, so expose the pending count instead
-  // of making that lifecycle state an invisible terminal veto.
-  pending_tool_batch_effect_count: int,
-  // Absent until a deterministic gate has actually run and reported. A judge
-  // stage reads it; nothing else may synthesize one.
-  verification?: CompletionVerificationState?,
-}
 
 pub type CompletionJudgeInvocations = {
   deterministic: bool,
@@ -398,6 +309,83 @@ fn __judge_clip_evidence(value: any, limit: int) -> string {
     + substring(text, len(text) - tail_chars, len(text))
 }
 
+fn __judge_bounded_artifact_id(value: unknown) -> string {
+  const identity = trim(to_string(value ?? ""))
+  if identity == "" {
+    return ""
+  }
+  if len(identity) <= __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT {
+    return identity
+  }
+  // Keep a readable prefix and a collision-resistant identity for paths longer
+  // than the evidence envelope. No changed artifact silently disappears.
+  return substring(identity, 0, 80) + "…#sha256:" + sha256(identity)
+}
+
+fn __judge_push_artifact_ids(items: list<string>, bucket: unknown) -> list<string> {
+  let out = items
+  if type_of(bucket) != "list" {
+    return out
+  }
+  for value in bucket {
+    const identity = trim(to_string(value ?? ""))
+    if identity != "" && !out.contains(identity) {
+      out = out + [identity]
+    }
+  }
+  return out
+}
+
+fn __judge_mutation_artifact_ids(
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  opts: dict,
+) -> list<string> {
+  let artifact_ids: list<string> = []
+  for call in lifecycle.calls {
+    const descriptor = __judge_tool_descriptor(opts, call.name)
+    if !__judge_descriptor_is_mutation(descriptor) || call.status != "completed" {
+      continue
+    }
+    for result in call.results {
+      if result.outcome != "ok" {
+        continue
+      }
+      artifact_ids = __judge_push_artifact_ids(artifact_ids, canon_event_paths(result.data))
+    }
+  }
+  return artifact_ids
+}
+
+fn __judge_mutation_requirement_evidence(
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  opts: dict,
+) -> list<CompletionRequirementEvidenceRecord> {
+  const artifact_ids = __judge_mutation_artifact_ids(lifecycle, opts).sorted()
+  if len(artifact_ids) == 0 {
+    return []
+  }
+  const sample_count = if len(artifact_ids) < __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT {
+    len(artifact_ids)
+  } else {
+    __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT
+  }
+  let representative_ids: list<string> = []
+  for identity in artifact_ids.slice(0, sample_count) {
+    representative_ids = representative_ids + [__judge_bounded_artifact_id(identity)]
+  }
+  const record: CompletionRequirementEvidenceRecord = {
+    evidence_index: __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX,
+    role: "mutation_summary",
+    supports_completion: true,
+    summary: "Changed " + to_string(len(artifact_ids)) + " artifact(s) across this session.",
+    representative_artifact_ids: representative_ids,
+    artifact_count: len(artifact_ids),
+    artifact_set_digest: "sha256:" + sha256(json_stringify(artifact_ids)),
+    measurement: "observed",
+  }
+  return [record]
+}
+
 fn __judge_descriptor_is_verifier(descriptor: dict) -> bool {
   return descriptor?.evidence_role == "verification"
 }
@@ -550,6 +538,7 @@ fn __judge_evidence_projection_from_lifecycle(
     lifecycle_issues: latest_issues,
     actions: selected,
     fallback_observations: observation_fallback,
+    requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
   }
   let selection: list<CompletionEvidenceSelection> = []
   for action in selected {
@@ -627,29 +616,25 @@ fn __judge_payload(
   const tool_names = __session_tool_names(lifecycle)
   const successful_tool_names = __session_successful_tool_names(lifecycle)
   const transcript = json_stringify(messages)
-  const evidence = __judge_evidence_projection_from_lifecycle(
+  const projected = __judge_evidence_projection_from_lifecycle(
     messages,
     lifecycle,
     opts,
     "sha256:" + sha256(transcript),
   )
+  const evidence_packet = completion_requirement_evidence_packet(projected.packet, text)
+  const evidence_serialized = json_stringify(evidence_packet)
+  const evidence_stats = projected.stats + {serialized_chars: len(evidence_serialized)}
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
-  const evidence_id = "sha256:"
-    + sha256(
-      json_stringify(
-        {
-          task: session?.task ?? "",
-          trigger: stop_reason,
-          candidate_text: text,
-          actions: evidence.packet.actions,
-          fallback_observations: evidence.packet.fallback_observations,
-          lifecycle_issues: evidence.packet.lifecycle_issues,
-          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
-        },
-      ),
-    )
+  const evidence_id = completion_evidence_id(
+    session?.task ?? "",
+    stop_reason,
+    text,
+    evidence_packet,
+    pending_tool_batch_effect_count,
+  )
   return {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
@@ -661,9 +646,9 @@ fn __judge_payload(
     last_text: text,
     raw_text: raw_text == "" ? text : raw_text,
     transcript: transcript,
-    judge_evidence: evidence.serialized,
-    judge_evidence_packet: evidence.packet,
-    judge_evidence_projection: evidence.stats,
+    judge_evidence: evidence_serialized,
+    judge_evidence_packet: evidence_packet,
+    judge_evidence_projection: evidence_stats,
     all_tools_used: join(tool_names, ", "),
     successful_tools_used: join(successful_tool_names, ", "),
     iteration: iteration,
@@ -681,14 +666,29 @@ fn __judge_payload_with_verification(
   if state == nil {
     return payload
   }
+  const verification = state
+    + {observed_at_evidence_index: COMPLETION_VERIFICATION_EVIDENCE_INDEX}
+  const evidence_packet = completion_requirement_evidence_packet(
+    payload.judge_evidence_packet,
+    payload.last_text,
+    verification,
+  )
+  const evidence_serialized = json_stringify(evidence_packet)
   return payload
     + {
-      verification: state
-        + {
-          observed_at_evidence_index: __completion_verification_evidence_index(
-            payload.judge_evidence_projection.selected_actions,
-          ),
-        },
+      evidence_id: completion_evidence_id(
+        payload.task,
+        payload.stop_reason,
+        payload.last_text,
+        evidence_packet,
+        payload.pending_tool_batch_effect_count,
+        verification,
+      ),
+      judge_evidence: evidence_serialized,
+      judge_evidence_packet: evidence_packet,
+      judge_evidence_projection: payload.judge_evidence_projection
+        + {serialized_chars: len(evidence_serialized)},
+      verification: verification,
     }
 }
 
