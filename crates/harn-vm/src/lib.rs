@@ -51,6 +51,7 @@ pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
 mod chunk;
+pub mod code_references;
 mod compiler;
 pub mod composition;
 pub mod conditional_replace;

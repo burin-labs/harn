@@ -105,6 +105,11 @@ impl ReferenceIndex {
                     from: site.clone(),
                     to_file: key.file.clone(),
                     to_name: key.name.clone(),
+                    to_line: self
+                        .definitions
+                        .get(key)
+                        .map(|definition| definition.span.line)
+                        .unwrap_or(1),
                 });
             }
         }
@@ -127,6 +132,9 @@ pub struct ReferenceEdge {
     pub from: RefSite,
     pub to_file: PathBuf,
     pub to_name: String,
+    /// One-based declaration line. Together with file and name this
+    /// preserves the resolved definition identity for graph projections.
+    pub to_line: usize,
 }
 
 /// Walk `sources` and record every identifier that [`ModuleGraph::definition_of`]

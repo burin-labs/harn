@@ -94,6 +94,10 @@ impl BranchOverlay {
         self.deltas.keys().copied()
     }
 
+    pub(super) fn deltas(&self) -> impl Iterator<Item = (FileId, &FileDelta)> {
+        self.deltas.iter().map(|(file_id, delta)| (*file_id, delta))
+    }
+
     /// Apply every staged delta to the overlay's private graph, using
     /// the base graph as the starting point for inheritance. Returns the
     /// new node count of the overlay-private graph.
@@ -124,6 +128,10 @@ impl BranchOverlay {
     /// [`Self::materialize`] first or this returns an empty graph.
     pub fn graph(&self) -> &SymbolGraph {
         &self.materialized
+    }
+
+    pub(super) fn graph_mut(&mut self) -> &mut SymbolGraph {
+        &mut self.materialized
     }
 }
 

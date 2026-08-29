@@ -18,8 +18,8 @@ use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
-use super::overlay::OverlayState;
-use super::symbol_graph::SymbolGraph;
+use super::overlay::{BranchOverlay, FileDelta, OverlayState};
+use super::symbol_graph::{ResolvedReference, SymbolGraph};
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
 use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
@@ -107,6 +107,7 @@ impl IndexState {
         }
         // Second pass: every Module node exists now, so resolve IMPORTS.
         state.link_symbol_imports();
+        state.link_harn_references();
         (state, outcome)
     }
 
@@ -115,12 +116,19 @@ impl IndexState {
     /// exists or fails the indexability/sensitivity filter, any existing
     /// entry under that path is removed and `None` is returned.
     pub fn reindex_file(&mut self, abs: &Path) -> Option<FileId> {
+        let refresh_harn_references = abs.extension().is_some_and(|ext| ext == "harn");
         if !abs.exists() {
             self.remove_file_path(abs);
+            if refresh_harn_references {
+                self.link_harn_references();
+            }
             return None;
         }
         if !is_indexable_file(abs) || super::walker::is_sensitive_path(abs) {
             self.remove_file_path(abs);
+            if refresh_harn_references {
+                self.link_harn_references();
+            }
             return None;
         }
         let id = self.ingest(abs)?;
@@ -133,6 +141,9 @@ impl IndexState {
             self.rebuild_deps(id, &rel);
             self.rebuild_symbol_graph_for(id);
             self.link_symbol_imports();
+            if refresh_harn_references {
+                self.link_harn_references();
+            }
         }
         Some(id)
     }
@@ -275,6 +286,94 @@ impl IndexState {
         self.symbols.link_imports(&resolved);
     }
 
+    /// Rebuild the Harn reference projection from the shared module resolver.
+    /// The resolver sees the whole Harn file set so a single-file edit can
+    /// safely retarget uses in other modules.
+    pub(super) fn link_harn_references(&mut self) {
+        let mut file_ids = HashMap::new();
+        let mut harn_files = Vec::new();
+        for (id, file) in &self.files {
+            if file.language != "harn" {
+                continue;
+            }
+            let path = canonicalize_existing(&self.root.join(&file.relative_path));
+            file_ids.insert(path.clone(), *id);
+            harn_files.push(path);
+        }
+        harn_files.sort();
+
+        let facts = harn_vm::code_references::resolve_harn_code_references(&harn_files, None);
+        let resolved = project_resolved_references(facts, &file_ids);
+        self.symbols.replace_harn_refs(&resolved);
+    }
+
+    /// Materialize an overlay and relink its Harn references against the
+    /// branch-specific bytes. Resolver-owned edges are replaced in the
+    /// private graph, so repeated materialization cannot accumulate stale
+    /// references.
+    pub fn materialize_overlay(&self, overlay: &mut BranchOverlay) -> usize {
+        overlay.materialize(&self.symbols);
+
+        let deltas: HashMap<FileId, &FileDelta> = overlay.deltas().collect();
+        let mut file_ids = HashMap::new();
+        let mut harn_files = Vec::new();
+        let mut source_overrides = HashMap::new();
+        for (id, file) in &self.files {
+            match deltas.get(id).copied() {
+                Some(FileDelta::Removed) => continue,
+                Some(FileDelta::Modified {
+                    path,
+                    source,
+                    language,
+                    ..
+                }) if language.name() == "harn" => {
+                    let absolute = canonicalize_existing(&self.root.join(path));
+                    file_ids.insert(absolute.clone(), *id);
+                    harn_files.push(absolute.clone());
+                    source_overrides.insert(absolute, source.clone());
+                }
+                Some(FileDelta::Modified { .. }) => {}
+                None if file.language == "harn" => {
+                    let absolute = canonicalize_existing(&self.root.join(&file.relative_path));
+                    file_ids.insert(absolute.clone(), *id);
+                    harn_files.push(absolute);
+                }
+                None => {}
+            }
+        }
+        for (id, delta) in deltas {
+            if self.files.contains_key(&id) {
+                continue;
+            }
+            let FileDelta::Modified {
+                path,
+                source,
+                language,
+                ..
+            } = delta
+            else {
+                continue;
+            };
+            if language.name() != "harn" {
+                continue;
+            }
+            let absolute = canonicalize_existing(&self.root.join(path));
+            file_ids.insert(absolute.clone(), id);
+            harn_files.push(absolute.clone());
+            source_overrides.insert(absolute, source.clone());
+        }
+        harn_files.sort();
+        harn_files.dedup();
+
+        let facts = harn_vm::code_references::resolve_harn_code_references(
+            &harn_files,
+            Some(&source_overrides),
+        );
+        let resolved = project_resolved_references(facts, &file_ids);
+        overlay.graph_mut().replace_harn_refs(&resolved);
+        overlay.graph().node_count()
+    }
+
     /// Look up a file by either its workspace-relative path or its
     /// absolute path inside the workspace root.
     pub fn lookup_path(&self, raw: &str) -> Option<FileId> {
@@ -350,6 +449,29 @@ impl IndexState {
     pub(crate) fn set_next_file_id(&mut self, id: FileId) {
         self.next_id = id.max(1);
     }
+}
+
+fn project_resolved_references(
+    facts: harn_vm::code_references::ResolvedCodeReferences,
+    file_ids: &HashMap<PathBuf, FileId>,
+) -> Vec<ResolvedReference> {
+    facts
+        .edges
+        .into_iter()
+        .filter_map(|edge| {
+            let source_file = *file_ids.get(&edge.source_file)?;
+            let target_file = *file_ids.get(&edge.target_file)?;
+            if source_file == target_file {
+                return None;
+            }
+            Some(ResolvedReference {
+                source_file,
+                target_file,
+                target_name: edge.target_name,
+                target_line: u32::try_from(edge.target_line).ok()?,
+            })
+        })
+        .collect()
 }
 
 /// Map an AST-level [`AstSymbol`] (0-based tree-sitter coordinates) into

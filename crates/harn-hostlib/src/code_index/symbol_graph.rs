@@ -81,8 +81,8 @@ impl NodeKind {
 pub enum EdgeKind {
     /// CallSite → Function. A call expression resolving to a function.
     Calls,
-    /// Module → any. Name-heuristic for languages without a resolver.
-    /// Harn files do not emit these; they use ModuleGraph instead.
+    /// Module → any. Name heuristic for languages without a resolver;
+    /// Harn edges are projected from its resolved module graph.
     Refs,
     /// Module → Module (resolved) or Module → Import (unresolved).
     Imports,
@@ -182,6 +182,19 @@ pub struct RebuildOutcome {
     /// Flat symbol list extracted from the parse. Empty when the
     /// grammar didn't recognise the source.
     pub symbols: Vec<Symbol>,
+}
+
+/// One resolver-owned reference projected onto indexed file identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedReference {
+    /// File containing the resolved use.
+    pub source_file: FileId,
+    /// File containing the resolved definition.
+    pub target_file: FileId,
+    /// Definition name.
+    pub target_name: String,
+    /// One-based declaration line.
+    pub target_line: u32,
 }
 
 /// Typed symbol graph for a single workspace.
@@ -466,6 +479,64 @@ impl SymbolGraph {
                 if !already_linked {
                     self.add_edge(src_module, tgt_module, EdgeKind::Imports);
                 }
+            }
+        }
+    }
+
+    /// Replace every resolver-owned Harn `REFS` edge with `resolved`.
+    ///
+    /// Replacement, rather than add-only linking, is load-bearing: a file
+    /// reindex or branch overlay may retarget or remove a use. Non-Harn
+    /// heuristic edges are left untouched.
+    pub fn replace_harn_refs(&mut self, resolved: &[ResolvedReference]) {
+        let harn_modules: Vec<NodeId> = self
+            .nodes
+            .values()
+            .filter(|node| node.kind == NodeKind::Module && node.language == "harn")
+            .map(|node| node.id)
+            .collect();
+        for source in harn_modules {
+            let removed: Vec<Edge> = self
+                .out_edges
+                .get(&source)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|edge| edge.kind == EdgeKind::Refs)
+                .collect();
+            if let Some(edges) = self.out_edges.get_mut(&source) {
+                edges.retain(|edge| edge.kind != EdgeKind::Refs);
+            }
+            for edge in removed {
+                if let Some(incoming) = self.in_edges.get_mut(&edge.to) {
+                    incoming.retain(|candidate| {
+                        candidate.from != source || candidate.kind != EdgeKind::Refs
+                    });
+                }
+            }
+        }
+
+        let mut installed = BTreeSet::new();
+        for reference in resolved {
+            let Some(source) = self.module_node_for_file(reference.source_file) else {
+                continue;
+            };
+            let target = self
+                .by_file
+                .get(&reference.target_file)
+                .into_iter()
+                .flatten()
+                .copied()
+                .find(|id| {
+                    self.nodes.get(id).is_some_and(|node| {
+                        node.name == reference.target_name && node.line == reference.target_line
+                    })
+                });
+            let Some(target) = target else {
+                continue;
+            };
+            if installed.insert((source, target)) {
+                self.add_edge(source, target, EdgeKind::Refs);
             }
         }
     }

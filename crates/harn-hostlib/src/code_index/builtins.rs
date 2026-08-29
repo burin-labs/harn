@@ -1015,7 +1015,7 @@ pub(super) fn run_branch_overlay(
                 param: "branch",
             })?;
             let mut overlay = super::overlay::BranchOverlay::new(&branch_name);
-            overlay.materialize(&state.symbols);
+            state.materialize_overlay(&mut overlay);
             state.overlays.set(overlay);
             if activate {
                 state.overlays.activate(Some(branch_name));
@@ -1032,7 +1032,7 @@ pub(super) fn run_branch_overlay(
             // 100% reuse / 0-change baseline.
             if state.overlays.get(&branch_name).is_none() {
                 let mut overlay = super::overlay::BranchOverlay::new(&branch_name);
-                overlay.materialize(&state.symbols);
+                state.materialize_overlay(&mut overlay);
                 state.overlays.set(overlay);
             }
             state.overlays.activate(Some(branch_name));

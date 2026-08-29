@@ -7,7 +7,9 @@ use std::fs;
 use std::sync::Arc;
 
 use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    ast::Language,
+    code_index::{BranchOverlay, CodeIndexCapability, FileDelta},
+    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
 };
 use harn_vm::VmValue;
 
@@ -98,6 +100,29 @@ fn rebuild(registry: &BuiltinRegistry, root: &std::path::Path) {
     );
 }
 
+fn harn_run_ref_edges(registry: &BuiltinRegistry) -> Vec<(String, String)> {
+    let result = call(
+        registry,
+        "hostlib_code_index_cypher",
+        dict(&[(
+            "query",
+            VmValue::String(arcstr::ArcStr::from(
+                "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN m.path AS source, f.path AS target",
+            )),
+        )]),
+    );
+    let rows = list_field(&extract_dict(&result), "rows");
+    let mut edges: Vec<(String, String)> = rows
+        .iter()
+        .map(|row| {
+            let row = extract_dict(row);
+            (string_field(&row, "source"), string_field(&row, "target"))
+        })
+        .collect();
+    edges.sort();
+    edges
+}
+
 #[test]
 fn cypher_returns_function_by_name() {
     let dir = build_workspace();
@@ -151,29 +176,96 @@ fn harn_cypher_refs_follow_the_resolved_definition() {
     let (reg, _cap) = registry();
     rebuild(&reg, dir.path());
 
-    let result = call(
-        &reg,
-        "hostlib_code_index_cypher",
-        dict(&[(
-            "query",
-            VmValue::String(arcstr::ArcStr::from(
-                "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN m.path AS source, f.path AS target",
-            )),
-        )]),
-    );
-    let rows = list_field(&extract_dict(&result), "rows");
-    let edges: Vec<(String, String)> = rows
-        .iter()
-        .map(|row| {
-            let row = extract_dict(row);
-            (string_field(&row, "source"), string_field(&row, "target"))
-        })
-        .collect();
+    let edges = harn_run_ref_edges(&reg);
 
     assert_eq!(
         edges,
         vec![("importer.harn".into(), "exported.harn".into())],
         "only the imported call may resolve to exported.run"
+    );
+}
+
+#[test]
+fn harn_reindex_replaces_resolved_reference_edges() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("first.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(dir.path().join("second.harn"), "pub fn run() { 2 }\n").unwrap();
+    let importer = dir.path().join("importer.harn");
+    fs::write(
+        &importer,
+        "import { run } from \"./first\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+
+    let (reg, _cap) = registry();
+    rebuild(&reg, dir.path());
+    assert_eq!(
+        harn_run_ref_edges(&reg),
+        vec![("importer.harn".into(), "first.harn".into())]
+    );
+
+    fs::write(
+        &importer,
+        "import { run } from \"./second\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+    call(
+        &reg,
+        "hostlib_code_index_reindex_file",
+        dict(&[(
+            "path",
+            VmValue::String(arcstr::ArcStr::from("importer.harn")),
+        )]),
+    );
+
+    assert_eq!(
+        harn_run_ref_edges(&reg),
+        vec![("importer.harn".into(), "second.harn".into())],
+        "reindex must replace the old resolver-owned edge"
+    );
+}
+
+#[test]
+fn harn_branch_overlay_replaces_resolved_reference_edges() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("first.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(dir.path().join("second.harn"), "pub fn run() { 2 }\n").unwrap();
+    fs::write(
+        dir.path().join("importer.harn"),
+        "import { run } from \"./first\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+
+    let (reg, cap) = registry();
+    rebuild(&reg, dir.path());
+    assert_eq!(
+        harn_run_ref_edges(&reg),
+        vec![("importer.harn".into(), "first.harn".into())]
+    );
+
+    let shared = cap.shared();
+    let mut guard = shared.lock().unwrap();
+    let state = guard.as_mut().unwrap();
+    let importer_id = state.lookup_path("importer.harn").unwrap();
+    let mut overlay = BranchOverlay::new("topic/retarget");
+    overlay.stage(
+        importer_id,
+        FileDelta::Modified {
+            path: "importer.harn".into(),
+            language: Language::Harn,
+            source: "import { run } from \"./second\"\nfn helper() { run() }\n".into(),
+            imports: vec!["./second".into()],
+        },
+    );
+    state.materialize_overlay(&mut overlay);
+    state.overlays.set(overlay);
+    state.overlays.activate(Some("topic/retarget".into()));
+    drop(guard);
+
+    assert_eq!(
+        harn_run_ref_edges(&reg),
+        vec![("importer.harn".into(), "second.harn".into())],
+        "overlay materialization must replace the inherited edge"
     );
 }
 
