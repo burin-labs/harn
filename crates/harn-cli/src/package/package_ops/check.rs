@@ -58,6 +58,7 @@ pub(crate) fn check_package_impl(
         &mut errors,
         &mut warnings,
     );
+    validate_required_secret_spelling(&manifest_path, &mut errors, &mut warnings);
     match package.and_then(|package| package.harn.as_deref()) {
         Some(range) if supports_current_harn(range) => {}
         Some(range) => push_error(
