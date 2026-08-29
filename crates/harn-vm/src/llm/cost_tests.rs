@@ -787,3 +787,38 @@ fn budget_error_reports_the_worst_case_basis_before_any_call() {
     assert!((headroom - 0.01).abs() < 1e-9, "unspent cap: {headroom}");
     reset_cost_state();
 }
+
+#[test]
+fn nested_budget_scope_cannot_pollute_the_outer_sessions_observed_usage() {
+    // A delegated child that opens its own budget scope on this thread must
+    // not leave its calls in the parent's evidence: the projection would then
+    // price the parent's next call from a different session's cache ratio and
+    // answer length.
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    reset_cost_state();
+
+    record_cached_calls(3);
+    let outer = peek_observed_session_usage();
+    assert_eq!(outer.calls, 3);
+
+    {
+        let _inner = install_llm_cost_budget(5.0);
+        // The child scope starts with no evidence, so its first call is
+        // projected worst-case rather than inheriting the parent's ratio.
+        assert_eq!(peek_observed_session_usage(), ObservedSessionUsage::EMPTY);
+        let mut chatty = cached_call_result();
+        chatty.output_tokens = 8_000;
+        chatty.cache_read_tokens = 0;
+        chatty.cache_write_tokens = 0;
+        record_llm_usage(&chatty).expect("recording the child's call");
+        assert_eq!(peek_observed_session_usage().calls, 1);
+    }
+
+    assert_eq!(
+        peek_observed_session_usage(),
+        outer,
+        "the child's usage must not survive its scope"
+    );
+    reset_cost_state();
+}
