@@ -214,7 +214,7 @@ capabilities = ["webhook"]
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
-required_secrets = ["acme/api-key"]
+required_secrets = [{ id = "acme/api-key", direction = "outbound" }]
 credential_environment = [
   { secret = "acme/api-key", environment_names = ["ACME_API_KEY"] },
 ]

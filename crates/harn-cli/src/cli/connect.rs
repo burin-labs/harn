@@ -4,7 +4,7 @@ use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
 #[command(
-    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one required secret prompt for it. Use --from-env or --value-file for unattended keyring storage. On a headless host, a manifest-declared credential environment variable can be left set instead of using a keyring."
+    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads authentication metadata from the nearest harn.toml [[providers]] entry. OAuth providers open their authorization flow. API-key providers with one outbound credential prompt for it. Use --from-env or --value-file for unattended keyring storage. On a headless host, a manifest-declared credential environment variable can be left set instead of using a keyring."
 )]
 pub(crate) struct ConnectArgs {
     /// Show authenticated connector tokens known to the local keyring.

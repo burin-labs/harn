@@ -168,7 +168,7 @@ oauth = { resource = "https://www.googleapis.com/", token_endpoint = "https://oa
 
 [providers.setup]
 auth_type = "oauth"
-required_secrets = ["google_workspace/access-token"]
+required_secrets = [{ id = "google_workspace/access-token", direction = "outbound" }]
 "#,
     )
     .unwrap();
@@ -192,8 +192,8 @@ required_secrets = ["google_workspace/access-token"]
         connectors[0]
             .setup
             .as_ref()
-            .map(|setup| setup.required_secrets.as_slice()),
-        Some(&["google_workspace/access-token".to_string()][..])
+            .map(|setup| setup.required_secret_ids().collect::<Vec<_>>()),
+        Some(vec!["google_workspace/access-token"])
     );
 }
 

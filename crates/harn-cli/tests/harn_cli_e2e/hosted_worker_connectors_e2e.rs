@@ -17,7 +17,7 @@ id = "worker-echo"
 connector = { harn = "echo_connector.harn" }
 
 [providers.setup]
-required_secrets = ["worker-echo/api-token"]
+required_secrets = [{ id = "worker-echo/api-token", direction = "outbound" }]
 "#,
     )
     .expect("manifest");
@@ -156,7 +156,7 @@ id = "worker-echo"
 connector = { harn = "echo_connector.harn" }
 
 [providers.setup]
-required_secrets = ["worker-echo/api-token"]
+required_secrets = [{ id = "worker-echo/api-token", direction = "outbound" }]
 "#,
     )
     .expect("manifest with declared credential");

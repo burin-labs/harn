@@ -18,7 +18,10 @@ capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql"]
 auth_type = "oauth2"
 flow = "browser"
 required_scopes = ["read", "write"]
-required_secrets = ["linear/api-token", "linear/webhook-secret"]
+required_secrets = [
+  { id = "linear/api-token", direction = "outbound" },
+  { id = "linear/webhook-secret", direction = "inbound" },
+]
 setup_command = ["harn", "connect", "linear"]
 validation_command = ["harn", "connect", "status", "--connector", "linear", "--json"]
 

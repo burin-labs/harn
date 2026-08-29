@@ -15,7 +15,7 @@ connector = { harn = "./demo_connector.harn" }
 auth_type = "api-key"
 flow = "cli"
 required_scopes = ["demo:read"]
-required_secrets = ["api_token"]
+required_secrets = [{ id = "api_token", direction = "outbound" }]
 setup_command = ["harn", "connect", "api-key", "--connector", "demo", "--secret-id", "demo/api-token", "--scopes", "demo:read"]
 validation_command = ["harn", "connect", "status", "--connector", "demo", "--json"]
 

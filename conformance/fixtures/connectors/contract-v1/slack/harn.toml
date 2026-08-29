@@ -13,7 +13,11 @@ capabilities = ["webhook", "rate_limit", "pagination"]
 auth_type = "oauth2"
 flow = "browser"
 required_scopes = ["app_mentions:read", "channels:history", "chat:write"]
-required_secrets = ["slack/signing-secret", "slack/bot-token", "slack/app-token"]
+required_secrets = [
+  { id = "slack/signing-secret", direction = "inbound" },
+  { id = "slack/bot-token", direction = "outbound" },
+  { id = "slack/app-token", direction = "outbound" },
+]
 setup_command = ["harn", "connect", "slack"]
 validation_command = ["harn", "connect", "status", "--connector", "slack", "--json"]
 

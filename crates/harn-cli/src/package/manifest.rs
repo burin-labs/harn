@@ -19,9 +19,9 @@ pub use provider_setup::{
     ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
     ConnectorParameterManifest, ConnectorParameterType, ConnectorProtectedProfileManifest,
     ConnectorReconciliation, ConnectorRecoveryCopy, ConnectorRedactionTarget,
-    ConnectorServiceManifest, ConnectorSetupConfigurationField, ConnectorTestProfile,
-    ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
-    ResolvedProviderConnectorConfig,
+    ConnectorRequiredSecretManifest, ConnectorSecretDirection, ConnectorServiceManifest,
+    ConnectorSetupConfigurationField, ConnectorTestProfile, ProtectedProfileFieldClass,
+    ProviderManifestEntry, ProviderSetupManifest, ResolvedProviderConnectorConfig,
 };
 
 #[derive(Debug, Clone, Deserialize)]

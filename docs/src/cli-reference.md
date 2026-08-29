@@ -2675,12 +2675,13 @@ nearest `harn.toml` `[[providers]]` table. OAuth metadata starts the browser
 flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
 override that metadata for one run.
 
-For `auth_type = "api-key"` with one `required_secrets` entry, the same command
-prompts without echoing the key. `--from-env NAME` and `--value-file PATH` read
+For `auth_type = "api-key"` with one outbound `required_secrets` entry, the
+same command prompts without echoing the key. Inbound verification secrets do
+not make the target ambiguous. `--from-env NAME` and `--value-file PATH` read
 the value from that source and store it in the configured keyring; the option
 contains only the source name or path, never the secret. A connector with
-several required secrets returns the exact `harn connect api-key` command for
-each target so their values cannot be mixed up.
+several outbound credentials returns the exact `harn connect api-key` command
+for each target so their values cannot be mixed up.
 
 Connectors can declare `credential_environment` mappings from logical secret
 ids to accepted environment-variable names. `harn connect status` then treats

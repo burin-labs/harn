@@ -152,7 +152,10 @@ pub(super) async fn connector_status(
     let flow = setup.flow.clone();
     let recovery = setup.recovery.clone();
     let required_scopes = setup.required_scopes.clone();
-    let required_secrets = setup.required_secrets.clone();
+    let required_secrets = setup
+        .required_secret_ids()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let credential_environment = setup.credential_environment.clone();
     let configuration_environment = setup.configuration_environment.clone();
     let entry = index
@@ -466,6 +469,7 @@ pub(super) fn connect_setup_plan_at(
         body: String::new(),
     });
 
+    let required_secrets = setup.required_secret_ids().map(str::to_string).collect();
     let launch_command = connector_setup_launch_command(connector_id, setup.auth_type.as_deref());
     Ok(ConnectSetupPlan {
         schema_version: 1,
@@ -476,7 +480,7 @@ pub(super) fn connect_setup_plan_at(
         auth_type: setup.auth_type,
         flow: setup.flow,
         required_scopes: setup.required_scopes,
-        required_secrets: setup.required_secrets,
+        required_secrets,
         credential_environment: setup.credential_environment,
         configuration_environment: setup.configuration_environment,
         launch_command,
