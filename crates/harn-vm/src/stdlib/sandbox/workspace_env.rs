@@ -138,6 +138,16 @@ fn workspace_toolchain_env_with_package_cache(
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
         ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
+        // ccache is a pure cache like the rest, but its TEMPDIR is the one that
+        // actually breaks builds: it defaults to XDG_RUNTIME_DIR
+        // (`/run/user/<uid>`), which no workspace write root covers, so a cgo
+        // build fails "Permission denied" before compiling anything. Both are
+        // relocated for the same reason the other caches are.
+        ("CCACHE_DIR".to_string(), path("CCACHE_DIR", "ccache")),
+        (
+            "CCACHE_TEMPDIR".to_string(),
+            path("CCACHE_TEMPDIR", "ccache-tmp"),
+        ),
     ];
 
     // Harn's package cache is resolved before HOME/XDG are relocated. In
@@ -256,6 +266,8 @@ mod tests {
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
             "PNPM_HOME",
+            "CCACHE_DIR",
+            "CCACHE_TEMPDIR",
         ] {
             let value = PathBuf::from(env.get(key).unwrap());
             assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");

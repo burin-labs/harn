@@ -389,7 +389,10 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
                 if sibling == step {
                     continue;
                 }
-                if denied.iter().any(|d| sibling.starts_with(d) || d.starts_with(&sibling)) {
+                if denied
+                    .iter()
+                    .any(|d| sibling.starts_with(d) || d.starts_with(&sibling))
+                {
                     // Another denial lives here; it is handled by its own pass.
                     continue;
                 }
@@ -400,10 +403,14 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
             cursor = step;
             if granted.len() > MAX_DENY_EXPANSION_RULES {
                 return Err(sandbox_rejection(format!(
-                    "excluding denied paths from sandbox root '{}' needs more than {} rules; \
-                     refusing the spawn rather than granting the root unsubtracted",
+                    "excluding denied paths from sandbox root '{}' produced {} rules, over the \
+                     {} cap; the directory that expanded was '{}' while excluding '{}'. Refusing \
+                     the spawn rather than granting the root unsubtracted.",
                     root.display(),
-                    MAX_DENY_EXPANSION_RULES
+                    granted.len(),
+                    MAX_DENY_EXPANSION_RULES,
+                    cursor.display(),
+                    deny.display(),
                 )));
             }
         }
@@ -411,10 +418,19 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
     Ok(granted)
 }
 
-/// Ceiling on complement expansion. A home directory with a pathological number
-/// of entries must fail closed, not silently produce a ruleset the kernel will
-/// reject or truncate.
-const MAX_DENY_EXPANSION_RULES: usize = 512;
+/// Ceiling on complement expansion.
+///
+/// Landlock itself has no small documented rule limit — rules are added one
+/// `landlock_add_rule` syscall at a time and bounded by memory — so this is a
+/// guard against a pathological directory, not a kernel constraint. It is set
+/// well above anything a real home produces: measured on the two Linux eval
+/// hosts, the product-default denylist expands to well under a hundred rules
+/// (see `report_default_denylist_expansion_cost`, which prints the live count).
+///
+/// Set high enough that a real machine cannot hit it, because the failure mode
+/// is a refused spawn: a cap that trips on a busy home turns a security feature
+/// into an outage.
+const MAX_DENY_EXPANSION_RULES: usize = 4096;
 
 fn push_rule(
     profile: &mut LandlockProfile,
@@ -1496,6 +1512,47 @@ mod tests {
         for name in names {
             std::fs::create_dir_all(root.join(name)).expect("tree");
         }
+    }
+
+    /// Measurement, not assertion: prints what the product-default denylist
+    /// actually costs on THIS host, so the cap is chosen from numbers instead
+    /// of intuition. Run with `--nocapture`.
+    ///
+    /// It asserts only that the expansion succeeded and stayed under the cap,
+    /// because the point is the reported figure, and a machine-specific count
+    /// is not something to freeze into an assertion.
+    #[test]
+    fn report_default_denylist_expansion_cost() {
+        let Some(home) = crate::user_dirs::home_dir() else {
+            eprintln!("[landlock-cost] no home dir on this host; nothing to measure");
+            return;
+        };
+        let denied: Vec<PathBuf> = crate::orchestration::default_read_deny_home_paths()
+            .iter()
+            .map(|relative| super::normalize_for_policy(&home.join(relative)))
+            .collect();
+        let home = super::normalize_for_policy(&home);
+
+        let started = std::time::Instant::now();
+        let granted = expand_around_denied(&home, &denied).expect("expand around home");
+        let elapsed = started.elapsed();
+
+        let entries = std::fs::read_dir(&home).map(|dir| dir.count()).unwrap_or(0);
+        eprintln!(
+            "[landlock-cost] home={} home_entries={} denied={} expanded_rules={} elapsed={:?} \
+             cap={}",
+            home.display(),
+            entries,
+            denied.len(),
+            granted.len(),
+            elapsed,
+            MAX_DENY_EXPANSION_RULES,
+        );
+        assert!(
+            granted.len() <= MAX_DENY_EXPANSION_RULES,
+            "the product default must not trip the cap on a real home: {} rules",
+            granted.len()
+        );
     }
 
     #[test]
