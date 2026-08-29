@@ -1,1 +1,23 @@
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
 
+answer one
+
+answer two
+
+
+=== /clear starts the conversation over ===
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+answer one
+
+Conversation cleared.
+after clear
+
+
+=== a system prompt reaches every turn ===
+Talking to mock-model on mock.
+Type /help for commands, /bye to finish.
+
+ok
