@@ -21,6 +21,7 @@ fn __options(namespace: string, fallback: Summary, threshold: int = 1) {
     fallback: fallback,
     ladder: "agent_cheap",
     max_tokens: 400,
+    timeout_ms: 20000,
     ttl_seconds: 3600,
     max_entries: 32,
     namespace: namespace,
@@ -40,7 +41,7 @@ pipeline test_small_response_stays_exact_without_summarizer(harness: Harness, ta
       {summary: "fallback", critical_facts: []},
       10000,
     ),
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       harness.runtime.atomic_add(calls, 1)
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
@@ -66,11 +67,12 @@ pipeline test_summary_is_cached_and_exact_value_remains_retrievable(
   const namespace = "response-compaction-cache-" + harness.random.uuid()
   const exact: ExactResponse = {text: "large response ".repeat(40), facts: ["keep-a", "keep-b"]}
   const options = __options(namespace, {summary: "fallback", critical_facts: []})
-  const summarize = { prompt, _schema, ladder, max_tokens ->
+  const summarize = { prompt, _schema, ladder, max_tokens, timeout_ms ->
     harness.runtime.atomic_add(calls, 1)
     assert_eq(contains(prompt, "large response"), true)
     assert_eq(ladder, "agent_cheap")
     assert_eq(max_tokens, 400)
+    assert_eq(timeout_ms, 20000)
     return {
       ok: true,
       data: {summary: "compact", critical_facts: ["keep-a", "keep-b"]},
@@ -104,6 +106,7 @@ pipeline test_summary_is_cached_and_exact_value_remains_retrievable(
   assert_eq(second.receipt.route.provider, "fixture")
   assert_eq(second.receipt.route.model, "fixture-summary")
   assert_eq(first.receipt.summary_call_count, 1)
+  assert_eq(first.receipt.summary_timeout_ms, 20000)
   assert_eq(first.receipt.summary_usage.input_tokens, 0)
   assert_eq(first.receipt.summary_usage.output_tokens, 0)
   assert_eq(second.receipt.summary_call_count, 0)
@@ -129,7 +132,9 @@ pipeline test_malformed_summary_uses_typed_fallback_after_exact_commit(
     schema_of(ExactResponse),
     schema_of(Summary),
     __options("response-compaction-malformed-" + harness.random.uuid(), fallback),
-    { _prompt, _schema, _ladder, _max_tokens -> return {ok: true, data: {summary: 7}} },
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
+      return {ok: true, data: {summary: 7}}
+    },
   )
   assert_eq(result.output.kind, "fallback")
   assert_eq(result.output.value, fallback)
@@ -155,7 +160,7 @@ pipeline test_model_failure_category_does_not_change_deterministic_fallback(
     schema_of(ExactResponse),
     schema_of(Summary),
     __options("response-compaction-failure-" + harness.random.uuid(), fallback),
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: false, cause: "model_error", error_category: "timeout"}
     },
   )
@@ -180,7 +185,7 @@ pipeline test_summary_identity_changes_with_instructions_and_schema(
     schema_of(ExactResponse),
     schema_of(Summary),
     base,
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "a", critical_facts: []}}
     },
   )
@@ -190,7 +195,7 @@ pipeline test_summary_identity_changes_with_instructions_and_schema(
     schema_of(ExactResponse),
     schema_of(Summary),
     base + {instructions: "Retain critical facts and ordering."},
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "b", critical_facts: []}}
     },
   )
@@ -219,7 +224,7 @@ pipeline test_concurrent_exact_commits_never_expose_partial_values(
             schema_of(ExactResponse),
             schema_of(Summary),
             options,
-            { _prompt, _schema, _ladder, _max_tokens ->
+            { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
               return {ok: true, data: {summary: "unused", critical_facts: []}}
             },
           )
@@ -250,7 +255,7 @@ pipeline test_lru_bound_makes_eviction_visible_as_missing(harness: Harness, task
     schema_of(ExactResponse),
     schema_of(Summary),
     options,
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
   )
@@ -260,7 +265,7 @@ pipeline test_lru_bound_makes_eviction_visible_as_missing(harness: Harness, task
     schema_of(ExactResponse),
     schema_of(Summary),
     options,
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
   )
@@ -295,7 +300,30 @@ pipeline test_exact_validation_failure_is_closed_before_summarizer(
         "response-compaction-invalid-exact-" + harness.random.uuid(),
         {summary: "fallback", critical_facts: []},
       ),
-      { _prompt, _schema, _ladder, _max_tokens ->
+      { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
+        harness.runtime.atomic_add(calls, 1)
+        return {ok: true, data: {summary: "bad", critical_facts: []}}
+      },
+    )
+  }
+  assert_eq(is_err(attempted), true)
+  assert_eq(harness.runtime.atomic_get(calls), 0)
+}
+
+pipeline test_non_positive_timeout_is_rejected_before_summarizer(harness: Harness, task: unknown) {
+  const calls = harness.runtime.atomic(0)
+  const attempted = try {
+    __response_compact_with_caller(
+      __caps(harness.fs, harness.llm),
+      {text: "large ".repeat(20), facts: []},
+      schema_of(ExactResponse),
+      schema_of(Summary),
+      __options(
+        "response-compaction-invalid-timeout-" + harness.random.uuid(),
+        {summary: "fallback", critical_facts: []},
+      )
+        + {timeout_ms: 0},
+      { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
         harness.runtime.atomic_add(calls, 1)
         return {ok: true, data: {summary: "bad", critical_facts: []}}
       },
@@ -314,7 +342,7 @@ pipeline test_namespace_cannot_escape_owned_workspace_root(harness: Harness, tas
       schema_of(ExactResponse),
       schema_of(Summary),
       __options("../outside", {summary: "fallback", critical_facts: []}),
-      { _prompt, _schema, _ladder, _max_tokens ->
+      { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
         harness.runtime.atomic_add(calls, 1)
         return {ok: true, data: {summary: "bad", critical_facts: []}}
       },
@@ -341,7 +369,7 @@ pipeline test_heterogeneous_dict_boundary_remains_lossless(harness: Harness, tas
       {summary: "fallback", critical_facts: []},
       10000,
     ),
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
   )
@@ -370,7 +398,7 @@ pipeline test_tampered_exact_reference_fails_closed_under_owned_root(
       {summary: "fallback", critical_facts: []},
       10000,
     ),
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
   )
@@ -397,7 +425,7 @@ pipeline test_schema_valid_exact_content_tamper_fails_digest_verification(
       {summary: "fallback", critical_facts: []},
       10000,
     ),
-    { _prompt, _schema, _ladder, _max_tokens ->
+    { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
       return {ok: true, data: {summary: "unused", critical_facts: []}}
     },
   )

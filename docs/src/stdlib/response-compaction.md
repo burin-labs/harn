@@ -23,6 +23,7 @@ const compacted = response_compact(
     instructions: "Preserve identifiers, errors, and incomplete work.",
     fallback: {overview: "Exact response retained.", critical_facts: []},
     ladder: "agent_cheap",
+    timeout_ms: 20000,
     ttl_seconds: 86400,
     max_entries: 256,
   },
@@ -43,6 +44,8 @@ const exact = response_compaction_read_exact(
 - `output.kind` is exactly `exact`, `summarized`, or `fallback`.
 - Summaries use a named catalog ladder. The cache identity includes the exact
   digest, summary schema, instructions, ladder, and token bound.
+- Summarization has a validated bounded timeout (20 seconds by default). A
+  timeout returns the deterministic fallback without weakening exact retention.
 - Only schema-valid summaries enter the cache. A malformed or failed summary
   returns the caller's typed fallback while `exact_ref` remains readable.
 - `exact_ref` contains no caller-controlled path. Readback derives the owned

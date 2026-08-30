@@ -16,6 +16,7 @@ pub type ResponseCompactionOptions<S> = {
   fallback: S,
   ladder?: string,
   max_tokens?: int,
+  timeout_ms?: int,
   ttl_seconds?: int,
   max_entries?: int,
   namespace?: string,
@@ -45,6 +46,7 @@ pub type ResponseCompactionReceipt = {
   summary_cache_key: string,
   summary_cache_hit: bool,
   summary_call_count: int,
+  summary_timeout_ms: int,
   summary_usage?: ResponseCompactionUsage,
   route: ResponseCompactionRoute,
   fallback_cause?: ResponseCompactionFallbackCause,
@@ -78,7 +80,7 @@ type ResponseSummaryAttempt<S> = {
   usage?: ResponseCompactionUsage,
 }
 
-type ResponseSummaryCaller<S> = fn(string, Schema<S>, string, int) -> unknown
+type ResponseSummaryCaller<S> = fn(string, Schema<S>, string, int, int) -> unknown
 
 type ResponseCompactionConfig<S> = {
   summarize_above_bytes: int,
@@ -86,6 +88,7 @@ type ResponseCompactionConfig<S> = {
   fallback: S,
   ladder: string,
   max_tokens: int,
+  timeout_ms: int,
   ttl_seconds: int,
   max_entries: int,
   namespace: string,
@@ -109,11 +112,15 @@ fn __response_compaction_config<S>(
     throw "response_compact: ladder must be non-empty"
   }
   const max_tokens = options.max_tokens ?? 800
+  const timeout_ms = options.timeout_ms ?? 20000
   const ttl_seconds = options.ttl_seconds ?? 86400
   const max_entries = options.max_entries ?? 256
   const namespace = trim(options.namespace ?? "response-compaction")
   if max_tokens <= 0 {
     throw "response_compact: max_tokens must be positive"
+  }
+  if timeout_ms <= 0 {
+    throw "response_compact: timeout_ms must be positive"
   }
   if ttl_seconds <= 0 {
     throw "response_compact: ttl_seconds must be positive"
@@ -134,6 +141,7 @@ fn __response_compaction_config<S>(
     fallback: fallback,
     ladder: ladder,
     max_tokens: max_tokens,
+    timeout_ms: timeout_ms,
     ttl_seconds: ttl_seconds,
     max_entries: max_entries,
     namespace: namespace,
@@ -244,6 +252,7 @@ fn __response_summary_attempt<S>(
   summary_schema: Schema<S>,
   ladder: string,
   max_tokens: int,
+  timeout_ms: int,
 ) -> ResponseSummaryAttempt<S> {
   const raw = llm.call_structured_result(
     prompt,
@@ -251,6 +260,7 @@ fn __response_summary_attempt<S>(
     {
       ladder: ladder,
       max_tokens: max_tokens,
+      timeout_ms: timeout_ms,
       temperature: 0.0,
       schema_retries: 1,
       system:
@@ -369,6 +379,7 @@ fn __response_compaction_receipt(
   summary_cache_key: string,
   cache_hit: bool,
   call_count: int,
+  timeout_ms: int,
   route: ResponseCompactionRoute,
   usage: ResponseCompactionUsage? = nil,
   cause: ResponseCompactionFallbackCause? = nil,
@@ -383,6 +394,7 @@ fn __response_compaction_receipt(
     summary_cache_key: summary_cache_key,
     summary_cache_hit: cache_hit,
     summary_call_count: call_count,
+    summary_timeout_ms: timeout_ms,
     route: route,
   }
   if usage != nil {
@@ -432,6 +444,7 @@ pub fn __response_compact_with_caller<T, S>(
         summary_key,
         false,
         0,
+        config.timeout_ms,
         route,
       ),
     }
@@ -466,6 +479,7 @@ pub fn __response_compact_with_caller<T, S>(
           summary_key,
           true,
           0,
+          config.timeout_ms,
           cached_route,
           cached_usage,
         ),
@@ -478,6 +492,7 @@ pub fn __response_compact_with_caller<T, S>(
       summary_schema,
       config.ladder,
       config.max_tokens,
+      config.timeout_ms,
     ),
     summary_schema,
   )
@@ -507,6 +522,7 @@ pub fn __response_compact_with_caller<T, S>(
           summary_key,
           false,
           1,
+          config.timeout_ms,
           resolved_route,
           attempt.usage,
         ),
@@ -522,6 +538,7 @@ pub fn __response_compact_with_caller<T, S>(
         summary_key,
         false,
         1,
+        config.timeout_ms,
         route,
         attempt.usage,
         attempt.cause,
@@ -554,8 +571,15 @@ pub fn response_compact<T, S>(
     exact_schema,
     summary_schema,
     options,
-    { prompt, schema, ladder, max_tokens ->
-      return __response_summary_attempt(capabilities.llm, prompt, schema, ladder, max_tokens)
+    { prompt, schema, ladder, max_tokens, timeout_ms ->
+      return __response_summary_attempt(
+        capabilities.llm,
+        prompt,
+        schema,
+        ladder,
+        max_tokens,
+        timeout_ms,
+      )
     },
   )
 }
