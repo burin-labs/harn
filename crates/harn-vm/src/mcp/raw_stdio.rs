@@ -113,7 +113,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for RawResponseReader<R> {
         let this = self.get_mut();
         let before = buf.filled().len();
         let result = Pin::new(&mut this.inner).poll_read(cx, buf);
-        if let Poll::Ready(Ok(())) = &result {
+        if matches!(&result, Poll::Ready(Ok(()))) {
             let bytes = buf.filled()[before..].to_vec();
             this.record_bytes(&bytes);
         }
