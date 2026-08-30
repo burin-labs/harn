@@ -73,12 +73,17 @@ pub(super) async fn initialize(
 /// projections therefore read one durable clock instead of deriving elapsed
 /// time from mutable session-row metadata.
 async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
+    // Normal VM calls inherit the invocation identity. Direct host and nested
+    // session entry points are also valid, so give those runs a VM-owned
+    // identity instead of aborting the agent loop or persisting no identity.
+    let execution_id = crate::current_execution_scope().unwrap_or_else(crate::mint_execution_scope);
     let event = super::super::helpers::transcript_event(
         "agent_run_started",
         "system",
         "internal",
         "Agent loop started",
         Some(serde_json::json!({
+            "execution_id": execution_id,
             "lifecycle_state": crate::agent_events::AgentLifecycleState::Running.wire_name(),
         })),
     );

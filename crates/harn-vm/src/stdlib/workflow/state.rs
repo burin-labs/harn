@@ -389,7 +389,7 @@ pub(super) fn prepare_workflow_state(
         replay_fixture: None,
         observability: None,
         evidence: crate::orchestration::ExecutionEvidenceRecord {
-            schema_version: 1,
+            schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(execution_id),
             ..Default::default()
         },
