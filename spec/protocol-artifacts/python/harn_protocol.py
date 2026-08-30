@@ -1063,6 +1063,8 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
     reason: str
     owner: AgentTerminalOwner
     terminalClass: Optional[AgentTerminalClass] = None
+    message: Optional[str] = None
+    detail: Optional[str] = None
 
 
 @dataclass

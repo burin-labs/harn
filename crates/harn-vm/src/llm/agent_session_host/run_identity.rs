@@ -76,6 +76,12 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
         ),
         &stop_reason,
     )
+    .with_terminal_class(
+        terminal_class
+            .as_deref()
+            .and_then(crate::llm::AgentTerminalClass::from_wire),
+    )
+    .with_error(terminal_error)
     .to_json();
     let transcript = crate::agent_sessions::transcript(session_id)
         .as_ref()
