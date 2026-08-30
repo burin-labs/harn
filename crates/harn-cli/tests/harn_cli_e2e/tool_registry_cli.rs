@@ -81,6 +81,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("--widget-id <INT>"), "{help}");
     assert!(help.contains("--harn-input"), "{help}");
+    assert!(help.contains("--json"), "{help}");
 
     let run = harn_e2e_command()
         .args([
@@ -93,6 +94,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
             "42",
             "--verbose",
             "false",
+            "--json",
         ])
         .output()
         .expect("run command");
