@@ -32,6 +32,50 @@ pub struct ToolCliSpec {
     pub hidden: bool,
 }
 
+/// Adapter projections that may discover and invoke a registry tool.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolAudience {
+    Cli,
+    Mcp,
+    Catalog,
+    Dashboard,
+}
+
+impl ToolAudience {
+    const ALL: [Self; 4] = [Self::Cli, Self::Mcp, Self::Catalog, Self::Dashboard];
+
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "cli" => Self::Cli,
+            "mcp" => Self::Mcp,
+            "catalog" => Self::Catalog,
+            "dashboard" => Self::Dashboard,
+            _ => return None,
+        })
+    }
+}
+
+/// Closed adapter-exposure policy owned by one registry entry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ToolGovernance {
+    pub audiences: Vec<ToolAudience>,
+}
+
+impl ToolGovernance {
+    pub fn allows(&self, audience: ToolAudience) -> bool {
+        self.audiences.contains(&audience)
+    }
+}
+
+impl Default for ToolGovernance {
+    fn default() -> Self {
+        Self {
+            audiences: ToolAudience::ALL.to_vec(),
+        }
+    }
+}
+
 /// Origin binding retained for diagnostics and generated projections.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ToolSource {
@@ -97,6 +141,7 @@ pub struct ToolCatalogEntry {
     pub icons: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<JsonValue>,
+    pub governance: ToolGovernance,
     pub cli: ToolCliSpec,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
@@ -157,6 +202,37 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     })
 }
 
+/// Normalize and retain only tools exposed to one adapter audience.
+pub fn tool_registry_catalog_for_audience(
+    registry: &VmValue,
+    audience: ToolAudience,
+) -> Result<ToolCatalog, VmError> {
+    let mut catalog = tool_registry_catalog(registry)?;
+    catalog
+        .tools
+        .retain(|tool| tool.governance.allows(audience));
+    Ok(catalog)
+}
+
+/// Serialize the catalog adapter projection with optional shared schemas.
+pub fn tool_registry_schema(
+    registry: &VmValue,
+    components: Option<&VmValue>,
+) -> Result<JsonValue, VmError> {
+    let catalog = tool_registry_catalog_for_audience(registry, ToolAudience::Catalog)?;
+    let mut schema = serde_json::to_value(catalog)
+        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
+    if let Some(components) = components.and_then(VmValue::as_dict) {
+        let components = result_to_json(&VmValue::dict(components.clone())).map_err(|error| {
+            VmError::Runtime(format!(
+                "tool_schema: components are not portable JSON: {error}"
+            ))
+        })?;
+        schema["components"] = serde_json::json!({"schemas": components});
+    }
+    Ok(schema)
+}
+
 /// Normalize a registry and require one local Harn closure per tool.
 pub fn executable_tools(registry: &VmValue) -> Result<Vec<ExecutableTool>, VmError> {
     let registry_dict = registry_dict(registry)?;
@@ -186,6 +262,16 @@ pub fn executable_tools(registry: &VmValue) -> Result<Vec<ExecutableTool>, VmErr
             Ok(ExecutableTool { catalog, handler })
         })
         .collect()
+}
+
+/// Normalize executable tools and retain only one adapter's allowed entries.
+pub fn executable_tools_for_audience(
+    registry: &VmValue,
+    audience: ToolAudience,
+) -> Result<Vec<ExecutableTool>, VmError> {
+    let mut tools = executable_tools(registry)?;
+    tools.retain(|tool| tool.catalog.governance.allows(audience));
+    Ok(tools)
 }
 
 /// Convert a handler result to portable JSON without stringifying unsupported
@@ -279,6 +365,7 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let icons = optional_array(entry, "icons", &format!("tool {name:?}"))?;
     let execution = optional_object(entry, "execution", &format!("tool {name:?}"))?;
     let meta = optional_object(entry, "meta", &format!("tool {name:?}"))?;
+    let governance = governance_spec(entry.get("governance"), &name)?;
     let cli = cli_spec(entry.get("cli"), &name, namespace.as_deref())?;
     let source = source_spec(entry.get("source"), &name)?;
     let policy = policy_spec(
@@ -295,12 +382,63 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
         annotations,
         icons,
         execution,
+        governance,
         cli,
         namespace,
         defer_loading,
         source,
         policy,
         meta,
+    })
+}
+
+fn governance_spec(value: Option<&VmValue>, name: &str) -> Result<ToolGovernance, VmError> {
+    let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) else {
+        return Ok(ToolGovernance::default());
+    };
+    let fields = match value {
+        VmValue::Dict(fields) => fields,
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance' must be an object"
+            )));
+        }
+    };
+    for key in fields.keys() {
+        if key.as_str() != "audiences" {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance' contains unknown key {key:?}"
+            )));
+        }
+    }
+    let values = match fields.get("audiences") {
+        Some(VmValue::List(values)) if !values.is_empty() => values,
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance.audiences' must be a non-empty list"
+            )));
+        }
+    };
+    let mut audiences = BTreeSet::new();
+    for value in values.iter() {
+        let VmValue::String(value) = value else {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance.audiences' must contain only audience names"
+            )));
+        };
+        let Some(audience) = ToolAudience::parse(value) else {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance.audiences' has unknown audience {value:?}"
+            )));
+        };
+        if !audiences.insert(audience) {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'governance.audiences' contains duplicate audience {value:?}"
+            )));
+        }
+    }
+    Ok(ToolGovernance {
+        audiences: audiences.into_iter().collect(),
     })
 }
 
@@ -699,6 +837,26 @@ mod tests {
         VmValue::dict(entry)
     }
 
+    fn governed_entry(name: &str, audiences: &[&str]) -> VmValue {
+        let mut tool = match entry(name, None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut governance = DictMap::new();
+        governance.insert(
+            "audiences".into(),
+            VmValue::List(
+                audiences
+                    .iter()
+                    .map(|audience| string(audience))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+        );
+        tool.insert("governance".into(), VmValue::dict(governance));
+        VmValue::dict(tool)
+    }
+
     #[test]
     fn defaults_command_to_namespace_and_name() {
         let mut tool = match entry("get_widget", None) {
@@ -730,6 +888,72 @@ mod tests {
         tool.insert("description".into(), string(""));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(catalog.tools[0].description, None);
+    }
+
+    #[test]
+    fn defaults_governance_to_every_adapter_for_compatible_registries() {
+        let catalog = tool_registry_catalog(&registry(vec![entry("inspect", None)])).unwrap();
+        assert_eq!(
+            catalog.tools[0].governance.audiences,
+            [
+                ToolAudience::Cli,
+                ToolAudience::Mcp,
+                ToolAudience::Catalog,
+                ToolAudience::Dashboard,
+            ]
+        );
+    }
+
+    #[test]
+    fn filters_each_projection_and_serializes_normalized_governance() {
+        let registry = registry(vec![governed_entry(
+            "operator_inspect",
+            &["catalog", "cli"],
+        )]);
+        for audience in [ToolAudience::Cli, ToolAudience::Catalog] {
+            let catalog = tool_registry_catalog_for_audience(&registry, audience).unwrap();
+            assert_eq!(catalog.tools.len(), 1);
+        }
+        for audience in [ToolAudience::Mcp, ToolAudience::Dashboard] {
+            let catalog = tool_registry_catalog_for_audience(&registry, audience).unwrap();
+            assert!(catalog.tools.is_empty());
+        }
+        let catalog = tool_registry_catalog_for_audience(&registry, ToolAudience::Catalog).unwrap();
+        let serialized = serde_json::to_value(catalog).unwrap();
+        assert_eq!(
+            serialized["tools"][0]["governance"]["audiences"],
+            serde_json::json!(["cli", "catalog"])
+        );
+    }
+
+    #[test]
+    fn rejects_empty_unknown_and_open_governance() {
+        let mut missing_audiences = match entry("missing_audiences", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        missing_audiences.insert("governance".into(), VmValue::dict(DictMap::new()));
+        let missing_audiences = validate_tool_entry(&VmValue::dict(missing_audiences)).unwrap_err();
+        assert!(missing_audiences.to_string().contains("non-empty list"));
+
+        let empty = validate_tool_entry(&governed_entry("empty", &[])).unwrap_err();
+        assert!(empty.to_string().contains("non-empty list"));
+
+        let unknown = validate_tool_entry(&governed_entry("unknown", &["desktop"])).unwrap_err();
+        assert!(unknown.to_string().contains("unknown audience"));
+
+        let mut tool = match governed_entry("open", &["cli"]) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut governance = match tool.get("governance").unwrap() {
+            VmValue::Dict(governance) => (**governance).clone(),
+            _ => unreachable!(),
+        };
+        governance.insert("authorization".into(), string("admin"));
+        tool.insert("governance".into(), VmValue::dict(governance));
+        let open = validate_tool_entry(&VmValue::dict(tool)).unwrap_err();
+        assert!(open.to_string().contains("unknown key"));
     }
 
     #[test]
