@@ -837,12 +837,12 @@ fn process_exec_stdin_preserves_absent_nil_and_explicit_empty() {
 
 #[test]
 fn process_exec_stdin_child_echo() {
-    if std::env::var_os("HARN_PROCESS_STDIN_ECHO_CHILD").is_none() {
+    if std::env::var_os("PROCESS_STDIN_ECHO_CHILD").is_none() {
         return;
     }
     let mut input = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).expect("child reads stdin");
-    print!("HARN_STDIN_ECHO_START{input}HARN_STDIN_ECHO_END");
+    print!("PROCESS_STDIN_ECHO_START{input}PROCESS_STDIN_ECHO_END");
 }
 
 #[test]
@@ -851,7 +851,7 @@ fn process_exec_delivers_stdin_to_a_real_child() {
         let current_exe = std::env::current_exe().expect("current test executable");
         let input = "line one\nline two: λ\n";
         let env = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("HARN_PROCESS_STDIN_ECHO_CHILD"),
+            crate::value::intern_key("PROCESS_STDIN_ECHO_CHILD"),
             VmValue::string("1"),
         )]));
         let params = crate::value::DictMap::from_iter([
@@ -879,10 +879,12 @@ fn process_exec_delivers_stdin_to_a_real_child() {
         );
         let stdout = receipt
             .get("stdout")
-            .map(VmValue::display)
-            .unwrap_or_default();
+            .expect("completed process receipt carries stdout")
+            .display();
         assert!(
-            stdout.contains(&format!("HARN_STDIN_ECHO_START{input}HARN_STDIN_ECHO_END")),
+            stdout.contains(&format!(
+                "PROCESS_STDIN_ECHO_START{input}PROCESS_STDIN_ECHO_END"
+            )),
             "the real child must echo the exact multiline Unicode input; stdout={stdout:?}"
         );
     });

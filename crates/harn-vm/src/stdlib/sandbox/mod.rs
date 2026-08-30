@@ -61,7 +61,9 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod paths;
+mod process_config;
 mod process_output;
+pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 #[cfg(target_os = "windows")]
 pub(crate) use process_output::windows_command_output;
@@ -113,32 +115,6 @@ pub enum FsAccess {
     Read,
     Write,
     Delete,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum ProcessStdin {
-    #[default]
-    Null,
-    Bytes(Vec<u8>),
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct ProcessCommandConfig {
-    pub cwd: Option<PathBuf>,
-    pub env: Vec<(String, String)>,
-    /// Environment keys removed after the inherited/session environment and
-    /// caller overlays have been composed.
-    pub env_remove: Vec<String>,
-    /// Exact child-input contract. `Null` means no input was requested;
-    /// `Bytes(Vec::new())` is an explicit empty stream.
-    pub stdin: ProcessStdin,
-    /// When `true`, the child starts from an EMPTY environment and receives only
-    /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
-    /// path an active session environment takes (`security::resolve_env` has
-    /// already composed the policy snapshot and grants into `env`). When
-    /// `false` (outside a session), the child inherits the parent environment
-    /// and `env` is overlaid on top.
-    pub closed_env: bool,
 }
 
 #[derive(Clone, Debug, Default)]
