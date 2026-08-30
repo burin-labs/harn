@@ -137,6 +137,7 @@ in typed registry fields rather than `_meta`.
 Registry construction and adapter loading reject:
 
 - malformed `cli`, `source`, output schema, icon, and metadata shapes
+- invalid JSON Schemas and runtime-only values in serializable fields
 - empty or invalid command parts
 - duplicate command paths
 - commands that are both a leaf tool and a parent group

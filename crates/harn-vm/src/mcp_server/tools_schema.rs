@@ -33,5 +33,5 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
 
 #[cfg(test)]
 pub(super) fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Value {
-    crate::tool_registry::params_to_json_schema(params)
+    crate::tool_registry::params_to_json_schema(params).expect("test parameter schema")
 }

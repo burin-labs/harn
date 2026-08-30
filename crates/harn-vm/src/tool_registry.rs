@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
-use crate::mcp_server::convert::{annotations_to_json, vm_value_to_json};
+use crate::mcp_server::convert::annotations_to_json;
 use crate::value::{VmClosure, VmError, VmValue};
 
 pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
@@ -47,6 +47,38 @@ pub struct ToolSource {
     pub binding: Option<JsonValue>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPolicyKind {
+    Read,
+    Edit,
+    Delete,
+    Move,
+    Search,
+    Execute,
+    Think,
+    Fetch,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSideEffectLevel {
+    None,
+    ReadOnly,
+    WorkspaceWrite,
+    ProcessExec,
+    Network,
+    DesktopControl,
+}
+
+/// Harn-owned execution classification, separate from advisory MCP hints.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct ToolPolicy {
+    pub kind: ToolPolicyKind,
+    pub side_effect_level: ToolSideEffectLevel,
+}
+
 /// One normalized tool entry shared by every presentation adapter.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,7 +103,7 @@ pub struct ToolCatalogEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ToolSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy: Option<JsonValue>,
+    pub policy: Option<ToolPolicy>,
     #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
     pub meta: Option<JsonValue>,
 }
@@ -96,9 +128,16 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     let registry = registry_dict(registry)?;
     let entries = registry_entries(registry)?;
     let mut tools = Vec::with_capacity(entries.len());
+    let mut names = BTreeSet::new();
     let mut command_owners = BTreeMap::<Vec<String>, String>::new();
     for entry in entries {
         let catalog = catalog_entry(entry)?;
+        if !names.insert(catalog.name.clone()) {
+            return Err(VmError::Runtime(format!(
+                "tool registry contains duplicate tool name {:?}",
+                catalog.name
+            )));
+        }
         if let Some(previous) =
             command_owners.insert(catalog.cli.command.clone(), catalog.name.clone())
         {
@@ -223,8 +262,12 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let namespace = optional_string(entry, "namespace", &format!("tool {name:?}"))?;
     let defer_loading =
         optional_bool(entry, "defer_loading", &format!("tool {name:?}"))?.unwrap_or(false);
-    let input_schema = params_to_json_schema(entry.get("parameters"));
+    let input_schema = params_to_json_schema(entry.get("parameters"))?;
     let output_schema = optional_object(entry, "outputSchema", &format!("tool {name:?}"))?;
+    validate_json_schema(&input_schema, &format!("tool {name:?} input schema"))?;
+    if let Some(output_schema) = output_schema.as_ref() {
+        validate_json_schema(output_schema, &format!("tool {name:?} output schema"))?;
+    }
     let annotations = entry.get("annotations").and_then(annotations_to_json);
     let icons = optional_array(entry, "icons", &format!("tool {name:?}"))?;
     let execution = optional_object(entry, "execution", &format!("tool {name:?}"))?;
@@ -346,7 +389,7 @@ fn policy_spec(
     value: Option<&VmValue>,
     legacy_annotations: Option<&VmValue>,
     name: &str,
-) -> Result<Option<JsonValue>, VmError> {
+) -> Result<Option<ToolPolicy>, VmError> {
     if let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) {
         let fields = match value {
             VmValue::Dict(fields) => fields,
@@ -370,39 +413,20 @@ fn policy_spec(
             "side_effect_level",
             &format!("tool {name:?} field 'policy'"),
         )?;
-        if !matches!(
-            kind.as_str(),
-            "read"
-                | "edit"
-                | "delete"
-                | "move"
-                | "search"
-                | "execute"
-                | "think"
-                | "fetch"
-                | "other"
-        ) {
+        let Some(kind) = policy_kind(&kind) else {
             return Err(VmError::Runtime(format!(
                 "tool {name:?} field 'policy.kind' has unknown value {kind:?}"
             )));
-        }
-        if !matches!(
-            side_effect_level.as_str(),
-            "none"
-                | "read_only"
-                | "workspace_write"
-                | "process_exec"
-                | "network"
-                | "desktop_control"
-        ) {
+        };
+        let Some(side_effect_level) = parse_side_effect_level(&side_effect_level) else {
             return Err(VmError::Runtime(format!(
                 "tool {name:?} field 'policy.side_effect_level' has unknown value {side_effect_level:?}"
             )));
-        }
-        return Ok(Some(serde_json::json!({
-            "kind": kind,
-            "side_effect_level": side_effect_level,
-        })));
+        };
+        return Ok(Some(ToolPolicy {
+            kind,
+            side_effect_level,
+        }));
     }
 
     // Compatibility projection for registries authored before `policy` became
@@ -411,13 +435,45 @@ fn policy_spec(
     let Some(VmValue::Dict(annotations)) = legacy_annotations else {
         return Ok(None);
     };
-    let mut policy = serde_json::Map::new();
-    for key in ["kind", "side_effect_level"] {
-        if let Some(VmValue::String(value)) = annotations.get(key) {
-            policy.insert(key.to_string(), JsonValue::String(value.to_string()));
-        }
-    }
-    Ok((!policy.is_empty()).then_some(JsonValue::Object(policy)))
+    let Some(VmValue::String(kind)) = annotations.get("kind") else {
+        return Ok(None);
+    };
+    let Some(VmValue::String(side_effect_level)) = annotations.get("side_effect_level") else {
+        return Ok(None);
+    };
+    Ok(policy_kind(kind)
+        .zip(parse_side_effect_level(side_effect_level))
+        .map(|(kind, side_effect_level)| ToolPolicy {
+            kind,
+            side_effect_level,
+        }))
+}
+
+fn policy_kind(value: &str) -> Option<ToolPolicyKind> {
+    Some(match value {
+        "read" => ToolPolicyKind::Read,
+        "edit" => ToolPolicyKind::Edit,
+        "delete" => ToolPolicyKind::Delete,
+        "move" => ToolPolicyKind::Move,
+        "search" => ToolPolicyKind::Search,
+        "execute" => ToolPolicyKind::Execute,
+        "think" => ToolPolicyKind::Think,
+        "fetch" => ToolPolicyKind::Fetch,
+        "other" => ToolPolicyKind::Other,
+        _ => return None,
+    })
+}
+
+fn parse_side_effect_level(value: &str) -> Option<ToolSideEffectLevel> {
+    Some(match value {
+        "none" => ToolSideEffectLevel::None,
+        "read_only" => ToolSideEffectLevel::ReadOnly,
+        "workspace_write" => ToolSideEffectLevel::WorkspaceWrite,
+        "process_exec" => ToolSideEffectLevel::ProcessExec,
+        "network" => ToolSideEffectLevel::Network,
+        "desktop_control" => ToolSideEffectLevel::DesktopControl,
+        _ => return None,
+    })
 }
 
 fn valid_command_part(value: &str) -> bool {
@@ -473,7 +529,7 @@ fn optional_object(
 ) -> Result<Option<JsonValue>, VmError> {
     match fields.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value @ VmValue::Dict(_)) => Ok(Some(vm_value_to_json(value))),
+        Some(value @ VmValue::Dict(_)) => Ok(Some(portable_json(value, owner)?)),
         _ => Err(VmError::Runtime(format!(
             "{owner} field {key:?} must be an object"
         ))),
@@ -487,7 +543,7 @@ fn optional_array(
 ) -> Result<Option<JsonValue>, VmError> {
     match fields.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value @ VmValue::List(_)) => Ok(Some(vm_value_to_json(value))),
+        Some(value @ VmValue::List(_)) => Ok(Some(portable_json(value, owner)?)),
         _ => Err(VmError::Runtime(format!(
             "{owner} field {key:?} must be a list"
         ))),
@@ -495,10 +551,10 @@ fn optional_array(
 }
 
 /// Convert Harn parameter definitions into the canonical JSON object schema.
-pub fn params_to_json_schema(params: Option<&VmValue>) -> JsonValue {
+pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmError> {
     let params = match params {
         Some(VmValue::Dict(params)) => params,
-        _ => return serde_json::json!({"type": "object", "properties": {}}),
+        _ => return Ok(serde_json::json!({"type": "object", "properties": {}})),
     };
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
@@ -506,15 +562,24 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> JsonValue {
         let property = match definition {
             VmValue::Dict(definition) => {
                 let mut property = match definition.get("schema") {
-                    Some(schema @ VmValue::Dict(_)) => vm_value_to_json(schema)
-                        .as_object()
-                        .cloned()
-                        .unwrap_or_default(),
-                    _ => definition
-                        .iter()
-                        .filter(|(key, _)| key.as_str() != "required")
-                        .map(|(key, value)| (key.to_string(), vm_value_to_json(value)))
-                        .collect(),
+                    Some(schema @ VmValue::Dict(_)) => {
+                        portable_json(schema, "tool parameter schema")?
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default()
+                    }
+                    _ => {
+                        let mut fields = serde_json::Map::new();
+                        for (key, value) in definition.iter() {
+                            if key.as_str() != "required" {
+                                fields.insert(
+                                    key.to_string(),
+                                    portable_json(value, "tool parameter definition")?,
+                                );
+                            }
+                        }
+                        fields
+                    }
                 };
                 if matches!(definition.get("required"), Some(VmValue::Bool(true))) {
                     required.push(JsonValue::String(name.to_string()));
@@ -536,7 +601,18 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> JsonValue {
     if !required.is_empty() {
         schema["required"] = JsonValue::Array(required);
     }
-    schema
+    Ok(schema)
+}
+
+fn portable_json(value: &VmValue, owner: &str) -> Result<JsonValue, VmError> {
+    crate::llm::helpers::vm_value_to_json_strict(value, owner)
+        .map_err(|error| VmError::Runtime(format!("{owner} is not portable JSON: {error}")))
+}
+
+fn validate_json_schema(schema: &JsonValue, owner: &str) -> Result<(), VmError> {
+    jsonschema::draft202012::new(schema)
+        .map(|_| ())
+        .map_err(|error| VmError::Runtime(format!("{owner} is invalid: {error}")))
 }
 
 fn json_schema_type(kind: &str) -> &str {
@@ -607,6 +683,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_tool_names_even_with_distinct_commands() {
+        let command = |part: &str| {
+            let mut cli = DictMap::new();
+            cli.insert("command".into(), VmValue::List(vec![string(part)].into()));
+            VmValue::dict(cli)
+        };
+        let error = tool_registry_catalog(&registry(vec![
+            entry("duplicate", Some(command("first"))),
+            entry("duplicate", Some(command("second"))),
+        ]))
+        .unwrap_err();
+        assert!(error.to_string().contains("duplicate tool name"));
+    }
+
+    #[test]
     fn rejects_unknown_cli_keys() {
         let mut cli = DictMap::new();
         cli.insert("commnad".into(), string("typo"));
@@ -629,8 +720,41 @@ mod tests {
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(
             catalog.tools[0].policy,
-            Some(serde_json::json!({"kind": "fetch", "side_effect_level": "network"}))
+            Some(ToolPolicy {
+                kind: ToolPolicyKind::Fetch,
+                side_effect_level: ToolSideEffectLevel::Network,
+            })
         );
         assert!(catalog.tools[0].annotations.is_none());
+    }
+
+    #[test]
+    fn rejects_runtime_only_values_in_static_metadata() {
+        let mut tool = match entry("inspect", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut meta = DictMap::new();
+        meta.insert("opaque".into(), VmValue::BuiltinRef("println".into()));
+        tool.insert("meta".into(), VmValue::dict(meta));
+        let error = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap_err();
+        assert!(error.to_string().contains("not portable JSON"));
+    }
+
+    #[test]
+    fn rejects_invalid_json_schema_at_the_registry_boundary() {
+        let mut tool = match entry("inspect", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut schema = DictMap::new();
+        schema.insert("type".into(), string("not-a-json-schema-type"));
+        let mut parameter = DictMap::new();
+        parameter.insert("schema".into(), VmValue::dict(schema));
+        let mut parameters = DictMap::new();
+        parameters.insert("value".into(), VmValue::dict(parameter));
+        tool.insert("parameters".into(), VmValue::dict(parameters));
+        let error = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap_err();
+        assert!(error.to_string().contains("input schema is invalid"));
     }
 }
