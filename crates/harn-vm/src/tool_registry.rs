@@ -601,6 +601,17 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
                         let mut fields = serde_json::Map::new();
                         for (key, value) in definition.iter() {
                             if key.as_str() != "required" {
+                                if key.as_str() == "type" {
+                                    if let VmValue::String(kind) = value {
+                                        if let Some(kind) = json_schema_type(kind.as_str()) {
+                                            fields.insert(
+                                                key.to_string(),
+                                                JsonValue::String(kind.to_string()),
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                }
                                 fields.insert(
                                     key.to_string(),
                                     portable_json(value, "tool parameter definition")?,
@@ -620,7 +631,9 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
                 }
                 JsonValue::Object(property)
             }
-            VmValue::String(kind) => serde_json::json!({"type": json_schema_type(kind.as_str())}),
+            VmValue::String(kind) => json_schema_type(kind.as_str())
+                .map(|kind| serde_json::json!({"type": kind}))
+                .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
             _ => JsonValue::Object(serde_json::Map::new()),
         };
         properties.insert(name.to_string(), property);
@@ -644,15 +657,16 @@ fn validate_json_schema(schema: &JsonValue, owner: &str) -> Result<(), VmError> 
         .map_err(|error| VmError::Runtime(format!("{owner} is invalid: {error}")))
 }
 
-fn json_schema_type(kind: &str) -> &str {
-    match kind {
+fn json_schema_type(kind: &str) -> Option<&str> {
+    Some(match kind {
+        "any" | "unknown" => return None,
         "int" => "integer",
         "float" => "number",
         "bool" => "boolean",
         "list" => "array",
         "dict" => "object",
         other => other,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -702,6 +716,23 @@ mod tests {
         tool.insert("description".into(), string(""));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(catalog.tools[0].description, None);
+    }
+
+    #[test]
+    fn lowers_unconstrained_harn_parameter_types_to_valid_json_schema() {
+        let mut definition = DictMap::new();
+        definition.insert("type".into(), string("any"));
+        definition.insert("description".into(), string("Optional input"));
+        let mut parameters = DictMap::new();
+        parameters.insert("input".into(), VmValue::dict(definition));
+        parameters.insert("context".into(), string("unknown"));
+        let schema = params_to_json_schema(Some(&VmValue::dict(parameters))).unwrap();
+        assert_eq!(
+            schema["properties"]["input"],
+            serde_json::json!({"description": "Optional input"})
+        );
+        assert_eq!(schema["properties"]["context"], serde_json::json!({}));
+        validate_json_schema(&schema, "test schema").unwrap();
     }
 
     #[test]
