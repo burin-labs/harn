@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
+use serde::Serialize;
 
 use super::ProjectContextMode;
 use crate::commands::time::RunTiming;
@@ -25,12 +26,15 @@ use crate::package;
 /// own content failing — and reporting both as "did not load" is what made a run
 /// that could not materialize its packages indistinguishable from a run whose
 /// program was broken.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ChunkLoadFailure {
     /// The entry file could not be read.
     EntryUnreadable,
     /// The run's locked dependencies could not be materialized.
     PackageMaterialization,
+    /// An import failed before the VM started. The typed facts are retained
+    /// here so every run-launch projection consumes the same value.
+    Import(ImportFailureDetail),
     /// The program did not parse, typecheck, or compile.
     Program,
 }
@@ -39,20 +43,72 @@ impl ChunkLoadFailure {
     /// The `--json` error event's `code`. Program failures keep reporting
     /// `compile_error`; the preparation codes are new because there was
     /// previously nothing to name.
-    pub(crate) fn diagnostic_code(self) -> &'static str {
+    pub(crate) fn diagnostic_code(&self) -> &'static str {
         match self {
             Self::EntryUnreadable => "entry_unreadable",
             Self::PackageMaterialization => "package_materialization",
+            Self::Import(_) => "compile_error",
             Self::Program => "compile_error",
         }
     }
 
-    pub(crate) fn classification(self) -> crate::exit::RunFailure {
+    pub(crate) fn classification(&self) -> crate::exit::RunFailure {
         match self {
             Self::EntryUnreadable | Self::PackageMaterialization => crate::exit::RunFailure::Setup,
-            Self::Program => crate::exit::RunFailure::Program,
+            Self::Import(_) | Self::Program => crate::exit::RunFailure::Program,
         }
     }
+
+    pub(crate) fn details(&self) -> serde_json::Value {
+        match self {
+            Self::Import(details) => serde_json::to_value(details)
+                .expect("the closed import failure detail must serialize"),
+            Self::EntryUnreadable | Self::PackageMaterialization | Self::Program => {
+                serde_json::Value::Null
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FailureDetailKind {
+    ImportFailure,
+}
+
+/// Machine-readable import facts retained at the run-launch boundary.
+///
+/// `source` is workspace-relative when the target belongs to the project. A
+/// module URI is used for targets outside that root, so this contract never
+/// leaks a host-specific absolute path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ImportFailureDetail {
+    kind: FailureDetailKind,
+    failure_class: ImportFailureClass,
+    module: String,
+    symbol: Option<String>,
+    source: String,
+    harn_version: &'static str,
+    harn_revision: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ImportFailureClass {
+    UnresolvedModule,
+    MissingImportedSymbol,
+    PrivateImportedSymbol,
+    ImportedModuleCompileFailure,
+}
+
+pub(super) struct ImportLoadFailure {
+    pub(super) detail: ImportFailureDetail,
+    pub(super) rendered: String,
+}
+
+pub(super) struct ImportTypecheck {
+    pub(super) diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(super) failure: Option<ImportLoadFailure>,
 }
 
 /// Result of [`compile_or_load_chunk_for_run`]. Failures propagate as
@@ -170,20 +226,24 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // Materializing the import graph's packages happens inside the type check,
     // so a dependency that could not be prepared surfaces here rather than as a
     // diagnostic about the program's own text.
-    let type_diagnostics =
+    let typecheck =
         match typecheck_with_imports(&program, Path::new(path), &source, project_context) {
-            Ok(diagnostics) => diagnostics,
+            Ok(typecheck) => typecheck,
             Err(error) => {
                 stderr.push_str(&format!("error: {error}\n"));
                 return Err(ChunkLoadFailure::PackageMaterialization);
             }
         };
-    for diag in &type_diagnostics {
+    for diag in &typecheck.diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
         }
         stderr.push_str(&rendered);
+    }
+    if let Some(failure) = typecheck.failure {
+        stderr.push_str(&failure.rendered);
+        return Err(ChunkLoadFailure::Import(failure.detail));
     }
     if let Some(t) = timing.as_deref_mut() {
         t.typecheck = typecheck_start.elapsed();
@@ -345,28 +405,213 @@ pub(super) fn typecheck_with_imports(
     path: &Path,
     source: &str,
     project_context: ProjectContextMode,
-) -> Result<Vec<harn_parser::TypeDiagnostic>, package::PackageError> {
-    let checker = match project_context {
+) -> Result<ImportTypecheck, package::PackageError> {
+    let graph = match project_context {
         ProjectContextMode::Project => {
             let mut graph = harn_modules::build(&[path.to_path_buf()]);
             if package::ensure_reachable_dependencies_materialized(path, &graph)? {
                 graph = harn_modules::build(&[path.to_path_buf()]);
             }
-            crate::typecheck_imports::checker_with_resolved_graph(
-                harn_parser::TypeChecker::new(),
-                path,
-                &graph,
-            )
+            graph
         }
-        ProjectContextMode::Standalone => {
-            crate::typecheck_imports::checker_with_standalone_imports(
-                harn_parser::TypeChecker::new(),
-                path,
-                source,
-            )
-        }
+        ProjectContextMode::Standalone => harn_modules::build_with_standalone_source(path, source),
     };
-    Ok(checker.check_with_source(program, source))
+    let checker = crate::typecheck_imports::checker_with_resolved_graph(
+        harn_parser::TypeChecker::new(),
+        path,
+        &graph,
+    );
+    Ok(ImportTypecheck {
+        diagnostics: checker.check_with_source(program, source),
+        failure: import_failure_for_run(program, path, source, &graph),
+    })
+}
+
+fn import_failure_for_run(
+    program: &[harn_parser::SNode],
+    entry_path: &Path,
+    source: &str,
+    graph: &harn_modules::ModuleGraph,
+) -> Option<ImportLoadFailure> {
+    if let Some(failure) = graph.import_compile_failures(entry_path).into_iter().next() {
+        let message = format!(
+            "imported module '{}' failed to compile ({}): {}",
+            failure.import_raw_path,
+            failure.module_path.display(),
+            failure.error.message,
+        );
+        let help = format!(
+            "fix the lex/parse error in {} before this import can resolve",
+            failure.module_path.display(),
+        );
+        return Some(ImportLoadFailure {
+            detail: import_failure_detail(
+                entry_path,
+                ImportFailureClass::ImportedModuleCompileFailure,
+                &failure.import_raw_path,
+                None,
+                Some(&failure.module_path),
+            ),
+            rendered: render_import_failure(
+                source,
+                entry_path,
+                &failure.import_span,
+                harn_parser::diagnostic_codes::Code::ModuleImportCompileFailed,
+                &message,
+                Some(&help),
+            ),
+        });
+    }
+
+    if let Some(issue) = graph.selective_import_issues(entry_path).into_iter().next() {
+        let failure_class = match issue.kind {
+            harn_modules::SelectiveImportIssueKind::Missing => {
+                ImportFailureClass::MissingImportedSymbol
+            }
+            harn_modules::SelectiveImportIssueKind::Private => {
+                ImportFailureClass::PrivateImportedSymbol
+            }
+        };
+        let resolved = graph
+            .imports_for_module(entry_path)
+            .into_iter()
+            .find(|import| import.raw_path == issue.module)
+            .and_then(|import| import.resolved_path);
+        return Some(ImportLoadFailure {
+            detail: import_failure_detail(
+                entry_path,
+                failure_class,
+                &issue.module,
+                Some(issue.name.clone()),
+                resolved.as_deref(),
+            ),
+            rendered: render_import_failure(
+                source,
+                entry_path,
+                &issue.span,
+                harn_parser::diagnostic_codes::Code::ImportSymbolMissing,
+                &issue.message(),
+                Some(&issue.help()),
+            ),
+        });
+    }
+
+    let unresolved = graph
+        .imports_for_module(entry_path)
+        .into_iter()
+        .find(|import| import.resolved_path.is_none())?;
+    let span = import_span(program, &unresolved.raw_path)
+        .unwrap_or_else(|| harn_lexer::Span::with_offsets(0, 0, 1, 1));
+    let message = format!("unresolved import '{}'", unresolved.raw_path);
+    Some(ImportLoadFailure {
+        detail: import_failure_detail(
+            entry_path,
+            ImportFailureClass::UnresolvedModule,
+            &unresolved.raw_path,
+            unresolved
+                .selective_names
+                .as_ref()
+                .and_then(|names| (names.len() == 1).then(|| names[0].clone())),
+            None,
+        ),
+        rendered: render_import_failure(
+            source,
+            entry_path,
+            &span,
+            harn_parser::diagnostic_codes::Code::ModuleImportUnresolved,
+            &message,
+            Some("create the module or correct the import specifier"),
+        ),
+    })
+}
+
+fn import_failure_detail(
+    entry_path: &Path,
+    failure_class: ImportFailureClass,
+    module: &str,
+    symbol: Option<String>,
+    resolved_source: Option<&Path>,
+) -> ImportFailureDetail {
+    ImportFailureDetail {
+        kind: FailureDetailKind::ImportFailure,
+        failure_class,
+        module: module.to_string(),
+        symbol,
+        source: normalized_source_identity(entry_path, resolved_source, module),
+        harn_version: env!("CARGO_PKG_VERSION"),
+        harn_revision: nonempty_build_revision(),
+    }
+}
+
+fn nonempty_build_revision() -> Option<&'static str> {
+    let revision = env!("HARN_BUILD_REVISION");
+    (!revision.is_empty()).then_some(revision)
+}
+
+fn normalized_source_identity(
+    entry_path: &Path,
+    resolved_source: Option<&Path>,
+    module: &str,
+) -> String {
+    let source = resolved_source.unwrap_or(entry_path);
+    if let Some(stdlib) = source.to_str().and_then(|path| path.strip_prefix("<std>/")) {
+        return format!("harn://std/{stdlib}");
+    }
+    let entry = harn_modules::canonical_path(entry_path);
+    let root = harn_modules::manifest_walk::find_project_root(&entry)
+        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let root = harn_modules::canonical_path(&root);
+    let source = harn_modules::canonical_path(source);
+    if let Ok(relative) = source.strip_prefix(&root) {
+        let relative = normalize_wire_path(relative);
+        if !relative.is_empty() {
+            return relative;
+        }
+    }
+    format!("harn://module/{}", module.trim_start_matches("./"))
+}
+
+fn normalize_wire_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn import_span(program: &[harn_parser::SNode], raw_path: &str) -> Option<harn_lexer::Span> {
+    program.iter().find_map(|node| match &node.node {
+        harn_parser::Node::ImportDecl { path, .. }
+        | harn_parser::Node::SelectiveImport { path, .. }
+        | harn_parser::Node::NamespaceImport { path, .. }
+            if path == raw_path =>
+        {
+            Some(node.span)
+        }
+        _ => None,
+    })
+}
+
+fn render_import_failure(
+    source: &str,
+    entry_path: &Path,
+    span: &harn_lexer::Span,
+    code: harn_parser::diagnostic_codes::Code,
+    message: &str,
+    help: Option<&str>,
+) -> String {
+    harn_parser::diagnostic::render_diagnostic_with_code(
+        source,
+        &entry_path.to_string_lossy(),
+        span,
+        "error",
+        code,
+        message,
+        Some("import fails here"),
+        help,
+    )
 }
 
 #[cfg(test)]
