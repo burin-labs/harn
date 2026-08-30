@@ -243,6 +243,39 @@ fn run_record_crystallization_preserves_execution_identity_without_inventing_leg
 }
 
 #[test]
+fn crystallization_rejects_claimed_non_harn_execution_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("trace.json");
+    std::fs::write(
+        &trace_path,
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "id": "invalid-trace",
+            "execution_id": "external-run-1",
+            "actions": [],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let trace_error = load_crystallization_trace(&trace_path).unwrap_err();
+    assert!(trace_error
+        .to_string()
+        .contains("invalid execution identity"));
+
+    let run_path = dir.path().join("run.json");
+    let mut run = crate::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "invalid-run".to_string(),
+        ..crate::orchestration::RunRecord::default()
+    };
+    run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+    run.evidence.execution_id = Some("external-run-1".to_string());
+    std::fs::write(&run_path, serde_json::to_vec(&run).unwrap()).unwrap();
+    let run_error = load_crystallization_trace(&run_path).unwrap_err();
+    assert!(run_error.to_string().contains("invalid execution evidence"));
+}
+
+#[test]
 fn composition_replay_receipts_distinguish_parent_and_child_drift() {
     let first = composition_trace("composition_a", "composition-run-a", "README.md", "hello");
     let mut second = first.clone();

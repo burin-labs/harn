@@ -480,12 +480,21 @@ pub fn load_crystallization_trace(path: &Path) -> Result<CrystallizationTrace, V
     })?;
 
     let mut trace = if value.get("actions").is_some() {
-        serde_json::from_value::<CrystallizationTrace>(value).map_err(|error| {
+        let trace = serde_json::from_value::<CrystallizationTrace>(value).map_err(|error| {
             VmError::Runtime(format!(
                 "failed to decode crystallization trace {}: {error}",
                 path.display()
             ))
-        })?
+        })?;
+        if let Some(execution_id) = trace.execution_id.as_deref() {
+            crate::orchestration::validate_execution_id(execution_id).map_err(|error| {
+                VmError::Runtime(format!(
+                    "crystallization trace {} has invalid execution identity: {error}",
+                    path.display()
+                ))
+            })?;
+        }
+        trace
     } else if value.get("stages").is_some() || value.get("_type") == Some(&json!("workflow_run")) {
         let run: RunRecord = serde_json::from_value(value).map_err(|error| {
             VmError::Runtime(format!(
@@ -493,6 +502,14 @@ pub fn load_crystallization_trace(path: &Path) -> Result<CrystallizationTrace, V
                 path.display()
             ))
         })?;
+        if run.evidence.execution_id.is_some() {
+            crate::orchestration::validate_execution_evidence(&run.evidence).map_err(|error| {
+                VmError::Runtime(format!(
+                    "run record {} has invalid execution evidence: {error}",
+                    path.display()
+                ))
+            })?;
+        }
         trace_from_run_record(run)
     } else {
         return Err(VmError::Runtime(format!(

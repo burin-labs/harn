@@ -34,9 +34,7 @@ pub fn validate_execution_evidence(
     let Some(execution_id) = evidence.execution_id.as_deref() else {
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
-    if !is_valid_execution_id(execution_id) {
-        return Err(ExecutionEvidenceValidationError::InvalidExecutionId);
-    }
+    validate_execution_id(execution_id)?;
     let Some(recording) = evidence.flight_recording.as_ref() else {
         return Ok(());
     };
@@ -55,13 +53,17 @@ pub fn validate_execution_evidence(
     Ok(())
 }
 
-fn is_valid_execution_id(candidate: &str) -> bool {
-    candidate
+/// Validate one claimed Harn-owned execution identity.
+pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceValidationError> {
+    let valid = candidate
         .strip_prefix(EXECUTION_ID_PREFIX)
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .is_some_and(|value| {
             value.get_version_num() == 7 && value.get_variant() == uuid::Variant::RFC4122
-        })
+        });
+    valid
+        .then_some(())
+        .ok_or(ExecutionEvidenceValidationError::InvalidExecutionId)
 }
 
 fn is_blake3_hash(candidate: &str) -> bool {
@@ -103,6 +105,7 @@ mod tests {
     fn accepts_harn_owned_identity_and_matching_flight_artifact() {
         let mut evidence = evidence();
         evidence.flight_recording = Some(artifact());
+        assert_eq!(validate_execution_id(EXECUTION_ID), Ok(()));
         assert_eq!(validate_execution_evidence(&evidence), Ok(()));
     }
 
@@ -113,6 +116,10 @@ mod tests {
             "hxe-019c13e0-8080-4000-8000-000000000001",
             "hxe-019c13e0-8080-7000-c000-000000000001",
         ] {
+            assert_eq!(
+                validate_execution_id(invalid),
+                Err(ExecutionEvidenceValidationError::InvalidExecutionId)
+            );
             let mut evidence = evidence();
             evidence.execution_id = Some(invalid.to_string());
             assert_eq!(
