@@ -70,9 +70,12 @@ without carrying runtime-only values. A future dashboard adapter consumes the
 same normalized governance field rather than maintaining another exposure
 list.
 
-The agent loop is also an adapter. It filters the model-facing schema and the
-direct dispatch path with the same `agent` audience, so a model cannot invoke a
-tool that was intentionally reserved for an operator surface.
+The agent loop is also an adapter. It projects the executable registry once at
+its option boundary, before prompt guidance, progressive search, surface
+narrowing, schema generation, or dispatch can inspect it. Direct LLM calls use
+the same normalized `agent` projection. A tool intentionally reserved for an
+operator surface therefore cannot leak its name or instructions to the model,
+appear in a search result, or execute through a forged call.
 
 ## Language bridges
 
