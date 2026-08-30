@@ -84,7 +84,7 @@ pub fn approval_review_case_request(row: dict) -> dict {
     reason: "a permission gate refused this action",
     refused_paths: [],
     // Calibration runs off a real platform refusal, so it declares the same
-    // unobservable posture tornadough reports rather than implying paths that
+    // unobservable posture a Linux host reports rather than implying paths that
     // a live Linux run could never supply.
     observability: "unobservable",
     untrusted_context: row?.untrusted_context,

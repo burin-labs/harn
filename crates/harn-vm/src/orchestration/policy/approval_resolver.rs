@@ -68,9 +68,9 @@ impl ApprovalResolver {
         match value.trim() {
             "host" | "ask" | "person" => Some(Self::Host),
             "auto_review" | "auto-review" | "review" => Some(Self::AutoReview),
-            // The surface spellings Burin's `/approve` already accepts. They
-            // arrive here rather than staying a Burin-local empty policy
-            // overlay, so "yolo" has ONE owner and one meaning.
+            // The surface spellings a downstream host's approve command already
+            // accepts. They arrive here rather than staying a downstream-local
+            // empty policy overlay, so "yolo" has ONE owner and one meaning.
             "allow_all" | "allow-all" | "yolo" | "full_auto" | "full-auto" => Some(Self::AllowAll),
             _ => None,
         }
@@ -141,7 +141,7 @@ mod tests {
     fn host_cannot_answer_without_a_person() {
         // The load-bearing negative. If this ever returns true, every `Ask`
         // rule on a headless run is silently granted -- which is the exact
-        // regression bc#6524 fixed on the Burin side.
+        // regression a downstream host already had to fix once.
         assert!(!ApprovalResolver::Host.answers_ask_without_a_person());
     }
 
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn burin_yolo_spellings_resolve_to_allow_all() {
+    fn downstream_yolo_spellings_resolve_to_allow_all() {
         for spelling in ["allow_all", "allow-all", "yolo", "full_auto", "full-auto"] {
             assert_eq!(
                 ApprovalResolver::parse(spelling),
