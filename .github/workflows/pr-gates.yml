@@ -21,7 +21,7 @@ name: PR gates
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
   merge_group:
 
 permissions:
@@ -37,6 +37,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 jobs:
+  public-metadata-privacy:
+    name: Public metadata privacy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip merge-group replay
+        if: github.event_name == 'merge_group'
+        run: echo "::notice title=Public metadata privacy::merge_group event is a no-op pass."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+
+      - name: Scan pull-request title and body
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: ./scripts/check_pr_metadata_privacy.sh
+
   gate:
     # The matrix value becomes the check-run name, so these render as
     # "Demo gate" and "Changelog fragment" exactly as before.

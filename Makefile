@@ -596,6 +596,7 @@ test-agent-scripts:
 test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
+	./scripts/tests/check_pr_metadata_privacy_test.sh
 	./scripts/tests/apt_install_action_test.sh
 	./scripts/tests/rust_toolchain_action_test.sh
 	./scripts/tests/npm_ci_with_retry_test.sh
@@ -618,6 +619,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
 	./scripts/tests/prepare_development_version_test.sh
+	./scripts/tests/development_bump_cutover_test.sh
+	./scripts/tests/development_cutover_monitor_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh

@@ -1,0 +1,22 @@
+# sha256 of lowercase tokens that must never appear in tracked text.
+#
+# The plaintext is deliberately absent. This repository is public, and a gate
+# that listed the strings it guards would publish them on every clone and echo
+# them into every public CI log on a match — which is the leak it exists to
+# prevent. Only hashes live here, and the scanner reports a hash prefix, never
+# the matched text.
+#
+# Add one:
+#   printf '%s' "$token" | sha256sum | awk '{print $1}'   # or: shasum -a 256
+#
+# Lowercase the token first. Tokens are split on [^A-Za-z0-9._-]+, so a
+# hostname and its `.local` form are two different tokens — hash both. Same for
+# each numbered member of a host family.
+0573015b58279e612ce5f5df0e1a8e9f12a5956beb19e4431d0d1d56829a7ccd
+08fef8ede17f773b6cd15fa961a0bd0bccc41a20e53b9651967a0fad89c9ef41
+09b3a8432890c4319377830f4fa3032e39df845cf261c8125ec3e864ecaf8a0d
+2a670b2cc1b59491bbde0283ec01d676c219caaa65c223036c279cd4429e31b0
+6aee3c61be165895eff2218af4fe2dedce849b81c77388feac29789b7a312056
+9f1044dd7a7cbdcdaee3d88973fb9c13bb30e3ccb8a7c9f5fac4b7b7af7f79d9
+b1bba6cbd7d92a823dff92346b55bff4571d069fb9e93b73918efa2e812238ef
+b82e4af8a4459ff4c13e0be57c58ab1d1165b7c234ed27352ca254ace4161177

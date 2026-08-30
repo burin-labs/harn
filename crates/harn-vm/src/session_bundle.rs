@@ -1311,7 +1311,7 @@ fn raw_bundle_from_run(
             event_log_pointers: event_log_pointers_from_run(run),
             transitions: run.transitions.clone(),
             checkpoints: run.checkpoints.clone(),
-            trace_spans: run.trace_spans.clone(),
+            trace_spans: run.evidence.trace_spans.clone(),
             deterministic_events: deterministic_events_from_run(run)?,
         },
         redaction: RedactionManifest {

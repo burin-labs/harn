@@ -449,7 +449,7 @@ pub(super) fn dump_llm_request(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let context_token_breakdown =
-        serde_json::to_value(crate::llm::cost::project_llm_call_context_breakdown(opts))
+        serde_json::to_value(crate::llm::cost_context::project_llm_call_context_breakdown(opts))
             .unwrap_or(serde_json::Value::Null);
     emit_context_token_breakdown_checkpoint(
         opts,

@@ -29,8 +29,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:8aed668faef825ad6b356a00220c028f32316c1f210f688641c055a65a615688",
-    "projection_id": "session_view:session_root_transcript:8aed668faef8"
+    "projection_hash": "sha256:34f4104e9a4c3a6ab112332fd4a62f4a8c466592402a1f3ddcd33ce9574c688f",
+    "projection_id": "session_view:session_root_transcript:34f4104e9a4c"
   },
   "runs": [
     {
@@ -58,6 +58,31 @@
           "reason": "completed"
         }
       ],
+      "evidence": {
+        "execution_id": "run-root-transcript",
+        "flight_recording": null,
+        "gaps": [],
+        "schema_version": 1,
+        "trace_spans": [
+          {
+            "duration_ms": 3000,
+            "kind": "llm_call",
+            "links": [],
+            "metadata": {
+              "cost_usd": 0.02,
+              "input_tokens": 12,
+              "model": "fixture-model",
+              "output_tokens": 8,
+              "provider": "fixture-provider"
+            },
+            "name": "fixture completion",
+            "parent_span_id": null,
+            "span_id": 0,
+            "start_ms": 0,
+            "trace_id": ""
+          }
+        ]
+      },
       "failure": null,
       "metadata": {
         "artifact_count": 1,
@@ -84,8 +109,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:86573296d365741b784f5dcf31a79a60426ab3d09238cd9873fd0cd73c3d2437",
-        "projection_id": "run_view:run_root_transcript:86573296d365"
+        "projection_hash": "sha256:a1b0c526ba2e87938931f3fc3d8e0bbc9fd93501a7ac64d1bd7766cfebd77860",
+        "projection_id": "run_view:run_root_transcript:a1b0c526ba2e"
       },
       "providers": [
         {

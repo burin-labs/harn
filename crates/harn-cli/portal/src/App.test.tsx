@@ -68,6 +68,24 @@ const runsPayload = {
 
 const detailPayload = {
   summary: runsPayload.runs[0],
+  view: {
+    evidence: {
+      schema_version: 1,
+      execution_id: "hxe-portal-test",
+      flight_recording: {
+        schema_version: 1,
+        execution_id: "hxe-portal-test",
+        format: "harn.flight.v1+json",
+        path: "/tmp/flight.json",
+        content_hash: "blake3:abc",
+        byte_length: 100,
+        retained_events: 42,
+        dropped_events: 3,
+        value_policy: "omitted",
+      },
+      gaps: [],
+    },
+  },
   task: "Fix issue",
   workflow_id: "wf",
   parent_run_id: null,
@@ -287,6 +305,10 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByText("Inspect persisted run")).toBeInTheDocument()
     })
+    expect(screen.getByText("Execution evidence")).toBeInTheDocument()
+    expect(screen.getByText("hxe-portal-test")).toBeInTheDocument()
+    expect(screen.getByText("42 events")).toBeInTheDocument()
+    expect(screen.getByText(/3 dropped/)).toBeInTheDocument()
     expect(screen.getByText("harn replay .harn-runs/failed.json")).toBeInTheDocument()
     expect(screen.getByText(/reviewer • Spawned • 1710000000.100/)).toBeInTheDocument()
     expect(screen.getByText(/github:issue\.opened \(original trigger_evt_original\) → github:issue\.opened • replay chain • replay_chain/)).toBeInTheDocument()

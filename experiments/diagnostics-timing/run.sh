@@ -34,7 +34,7 @@ max_iter=20
 # and the run reports a number from a machine nobody chose. calib.sh already
 # pins it; the sweep has to pin it too or the calibration and the matrix are not
 # measuring the same thing.
-base_url="http://tornadough:8001"
+base_url="${DIAG_TIMING_BASE_URL:?set DIAG_TIMING_BASE_URL to the pinned server, e.g. http://server.example:8001}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

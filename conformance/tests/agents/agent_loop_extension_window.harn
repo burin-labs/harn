@@ -1,0 +1,154 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn lookup_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return release evidence",
+    {
+      handler: { args -> "evidence for " + args.query },
+      parameters: {query: {type: "string", description: "Lookup query"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn call(id: string, query: string) {
+  return {tool_calls: [{id: id, name: "lookup", arguments: {query: query}}]}
+}
+
+pipeline default(harness: Harness) {
+  // Case 1: the boundary turn itself is a repeated read (no information gain),
+  // but a progressing turn sits one turn back — inside the `extend_by` window.
+  // The loop extends and the run completes.
+  with_llm_script(
+    harness.llm,
+    [
+      call("w1", "alpha"),
+      call("w2", "beta"),
+      call("w3", "beta"),
+      llm_text("<user_response>Repaired.</user_response>"),
+    ],
+    { ->
+      const windowed = agent_loop(
+        harness,
+        "Repair after a failed check",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 3, max: 9, extend_by: 2},
+        },
+      )
+      harness.stdio.println(windowed.status)
+      harness.stdio.println(windowed.adaptive_budget.extensions_used)
+      harness.stdio.println(windowed.adaptive_budget.final_limit)
+      harness.stdio.println(windowed.adaptive_budget.decisions[0].action)
+      harness.stdio.println(windowed.adaptive_budget.decisions[0].reason)
+    },
+  )
+  // Case 2: matched control for case 1 — the SAME script with the window
+  // narrowed to the boundary turn alone. This is the pre-window behavior, and
+  // it stops at the initial cap. If case 1 and case 2 ever agree, the window is
+  // not the thing deciding the extension.
+  with_llm_script(
+    harness.llm,
+    [
+      call("n1", "alpha"),
+      call("n2", "beta"),
+      call("n3", "beta"),
+      llm_text("<user_response>Repaired.</user_response>"),
+    ],
+    { ->
+      const narrow = agent_loop(
+        harness,
+        "Repair after a failed check",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {
+            mode: "adaptive",
+            initial: 3,
+            max: 9,
+            extend_by: 2,
+            progress_window: 1,
+          },
+        },
+      )
+      harness.stdio.println(narrow.status)
+      harness.stdio.println(narrow.adaptive_budget.extensions_used)
+      harness.stdio.println(narrow.adaptive_budget.final_limit)
+    },
+  )
+  // Case 3: thrash control. Every turn in the window is the same read returning
+  // the same result, so no turn satisfies the progress predicate and the loop
+  // stops at the cap instead of buying itself another window.
+  with_llm_script(
+    harness.llm,
+    [
+      call("t1", "same"),
+      call("t2", "same"),
+      call("t3", "same"),
+      call("t4", "same"),
+      call("t5", "same"),
+    ],
+    { ->
+      const thrash = agent_loop(
+        harness,
+        "Read the same thing forever",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 3, max: 9, extend_by: 2},
+        },
+      )
+      harness.stdio.println(thrash.status)
+      harness.stdio.println(thrash.adaptive_budget.extensions_used)
+      harness.stdio.println(thrash.adaptive_budget.final_limit)
+    },
+  )
+  // Case 4: the max cap still binds after repeated extensions. Every turn
+  // progresses, so the window never denies; `max` is what stops the run, and
+  // the last extension is clamped to it rather than overshooting.
+  with_llm_script(
+    harness.llm,
+    [
+      call("c1", "1"),
+      call("c2", "2"),
+      call("c3", "3"),
+      call("c4", "4"),
+      call("c5", "5"),
+      call("c6", "6"),
+    ],
+    { ->
+      const capped = agent_loop(
+        harness,
+        "Keep working",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 2, max: 5, extend_by: 2},
+        },
+      )
+      harness.stdio.println(capped.status)
+      harness.stdio.println(capped.adaptive_budget.extensions_used)
+      harness.stdio.println(capped.adaptive_budget.final_limit)
+      harness.stdio.println(capped.adaptive_budget.final_limit <= capped.adaptive_budget.max)
+    },
+  )
+}

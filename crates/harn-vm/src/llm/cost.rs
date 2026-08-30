@@ -13,6 +13,62 @@ thread_local! {
     static LLM_ACCUMULATED_COST: RefCell<f64> = const { RefCell::new(0.0) };
     static LLM_TOKEN_BUDGET: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LLM_ACCUMULATED_TOKENS: RefCell<u64> = const { RefCell::new(0) };
+    static LLM_OBSERVED_USAGE: RefCell<ObservedSessionUsage> =
+        const { RefCell::new(ObservedSessionUsage::EMPTY) };
+}
+
+/// Session-observed token usage, accumulated from completed calls on this
+/// thread. The pre-call budget projection reads it so the second and later
+/// calls of a session are priced against what this session actually costs
+/// (cache hits included) instead of the uncached worst case.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ObservedSessionUsage {
+    pub calls: u64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+}
+
+impl ObservedSessionUsage {
+    const EMPTY: Self = Self {
+        calls: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+
+    /// Mean output tokens per observed call, rounded up. `None` before the
+    /// first call, which is what keeps the first projection worst-case.
+    fn mean_output_tokens(&self) -> Option<i64> {
+        if self.calls == 0 {
+            return None;
+        }
+        Some((self.output_tokens.max(0) as f64 / self.calls as f64).ceil() as i64)
+    }
+}
+
+/// The usage this session has actually observed so far on this thread.
+pub(crate) fn peek_observed_session_usage() -> ObservedSessionUsage {
+    LLM_OBSERVED_USAGE.with(|usage| *usage.borrow())
+}
+
+fn record_observed_session_usage(usage: &crate::llm::usage::LlmUsage) {
+    LLM_OBSERVED_USAGE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.calls = slot.calls.saturating_add(1);
+        slot.input_tokens = slot.input_tokens.saturating_add(usage.input_tokens.max(0));
+        slot.output_tokens = slot
+            .output_tokens
+            .saturating_add(usage.output_tokens.max(0));
+        slot.cache_read_tokens = slot
+            .cache_read_tokens
+            .saturating_add(usage.cache_read_tokens.max(0));
+        slot.cache_write_tokens = slot
+            .cache_write_tokens
+            .saturating_add(usage.cache_write_tokens.max(0));
+    });
 }
 
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
@@ -21,6 +77,7 @@ pub(crate) fn reset_cost_state() {
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
     LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);
     LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 0);
+    LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
 }
 
 pub fn peek_total_cost() -> f64 {
@@ -36,12 +93,14 @@ pub fn peek_total_cost() -> f64 {
 pub struct LlmBudgetGuard {
     previous_budget: Option<f64>,
     previous_accumulated: f64,
+    previous_observed: ObservedSessionUsage,
 }
 
 impl Drop for LlmBudgetGuard {
     fn drop(&mut self) {
         LLM_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
         LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = self.previous_accumulated);
+        LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = self.previous_observed);
     }
 }
 
@@ -53,11 +112,14 @@ impl Drop for LlmBudgetGuard {
 pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
     let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
     let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
+    let previous_observed = peek_observed_session_usage();
     LLM_BUDGET.with(|b| *b.borrow_mut() = Some(max_cost_usd.max(0.0)));
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LLM_OBSERVED_USAGE.with(|u| *u.borrow_mut() = ObservedSessionUsage::EMPTY);
     LlmBudgetGuard {
         previous_budget,
         previous_accumulated,
+        previous_observed,
     }
 }
 
@@ -156,28 +218,40 @@ pub(crate) struct LlmBudgetProjection {
     pub provider: String,
     pub model: String,
     pub projected_input_tokens: i64,
+    /// The request's output budget (`max_tokens`). Token-ceiling checks and
+    /// rate-limit reservations keep using this worst case even when the cost
+    /// projection prices a smaller, observed output.
     pub projected_output_tokens: i64,
+    /// Output tokens the `projected_cost_usd` figure was priced from. Equal to
+    /// `projected_output_tokens` on a worst-case projection; the session's
+    /// observed mean output per call (clamped to the budget) otherwise.
+    pub costed_output_tokens: i64,
     pub projected_cost_usd: f64,
     pub session_cost_usd: f64,
+    pub basis: ProjectionBasis,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct LlmContextTokenBreakdown {
-    pub schema: &'static str,
-    pub segments: Vec<LlmContextTokenSegment>,
-    pub input_tokens: i64,
-    pub output_budget_tokens: i64,
-    pub context_tokens: i64,
-    pub message_count: usize,
-    pub native_tool_count: usize,
-    pub provider_tool_count: usize,
+/// What the pre-call cost projection was computed from. A reader who sees a
+/// `budget_exceeded` stop needs this to tell "the session spent the cap" from
+/// "the next call's *estimate* crossed the cap while actual spend was well
+/// under it".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectionBasis {
+    /// No completed call in this session yet: every projected input token is
+    /// priced uncached and the whole output budget is assumed spent.
+    WorstCase,
+    /// Priced from this session's observed cache-hit ratio and mean output
+    /// tokens per call.
+    Observed,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct LlmContextTokenSegment {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub tokens: i64,
+impl ProjectionBasis {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ProjectionBasis::WorstCase => "worst_case",
+            ProjectionBasis::Observed => "observed",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,170 +352,92 @@ pub(crate) fn parse_budget(
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 
-pub(super) fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i64 {
-    match value {
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => 1,
-        serde_json::Value::String(s) => estimate_text_tokens_for_model(s, model),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .map(|item| estimate_json_tokens(item, model))
-            .sum(),
-        serde_json::Value::Object(map) => map
-            .iter()
-            .map(|(key, value)| {
-                estimate_text_tokens_for_model(key, model) + estimate_json_tokens(value, model)
-            })
-            .sum(),
-    }
-}
-
-fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
-    super::token_count::estimate_text_tokens(text, Some(model)).tokens
-}
-
-pub(crate) fn project_llm_call_tokens(opts: &super::api::LlmCallOptions) -> (i64, i64) {
-    let breakdown = project_llm_call_context_breakdown(opts);
-    (breakdown.input_tokens, breakdown.output_budget_tokens)
-}
-
-pub(crate) fn project_llm_call_context_breakdown(
-    opts: &super::api::LlmCallOptions,
-) -> LlmContextTokenBreakdown {
-    let system_tokens = opts
-        .system
-        .as_deref()
-        .map(|system| estimate_text_tokens_for_model(system, &opts.model))
-        .unwrap_or(0);
-    let mut user_message_tokens = 0;
-    let mut assistant_message_tokens = 0;
-    let mut tool_result_tokens = 0;
-    let mut other_message_tokens = 0;
-    for message in &opts.messages {
-        let tokens = estimate_json_tokens(message, &opts.model);
-        if super::context_breakdown::message_is_tool_result(message) {
-            tool_result_tokens += tokens;
-            continue;
-        }
-        match message.get("role").and_then(serde_json::Value::as_str) {
-            Some("user") => user_message_tokens += tokens,
-            Some("assistant") => assistant_message_tokens += tokens,
-            _ => other_message_tokens += tokens,
-        }
-    }
-    let tool_tokens: i64 = opts
-        .native_tools
-        .as_ref()
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    estimate_text_tokens_for_model(
-                        &serde_json::to_string(tool).unwrap_or_default(),
-                        &opts.model,
-                    )
-                })
-                .sum()
-        })
-        .unwrap_or(0);
-    let provider_tool_tokens: i64 = opts
-        .provider_tools
-        .iter()
-        .map(|tool| {
-            estimate_text_tokens_for_model(
-                &serde_json::to_string(tool).unwrap_or_default(),
-                &opts.model,
-            )
-        })
-        .sum();
-    let projected_input_tokens = system_tokens
-        .saturating_add(user_message_tokens)
-        .saturating_add(assistant_message_tokens)
-        .saturating_add(tool_result_tokens)
-        .saturating_add(other_message_tokens)
-        .saturating_add(tool_tokens)
-        .saturating_add(provider_tool_tokens);
-    let projected_output_tokens = opts.max_tokens.max(0);
-    let segments = vec![
-        LlmContextTokenSegment {
-            id: "system_prompt",
-            label: "System prompt",
-            tokens: system_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "user_messages",
-            label: "User turns",
-            tokens: user_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "assistant_messages",
-            label: "Assistant turns",
-            tokens: assistant_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "tool_results",
-            label: "Tool results",
-            tokens: tool_result_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "other_messages",
-            label: "Other messages",
-            tokens: other_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "native_tool_schemas",
-            label: "Native tool schemas",
-            tokens: tool_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "provider_tools",
-            label: "Provider-hosted tools",
-            tokens: provider_tool_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "output_budget",
-            label: "Output budget",
-            tokens: projected_output_tokens,
-        },
-    ];
-    LlmContextTokenBreakdown {
-        schema: "harn.llm.context_token_breakdown.v1",
-        segments,
-        input_tokens: projected_input_tokens,
-        output_budget_tokens: projected_output_tokens,
-        context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
-        message_count: opts.messages.len(),
-        native_tool_count: opts
-            .native_tools
-            .as_ref()
-            .map(|tools| tools.len())
-            .unwrap_or(0),
-        provider_tool_count: opts.provider_tools.len(),
-    }
-}
-
-pub(crate) fn project_llm_call_context_tokens(opts: &super::api::LlmCallOptions) -> u64 {
-    let (input, output) = project_llm_call_tokens(opts);
-    input.max(0) as u64 + output.max(0) as u64
-}
-
+/// Project what the next provider call will cost, in USD.
+///
+/// Before any call completes there is no evidence, so the projection is the
+/// uncached worst case: every projected input token at the full input rate and
+/// the entire output budget (`max_tokens`) at the output rate. On a cached,
+/// short-answer session that overstates a real call by more than an order of
+/// magnitude, which stops a session at a fraction of its cap.
+///
+/// From the second call on, this session's own completed calls are the
+/// evidence: the observed cache-hit ratio splits the projected input into a
+/// cache-read-priced share and an uncached remainder, and the observed mean
+/// output tokens per call replaces the full output budget (clamped to that
+/// budget, so the estimate is never larger than the worst case).
+///
+/// **Overrun guarantee.** This is a *pre-call* check: it runs only while
+/// accumulated session spend is still at or under the cap, and the call it
+/// admits is priced from real usage afterwards. So however the projection is
+/// computed, actual spend can exceed the limit by at most the true cost of one
+/// admitted call. Using observed evidence changes which calls are admitted, not
+/// that bound.
 pub(crate) fn project_llm_call_cost(
     opts: &super::api::LlmCallOptions,
     session_cost_usd: f64,
 ) -> LlmBudgetProjection {
-    let (projected_input_tokens, projected_output_tokens) = project_llm_call_tokens(opts);
-    let projected_cost_usd = calculate_cost_for_provider(
-        &opts.provider,
-        &opts.model,
-        projected_input_tokens,
-        projected_output_tokens,
-    );
+    let (projected_input_tokens, projected_output_tokens) =
+        super::cost_context::project_llm_call_tokens(opts);
+    let output_budget_tokens = projected_output_tokens;
+    let observed = peek_observed_session_usage();
+    let (costed_output_tokens, projected_cost_usd, basis) = match observed.mean_output_tokens() {
+        Some(mean_output_tokens) => {
+            let costed_output_tokens = mean_output_tokens.clamp(0, output_budget_tokens);
+            let ratio = cache_hit_ratio(
+                observed.input_tokens,
+                observed.cache_read_tokens,
+                observed.cache_write_tokens,
+            )
+            .clamp(0.0, 1.0);
+            let cache_read_tokens = (projected_input_tokens.max(0) as f64 * ratio).round() as i64;
+            // `pricing_aware_call_cost_with_cache` treats a cache count
+            // that fits inside `input_tokens` as a subset of it, so the
+            // uncached remainder is priced at the input rate and the
+            // cached share at the cache-read rate.
+            let cost = pricing_aware_call_cost_with_cache(
+                &opts.provider,
+                &opts.model,
+                projected_input_tokens,
+                costed_output_tokens,
+                cache_read_tokens,
+                0,
+            );
+            match cost {
+                Some(cost) => (costed_output_tokens, cost, ProjectionBasis::Observed),
+                // Unknown pricing: keep the historical zero-cost budget
+                // arithmetic rather than inventing a rate.
+                None => (
+                    costed_output_tokens,
+                    calculate_cost_for_provider(
+                        &opts.provider,
+                        &opts.model,
+                        projected_input_tokens,
+                        costed_output_tokens,
+                    ),
+                    ProjectionBasis::Observed,
+                ),
+            }
+        }
+        None => (
+            output_budget_tokens,
+            calculate_cost_for_provider(
+                &opts.provider,
+                &opts.model,
+                projected_input_tokens,
+                output_budget_tokens,
+            ),
+            ProjectionBasis::WorstCase,
+        ),
+    };
     LlmBudgetProjection {
         provider: opts.provider.clone(),
         model: opts.model.clone(),
         projected_input_tokens,
         projected_output_tokens,
+        costed_output_tokens,
         projected_cost_usd,
         session_cost_usd,
+        basis,
     }
 }
 
@@ -472,6 +468,19 @@ pub(crate) fn budget_exceeded_error(
         "projected_output_tokens".to_string(),
         VmValue::Int(projection.projected_output_tokens),
     );
+    dict.insert(
+        "costed_output_tokens".to_string(),
+        VmValue::Int(projection.costed_output_tokens),
+    );
+    // A projection stop is not the same event as spending the cap. These three
+    // fields let a reader tell them apart without re-deriving the arithmetic.
+    dict.put_str("projection_basis", projection.basis.as_str());
+    if matches!(limit_kind, BudgetLimitKind::TotalCost) {
+        dict.insert(
+            "headroom_usd".to_string(),
+            VmValue::Float(limit_value - projection.session_cost_usd),
+        );
+    }
     dict.put_str("provider", projection.provider.clone());
     dict.put_str("model", projection.model.clone());
     dict.put_str(
@@ -482,8 +491,13 @@ pub(crate) fn budget_exceeded_error(
                 BudgetLimitKind::PerCallCost =>
                     format!("projected cost ${:.6}", projection.projected_cost_usd),
                 BudgetLimitKind::TotalCost => format!(
-                    "projected session cost ${:.6}",
-                    projection.session_cost_usd + projection.projected_cost_usd
+                    "projected session cost ${:.6} (spent ${:.6} of ${:.6}; next call projected \
+                     at ${:.6}, {} basis)",
+                    projection.session_cost_usd + projection.projected_cost_usd,
+                    projection.session_cost_usd,
+                    limit_value,
+                    projection.projected_cost_usd,
+                    projection.basis.as_str(),
                 ),
                 BudgetLimitKind::InputTokens => format!(
                     "projected input tokens {}",
@@ -890,6 +904,7 @@ fn accumulate_llm_usage(
 
 pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<(), VmError> {
     let usage = result.usage();
+    record_observed_session_usage(&usage);
     accumulate_llm_usage(
         &result.model,
         usage.input_tokens,

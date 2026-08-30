@@ -8,7 +8,7 @@ mod core;
 pub mod embed;
 mod error;
 mod exports;
-#[cfg(feature = "hostlib")]
+#[cfg(feature = "hostlib-full")]
 mod harn_reference_resolver;
 pub mod http_codec;
 pub mod limits;
@@ -34,6 +34,16 @@ pub mod ws;
 #[cfg(feature = "hostlib")]
 pub fn run_process_guardian_if_requested() -> bool {
     harn_hostlib::process::owner_death::run_if_requested()
+}
+
+#[cfg(feature = "hostlib-full")]
+fn install_dispatch_hostlib(vm: &mut harn_vm::Vm) {
+    harn_reference_resolver::install(vm);
+}
+
+#[cfg(all(feature = "hostlib", not(feature = "hostlib-full")))]
+fn install_dispatch_hostlib(vm: &mut harn_vm::Vm) {
+    let _ = harn_hostlib::install_default(vm);
 }
 
 /// Default 10 MiB body size cap applied to every HTTP router exposed by
@@ -92,7 +102,7 @@ pub use exports::{
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
     ScheduleSpec, ToolAnnotations,
 };
-#[cfg(feature = "hostlib")]
+#[cfg(feature = "hostlib-full")]
 pub use harn_reference_resolver::resolver as harn_reference_resolver;
 /// Install the process-lifetime shared Postgres pool registry.
 ///

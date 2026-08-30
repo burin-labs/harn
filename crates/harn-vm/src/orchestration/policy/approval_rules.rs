@@ -467,6 +467,40 @@ impl PolicyEvaluation {
         self.action == PolicyAction::Deny.as_str()
     }
 
+    /// Rewrite this decision as an allow granted by the automated reviewer.
+    ///
+    /// The original action and reason are kept in the receipt under
+    /// `auto_review`, so the record still says what the policy decided and who
+    /// overrode it. An override that erased what it overrode would make the
+    /// receipt agree with the outcome by construction and prove nothing.
+    pub fn grant_by_auto_review(&mut self, rationale: &str) {
+        let overridden_action =
+            std::mem::replace(&mut self.action, PolicyAction::Allow.as_str().to_string());
+        let overridden_reason = std::mem::replace(
+            &mut self.reason,
+            if rationale.is_empty() {
+                "approved by the automated reviewer".to_string()
+            } else {
+                rationale.to_string()
+            },
+        );
+        // The gate no longer requires a person, so leaving a required approval
+        // shape behind would leave a downstream reader waiting for a prompt
+        // that is never coming.
+        self.required_approval = None;
+        if let Some(map) = self.receipt.as_object_mut() {
+            map.insert(
+                "auto_review".to_string(),
+                serde_json::json!({
+                    "overridden_action": overridden_action,
+                    "overridden_reason": overridden_reason,
+                    "rationale": rationale,
+                    "decider": "auto_reviewer",
+                }),
+            );
+        }
+    }
+
     pub fn has_audit_signal(&self) -> bool {
         self.matched_rule.is_some() || !self.risk_labels.is_empty()
     }

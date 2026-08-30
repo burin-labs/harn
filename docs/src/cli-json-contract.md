@@ -88,7 +88,7 @@ versions.
 | `harn lint --json`             | Per-file lint diagnostics + autofix availability         |
 | `harn parse --json`            | Tagged Harn AST with byte spans                          |
 | `harn tokens --json`           | Lexer token stream with source lexemes                   |
-| `harn run --json`              | Streaming NDJSON event log (stdout/stderr/tool/result)   |
+| `harn run --json`              | Streaming NDJSON event log (stdio/tool/evidence/result)  |
 | `harn run --emit-summary-json` | One terminal raw NDJSON summary object on stderr/file/fd  |
 | `harn run --emit-phase-json`   | One terminal raw NDJSON phase object on stderr/file/fd    |
 | `harn run --emit-rusage-json`  | One terminal raw NDJSON CPU sample on stderr/file/fd      |
@@ -123,10 +123,35 @@ versions.
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn connect <provider> --json` | Secret-free connector setup progress and terminal NDJSON events |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
-| `harn version --json`          | CLI build metadata (`name`, `version`, `description`, optional `source_revision`)    |
+| `harn version --json`          | CLI build metadata plus the VM-owned linked-runtime content fingerprint    |
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |
 
 ## Per-command notes
+
+### `harn run --json`
+
+After the VM finishes, Harn writes the execution's run record and emits one
+`evidence_persisted` event before the terminal event:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "event_type": "evidence_persisted",
+    "seq": 4,
+    "execution_id": "hxe-0199...",
+    "run_record_path": "/workspace/.harn-runs/hxe-0199....json"
+  },
+  "error": null,
+  "warnings": []
+}
+```
+
+When `--flight-recorder` is active, `data.flight_recording` contains the same
+artifact descriptor stored in the run record. Otherwise the field is omitted.
+The path is readable when the event arrives. A terminal `result` or `error`
+always has a higher `seq`.
 
 ### `harn version --json`
 
@@ -138,7 +163,20 @@ versions.
     "name": "harn-cli",
     "version": "0.8.27",
     "description": "CLI for the Harn programming language — run, test, REPL, format, and lint",
-    "source_revision": "0123456789abcdef0123456789abcdef01234567"
+    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+    "runtime_content_fingerprint": {
+      "schema": "harn.runtime_content_fingerprint.v1",
+      "content_sha256": "f27d...64 lowercase hexadecimal characters...",
+      "harn_version": "0.8.27",
+      "embedded_stdlib_sha256": "a61b...64 lowercase hexadecimal characters...",
+      "compatibility": {
+        "codegen_fingerprint": "02c9...",
+        "bytecode_schema_version": 14,
+        "linked_program_schema_version": 1,
+        "linker_algorithm_version": 1
+      },
+      "source_revision": "0123456789abcdef0123456789abcdef01234567"
+    }
   },
   "error": null,
   "warnings": []
@@ -151,6 +189,12 @@ that build carried no revision attestation. The command never guesses it from
 the caller's current directory or a runtime environment variable. Consumers
 that credit measurements to an exact revision should require a non-null exact
 match; version-only consumers may ignore the field.
+
+`runtime_content_fingerprint` is computed by the linked VM and cannot be
+overridden by the caller's runtime environment. Its `content_sha256` covers the
+Harn version, every embedded standard-library source, and the code-generation,
+bytecode, and linker compatibility identities. `source_revision` is optional
+provenance and is deliberately excluded from `content_sha256`.
 
 ### `harn upgrade --json`
 

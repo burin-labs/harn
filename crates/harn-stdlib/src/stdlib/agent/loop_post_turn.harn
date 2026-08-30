@@ -110,6 +110,7 @@ pub type AgentLoopPostTurnState = {
   stall_state: AgentStallState,
   stop_reason: string?,
   terminal_write_unverified: bool,
+  turns_since_loop_progress: int,
   turns_since_progress: int,
   verify_attempts: int,
   verify_completion_judge_invocations: int,
@@ -291,6 +292,7 @@ pub fn agent_loop_post_turn_transition(
       missing_required_tools: missing_required_for_loop,
       completion_proposed: false,
       verdict: nil,
+      progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
         harness.agent,
@@ -569,6 +571,7 @@ pub fn agent_loop_post_turn_transition(
       verdict: verdict_record,
       progress_no_net_advance: loop_no_net_progress,
       progress_no_information_gain: context.completed_no_information_gain,
+      progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
         harness.agent,
@@ -580,6 +583,10 @@ pub fn agent_loop_post_turn_transition(
         context.consecutive_failure_count,
       ),
   )
+  // `agent_loop_snapshot_state` returns the window counter already advanced for
+  // this turn; store it back so the next boundary sees the real streak.
+  next = next
+    + {turns_since_loop_progress: loop_state.progress?.turns_since_progressing ?? 0}
   const command = agent_loop_control_invoke(next.opts, context.budget, loop_state)
   const applied = agent_loop_apply_command(
     harness.agent,

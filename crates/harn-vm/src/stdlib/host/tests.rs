@@ -1,4 +1,4 @@
-use super::process_exec::resolve_process_exec_cwd;
+use super::process_exec::{process_exec_stdin, resolve_process_exec_cwd};
 use super::{
     build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
     dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
@@ -804,11 +804,98 @@ fn process_exec_env_mode_unknown_is_rejected() {
     });
 }
 
+#[test]
+fn process_exec_stdin_preserves_absent_nil_and_explicit_empty() {
+    let missing = crate::value::DictMap::new();
+    assert_eq!(
+        process_exec_stdin(&missing, "process.exec").expect("missing stdin"),
+        crate::stdlib::sandbox::ProcessStdin::Null
+    );
+
+    let nil = crate::value::DictMap::from_iter([(crate::value::intern_key("stdin"), VmValue::Nil)]);
+    assert_eq!(
+        process_exec_stdin(&nil, "process.exec").expect("nil stdin"),
+        crate::stdlib::sandbox::ProcessStdin::Null
+    );
+
+    let empty = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("stdin"),
+        VmValue::string(""),
+    )]);
+    assert_eq!(
+        process_exec_stdin(&empty, "process.exec").expect("empty stdin"),
+        crate::stdlib::sandbox::ProcessStdin::Bytes(Vec::new()),
+        "an explicit empty stream must not collapse into missing input"
+    );
+
+    let invalid =
+        crate::value::DictMap::from_iter([(crate::value::intern_key("stdin"), VmValue::Int(0))]);
+    let error = process_exec_stdin(&invalid, "process.exec")
+        .expect_err("a non-string stdin must fail at the host seam");
+    assert!(error.to_string().contains("stdin must be a string or nil"));
+}
+
+#[test]
+fn process_exec_stdin_child_echo() {
+    if std::env::var_os("PROCESS_STDIN_ECHO_CHILD").is_none() {
+        return;
+    }
+    let mut input = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).expect("child reads stdin");
+    print!("PROCESS_STDIN_ECHO_START{input}PROCESS_STDIN_ECHO_END");
+}
+
+#[test]
+fn process_exec_delivers_stdin_to_a_real_child() {
+    run_host_async_test(|| async {
+        let current_exe = std::env::current_exe().expect("current test executable");
+        let input = "line one\nline two: λ\n";
+        let env = VmValue::dict(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("PROCESS_STDIN_ECHO_CHILD"),
+            VmValue::string("1"),
+        )]));
+        let params = crate::value::DictMap::from_iter([
+            (crate::value::intern_key("mode"), VmValue::string("argv")),
+            (
+                crate::value::intern_key("argv"),
+                VmValue::List(std::sync::Arc::new(vec![
+                    VmValue::string(current_exe.to_string_lossy()),
+                    VmValue::string("process_exec_stdin_child_echo"),
+                    VmValue::string("--nocapture"),
+                ])),
+            ),
+            (crate::value::intern_key("env"), env),
+            (crate::value::intern_key("stdin"), VmValue::string(input)),
+            (crate::value::intern_key("timeout_ms"), VmValue::Int(10_000)),
+        ]);
+
+        let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
+            .await
+            .expect("process.exec result");
+        let receipt = result.as_dict().expect("process receipt");
+        assert!(
+            matches!(receipt.get("success"), Some(VmValue::Bool(true))),
+            "the child process must complete successfully"
+        );
+        let stdout = receipt
+            .get("stdout")
+            .expect("completed process receipt carries stdout")
+            .display();
+        assert!(
+            stdout.contains(&format!(
+                "PROCESS_STDIN_ECHO_START{input}PROCESS_STDIN_ECHO_END"
+            )),
+            "the real child must echo the exact multiline Unicode input; stdout={stdout:?}"
+        );
+    });
+}
+
 // Drive the real `host_call("process","exec")` builder under a restricted
 // policy and read back the `$TMPDIR` the child actually saw. This is the
 // agent-facing path; the assertion is OS-independent (it observes the
 // injected env, not OS-sandbox enforcement), so it pins the mechanism on
-// every CI host while the live OS-level link proof runs on tornadough.
+// every CI host while the live OS-level link proof runs on a Linux host
+// with Landlock available.
 #[cfg(unix)]
 async fn process_exec_tmpdir_probe(
     workspace: &std::path::Path,
@@ -836,7 +923,8 @@ async fn process_exec_tmpdir_probe(
         workspace_roots: vec![workspace.to_string_lossy().into_owned()],
         // Keep OS confinement out of this unit assertion regardless of host
         // Landlock/seatbelt availability; we are pinning the env injection,
-        // not OS enforcement (which the tornadough run proves end-to-end).
+        // not OS enforcement (which the Linux Landlock run proves
+        // end-to-end).
         ..crate::orchestration::CapabilityPolicy::default()
     });
     std::env::set_var("HARN_HANDLER_SANDBOX", "off");

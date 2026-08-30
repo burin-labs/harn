@@ -82,6 +82,7 @@ pub(super) fn build_cost_report(run_dir: &Path) -> Result<PortalCostReport, Stri
             .to_string();
 
         for span in run
+            .evidence
             .trace_spans
             .iter()
             .filter(|span| span.kind == "llm_call")
@@ -622,7 +623,7 @@ fn build_stages(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalStage> {
 }
 
 fn build_spans(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalSpan> {
-    let mut spans = run.trace_spans.clone();
+    let mut spans = run.evidence.trace_spans.clone();
     spans.sort_by(|a, b| {
         a.start_ms
             .cmp(&b.start_ms)

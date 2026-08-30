@@ -1779,11 +1779,15 @@ jobs:
           # handle the mounted target directory.
           CARGO_INCREMENTAL: "0"
         run: |
-          # --workspace (libs + bins + build scripts), not --all-targets: keep
-          # the required gate reliable by not depending on dev-only deps
-          # cross-compiling cleanly. The recurring cfg-gate break class lives in
-          # lib/bin code; test-only cfg breaks stay covered by windows-nightly.yml.
+          # Keep the broad workspace pass on production targets so unrelated
+          # dev-only dependencies cannot make this required lane brittle.
           cross check --locked --workspace --target x86_64-pc-windows-gnu
+          # harn-serve's hostlib-enabled tests exercise the platform process
+          # boundary used by ACP cancellation. Compile that focused test surface
+          # here because a missing Unix cfg once reached main and was detected
+          # only by release certification (#7638).
+          cross check --locked -p harn-serve --tests --features hostlib \
+            --target x86_64-pc-windows-gnu
 
   macos-plan:
     name: macOS CI routing

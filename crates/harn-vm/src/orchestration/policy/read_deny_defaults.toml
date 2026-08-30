@@ -1,0 +1,46 @@
+# Credential material a confined child process may never read.
+#
+# Data, not code: adding a path here is a reviewable one-line diff, and nothing
+# in the Rust module decides what belongs on this list.
+#
+# Every entry is home-relative, and every one of them sits under a directory
+# some preset already grants. `PackageManagerConfig` opens `~/.config`,
+# `~/.cache`, and `~/.netrc` wholesale; `DeveloperToolchains` opens the home
+# toolchain roots. Naming a parent readable is not consent to read the
+# credentials inside it, which is why this list beats the presets rather than
+# competing with them.
+#
+# A host may ADD denials through `ProcessSandboxPolicy::read_deny_roots`. It
+# cannot remove these.
+
+[defaults]
+home_relative = [
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".netrc",
+  ".docker/config.json",
+  ".config/gh/hosts.yml",
+  ".config/gcloud",
+  ".kube/config",
+  ".npmrc",
+  ".pypirc",
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
+]
+
+# Why each entry is here, for review. Absent keys are not an error; this table
+# is documentation that lives next to the data instead of drifting from it.
+[reason]
+".ssh" = "private keys and known_hosts"
+".aws" = "long-lived access keys and session tokens"
+".gnupg" = "private keyring"
+".netrc" = "plaintext machine credentials; granted by PackageManagerConfig"
+".docker/config.json" = "registry auth tokens"
+".config/gh/hosts.yml" = "GitHub OAuth token; under preset-granted ~/.config"
+".config/gcloud" = "Google Cloud credentials; under preset-granted ~/.config"
+".kube/config" = "cluster credentials and client certs"
+".npmrc" = "registry auth tokens"
+".pypirc" = "package index upload credentials"
+".cargo/credentials" = "crates.io API token"
+".cargo/credentials.toml" = "crates.io API token"

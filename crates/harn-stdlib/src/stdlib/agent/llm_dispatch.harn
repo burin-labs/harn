@@ -27,6 +27,53 @@ fn __dispatch_messages_include_tool_result(messages: list) {
   return false
 }
 
+fn __dispatch_value_has_payload(value: any) {
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "string" {
+    return trim(value) != ""
+  }
+  if type_of(value) == "list" {
+    for item in value {
+      if __dispatch_value_has_payload(item) {
+        return true
+      }
+    }
+    return false
+  }
+  if type_of(value) == "dict" {
+    for key in keys(value) {
+      // Message discriminators describe an envelope, not provider input.
+      // A role/type-only message is still structurally empty.
+      if key != "role" && key != "type" && __dispatch_value_has_payload(value[key]) {
+        return true
+      }
+    }
+    return false
+  }
+  return true
+}
+
+fn __dispatch_request_has_payload(message: any, turn_system: any, llm_opts: dict) {
+  return __dispatch_value_has_payload(message)
+    || __dispatch_value_has_payload(turn_system)
+    || __dispatch_value_has_payload(llm_opts?.messages)
+}
+
+fn __dispatch_reject_empty_request(message: any, turn_system: any, llm_opts: dict) {
+  if __dispatch_request_has_payload(message, turn_system, llm_opts) {
+    return nil
+  }
+  throw {
+    kind: "terminal",
+    category: "agent_loop_protocol_failure",
+    reason: "empty_provider_request",
+    terminal_class: "agent_loop_protocol_failure",
+    message: "agent_loop: refusing a structurally empty provider request",
+  }
+}
+
 fn __dispatch_error_field(err: any, key: string, fallback: string) {
   if type_of(err) == "dict" {
     const value = err[key]
@@ -246,6 +293,7 @@ fn __dispatch_invoke_once(
  */
 pub fn agent_invoke_llm(harness: Harness, message: any, turn_system: any, llm_opts: dict) -> dict {
   __dispatch_reject_removed_options(llm_opts)
+  __dispatch_reject_empty_request(message, turn_system, llm_opts)
   __dispatch_emit_call_start(harness.agent, llm_opts)
   const first = __dispatch_invoke_once(harness, message, turn_system, llm_opts)
   const schema = __dispatch_structured_output_schema(llm_opts)

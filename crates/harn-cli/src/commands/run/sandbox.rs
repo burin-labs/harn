@@ -424,6 +424,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            read_deny_roots: Vec::new(),
             allow_tcp_loopback: allow_process_loopback,
         },
         side_effect_level: Some(

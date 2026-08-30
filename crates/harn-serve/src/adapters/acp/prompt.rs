@@ -373,14 +373,28 @@ impl AcpServer {
     }
 }
 
+/// The prompt result for a turn the user stopped (harn#7581).
+///
+/// A cancel is a terminal outcome like any other, so it carries
+/// `_meta.harn.terminal` the way every non-cancelled path does. It used to
+/// report only `stopReason: "cancelled"`, which left readers of the typed
+/// terminal — the headless result, the eval meter, the session inspector —
+/// seeing a turn with no terminal at all and reporting it as still open. The
+/// loop does not seal `cancelled` itself: the adapter observes the cancel one
+/// layer up, which is why the outcome is constructed here.
 pub(super) fn cancelled_prompt_result(
     persistence_error: Option<&harn_vm::agent_events::AgentEventSinkError>,
 ) -> serde_json::Value {
-    let mut result = serde_json::json!({"stopReason": "cancelled"});
+    let terminal = harn_vm::agent_events::AgentTerminalOutcome::new(
+        harn_vm::agent_events::AgentTerminalKind::UserCancelled,
+        "session/cancel",
+    );
+    let mut result = serde_json::json!({
+        "stopReason": "cancelled",
+        "_meta": {"harn": {"terminal": terminal}},
+    });
     if let Some(error) = persistence_error {
-        result["_meta"] = serde_json::json!({
-            "harn": {"persistenceError": error.to_string()}
-        });
+        result["_meta"]["harn"]["persistenceError"] = serde_json::Value::String(error.to_string());
     }
     result
 }

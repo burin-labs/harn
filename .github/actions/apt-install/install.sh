@@ -9,7 +9,10 @@ readonly APT_INSTALL_SECONDS="${APT_INSTALL_SECONDS:-60}"
 readonly APT_NETWORK_SECONDS="${APT_NETWORK_SECONDS:-15}"
 readonly APT_SOURCES_DIR="${APT_SOURCES_DIR:-/etc/apt/sources.list.d}"
 
-mapfile -t check_commands < <(printf '%s\n' "${CHECK_COMMAND:-}" | tr '[:space:]' '\n' | sed '/^$/d')
+check_commands=()
+while IFS= read -r command_name; do
+  check_commands+=("$command_name")
+done < <(printf '%s\n' "${CHECK_COMMAND:-}" | tr '[:space:]' '\n' | sed '/^$/d')
 if [[ "${#check_commands[@]}" -gt 0 ]]; then
   all_present=true
   for command_name in "${check_commands[@]}"; do
@@ -26,7 +29,10 @@ if [[ "${#check_commands[@]}" -gt 0 ]]; then
   fi
 fi
 
-mapfile -t packages < <(printf '%s\n' "${APT_PACKAGES:-}" | tr '[:space:]' '\n' | sed '/^$/d')
+packages=()
+while IFS= read -r package_name; do
+  packages+=("$package_name")
+done < <(printf '%s\n' "${APT_PACKAGES:-}" | tr '[:space:]' '\n' | sed '/^$/d')
 if [[ "${#packages[@]}" -eq 0 ]]; then
   echo "::error::apt-install requires at least one package"
   exit 1

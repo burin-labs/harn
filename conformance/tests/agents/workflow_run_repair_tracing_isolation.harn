@@ -45,7 +45,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(out.ok)
   harness.stdio.println(len(out.attempts))
   // The workflow's own pipeline span was collected into the run record.
-  harness.stdio.println(len(out.run.trace_spans) > 0)
+  harness.stdio.println(len(out.run.evidence.trace_spans) > 0)
   // The enclosing OPEN span still resolves — no "unknown timing handle".
   const run_seg = end_timing(harness.clock, run_span, {status: "ok"})
   harness.stdio.println(run_seg.status)

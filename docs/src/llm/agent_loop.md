@@ -708,6 +708,7 @@ Fields:
 | `initial` | int | `max / 4` (adaptive), `max` (fixed) | Iteration cap to start with |
 | `max` | int | `16` (adaptive), `50` (fixed) | Hard upper bound; extensions never raise the cap above this |
 | `extend_by` | int | `2` (adaptive), `0` (fixed) | Default extension delta when policy returns `{action: "extend"}` without `by` / `until` |
+| `progress_window` | int | `extend_by` (adaptive), `0` (fixed) | How many recent turns the default policy looks back over for a progressing turn. `1` restricts the decision to the boundary turn alone |
 | `expose_decisions` | bool | `mode == "adaptive"` | When true, the result includes an `adaptive_budget` summary with the decision log |
 
 `max_iterations: N` and `iteration_budget: {mode: "fixed", initial: N, max: N}`
@@ -734,7 +735,7 @@ loop_control: { state ->
   if state.progress.changed
     && !state.progress.no_net_advance
     && !state.progress.no_information_gain {
-    return {action: "extend", by: 2, reason: "recent turn made progress"}
+    return {action: "extend", by: 2, reason: "progress within window"}
   }
   return nil
 }
@@ -762,6 +763,7 @@ State snapshot fields:
 | `progress.changed` | True if this turn made tool calls, produced new successful tool names, or wrote visible text |
 | `progress.no_net_advance` | True when verify-bearing activity repeats a failing outcome without advancing it |
 | `progress.no_information_gain` | True when every completed, explicitly read-only observation this turn exactly repeats a prior `(tool, arguments, result)` signature |
+| `progress.turns_since_progressing` | Turns elapsed since the last turn that had a non-vetoed activity signal; `0` means this turn did |
 | `progress.summary` | Human-readable progress hint (`"executed N tool call(s)"`, `"completion gate vetoed"`, etc.) |
 
 Return value is one of:
@@ -779,8 +781,18 @@ the cap edge:
 
 - the latest verify/turn-end judge vetoed completion,
 - `require_successful_tools` is unsatisfied, or
-- the most recent turn has an activity signal that is not vetoed by a measured
-  repeated verification outcome or an all-repeated read-only observation set.
+- some turn within the last `progress_window` turns (default `extend_by`) had an
+  activity signal that was not vetoed by a measured repeated verification
+  outcome or an all-repeated read-only observation set.
+
+The window exists because the budget boundary lands on whatever turn it lands
+on. A run that had been editing and then spent its last turns reading files back
+to repair a failed check would be stopped at its initial cap by a
+boundary-turn-only rule, even though the repair was in flight. The definition of
+a progressing turn is unchanged; only how far back the rule looks for one
+changed. A window in which no turn progresses still stops the loop, so a
+sustained thrash buys at most one extension before the counter passes the window,
+and `max` remains the outer bound in every case.
 
 The read-only veto is structural: tool annotations must classify every call as
 read-only, every result must succeed, and every exact result must already have

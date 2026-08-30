@@ -1,0 +1,82 @@
+// Run: harn test tests/agent/llm_dispatch_guard_test.harn
+//
+// A structurally empty request is a harness protocol failure and must never
+// reach a provider transport. The non-empty history control proves the caller
+// seam is live rather than letting an uninvoked mock read as success.
+import { agent_invoke_llm } from "std/agent/llm_dispatch"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn _increment(runtime: HarnessRuntime, cell: unknown) {
+  const snapshot = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snapshot, snapshot.value + 1)
+}
+
+pipeline test_empty_request_fails_before_provider_dispatch(harness: Harness, task: unknown) {
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "empty-request-calls-" + harness.random.uuid(), initial: 0},
+  )
+  const caller = { _call ->
+    _increment(harness.runtime, calls)
+    return {ok: true, value: {text: "unexpected", provider: "mock", model: "mock"}}
+  }
+  const outcome = try {
+    agent_invoke_llm(harness, "  ", nil, {_llm_caller: caller, messages: []})
+  }
+  assert(is_err(outcome), "an empty request must fail closed")
+  const error = unwrap_err(outcome)
+  assert_eq(error.category, "agent_loop_protocol_failure")
+  assert_eq(error.reason, "empty_provider_request")
+  assert_eq(error.terminal_class, "agent_loop_protocol_failure")
+  assert_eq(harness.runtime.shared_snapshot(calls).value, 0)
+}
+
+pipeline test_nonempty_history_reaches_provider_dispatch(harness: Harness, task: unknown) {
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "history-request-calls-" + harness.random.uuid(), initial: 0},
+  )
+  const caller = { _call ->
+    _increment(harness.runtime, calls)
+    return {ok: true, value: {text: "ok", provider: "mock", model: "mock"}}
+  }
+  const result = agent_invoke_llm(
+    harness,
+    "",
+    nil,
+    {_llm_caller: caller, messages: [{role: "user", content: "continue from this saved turn"}]},
+  )
+  assert(result.ok)
+  assert_eq(harness.runtime.shared_snapshot(calls).value, 1)
+}
+
+pipeline test_provider_error_projects_class_message_and_detail(harness: Harness, task: unknown) {
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "provider_error",
+      error: {
+        kind: "transient",
+        category: "provider_5xx",
+        reason: "upstream_unavailable",
+        provider: "mock",
+        model: "mock-model",
+        message: "provider capacity is temporarily unavailable",
+        detail: "request id req-42",
+      },
+    }
+  }
+  const opts: AgentSpec = {
+    provider: "mock",
+    model: "mock-model",
+    session_id: "provider-terminal-detail-" + harness.random.uuid(),
+    max_iterations: 1,
+    final_wrapup: false,
+    llm_caller: caller,
+  }
+  const result = agent_loop(harness, "Inspect the failure receipt.", nil, opts)
+  assert_eq(result.status, "provider_error")
+  assert_eq(result.terminal.kind, "provider_error")
+  assert_eq(result.terminal.terminalClass, "provider_unavailable")
+  assert_eq(result.terminal.message, "provider capacity is temporarily unavailable")
+  assert_eq(result.terminal.detail, "request id req-42")
+}

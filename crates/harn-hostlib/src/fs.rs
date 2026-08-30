@@ -342,13 +342,13 @@ pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
     guard.insert(session_id.to_string(), state);
     Ok(status)
 }
-
 /// Return native filesystem paths for every pending staged entry.
 ///
 /// Public staged status normalizes paths for the agent/tool surface. Internal
 /// callers that need to read from the filesystem must keep the native
 /// [`PathBuf`]s, especially on Windows where slash-normalized display strings
 /// are not always valid filesystem paths.
+#[cfg(any(feature = "ast", test))]
 pub(crate) fn staged_pending_paths(session_id: &str) -> Result<BTreeSet<PathBuf>, HostlibError> {
     validate_session_id(STATUS_BUILTIN, session_id)?;
     let mut guard = lock_sessions();

@@ -951,6 +951,18 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(1);
                 }
             }
+            ToolCommand::Run(run_args) => {
+                if let Err(error) = commands::tool::run_registry(&run_args).await {
+                    eprintln!("error: {error}");
+                    process::exit(error.exit_code);
+                }
+            }
+            ToolCommand::Schema(schema_args) => {
+                if let Err(error) = commands::tool::print_registry_schema(&schema_args).await {
+                    eprintln!("error: {error}");
+                    process::exit(error.exit_code);
+                }
+            }
         },
         // Hidden dev-only generators; see commands::generate.
         Command::DumpHighlightKeywords(_)
@@ -1042,12 +1054,16 @@ pub(crate) fn run_dap_adapter() {
 }
 
 pub(crate) async fn run_version(args: cli::VersionArgs) -> i32 {
+    let runtime_content = serde_json::to_string(harn_vm::runtime_content_fingerprint())
+        .expect("runtime content fingerprint serializes");
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =
         env_guard::ScopedEnvVar::set("HARN_BUILD_DESCRIPTION", env!("CARGO_PKG_DESCRIPTION"));
     let _revision =
         env_guard::ScopedEnvVar::set("HARN_BUILD_REVISION", env!("HARN_BUILD_REVISION"));
+    let _runtime_content =
+        env_guard::ScopedEnvVar::set("HARN_RUNTIME_CONTENT_FINGERPRINT", &runtime_content);
     let argv = if args.json {
         vec!["--json".to_string()]
     } else {

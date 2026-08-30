@@ -534,6 +534,8 @@ pub fn __agent_loop_budget_error_projection(error: unknown) -> dict {
     session_cost_usd: error?.session_cost_usd,
     projected_input_tokens: error?.projected_input_tokens,
     projected_output_tokens: error?.projected_output_tokens,
+    projection_basis: error?.projection_basis,
+    headroom_usd: error?.headroom_usd,
     provider: error?.provider,
     model: error?.model,
   }

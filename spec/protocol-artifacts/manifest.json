@@ -542,7 +542,8 @@
       "user_policy",
       "managed_policy",
       "runtime_policy",
-      "host_unavailable"
+      "host_unavailable",
+      "auto_reviewer"
     ],
     "toolPermissionGrantExpiries": [
       "after_dispatch",
@@ -571,7 +572,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.123-dev",
+  "artifactVersion": "0.10.124-dev",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",

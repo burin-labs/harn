@@ -1164,12 +1164,12 @@ mod tests {
 
     #[path = "structured_output_tests.rs"]
     mod structured_output;
-
     fn env(index: u64, event: AgentEvent) -> PersistedAgentEvent {
         PersistedAgentEvent {
             index,
             emitted_at_ms: 0,
             frame_depth: None,
+            execution_id: None,
             event,
         }
     }
