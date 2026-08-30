@@ -57,9 +57,12 @@ pub fn validate_execution_evidence(
 pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceValidationError> {
     let valid = candidate
         .strip_prefix(EXECUTION_ID_PREFIX)
-        .and_then(|value| uuid::Uuid::parse_str(value).ok())
-        .is_some_and(|value| {
-            value.get_version_num() == 7 && value.get_variant() == uuid::Variant::RFC4122
+        .is_some_and(|raw| {
+            uuid::Uuid::parse_str(raw).is_ok_and(|value| {
+                raw == value.hyphenated().to_string()
+                    && value.get_version_num() == 7
+                    && value.get_variant() == uuid::Variant::RFC4122
+            })
         });
     valid
         .then_some(())
@@ -113,6 +116,8 @@ mod tests {
     fn rejects_non_v7_and_non_rfc_execution_ids() {
         for invalid in [
             "cloud-run-id",
+            "hxe-019C13E0-8080-7000-8000-000000000001",
+            "hxe-019c13e0808070008000000000000001",
             "hxe-019c13e0-8080-4000-8000-000000000001",
             "hxe-019c13e0-8080-7000-c000-000000000001",
         ] {
