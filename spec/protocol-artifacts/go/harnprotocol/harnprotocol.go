@@ -14,7 +14,7 @@ import (
 )
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.122-dev"
+const ArtifactVersion = "0.10.123-dev"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -1422,6 +1422,49 @@ type ACPWorkerUpdate struct {
 	Metadata      json.RawMessage    `json:"metadata,omitempty"`
 	Audit         json.RawMessage    `json:"audit,omitempty"`
 	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+const HarnPreparedSessionSchema = "harn.prepared_session.v1"
+
+var HarnPreparedSessionStates = []string{"needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal"}
+var HarnPreparedSessionCommands = []string{"approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"}
+
+type HarnPreparedSessionApprovalDecision struct {
+	BatchFingerprint string `json:"batch_fingerprint"`
+	Approved         bool   `json:"approved"`
+	Decider          string `json:"decider"`
+}
+type HarnPreparedSessionBinding struct {
+	SessionID            string          `json:"session_id"`
+	WorkspaceFingerprint string          `json:"workspace_fingerprint"`
+	Runtime              json.RawMessage `json:"runtime"`
+	Consumer             json.RawMessage `json:"consumer"`
+}
+type HarnPreparedRuntimeAttachment struct {
+	SessionID            string          `json:"session_id"`
+	WorkspaceFingerprint string          `json:"workspace_fingerprint"`
+	Runtime              json.RawMessage `json:"runtime"`
+	Consumer             json.RawMessage `json:"consumer"`
+}
+type HarnPreparedSessionLease struct {
+	Schema             string                               `json:"schema"`
+	SessionID          string                               `json:"session_id"`
+	SessionFingerprint string                               `json:"session_fingerprint"`
+	PlanFingerprint    string                               `json:"plan_fingerprint"`
+	Binding            HarnPreparedSessionBinding           `json:"binding"`
+	Intent             json.RawMessage                      `json:"intent"`
+	Approval           *HarnPreparedSessionApprovalDecision `json:"approval,omitempty"`
+	IssuedAtMs         int                                  `json:"issued_at_ms"`
+	ExpiresAtMs        int                                  `json:"expires_at_ms"`
+}
+type HarnPreparedSessionUpdate struct {
+	State       string                    `json:"state"`
+	SessionID   string                    `json:"session_id"`
+	Batch       json.RawMessage           `json:"batch,omitempty"`
+	Lease       *HarnPreparedSessionLease `json:"lease,omitempty"`
+	Diagnostics []json.RawMessage         `json:"diagnostics,omitempty"`
+	Receipt     json.RawMessage           `json:"receipt,omitempty"`
+	Outcome     json.RawMessage           `json:"outcome,omitempty"`
 }
 
 const HarnSessionRecapQueryMethod = "harn.session_recap.query"

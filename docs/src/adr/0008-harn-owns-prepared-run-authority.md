@@ -6,7 +6,10 @@ Accepted on 2026-08-14 for
 [#6662](https://github.com/burin-labs/harn/issues/6662), and extended by
 [#6666](https://github.com/burin-labs/harn/issues/6666),
 [#6667](https://github.com/burin-labs/harn/issues/6667), and
-[#6860](https://github.com/burin-labs/harn/issues/6860).
+[#6860](https://github.com/burin-labs/harn/issues/6860), then extended with
+prepared sessions and provider identity consumption by
+[#6674](https://github.com/burin-labs/harn/issues/6674) and
+[#6675](https://github.com/burin-labs/harn/issues/6675).
 
 ## Context
 
@@ -68,9 +71,16 @@ effect. Terminal receipts record requested, granted, used, denied, and unused
 authority plus the decider and policy evidence, without secret material.
 
 Dynamic needs use a typed `AuthorityLeaseDelta`. A delta is bound to its parent
-lease and may only attenuate an existing requirement. Widening requires a new
-prepared run so a delta cannot silently turn an approved envelope into a larger
-one.
+lease. Attenuations can be admitted immediately. A prepared session groups a
+widening into one fingerprinted semantic approval batch, and only an exact
+persisted approval adds it to the live envelope. A denied widening leaves the
+parent session usable.
+
+`PreparedSession` owns the versioned host/session state machine around
+`PreparedRun`: grouped approval, a fingerprinted value-free session lease,
+exact runtime/workspace/session attach, replay prevention, reusable turns,
+typed deltas, stop/pivot, and terminal accounting. Generated host bindings and
+the JSON Schema project this single Rust-owned contract.
 
 Command-derived toolchain roots use a post-readiness discovery phase on the
 same lease. The plan reviews an exact probe command and root ceiling. The
@@ -102,8 +112,8 @@ This decision must be revisited if:
    normalized requirement;
 2. a host must expose a secret value in `RunIntent`, a lease, or a receipt;
 3. a serializable lease can authorize an operation after process restart;
-4. a useful dynamic requirement cannot be expressed as attenuation or a new
-   prepared run;
+4. a useful dynamic requirement cannot be expressed as attenuation or one
+   grouped prepared-session delta;
 5. a canonical run can perform credential resolution, model spend, subprocess
    launch, network I/O, or sandbox installation before its startup receipt; or
 6. Burin or Cloud must maintain a second authority taxonomy to present or

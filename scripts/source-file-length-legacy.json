@@ -50,7 +50,6 @@
     "crates/harn-vm/src/stdlib/concurrency.rs",
     "crates/harn-vm/src/stdlib/crypto.rs",
     "crates/harn-vm/src/stdlib/hitl.rs",
-    "crates/harn-vm/src/stdlib/host.rs",
     "crates/harn-vm/src/stdlib/http_response.rs",
     "crates/harn-vm/src/stdlib/io.rs",
     "crates/harn-vm/src/stdlib/json_stream.rs",

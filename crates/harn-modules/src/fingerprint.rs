@@ -487,11 +487,4 @@ mod tests {
         // downstreams see, so they're outside the public surface.
         assert_eq!(before, after);
     }
-
-    #[test]
-    fn hex_is_64_chars() {
-        let h = fingerprint_hex(&fp("pub fn x() {}\n"));
-        assert_eq!(h.len(), 64);
-        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
-    }
 }

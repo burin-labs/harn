@@ -460,7 +460,7 @@ pub enum PreparationOutcome {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuthorityLeaseDelta {
     pub(crate) parent_lease_fingerprint: String,
     pub(crate) requirement: AuthorityRequirement,

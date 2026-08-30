@@ -571,7 +571,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.122-dev",
+  "artifactVersion": "0.10.123-dev",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
@@ -834,6 +834,28 @@
     "documentSchema": "schemas/plan-document-v1.schema.json",
     "documentSchemaVersion": "harn.plan_document.v1"
   },
+  "preparedSession": {
+    "commands": [
+      "approval_decision",
+      "attach",
+      "turn",
+      "request_delta",
+      "stop",
+      "pivot",
+      "finish"
+    ],
+    "schema": "harn.prepared_session.v1",
+    "states": [
+      "needs_approval",
+      "ready",
+      "blocked",
+      "active",
+      "delta",
+      "stopped",
+      "pivoted",
+      "terminal"
+    ]
+  },
   "receipts": {
     "toolCallReceiptExecutors": [
       "harn",
@@ -912,6 +934,15 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/session_recap.rs"
+    },
+    {
+      "artifact": "schemas/prepared-session-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::prepared_run::PreparedSession",
+        "schema": "harn.prepared_session.v1"
+      },
+      "source": "crates/harn-vm/schemas/prepared-session-v1.schema.json"
     },
     {
       "artifact": "schemas/plan-document-v1.schema.json",

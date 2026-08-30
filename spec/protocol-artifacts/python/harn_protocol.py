@@ -165,7 +165,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.122-dev"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.123-dev"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -1558,6 +1558,47 @@ class ACPWorkerUpdate(_HarnDataclass):
     metadata: Optional[JsonValue] = None
     audit: Optional[JsonValue] = None
     _meta: Optional[HarnExtensionMeta] = None
+
+HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1"
+HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal")
+HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
+@dataclass
+class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    batch_fingerprint: str
+    approved: bool
+    decider: str
+@dataclass
+class HarnPreparedSessionBinding(_HarnDataclass):
+    session_id: str
+    workspace_fingerprint: str
+    runtime: JsonValue
+    consumer: JsonValue
+@dataclass
+class HarnPreparedRuntimeAttachment(_HarnDataclass):
+    session_id: str
+    workspace_fingerprint: str
+    runtime: JsonValue
+    consumer: JsonValue
+@dataclass
+class HarnPreparedSessionLease(_HarnDataclass):
+    schema: str
+    session_id: str
+    session_fingerprint: str
+    plan_fingerprint: str
+    binding: HarnPreparedSessionBinding
+    intent: JsonValue
+    issued_at_ms: int
+    expires_at_ms: int
+    approval: Optional[HarnPreparedSessionApprovalDecision] = None
+@dataclass
+class HarnPreparedSessionUpdate(_HarnDataclass):
+    state: str
+    session_id: str
+    batch: Optional[JsonValue] = None
+    lease: Optional[HarnPreparedSessionLease] = None
+    diagnostics: Optional[List[JsonValue]] = None
+    receipt: Optional[JsonValue] = None
+    outcome: Optional[JsonValue] = None
 
 
 HARN_SESSION_RECAP_QUERY_METHOD: str = "harn.session_recap.query"

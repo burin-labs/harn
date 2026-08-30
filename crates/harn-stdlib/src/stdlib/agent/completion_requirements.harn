@@ -18,6 +18,10 @@ pub type CompletionRequirementStatus = {
   met: bool,
   evidence_refs: list<int>,
   status: CompletionRequirementRowStatus,
+  // The evidence kinds this item accepts, carried on the row so pending
+  // feedback can name them. Without this a rejected item can only be echoed
+  // back as its own text, which tells the actor nothing it did not already know.
+  evidence_roles: list<CompletionRequirementEvidenceRole>,
 }
 
 pub type CompletionRequirementReport = {
@@ -42,8 +46,16 @@ pub type CompletionRequirementEvidenceRecord = {
   measurement?: string,
 }
 
+// The judge is shown one packet whose `actions` and `requirement_evidence`
+// both carry a field named `evidence_index`, in two disjoint namespaces
+// (actions count up from zero; typed records count down from -1). A model that
+// cites a real tool action alongside a typed record is reading the packet it
+// was given, so an action index has to be recognized here rather than read as
+// a citation of nothing.
 pub type CompletionRequirementEvidencePacket = {
   requirement_evidence?: list<CompletionRequirementEvidenceRecord>,
+  actions?: list,
+  fallback_observations?: list,
 }
 
 fn completion_requirement_evidence_role(value: unknown) -> CompletionRequirementEvidenceRole? {
@@ -61,6 +73,10 @@ fn completion_requirement_evidence_role(value: unknown) -> CompletionRequirement
 
 fn completion_requirement_evidence_roles(raw: unknown) -> list<CompletionRequirementEvidenceRole> {
   if raw == nil {
+    // `mutation_summary` is deliberately NOT in the default. The packet ships
+    // one so a requirement that opts in via `evidence_roles` can cite it;
+    // having changed a file is not evidence that an undeclared requirement was
+    // met. See `test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement`.
     let all_roles: list<CompletionRequirementEvidenceRole> = []
     all_roles = all_roles + ["assistant_output"]
     return all_roles + ["deterministic_verification"]
@@ -250,6 +266,48 @@ fn completion_requirement_evidence_matches(
   return matches
 }
 
+fn completion_requirement_action_indices(packet: CompletionRequirementEvidencePacket) -> list<int> {
+  let indices: list<int> = []
+  for action in (packet.actions ?? []) + (packet.fallback_observations ?? []) {
+    if type_of(action?.evidence_index) == "int" && !indices.contains(action.evidence_index) {
+      indices = indices + [action.evidence_index]
+    }
+  }
+  return indices
+}
+
+fn completion_requirement_record_qualifies(
+  record: CompletionRequirementEvidenceRecord,
+  allowed_roles: list<CompletionRequirementEvidenceRole>,
+) -> bool {
+  const role = completion_requirement_evidence_role(record?.role)
+  if role == nil || !allowed_roles.contains(role) || record?.supports_completion != true
+    || type_of(record?.summary) != "string"
+    || trim(record.summary) == ""
+    || type_of(record?.representative_artifact_ids) != "list" {
+    return false
+  }
+  if role == "deterministic_verification" && record?.measurement != "passed" {
+    return false
+  }
+  if role == "mutation_summary"
+    && (type_of(record?.artifact_count) != "int" || record.artifact_count < 1
+      || type_of(record?.artifact_set_digest) != "string"
+      || trim(record.artifact_set_digest) == "") {
+    return false
+  }
+  return true
+}
+
+/**
+ * A row is supported when at least one citation resolves to a typed record
+ * with an allowed role. A citation of a tool action the packet itself listed is
+ * corroborating, not disqualifying: the two namespaces share the field name
+ * `evidence_index`, so treating an action reference as a citation of nothing
+ * rejects a well-formed assessment for a wire-vocabulary collision. A citation
+ * that resolves to nothing at all, or to a record whose role is disallowed or
+ * whose reading contradicts completion, still fails the row.
+ */
 fn completion_requirement_refs_supported(
   refs: list<int>,
   requirement: CompletionRequirement,
@@ -262,30 +320,66 @@ fn completion_requirement_refs_supported(
   if len(allowed_roles) == 0 {
     return false
   }
+  const action_indices = completion_requirement_action_indices(packet)
+  let qualifying = 0
   for evidence_index in refs {
     const matches = completion_requirement_evidence_matches(packet, evidence_index)
-    if len(matches) != 1 {
+    if len(matches) > 1 {
       return false
     }
-    const record = matches[0]
-    const role = completion_requirement_evidence_role(record?.role)
-    if role == nil || !allowed_roles.contains(role) || record?.supports_completion != true
-      || type_of(record?.summary) != "string"
-      || trim(record.summary) == ""
-      || type_of(record?.representative_artifact_ids) != "list" {
-      return false
+    if len(matches) == 1 {
+      // Indexing is fallible to the checker even where the length is known, and
+      // qualification takes a record rather than a maybe-record. Iterating the
+      // one-element list binds the element at its declared type instead of
+      // re-validating what `completion_requirement_evidence_matches` already
+      // guarantees.
+      for record in matches {
+        if !completion_requirement_record_qualifies(record, allowed_roles) {
+          return false
+        }
+      }
+      qualifying = qualifying + 1
+      continue
     }
-    if role == "deterministic_verification" && record?.measurement != "passed" {
-      return false
-    }
-    if role == "mutation_summary"
-      && (type_of(record?.artifact_count) != "int" || record.artifact_count < 1
-        || type_of(record?.artifact_set_digest) != "string"
-        || trim(record.artifact_set_digest) == "") {
+    if !action_indices.contains(evidence_index) {
       return false
     }
   }
-  return true
+  return qualifying >= 1
+}
+
+/**
+ * A deterministic verifier that ran and passed is a runtime fact, not a claim
+ * the judge establishes. When an item accepts verification evidence and the
+ * packet carries a passing reading, the item is satisfied by that receipt, so a
+ * citation the model formatted badly cannot veto settled work. The model must
+ * still report the item met; this removes the citation trap, not the judgment.
+ */
+fn completion_requirement_verified_by_receipt(
+  requirement: CompletionRequirement,
+  packet: CompletionRequirementEvidencePacket,
+) -> bool {
+  const allowed_roles = completion_requirement_evidence_roles(requirement.evidence_roles)
+  // The receipt settles an item whose evidence kind IS verification, never one
+  // that merely permits verification among other kinds. The default role set
+  // contains `deterministic_verification` alongside `assistant_output`, so
+  // testing only for its presence would let a passing verifier anywhere in the
+  // session satisfy "Answer the question." — an item the verifier says nothing
+  // about. Requiring the author to have narrowed the item to verification
+  // evidence is the opt-in that keeps this a binding, not a bypass.
+  // See `test_omitted_roles_do_not_let_mutation_summary_prove_any_requirement`.
+  if !allowed_roles.contains("deterministic_verification")
+    || allowed_roles.contains("assistant_output") {
+    return false
+  }
+  for record in packet.requirement_evidence ?? [] {
+    if completion_requirement_evidence_role(record?.role) == "deterministic_verification"
+      && record?.measurement == "passed"
+      && record?.supports_completion == true {
+      return true
+    }
+  }
+  return false
 }
 
 fn completion_requirement_matches(raw_rows: unknown, requirement_id: string) -> list {
@@ -333,11 +427,13 @@ pub fn completion_requirement_report(
       refs = completion_requirement_strict_refs(raw?.evidence_refs)
       if type_of(raw?.met) != "bool" || raw.met != true {
         status = "unmet"
-      } else if !completion_requirement_refs_well_formed(raw?.evidence_refs)
-        || !completion_requirement_refs_supported(refs, requirement, evidence_packet) {
-        status = "unsupported"
-      } else {
+      } else if completion_requirement_refs_well_formed(raw?.evidence_refs)
+        && completion_requirement_refs_supported(refs, requirement, evidence_packet) {
         status = "met"
+      } else if completion_requirement_verified_by_receipt(requirement, evidence_packet) {
+        status = "met"
+      } else {
+        status = "unsupported"
       }
     } else if len(matches) > 1 {
       status = "unsupported"
@@ -354,6 +450,7 @@ pub fn completion_requirement_report(
           met: met,
           evidence_refs: refs,
           status: status,
+          evidence_roles: completion_requirement_evidence_roles(requirement.evidence_roles),
         },
       ]
   }
@@ -388,10 +485,63 @@ pub fn completion_requirement_report(
  * @api_stability: experimental
  * @example: completion_requirement_pending_feedback(report)
  */
+fn completion_requirement_status_phrase(status: CompletionRequirementRowStatus) -> string {
+  if status == "unmet" {
+    return "reported not met"
+  }
+  if status == "missing" {
+    return "not assessed"
+  }
+  if status == "unsupported" {
+    return "claimed met without usable evidence"
+  }
+  return "met"
+}
+
+fn completion_requirement_role_names(
+  roles: list<CompletionRequirementEvidenceRole>,
+) -> list<string> {
+  let names: list<string> = []
+  for role in roles {
+    names = names + [to_string(role)]
+  }
+  return names
+}
+
+fn completion_requirement_clip_name(name: string) -> string {
+  const limit = 180
+  if len(name) <= limit {
+    return name
+  }
+  return substring(name, 0, limit) + "…"
+}
+
 pub fn completion_requirement_pending_feedback(report: CompletionRequirementReport) -> string {
+  let parts: list<string> = []
+  let row_names: list<string> = []
+  for row in report.rows {
+    row_names = row_names + [row.name]
+    if row.met {
+      continue
+    }
+    parts = parts
+      + [
+        "`" + row.requirement_id + "` is " + completion_requirement_status_phrase(row.status)
+          + " — "
+          + completion_requirement_clip_name(row.name)
+          + " Accepted evidence kinds: "
+          + join(completion_requirement_role_names(row.evidence_roles), ", ")
+          + ".",
+      ]
+  }
+  for name in report.pending_names {
+    if !row_names.contains(name) {
+      parts = parts + [name + "."]
+    }
+  }
   return "Completion rejected: " + to_string(report.pending_count)
-    + " pending or invalid assessment(s) across "
+    + " of "
     + to_string(report.required_count)
-    + " required acceptance item(s): "
-    + join(report.pending_names, "; ")
+    + " acceptance item(s) still pending. "
+    + join(parts, " ")
 }

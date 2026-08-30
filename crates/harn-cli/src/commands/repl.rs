@@ -477,7 +477,7 @@ async fn run_repl_interactive() {
 
 #[cfg(test)]
 mod tests {
-    use super::{repl_builtin_names, scan_input_state, HarnCompleter, HarnValidator};
+    use super::{repl_builtin_names, scan_input_state, HarnCompleter};
 
     #[test]
     fn completer_returns_fresh_keyword_suggestions() {
@@ -517,12 +517,6 @@ mod tests {
         assert!(!builtins.iter().any(|name| name == "http_get"));
         assert!(builtins.iter().any(|name| name == "uuid"));
         assert!(!builtins.iter().any(|name| name == "workflow_execute"));
-    }
-
-    #[test]
-    fn validator_type_exists_for_reedline_integration() {
-        #[allow(clippy::no_effect_underscore_binding)]
-        let _validator = HarnValidator;
     }
 
     #[tokio::test]

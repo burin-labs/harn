@@ -1,0 +1,75 @@
+import { ChatSessionConfig, chat_session } from "std/llm/chat_session"
+import { with_llm_script } from "std/testing"
+
+/**
+ * History is append-only across turns, and `/clear` is the only thing that
+ * drops it.
+ *
+ * The assertions read the mock provider's captured requests after the real
+ * session loop returns. A dropped, reordered, or leaked message changes the
+ * exact role/content sequence and fails the run.
+ */
+fn __config() -> ChatSessionConfig {
+  return {
+    provider: "mock",
+    model: "mock-model",
+    label: "mock-model",
+    endpoint: nil,
+    system: nil,
+    stats: "off",
+  }
+}
+
+pipeline default(harness: Harness) {
+  // Turn two must carry turn one's question *and* its answer, in order,
+  // ahead of the new question.
+  harness.testing.stdin_set("first question\nsecond question\n")
+  with_llm_script(
+    harness.llm,
+    [{text: "answer one"}, {text: "answer two"}],
+    { ->
+      chat_session(harness, __config())
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 2, "two messages must produce two model calls"
+      const history = calls[1].messages
+      require len(history) == 3, "turn two must contain the complete first exchange"
+      require history[0].role == "user" && history[0].content == "first question",
+        "turn two must start with turn one's question"
+      require history[1].role == "assistant" && history[1].content == "answer one",
+        "turn two must retain turn one's answer"
+      require history[2].role == "user" && history[2].content == "second question",
+        "turn two must end with the new question"
+    },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== /clear starts the conversation over ===")
+  harness.testing.stdin_set("first question\n/clear\nsecond question\n")
+  with_llm_script(
+    harness.llm,
+    [{text: "answer one"}, {text: "after clear"}],
+    { ->
+      chat_session(harness, __config())
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 2, "clear must not issue a model call"
+      const cleared = calls[1].messages
+      require len(cleared) == 1, "clear must remove the prior exchange"
+      require cleared[0].role == "user" && cleared[0].content == "second question",
+        "the first post-clear request must contain only the new question"
+    },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== a system prompt reaches every turn ===")
+  harness.testing.stdin_set("hello\n")
+  with_llm_script(
+    harness.llm,
+    [{text: "ok"}],
+    { ->
+      chat_session(harness, __config() + {system: "answer only in haiku"})
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 1, "one message must produce one model call"
+      require calls[0].system == "answer only in haiku",
+        "the session system prompt must reach the provider request"
+    },
+  )
+  harness.testing.stdin_reset()
+}

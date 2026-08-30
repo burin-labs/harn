@@ -3,6 +3,7 @@ pub(crate) mod app;
 mod app_host_assets;
 pub(crate) mod bench;
 pub(crate) mod canon;
+pub(crate) mod chat;
 pub(crate) mod check;
 pub(crate) mod codemod;
 pub(crate) mod config_cmd;

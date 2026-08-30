@@ -1670,7 +1670,7 @@ mod tests {
         DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
-    use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
+    use harn_vm::llm_config::{HealthcheckDef, ProviderDef};
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -2012,15 +2012,6 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
             .as_deref()
             .map(|s| s.contains("rustup target add"))
             .unwrap_or(false));
-    }
-
-    #[test]
-    fn auth_env_multiple_variant_exists_for_provider_checks() {
-        let auth = AuthEnv::Multiple(vec!["FIRST".to_string(), "SECOND".to_string()]);
-        let AuthEnv::Multiple(names) = auth else {
-            panic!("expected multiple auth envs");
-        };
-        assert_eq!(names, vec!["FIRST".to_string(), "SECOND".to_string()]);
     }
 
     #[test]

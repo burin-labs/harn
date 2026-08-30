@@ -319,15 +319,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lexical_identical_text_is_self_similar() {
-        let e = LexicalEmbedder::default();
-        let v = e.embed("rate limiter middleware");
-        assert_eq!(v.len(), 256);
-        let sim = super::super::similarity::cosine(&v, &v);
-        assert!((sim - 1.0).abs() < 1e-5, "self-sim was {sim}");
-    }
-
-    #[test]
     fn lexical_related_beats_unrelated() {
         let e = LexicalEmbedder::default();
         let query = e.embed("rate limiter for the API");

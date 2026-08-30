@@ -95,6 +95,15 @@ pub(super) fn generate_manifest_for_version(
     }));
     schemas.push(json!({
         "protocol": "harn",
+        "source": "crates/harn-vm/schemas/prepared-session-v1.schema.json",
+        "artifact": harn_vm::prepared_run::PREPARED_SESSION_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::prepared_run::PreparedSession",
+            "schema": harn_vm::prepared_run::PREPARED_SESSION_SCHEMA,
+        },
+    }));
+    schemas.push(json!({
+        "protocol": "harn",
         "source": "crates/harn-vm/src/llm/plan/document.rs",
         "artifact": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT,
         "provenance": {
@@ -135,6 +144,11 @@ pub(super) fn generate_manifest_for_version(
             },
         },
         "schemas": schemas,
+        "preparedSession": {
+            "schema": harn_vm::prepared_run::PREPARED_SESSION_SCHEMA,
+            "states": super::prepared_session::PREPARED_SESSION_STATES,
+            "commands": super::prepared_session::PREPARED_SESSION_COMMANDS,
+        },
         "acp": {
             "schemaCompatibility": ACP_SCHEMA_COMPATIBILITY,
             "agentMethods": ACP_AGENT_METHODS,
