@@ -508,10 +508,10 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
 ) -> ToolDispatchOutcome {
     use super::tools::handle_tool_locally;
 
-    if tool_is_excluded_from_agent(tools_val, tool_name) {
+    if let Err(message) = require_agent_registry_membership(tools_val, tool_name) {
         return ToolDispatchOutcome {
             result: Err(VmError::CategorizedError {
-                message: format!("tool '{tool_name}' is not exposed to the agent/model adapter"),
+                message,
                 category: ErrorCategory::ToolRejected,
             }),
             executor: None,
@@ -837,32 +837,49 @@ pub(super) fn declared_executor_for_tool(
     None
 }
 
-fn tool_is_excluded_from_agent(tools_val: Option<&VmValue>, tool_name: &str) -> bool {
-    let Some(dict) = tools_val.and_then(VmValue::as_dict) else {
-        return false;
+fn require_agent_registry_membership(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+) -> Result<(), String> {
+    let Some(tools_val) = tools_val else {
+        // Legacy ambient dispatch is intentional only when no explicit tool
+        // registry was supplied. Once a registry exists, it is the complete
+        // callable model surface and missing names must not fall through to a
+        // local short-circuit or connected host bridge.
+        return Ok(());
+    };
+    let Some(dict) = tools_val.as_dict() else {
+        return Err(format!(
+            "tool '{tool_name}' cannot be dispatched because the active agent tool registry is malformed"
+        ));
     };
     let Some(VmValue::List(tools)) = dict.get("tools") else {
-        return false;
+        return Err(format!(
+            "tool '{tool_name}' cannot be dispatched because the active agent tool registry is malformed"
+        ));
     };
-    tools
-        .iter()
-        .find_map(|tool| {
-            let VmValue::Dict(entry) = tool else {
-                return None;
-            };
-            if entry.get("name").map(VmValue::display).as_deref() != Some(tool_name) {
-                return None;
-            }
-            Some(
-                crate::tool_registry::tool_entry_allows_audience(
-                    entry,
-                    crate::tool_registry::ToolAudience::Agent,
-                )
-                .map(|allowed| !allowed)
-                .unwrap_or(true),
-            )
-        })
-        .unwrap_or(false)
+    let Some(entry) = tools.iter().find_map(|tool| {
+        let VmValue::Dict(entry) = tool else {
+            return None;
+        };
+        (entry.get("name").map(VmValue::display).as_deref() == Some(tool_name)).then_some(entry)
+    }) else {
+        return Err(format!(
+            "tool '{tool_name}' is not present in the active agent tool registry"
+        ));
+    };
+    match crate::tool_registry::tool_entry_allows_audience(
+        entry,
+        crate::tool_registry::ToolAudience::Agent,
+    ) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "tool '{tool_name}' is not exposed to the agent/model adapter"
+        )),
+        Err(error) => Err(format!(
+            "tool '{tool_name}' has invalid agent/model governance: {error}"
+        )),
+    }
 }
 
 /// Return the configured `mcp_server` name on `tool_name`'s entry, set
@@ -1505,7 +1522,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn forged_call_cannot_dispatch_a_tool_excluded_from_the_agent() {
+    async fn projected_registry_blocks_excluded_host_bridge_fallthrough() {
         let bridge_called = Arc::new(AtomicBool::new(false));
         let writer_called = Arc::clone(&bridge_called);
         let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
@@ -1529,7 +1546,12 @@ mod tests {
             crate::value::intern_key("governance"),
             VmValue::dict(governance),
         );
-        let tools = tools_dict(vec![("operator_inspect", entry)]);
+        let raw_tools = tools_dict(vec![("operator_inspect", entry)]);
+        let tools = crate::tool_registry::project_tools_for_audience(
+            &raw_tools,
+            crate::tool_registry::ToolAudience::Agent,
+        )
+        .expect("project registry");
 
         let outcome = dispatch_tool_execution(
             "operator_inspect",
@@ -1544,7 +1566,46 @@ mod tests {
         assert!(!bridge_called.load(std::sync::atomic::Ordering::SeqCst));
         assert!(outcome.executor.is_none());
         let error = outcome.result.unwrap_err().to_string();
-        assert!(error.contains("not exposed to the agent/model adapter"));
+        assert!(error.contains("not present in the active agent tool registry"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn projected_registry_blocks_excluded_local_short_circuit_fallthrough() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("private.txt");
+        std::fs::write(&path, "LOCAL_SHORT_CIRCUIT_RAN").expect("write fixture");
+
+        let mut governance = crate::value::DictMap::new();
+        governance.insert(
+            crate::value::intern_key("audiences"),
+            VmValue::List(Arc::new(vec![VmValue::String("cli".into())])),
+        );
+        let mut entry = crate::value::DictMap::new();
+        entry.insert(
+            crate::value::intern_key("governance"),
+            VmValue::dict(governance),
+        );
+        let raw_tools = tools_dict(vec![("read_file", entry)]);
+        let tools = crate::tool_registry::project_tools_for_audience(
+            &raw_tools,
+            crate::tool_registry::ToolAudience::Agent,
+        )
+        .expect("project registry");
+
+        let outcome = dispatch_tool_execution(
+            "read_file",
+            &serde_json::json!({"path": path}),
+            Some(&tools),
+            None,
+            0,
+            0,
+        )
+        .await;
+
+        assert!(outcome.executor.is_none());
+        let error = outcome.result.unwrap_err().to_string();
+        assert!(error.contains("not present in the active agent tool registry"));
+        assert!(!error.contains("LOCAL_SHORT_CIRCUIT_RAN"));
     }
 
     #[tokio::test(flavor = "current_thread")]
