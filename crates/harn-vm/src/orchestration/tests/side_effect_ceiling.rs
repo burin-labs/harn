@@ -338,3 +338,289 @@ fn trusted_bridge_depth_exempts_harness_state_reads_like_bridged_builtins() {
         "trusted bridge depth must exempt harness methods the same way it exempts bridged builtins"
     );
 }
+
+/// The agent-session control plane: the transcript bookkeeping the agent loop
+/// performs on its own behalf — opening the session a model call is recorded
+/// in, anchoring its workspace, forking it, closing it. Every entry takes a
+/// session id and declares only `state.*` effects.
+///
+/// Only the `write` / `mutate` half is enumerated, because only that half is
+/// ranked above `read_only` on the side-effect ladder. A read-only sibling
+/// needs no marker and gets none — a marker that changed nothing would read
+/// as audited while asserting nothing.
+///
+/// Two families are deliberately out:
+///
+///   * `harness.agent.state_*` — the DURABLE agent-state namespace. Its first
+///     argument is an fs-backed `resource` handle minted by `state_init` /
+///     `state_resume`, which declare `fs.mutate` and stay capped. Different
+///     resource, different owner.
+///   * `harness.agent.worker_*` / `pool_*` — delegated workers, which carry
+///     `worker.*` effects. Spawning a sub-agent is a real resource
+///     escalation, not loop bookkeeping.
+///
+/// `seed_from_jsonl` is out for the same reason: it reads an arbitrary file.
+fn agent_session_control_plane_writes() -> Vec<&'static str> {
+    const DURABLE_STATE_NAMESPACE: &[&str] = &[
+        "state_write",
+        "state_read",
+        "state_list",
+        "state_delete",
+        "state_handoff",
+    ];
+    // `all_builtin_manifest()` and not `all_builtin_defs()`. The latter holds
+    // only the `#[harn_builtin]`-emitted VM defs, which is 17 of these 27 —
+    // the contract-only `capability_method!` declarations are absent from it,
+    // so a census built on it silently cannot see ten of the methods it exists
+    // to police. The manifest is the union the enforcement index is built
+    // from, so this censuses exactly what `contract_effect_allowed_by_ceiling`
+    // will later consult. Aliases repeat a primary's contract under a second
+    // name; only the canonical entry owns the capability method.
+    let mut names: Vec<&'static str> = crate::stdlib::all_builtin_manifest()
+        .iter()
+        .filter(|entry| entry.is_canonical())
+        .filter_map(|entry| match entry.contract.exposure {
+            harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                capability: harn_builtin_meta::CapabilityId::Agent,
+                method,
+            } => Some((method, entry.contract.effects)),
+            _ => None,
+        })
+        .filter(|(method, effects)| {
+            !effects.is_empty()
+                && effects
+                    .iter()
+                    .all(|spec| spec.kind == harn_builtin_meta::EffectKind::State)
+                && effects.iter().any(|spec| {
+                    matches!(
+                        spec.access,
+                        harn_builtin_meta::EffectAccess::Write
+                            | harn_builtin_meta::EffectAccess::Mutate
+                    )
+                })
+                && !DURABLE_STATE_NAMESPACE.contains(method)
+        })
+        .map(|(method, _)| method)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Falsifier for the served-path blocker. `harn serve api` runs a turn under
+/// the session mode's autonomy tier, and every mode except `code` installs a
+/// `read_only` side-effect ceiling. Judged on that ladder,
+/// `state:mutate (agent-sessions)` ranks `workspace_write`, so the loop's own
+/// `harness.agent.open` was rejected before the first model call and every
+/// served turn died. `harn run` never saw it: it installs no ceiling at all.
+///
+/// Disarm by deleting `runtime_infrastructure` from `harness.agent.open` in
+/// `crates/harn-capability-contracts/src/ai.rs`; this fails, and the negative
+/// control below pins the exact message it fails with.
+#[test]
+fn agent_session_control_plane_survives_a_read_only_ceiling() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        ..Default::default()
+    });
+    let session = crate::value::VmValue::String("session-1".into());
+    let results: Vec<(&str, Result<(), crate::value::VmError>)> =
+        agent_session_control_plane_writes()
+            .into_iter()
+            .map(|method| {
+                let args = [
+                    session.clone(),
+                    session.clone(),
+                    session.clone(),
+                    session.clone(),
+                ];
+                (
+                    method,
+                    enforce_current_policy_for_capability(
+                        harn_builtin_meta::CapabilityId::Agent,
+                        method,
+                        &args,
+                    ),
+                )
+            })
+            .collect();
+    pop_execution_policy();
+
+    assert!(
+        results.len() >= 27,
+        "the control-plane census collapsed to {} entries; a census that measured \
+         nothing would pass this test vacuously",
+        results.len()
+    );
+    let rejected: Vec<String> = results
+        .iter()
+        .filter_map(|(method, result)| {
+            result
+                .as_ref()
+                .err()
+                .map(|error| format!("{method}: {error:?}"))
+        })
+        .collect();
+    assert!(
+        rejected.is_empty(),
+        "the agent loop must be able to run its own session control plane under the \
+         ceiling every non-`code` session mode installs; {} of {} rejected:\n  {rejected:#?}",
+        rejected.len(),
+        results.len(),
+    );
+}
+
+/// Negative control. Disarm the marker and the same ceiling must still reject
+/// the same call, with the message the served path actually reported.
+#[test]
+fn agent_open_without_the_marker_is_rejected_by_the_ladder() {
+    let contract = crate::stdlib::capability_method_manifest_entry(
+        harn_builtin_meta::CapabilityId::Agent,
+        "open",
+    )
+    .expect("declared agent.open contract")
+    .contract;
+    let disarmed = harn_builtin_meta::BuiltinContract {
+        runtime_infrastructure: false,
+        ..contract
+    };
+    let effect = runtime_effects_from_contract(contract.effects, &[])
+        .into_iter()
+        .next()
+        .expect("agent.open declares an effect");
+    let ceiling = CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        ..Default::default()
+    };
+
+    assert!(
+        super::super::contract_effect_allowed_by_ceiling(&effect, contract, &ceiling),
+        "the shipped contract must be admitted, or the control below proves nothing"
+    );
+    assert!(
+        !super::super::contract_effect_allowed_by_ceiling(&effect, disarmed, &ceiling),
+        "without the marker the ladder must still reject the agent-session write"
+    );
+
+    push_execution_policy(ceiling);
+    let live = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Agent,
+        "state_write",
+        &[crate::value::VmValue::String("durable-handle".into())],
+    );
+    pop_execution_policy();
+    let text = format!("{:?}", live.expect_err("durable state stays capped"));
+    assert!(
+        text.contains("exceeds the active effect ceiling"),
+        "unexpected rejection text: {text}"
+    );
+}
+
+/// The control that keeps the marker honest: it exempts the agent-session
+/// control plane from the ladder and NOTHING else about state.
+///
+/// The durable agent-state namespace is the sharpest possible sibling — same
+/// capability handle, same effect kind, same accesses, same ceiling. Only the
+/// declaration differs, because its first argument is an fs-backed `resource`
+/// handle rather than a session id. If this ever passes, the fix has been read
+/// as "state is open now" and the ceiling has stopped meaning anything.
+#[test]
+fn the_marker_does_not_open_durable_agent_state() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        ..Default::default()
+    });
+    let handle = crate::value::VmValue::String("durable-handle".into());
+    let admitted =
+        enforce_current_policy_for_capability(harn_builtin_meta::CapabilityId::Agent, "open", &[]);
+    let outcomes: Vec<(&str, bool)> = [
+        "state_init",
+        "state_resume",
+        "state_write",
+        "state_delete",
+        "state_handoff",
+    ]
+    .into_iter()
+    .map(|method| {
+        let args = [handle.clone(), handle.clone(), handle.clone()];
+        (
+            method,
+            enforce_current_policy_for_capability(
+                harn_builtin_meta::CapabilityId::Agent,
+                method,
+                &args,
+            )
+            .is_err(),
+        )
+    })
+    .collect();
+    pop_execution_policy();
+
+    assert!(
+        admitted.is_ok(),
+        "the session control plane must be admitted in the same breath, or this \
+         control proves nothing: {admitted:?}"
+    );
+    let leaked: Vec<&str> = outcomes
+        .iter()
+        .filter(|(_, refused)| !refused)
+        .map(|(method, _)| *method)
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "`runtime_infrastructure` must not become a durable-state write grant; \
+         these were admitted under a read_only ceiling: {leaked:#?}"
+    );
+}
+
+/// A capability-restricted ceiling still governs the control plane. The marker
+/// relaxes the coarse tool-invasiveness ladder, not the capability gate — a
+/// host that says "this run may not write state" must still be obeyed.
+#[test]
+fn the_marker_does_not_bypass_a_restricted_capability_ceiling() {
+    push_execution_policy(CapabilityPolicy {
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..Default::default()
+    });
+    let denied =
+        enforce_current_policy_for_capability(harn_builtin_meta::CapabilityId::Agent, "open", &[]);
+    pop_execution_policy();
+    assert!(
+        denied.is_err(),
+        "a ceiling that withholds state:write must still deny agent.open: {denied:?}"
+    );
+}
+
+/// Structural guard, not a spot check: a new agent-session control-plane
+/// method added without the marker is a new served-path outage, and it would
+/// look exactly like the 27 that carry it. Fail at the registry instead of at
+/// a customer's first turn.
+#[test]
+fn every_agent_session_control_plane_write_declares_the_marker() {
+    let census = agent_session_control_plane_writes();
+    assert!(
+        census.len() >= 27,
+        "the control-plane census collapsed to {} entries; it must not read empty \
+         and pass vacuously",
+        census.len()
+    );
+    let missing: Vec<&'static str> = census
+        .iter()
+        .filter(|method| {
+            !crate::stdlib::capability_method_manifest_entry(
+                harn_builtin_meta::CapabilityId::Agent,
+                method,
+            )
+            .expect("declared agent capability method")
+            .contract
+            .runtime_infrastructure
+        })
+        .copied()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these agent-session control-plane methods write session state but do not \
+         declare `runtime_infrastructure`, so a served turn under any non-`code` \
+         session mode will reject them:\n  {missing:#?}"
+    );
+}

@@ -1094,7 +1094,8 @@ capability_method!(
     "harness.agent.open",
     ["state.mutate@const=agent-sessions"],
     "__cap_agent_open(id?: string, opts?: dict) -> string",
-    "Open or create an agent session."
+    "Open or create an agent session.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_workspace_anchor,
@@ -1108,7 +1109,8 @@ capability_method!(
     "harness.agent.set_workspace_anchor",
     ["state.write@arg0"],
     "__cap_agent_set_workspace_anchor(id: string, anchor: any) -> bool",
-    "Set a session workspace anchor."
+    "Set a session workspace anchor.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_workspace_policy,
@@ -1122,21 +1124,24 @@ capability_method!(
     "harness.agent.set_workspace_policy",
     ["state.write@arg0"],
     "__cap_agent_set_workspace_policy(id: string, policy: dict) -> bool",
-    "Set a session workspace policy."
+    "Set a session workspace policy.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_add_root,
     "harness.agent.add_root",
     ["state.write@arg0"],
     "__cap_agent_add_root(id: string, root: string, opts?: dict) -> dict",
-    "Add a session workspace root."
+    "Add a session workspace root.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_remove_root,
     "harness.agent.remove_root",
     ["state.mutate@arg0"],
     "__cap_agent_remove_root(id: string, root: string) -> dict",
-    "Remove a session workspace root."
+    "Remove a session workspace root.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_list_roots,
@@ -1186,7 +1191,8 @@ capability_method!(
     "harness.agent.record_changed_path",
     ["state.write@arg1"],
     "__cap_agent_record_changed_path(path: string, session_id?: string) -> bool",
-    "Record a changed path for a session."
+    "Record a changed path for a session.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_actor_chain,
@@ -1221,98 +1227,112 @@ capability_method!(
     "harness.agent.set_scratchpad",
     ["state.write@arg0"],
     "__cap_agent_set_scratchpad(id: string, scratchpad: dict, opts?: dict) -> dict",
-    "Set the session scratchpad."
+    "Set the session scratchpad.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_clear_scratchpad,
     "harness.agent.clear_scratchpad",
     ["state.mutate@arg0"],
     "__cap_agent_clear_scratchpad(id: string, opts?: dict) -> dict",
-    "Clear the session scratchpad."
+    "Clear the session scratchpad.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_claim_tool_format,
     "harness.agent.claim_tool_format",
     ["state.mutate@arg0"],
     "__cap_agent_claim_tool_format(id: string, tool_format: string) -> nil",
-    "Claim a session tool format."
+    "Claim a session tool format.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_reset,
     "harness.agent.reset",
     ["state.mutate@arg0"],
     "__cap_agent_reset(id: string) -> nil",
-    "Reset a session."
+    "Reset a session.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_fork,
     "harness.agent.fork",
     ["state.read@arg0", "state.write@arg1"],
     "__cap_agent_fork(src: string, dst?: string) -> string",
-    "Fork a session."
+    "Fork a session.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_fork_at,
     "harness.agent.fork_at",
     ["state.read@arg0", "state.write@arg2"],
     "__cap_agent_fork_at(src: string, keep_first: int, dst?: string) -> string",
-    "Fork a session at a transcript position."
+    "Fork a session at a transcript position.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_rollback,
     "harness.agent.rollback",
     ["state.mutate@arg0"],
     "__cap_agent_rollback(id: string) -> dict",
-    "Roll back the last session mutation."
+    "Roll back the last session mutation.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_redo,
     "harness.agent.redo",
     ["state.mutate@arg0"],
     "__cap_agent_redo(id: string) -> dict",
-    "Redo a rolled-back session mutation."
+    "Redo a rolled-back session mutation.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_close,
     "harness.agent.close",
     ["state.mutate@arg0"],
     "__cap_agent_close(id: string, status?: any) -> nil",
-    "Close a session."
+    "Close a session.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_trim,
     "harness.agent.trim",
     ["state.mutate@arg0"],
     "__cap_agent_trim(id: string, keep_last: int) -> nil",
-    "Trim a session transcript."
+    "Trim a session transcript.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_attach,
     "harness.agent.attach",
     ["state.write@arg0"],
     "__cap_agent_attach(id: string, client_id: string, opts?: dict) -> dict",
-    "Attach a live client."
+    "Attach a live client.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_takeover,
     "harness.agent.takeover",
     ["state.mutate@arg0"],
     "__cap_agent_takeover(id: string, client_id: string, opts?: dict) -> dict",
-    "Transfer session ownership to a client."
+    "Transfer session ownership to a client.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_detach,
     "harness.agent.detach",
     ["state.mutate@arg0"],
     "__cap_agent_detach(id: string, client_id: string, opts?: dict) -> dict",
-    "Detach a live client."
+    "Detach a live client.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_heartbeat,
     "harness.agent.heartbeat",
     ["state.write@arg0"],
     "__cap_agent_heartbeat(id: string, client_id: string, opts?: dict) -> dict",
-    "Record a client heartbeat."
+    "Record a client heartbeat.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_live_clients,
@@ -1321,28 +1341,35 @@ capability_method!(
     "__cap_agent_live_clients(id: string) -> list",
     "List live session clients."
 );
-capability_method!(agent_client_inject_prompt, "harness.agent.client_inject_prompt", ["state.write@arg0"], "__cap_agent_client_inject_prompt(id: string, client_id: string, content: any, opts?: dict) -> nil", "Inject a client prompt.");
-capability_method!(agent_route_permission, "harness.agent.route_permission", ["state.mutate@arg0"], "__cap_agent_route_permission(id: string, client_id: string, request: any, opts?: dict) -> dict", "Route a permission request.");
+capability_method!(agent_client_inject_prompt, "harness.agent.client_inject_prompt", ["state.write@arg0"], "__cap_agent_client_inject_prompt(id: string, client_id: string, content: any, opts?: dict) -> nil", "Inject a client prompt.",
+    runtime_infrastructure
+);
+capability_method!(agent_route_permission, "harness.agent.route_permission", ["state.mutate@arg0"], "__cap_agent_route_permission(id: string, client_id: string, request: any, opts?: dict) -> dict", "Route a permission request.",
+    runtime_infrastructure
+);
 capability_method!(
     agent_inject,
     "harness.agent.inject",
     ["state.write@arg0"],
     "__cap_agent_inject(id: string, message: any) -> nil",
-    "Inject a session message."
+    "Inject a session message.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_post_event,
     "harness.agent.post_event",
     ["state.write@arg0"],
     "__cap_agent_post_event(id: string, kind: string, content: any, source?: any) -> nil",
-    "Post a durable session event."
+    "Post a durable session event.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_drain_inbox,
     "harness.agent.drain_inbox",
     ["state.mutate@arg0"],
     "__cap_agent_drain_inbox(id: string) -> list",
-    "Drain a session inbox."
+    "Drain a session inbox.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_seed_from_jsonl,
@@ -1356,14 +1383,16 @@ capability_method!(
     "harness.agent.reanchor",
     ["state.mutate@arg0"],
     "__cap_agent_reanchor(id: string, new_anchor: any, opts?: dict) -> dict",
-    "Reanchor a session workspace."
+    "Reanchor a session workspace.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_compact,
     "harness.agent.compact",
     ["state.mutate@arg0"],
     "__cap_agent_compact(id: string, opts?: dict) -> dict",
-    "Compact a session transcript."
+    "Compact a session transcript.",
+    runtime_infrastructure
 );
 capability_method!(
     agent_self_review,

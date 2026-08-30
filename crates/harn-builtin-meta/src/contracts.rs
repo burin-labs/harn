@@ -485,6 +485,26 @@ pub struct BuiltinContract {
     pub exposure: BuiltinExposure,
     pub effects: &'static [EffectSpec],
     pub effects_authorized_by: Option<EffectAuthorization>,
+    /// This operation is the agent runtime's own bookkeeping, not an action a
+    /// model chose to take.
+    ///
+    /// It changes exactly one thing: the coarse side-effect ladder
+    /// (`read_only` < `workspace_write` < `process_exec` < `network`) does not
+    /// rank these effects. That ladder answers "how much of the user's world
+    /// may a *tool* touch", and the runtime opening the session a model call
+    /// is recorded in is not a tool the model ran — but `state:mutate` ranked
+    /// `workspace_write` all the same, so a `read_only` ceiling rejected the
+    /// agent loop's own session lifecycle and killed the turn before its
+    /// first model call.
+    ///
+    /// Everything else still applies. A ceiling that restricts capabilities
+    /// governs these effects exactly as before, they stay in receipts and
+    /// lineage, and they stay in the effect record. This is not a way to make
+    /// a write invisible; it is a statement about *who* performed it.
+    ///
+    /// Distinct from [`EffectAuthorization`], which delegates an effect to
+    /// another capability grant and is deliberately limited to reads.
+    pub runtime_infrastructure: bool,
 }
 
 impl BuiltinContract {
@@ -492,24 +512,28 @@ impl BuiltinContract {
         exposure: BuiltinExposure::Undeclared,
         effects: &[],
         effects_authorized_by: None,
+        runtime_infrastructure: false,
     };
 
     pub const PURE: Self = Self {
         exposure: BuiltinExposure::PureGlobal,
         effects: &[],
         effects_authorized_by: None,
+        runtime_infrastructure: false,
     };
 
     pub const RUNTIME_INTERNAL: Self = Self {
         exposure: BuiltinExposure::RuntimeInternal,
         effects: &[],
         effects_authorized_by: None,
+        runtime_infrastructure: false,
     };
 
     pub const STDLIB_INTERNAL: Self = Self {
         exposure: BuiltinExposure::StdlibInternal,
         effects: &[],
         effects_authorized_by: None,
+        runtime_infrastructure: false,
     };
 
     pub const fn harness(
@@ -521,6 +545,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
             effects_authorized_by: None,
+            runtime_infrastructure: false,
         }
     }
 
@@ -546,6 +571,29 @@ impl BuiltinContract {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
             effects_authorized_by: Some(effects_authorized_by),
+            runtime_infrastructure: false,
+        }
+    }
+
+    /// A Harness method the agent runtime performs on its own behalf. See
+    /// [`BuiltinContract::runtime_infrastructure`] for exactly what this
+    /// relaxes and what it does not.
+    pub const fn harness_runtime_infrastructure(
+        capability: CapabilityId,
+        method: &'static str,
+        effects: &'static [EffectSpec],
+    ) -> Self {
+        assert!(
+            !effects.is_empty(),
+            "runtime infrastructure requires declared effects: the marker exempts \
+             effects from the side-effect ladder, so a contract with none is \
+             decorative and would read as audited while asserting nothing"
+        );
+        Self {
+            exposure: BuiltinExposure::HarnessMethod { capability, method },
+            effects,
+            effects_authorized_by: None,
+            runtime_infrastructure: true,
         }
     }
 
@@ -557,6 +605,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::CapabilityFunction { authority_argument },
             effects,
             effects_authorized_by: None,
+            runtime_infrastructure: false,
         }
     }
 
@@ -565,6 +614,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::PrivilegedWire,
             effects,
             effects_authorized_by: None,
+            runtime_infrastructure: false,
         }
     }
 

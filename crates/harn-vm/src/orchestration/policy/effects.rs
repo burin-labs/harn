@@ -736,10 +736,30 @@ pub(crate) fn contract_effect_allowed_by_ceiling(
             authority.operation,
         )
     });
-    effect_allowed_by_ceiling_with_authorization(effect, ceiling, explicitly_authorized)
+    if !effect_capability_allowed_by_ceiling(effect, ceiling, explicitly_authorized) {
+        return false;
+    }
+    // The side-effect ladder ranks how invasive a *model-facing tool* is. The
+    // agent runtime's own bookkeeping is not a tool the model ran, so a
+    // contract that says so is not ranked on it.
+    //
+    // Without this, `harness.agent.open` — `state:mutate (agent-sessions)`,
+    // which the ladder classifies `workspace_write` — was rejected under the
+    // `read_only` ceiling every non-`code` ACP session mode installs, and every
+    // served turn died before its first model call. `harn run` never saw it
+    // because it installs no ceiling at all.
+    //
+    // The capability gate above still applies in full: a ceiling that
+    // restricts `state`/`write` still denies these, and the effects stay in
+    // the record for receipts and lineage. This says who performed the write,
+    // not that there wasn't one.
+    if contract.runtime_infrastructure {
+        return true;
+    }
+    effect_within_side_effect_ceiling(effect, ceiling)
 }
 
-fn effect_allowed_by_ceiling_with_authorization(
+fn effect_capability_allowed_by_ceiling(
     effect: &EffectRecord,
     ceiling: &CapabilityPolicy,
     explicitly_authorized: bool,
@@ -751,13 +771,23 @@ fn effect_allowed_by_ceiling_with_authorization(
             return false;
         }
     }
-    if let Some(ceiling_level) = ceiling.side_effect_level.as_deref() {
-        let requested = side_effect_level_for(effect);
-        if requested_exceeds_ceiling(requested, ceiling_level) {
-            return false;
-        }
-    }
     true
+}
+
+fn effect_within_side_effect_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
+    let Some(ceiling_level) = ceiling.side_effect_level.as_deref() else {
+        return true;
+    };
+    !requested_exceeds_ceiling(side_effect_level_for(effect), ceiling_level)
+}
+
+fn effect_allowed_by_ceiling_with_authorization(
+    effect: &EffectRecord,
+    ceiling: &CapabilityPolicy,
+    explicitly_authorized: bool,
+) -> bool {
+    effect_capability_allowed_by_ceiling(effect, ceiling, explicitly_authorized)
+        && effect_within_side_effect_ceiling(effect, ceiling)
 }
 
 fn effect_capability_op(effect: &EffectRecord) -> (&'static str, Cow<'static, str>) {
