@@ -321,7 +321,9 @@ pub(super) fn equivalent_failover_requirements_for_options(
     provider_tool_types.sort();
     provider_tool_types.dedup();
     crate::llm_config::EquivalentModelRequirements {
-        context_tokens: Some(crate::llm::cost::project_llm_call_context_tokens(opts)),
+        context_tokens: Some(crate::llm::cost_context::project_llm_call_context_tokens(
+            opts,
+        )),
         responses_api: opts.api_mode == crate::llm::api::LlmApiMode::Responses,
         native_tools,
         text_tool_wire_format,

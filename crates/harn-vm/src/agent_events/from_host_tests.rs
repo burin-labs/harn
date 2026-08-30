@@ -532,6 +532,8 @@ fn from_host_deserializes_budget_events() {
             "session_cost_usd": 0.69,
             "projected_input_tokens": 12000,
             "projected_output_tokens": 4000,
+            "projection_basis": "observed",
+            "headroom_usd": 0.56,
             "provider": "openai",
             "model": "gpt-5.6-sol",
         }),
@@ -545,6 +547,8 @@ fn from_host_deserializes_budget_events() {
             session_cost_usd,
             projected_input_tokens,
             projected_output_tokens,
+            projection_basis,
+            headroom_usd,
             provider,
             model,
             ..
@@ -560,6 +564,8 @@ fn from_host_deserializes_budget_events() {
             assert_eq!(session_cost_usd, Some(0.69));
             assert_eq!(projected_input_tokens, Some(12000));
             assert_eq!(projected_output_tokens, Some(4000));
+            assert_eq!(projection_basis.as_deref(), Some("observed"));
+            assert_eq!(headroom_usd, Some(0.56));
             assert_eq!(provider.as_deref(), Some("openai"));
             assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
         }

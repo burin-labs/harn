@@ -124,6 +124,8 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             session_cost_usd,
             projected_input_tokens,
             projected_output_tokens,
+            projection_basis,
+            headroom_usd,
             provider,
             model,
         } => {
@@ -138,6 +140,8 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                 "sessionCostUsd": session_cost_usd,
                 "projectedInputTokens": projected_input_tokens,
                 "projectedOutputTokens": projected_output_tokens,
+                "projectionBasis": projection_basis,
+                "headroomUsd": headroom_usd,
                 "provider": provider,
                 "model": model,
             });
