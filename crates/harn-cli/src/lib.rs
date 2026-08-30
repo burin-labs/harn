@@ -106,12 +106,15 @@ pub fn run() {
 
     ensure_builtin_signatures_installed();
 
-    let runtime_mode = cli_runtime_mode(&raw_args);
-
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
         .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(move || {
+            // Parsing `Cli` materializes the largest command variant on the
+            // current stack. Keep both bootstrap parsing passes on the CLI's
+            // explicitly sized thread; the default Windows process stack is
+            // smaller and can overflow as the command surface grows.
+            let runtime_mode = cli_runtime_mode(&raw_args);
             let runtime = build_cli_runtime(runtime_mode);
             runtime.block_on(async_main(raw_args, runtime_mode));
             // Drain any queued OTLP exports while the tokio runtime
