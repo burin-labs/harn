@@ -353,9 +353,16 @@ pipeline test_repeated_monologue_gets_a_second_rung_that_drops_the_narration(
   with_llm_script(
     harness.llm,
     [
+      // The detector builds a no-progress streak only across turns whose
+      // token sets overlap by at least 0.8, so these narrations must stay
+      // near-identical. Rewriting them into distinct prose stops the streak
+      // from ever reaching the threshold and this test would then pass
+      // vacuously by never entering recovery at all. The marker on the third
+      // turn is one extra token, which keeps similarity above the threshold
+      // while staying greppable in the transcript.
       llm_text("I should inspect app/Models/Entry.php before editing."),
-      llm_text("I still need to inspect the Entry model before editing."),
-      llm_text("REPEATEDNARRATION I keep saying I will read the Entry model."),
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("REPEATEDNARRATION I should inspect app/Models/Entry.php before editing."),
       look_call("look_after_second_rung"),
       llm_text("Read the Entry model. ##DONE##"),
     ],
@@ -423,10 +430,14 @@ pipeline test_monologue_ladder_still_stops_when_every_rung_is_spent(harness: Har
   with_llm_script(
     harness.llm,
     [
+      // Near-identical on purpose: the no-progress streak only advances across
+      // turns whose token sets overlap by at least 0.8. Distinct prose here
+      // would never reach the threshold, and the test would pass for the wrong
+      // reason — never entering the ladder rather than exhausting it.
       llm_text("I should inspect app/Models/Entry.php before editing."),
-      llm_text("I still need to inspect the Entry model before editing."),
-      llm_text("I really do need to read the Entry model first."),
-      llm_text("Once more, I intend to read the Entry model."),
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("I should inspect app/Models/Entry.php before editing."),
     ],
     { ->
       const session = "monologue-ladder-exhausted-" + harness.random.uuid()
