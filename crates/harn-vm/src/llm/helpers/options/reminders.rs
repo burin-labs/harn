@@ -382,4 +382,48 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].body, "contract");
     }
+
+    /// The trace shape behind harn#7580, replayed at the seam that decides it.
+    ///
+    /// An operator steers mid-turn; the turn-end judge then vetoes, re-derives
+    /// acceptance from the ORIGINAL task, and its feedback is stamped
+    /// `corrective` under `runtime_feedback/<kind>` by
+    /// `crate::llm::agent_config::inject_agent_feedback`. The two carry
+    /// different dedupe keys, so both survive into one envelope and the model
+    /// is told two contradictory things in the same breath. Which one it
+    /// follows is decided entirely by the authority each carries.
+    ///
+    /// Before the fix the steer was a plain user message with no authority at
+    /// all, so the judge's corrective was the ranking instruction and the
+    /// model reverted. Delivering the steer as `contract` puts the operator
+    /// above the harness — the order the envelope instructions state — and
+    /// renders it first regardless of arrival order.
+    #[test]
+    fn an_operator_steer_outranks_a_judge_corrective_that_arrives_later() {
+        let mut steer = reminder(
+            "The operator redirected this run mid-turn. […] final reply must be exactly BRAVO",
+            Some("operator_steer/msg_inj_0199"),
+        );
+        steer.authority = DirectiveAuthority::Contract;
+        let mut veto = reminder(
+            "the final reply was 'BRAVO' not 'ALPHA'; call look to confirm",
+            Some("runtime_feedback/verify_completion"),
+        );
+        veto.authority = DirectiveAuthority::Corrective;
+
+        // Arrival order is the defect's order: the judge speaks last.
+        let out = dedupe_and_order_directives(vec![steer, veto]);
+        let authorities: Vec<&str> = out.iter().map(|r| r.authority.as_str()).collect();
+        assert_eq!(
+            authorities,
+            vec!["contract", "corrective"],
+            "the operator's steer must rank above a later judge corrective, and \
+             render first; got {out:#?}"
+        );
+        assert!(
+            out[0].body.contains("BRAVO"),
+            "the steer text must still be present at the next model call; got {:?}",
+            out[0].body
+        );
+    }
 }
