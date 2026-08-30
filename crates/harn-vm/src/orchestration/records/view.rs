@@ -284,6 +284,15 @@ pub struct RunViewOptions {
     pub run_path: Option<String>,
     pub last_event_id: Option<EventId>,
     pub prefix_hash: Option<String>,
+    pub artifact_paths: ArtifactPathVisibility,
+}
+
+/// Whether a run projection may expose host-local artifact locators.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArtifactPathVisibility {
+    #[default]
+    Hidden,
+    Local,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -331,6 +340,7 @@ pub fn build_run_view_with_path(run: &RunRecord, run_path: Option<impl Into<Stri
         run,
         RunViewOptions {
             run_path: run_path.map(Into::into),
+            artifact_paths: ArtifactPathVisibility::Local,
             ..RunViewOptions::default()
         },
     )
@@ -343,6 +353,7 @@ pub async fn build_run_view_with_event_log(
 ) -> Result<RunView, RunViewError> {
     let mut options = RunViewOptions {
         run_path: run_path.map(Into::into),
+        artifact_paths: ArtifactPathVisibility::Local,
         ..RunViewOptions::default()
     };
     if let Some(log) = log {
@@ -404,7 +415,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             finished_at: run.finished_at.clone(),
             duration_ms: run_duration_ms(run),
         },
-        evidence: project_evidence(run, &policy),
+        evidence: project_evidence(run, &policy, options.artifact_paths),
         projection: ProjectionInfo {
             projection_id: String::new(),
             projection_hash: None,
@@ -457,7 +468,11 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     view
 }
 
-fn project_evidence(run: &RunRecord, policy: &RedactionPolicy) -> super::ExecutionEvidenceRecord {
+fn project_evidence(
+    run: &RunRecord,
+    policy: &RedactionPolicy,
+    artifact_paths: ArtifactPathVisibility,
+) -> super::ExecutionEvidenceRecord {
     let mut evidence = run.evidence.clone();
     for span in &mut evidence.trace_spans {
         span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
@@ -468,7 +483,11 @@ fn project_evidence(run: &RunRecord, policy: &RedactionPolicy) -> super::Executi
         }
     }
     if let Some(recording) = &mut evidence.flight_recording {
-        recording.path = redact_bounded(&recording.path, policy, PREVIEW_LIMIT);
+        if artifact_paths == ArtifactPathVisibility::Hidden {
+            recording.path = None;
+        } else if let Some(path) = &mut recording.path {
+            *path = redact_bounded(path, policy, PREVIEW_LIMIT);
+        }
     }
     for gap in &mut evidence.gaps {
         gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
@@ -1346,6 +1365,50 @@ mod tests {
         assert_eq!(view.providers.len(), 1);
         assert!(view.projection.projection_id.starts_with("run_view:run_1:"));
         assert!(view.projection.projection_hash.is_some());
+    }
+
+    #[test]
+    fn public_view_hides_local_flight_path_while_local_view_can_open_it() {
+        let mut run = sample_run();
+        run.evidence.flight_recording = Some(crate::flight_recorder::FlightRecordingArtifact {
+            schema_version: crate::flight_recorder::FLIGHT_RECORDING_SCHEMA_VERSION,
+            execution_id: "hxe-view".to_string(),
+            format: crate::flight_recorder::FLIGHT_RECORDING_FORMAT.to_string(),
+            path: Some("/private/workspace/.harn/flight.json".to_string()),
+            content_hash: format!("blake3:{}", "a".repeat(64)),
+            byte_length: 10,
+            retained_events: 1,
+            dropped_events: 0,
+            value_policy: crate::flight_recorder::FlightValuePolicy::Omitted,
+        });
+
+        let public = build_run_view(&run);
+        assert_eq!(
+            public
+                .evidence
+                .flight_recording
+                .as_ref()
+                .and_then(|recording| recording.path.as_deref()),
+            None
+        );
+        assert_eq!(
+            run.evidence
+                .flight_recording
+                .as_ref()
+                .and_then(|recording| recording.path.as_deref()),
+            Some("/private/workspace/.harn/flight.json"),
+            "projection must not mutate the durable evidence record"
+        );
+
+        let local = build_run_view_with_path(&run, Some("runs/run_1.json"));
+        assert_eq!(
+            local
+                .evidence
+                .flight_recording
+                .as_ref()
+                .and_then(|recording| recording.path.as_deref()),
+            Some("/private/workspace/.harn/flight.json")
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 export type RunSummary = {
-  path: string
+  path: string | null
   id: string
   workflow_name: string
   status: string
