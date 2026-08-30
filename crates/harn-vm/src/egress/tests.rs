@@ -11,14 +11,22 @@ use std::sync::{Arc, Once};
 
 static_assertions::assert_not_impl_any!(EgressPolicyScope: Send, Sync);
 
-fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
-    // `test_env_guard` clears ambient `HARN_EGRESS_*` and resets policy.
-    let guard = test_env_guard();
-    let map = config
+/// The script-declared half of a composed policy, spelled the way a `.harn`
+/// caller declares it. Every composition test builds one, so it gets one
+/// owner instead of an inline array-to-map dance per test — which is also
+/// what tripped the single-item `into_iter` lint three times over.
+fn script_config(entries: &[(&str, VmValue)]) -> crate::value::DictMap {
+    entries
         .iter()
         .cloned()
         .map(|(key, value)| (key.to_string(), value))
-        .collect();
+        .collect()
+}
+
+fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
+    // `test_env_guard` clears ambient `HARN_EGRESS_*` and resets policy.
+    let guard = test_env_guard();
+    let map = script_config(config);
     let (policy, declared) = policy_from_config(&map).expect("policy parses");
     install_policy(policy, declared, "test").expect("policy installs");
     guard
@@ -888,12 +896,7 @@ fn environment_and_script_policies_compose_instead_of_refusing() {
     guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
     guard.set(HARN_EGRESS_DENY_ENV, "blocked-by-operator.example.test");
 
-    let script = [(
-        "allow".to_string(),
-        strings(&["allowed-by-script.example.test"]),
-    )]
-    .into_iter()
-    .collect();
+    let script = script_config(&[("allow", strings(&["allowed-by-script.example.test"]))]);
     let (policy, declared) = policy_from_config(&script).expect("script policy parses");
     install_policy(policy, declared, "stdlib").expect("a script policy composes onto the env one");
 
@@ -925,19 +928,14 @@ fn composition_cannot_loosen_a_restriction_another_source_declared() {
     guard.set(HARN_EGRESS_BLOCK_PRIVATE_ENV, "private");
     guard.set(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "true");
 
-    let script = [
+    let script = script_config(&[
+        ("default", VmValue::String(arcstr::ArcStr::from("allow"))),
         (
-            "default".to_string(),
-            VmValue::String(arcstr::ArcStr::from("allow")),
-        ),
-        (
-            "block_private".to_string(),
+            "block_private",
             VmValue::String(arcstr::ArcStr::from("off")),
         ),
-        ("allow_loopback".to_string(), VmValue::Bool(false)),
-    ]
-    .into_iter()
-    .collect();
+        ("allow_loopback", VmValue::Bool(false)),
+    ]);
     let (policy, declared) = policy_from_config(&script).expect("script policy parses");
     install_policy(policy, declared, "stdlib").expect("composes");
 
@@ -963,9 +961,7 @@ fn an_undeclared_script_axis_leaves_the_environment_axis_intact() {
     guard.set(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "true");
 
     // Declares `allow` only.
-    let script = [("allow".to_string(), strings(&["api.example.test"]))]
-        .into_iter()
-        .collect();
+    let script = script_config(&[("allow", strings(&["api.example.test"]))]);
     let (policy, declared) = policy_from_config(&script).expect("script policy parses");
     install_policy(policy, declared, "stdlib").expect("composes");
 
@@ -988,9 +984,7 @@ fn the_policy_receipt_names_every_contributing_source() {
     let guard = test_env_guard();
     guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
 
-    let script = [("allow".to_string(), strings(&["api.example.test"]))]
-        .into_iter()
-        .collect();
+    let script = script_config(&[("allow", strings(&["api.example.test"]))]);
     let (policy, declared) = policy_from_config(&script).expect("script policy parses");
     install_policy(policy, declared, "stdlib").expect("composes");
 
