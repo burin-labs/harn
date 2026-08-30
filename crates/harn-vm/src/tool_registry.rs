@@ -310,8 +310,11 @@ fn cli_spec(
     namespace: Option<&str>,
 ) -> Result<ToolCliSpec, VmError> {
     let default_command = namespace
-        .map(|namespace| vec![namespace.to_string(), name.to_string()])
-        .unwrap_or_else(|| vec![name.to_string()]);
+        .into_iter()
+        .chain(std::iter::once(name))
+        .flat_map(|part| part.split('.'))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let Some(value) = value else {
         return checked_cli_spec(default_command, false, name);
     };
@@ -705,6 +708,17 @@ mod tests {
         tool.insert("namespace".into(), string("widgets"));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(catalog.tools[0].cli.command, ["widgets", "get_widget"]);
+    }
+
+    #[test]
+    fn dotted_identity_defaults_to_a_nested_command_path() {
+        let catalog =
+            tool_registry_catalog(&registry(vec![entry("harn.code.search_examples", None)]))
+                .unwrap();
+        assert_eq!(
+            catalog.tools[0].cli.command,
+            ["harn", "code", "search_examples"]
+        );
     }
 
     #[test]

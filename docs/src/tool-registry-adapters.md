@@ -86,8 +86,10 @@ additional properties fail at the CLI boundary.
 
 `cli.command` must be a non-empty list of command names. A tool with no `cli`
 field defaults to `[namespace, name]` when `namespace` is present and `[name]`
-otherwise. `cli.hidden: true` removes it from generated help but does not block
-explicit invocation. Duplicate paths and leaf/parent path conflicts are errors.
+otherwise. Dots in an implicit namespace or tool name become nested commands,
+so `harn.code.search_examples` projects to `harn code search_examples`.
+`cli.hidden: true` removes it from generated help but does not block explicit
+invocation. Duplicate paths and leaf/parent path conflicts are errors.
 
 ## MCP projection
 
