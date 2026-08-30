@@ -160,9 +160,9 @@ fn workspace_toolchain_env_with_package_cache(
         ));
     }
 
-    // HOME is intentionally relocated, but immutable user toolchains and
-    // package-manager configuration still resolve through their existing
-    // process-only preset roots. Cargo's mutable registry/git cache already
+    // HOME is no longer relocated (see above), but these keys are still set
+    // explicitly so a child that inherits a relocated-looking environment from
+    // an outer harness still resolves the user's real toolchains. Cargo's mutable registry/git cache already
     // has the narrowly scoped write grants added in #5170; keeping CARGO_HOME
     // there also preserves private-registry configuration without copying
     // credentials into the workspace.
