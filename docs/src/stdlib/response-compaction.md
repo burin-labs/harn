@@ -38,15 +38,16 @@ const exact = response_compaction_read_exact(
 ## Contract
 
 - The exact typed value is written to an atomic filesystem cache below
-  `harness.fs.workspace_temp_dir()` and schema-validated on readback before a
-  model call can begin.
+  `harness.fs.workspace_temp_dir()`, then schema-validated and checked against
+  its canonical JSON digest on readback before a model call can begin.
 - `output.kind` is exactly `exact`, `summarized`, or `fallback`.
 - Summaries use a named catalog ladder. The cache identity includes the exact
   digest, summary schema, instructions, ladder, and token bound.
 - Only schema-valid summaries enter the cache. A malformed or failed summary
   returns the caller's typed fallback while `exact_ref` remains readable.
 - `exact_ref` contains no caller-controlled path. Readback derives the owned
-  workspace-temporary root and rejects malformed references as `broken`.
+  workspace-temporary root. Malformed references and schema-valid content
+  tampering both return `broken`.
 - TTL and LRU limits bound both exact and summary storage. Expired or evicted
   exact values read as `missing`, never as a successful empty value.
 - Receipts contain digests, byte counts, cache and route facts, and optional
