@@ -626,9 +626,8 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.cache_accounting_declared,
         true,
     );
-    // `status: "incomplete"` says only that generation stopped early. The
-    // nested reason owns why, so preserve it when present and retain status as
-    // the fallback for completed responses.
+    // `status: "incomplete"` says only that generation stopped early. Prefer
+    // its nested reason and retain status as the completed-response fallback.
     let stop_reason = json
         .get("incomplete_details")
         .and_then(|value| value.get("reason"))
