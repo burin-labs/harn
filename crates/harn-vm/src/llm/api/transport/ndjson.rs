@@ -132,6 +132,8 @@ where
     let mut blocks = Vec::new();
     let mut saw_done = false;
     let mut done_reason: Option<String> = None;
+    let mut response_id: Option<String> = None;
+    let mut provider_content_block_types: Vec<String> = Vec::new();
     let mut telemetry = ProviderTelemetry::default();
 
     loop {
@@ -169,6 +171,12 @@ where
         // `think: true` so thinking tokens aren't dropped.
         let content = json["message"]["content"].as_str().unwrap_or("");
         let thinking = json["message"]["thinking"].as_str().unwrap_or("");
+        if json["message"].get("content").is_some() {
+            push_distinct_block_type(&mut provider_content_block_types, "text");
+        }
+        if json["message"].get("thinking").is_some() {
+            push_distinct_block_type(&mut provider_content_block_types, "thinking");
+        }
         if !content.is_empty() {
             text.push_str(content);
             let _ = delta_tx.send(content.to_string());
@@ -186,6 +194,9 @@ where
 
         if let Some(m) = json["model"].as_str() {
             result_model = m.to_string();
+        }
+        if let Some(id) = json["id"].as_str().filter(|value| !value.is_empty()) {
+            response_id = Some(id.to_string());
         }
 
         if json["done"].as_bool() == Some(true) {
@@ -238,13 +249,18 @@ where
         return Err(empty_generation_error(
             provider,
             model,
-            ProviderUsageReceipt::new(
-                reported_input_tokens,
-                reported_output_tokens,
-                telemetry.provider_cost_usd,
-                false,
-            )
-            .with_cache(0, 0, telemetry.cache_accounting_declared, false),
+            ProviderResponseEnvelope::new(
+                response_id.as_deref(),
+                done_reason.as_deref(),
+                provider_content_block_types,
+                ProviderUsageReceipt::new(
+                    reported_input_tokens,
+                    reported_output_tokens,
+                    telemetry.provider_cost_usd,
+                    false,
+                )
+                .with_cache(0, 0, telemetry.cache_accounting_declared, false),
+            ),
             format!(
                 "ollama model {model} reported eval_count={output_tokens} but delivered no visible content or tool calls [ollama_empty_content_parser_bug]"
             ),
@@ -286,6 +302,12 @@ where
         logprobs: Vec::new(),
         telemetry,
     })
+}
+
+fn push_distinct_block_type(types: &mut Vec<String>, block_type: &str) {
+    if !types.iter().any(|existing| existing == block_type) {
+        types.push(block_type.to_string());
+    }
 }
 
 async fn next_ollama_ndjson_line<R>(

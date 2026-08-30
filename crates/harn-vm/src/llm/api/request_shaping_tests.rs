@@ -169,7 +169,12 @@ fn offthread_error_preserves_structured_completion_receipt() {
     let expected = crate::llm::api::empty_generation_error(
         "ollama",
         "stub-model",
-        crate::llm::usage::ProviderUsageReceipt::new(Some(5), Some(3), None, false),
+        crate::llm::api::ProviderResponseEnvelope::new(
+            None,
+            None,
+            Vec::new(),
+            crate::llm::usage::ProviderUsageReceipt::new(Some(5), Some(3), None, false),
+        ),
         "the provider committed no visible content".to_string(),
     );
 

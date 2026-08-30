@@ -14,7 +14,7 @@
           "io.modelcontextprotocol/protocolVersion": "2026-07-28",
           "io.modelcontextprotocol/clientInfo": {
             "name": "harn-conformance",
-            "version": "0.10.124-dev"
+            "version": "0.10.125-dev"
           },
           "io.modelcontextprotocol/clientCapabilities": {}
         }

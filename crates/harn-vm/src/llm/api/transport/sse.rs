@@ -625,6 +625,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut blocks: Vec<serde_json::Value> = Vec::new();
     let mut telemetry = ProviderTelemetry::default();
     let mut anth_request_id: Option<String> = None;
+    let mut response_envelope = super::response_envelope::StreamingResponseEnvelope::default();
     // Set once the provider echoes the fast-mode knob (`speed` /
     // `service_tier`) on a streamed event; drives premium-tier billing.
     let mut served_fast = false;
@@ -743,6 +744,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         }
         liveness.mark_partial_output();
         liveness.mark_first_frame();
+        response_envelope.observe_frame(&json);
         let managed_receipt_frame = managed_transport
             && json
                 .get(crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY)
@@ -796,6 +798,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 }
                 Some("content_block_start") => {
                     let block = &json["content_block"];
+                    response_envelope.observe_anthropic_block(block);
                     match block["type"].as_str() {
                         Some("tool_use") => {
                             let id = block["id"].as_str().unwrap_or("").to_string();
@@ -992,6 +995,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             let choice = &json["choices"][0];
             let delta = &choice["delta"];
 
+            response_envelope.observe_openai_delta(delta);
             if let Some(content) = delta["content"].as_str() {
                 let visible = oai_thinking_splitter.push(content);
                 if !visible.is_empty() {
@@ -1008,10 +1012,8 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             // Streaming deltas for `reasoning` (Ollama OpenAI-compat,
             // OpenRouter passthrough), `reasoning_content` (DashScope,
             // Together), and `reasoning_details` (MiniMax) arrive as
-            // token-sized fragments — `"Here"`,
-            // `"'s"`, `" a"`, `" thinking"`. Concatenate them verbatim;
-            // `extract_openai_message_field_as_text` + `append_paragraph`
-            // would `.trim()` each fragment (losing inter-token spaces)
+            // token-sized fragments. Concatenate them verbatim;
+            // message-level normalization would trim inter-token spaces
             // and inject a newline between every chunk, producing
             // one-token-per-line reasoning text like
             // `"The\ntask\nis\nto\nextend"`. The non-streaming response
@@ -1025,7 +1027,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 thinking_text.push_str(reasoning_delta);
                 append_coalesced_text_block(&mut blocks, "reasoning", reasoning_delta, "private");
             }
-
             // Only capture finish_reason once; OpenRouter can send
             // duplicates (qwen-code#2402) that truncate in-progress tool
             // calls.
@@ -1358,25 +1359,16 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         && tool_calls.is_empty()
         && !has_tool_search_block
     {
-        // Name the ACTUAL wire style, not a hardcoded "openai-compatible".
-        // This streaming parser handles BOTH the native Anthropic SSE shape
-        // and the OpenAI-compatible shape selected by the contract, so a
-        // native Anthropic empty-completion flake used to be mislabeled as
-        // "openai-compatible model", which sent a real root-cause hunt down
-        // the wrong (transport-routing) path. The `provider` id is the ground
-        // truth; the wire style disambiguates native vs. compat.
-        let wire_style = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
-            "anthropic-native"
-        } else {
-            "openai-compatible"
-        };
-        return Err(empty_generation_error(
-            provider,
-            model,
+        return Err(response_envelope.into_empty_generation_error(
+            super::response_envelope::EmptyGenerationContext {
+                provider,
+                model,
+                dialect,
+                body_response_id_fallback: anth_request_id.as_deref(),
+                stop_reason: stop_reason.as_deref(),
+                output_tokens,
+            },
             provider_usage,
-            format!(
-                "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
-            ),
         ));
     }
     // Deterministic upstream contract-violation backstop (streaming path).

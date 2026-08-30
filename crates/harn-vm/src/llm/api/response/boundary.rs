@@ -8,9 +8,9 @@
 //! content type silently subtracted from every turn until someone noticed the
 //! model "not doing what it said".
 //!
-//! One reporting function per drop shape, so each fall-through arm in
-//! `response.rs` stays a single readable line and the wording of these events
-//! has one owner.
+//! One reporting function per drop shape, so each fall-through arm in the
+//! provider response adapters stays a single readable line and the wording of
+//! these events has one owner.
 
 use serde_json::Value;
 

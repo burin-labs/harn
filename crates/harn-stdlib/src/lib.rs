@@ -117,6 +117,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "eval/hypothesis/workflow" => "stdlib/eval/hypothesis/workflow.harn",
     "eval/agreement" => "stdlib/stdlib_eval_agreement.harn",
     "runtime" => "stdlib/stdlib_runtime.harn",
+    "runtime/content_fingerprint" => "stdlib/runtime/content_fingerprint.harn",
     "io" => "stdlib/stdlib_io.harn",
     "net" => "stdlib/stdlib_net.harn",
     "command" => "stdlib/stdlib_command.harn",
