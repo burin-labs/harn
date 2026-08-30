@@ -90,7 +90,7 @@ fn main(harness: Harness) {
       require manifest.manifest.root == "transformed"
       require manifest.manifest.system_prompt_bytes == 0
       require compaction_calls[0].system == nil
-      require calls[2].mock_scope == "agent"
+      require calls[2].mock_scope == "agent.main"
       require contains(json_stringify(calls[2].messages), "retained goal and latest evidence"),
         "the immediately following agent request must contain the installed summary"
       harness.stdio.println(result.status)
