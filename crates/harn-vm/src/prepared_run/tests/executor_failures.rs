@@ -10,11 +10,12 @@ struct StructuredExecutorFailure {
 
 struct StructuredFailingExecutor;
 
+#[async_trait::async_trait]
 impl PreparedRunExecutor for StructuredFailingExecutor {
     type Output = ();
     type Error = StructuredExecutorFailure;
 
-    fn execute(&self, _authority: &mut AuthorityUse<'_>) -> Result<Self::Output, Self::Error> {
+    async fn execute(&self, _authority: &AuthorityUse) -> Result<Self::Output, Self::Error> {
         Err(StructuredExecutorFailure {
             input_tokens: 1_024,
             tool_events: vec!["read", "test"],
@@ -37,11 +38,11 @@ impl AuthorityReceiptSink for ToggleTerminalReceiptSink {
     }
 }
 
-#[test]
-fn structured_executor_failure_survives_the_prepared_run_boundary() {
+#[tokio::test]
+async fn structured_executor_failure_survives_the_prepared_run_boundary() {
     let (run, lease, _) = prepared(StructuredFailingExecutor);
 
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::ExecutorFailed { error, receipt } => {
             assert_eq!(
                 error,
@@ -60,8 +61,8 @@ fn structured_executor_failure_survives_the_prepared_run_boundary() {
     }
 }
 
-#[test]
-fn terminal_receipt_failure_stays_separate_from_executor_failures() {
+#[tokio::test]
+async fn terminal_receipt_failure_stays_separate_from_executor_failures() {
     let sink = Arc::new(ToggleTerminalReceiptSink::default());
     let run = PreparedRun::with_clock(
         FixtureExecutor {
@@ -74,7 +75,7 @@ fn terminal_receipt_failure_stays_separate_from_executor_failures() {
     let lease = approved_lease(&run, &intent(), &host_facts());
     sink.fail.store(true, Ordering::SeqCst);
 
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::AuthorityFailed { error, receipt } => {
             assert_eq!(
                 error,
@@ -98,7 +99,7 @@ fn terminal_receipt_failure_stays_separate_from_executor_failures() {
     let lease = approved_lease(&run, &intent(), &host_facts());
     sink.fail.store(true, Ordering::SeqCst);
 
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::ExecutorFailed { error, receipt } => {
             assert_eq!(error.input_tokens, 1_024);
             assert!(receipt
@@ -113,8 +114,8 @@ fn terminal_receipt_failure_stays_separate_from_executor_failures() {
     }
 }
 
-#[test]
-fn lease_failure_before_dispatch_is_not_an_executor_failure() {
+#[tokio::test]
+async fn lease_failure_before_dispatch_is_not_an_executor_failure() {
     let clock = Arc::new(AtomicU64::new(NOW_MS));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let run = PreparedRun::with_clock(
@@ -131,7 +132,7 @@ fn lease_failure_before_dispatch_is_not_an_executor_failure() {
     let lease = approved_lease(&run, &intent(), &host_facts());
     clock.store(DEADLINE_MS + 1, Ordering::SeqCst);
 
-    match run.execute(lease) {
+    match run.execute(lease).await {
         ExecutionOutcome::AuthorityFailed { error, receipt } => {
             assert_eq!(error, "authority lease expired before execution");
             assert!(!receipt.executor_invoked);

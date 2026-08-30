@@ -11,6 +11,7 @@ use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_typescript_external_action_types;
+use super::prepared_session::append_typescript_prepared_session_types;
 use super::session_recap::append_typescript_session_recap_types;
 use super::session_update_payloads::{
     append_typescript_session_update_payloads, typescript_session_update_union_members,
@@ -1182,6 +1183,7 @@ export interface HarnSessionTimelineUpdate {
 }
 ",
     );
+    append_typescript_prepared_session_types(&mut out);
     append_typescript_session_recap_types(&mut out);
     out
 }
