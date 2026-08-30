@@ -357,3 +357,41 @@ fn a_nested_policy_may_add_a_denial_and_may_never_drop_one() {
         "a nested request may add its own denial: {nested:?}"
     );
 }
+
+/// Adding a field to `ProcessSandboxPolicy` changes every workflow graph
+/// digest, and that is not obvious from either file.
+///
+/// `WorkflowGraph` embeds `CapabilityPolicy`, and `workflow_graph_digest` is a
+/// SHA-256 over the canonical graph's JSON. None of these fields carry
+/// `skip_serializing_if`, so an empty `read_deny_roots` still serializes and
+/// still moves the digest. That is why `read_deny_roots` repinned the
+/// quickstart digest in `docs/src/workflow-authoring-quickstart.md`.
+///
+/// This test exists so the next person who adds a field here learns the
+/// consequence from a failing assertion rather than from a docs gate.
+#[test]
+fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
+    let json = serde_json::to_value(ProcessSandboxPolicy::default()).expect("serialize");
+    let object = json.as_object().expect("object");
+    for field in [
+        "presets",
+        "read_roots",
+        "write_roots",
+        "read_deny_roots",
+        "allow_tcp_loopback",
+    ] {
+        assert!(
+            object.contains_key(field),
+            "`{field}` must appear even at its default, because workflow graph \
+             digests are taken over this serialization; adding a field here \
+             repins every pinned digest"
+        );
+    }
+    assert_eq!(
+        object.len(),
+        5,
+        "a field was added or removed: repin the quickstart graph_digest in \
+         docs/src/workflow-authoring-quickstart.md and \
+         scripts/check_docs_workflow_quickstart.harn"
+    );
+}

@@ -59,8 +59,14 @@ Per backend:
   `sandbox-exec` is last-match-wins, so position is the enforcement.
 - **Linux** has no deny rule. Landlock is allow-only, so a denial is expressed
   by not granting: `expand_around_denied` substitutes the siblings that do not
-  lead to the denial. It fails closed on an unlistable ancestor, and treats a
-  *missing* ancestor as nothing-to-subtract.
+  lead to the denial. An ancestor it cannot enumerate ends the walk, granting
+  nothing beneath it; any other enumeration error still fails closed.
+
+  The rule worth carrying to any allow-only backend: **"cannot enumerate" ends
+  the walk, it never refuses the spawn.** The absence of a grant is already the
+  denial, so stopping early is strictly narrower than continuing. Refusing
+  instead took every run down twice here, once for a missing `~/.kube` and once
+  for an unreadable `$HOME`, and gained no authority either time.
 - **Windows / OpenBSD** do not apply the denylist yet.
 
 ## When a toolchain command fails under an agent

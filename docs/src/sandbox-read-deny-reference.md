@@ -71,6 +71,11 @@ A host may add to this list through `read_deny_roots`. It cannot remove from it.
 | Windows | AppContainer | not yet |
 | OpenBSD | `unveil` | not yet |
 
+Windows and OpenBSD do not refuse the spawn either. The default denylist is
+never empty, so refusing on an unsupporting backend would refuse every spawn on
+that platform. The term is simply unenforced there, and saying so is worth more
+than a claim the code does not honor.
+
 `sandbox-exec` is last-match-wins, so on macOS the deny rules' **position** in
 the generated profile is the enforcement.
 
@@ -79,9 +84,15 @@ expresses a denial by not granting: it walks from the granted root toward each
 denied path and substitutes, at every level, the sibling entries that do not
 lead to the denial.
 
-- An unlistable ancestor **refuses the spawn** rather than granting the root.
-- A denial under a directory that does not exist costs nothing and ends the
-  walk.
+- An ancestor that cannot be enumerated **ends the walk**, granting nothing
+  beneath it and never the ancestor itself. That covers both a missing
+  directory (nothing below it to subtract) and an unreadable one (its children
+  cannot be granted, so granting none of them is exactly right). Ending early
+  is strictly narrower than continuing, so it is the safe direction on an
+  allow-only backend; refusing the spawn instead bought no authority and took
+  down every run whose `$HOME` the runtime could not list.
+- Any **other** enumeration error still refuses the spawn, so the relaxation
+  cannot widen into "any error means nothing to exclude".
 - Expansion is capped at `MAX_DENY_EXPANSION_RULES` (4096). Measured cost for
   the twelve defaults on a real home directory is 187 to 190 rules in 10 to 45
   ms; `report_default_denylist_expansion_cost` prints the number for the host
