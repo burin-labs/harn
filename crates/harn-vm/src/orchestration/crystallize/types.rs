@@ -41,6 +41,9 @@ pub(super) const DEFAULT_ROLLOUT_POLICY: &str = "shadow_then_canary";
 pub struct CrystallizationTrace {
     pub version: u32,
     pub id: String,
+    /// Harn-owned identity of the execution this trace was projected from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub source: Option<String>,
     pub source_hash: Option<String>,
     pub workflow_id: Option<String>,
