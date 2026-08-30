@@ -513,24 +513,106 @@ pipeline test_cold_graph(_task) { assert_eq(value_0(), 511) }
 }
 
 #[test]
-fn empty_user_suite_pins_default_latency_representation() {
+fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
     let temp = tempfile::TempDir::new().expect("tempdir");
+    let empty = temp.path().join("empty.harn");
+    let passing = temp.path().join("passing.harn");
+    let json_out = temp.path().join("report.json");
+    let junit = temp.path().join("report.xml");
+    std::fs::write(&empty, "fn helper() -> int { return 1 }\n").expect("write empty target");
+    std::fs::write(&passing, "pipeline test_passing(_task) { assert(true) }\n")
+        .expect("write passing target");
 
-    let output = Command::new(binary_path())
-        .args(["test", temp.path().to_str().unwrap()])
+    let rejected = Command::new(binary_path())
+        .args([
+            "test",
+            "--test-path",
+            empty.to_str().expect("empty target path is UTF-8"),
+            "--json-out",
+            json_out.to_str().expect("JSON report path is UTF-8"),
+            "--junit",
+            junit.to_str().expect("JUnit report path is UTF-8"),
+        ])
         .output()
-        .expect("spawn harn test");
+        .expect("spawn rejected empty user test");
 
-    assert!(
-        output.status.success(),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(
+        rejected.status.code(),
+        Some(harn_cli::exit::PROGRAM_FAILURE),
+        "an empty run is a program verdict, not setup failure; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&rejected.stdout),
+        String::from_utf8_lossy(&rejected.stderr),
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&rejected.stdout);
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
     assert!(stdout.contains("No test pipelines found"), "{stdout}");
     assert!(
         stdout.contains("Latency: p50=n/a  p90=n/a (0 samples)"),
         "{stdout}"
+    );
+    assert!(stderr.contains("0 user tests ran"), "{stderr}");
+    assert!(stderr.contains(&empty.display().to_string()), "{stderr}");
+    assert!(stderr.contains("--allow-empty"), "{stderr}");
+
+    let rejected_report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_out).expect("read rejected JSON report"))
+            .expect("parse rejected JSON report");
+    assert_eq!(rejected_report["summary"]["total"], 0);
+    assert_eq!(rejected_report["summary"]["passed"], 0);
+    assert_eq!(rejected_report["summary"]["failed"], 0);
+    assert_eq!(rejected_report["cases"], serde_json::json!([]));
+    let rejected_junit = std::fs::read_to_string(&junit).expect("read rejected JUnit report");
+    assert!(rejected_junit.contains(r#"tests="0""#), "{rejected_junit}");
+    assert!(!rejected_junit.contains("<testcase"), "{rejected_junit}");
+
+    let allowed = Command::new(binary_path())
+        .args([
+            "test",
+            "--test-path",
+            empty.to_str().expect("empty target path is UTF-8"),
+            "--json-out",
+            json_out.to_str().expect("JSON report path is UTF-8"),
+            "--junit",
+            junit.to_str().expect("JUnit report path is UTF-8"),
+            "--allow-empty",
+        ])
+        .output()
+        .expect("spawn explicitly allowed empty user test");
+    assert!(
+        allowed.status.success(),
+        "the identical target must succeed with --allow-empty; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&allowed.stdout),
+        String::from_utf8_lossy(&allowed.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&allowed.stdout).contains("No test pipelines found"),
+        "{}",
+        String::from_utf8_lossy(&allowed.stdout)
+    );
+    assert!(
+        allowed.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+
+    let positive = Command::new(binary_path())
+        .args([
+            "test",
+            "--test-path",
+            passing.to_str().expect("passing target path is UTF-8"),
+        ])
+        .output()
+        .expect("spawn non-empty positive control");
+    assert!(
+        positive.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&positive.stdout),
+        String::from_utf8_lossy(&positive.stderr),
+    );
+    let positive_stdout = String::from_utf8_lossy(&positive.stdout);
+    assert!(
+        positive_stdout.contains("1 passed, 1 total"),
+        "{positive_stdout}"
     );
 }
 
