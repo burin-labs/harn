@@ -696,6 +696,11 @@ if ! grep -Fq './scripts/snapshot_harn_bin.sh "$harn_bin" "$stable_root/harn-bin
   cat "$make_all" >&2
   exit 1
 fi
+if ! grep -Fq "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt" "$make_all"; then
+  echo "all did not republish the canonical binary receipt after recursive Cargo gates" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
 
 make_provider_targets="$tmp_root/make-provider-targets.txt"
 make -C "$repo_root" -n \
