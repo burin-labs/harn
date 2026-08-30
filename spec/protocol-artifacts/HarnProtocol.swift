@@ -1687,6 +1687,8 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
     public var reason: String
     public var owner: HarnAgentTerminalOwner
     public var terminalClass: HarnAgentTerminalClass?
+    public var message: String?
+    public var detail: String?
 }
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {

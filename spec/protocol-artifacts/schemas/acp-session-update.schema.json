@@ -276,7 +276,9 @@
             "parse_dropped",
             "generic_throw"
           ]
-        }
+        },
+        "message": { "type": "string" },
+        "detail": { "type": "string" }
       }
     },
     "JsonRpcErrorResponse": {
