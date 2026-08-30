@@ -534,6 +534,21 @@ fn rejects_a_wrong_run_identity() {
 }
 
 #[test]
+fn rejects_a_claimed_non_harn_execution_identity() {
+    let artifact = artifact("run-1", &text_channel_rows());
+    let mut run: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&artifact.run_path).unwrap()).unwrap();
+    run["evidence"] = json!({
+        "schema_version": crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+        "execution_id": "external-run-1",
+    });
+    std::fs::write(&artifact.run_path, serde_json::to_vec_pretty(&run).unwrap()).unwrap();
+
+    let error = project_path(&artifact.run_path).unwrap_err();
+    assert_eq!(error.kind, "invalid_execution_evidence");
+}
+
+#[test]
 fn rejects_a_wrong_session_identity() {
     let artifact = artifact("run-1", &text_channel_rows());
     let mut request = TrainingExampleRequest::new(&artifact.run_path);
