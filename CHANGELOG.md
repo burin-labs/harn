@@ -9,6 +9,160 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.123
+
+### Breaking
+
+- **Run/session view spans now live at `evidence.trace_spans` (#7615).** The
+  execution-evidence envelope is the single persisted owner for execution
+  identity, span hierarchy, flight artifacts, and explicit collection gaps.
+  Consumers of the former top-level run-record `trace_spans` field must read
+  the nested field.
+
+### Added
+
+- **Prepared sessions now carry one authority decision from planning through
+  provider dispatch and terminal accounting (#6674, #6675).** Hosts can attach
+  a replay-safe, runtime- and workspace-bound session lease, reuse it across
+  turns, approve widening as one semantic delta batch, and supply Bedrock or
+  Vertex credentials through consumer-bound identity brokers without ambient
+  credential fallback inside the prepared path.
+- **`harn chat` starts an interactive chat session with the live model, reporting how fast it answers (#7171).**
+  Tokens stream as they arrive and each turn ends with a speed line: decode
+  rate, token counts, time to first token, and total wall time, sourced from
+  the provider's own timings when it reports them. `--verbose` gives the full
+  breakdown, `--no-stats` gives none. The session defaults to whatever local
+  model `harn local switch` selected, and `/help`, `/model`, `/system`,
+  `/stats`, `/clear`, and `/bye` steer it from the prompt. Plain completions
+  only: no tools and no system prompt unless you set one, so a speed reading
+  measures the model rather than scaffolding around it.
+- **`llm_stream_call`'s terminal chunk now carries `usage` (#7171).** Streaming
+  callers previously received deltas but no accounting, so they could render a
+  reply and still not report its token counts, cost, or `provider_telemetry`
+  timings. The terminal chunk now publishes the same `usage` value `llm_call`
+  returns.
+- **New `std/llm/chat_session` module (#7171).** `chat_session(harness, config)`
+  runs the interactive loop that backs `harn chat`, so any surface wanting the
+  same conversation gets it without reimplementing turn handling, and so the
+  loop can be driven directly by a test with mocked stdin and taped
+  completions.
+- **New `std/llm/speed` module (#7171).** `format_speed_line` and
+  `format_speed_report` turn a response's `usage` into a readable speed report,
+  preferring server-reported timings over wall-clock estimates and omitting
+  measurements the provider did not send instead of rendering them as zero.
+- **New `harn-control-events` skill and a control-events explanation page.**
+  Stop and steer are events a session must answer, not requests it may finish
+  its current plan before considering. `harn skill get harn-control-events
+  --full` covers the three guarantees a stop owes (the loop stops, what the
+  session started dies, the record names the control), why an accepted cancel
+  is the hard case for the third, the three things a mid-turn message can mean
+  and which of them is the host's rather than Harn's, and the negative controls
+  that keep a stop test from passing vacuously.
+- **`harn package check` warns on legacy bare-string `required_secrets` (#7587).**
+  A package that declares `required_secrets = ["provider/secret"]` instead of
+  `{ id, direction }` tables now gets a warning naming the provider and the
+  offending ids, with the typed spelling to copy. The bare form is still
+  accepted and still reads as `direction = "outbound"`, so already-published
+  packages keep working and the warning does not change the exit code.
+- Add an approval resolver so a permission `ask` on a non-interactive run has
+  someone to answer it. `ApprovalResolver` selects who answers — the host, an
+  automated reviewer, or an unconditional allow — and is orthogonal to the
+  per-rule `allow`/`ask`/`deny` verdict rather than a fourth rung on it. A run
+  that installs a resolver no longer collapses every `ask` to a denial before it
+  starts, and records which resolver it installed beside the one it was asked
+  for.
+
+  `agent_loop` accepts an `approval_reviewer` closure that is consulted when a
+  rule would refuse a call with nobody present to reconsider it; on approval the
+  call proceeds and the receipt keeps the action and reason it overrode.
+  `approval_reviewer_for` builds one that reads the refused action against the
+  session's stated goal, and `approval_allow_all_reviewer` is the unconditional
+  form. Reviewer policy — model, circuit breaker, denylist, and the
+  risk-by-authorization thresholds — is configuration in
+  `approval_review_policy.toml` rather than code.
+
+  The seam fails closed: a missing reviewer, an error, or a verdict that cannot be
+  read leaves the call refused exactly as it would have been. An unconditional
+  allow still cannot lift the catastrophic floor.
+
+  `scripts/run_approval_review_calibration.harn` measures a reviewer against a
+  corpus of paired cases and reports agreement, false-approve and false-deny rates
+  separately, and cost per verdict.
+
+  A host product can contribute its own reviewer wording through
+  `policy.host_guidance`, appended under an `OPERATOR INSTRUCTIONS` label. The
+  thresholds, the denylist, and the floor stay in the policy data, where they are
+  reviewable.
+- **Every `harn run` now leaves one execution receipt, with an optional VM
+  flight recorder (#7615).** Completed and failed VM runs write a bounded
+  `.harn-runs/hxe-....json` record whose identity also appears on local and
+  OpenTelemetry spans and durable events. `--flight-recorder` adds an exact
+  source-path artifact that never stores runtime values, reports dropped
+  events, and records persistence gaps instead of presenting partial evidence
+  as complete. `std/execution` adds typed, idempotent `proceed`, `abstain`, and
+  `escalate` decisions over the same durable channel ledger.
+- `ToolRegistry` is now the shared executable contract for MCP and generated
+  CLIs. `harn tool run` projects nested commands and typed flags from a
+  script-published registry, while `harn tool schema` emits the same versioned
+  catalog for generators and documentation.
+- Add lossless typed response compaction with exact workspace retention,
+  cached catalog-routed summaries, and deterministic fallbacks.
+
+### Changed
+
+- Replace low-value implementation-mirroring tests with behavioral assertions,
+  known-answer vectors, and representative boundary coverage while removing
+  redundant tests that did not prove user-visible behavior.
+- Session recap consumers can attach optional bounded presentation enrichment to
+  one exact projection. Missing, stale, malformed, or oversized enrichment leaves
+  the deterministic recap unchanged.
+
+### Fixed
+
+- **A `session/cancel` that names an unregistered session is no longer swallowed in silence (#7583).**
+  The frame was consumed on a miss, so "nothing was cancelled" and "everything
+  was cancelled" produced the same observable. A miss now warns and emits a
+  `ControlOutcome` with `status: "rejected"` naming the session it could not
+  find. A cancelled prompt also seals its terminal with a `UserCancelled`
+  outcome instead of returning `stopReason: "cancelled"` and a null terminal,
+  and an accepted cancel kills that session's backgrounded command handles —
+  only that session's — so a stopped agent does not leave its children running.
+- **A completion judge that says `done` is no longer overturned for citing the
+  packet's own actions (#7584).** The evidence packet carries two disjoint index
+  namespaces under one field name: `actions` count up from zero, and the typed
+  `requirement_evidence` records count down from -1. Citation support resolved
+  every reference against `requirement_evidence` alone, so a requirement row
+  that cited the passing verification the packet had just listed was rejected,
+  the row read unsupported, and the loop nudged the model onward until the judge
+  cap fired. Runs ended recorded as unverified with the declared verifier green
+  the whole time. A citation that resolves to a listed action is now
+  corroborating; one that resolves to nothing, or to a record whose role is
+  disallowed or whose reading contradicts completion, still fails the row.
+- The release workflow now opens the next development-version pull request before
+  validating its restamped grammar receipt. A five-minute monitor reports a
+  missing cutover on the main commit.
+- Reject tagged releases with unfolded changelog fragments before resolving release metadata or building the portal.
+- `HarnessProcess.run` now delivers an explicitly provided `stdin` string to the child process instead of silently
+  replacing it with an empty input stream.
+- Fixed response compaction so successful structured summaries are returned instead of discarded as fallbacks.
+- **Pre-call budget projection now prices the next call from the session's own calls.**
+  A cached session with short answers could be stopped by `total_budget_usd`
+  at roughly half its cap: the pre-call estimate priced every projected input
+  token at the uncached rate and assumed the whole output budget was spent, so
+  one small call was projected ~18x its real cost. From the second call of a
+  session on, the estimate uses the observed cache-hit ratio and the observed
+  mean output tokens per call (clamped to the output budget); the first call
+  keeps the conservative worst case. Token ceilings and rate-limit
+  reservations still use the full output budget.
+- **`budget_exceeded` errors and `budget_exhausted` events say which happened.**
+  New `projection_basis` (`observed` / `worst_case`), `headroom_usd`, and
+  `costed_output_tokens` fields, plus a message that names spend against the
+  cap, so "stopped by an estimate at $0.18 of $0.33" is distinguishable from
+  "spent the cap". `sessionCostUsd`, `projectionBasis`, and `headroomUsd`
+  project through ACP.
+- Agent loops now refuse structurally empty model requests before dispatch.
+  Typed terminal outcomes preserve classified provider diagnostics.
+
 ## v0.10.122
 
 ### Added
