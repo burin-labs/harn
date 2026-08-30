@@ -1,4 +1,7 @@
-import { approval_allow_all_reviewer } from "std/agent/approval_review"
+import {
+  approval_allow_all_reviewer,
+  approval_review_system_prompt,
+} from "std/agent/approval_review"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 // The `AutoReview` seam: an approval nobody is present to give.
@@ -191,6 +194,32 @@ pipeline default(harness: Harness) {
   assert(
     no_floor.ok == true,
     "CONTROL: with an empty floor the SAME call clears, so case 7's refusal is the floor and nothing else",
+  )
+  // 9. The host-guidance seam, as a matched pair. A downstream product owns its
+  //    own reviewer wording; Harn owns where that wording may go and what trust
+  //    class it carries. Both halves are needed: the positive alone would pass
+  //    on a prompt that always carried the label, and the negative alone would
+  //    pass on a prompt that ignored the field entirely.
+  const with_guidance = approval_review_system_prompt(
+    {host_guidance: "This host never edits generated output without an explicit ask."},
+  )
+  assert(
+    contains(with_guidance, "This host never edits generated output"),
+    "host_guidance must reach the reviewer's system prompt",
+  )
+  assert(
+    contains(with_guidance, "OPERATOR INSTRUCTIONS"),
+    "host guidance must arrive LABELED, so the reviewer knows which trust class it is in",
+  )
+  // CONTROL: blank and absent are the same answer. An empty labeled section
+  // reads to the model as an operator who deliberately said nothing.
+  assert(
+    !contains(approval_review_system_prompt({host_guidance: "   "}), "OPERATOR INSTRUCTIONS"),
+    "blank guidance must emit no section at all",
+  )
+  assert(
+    !contains(approval_review_system_prompt({}), "OPERATOR INSTRUCTIONS"),
+    "absent guidance must emit no section at all",
   )
   harness.stdio.println("approval_reviewer_ok")
 }

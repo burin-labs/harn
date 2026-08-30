@@ -90,6 +90,13 @@ pub fn approval_review_verdict_schema(policy: dict) -> dict {
  * a data change. The trust rule is stated twice on purpose -- once as a labeled
  * list and once as an instruction -- because the labels alone read as metadata.
  *
+ * `policy.host_guidance` is the one place a downstream host contributes wording.
+ * It is appended, never interpolated into the rules above, and it is labeled as
+ * an operator instruction because that is the trust class it actually has: the
+ * operator may widen what is authorized, and a host writing this prompt fragment
+ * is the operator speaking. A host that needs different SEMANTICS does not get
+ * them here; the thresholds and the floor stay in the policy data.
+ *
  * @effects: []
  * @errors: []
  */
@@ -124,6 +131,22 @@ pub fn approval_review_system_prompt(policy: dict) -> string {
     + "Retrying after a sandbox denial is not itself suspicious. Judge the action, "
     + "not the retry.\n\n"
     + "Be decisive and brief. One line of rationale."
+    + __approval_review_host_guidance(policy)
+}
+
+/**
+ * The host's own wording, appended and labeled, or nothing at all.
+ *
+ * Blank and absent are the same answer here on purpose: a host that projected
+ * an empty string did not write guidance, and an empty labeled section reads to
+ * the model as an operator who said nothing deliberately.
+ */
+fn __approval_review_host_guidance(policy: dict) -> string {
+  const guidance = trim(to_string(policy?.host_guidance ?? ""))
+  if guidance == "" {
+    return ""
+  }
+  return "\n\nOPERATOR INSTRUCTIONS (trusted, from the host product):\n" + guidance
 }
 
 /**

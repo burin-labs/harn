@@ -76,7 +76,7 @@ rationale}` works.
 
 ### Yolo is this seam, not a bypass
 
-```harn
+```harn,ignore
 approval_reviewer: approval_allow_all_reviewer(review_policy)
 ```
 
@@ -84,6 +84,18 @@ approval_reviewer: approval_allow_all_reviewer(review_policy)
 than around it means it inherits the floor, the receipt, and the activity record
 — and there is exactly one place in the system where a refusal can be lifted. It
 does **not** lift the catastrophic floor.
+
+### A host contributes wording, not semantics
+
+`policy.host_guidance` is appended to the reviewer's system prompt under an
+`OPERATOR INSTRUCTIONS` label. That label is the trust class, not decoration: the
+operator may widen what is authorized, and a host writing this fragment is the
+operator speaking. Blank and absent are the same answer — an empty labeled
+section reads as an operator who deliberately said nothing.
+
+Thresholds, the denylist, and the floor are not reachable from here. A host that
+needs different semantics changes the policy data, which is reviewable, rather
+than the prompt, which is not.
 
 ### It fails closed
 
