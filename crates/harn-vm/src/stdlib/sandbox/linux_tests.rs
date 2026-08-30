@@ -556,6 +556,18 @@ fn report_default_denylist_expansion_cost() {
         "the product default must not trip the cap on a real home: {} rules",
         granted.len()
     );
+    // Non-null control. A cap check against a nearly empty directory passes for
+    // the wrong reason, so refuse to report a measurement that cannot have come
+    // from a real home. This is the difference between a measured number and a
+    // measured nothing, and it already fired once: a sibling test's `HOME`
+    // window made this read `/tmp/.tmpLZc8Wo` with 3 entries and 3 rules, which
+    // printed and passed while measuring nothing.
+    assert!(
+        entries >= 10,
+        "[landlock-cost] measured '{}' with only {entries} entries, which is not a real home; \
+         the cap check would pass vacuously. Something rewrote HOME under this test.",
+        home.display()
+    );
 }
 
 #[test]
