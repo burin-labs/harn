@@ -542,7 +542,8 @@
       "user_policy",
       "managed_policy",
       "runtime_policy",
-      "host_unavailable"
+      "host_unavailable",
+      "auto_reviewer"
     ],
     "toolPermissionGrantExpiries": [
       "after_dispatch",

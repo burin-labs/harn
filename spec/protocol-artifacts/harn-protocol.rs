@@ -836,6 +836,8 @@ pub enum HarnToolPermissionDecider {
     RuntimePolicy,
     #[serde(rename = "host_unavailable")]
     HostUnavailable,
+    #[serde(rename = "auto_reviewer")]
+    AutoReviewer,
 }
 
 impl HarnToolPermissionDecider {
@@ -846,6 +848,7 @@ impl HarnToolPermissionDecider {
         Self::ManagedPolicy,
         Self::RuntimePolicy,
         Self::HostUnavailable,
+        Self::AutoReviewer,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -856,6 +859,7 @@ impl HarnToolPermissionDecider {
             Self::ManagedPolicy => "managed_policy",
             Self::RuntimePolicy => "runtime_policy",
             Self::HostUnavailable => "host_unavailable",
+            Self::AutoReviewer => "auto_reviewer",
         }
     }
 }

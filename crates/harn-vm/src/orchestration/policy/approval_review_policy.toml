@@ -1,0 +1,88 @@
+# Approval-reviewer policy.
+#
+# The reviewer decides whether a refused action should be granted. Everything
+# that a person would want to change without recompiling lives here: which model
+# reviews, how hard it thinks, when the circuit breaker trips, what it may never
+# grant, and which categories start from a presumption of denial.
+#
+# Read once at the resolver seam and handed to the reviewer session as typed
+# input. Nothing here is read from the environment, so a run's receipt can say
+# which policy it enforced.
+#
+# The reviewer session itself -- prompt assembly, verdict schema, decision
+# record -- is Harn (`std/agent/approval_review`). Rust holds only the seam.
+
+version = 1
+
+[reviewer]
+# Cheap by default: the reviewer runs on a would-be denial, not on every tool
+# call, but a busy run can still produce dozens of verdicts. Evals override this
+# with a stronger model; see `docs/how-to/approval-review.md`.
+model = "claude-haiku-4-5-20251001"
+effort = "low"
+# Fail closed. A reviewer that times out has not approved anything, and treating
+# silence as assent would make the timeout the widest grant in the system.
+timeout_ms = 30000
+on_error = "deny"
+
+[breaker]
+# A reviewer that has denied three times in a row is not exercising judgment
+# about three different requests -- it is stuck and the agent is looping against
+# it. Consecutive, not total: a run that legitimately denies several unrelated
+# requests across a long session is working correctly.
+max_consecutive_denials = 3
+# Codex's window, and the reason for it: without a total cap an auto-denying
+# reviewer is a livelock rather than a failure.
+max_denials_per_turn = 10
+# Cell-level regression signal. Flags the cell; never aborts the batch.
+cell_flag_denied_trial_share = 0.5
+
+# Actions no reviewer may grant, whatever the goal claims to justify.
+#
+# This list is a floor, not a heuristic: it is checked before the reviewer is
+# consulted, so a persuasive session goal never reaches a model that could be
+# talked out of it. `universal_catastrophic_reason` in the process layer is the
+# independent enforcement of the same rule for commands; this list is what the
+# resolver refuses to even ask about.
+[floor]
+never_grant = [
+  "credential_exfiltration",
+  "destructive_root_delete",
+  "disable_security_control",
+  "history_rewrite_on_shared_ref",
+]
+
+# Categories that start from a presumption of denial. The reviewer may still
+# approve one when the user's stated goal plainly requires it -- reading
+# `~/.ssh/config` to fix a remote is a real task -- but the burden is on the
+# request, and an approval here must name the part of the goal that grants it.
+[denylist]
+categories = [
+  "secret_material_read",
+  "outbound_network_to_unstated_host",
+  "package_install_from_unstated_source",
+  "force_push",
+  "recursive_delete_outside_workspace",
+]
+
+# What the reviewer is told about the trust of each input. Tool output and file
+# contents are untrusted: they are where an injection would arrive, and they can
+# never widen what the user's goal authorized.
+[trust]
+trusted_inputs = ["user_goal", "session_task", "agent_instructions"]
+untrusted_inputs = ["tool_output", "file_contents", "command_stderr", "network_response"]
+
+[verdict]
+# The reviewer returns a decomposed verdict rather than a bare allow/deny, so a
+# rollup can separate "the action was low risk" from "the goal authorized it".
+# Codex's risk x authorization split; the outcome is derived, not asserted.
+risk_levels = ["low", "medium", "high", "critical"]
+authorization_levels = ["unknown", "low", "medium", "high"]
+
+# The derivation, stated as data so a policy change does not need a code change.
+# Read as: at this risk, approve only if authorization is at least this.
+[verdict.thresholds]
+low = "unknown"
+medium = "low"
+high = "medium"
+critical = "never"

@@ -1,0 +1,126 @@
+import { agent_command_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+// The reviewer seam through a REAL `agent_loop`, not just tool dispatch.
+//
+// `approval_reviewer.harn` proves the seam at the dispatch boundary. This
+// proves it survives the thing the product actually runs: a loop that installs
+// session policies, dispatches a tool, feeds the result back, and finishes.
+// Those are different code paths, and a seam can work at the inner one while
+// the outer never installs it — which is precisely what
+// `SESSION_POLICY_OPTION_KEYS` would have caused had the option key not been
+// registered there.
+//
+// The pair is the proof. Same script, same policy, same tool: without a
+// reviewer the command is refused and the loop reports the denial; with one it
+// runs and its output reaches the second turn.
+fn probe_tools(harness: Harness, root: string) {
+  return agent_command_tools(
+    harness,
+    nil,
+    {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]},
+  )
+}
+
+fn probe_script() -> list {
+  return [
+    {
+      text: "",
+      tool_calls: [
+        {
+          id: "run1",
+          name: "run_command",
+          // The output (42) is deliberately NOT present in the argv. A marker
+          // that appears in the command text would show up in the echoed tool
+          // call whether or not the tool ever ran -- which is exactly the false
+          // positive the first draft of this test had.
+          arguments: {argv: ["sh", "-c", "expr 6 + 36"]},
+        },
+      ],
+    },
+    llm_text("Saw the command result."),
+  ]
+}
+
+/** A reviewer that grants, in the decision-record shape the seam requires. */
+fn granting_reviewer() {
+  return { _ ->
+    {approved: true, reviewer_answered: true, rationale: "the stated task is to run this command"}
+  }
+}
+
+pipeline main(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-approval-reviewer-loop-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(root, true)
+  // Asks for the command tool. No host bridge is wired in this context, so an
+  // ask that reaches the prompt has nobody to answer it.
+  const asking_policy = {require_approval: ["run_command"]}
+  // CONTROL: no reviewer. The command must NOT run, or the case below proves
+  // nothing.
+  with_llm_script(
+    harness.llm,
+    probe_script(),
+    { ->
+      const control = agent_loop(
+        harness,
+        "Run the command and report back.",
+        nil,
+        {
+          provider: "mock",
+          tools: probe_tools(harness, root),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          approval_policy: asking_policy,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      // Read the structured tool_result outcome, not prose. The refusal is a
+      // decision the runtime recorded; grepping the turn for words is how a
+      // test ends up asserting on an echoed argument instead of a result.
+      harness.stdio.println(
+        "control_refused=" + to_string(contains(second_turn, "\"outcome\":\"error\"")),
+      )
+      harness.stdio.println("control_output_absent=" + to_string(!contains(second_turn, "42")))
+    },
+  )
+  // The same loop with a granting reviewer installed: the command runs and its
+  // output reaches the model's next turn.
+  with_llm_script(
+    harness.llm,
+    probe_script(),
+    { ->
+      const result = agent_loop(
+        harness,
+        "Run the command and report back.",
+        nil,
+        {
+          provider: "mock",
+          tools: probe_tools(harness, root),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          approval_policy: asking_policy,
+          approval_reviewer: granting_reviewer(),
+        },
+      )
+      harness.stdio.println("status=" + to_string(result.status))
+      const calls = harness.llm.mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      harness.stdio.println(
+        "reviewed_refused=" + to_string(contains(second_turn, "\"outcome\":\"error\"")),
+      )
+      // The falsifier for the whole feature: the command's computed stdout (42),
+      // which is deliberately absent from the argv, so it can only appear here
+      // if the refused call was granted and actually executed.
+      harness.stdio.println("reviewed_output_present=" + to_string(contains(second_turn, "42")))
+    },
+  )
+}

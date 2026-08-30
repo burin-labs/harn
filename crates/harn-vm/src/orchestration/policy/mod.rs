@@ -1,6 +1,8 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_activity;
+mod approval_resolver;
+mod approval_review_config;
 mod approval_rules;
 mod capability_lattice;
 mod effect_call_cache;
@@ -34,6 +36,13 @@ pub use approval_activity::{
     ToolPermissionPolicyEvidence, ToolPermissionPolicyFacts, ToolPermissionPolicyLayer,
     ToolPermissionPolicyOutcome, ToolPermissionRequester, ToolPermissionResolution,
     ToolPermissionScope,
+};
+pub use approval_resolver::{
+    ApprovalResolver, ApprovalResolverReceipt, APPROVAL_RESOLVER_RECEIPT_SCHEMA,
+};
+pub use approval_review_config::{
+    ApprovalReviewPolicy, BreakerConfig, DenylistConfig, FloorConfig, OnReviewerError,
+    ReviewerConfig, TrustConfig, VerdictConfig, APPROVAL_REVIEW_POLICY,
 };
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
