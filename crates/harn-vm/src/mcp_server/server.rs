@@ -205,7 +205,7 @@ impl McpServer {
                                 .connection
                                 .lock()
                                 .expect("MCP session lock poisoned")
-                                .is_initialized()
+                                .is_ready_for_notifications()
                             {
                                 let _ = out_tx.send(serde_json::json!({
                                     "jsonrpc": "2.0",
@@ -263,6 +263,13 @@ impl McpServer {
         vm: &mut Vm,
     ) -> Option<serde_json::Value> {
         let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        if method == "notifications/initialized" {
+            self.connection
+                .lock()
+                .expect("MCP session lock poisoned")
+                .mark_initialized();
+            return None;
+        }
         let id = msg.get("id").cloned()?;
         let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 

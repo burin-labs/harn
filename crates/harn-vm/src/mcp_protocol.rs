@@ -184,6 +184,7 @@ impl McpRequestProfile {
 pub struct McpServerSession {
     client_identity: String,
     initialized_protocol_version: Option<rmcp::model::ProtocolVersion>,
+    notifications_ready: bool,
 }
 
 impl Default for McpServerSession {
@@ -191,6 +192,7 @@ impl Default for McpServerSession {
         Self {
             client_identity: "unknown".to_string(),
             initialized_protocol_version: None,
+            notifications_ready: false,
         }
     }
 }
@@ -200,8 +202,14 @@ impl McpServerSession {
         &self.client_identity
     }
 
-    pub fn is_initialized(&self) -> bool {
-        self.initialized_protocol_version.is_some()
+    pub fn is_ready_for_notifications(&self) -> bool {
+        self.notifications_ready
+    }
+
+    pub fn mark_initialized(&mut self) {
+        if self.initialized_protocol_version.is_some() {
+            self.notifications_ready = true;
+        }
     }
 
     pub fn initialize(
@@ -214,6 +222,7 @@ impl McpServerSession {
         let outcome = negotiate_initialize(params, capabilities, server_info, instructions)?;
         self.client_identity = outcome.client_identity;
         self.initialized_protocol_version = Some(outcome.protocol_version);
+        self.notifications_ready = false;
         Ok(outcome.result)
     }
 
@@ -232,6 +241,7 @@ impl McpServerSession {
             if let Some(info) = metadata.client_info() {
                 self.client_identity = format!("{}/{}", info.name, info.version);
             }
+            self.notifications_ready = true;
             return Ok(McpRequestProfile {
                 protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
             });
@@ -781,6 +791,27 @@ mod tests {
             )
             .expect("released request metadata should use the initialized version");
         assert!(!profile.uses_result_envelope());
+    }
+
+    #[test]
+    fn released_session_waits_for_initialized_notification_before_server_notifications() {
+        let mut session = McpServerSession::default();
+        session
+            .initialize(
+                &json!({
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"},
+                }),
+                json!({"tools": {"listChanged": true}}),
+                json!({"name": "harn", "version": "test"}),
+                None,
+            )
+            .expect("initialize should negotiate");
+
+        assert!(!session.is_ready_for_notifications());
+        session.mark_initialized();
+        assert!(session.is_ready_for_notifications());
     }
 
     #[test]
