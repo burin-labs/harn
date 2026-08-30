@@ -1903,7 +1903,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `harness.llm.call`; the `stream` option remains the transport toggle |
 | `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `harness.llm.call` |
-| `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
+| `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision, while `result.terminal.run_record_status` is its canonical persistence projection; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
 | `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
 | `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
 | `agent_dispatch_tool_call(tools, call, registry?, options?)` | tools: `HarnessTools`, call: dict, registry: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
@@ -2922,10 +2922,10 @@ These builtins expose Harn's typed orchestration runtime.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `workflow_execute(task, graph, artifacts?, options?)` | task, graph, artifacts, options | dict | Execute a workflow and persist a run record |
-| `run_record(payload)` | payload: dict | run record | Normalize a run record |
-| `run_record_save(run, path?)` | run, path | dict | Persist a run record |
-| `run_record_load(path)` | path: string | run record | Load a run record from disk |
-| `load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
+| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record; newly constructed records inherit the active VM execution identity |
+| `harness.fs.run_record_save(run, path?)` | run, path | dict | Persist a run record |
+| `harness.fs.run_record_load(path)` | path: string | run record | Load a run record from disk |
+| `harness.fs.load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
 | `run_record_fixture(run)` | run | replay fixture | Derive a replay/eval fixture from a saved run |
 | `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
 | `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |
