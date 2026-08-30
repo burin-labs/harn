@@ -62,7 +62,7 @@ async fn tools_list_exposes_public_functions() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
@@ -118,7 +118,7 @@ async fn advertised_nominal_output_schema_validates_structured_tool_result() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r"
+        r#"
 pub struct Greeting {
   message: string
   tags: list<string>

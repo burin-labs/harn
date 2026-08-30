@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -306,20 +308,28 @@ impl McpOrchestratorService {
         trace_id: &str,
         arguments: JsonValue,
     ) -> Result<JsonValue, String> {
-        match name {
-            "harn.secret_scan" | "harn::secret_scan" => self.tool_secret_scan(arguments).await,
-            "harn.trigger.fire" => self.tool_trigger_fire(session, trace_id, arguments).await,
-            "harn.trigger.list" => self.tool_trigger_list(arguments).await,
-            "harn.trigger.replay" => self.tool_trigger_replay(arguments).await,
-            "harn.orchestrator.queue" => self.tool_orchestrator_queue(arguments).await,
-            "harn.orchestrator.dlq.list" => self.tool_orchestrator_dlq_list(arguments).await,
-            "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
-            "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
-            "harn.run.report" => self.tool_run_report(arguments).await,
-            "harn.run.review" => self.tool_run_review(arguments).await,
-            "harn.trust.query" => self.tool_trust_query(arguments).await,
-            _ => Err(format!("unknown tool '{name}'")),
-        }
+        // Each arm is boxed so this future holds one pointer instead of the
+        // union of every tool future. Inlined, the frame is the size of the
+        // LARGEST arm and grows with every tool added, which is how it crossed
+        // the 512 KiB `large_stack_frames` ceiling at 512457 bytes on a change
+        // that added no tool at all. Boxing decouples the frame from the arm
+        // count, so the next tool cannot reintroduce this.
+        type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<JsonValue, String>> + Send + 'a>>;
+        let call: ToolFuture<'_> = match name {
+            "harn.secret_scan" | "harn::secret_scan" => Box::pin(self.tool_secret_scan(arguments)),
+            "harn.trigger.fire" => Box::pin(self.tool_trigger_fire(session, trace_id, arguments)),
+            "harn.trigger.list" => Box::pin(self.tool_trigger_list(arguments)),
+            "harn.trigger.replay" => Box::pin(self.tool_trigger_replay(arguments)),
+            "harn.orchestrator.queue" => Box::pin(self.tool_orchestrator_queue(arguments)),
+            "harn.orchestrator.dlq.list" => Box::pin(self.tool_orchestrator_dlq_list(arguments)),
+            "harn.orchestrator.dlq.retry" => Box::pin(self.tool_orchestrator_dlq_retry(arguments)),
+            "harn.orchestrator.inspect" => Box::pin(self.tool_orchestrator_inspect(arguments)),
+            "harn.run.report" => Box::pin(self.tool_run_report(arguments)),
+            "harn.run.review" => Box::pin(self.tool_run_review(arguments)),
+            "harn.trust.query" => Box::pin(self.tool_trust_query(arguments)),
+            _ => return Err(format!("unknown tool '{name}'")),
+        };
+        call.await
     }
 
     pub(super) fn create_tool_task(
