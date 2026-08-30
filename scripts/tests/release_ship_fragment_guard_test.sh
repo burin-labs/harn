@@ -5,19 +5,20 @@
 # (the fold lives in the bump-fleet release_harn 'prepare' flow). Invoking
 # release_ship directly with fragments still present would ship a release whose
 # CHANGELOG omits them and whose --finalize renders empty notes. The guardrail
-# runs first inside run_common_gates and must fail loud. This dogfoods the exact
-# failure mode hit during the v0.9.21 cut.
+# must fail loud before build-shaped work. This dogfoods the exact failure mode
+# hit during the v0.9.21 cut.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ship_script="$repo_root/scripts/release_ship.sh"
+guard_library="$repo_root/scripts/lib/release_tree_guard.sh"
 
 # Extract just the guardrail function so we can exercise it in isolation without
 # running the whole release (which builds crates). If the function is renamed or
 # removed this extraction yields nothing and the first assertion fails loudly.
-guard_src=$(sed -n '/^require_no_unfolded_fragments() {/,/^}/p' "$ship_script")
+guard_src=$(sed -n '/^require_no_unfolded_fragments() {/,/^}/p' "$guard_library")
 if [[ -z "$guard_src" ]]; then
-  echo "FAIL: require_no_unfolded_fragments not found in $ship_script" >&2
+  echo "FAIL: require_no_unfolded_fragments not found in $guard_library" >&2
   exit 1
 fi
 
@@ -117,5 +118,73 @@ if ! run_guard_allowing "$clean" >/dev/null 2>&1; then
   echo "FAIL: escape broke the fragment-free path" >&2
   exit 1
 fi
+
+# --- Case 8: finalize rejects the tag tree before resolving Harn -------------
+# Exercise the production entry point, not only the extracted function. The
+# fake metadata binary is deliberately slow: reaching it means finalize paid
+# build-shaped work before making the millisecond fragment decision.
+run_finalize_tag_fixture() {
+  local name="$1"
+  local fold_on_main="$2"
+  local fixture="$tmp_root/$name"
+  local metadata_marker="$tmp_root/$name-metadata-called"
+  local fake_metadata="$tmp_root/$name-fake-release-metadata"
+  mkdir -p "$fixture/changelog.d"
+  git -C "$fixture" init -q -b main
+  git -C "$fixture" config user.name "Release guard fixture"
+  git -C "$fixture" config user.email "release-guard@example.invalid"
+  git -C "$fixture" config commit.gpgSign false
+  printf '[workspace.package]\nversion = "0.10.999"\n' > "$fixture/Cargo.toml"
+  printf -- '- must be folded before release\n' > "$fixture/changelog.d/7605.fixed.md"
+  git -C "$fixture" add Cargo.toml changelog.d/7605.fixed.md
+  git -C "$fixture" commit -q -m "tagged release fixture"
+  git -C "$fixture" tag v0.10.999
+
+  if [[ "$fold_on_main" == "true" ]]; then
+    git -C "$fixture" rm -q changelog.d/7605.fixed.md
+    git -C "$fixture" commit -q -m "fold fragment after tag"
+    if git -C "$fixture" cat-file -e main:changelog.d/7605.fixed.md 2>/dev/null; then
+      echo "FAIL: negative-control branch still contains the fragment" >&2
+      exit 1
+    fi
+  fi
+  git -C "$fixture" switch -q --detach v0.10.999
+  [[ -f "$fixture/changelog.d/7605.fixed.md" ]] \
+    || { echo "FAIL: fixture tag does not contain the fragment" >&2; exit 1; }
+
+  cat > "$fake_metadata" <<EOF
+#!/usr/bin/env bash
+printf 'called\n' > "$metadata_marker"
+sleep 3
+printf '0.10.999\n'
+EOF
+  chmod +x "$fake_metadata"
+
+  local output status started elapsed
+  started=$SECONDS
+  if output=$(cd "$fixture" && \
+      HARN_RELEASE_ROOT="$fixture" \
+      HARN_RELEASE_METADATA_BIN="$fake_metadata" \
+      bash "$ship_script" --finalize --skip-dry-run --skip-github-release 2>&1); then
+    status=0
+  else
+    status=$?
+  fi
+  elapsed=$((SECONDS - started))
+
+  [[ "$status" -ne 0 ]] \
+    || { echo "FAIL: finalize accepted a tagged tree with a fragment" >&2; exit 1; }
+  grep -q "7605.fixed.md" <<<"$output" \
+    || { echo "FAIL: finalize did not name the tag's fragment: $output" >&2; exit 1; }
+  ! grep -q "Build portal frontend" <<<"$output" \
+    || { echo "FAIL: finalize built the portal before rejecting the fragment" >&2; exit 1; }
+  [[ ! -e "$metadata_marker" ]] \
+    || { echo "FAIL: finalize resolved Harn metadata before rejecting the fragment" >&2; exit 1; }
+  (( elapsed < 2 )) \
+    || { echo "FAIL: fragment rejection took ${elapsed}s, expected under 2s" >&2; exit 1; }
+}
+
+run_finalize_tag_fixture "tag-and-branch-carry-fragment" false
+run_finalize_tag_fixture "branch-folded-tag-still-carries-fragment" true
 
 echo "release_ship_fragment_guard_test: ok"
