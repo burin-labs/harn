@@ -174,9 +174,7 @@ pub fn response_compaction_read_exact<T>(
   schema: Schema<T>,
 ) -> ResponseCompactionExactRead<T> {
   if ref.storage != "workspace_temp"
-    || !ref.key.starts_with(
-    __RESPONSE_COMPACTION_VERSION + ":exact:",
-  )
+    || !ref.key.starts_with(__RESPONSE_COMPACTION_VERSION + ":exact:")
     || ref.namespace == ""
     || contains(ref.namespace, "..")
     || regex_match("[^A-Za-z0-9._-]", ref.namespace) != nil
@@ -196,7 +194,12 @@ pub fn response_compaction_read_exact<T>(
   if !is_ok(validated) {
     return {state: "broken", detail: unwrap_err(validated).message}
   }
-  return {state: "found", value: unwrap(validated)}
+  const value = unwrap(validated)
+  const expected_key = __RESPONSE_COMPACTION_VERSION + ":exact:" + sha256(json_stringify(value))
+  if ref.key != expected_key {
+    return {state: "broken", detail: "exact retained content failed digest verification"}
+  }
+  return {state: "found", value: value}
 }
 
 fn __response_compaction_persist_exact<T>(
@@ -346,16 +349,16 @@ fn __response_summary_cache_key<S>(
   return __RESPONSE_COMPACTION_VERSION
     + ":summary:"
     + sha256(
-    json_stringify(
-      {
-        exact_sha256: exact_digest,
-        summary_schema: schema_json(summary_schema),
-        instructions: config.instructions,
-        ladder: config.ladder,
-        max_tokens: config.max_tokens,
-      },
-    ),
-  )
+      json_stringify(
+        {
+          exact_sha256: exact_digest,
+          summary_schema: schema_json(summary_schema),
+          instructions: config.instructions,
+          ladder: config.ladder,
+          max_tokens: config.max_tokens,
+        },
+      ),
+    )
 }
 
 fn __response_compaction_receipt(

@@ -2,6 +2,7 @@ import {
   __response_compact_with_caller,
   response_compaction_read_exact,
 } from "std/agent/response_compaction"
+import { cache_put, fs_cache } from "std/cache"
 
 type ExactResponse = {text: string, facts: list<string>}
 
@@ -211,19 +212,19 @@ pipeline test_concurrent_exact_commits_never_expose_partial_values(
   for _index in range(12) {
     handles = handles
       + [
-      spawn {
-        __response_compact_with_caller(
-          __caps(harness.fs, harness.llm),
-          exact,
-          schema_of(ExactResponse),
-          schema_of(Summary),
-          options,
-          { _prompt, _schema, _ladder, _max_tokens ->
-            return {ok: true, data: {summary: "unused", critical_facts: []}}
-          },
-        )
-      },
-    ]
+        spawn {
+          __response_compact_with_caller(
+            __caps(harness.fs, harness.llm),
+            exact,
+            schema_of(ExactResponse),
+            schema_of(Summary),
+            options,
+            { _prompt, _schema, _ladder, _max_tokens ->
+              return {ok: true, data: {summary: "unused", critical_facts: []}}
+            },
+          )
+        },
+      ]
   }
   assert_eq(len(handles), 12)
   for handle in handles {
@@ -242,9 +243,7 @@ pipeline test_concurrent_exact_commits_never_expose_partial_values(
 pipeline test_lru_bound_makes_eviction_visible_as_missing(harness: Harness, task: unknown) {
   const namespace = "response-compaction-bound-" + harness.random.uuid()
   const options = __options(namespace, {summary: "fallback", critical_facts: []}, 10000)
-    + {
-    max_entries: 1,
-  }
+    + {max_entries: 1}
   const first = __response_compact_with_caller(
     __caps(harness.fs, harness.llm),
     {text: "first", facts: []},
@@ -382,4 +381,37 @@ pipeline test_tampered_exact_reference_fails_closed_under_owned_root(
     schema_of(ExactResponse),
   )
   assert_eq(read.state, "broken")
+}
+
+pipeline test_schema_valid_exact_content_tamper_fails_digest_verification(
+  harness: Harness,
+  task: unknown,
+) {
+  const result = __response_compact_with_caller(
+    __caps(harness.fs, harness.llm),
+    {text: "original", facts: ["keep"]},
+    schema_of(ExactResponse),
+    schema_of(Summary),
+    __options(
+      "response-compaction-content-tamper-" + harness.random.uuid(),
+      {summary: "fallback", critical_facts: []},
+      10000,
+    ),
+    { _prompt, _schema, _ladder, _max_tokens ->
+      return {ok: true, data: {summary: "unused", critical_facts: []}}
+    },
+  )
+  const ref = result.receipt.exact_ref
+  const store = fs_cache(
+    path_join(harness.fs.workspace_temp_dir(), "harn-response-compaction"),
+    {namespace: ref.namespace, ttl_seconds: ref.ttl_seconds, max_entries: ref.max_entries},
+  )
+  cache_put(harness.llm, ref.key, {text: "schema-valid mutation", facts: ["keep"]}, {store: store})
+  const read = response_compaction_read_exact(
+    __caps(harness.fs, harness.llm),
+    ref,
+    schema_of(ExactResponse),
+  )
+  assert_eq(read.state, "broken")
+  assert_eq(read.detail, "exact retained content failed digest verification")
 }
