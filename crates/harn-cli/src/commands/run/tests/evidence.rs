@@ -55,6 +55,11 @@ async fn canonical_run_persists_one_identity_across_record_spans_and_flight_arti
         .collect::<Vec<_>>();
     assert_eq!(run_paths.len(), 1, "run paths: {run_paths:?}");
     let run = harn_vm::orchestration::load_run_record(&run_paths[0]).unwrap();
+    assert_eq!(
+        harn_vm::orchestration::validate_execution_evidence(&run.evidence),
+        Ok(()),
+        "the canonical CLI producer must satisfy its public validator",
+    );
     assert!(run.id.starts_with("hxe-"));
     assert_eq!(run.evidence.execution_id.as_deref(), Some(run.id.as_str()));
     assert_eq!(run.status, "completed");
@@ -191,6 +196,16 @@ pipeline main(harness: Harness) {{
     assert_eq!(automatic.len(), 1, "automatic records: {automatic:?}");
     let automatic = &automatic[0];
     assert_eq!(automatic.status, "completed");
+    assert_eq!(
+        harn_vm::orchestration::validate_execution_evidence(&automatic.evidence),
+        Ok(()),
+        "the automatic CLI record must satisfy its public validator",
+    );
+    assert_eq!(
+        harn_vm::orchestration::validate_execution_evidence(&workflow.evidence),
+        Ok(()),
+        "the workflow producer must satisfy the same public validator",
+    );
     assert_eq!(
         workflow.evidence.execution_id,
         automatic.evidence.execution_id

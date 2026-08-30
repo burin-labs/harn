@@ -583,7 +583,9 @@ fn prune_execution_run_records_unlocked(keep_path: &Path) -> Result<(), VmError>
                 && candidate
                     .file_stem()
                     .and_then(|stem| stem.to_str())
-                    .is_some_and(|stem| stem.starts_with("hxe-"))
+                    .is_some_and(|stem| {
+                        stem.starts_with(crate::observability::execution_scope::EXECUTION_ID_PREFIX)
+                    })
         },
     )
     .map_err(VmError::Runtime)
@@ -628,7 +630,7 @@ pub(crate) fn save_run_record_with_transcript(
 
 fn normalize_evidence_identity(run: &mut RunRecord) {
     if run.evidence.schema_version == 0 {
-        run.evidence.schema_version = 1;
+        run.evidence.schema_version = super::EXECUTION_EVIDENCE_SCHEMA_VERSION;
     }
     if run.evidence.execution_id.is_none()
         && !run
@@ -696,10 +698,10 @@ mod execution_retention_tests {
             .unwrap()
             .filter_map(Result::ok)
             .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with("hxe-") && name.ends_with(".json"))
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with(crate::observability::execution_scope::EXECUTION_ID_PREFIX)
+                        && name.ends_with(".json")
+                })
             })
             .count();
         assert_eq!(automatic_count, DEFAULT_EXECUTION_RUN_RETENTION);
