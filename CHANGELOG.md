@@ -9,6 +9,76 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.125
+
+### Breaking
+
+- Run-record construction is now an observability capability operation. Call
+  `harness.obs.run_record(payload)` instead of the former global
+  `run_record(payload)`. This makes the constructor's read of the active execution
+  identity explicit in Harn's effect contract.
+
+### Added
+
+- `harn serve mcp --surface script --watch` now reloads a validated `ToolRegistry`
+  without disconnecting stdio clients, keeps the previous runtime after invalid
+  edits, and emits the standard tool, resource, and prompt list-change
+  notifications. Generated tool commands also accept `--json` as an explicit
+  compact-output flag.
+- The provider registry now carries a typed `data_controls` fact per provider:
+  what retention or training control the provider exposes per request, where it
+  rides on the wire, what happens when Harn sets nothing, and the documentation
+  behind each claim. Callers request a posture in provider-neutral terms with
+  `data_controls: "strictest_available"` on `llm_call`, and every request returns
+  a receipt under `telemetry.data_controls` distinguishing `applied`,
+  `no_control_available`, `provider_unresearched`, and `not_requested` — so a
+  host can tell "we asked and this provider offers nothing" from "we never
+  asked". The declarations are projected into the provider catalog, so
+  `harn provider catalog show --json` can generate an accurate per-provider table
+  instead of prose. The shipped default posture is unchanged (`default`); an
+  embedder flips `[data_controls_policy] default_posture` in config rather than
+  having the runtime choose a privacy-relevant default by omission.
+- `AgentResult.terminal` now includes Harn's canonical `lifecycle_state` and
+  `run_record_status` projections so persistence and protocol adapters do not
+  have to reclassify terminal kinds.
+
+### Changed
+
+- **Runtime content fingerprints now have one strict Harn contract (#7658).**
+  CLI and campaign consumers validate the complete linked-feature receipt
+  before reading it.
+
+### Fixed
+
+- Empty model-generation failures now retain the response identifier, stop reason,
+  content-block shape, and measured usage in the provider response record.
+- **A host post-turn verdict can now claim the sentinel terminal (#7606).** The
+  post-turn callback is consulted before any natural terminal is decided, and a
+  natural terminal honours an explicit `needs_verify` from that verdict instead
+  of always demanding a verification pass. Previously a turn that ended on the
+  completion sentinel returned before the callback was invoked, so a host that
+  had already proved the work could not say so and paid for a redundant
+  completion-judge call on its happy path.
+- Loop recovery is now bounded and explainable, and a forced stop is terminal. A
+  thrash hard stop that the loop forces after its recovery bound has fired can no
+  longer be converted back into `continue` by a terminal callback. Repeated
+  recovery requires materially changed evidence — two hard stops carrying the same
+  signature are the same evidence seen twice — under a finite consecutive-recovery
+  ceiling, and the recovery receipt now reports the consecutive-recovery count, the
+  evidence revision the decision considered, and which bound refused it.
+- Fixed linked-runtime fingerprints so enabled VM features affect content identity,
+  and version JSON now reports schema 2 for its required fingerprint field.
+- Session-projected execution evidence now carries the run's typed execution identity and validates after
+  persistence round trips.
+- Prevent forged exact-response references, prompt-frame termination, and duplicate concurrent response-summary calls.
+- New run records constructed inside a running Harn program now inherit that VM
+  execution's canonical evidence identity instead of reporting a false
+  legacy-identity gap.
+- Release finalization now uses the immutable candidate range to distinguish
+  candidate-owned changelog fragments from later fragments that belong to the
+  next release. A busy main branch no longer strands an already-tagged release,
+  while unresolved or candidate-owned fragments still fail closed.
+
 ## v0.10.124
 
 ### Changed
