@@ -5,7 +5,7 @@ use std::time::Instant;
 use harn_vm::{PreparedModuleCache, Vm, VmBaseline};
 
 use super::{classify_vm_error, install_dispatch_vm_runtime, DispatchCore, DispatchCoreConfig};
-use crate::DispatchError;
+use crate::{DispatchError, ExportCatalog};
 
 /// Measured work used to construct one immutable dispatch generation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -16,6 +16,7 @@ pub struct DispatchGenerationReceipt {
     pub modules_compiled: u64,
     pub source_modules: u64,
     pub source_bytes: u64,
+    pub worker_count: usize,
     pub cache_entries: usize,
     pub cache_hits: u64,
     pub cache_misses: u64,
@@ -43,7 +44,10 @@ pub(super) struct PreparedDispatchGeneration {
 }
 
 impl PreparedDispatchGeneration {
-    pub(super) fn prepare(config: &DispatchCoreConfig) -> Result<Self, DispatchError> {
+    pub(super) fn prepare(
+        config: &DispatchCoreConfig,
+        catalog: &ExportCatalog,
+    ) -> Result<Self, DispatchError> {
         let started = Instant::now();
         let source = std::fs::read_to_string(&config.script_path).map_err(|error| {
             DispatchError::Io(format!(
@@ -87,6 +91,7 @@ impl PreparedDispatchGeneration {
             modules_compiled: stats.phases.modules_compiled,
             source_modules: stats.source_modules,
             source_bytes: stats.source_bytes,
+            worker_count: dispatch_worker_count(config, catalog),
             cache_entries: stats.cache.entries,
             cache_hits: stats.cache.hits,
             cache_misses: stats.cache.misses,
@@ -94,13 +99,14 @@ impl PreparedDispatchGeneration {
         };
         if std::env::var_os("HARN_DISPATCH_GENERATION_DEBUG").is_some() {
             eprintln!(
-                "[harn] prepared dispatch generation: preparation_ms={} module_compile_ms={} module_load_ms={} modules_compiled={} source_modules={} source_bytes={} cache_entries={} cache_hits={} cache_misses={}",
+                "[harn] prepared dispatch generation: preparation_ms={} module_compile_ms={} module_load_ms={} modules_compiled={} source_modules={} source_bytes={} worker_count={} cache_entries={} cache_hits={} cache_misses={}",
                 receipt.preparation_ms,
                 receipt.module_compile_ms,
                 receipt.module_load_ms,
                 receipt.modules_compiled,
                 receipt.source_modules,
                 receipt.source_bytes,
+                receipt.worker_count,
                 receipt.cache_entries,
                 receipt.cache_hits,
                 receipt.cache_misses,
@@ -135,16 +141,7 @@ impl DispatchCore {
     }
 
     pub(crate) fn dispatch_worker_count(&self) -> usize {
-        let has_concurrent_export = self.catalog.functions.values().any(|function| {
-            function.annotations.is_some_and(|annotations| {
-                annotations.read_only == Some(true) && annotations.idempotent == Some(true)
-            })
-        });
-        if has_concurrent_export {
-            self.config.max_dispatch_workers.get()
-        } else {
-            1
-        }
+        self.generation.receipt().worker_count
     }
 
     pub(crate) fn is_concurrent_dispatch(&self, function: &str) -> bool {
@@ -154,5 +151,18 @@ impl DispatchCore {
             .is_some_and(|annotations| {
                 annotations.read_only == Some(true) && annotations.idempotent == Some(true)
             })
+    }
+}
+
+fn dispatch_worker_count(config: &DispatchCoreConfig, catalog: &ExportCatalog) -> usize {
+    let has_concurrent_export = catalog.functions.values().any(|function| {
+        function.annotations.is_some_and(|annotations| {
+            annotations.read_only == Some(true) && annotations.idempotent == Some(true)
+        })
+    });
+    if has_concurrent_export {
+        config.max_dispatch_workers.get()
+    } else {
+        1
     }
 }

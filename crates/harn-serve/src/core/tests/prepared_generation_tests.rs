@@ -73,6 +73,7 @@ pub fn increment() -> int {
     let receipt = core.generation_receipt();
     assert_eq!(receipt.source_modules, 2);
     assert!(receipt.source_bytes > 0);
+    assert_eq!(receipt.worker_count, 1);
     assert_eq!(receipt.cache_entries, 2);
 
     std::fs::remove_file(&script).expect("remove root after preparation");

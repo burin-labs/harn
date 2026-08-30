@@ -313,7 +313,7 @@ impl DispatchCore {
                 config.base_dir.display()
             ))
         })?;
-        let generation = PreparedDispatchGeneration::prepare(&config)?;
+        let generation = PreparedDispatchGeneration::prepare(&config, &catalog)?;
         Ok(Self {
             config,
             catalog,
