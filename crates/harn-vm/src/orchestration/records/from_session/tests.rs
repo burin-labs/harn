@@ -993,6 +993,11 @@ async fn a_reused_session_projects_only_its_latest_run_invocation() {
     assert!(run.evidence.execution_id.is_none());
     assert_eq!(run.evidence.gaps[0].component, "execution_identity");
     assert_eq!(run.evidence.gaps[0].code, "session_projection_unavailable");
+    assert_eq!(
+        crate::orchestration::validate_execution_evidence(&run.evidence),
+        Err(crate::orchestration::ExecutionEvidenceValidationError::MissingExecutionId),
+        "legacy sessions remain visibly incomplete instead of bypassing the validator",
+    );
 }
 
 #[tokio::test]

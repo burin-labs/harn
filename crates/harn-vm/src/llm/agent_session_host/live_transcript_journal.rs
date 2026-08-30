@@ -73,9 +73,10 @@ pub(super) async fn initialize(
 /// projections therefore read one durable clock instead of deriving elapsed
 /// time from mutable session-row metadata.
 async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
-    let execution_id = crate::current_execution_scope().ok_or_else(|| {
-        VmError::Runtime("agent run started outside a VM execution scope".to_string())
-    })?;
+    // Normal VM calls inherit the invocation identity. Direct host and nested
+    // session entry points are also valid, so give those runs a VM-owned
+    // identity instead of aborting the agent loop or persisting no identity.
+    let execution_id = crate::current_execution_scope().unwrap_or_else(crate::mint_execution_scope);
     let event = super::super::helpers::transcript_event(
         "agent_run_started",
         "system",
