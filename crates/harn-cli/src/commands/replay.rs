@@ -31,6 +31,7 @@ pub(crate) fn json_schema() -> JsonValue {
                         "required": ["run_id", "status", "fixture"],
                         "properties": {
                             "run_id": {"type": "string"},
+                            "execution_id": {"type": "string"},
                             "status": {"type": "string"},
                             "fixture": {"type": "object"}
                         }
@@ -87,6 +88,10 @@ pub(crate) fn json_schema() -> JsonValue {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayReport {
     pub run_id: String,
+    /// Harn-owned identity of the source execution. Standalone traces and
+    /// legacy run records leave this absent rather than substituting run ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub status: String,
     pub stage_count: usize,
     pub stages: Vec<ReplayStage>,
@@ -622,6 +627,7 @@ fn execute_replay_trace(
     let fixture = trace_fixture_result(trace, &trace_run)?;
     let report = ReplayReport {
         run_id: trace_run.run_id.clone(),
+        execution_id: None,
         status: if fixture.pass { "completed" } else { "failed" }.to_string(),
         stage_count: 0,
         stages: Vec::new(),
@@ -676,6 +682,7 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
 
     ReplayReport {
         run_id: run.id.clone(),
+        execution_id: run.evidence.execution_id.clone(),
         status: run.status.clone(),
         stage_count: run.stages.len(),
         stages,
@@ -710,6 +717,9 @@ fn envelope_for_report(payload: ReplayReport) -> JsonEnvelope<ReplayReport> {
 
 fn print_report_human(report: &ReplayReport) {
     println!("Replay: {}", report.run_id);
+    if let Some(execution_id) = &report.execution_id {
+        println!("Execution: {execution_id}");
+    }
     for stage in &report.stages {
         println!(
             "[{}] status={} outcome={} branch={}",
@@ -950,7 +960,17 @@ fn to_string_pretty<T: Serialize>(value: &T) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::time_travel_keep_count;
+    use super::{replay_report_from_run, time_travel_keep_count};
+
+    #[test]
+    fn replay_report_does_not_synthesize_legacy_execution_identity() {
+        let run = harn_vm::orchestration::RunRecord {
+            id: "legacy-run".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(replay_report_from_run(&run).execution_id, None);
+    }
 
     #[test]
     fn time_travel_keeps_prefix_through_inclusive_cutoff() {
