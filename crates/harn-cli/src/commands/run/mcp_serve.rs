@@ -1,5 +1,5 @@
 pub(crate) enum RunFileMcpServeMode {
-    Stdio,
+    Stdio { watch: bool },
     Http(Box<RunFileMcpServeHttp>),
     App(Box<RunFileAppServe>),
 }
@@ -45,6 +45,17 @@ static TOOL_REGISTRY_LOAD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_ne
 /// Presentation adapters call this once and then consume the same VM-owned
 /// handlers; no adapter is allowed to rebuild or proxy the dispatch table.
 pub(crate) async fn load_file_tool_registry(
+    path: &str,
+) -> Result<LoadedToolRegistry, ToolRegistryLoadError> {
+    tokio::task::LocalSet::new()
+        .run_until(load_file_tool_registry_local(path))
+        .await
+}
+
+/// Local-task variant used by a live stdio server when a watched source tree
+/// changes. Keeping compilation and execution in this one loader preserves the
+/// exact same validation and connector setup as initial startup and CLI calls.
+pub(crate) async fn load_file_tool_registry_local(
     path: &str,
 ) -> Result<LoadedToolRegistry, ToolRegistryLoadError> {
     use std::path::Path;
@@ -116,56 +127,56 @@ pub(crate) async fn load_file_tool_registry(
     let _stale_resource_templates = harn_vm::take_mcp_serve_resource_templates();
     let _stale_prompts = harn_vm::take_mcp_serve_prompts();
     let _stale_metadata = harn_vm::take_mcp_serve_metadata();
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            vm.execute(&chunk)
-                .await
-                .map_err(|error| ToolRegistryLoadError {
-                    message: format!(
-                        "{diagnostics}{}{}",
-                        vm.output(),
-                        vm.format_runtime_error(&error)
-                    ),
-                    exit_code: error.process_exit_code().unwrap_or(1),
-                })?;
-            if !vm.output().is_empty() {
-                diagnostics.push_str(vm.output());
-            }
-            let registry =
-                harn_vm::take_mcp_serve_registry().ok_or_else(|| ToolRegistryLoadError {
-                    message: format!(
-                        "{diagnostics}pipeline did not publish a tool registry\n\
-                         hint: call harness.tools.mcp_tools(tools) from main"
-                    ),
-                    exit_code: 1,
-                })?;
-            harn_vm::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
-                ToolRegistryLoadError {
-                    message: format!("invalid tool registry: {error}"),
-                    exit_code: 1,
-                }
-            })?;
-            Ok(LoadedToolRegistry {
-                vm,
-                registry,
-                diagnostics,
-                resources: harn_vm::take_mcp_serve_resources(),
-                resource_templates: harn_vm::take_mcp_serve_resource_templates(),
-                prompts: harn_vm::take_mcp_serve_prompts(),
-                metadata: harn_vm::take_mcp_serve_metadata(),
-                _connector_clients: connector_clients,
-            })
-        })
+    vm.execute(&chunk)
         .await
+        .map_err(|error| ToolRegistryLoadError {
+            message: format!(
+                "{diagnostics}{}{}",
+                vm.output(),
+                vm.format_runtime_error(&error)
+            ),
+            exit_code: error.process_exit_code().unwrap_or(1),
+        })?;
+    if !vm.output().is_empty() {
+        diagnostics.push_str(vm.output());
+    }
+    let registry = harn_vm::take_mcp_serve_registry().ok_or_else(|| ToolRegistryLoadError {
+        message: format!(
+            "{diagnostics}pipeline did not publish a tool registry\n\
+                         hint: call harness.tools.mcp_tools(tools) from main"
+        ),
+        exit_code: 1,
+    })?;
+    harn_vm::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
+        ToolRegistryLoadError {
+            message: format!("invalid tool registry: {error}"),
+            exit_code: 1,
+        }
+    })?;
+    Ok(LoadedToolRegistry {
+        vm,
+        registry,
+        diagnostics,
+        resources: harn_vm::take_mcp_serve_resources(),
+        resource_templates: harn_vm::take_mcp_serve_resource_templates(),
+        prompts: harn_vm::take_mcp_serve_prompts(),
+        metadata: harn_vm::take_mcp_serve_metadata(),
+        _connector_clients: connector_clients,
+    })
 }
 
 pub(super) async fn run_server(
-    server: harn_vm::McpServer,
+    mut server: harn_vm::McpServer,
     mut vm: harn_vm::Vm,
     mode: RunFileMcpServeMode,
 ) {
     let result = match mode {
-        RunFileMcpServeMode::Stdio => server.run(&mut vm).await.map_err(|error| error.to_string()),
+        RunFileMcpServeMode::Stdio { watch: false } => {
+            server.run(&mut vm).await.map_err(|error| error.to_string())
+        }
+        RunFileMcpServeMode::Stdio { watch: true } => {
+            unreachable!("watch mode is owned by run_file_mcp_serve")
+        }
         RunFileMcpServeMode::Http(http) => {
             let RunFileMcpServeHttp {
                 options,
@@ -199,11 +210,11 @@ pub(crate) async fn run_file_mcp_serve(
     card_source: Option<&str>,
     mode: RunFileMcpServeMode,
 ) {
-    use std::path::Path;
     use std::process;
 
-    let loaded = match load_file_tool_registry(path).await {
-        Ok(loaded) => loaded,
+    let watch = matches!(&mode, RunFileMcpServeMode::Stdio { watch: true });
+    let loaded = match load_mcp_runtime(path, card_source, watch).await {
+        Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("error: {}", error.message);
             process::exit(error.exit_code);
@@ -212,98 +223,245 @@ pub(crate) async fn run_file_mcp_serve(
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
+    eprintln!(
+        "[harn] serve mcp: serving {} as '{}'{}",
+        loaded.capability_summary,
+        loaded.server_name,
+        if watch { " with source reload" } else { "" },
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            if watch {
+                run_reloadable_stdio(path, card_source, loaded).await;
+            } else {
+                let LoadedMcpRuntime {
+                    server,
+                    vm,
+                    connector_clients,
+                    ..
+                } = loaded;
+                run_server(server, vm, mode).await;
+                drop(connector_clients);
+            }
+        })
+        .await;
+}
+
+struct LoadedMcpRuntime {
+    server: harn_vm::McpServer,
+    vm: harn_vm::Vm,
+    diagnostics: String,
+    server_name: String,
+    capability_summary: String,
+    connector_clients: harn_vm::ActiveConnectorClientsGuard,
+}
+
+async fn load_mcp_runtime(
+    path: &str,
+    card_source: Option<&str>,
+    list_changes: bool,
+) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
+    let loaded = load_file_tool_registry(path).await?;
+    project_mcp_runtime(path, card_source, list_changes, loaded)
+}
+
+async fn load_mcp_runtime_local(
+    path: &str,
+    card_source: Option<&str>,
+) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
+    let loaded = load_file_tool_registry_local(path).await?;
+    project_mcp_runtime(path, card_source, true, loaded)
+}
+
+fn project_mcp_runtime(
+    path: &str,
+    card_source: Option<&str>,
+    list_changes: bool,
+    loaded: LoadedToolRegistry,
+) -> Result<LoadedMcpRuntime, ToolRegistryLoadError> {
+    use std::path::Path;
+
     let LoadedToolRegistry {
         vm,
         registry,
-        diagnostics: _,
+        diagnostics,
         resources,
         resource_templates,
         prompts,
         mut metadata,
-        _connector_clients,
+        _connector_clients: connector_clients,
     } = loaded;
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let tools = match harn_vm::tool_registry_to_mcp_tools(&registry) {
-                Ok(tools) => tools,
-                Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            };
-            let catalog = harn_vm::tool_registry::tool_registry_catalog(&registry)
-                .expect("registry was validated by the shared loader");
-            if let Some(info) = catalog.info {
-                let metadata = metadata.get_or_insert_default();
-                if metadata.name.is_none() {
-                    metadata.name = Some(info.name);
-                }
-                if metadata.version.is_none() {
-                    metadata.version = info.version;
-                }
-                if metadata.instructions.is_none() {
-                    metadata.instructions = info.description;
-                }
-            }
+    let tools =
+        harn_vm::tool_registry_to_mcp_tools(&registry).map_err(|error| ToolRegistryLoadError {
+            message: error.to_string(),
+            exit_code: 1,
+        })?;
+    let catalog = harn_vm::tool_registry::tool_registry_catalog(&registry)
+        .expect("registry was validated by the shared loader");
+    if let Some(info) = catalog.info {
+        let metadata = metadata.get_or_insert_default();
+        if metadata.name.is_none() {
+            metadata.name = Some(info.name);
+        }
+        if metadata.version.is_none() {
+            metadata.version = info.version;
+        }
+        if metadata.instructions.is_none() {
+            metadata.instructions = info.description;
+        }
+    }
 
-            let mut server_name = Path::new(path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("harn")
-                .to_string();
-            if let Some(name) = metadata
-                .as_ref()
-                .and_then(|metadata| metadata.name.as_ref())
+    let mut server_name = Path::new(path)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("harn")
+        .to_string();
+    if let Some(name) = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.name.as_ref())
+    {
+        server_name = name.clone();
+    }
+
+    let mut capabilities = Vec::new();
+    if !tools.is_empty() {
+        capabilities.push(format!(
+            "{} tool{}",
+            tools.len(),
+            if tools.len() == 1 { "" } else { "s" }
+        ));
+    }
+    let total_resources = resources.len() + resource_templates.len();
+    if total_resources > 0 {
+        capabilities.push(format!(
+            "{total_resources} resource{}",
+            if total_resources == 1 { "" } else { "s" }
+        ));
+    }
+    if !prompts.is_empty() {
+        capabilities.push(format!(
+            "{} prompt{}",
+            prompts.len(),
+            if prompts.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    let mut server = harn_vm::McpServer::new(
+        server_name.clone(),
+        tools,
+        resources,
+        resource_templates,
+        prompts,
+    )
+    .with_list_changes(list_changes);
+    if let Some(metadata) = metadata {
+        server = server.with_metadata(metadata);
+    }
+    if let Some(source) = card_source {
+        server = server.with_server_card(resolve_card_source(source).map_err(|error| {
+            ToolRegistryLoadError {
+                message: format!("--card: {error}"),
+                exit_code: 1,
+            }
+        })?);
+    }
+
+    Ok(LoadedMcpRuntime {
+        server,
+        vm,
+        diagnostics,
+        server_name,
+        capability_summary: capabilities.join(", "),
+        connector_clients,
+    })
+}
+
+async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: LoadedMcpRuntime) {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    use std::path::Path;
+    use std::time::Duration;
+
+    // The channel is a dirty bit, not an event log. A bounded slot prevents a
+    // rapid editor-save burst from accumulating while a replacement compiles.
+    let (source_tx, mut source_rx) = tokio::sync::mpsc::channel(1);
+    let mut watcher =
+        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| match result
+        {
+            Ok(event)
+                if !matches!(event.kind, EventKind::Access(_))
+                    && event.paths.iter().any(|path| {
+                        path.extension().and_then(|extension| extension.to_str()) == Some("harn")
+                            || path.file_name().and_then(|name| name.to_str()) == Some("harn.toml")
+                    }) =>
             {
-                server_name = name.clone();
+                let _ = source_tx.try_send(());
             }
+            Ok(_) => {}
+            Err(error) => eprintln!("[harn] serve mcp: source watcher error: {error}"),
+        }) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("error: failed to create MCP source watcher: {error}");
+                std::process::exit(1);
+            }
+        };
+    let watch_root = Path::new(path).parent().unwrap_or(Path::new("."));
+    if let Err(error) = watcher.watch(watch_root, RecursiveMode::Recursive) {
+        eprintln!(
+            "error: failed to watch MCP source root {}: {error}",
+            watch_root.display()
+        );
+        std::process::exit(1);
+    }
 
-            let mut capabilities = Vec::new();
-            if !tools.is_empty() {
-                capabilities.push(format!(
-                    "{} tool{}",
-                    tools.len(),
-                    if tools.len() == 1 { "" } else { "s" }
-                ));
-            }
-            let total_resources = resources.len() + resource_templates.len();
-            if total_resources > 0 {
-                capabilities.push(format!(
-                    "{total_resources} resource{}",
-                    if total_resources == 1 { "" } else { "s" }
-                ));
-            }
-            if !prompts.is_empty() {
-                capabilities.push(format!(
-                    "{} prompt{}",
-                    prompts.len(),
-                    if prompts.len() == 1 { "" } else { "s" }
-                ));
-            }
-            eprintln!(
-                "[harn] serve mcp: serving {} as '{server_name}'",
-                capabilities.join(", ")
-            );
-
-            let mut server =
-                harn_vm::McpServer::new(server_name, tools, resources, resource_templates, prompts);
-            if let Some(metadata) = metadata {
-                server = server.with_metadata(metadata);
-            }
-            if let Some(source) = card_source {
-                match resolve_card_source(source) {
-                    Ok(card) => server = server.with_server_card(card),
-                    Err(error) => {
-                        eprintln!("error: --card: {error}");
-                        process::exit(1);
+    let (reload_tx, reload_rx) = tokio::sync::mpsc::unbounded_channel();
+    let reload_path = path.to_string();
+    let reload_card = card_source.map(str::to_string);
+    tokio::task::spawn_local(async move {
+        while source_rx.recv().await.is_some() {
+            // One editor save can produce create, rename, and modify events.
+            // Wait for that burst, then load the final source state once.
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            while source_rx.try_recv().is_ok() {}
+            let replacement = load_mcp_runtime_local(&reload_path, reload_card.as_deref())
+                .await
+                .map(|runtime| {
+                    if !runtime.diagnostics.is_empty() {
+                        eprint!("{}", runtime.diagnostics);
                     }
-                }
+                    eprintln!(
+                        "[harn] serve mcp: reloaded {} as '{}'",
+                        runtime.capability_summary, runtime.server_name
+                    );
+                    harn_vm::McpServerReload::new(
+                        runtime.server,
+                        runtime.vm,
+                        runtime.connector_clients,
+                    )
+                })
+                .map_err(|error| error.message);
+            if reload_tx.send(replacement).is_err() {
+                break;
             }
-            run_server(server, vm, mode).await;
-            drop(_connector_clients);
-        })
+        }
+    });
+
+    let LoadedMcpRuntime {
+        server,
+        vm,
+        connector_clients,
+        ..
+    } = loaded;
+    let result = server
+        .run_reloadable(vm, connector_clients, reload_rx)
         .await;
+    drop(watcher);
+    if let Err(error) = result {
+        eprintln!("error: MCP server error: {error}");
+        std::process::exit(1);
+    }
 }
 
 /// Parse `--card` as inline JSON when it starts with an object or array;

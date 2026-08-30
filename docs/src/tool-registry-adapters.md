@@ -78,11 +78,16 @@ Every leaf also accepts:
 - `--harn-input @path.json` to read that object from a file
 - `--harn-input -` to read it from standard input
 - `--harn-output json|pretty|text` to select output encoding
+- `--json` as an explicit alias for compact JSON output when the tool does not
+  declare a `json` input property
 
 Individual flags override properties supplied through `--harn-input`. The
 merged object is validated against the registry's complete JSON Schema before
 the handler runs. Invalid required fields, enums, ranges, nested shapes, and
 additional properties fail at the CLI boundary.
+
+A tool with a `json` input keeps `--json` for that input. Use
+`--harn-output json` to select compact output in that case.
 
 `cli.command` must be a non-empty list of command names. A tool with no `cli`
 field defaults to `[namespace, name]` when `namespace` is present and `[name]`
@@ -95,12 +100,19 @@ invocation. Duplicate paths and leaf/parent path conflicts are errors.
 
 ```bash
 harn serve mcp server.harn
+harn serve mcp --surface script --watch server.harn
 ```
 
 MCP `tools/list` receives the same name, description, input schema, output
 schema, annotations, icons, execution metadata, and `_meta` values as the
 canonical catalog. MCP-only wire fields are projections; they are not a second
 declaration.
+
+With `--watch`, Harn validates a complete replacement registry and VM before
+swapping the live stdio server. Successful reloads keep the client connection
+open and emit the standard tool, resource, and prompt list-change
+notifications. Compilation, initialization, and registry-validation failures
+leave the previous handlers live.
 
 ## Static catalog
 

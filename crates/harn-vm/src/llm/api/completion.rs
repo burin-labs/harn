@@ -8,10 +8,9 @@ use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
 use super::auth::apply_auth_headers;
+use super::openai_normalize::extract_openai_choice_logprobs;
 use super::options::LlmCallOptions;
-use super::response::{
-    extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
-};
+use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
 use super::result::{mock_completion_response, LlmResult};
 use super::telemetry::{source as telemetry_source, ProviderTelemetry};
 
