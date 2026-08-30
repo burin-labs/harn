@@ -519,13 +519,29 @@ fn agent_terminal_contract_projects_the_rust_owner_exactly() {
         "AgentTerminalOwner projection drifted"
     );
 
+    let harn_lifecycle_states = harn_string_union_values(source, "AgentTerminalLifecycleState");
+    let rust_lifecycle_states: BTreeSet<String> = crate::agent_events::AgentTerminalKind::ALL
+        .into_iter()
+        .map(|kind| kind.lifecycle_state().wire_name().to_string())
+        .collect();
+    assert_eq!(
+        harn_lifecycle_states, rust_lifecycle_states,
+        "AgentTerminalLifecycleState projection drifted"
+    );
+
     assert_eq!(
         harn_alias_keys(source, "AgentTerminalOutcome"),
-        ["kind", "owner", "reason"]
+        [
+            "kind",
+            "lifecycle_state",
+            "owner",
+            "reason",
+            "run_record_status",
+        ]
             .into_iter()
             .map(str::to_string)
             .collect(),
-        "AgentTerminalOutcome must expose only producer-owned terminal fields",
+        "AgentTerminalOutcome must expose the producer-owned decision and its canonical projections",
     );
 }
 

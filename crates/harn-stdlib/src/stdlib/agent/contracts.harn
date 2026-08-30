@@ -14,7 +14,19 @@ pub type AgentTerminalKind = "natural" \
 
 pub type AgentTerminalOwner = "agent" | "user" | "policy" | "provider" | "harness" | "unknown"
 
-pub type AgentTerminalOutcome = {kind: AgentTerminalKind, reason: string, owner: AgentTerminalOwner}
+pub type AgentTerminalLifecycleState = "completed" \
+  | "failed" \
+  | "stopped" \
+  | "cancelled" \
+  | "suspended"
+
+pub type AgentTerminalOutcome = {
+  kind: AgentTerminalKind,
+  reason: string,
+  owner: AgentTerminalOwner,
+  lifecycle_state: AgentTerminalLifecycleState,
+  run_record_status: AgentTerminalLifecycleState,
+}
 
 pub type AgentLlmSummary = {
   token_scope: string,
