@@ -38,7 +38,7 @@ fn truncated_turn() {
 fn options(session: any, extra: dict? = nil) {
   return {
     provider: "mock",
-    model: "one-shot-prefill-fixture",
+    model: "claude-opus-3-5",
     tools: lookup_tools(),
     tool_format: "native",
     loop_until_done: true,
