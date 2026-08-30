@@ -7,7 +7,7 @@ repo_root=$(
   pwd
 )
 experiment_root="$repo_root/experiments/burin-mini"
-env_file="${BURIN_MINI_MATRIX_ENV_FILE:-$HOME/projects/burin-code/.env}"
+env_file="${BURIN_MINI_MATRIX_ENV_FILE:-${HARN_EXPERIMENT_ENV_FILE:-}}"
 timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
 matrix_root="${BURIN_MINI_MATRIX_ROOT:-$experiment_root/evals/reasoning-matrix/$timestamp}"
 policies="${BURIN_MINI_MATRIX_POLICIES:-off auto high}"

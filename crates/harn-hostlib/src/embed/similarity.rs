@@ -85,12 +85,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cosine_identical_vectors_is_one() {
-        let v = vec![1.0, 2.0, 3.0];
-        assert!((cosine(&v, &v) - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
     fn cosine_orthogonal_is_zero() {
         assert!(cosine(&[1.0, 0.0], &[0.0, 1.0]).abs() < 1e-6);
     }

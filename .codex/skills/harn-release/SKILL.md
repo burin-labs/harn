@@ -172,7 +172,7 @@ Terminal proof requires all of these to be successful:
   dereferences to the intended release commit. That commit contains the exact
   `--at-sha` parent and every `--expect-pr` prerequisite. The durable watcher
   reaches terminal health with the required assets and warm-matrix proof.
-- Cross-repo consumers do not wait on a release. For `burin-code`, use
+- Cross-repo consumers do not wait on a release. For a downstream host, use
   `./scripts/fetch-harn.sh --local` in that repo to build from
   `~/projects/harn` during iteration.
 

@@ -18,7 +18,7 @@ REPLICATES=3
 MOCK=0
 SINGLE_CELL=""
 PROBES=1
-ENV_FILE="${HOME}/projects/burin-code/.env"
+ENV_FILE="${HARN_EXPERIMENT_ENV_FILE:-}"
 TOOL_FORMAT="text"
 STEP_JUDGE_OVERRIDE=""
 STRUCTURAL_VALIDATOR_OVERRIDE=""
@@ -66,7 +66,11 @@ if [[ "${MOCK}" -eq 1 ]]; then
 else
   CHEAP_MODEL="openrouter:anthropic/claude-haiku-4-5"
   STRONG_MODEL="openrouter:anthropic/claude-sonnet-4-6"
-  ENV_ARG=("--env-file" "${ENV_FILE}")
+  if [[ -n "${ENV_FILE}" ]]; then
+    ENV_ARG=("--env-file" "${ENV_FILE}")
+  else
+    ENV_ARG=()
+  fi
 fi
 
 run_cell() {

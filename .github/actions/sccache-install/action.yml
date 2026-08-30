@@ -18,7 +18,7 @@ description: >
 # `mozilla-actions/sccache-action` installs the LATEST sccache when no version is
 # given, so leaving it unpinned means the next upstream sccache release silently
 # introduces that skew with no change on our side. That is exactly how
-# burin-labs/burin-code#5328 happened.
+# the unpinned-install incident on the shared self-hosted runners happened.
 #
 # VERSION is therefore coupled to the version installed on the self-hosted hosts
 # at ~/.local/bin/sccache and run by the `sccache-server` systemd user unit.

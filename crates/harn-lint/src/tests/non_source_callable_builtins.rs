@@ -129,7 +129,7 @@ fn non_literal_operation_falls_back_to_the_generic_route() {
 fn trusted_host_dispatch_does_not_report_a_privileged_wire() {
     // A privileged artifact is exactly who `privileged_wire` admits. Reporting
     // it there lands on a host's whole corpus at once — 84 findings in
-    // harn-cloud, 114 in burin-code (harn#6162).
+    // the hosted runtime, 114 in a downstream host (harn#6162).
     let source =
         "fn main(harness: Harness) {\n  let out = host_call(\"ast.outline\", {path: \"a.rs\"})\n}\n";
     assert_eq!(
@@ -182,7 +182,7 @@ fn trusted_host_dispatch_still_reports_a_runtime_internal() {
 
 #[test]
 fn trusted_host_dispatch_still_reports_a_migrated_ambient_builtin() {
-    // Measured on the real corpus: under the flag burin-code's HARN-LNT-072
+    // Measured on the real corpus: under the flag the downstream HARN-LNT-072
     // count goes to zero while its HARN-LNT-071 count stays at 99. The flag
     // admits the wire and changes nothing about the capability migrations.
     let source = "fn main(harness: Harness) {\n  log_info(\"hello\")\n}\n";

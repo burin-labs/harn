@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.121";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.123-dev";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
@@ -2591,6 +2591,404 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "parsing",
     "rawInputPartial",
 ];
+
+/// Harn-owned `session/update` extension payloads. Identity fields are first-class.
+pub const HARN_TYPED_SESSION_UPDATE_PAYLOADS: &[(&str, &str, &[&str])] = &[
+    ("artifact", "ACPArtifactUpdate", &["artifactId"]),
+    (
+        "available_commands_update",
+        "ACPAvailableCommandsUpdate",
+        &["availableCommands"],
+    ),
+    (
+        "fs_watch",
+        "ACPFsWatchUpdate",
+        &["subscriptionId", "events"],
+    ),
+    (
+        "handoff",
+        "ACPHandoffUpdate",
+        &["handoffId", "artifactId", "handoff"],
+    ),
+    ("hitl_request", "ACPHitlRequestUpdate", &["requestId"]),
+    ("hitl_resolved", "ACPHitlResolvedUpdate", &["requestId"]),
+    (
+        "live_session_client",
+        "ACPLiveSessionClientUpdate",
+        &["action"],
+    ),
+    ("log", "ACPLogUpdate", &["message"]),
+    ("progress", "ACPProgressUpdate", &["message"]),
+    (
+        "reminder_emitted",
+        "ACPReminderEmittedUpdate",
+        &["reminderId"],
+    ),
+    ("skill_activated", "ACPSkillActivatedUpdate", &["skillName"]),
+    (
+        "skill_deactivated",
+        "ACPSkillDeactivatedUpdate",
+        &["skillName"],
+    ),
+    (
+        "skill_narrow",
+        "ACPSkillNarrowUpdate",
+        &["removedTools", "remainingTools"],
+    ),
+    (
+        "skill_scope_tools",
+        "ACPSkillScopeToolsUpdate",
+        &["skillName", "allowedTools"],
+    ),
+    ("stance_transition", "ACPStanceTransitionUpdate", &["phase"]),
+    (
+        "tool_search_query",
+        "ACPToolSearchQueryUpdate",
+        &["toolUseId", "name"],
+    ),
+    (
+        "tool_search_result",
+        "ACPToolSearchResultUpdate",
+        &["toolUseId"],
+    ),
+    (
+        "transcript_compacted",
+        "ACPTranscriptCompactedUpdate",
+        &["mode", "strategy"],
+    ),
+    (
+        "transcript_projected",
+        "ACPTranscriptProjectedUpdate",
+        &["policy"],
+    ),
+    (
+        "worker_update",
+        "ACPWorkerUpdate",
+        &["workerId", "event", "status"],
+    ),
+];
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPArtifactUpdate {
+    pub session_update: String,
+    pub artifact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPAvailableCommandsUpdate {
+    pub session_update: String,
+    pub available_commands: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPFsWatchUpdate {
+    pub session_update: String,
+    pub subscription_id: String,
+    pub events: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPHandoffUpdate {
+    pub session_update: String,
+    pub handoff_id: String,
+    pub artifact_id: String,
+    pub handoff: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPHitlRequestUpdate {
+    pub session_update: String,
+    pub request_id: String,
+    pub kind: String,
+    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPHitlResolvedUpdate {
+    pub session_update: String,
+    pub request_id: String,
+    pub kind: String,
+    pub outcome: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPLiveSessionClientUpdate {
+    pub session_update: String,
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPLogUpdate {
+    pub session_update: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPProgressUpdate {
+    pub session_update: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPReminderEmittedUpdate {
+    pub session_update: String,
+    pub reminder_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminder: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPSkillActivatedUpdate {
+    pub session_update: String,
+    pub skill_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPSkillDeactivatedUpdate {
+    pub session_update: String,
+    pub skill_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPSkillNarrowUpdate {
+    pub session_update: String,
+    pub removed_tools: Vec<String>,
+    pub remaining_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPSkillScopeToolsUpdate {
+    pub session_update: String,
+    pub skill_name: String,
+    pub allowed_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPStanceTransitionUpdate {
+    pub session_update: String,
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escape_tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub justification: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPToolSearchQueryUpdate {
+    pub session_update: String,
+    pub tool_use_id: String,
+    pub name: String,
+    pub query: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPToolSearchResultUpdate {
+    pub session_update: String,
+    pub tool_use_id: String,
+    pub promoted: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPTranscriptCompactedUpdate {
+    pub session_update: String,
+    pub mode: String,
+    pub strategy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPTranscriptProjectedUpdate {
+    pub session_update: String,
+    pub policy: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ACPWorkerUpdate {
+    pub session_update: String,
+    pub worker_id: String,
+    pub event: String,
+    pub status: String,
+    pub terminal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+pub const HARN_PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
+pub const HARN_PREPARED_SESSION_STATES: &[&str] = &[
+    "needs_approval",
+    "ready",
+    "blocked",
+    "active",
+    "delta",
+    "stopped",
+    "pivoted",
+    "terminal",
+];
+pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
+    "approval_decision",
+    "attach",
+    "turn",
+    "request_delta",
+    "stop",
+    "pivot",
+    "finish",
+];
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionApprovalDecision {
+    pub batch_fingerprint: String,
+    pub approved: bool,
+    pub decider: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionBinding {
+    pub session_id: String,
+    pub workspace_fingerprint: String,
+    pub runtime: Value,
+    pub consumer: Value,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedRuntimeAttachment {
+    pub session_id: String,
+    pub workspace_fingerprint: String,
+    pub runtime: Value,
+    pub consumer: Value,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionLease {
+    pub schema: String,
+    pub session_id: String,
+    pub session_fingerprint: String,
+    pub plan_fingerprint: String,
+    pub binding: HarnPreparedSessionBinding,
+    pub intent: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<HarnPreparedSessionApprovalDecision>,
+    pub issued_at_ms: u64,
+    pub expires_at_ms: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionUpdate {
+    pub state: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<HarnPreparedSessionLease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Value>,
+}
 
 pub const HARN_SESSION_RECAP_QUERY_METHOD: &str = "harn.session_recap.query";
 pub const HARN_SESSION_RECAP_SCHEMA_VERSION: u32 = 1;

@@ -72,6 +72,7 @@ exempt_checks = [
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
   "check-stdlib-host-neutral",      # host-neutral stdlib naming ratchet, not a generated mirror
+  "check-public-product-names",     # public-contract downstream-product naming ratchet, not a generated mirror
   "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
   "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
   "check-schema-strict",             # zero-baseline strict gate for the std/schema facade, not a mirror
@@ -539,22 +540,22 @@ ci = true
 make_all = true
 
 # ---------------------------------------------------------------------------
-# Cross-repo guard — intentionally NOT in harn CI (needs a sibling
-# burin-code checkout). Runs in release / cross-repo jobs. ci = false.
+# Cross-repo guard — intentionally NOT in Harn CI (needs a sibling
+# downstream host checkout). Runs in release / cross-repo jobs. ci = false.
 # ---------------------------------------------------------------------------
 
 [[artifact]]
-id = "burin-protocol-artifacts"
-description = "Confirms every Burin Code vendored Harn protocol binding (Swift, Rust, and both TypeScript consumers) matches this checkout. Source of truth is the harn protocol artifacts; the consumer is a sibling repo."
-gen = ""  # regenerate downstream by re-vendoring spec/protocol-artifacts into burin-code
-check = "check-burin-protocol-artifacts"
+id = "downstream-protocol-artifacts"
+description = "Confirms every downstream vendored Harn protocol binding (Swift, Rust, and both TypeScript consumers) matches this checkout. Source of truth is the Harn protocol artifacts; the consumer is a sibling repo."
+gen = ""  # regenerate downstream by re-vendoring spec/protocol-artifacts into the host repo
+check = "check-downstream-protocol-artifacts"
 outputs = [
   "spec/protocol-artifacts/HarnProtocol.swift",
   "spec/protocol-artifacts/harn-protocol.rs",
   "spec/protocol-artifacts/harn-protocol.ts",
 ]
 sources = ["spec/protocol-artifacts/"]
-ci = false  # requires BURIN_CODE_ROOT / a sibling burin-code checkout; runs in release + cross-repo jobs only
+ci = false  # requires DOWNSTREAM_HOST_ROOT / a sibling host checkout; runs in release + cross-repo jobs only
 make_all = false  # excluded from `make all` for the same reason (no sibling checkout locally)
 
 # ---------------------------------------------------------------------------
@@ -615,6 +616,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-no-rust-prompt-prose" = "source"
 "lint-agent-path-normalization" = "source"
 "check-stdlib-host-neutral" = "source"
+"check-public-product-names" = "source"
 # --- binary: verdict depends on current executable semantics (check-drift-binary) ---
 "check-highlight" = "binary"
 "check-portable-benchmark-schema" = "binary"
@@ -654,7 +656,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-swift-protocol-binding" = "excluded"   # generated binding runtime probe (macOS Swift toolchain)
 "check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
 "check-wasm-wit" = "excluded"                 # pinned Bytecode Alliance wasm-tools validation (external toolchain)
-"check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)
+"check-downstream-protocol-artifacts" = "excluded" # needs a sibling host checkout (ci = false)
 "check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
 "check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
 "check-test-case-performance" = "excluded"    # per-test perf ratchet (build + run)

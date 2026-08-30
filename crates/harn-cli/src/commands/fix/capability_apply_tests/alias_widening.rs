@@ -94,7 +94,7 @@ fn a_second_use_of_the_alias_still_typechecks_after_wrap() {
     );
 }
 
-/// A registry list hand-over is the burin-code shape — wrap it.
+/// A registry list hand-over is the downstream-host shape, so wrap it.
 #[test]
 fn a_value_read_outside_a_parameter_default_is_wrapped() {
     let source = PROVABLE.replace(

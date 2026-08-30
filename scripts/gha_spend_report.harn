@@ -4,7 +4,7 @@ import { github_api_json_result } from "./github_api.harn"
 
 const DEFAULT_ORG = "burin-labs"
 
-const DEFAULT_REPOS = ["harn", "burin-code"]
+const DEFAULT_REPOS = ["harn"]
 
 const DEFAULT_RUNS_PER_REPO = 50
 
@@ -37,7 +37,7 @@ fn usage() -> string {
       "",
       "Examples:",
       "  harn run scripts/gha_spend_report.harn --",
-      "  harn run scripts/gha_spend_report.harn -- --org burin-labs --repo harn --repo burin-code",
+      "  harn run scripts/gha_spend_report.harn -- --org example-org --repo harn --repo host-app",
       "  harn run scripts/gha_spend_report.harn -- --json",
     ],
     "\n",

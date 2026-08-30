@@ -48,6 +48,21 @@ Harn's active redaction policy before it reaches the snapshot.
 until it carries and verifies its own binding to the snapshot's
 `projectionHash` or `contentHash`.
 
+## Optional enrichment
+
+`SessionRecapSnapshot::apply_optional_enrichment` is the owning interface for
+decorative recap copy. A candidate names the exact `sourceProjectionHash`, one
+bounded summary, and optional bounded headlines for turn IDs that already exist
+in the deterministic recap. Harn accepts it under
+`harn.dev/session-recap-enrichment/v1` only when the binding and every bound
+validate.
+
+Missing, stale, malformed, duplicate-turn, unknown-turn, or oversized
+enrichment returns an explicit `deterministic_fallback` disposition and leaves
+the snapshot byte-for-byte unchanged. The base recap remains the display
+fallback and source of truth. Enrichment is not written as a session event and
+must not be inserted into provider-visible transcript messages.
+
 The schema-v1 write contract is closed. A writer must reject unknown fields in
 the availability envelope or snapshot. Forward-compatible data belongs in the
 `extensions` object, which typed bindings preserve when they decode and

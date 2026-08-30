@@ -21,6 +21,13 @@ pub const SESSION_RECAP_SCHEMA_ARTIFACT: &str = "schemas/session-recap-v1.schema
 pub const DEFAULT_RECAP_SOURCE_LIMIT: usize = 4_096;
 pub const MAX_RECAP_SOURCE_LIMIT: usize = 32_768;
 
+mod enrichment;
+pub use enrichment::{
+    SessionRecapEnrichment, SessionRecapEnrichmentDisposition,
+    SessionRecapEnrichmentFallbackReason, SessionRecapTurnHeadline,
+    SESSION_RECAP_ENRICHMENT_EXTENSION,
+};
+
 /// One bounded read over a durable agent session.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
@@ -67,6 +74,18 @@ pub struct SessionRecapSnapshot {
     /// are not part of schema v1 and must not be written back by consumers.
     #[serde(default)]
     pub extensions: BTreeMap<String, serde_json::Value>,
+}
+
+impl SessionRecapSnapshot {
+    /// Attach one bounded decorative enrichment when it is bound to this exact
+    /// deterministic projection. Rejected or absent enrichment leaves the
+    /// snapshot unchanged, so consumers always retain the base recap.
+    pub fn apply_optional_enrichment(
+        &mut self,
+        enrichment: Option<SessionRecapEnrichment>,
+    ) -> SessionRecapEnrichmentDisposition {
+        enrichment::apply_optional_enrichment(self, enrichment)
+    }
 }
 
 /// Why a terminal result could not carry a deterministic recap snapshot.
@@ -1085,3 +1104,7 @@ fn sha256_canonical<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 #[path = "session_recap_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session_recap_enrichment_tests.rs"]
+mod enrichment_tests;

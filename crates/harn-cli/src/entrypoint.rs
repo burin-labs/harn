@@ -535,6 +535,12 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         Command::Codemod(args) => commands::codemod::run(args).await,
         Command::Rule(args) => commands::rule::run(args).await,
         Command::Try(args) => commands::try_cmd::run(args).await,
+        Command::Chat(args) => {
+            let exit = commands::chat::run(args).await;
+            if exit != 0 {
+                std::process::exit(exit);
+            }
+        }
         Command::Quickstart(args) => {
             if let Err(error) = commands::quickstart::run_quickstart(&args).await {
                 command_error(&error);

@@ -17,7 +17,9 @@ mod constants;
 mod external_action;
 mod external_action_types;
 mod manifest;
+mod prepared_session;
 mod session_recap;
+mod session_update_payloads;
 mod support;
 mod values;
 
@@ -201,6 +203,10 @@ fn generate_artifacts(
             harn_vm::session_recap::SESSION_RECAP_SCHEMA_ARTIFACT,
             serde_json::to_string_pretty(&harn_vm::session_recap::session_recap_json_schema())
                 .map_err(|error| format!("failed to encode session recap schema: {error}"))?,
+        ),
+        Artifact::new(
+            harn_vm::prepared_run::PREPARED_SESSION_SCHEMA_ARTIFACT,
+            harn_vm::prepared_run::PREPARED_SESSION_V1_SCHEMA_JSON,
         ),
     ];
 

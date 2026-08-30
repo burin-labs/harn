@@ -10,51 +10,18 @@
 //! `<cwd>/.harn` and honors `HARN_STATE_DIR`). Treats missing files as the
 //! "no prior selection / no Harn-managed process" state so first-run flows
 //! work without an explicit init.
+//!
+//! The *selection* half is owned by [`harn_vm::local_selection`] and merely
+//! re-exported here: it is a routing fact other surfaces (`harn chat`) must
+//! read, so it cannot live behind this binary crate's `pub(crate)`. PID
+//! records stay here because process lifecycle is genuinely the CLI's job.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-const LOCAL_SUBDIR: &str = "local";
-const SELECTION_FILE: &str = "selection.json";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct LocalSelection {
-    pub provider: String,
-    pub model: String,
-    pub alias: Option<String>,
-    pub base_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ctx: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keep_alive: Option<String>,
-    pub switched_at: String,
-}
-
-impl LocalSelection {
-    pub(crate) fn now(
-        provider: impl Into<String>,
-        model: impl Into<String>,
-        alias: Option<String>,
-        base_url: impl Into<String>,
-        ctx: Option<u64>,
-        keep_alive: Option<String>,
-    ) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-            alias,
-            base_url: base_url.into(),
-            ctx,
-            keep_alive,
-            switched_at: OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| String::new()),
-        }
-    }
-}
+pub(crate) use harn_vm::local_selection::{read_selection, write_selection, LocalSelection};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PidRecord {
@@ -68,34 +35,11 @@ pub(crate) struct PidRecord {
 }
 
 pub(crate) fn local_state_dir(base_dir: &Path) -> PathBuf {
-    harn_vm::runtime_paths::state_root(base_dir).join(LOCAL_SUBDIR)
+    harn_vm::local_selection::local_state_dir(base_dir)
 }
 
 pub(crate) fn ensure_state_dir(base_dir: &Path) -> Result<PathBuf, String> {
-    let dir = local_state_dir(base_dir);
-    fs::create_dir_all(&dir)
-        .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
-    Ok(dir)
-}
-
-pub(crate) fn write_selection(base_dir: &Path, selection: &LocalSelection) -> Result<(), String> {
-    let dir = ensure_state_dir(base_dir)?;
-    let path = dir.join(SELECTION_FILE);
-    let body = serde_json::to_vec_pretty(selection)
-        .map_err(|error| format!("failed to serialize local selection: {error}"))?;
-    fs::write(&path, body).map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
-pub(crate) fn read_selection(base_dir: &Path) -> Result<Option<LocalSelection>, String> {
-    let path = local_state_dir(base_dir).join(SELECTION_FILE);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let body =
-        fs::read(&path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let selection: LocalSelection = serde_json::from_slice(&body)
-        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
-    Ok(Some(selection))
+    harn_vm::local_selection::ensure_local_state_dir(base_dir)
 }
 
 fn pid_file(base_dir: &Path, provider: &str) -> PathBuf {
@@ -145,33 +89,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    #[test]
-    fn selection_roundtrip_persists_under_state_root() {
-        let dir = tempdir().expect("tempdir");
-        let selection = LocalSelection::now(
-            "ollama",
-            "qwen36:30b",
-            Some("qwen36-coder".to_string()),
-            "http://127.0.0.1:11434",
-            Some(32_768),
-            Some("30m".to_string()),
-        );
-        write_selection(dir.path(), &selection).expect("write selection");
-        let round = read_selection(dir.path())
-            .expect("read selection")
-            .expect("present");
-        assert_eq!(round.provider, "ollama");
-        assert_eq!(round.model, "qwen36:30b");
-        assert_eq!(round.alias.as_deref(), Some("qwen36-coder"));
-        assert_eq!(round.ctx, Some(32_768));
-    }
-
-    #[test]
-    fn read_selection_returns_none_when_missing() {
-        let dir = tempdir().expect("tempdir");
-        let result = read_selection(dir.path()).expect("ok");
-        assert!(result.is_none());
-    }
+    // Selection round-trip coverage lives with the owner, in
+    // `harn_vm::local_selection`.
 
     #[test]
     fn pid_record_roundtrip_and_clear() {

@@ -526,7 +526,7 @@ fn json_is_a_text_channel_format_for_parity() {
     // for, and it still holds. The resolved GRAMMAR is a separate question:
     // this fixture pins `preferred_tool_format = "text"`, and json and heredoc
     // are mutually unparseable, so accepting the request verbatim would teach a
-    // syntax the parser will not run (burin-code#6388). Accepted, then steered
+    // syntax the parser will not run. Accepted, then steered
     // to the route's pinned grammar.
     match resolve_with_parity("bootcamp-text-only-json", "text_only", false, "json") {
         Outcome::Accepted { tool_format, .. } => assert_eq!(
@@ -537,7 +537,7 @@ fn json_is_a_text_channel_format_for_parity() {
     }
 }
 
-/// burin-code#6388, isolated from parity. `interchangeable` parity means no
+/// A downstream grammar regression, isolated from parity. `interchangeable` parity means no
 /// channel is forbidden, so nothing above the grammar rule can fire: this pins
 /// the grammar steer on its own. A route whose catalog row names heredoc
 /// `text` must not have its prompt built for fenced-JSON just because a caller

@@ -92,6 +92,7 @@ pub(crate) mod limits;
 pub mod linked_program;
 pub mod llm;
 pub mod llm_config;
+pub mod local_selection;
 pub mod mcp;
 pub mod mcp_allowlist;
 pub mod mcp_auth;

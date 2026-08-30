@@ -11,7 +11,11 @@ use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_typescript_external_action_types;
+use super::prepared_session::append_typescript_prepared_session_types;
 use super::session_recap::append_typescript_session_recap_types;
+use super::session_update_payloads::{
+    append_typescript_session_update_payloads, typescript_session_update_union_members,
+};
 use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
@@ -793,7 +797,11 @@ export interface ACPSessionTruncatedUpdate {
   newTipTurnId?: string | null
   reason?: string
 }
-
+"#,
+    );
+    append_typescript_session_update_payloads(&mut out);
+    out.push_str(
+        r"
 export interface ACPHarnExtensionUpdate {
   sessionUpdate: HarnACPSessionUpdateExtension
   _meta?: ACPExtensionMeta<ACPObject>
@@ -806,7 +814,11 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolCallUpdate
   | ACPPlanUpdate
   | ACPSessionTruncatedUpdate
-  | ACPHarnExtensionUpdate
+",
+    );
+    out.push_str(&typescript_session_update_union_members());
+    out.push_str(
+        r#"  | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {
   sessionId: string
@@ -1171,6 +1183,7 @@ export interface HarnSessionTimelineUpdate {
 }
 ",
     );
+    append_typescript_prepared_session_types(&mut out);
     append_typescript_session_recap_types(&mut out);
     out
 }

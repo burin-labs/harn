@@ -165,7 +165,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.121"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.123-dev"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -1393,6 +1393,212 @@ class MCPPrompt(_HarnDataclass):
     title: Optional[str] = None
     description: Optional[str] = None
     arguments: Optional[List[JsonObject]] = None
+
+@dataclass
+class ACPArtifactUpdate(_HarnDataclass):
+    sessionUpdate: str
+    artifactId: str
+    kind: Optional[str] = None
+    title: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPAvailableCommandsUpdate(_HarnDataclass):
+    sessionUpdate: str
+    availableCommands: JsonValue
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPFsWatchUpdate(_HarnDataclass):
+    sessionUpdate: str
+    subscriptionId: str
+    events: JsonValue
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPHandoffUpdate(_HarnDataclass):
+    sessionUpdate: str
+    handoffId: str
+    artifactId: str
+    handoff: JsonValue
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPHitlRequestUpdate(_HarnDataclass):
+    sessionUpdate: str
+    requestId: str
+    kind: str
+    payload: JsonValue
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPHitlResolvedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    requestId: str
+    kind: str
+    outcome: JsonValue
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPLiveSessionClientUpdate(_HarnDataclass):
+    sessionUpdate: str
+    action: str
+    state: Optional[JsonValue] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPLogUpdate(_HarnDataclass):
+    sessionUpdate: str
+    message: str
+    level: Optional[str] = None
+    fields: Optional[JsonValue] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPProgressUpdate(_HarnDataclass):
+    sessionUpdate: str
+    message: str
+    phase: Optional[str] = None
+    progress: Optional[int] = None
+    total: Optional[int] = None
+    data: Optional[JsonValue] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPReminderEmittedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    reminderId: str
+    reminder: Optional[JsonValue] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPSkillActivatedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    skillName: str
+    iteration: Optional[int] = None
+    reason: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPSkillDeactivatedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    skillName: str
+    iteration: Optional[int] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPSkillNarrowUpdate(_HarnDataclass):
+    sessionUpdate: str
+    removedTools: List[str]
+    remainingTools: List[str]
+    reason: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPSkillScopeToolsUpdate(_HarnDataclass):
+    sessionUpdate: str
+    skillName: str
+    allowedTools: List[str]
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPStanceTransitionUpdate(_HarnDataclass):
+    sessionUpdate: str
+    phase: str
+    escapeTool: Optional[str] = None
+    allowedTools: Optional[List[str]] = None
+    justification: Optional[str] = None
+    consent: Optional[str] = None
+    reason: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPToolSearchQueryUpdate(_HarnDataclass):
+    sessionUpdate: str
+    toolUseId: str
+    name: str
+    query: JsonValue
+    strategy: Optional[str] = None
+    mode: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPToolSearchResultUpdate(_HarnDataclass):
+    sessionUpdate: str
+    toolUseId: str
+    promoted: JsonValue
+    strategy: Optional[str] = None
+    mode: Optional[str] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPTranscriptCompactedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    mode: str
+    strategy: str
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPTranscriptProjectedUpdate(_HarnDataclass):
+    sessionUpdate: str
+    policy: str
+    reason: str
+    _meta: Optional[HarnExtensionMeta] = None
+
+@dataclass
+class ACPWorkerUpdate(_HarnDataclass):
+    sessionUpdate: str
+    workerId: str
+    event: str
+    status: str
+    terminal: bool
+    workerName: Optional[str] = None
+    workerTask: Optional[str] = None
+    workerMode: Optional[str] = None
+    metadata: Optional[JsonValue] = None
+    audit: Optional[JsonValue] = None
+    _meta: Optional[HarnExtensionMeta] = None
+
+HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1"
+HARN_PREPARED_SESSION_STATES = ("needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal")
+HARN_PREPARED_SESSION_COMMANDS = ("approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish")
+@dataclass
+class HarnPreparedSessionApprovalDecision(_HarnDataclass):
+    batch_fingerprint: str
+    approved: bool
+    decider: str
+@dataclass
+class HarnPreparedSessionBinding(_HarnDataclass):
+    session_id: str
+    workspace_fingerprint: str
+    runtime: JsonValue
+    consumer: JsonValue
+@dataclass
+class HarnPreparedRuntimeAttachment(_HarnDataclass):
+    session_id: str
+    workspace_fingerprint: str
+    runtime: JsonValue
+    consumer: JsonValue
+@dataclass
+class HarnPreparedSessionLease(_HarnDataclass):
+    schema: str
+    session_id: str
+    session_fingerprint: str
+    plan_fingerprint: str
+    binding: HarnPreparedSessionBinding
+    intent: JsonValue
+    issued_at_ms: int
+    expires_at_ms: int
+    approval: Optional[HarnPreparedSessionApprovalDecision] = None
+@dataclass
+class HarnPreparedSessionUpdate(_HarnDataclass):
+    state: str
+    session_id: str
+    batch: Optional[JsonValue] = None
+    lease: Optional[HarnPreparedSessionLease] = None
+    diagnostics: Optional[List[JsonValue]] = None
+    receipt: Optional[JsonValue] = None
+    outcome: Optional[JsonValue] = None
 
 
 HARN_SESSION_RECAP_QUERY_METHOD: str = "harn.session_recap.query"

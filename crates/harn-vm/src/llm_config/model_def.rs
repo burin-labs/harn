@@ -794,7 +794,7 @@ pub struct ServingTierDef {
 /// This data-driven declaration follows the same spirit as `serving_tiers`
 /// (#4017): a capability/behavior encoded as catalog data rather than
 /// hand-rolled at each downstream call site (harn-bump-fleet,
-/// harn-cloud free_tier_pool, burin-code all shipped their own copy).
+/// the hosted free-tier pool and a downstream host all shipped their own copy).
 // NB: `PartialEq` only (no `Eq`): `ModelLadderStepDef::options` holds
 // `toml::Value`, which carries floats and therefore is not `Eq`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

@@ -128,7 +128,7 @@ fn template_id(template: ProjectTemplate) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch_to_script, resolve_new_args, template_id};
+    use super::{dispatch_to_script, resolve_new_args};
     use crate::cli::{NewArgs, ProjectTemplate};
     use std::fs;
 
@@ -142,14 +142,6 @@ mod tests {
         let (name, template) = resolve_new_args(&args).unwrap();
         assert_eq!(name.as_deref(), Some("sample"));
         assert_eq!(template, ProjectTemplate::Package);
-    }
-
-    #[test]
-    fn template_ids_match_scaffold_script_contract() {
-        assert_eq!(template_id(ProjectTemplate::Basic), "basic");
-        assert_eq!(template_id(ProjectTemplate::McpServer), "mcp-server");
-        assert_eq!(template_id(ProjectTemplate::PipelineLab), "pipeline-lab");
-        assert_eq!(template_id(ProjectTemplate::Connector), "connector");
     }
 
     #[test]

@@ -41,9 +41,9 @@ In scope:
 
 Out of scope for *this* repository:
 
-- vulnerabilities in Burin Code or Harn Cloud. Still report them, to the same
-  address — **security@harn.cloud** — naming the product. Do not open a public
-  issue against them.
+- vulnerabilities in a downstream host product or Harn Cloud. Still report them,
+  to the same address — **security@harn.cloud** — naming the product. Do not
+  open a public issue against them.
 - a script that is merely granted broad capabilities by its author. Harn
   enforces the policy it is given; a script explicitly granted process and
   network access is behaving as configured, not escaping the sandbox.

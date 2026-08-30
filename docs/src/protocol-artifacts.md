@@ -103,7 +103,7 @@ respectively.
 Cross-repo release jobs can run:
 
 ```sh
-BURIN_CODE_ROOT=/path/to/host-checkout make check-burin-protocol-artifacts
+DOWNSTREAM_HOST_ROOT=/path/to/host-checkout make check-downstream-protocol-artifacts
 ```
 
 to fail when a downstream host's vendored Swift or TypeScript protocol bindings

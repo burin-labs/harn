@@ -387,6 +387,14 @@ inaccessible_resource = "Grant the connector access to the requested resource."
 transient_provider_outage = "Retry after the provider or credential backend recovers."
 ```
 
+Write every `required_secrets` entry as a table with an explicit `direction`.
+Connector packages published before the direction became typed wrote a bare
+id string instead, and the manifest loader still accepts that spelling as
+`direction = "outbound"` so an installed package cache keeps loading across a
+Harn upgrade. It is a compatibility path for already-published packages, not a
+supported authoring form: `harn package verify` and every reader above the
+loader see the typed struct either way.
+
 Connector contract v2 requires each provider to declare one product-facing
 service contract. This is the semantic source for host setup screens,
 capability filtering, action

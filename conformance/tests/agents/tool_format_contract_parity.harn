@@ -1,5 +1,5 @@
 // Teach/accept parity for the openai-compat text-route format contract
-// (burin-labs/burin-code#4809).
+// observed in a downstream host.
 //
 // Claim: every exemplar rendered by `agent_render_tool_call_exemplar` for a
 // given `tool_format` is accepted by `agent_parse_tool_calls` under that same
@@ -101,13 +101,13 @@ pipeline main(harness: Harness) {
   //
   // We teach exactly one grammar per route and forgive the other on ARRIVAL.
   // A call written in the other grammar is still a call the model meant to
-  // make; discarding it silently is burin-code#6388. The two grammars are
+  // make; discarding it silently caused a downstream regression. The two grammars are
   // mutually unambiguous, so forgiving one costs no soundness — but every
   // forgiven accept must SAY so, or the drift that justified the pin goes
   // invisible.
   //
   // 1. Heredoc markup arriving on a json pin: accepted, normalized, evented.
-  //    Measured exposure: burin-code's default eval model `local-qwen3.6`
+  //    Measured exposure: a downstream host's default eval model `local-qwen3.6`
   //    resolves to llamacpp `qwen3.6-35b-a3b-ud-q4-k-xl` (preferred=json,
   //    parity=text_only), and before this it parsed 0 heredoc calls with 0
   //    errors — a silent total drop.

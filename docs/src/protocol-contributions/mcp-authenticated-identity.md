@@ -9,7 +9,7 @@
 - **Authors:** Burin Labs
 - **Reference impl:** the MCP authenticated-identity registry and "connected as"
   display tracked under [harn#3331](https://github.com/burin-labs/harn/issues/3331)
-  (Epic F). Per-server `whoami`-style probing ships in the Burin Code connector
+  (Epic F). Per-server `whoami`-style probing ships in a downstream connector
   surface today.
 
 Verified non-duplicate on 2026-07-03: [SEP-1299][sep-1299] is unrelated

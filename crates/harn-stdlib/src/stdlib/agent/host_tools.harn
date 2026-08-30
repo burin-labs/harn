@@ -10,7 +10,7 @@ fn __agent_host_root(options: dict?) {
   return opts?.root ?? opts?.cwd
 }
 
-fn __agent_host_list_contains(values: list?, needle: any) {
+fn __agent_host_list_contains(values: list | string | nil, needle: any) {
   if type_of(values) == "string" {
     return values == needle
   }

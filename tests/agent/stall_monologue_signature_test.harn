@@ -1,0 +1,140 @@
+// Run: harn test tests/agent/stall_monologue_signature_test.harn
+//
+// Monologue identity is the raw assistant emission. Token overlap may still
+// continue a paraphrase streak, but two different byte strings must not share
+// a signature. The production loop must pass raw text: sanitized visible text
+// is empty for internal verdict JSON and would reset or collide every turn.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import {
+  AgentStallState,
+  agent_stall_initial_state,
+  agent_stall_observe_tool_calls,
+} from "std/agent/stall"
+import { llm_text, with_llm_script } from "std/testing"
+
+const CONFIG = {enabled: true, no_progress_messages: 3}
+
+const VERDICT_A = "{\"verdict\":\"done\",\"reasoning\":\"first distinct completion attempt\"}"
+
+const VERDICT_B = "{\"verdict\":\"done\",\"reasoning\":\"second distinct completion attempt\"}"
+
+fn _observe_text(agent: HarnessAgent, state: AgentStallState, iteration: int, text: string) {
+  return agent_stall_observe_tool_calls(
+    agent,
+    "unit",
+    [],
+    iteration,
+    CONFIG,
+    state,
+    true,
+    nil,
+    text,
+    false,
+  )
+}
+
+fn events_of(events: any, kind: string) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline test_distinct_prose_turns_do_not_share_a_monologue_signature(
+  harness: Harness,
+  task: unknown,
+) {
+  const o1 = _observe_text(harness.agent, agent_stall_initial_state(), 1, "Hello world.")
+  const o2 = _observe_text(harness.agent, o1.state, 2, "Hello world!")
+  assert(o1.state.last_no_progress_signature != "")
+  assert(o2.state.last_no_progress_signature != "")
+  assert(o1.state.last_no_progress_signature != o2.state.last_no_progress_signature)
+}
+
+pipeline test_identical_prose_turns_share_a_monologue_signature(harness: Harness, task: unknown) {
+  const text = "The formatter owns whitespace normalization."
+  const o1 = _observe_text(harness.agent, agent_stall_initial_state(), 1, text)
+  const o2 = _observe_text(harness.agent, o1.state, 2, text)
+  assert_eq(o1.state.last_no_progress_signature, o2.state.last_no_progress_signature)
+  assert_eq(o2.state.no_progress_streak, 2)
+  assert(o2.warning == nil)
+}
+
+pipeline test_distinct_verdict_json_turns_do_not_share_a_monologue_signature(
+  harness: Harness,
+  task: unknown,
+) {
+  const o1 = _observe_text(harness.agent, agent_stall_initial_state(), 1, VERDICT_A)
+  const o2 = _observe_text(harness.agent, o1.state, 2, VERDICT_B)
+  assert(o1.state.last_no_progress_signature != o2.state.last_no_progress_signature)
+}
+
+pipeline test_identical_verdict_json_turns_share_a_monologue_signature(
+  harness: Harness,
+  task: unknown,
+) {
+  const o1 = _observe_text(harness.agent, agent_stall_initial_state(), 1, VERDICT_A)
+  const o2 = _observe_text(harness.agent, o1.state, 2, VERDICT_A)
+  assert_eq(o1.state.last_no_progress_signature, o2.state.last_no_progress_signature)
+  assert_eq(o2.state.no_progress_streak, 2)
+}
+
+fn _verdict_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline test_loop_hashes_raw_emission_not_stripped_visible_text(harness: Harness, task: unknown) {
+  const prefix = "Need to inspect Entry.php before editing."
+  const raw = prefix + "\n" + VERDICT_A
+  with_llm_script(
+    harness.llm,
+    [llm_text(raw), llm_text(raw), llm_text("Inspection complete. ##DONE##")],
+    { ->
+      const session = "raw-emission-monologue-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: _verdict_toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 1,
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Finish the task.", nil, opts) },
+      )
+      const warnings = events_of(captured.events, "agent_loop_stall_warning").filter(
+        { event -> (event.warning?.pattern ?? event.pattern) == "no_progress_monologue" },
+      )
+      assert(len(warnings) >= 1, "identical raw emissions must trip no_progress_monologue")
+      const signature = warnings[0].warning?.signature ?? warnings[0].signature
+      assert_eq(
+        signature,
+        "monologue:" + sha256(raw),
+        "loop must hash raw emission, not stripped visible text",
+      )
+    },
+  )
+}

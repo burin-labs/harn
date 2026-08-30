@@ -122,7 +122,7 @@ pub const PERSISTENT_SCCACHE_ACTION = "./.github/actions/sccache"
 // through it: sccache allows one server per user and a client whose version
 // differs from the running server SHUTS IT DOWN, so an unpinned install on a
 // many-worker self-hosted host kills the shared server out from under whatever
-// unrelated job is mid-compile (burin-labs/burin-code#5328). The upstream action
+// unrelated downstream-host job is mid-compile. The upstream action
 // installs the LATEST sccache when no version is given, which makes "unpinned"
 // a time bomb rather than a style question.
 pub const SCCACHE_INSTALL_ACTION_PATH = ".github/actions/sccache-install/action.yml"

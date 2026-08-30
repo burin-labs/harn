@@ -9,14 +9,18 @@
 mod contracts;
 mod discovery;
 mod engine;
+mod evidence;
 mod identity;
 mod receipt;
+mod session;
 
 pub use contracts::*;
 pub use discovery::*;
 pub use engine::*;
+pub use evidence::requirement_fingerprint;
 pub use identity::*;
 pub use receipt::*;
+pub use session::*;
 
 #[cfg(test)]
 mod tests;

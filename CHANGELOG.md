@@ -9,6 +9,41 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.122
+
+### Added
+
+- **`harn dump-protocol-artifacts` now emits typed Harn `session/update` payload structs (#7572).**
+  Hosts get first-class identity fields for every advertised extension
+  (`skill_activated`, `worker_update`, `stance_transition`, and the rest)
+  instead of a discriminator plus `_meta` lump. The catch-all
+  `ACPHarnExtensionUpdate` remains for unknown future variants.
+
+### Changed
+
+- Public source, tooling, and documentation now use host-neutral names for
+  downstream integrations, with a repository-wide drift check protecting the
+  boundary.
+
+### Fixed
+
+- Project resolution-backed Harn references into the hostlib symbol graph so
+  Cypher queries preserve module ownership and lexical shadowing across rebuilds.
+- Restore the polymorphic stdlib inputs that their implementations already
+  support, including bare workflow results, prebuilt media blocks, and GraphQL
+  endpoint strings, while preserving source-free document and audio blocks that
+  refer to an existing provider file ID.
+- Load connector packages that still declare `required_secrets` as bare id
+  strings. Typing the secret direction made every already-published connector
+  package fail to parse, so upgrading Harn broke consumers that pin those
+  packages by git rev. The legacy spelling now resolves to the outbound
+  direction the package was published against; the typed
+  `{ id, direction }` table stays the authoring form and is still checked key
+  by key.
+- No-progress monologue signatures now hash the raw assistant emission, so
+  distinct prose-only turns no longer collapse into one thrash identity after
+  sanitization or token normalization.
+
 ## v0.10.121
 
 ### Breaking

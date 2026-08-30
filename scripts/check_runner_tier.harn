@@ -11,8 +11,8 @@ import { read_yaml } from "std/fs"
 // therefore takes the wrong branch there: `== 'self-hosted'` guards fire on
 // vendor capacity and `!= 'self-hosted'` guards skip the steps they were meant
 // to run. That is how sticky-disk mounts, dependency caches and core-count
-// tuning end up pointed at the wrong machine (observed on the burin-code Rust
-// TUI lanes, burin-code#5423).
+// tuning end up pointed at the wrong machine (observed on downstream Rust TUI
+// lanes).
 //
 // The fix is one owner per job: a job-level HARN_RUNNER_TIER env var mirroring
 // the `runs-on` ladder and resolving to exactly one TIER. Steps branch on that.

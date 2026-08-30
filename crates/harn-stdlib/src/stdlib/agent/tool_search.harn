@@ -352,7 +352,7 @@ pub fn agent_tool_search_emit_queries(
   }
 }
 
-fn __tool_search_parse_result(result: string?) {
+fn __tool_search_parse_result(result: dict | string | nil) {
   if type_of(result) == "dict" {
     return result
   }

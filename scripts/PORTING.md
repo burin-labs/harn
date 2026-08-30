@@ -40,7 +40,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `nextest_filters_from_paths.harn` | `scripts/nextest_filters_from_paths.sh` + flake-detection workflow | Maps touched Rust paths to nextest binary/package filters while preserving integration-test-binary semantics. The shell file is only a workflow-compatible launcher. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
-| `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
+| `check_downstream_protocol_bindings.harn` | `make check-downstream-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a downstream host checkout. |
 | `check_protocol_bindings.harn` | `make check-bindings` | Harn owns the round-trip driver and diagnostics; Python is invoked only as the generated Python SDK runtime under test. |
 | `verify_crate_packages_plan.harn` + `verify_crate_package_includes.harn` | `scripts/verify_crate_packages.sh` | Cargo metadata normalization plus packaged `include_str!` / `include_bytes!` target inspection; the shell remains the Cargo/tar driver. |
 

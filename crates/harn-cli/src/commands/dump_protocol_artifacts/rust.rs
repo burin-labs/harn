@@ -14,7 +14,9 @@ use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::external_action_types::append_rust_external_action_types;
+use super::prepared_session::append_rust_prepared_session_types;
 use super::session_recap::append_rust_session_recap_types;
+use super::session_update_payloads::append_rust_session_update_payloads;
 use super::support::*;
 use super::values::*;
 
@@ -421,6 +423,8 @@ pub(super) fn generate_rust_for_version(
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     ));
 
+    append_rust_session_update_payloads(&mut out);
+    append_rust_prepared_session_types(&mut out);
     append_rust_session_recap_types(&mut out);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep

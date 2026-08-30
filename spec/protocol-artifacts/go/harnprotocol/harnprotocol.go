@@ -14,7 +14,7 @@ import (
 )
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.121"
+const ArtifactVersion = "0.10.123-dev"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -1237,6 +1237,234 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 	_, hasID := envelope["id"]
 	_, hasMethod := envelope["method"]
 	return !hasID && hasMethod
+}
+
+// ACPArtifactUpdate is the typed Harn `artifact` session/update payload.
+type ACPArtifactUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	ArtifactId    string             `json:"artifactId"`
+	Kind          *string            `json:"kind,omitempty"`
+	Title         *string            `json:"title,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPAvailableCommandsUpdate is the typed Harn `available_commands_update` session/update payload.
+type ACPAvailableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"`
+	AvailableCommands json.RawMessage    `json:"availableCommands"`
+	Meta              *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPFsWatchUpdate is the typed Harn `fs_watch` session/update payload.
+type ACPFsWatchUpdate struct {
+	SessionUpdate  string             `json:"sessionUpdate"`
+	SubscriptionId string             `json:"subscriptionId"`
+	Events         json.RawMessage    `json:"events"`
+	Meta           *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPHandoffUpdate is the typed Harn `handoff` session/update payload.
+type ACPHandoffUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	HandoffId     string             `json:"handoffId"`
+	ArtifactId    string             `json:"artifactId"`
+	Handoff       json.RawMessage    `json:"handoff"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPHitlRequestUpdate is the typed Harn `hitl_request` session/update payload.
+type ACPHitlRequestUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	RequestId     string             `json:"requestId"`
+	Kind          string             `json:"kind"`
+	Payload       json.RawMessage    `json:"payload"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPHitlResolvedUpdate is the typed Harn `hitl_resolved` session/update payload.
+type ACPHitlResolvedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	RequestId     string             `json:"requestId"`
+	Kind          string             `json:"kind"`
+	Outcome       json.RawMessage    `json:"outcome"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPLiveSessionClientUpdate is the typed Harn `live_session_client` session/update payload.
+type ACPLiveSessionClientUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Action        string             `json:"action"`
+	State         json.RawMessage    `json:"state,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPLogUpdate is the typed Harn `log` session/update payload.
+type ACPLogUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Message       string             `json:"message"`
+	Level         *string            `json:"level,omitempty"`
+	Fields        json.RawMessage    `json:"fields,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPProgressUpdate is the typed Harn `progress` session/update payload.
+type ACPProgressUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Message       string             `json:"message"`
+	Phase         *string            `json:"phase,omitempty"`
+	Progress      *int               `json:"progress,omitempty"`
+	Total         *int               `json:"total,omitempty"`
+	Data          json.RawMessage    `json:"data,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPReminderEmittedUpdate is the typed Harn `reminder_emitted` session/update payload.
+type ACPReminderEmittedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	ReminderId    string             `json:"reminderId"`
+	Reminder      json.RawMessage    `json:"reminder,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPSkillActivatedUpdate is the typed Harn `skill_activated` session/update payload.
+type ACPSkillActivatedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	SkillName     string             `json:"skillName"`
+	Iteration     *int               `json:"iteration,omitempty"`
+	Reason        *string            `json:"reason,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPSkillDeactivatedUpdate is the typed Harn `skill_deactivated` session/update payload.
+type ACPSkillDeactivatedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	SkillName     string             `json:"skillName"`
+	Iteration     *int               `json:"iteration,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPSkillNarrowUpdate is the typed Harn `skill_narrow` session/update payload.
+type ACPSkillNarrowUpdate struct {
+	SessionUpdate  string             `json:"sessionUpdate"`
+	RemovedTools   []string           `json:"removedTools"`
+	RemainingTools []string           `json:"remainingTools"`
+	Reason         *string            `json:"reason,omitempty"`
+	Meta           *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPSkillScopeToolsUpdate is the typed Harn `skill_scope_tools` session/update payload.
+type ACPSkillScopeToolsUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	SkillName     string             `json:"skillName"`
+	AllowedTools  []string           `json:"allowedTools"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPStanceTransitionUpdate is the typed Harn `stance_transition` session/update payload.
+type ACPStanceTransitionUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Phase         string             `json:"phase"`
+	EscapeTool    *string            `json:"escapeTool,omitempty"`
+	AllowedTools  []string           `json:"allowedTools,omitempty"`
+	Justification *string            `json:"justification,omitempty"`
+	Consent       *string            `json:"consent,omitempty"`
+	Reason        *string            `json:"reason,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPToolSearchQueryUpdate is the typed Harn `tool_search_query` session/update payload.
+type ACPToolSearchQueryUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	ToolUseId     string             `json:"toolUseId"`
+	Name          string             `json:"name"`
+	Query         json.RawMessage    `json:"query"`
+	Strategy      *string            `json:"strategy,omitempty"`
+	Mode          *string            `json:"mode,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPToolSearchResultUpdate is the typed Harn `tool_search_result` session/update payload.
+type ACPToolSearchResultUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	ToolUseId     string             `json:"toolUseId"`
+	Promoted      json.RawMessage    `json:"promoted"`
+	Strategy      *string            `json:"strategy,omitempty"`
+	Mode          *string            `json:"mode,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPTranscriptCompactedUpdate is the typed Harn `transcript_compacted` session/update payload.
+type ACPTranscriptCompactedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Mode          string             `json:"mode"`
+	Strategy      string             `json:"strategy"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPTranscriptProjectedUpdate is the typed Harn `transcript_projected` session/update payload.
+type ACPTranscriptProjectedUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	Policy        string             `json:"policy"`
+	Reason        string             `json:"reason"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+// ACPWorkerUpdate is the typed Harn `worker_update` session/update payload.
+type ACPWorkerUpdate struct {
+	SessionUpdate string             `json:"sessionUpdate"`
+	WorkerId      string             `json:"workerId"`
+	Event         string             `json:"event"`
+	Status        string             `json:"status"`
+	Terminal      bool               `json:"terminal"`
+	WorkerName    *string            `json:"workerName,omitempty"`
+	WorkerTask    *string            `json:"workerTask,omitempty"`
+	WorkerMode    *string            `json:"workerMode,omitempty"`
+	Metadata      json.RawMessage    `json:"metadata,omitempty"`
+	Audit         json.RawMessage    `json:"audit,omitempty"`
+	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+}
+
+const HarnPreparedSessionSchema = "harn.prepared_session.v1"
+
+var HarnPreparedSessionStates = []string{"needs_approval", "ready", "blocked", "active", "delta", "stopped", "pivoted", "terminal"}
+var HarnPreparedSessionCommands = []string{"approval_decision", "attach", "turn", "request_delta", "stop", "pivot", "finish"}
+
+type HarnPreparedSessionApprovalDecision struct {
+	BatchFingerprint string `json:"batch_fingerprint"`
+	Approved         bool   `json:"approved"`
+	Decider          string `json:"decider"`
+}
+type HarnPreparedSessionBinding struct {
+	SessionID            string          `json:"session_id"`
+	WorkspaceFingerprint string          `json:"workspace_fingerprint"`
+	Runtime              json.RawMessage `json:"runtime"`
+	Consumer             json.RawMessage `json:"consumer"`
+}
+type HarnPreparedRuntimeAttachment struct {
+	SessionID            string          `json:"session_id"`
+	WorkspaceFingerprint string          `json:"workspace_fingerprint"`
+	Runtime              json.RawMessage `json:"runtime"`
+	Consumer             json.RawMessage `json:"consumer"`
+}
+type HarnPreparedSessionLease struct {
+	Schema             string                               `json:"schema"`
+	SessionID          string                               `json:"session_id"`
+	SessionFingerprint string                               `json:"session_fingerprint"`
+	PlanFingerprint    string                               `json:"plan_fingerprint"`
+	Binding            HarnPreparedSessionBinding           `json:"binding"`
+	Intent             json.RawMessage                      `json:"intent"`
+	Approval           *HarnPreparedSessionApprovalDecision `json:"approval,omitempty"`
+	IssuedAtMs         int                                  `json:"issued_at_ms"`
+	ExpiresAtMs        int                                  `json:"expires_at_ms"`
+}
+type HarnPreparedSessionUpdate struct {
+	State       string                    `json:"state"`
+	SessionID   string                    `json:"session_id"`
+	Batch       json.RawMessage           `json:"batch,omitempty"`
+	Lease       *HarnPreparedSessionLease `json:"lease,omitempty"`
+	Diagnostics []json.RawMessage         `json:"diagnostics,omitempty"`
+	Receipt     json.RawMessage           `json:"receipt,omitempty"`
+	Outcome     json.RawMessage           `json:"outcome,omitempty"`
 }
 
 const HarnSessionRecapQueryMethod = "harn.session_recap.query"

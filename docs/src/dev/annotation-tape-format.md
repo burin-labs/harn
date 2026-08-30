@@ -194,5 +194,5 @@ below.
 - Issue [#451](https://github.com/burin-labs/harn/issues/451) /
   [#452](https://github.com/burin-labs/harn/issues/452) — downstream
   consumers (crystallization, friction events).
-- [burin-code#599](https://github.com/burin-labs/burin-code/issues/599)
+- downstream host annotation-tape integration
   — the IDE authoring surface that produces these files.

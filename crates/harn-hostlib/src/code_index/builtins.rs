@@ -566,9 +566,9 @@ pub(super) fn run_read_range_merged(
         ("end", VmValue::Int(hi as i64)),
     ]))
 }
-
 pub(super) fn run_reindex_file(
     index: &SharedIndex,
+    resolver: Option<&super::HarnReferenceResolver>,
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_REINDEX_FILE, args)?;
@@ -588,6 +588,7 @@ pub(super) fn run_reindex_file(
         });
     };
     let id = state.reindex_file(&abs);
+    state.relink_harn_references(resolver);
     Ok(build_dict([
         ("indexed", VmValue::Bool(id.is_some())),
         (
@@ -596,7 +597,6 @@ pub(super) fn run_reindex_file(
         ),
     ]))
 }
-
 pub(super) fn run_trigram_query(
     index: &SharedIndex,
     args: &[VmValue],

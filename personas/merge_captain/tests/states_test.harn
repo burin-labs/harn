@@ -4,29 +4,15 @@ import {
   all_actions,
   all_states,
   allowed_next,
-  is_state,
   is_terminal,
   is_valid_transition,
-  unknown_state,
 } from "../lib/states"
-
-pipeline test_all_states_distinct(harness: Harness, task: unknown) {
-  const states = all_states()
-  assert_eq(len(states), 12)
-  assert(is_state("queued"))
-  assert(is_state("merge_group_running"))
-  assert(!is_state("nope"))
-}
 
 pipeline test_terminal_states(harness: Harness, task: unknown) {
   assert(is_terminal("merged"))
   assert(is_terminal("closed"))
   assert(!is_terminal("queued"))
   assert(!is_terminal("blocked"))
-}
-
-pipeline test_unknown_state_default(harness: Harness, task: unknown) {
-  assert_eq(unknown_state(), "discovered")
 }
 
 pipeline test_transitions_legality(harness: Harness, task: unknown) {

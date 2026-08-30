@@ -80,15 +80,15 @@ pub(crate) async fn run_tail(
 
 /// Drive the supervision tail loop against `writer`, optionally signalling
 /// `ready_tx` once the watcher is armed and the initial frames have been
-/// flushed. The CLI entrypoint passes a stdout lock and `None`; tests can
-/// inject an in-memory writer plus a oneshot to avoid subprocess timing
-/// races.
+/// flushed. The signal carries the exact log being followed so tests can
+/// append without opening a competing SQLite connection. The CLI entrypoint
+/// passes a stdout lock and `None`.
 pub async fn drive_tail<W: std::io::Write>(
     manifest: Option<&Path>,
     state_dir: &Path,
     options: &PersonaSupervisionTailOptions,
     writer: &mut W,
-    mut ready_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    mut ready_tx: Option<tokio::sync::oneshot::Sender<Arc<AnyEventLog>>>,
 ) -> Result<(), String> {
     validate_tail_options(options)?;
     let catalog = load_catalog_for_tail(manifest)?;
@@ -122,7 +122,7 @@ pub async fn drive_tail<W: std::io::Write>(
             return Ok(());
         }
         if let Some(tx) = ready_tx.take() {
-            let _ = tx.send(());
+            let _ = tx.send(Arc::clone(&log));
         }
         waiter.wait().await;
     }

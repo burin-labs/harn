@@ -138,7 +138,6 @@ impl BedrockProvider {
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
         let region = resolve_live_region(request.region.as_deref()).await?;
-        let credentials = resolve_aws_credentials(&region).await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         strip_anthropic_sampling_params(&mut body, request);
@@ -149,6 +148,7 @@ impl BedrockProvider {
             percent_encode_component(&request.model)
         );
         let base_url = bedrock_base_url(&region);
+        let credentials = resolve_bedrock_credentials(&region, &base_url).await?;
         let url = format!("{}{}", base_url.trim_end_matches('/'), path);
         let sign_headers =
             BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]);
@@ -187,6 +187,50 @@ impl BedrockProvider {
         let result = parse_bedrock_converse_response(&json, &request.model)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
+    }
+}
+
+pub(crate) async fn resolve_bedrock_credentials(
+    region: &str,
+    base_url: &str,
+) -> Result<AwsCredentials, VmError> {
+    let audience = url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .ok_or_else(|| vm_err("bedrock endpoint has no credential audience"))?;
+    match crate::prepared_run::consume_provider_identity("bedrock", &audience, None, |material| {
+        serde_json::from_slice::<BrokeredAwsCredentials>(material.as_ref())
+            .map(AwsCredentials::from)
+            .map_err(|_| {
+                crate::prepared_run::IdentityBrokerError::new(
+                    "bedrock_identity_malformed",
+                    "brokered AWS identity is malformed",
+                )
+            })
+    })
+    .await
+    .map_err(|error| vm_err(format!("bedrock prepared identity failed ({})", error.code)))?
+    {
+        Some(credentials) => Ok(credentials),
+        None => resolve_aws_credentials(region).await,
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct BrokeredAwsCredentials {
+    access_key_id: String,
+    secret_access_key: String,
+    #[serde(default)]
+    session_token: Option<String>,
+}
+
+impl From<BrokeredAwsCredentials> for AwsCredentials {
+    fn from(credentials: BrokeredAwsCredentials) -> Self {
+        Self {
+            access_key_id: credentials.access_key_id,
+            secret_access_key: credentials.secret_access_key,
+            session_token: credentials.session_token,
+        }
     }
 }
 

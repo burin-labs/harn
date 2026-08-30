@@ -4,10 +4,12 @@
 //! schemas and error shape are exercised together.
 
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    code_index::{CodeIndexCapability, ResolvedHarnReference},
+    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
 };
 use harn_vm::VmValue;
 
@@ -126,6 +128,70 @@ fn cypher_returns_function_by_name() {
         other => panic!("expected string path, got {other:?}"),
     };
     assert_eq!(path, "src/a.rs");
+}
+
+#[test]
+fn harn_cypher_reindex_replaces_resolved_refs() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("exported.harn"), "pub fn run() { 1 }\n").unwrap();
+    fs::write(dir.path().join("alternate.harn"), "pub fn run() { 2 }\n").unwrap();
+    fs::write(
+        dir.path().join("importer.harn"),
+        "import { run } from \"./exported\"\nfn helper() { run() }\n",
+    )
+    .unwrap();
+
+    let changed = Arc::new(AtomicBool::new(false));
+    let resolver_changed = changed.clone();
+    let cap = CodeIndexCapability::new().with_harn_reference_resolver(Arc::new(move |_| {
+        Ok(vec![ResolvedHarnReference {
+            from_path: "importer.harn".into(),
+            to_path: if resolver_changed.load(Ordering::SeqCst) {
+                "alternate.harn".into()
+            } else {
+                "exported.harn".into()
+            },
+            to_name: "run".into(),
+        }])
+    }));
+    let mut reg = BuiltinRegistry::new();
+    cap.register_builtins(&mut reg);
+    rebuild(&reg, dir.path());
+
+    let query = || {
+        let result = call(
+            &reg,
+            "hostlib_code_index_cypher",
+            dict(&[(
+                "query",
+                VmValue::String(arcstr::ArcStr::from(
+                    "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN m.path AS source, f.path AS target",
+                )),
+            )]),
+        );
+        list_field(&extract_dict(&result), "rows")
+            .iter()
+            .map(|row| {
+                let row = extract_dict(row);
+                (string_field(&row, "source"), string_field(&row, "target"))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        query(),
+        vec![("importer.harn".into(), "exported.harn".into())]
+    );
+
+    changed.store(true, Ordering::SeqCst);
+    call(
+        &reg,
+        "hostlib_code_index_reindex_file",
+        dict(&[("path", VmValue::String("importer.harn".into()))]),
+    );
+    assert_eq!(
+        query(),
+        vec![("importer.harn".into(), "alternate.harn".into())]
+    );
 }
 
 #[test]

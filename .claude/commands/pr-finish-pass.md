@@ -117,7 +117,7 @@ process-wide globals under parallel execution. Reference: `docs/src/dev/testing.
 - **Restating obvious code:** `// increment counter`, `// loop over items`,
   `// return result`. If the comment paraphrases the line below, delete it.
 - **References to private/cross-org repos by name:** this codebase is
-  open-source. Replace `burin-code`, internal product names, etc. with neutral
+  open-source. Replace downstream repository names and internal product names with neutral
   phrasing — "a Harn integrator", "a Harn host", "a Harn Cloud workspace", "a
   downstream Harn consumer." External integrators read this code.
 - **Task/PR-bound comments:** "added for #1234", "see PR #4567", "needed by the
