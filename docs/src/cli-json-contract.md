@@ -157,7 +157,7 @@ always has a higher `seq`.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ok": true,
   "data": {
     "name": "harn-cli",
@@ -173,7 +173,22 @@ always has a higher `seq`.
         "codegen_fingerprint": "02c9...",
         "bytecode_schema_version": 14,
         "linked_program_schema_version": 1,
-        "linker_algorithm_version": 1
+        "linker_algorithm_version": 1,
+        "build_features": {
+          "default": true,
+          "full": true,
+          "content": true,
+          "compression": true,
+          "http_compression": true,
+          "cloud_aws": true,
+          "native_keyring": true,
+          "postgres": true,
+          "sqlite": true,
+          "otel": false,
+          "testbench_wasi": false,
+          "llm_bench_internals": false,
+          "vm_bench_internals": false
+        }
       },
       "source_revision": "0123456789abcdef0123456789abcdef01234567"
     }
@@ -193,8 +208,9 @@ match; version-only consumers may ignore the field.
 `runtime_content_fingerprint` is computed by the linked VM and cannot be
 overridden by the caller's runtime environment. Its `content_sha256` covers the
 Harn version, every embedded standard-library source, and the code-generation,
-bytecode, and linker compatibility identities. `source_revision` is optional
-provenance and is deliberately excluded from `content_sha256`.
+bytecode, linker, and enabled Cargo-feature identities. `source_revision` is
+optional provenance and is deliberately excluded from `content_sha256`. This
+required fingerprint field changes the version command's schema from 1 to 2.
 
 ### `harn upgrade --json`
 
