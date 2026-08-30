@@ -249,10 +249,19 @@ fn parse_registry_invocation(
     Ok(Some(RegistryInvocation {
         tool_name: tool.name.clone(),
         arguments: input,
-        output: leaf
-            .get_one::<String>("__harn_output")
-            .cloned()
-            .unwrap_or_else(|| "json".to_string()),
+        output: if leaf
+            .try_get_one::<bool>("__harn_json")
+            .ok()
+            .flatten()
+            .copied()
+            .unwrap_or(false)
+        {
+            "json".to_string()
+        } else {
+            leaf.get_one::<String>("__harn_output")
+                .cloned()
+                .unwrap_or_else(|| "json".to_string())
+        },
     }))
 }
 
@@ -295,6 +304,15 @@ fn clap_command(
             if let Some(description) = tool.description.as_ref() {
                 subcommand = subcommand.about(description.clone());
             }
+            let properties = tool
+                .input_schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let has_json_input = properties
+                .keys()
+                .any(|property_name| property_name.replace('_', "-") == "json");
             subcommand = subcommand
                 .hide(tool.cli.hidden)
                 .subcommand_required(false)
@@ -312,12 +330,15 @@ fn clap_command(
                         .default_value("json")
                         .help("Output encoding"),
                 );
-            let properties = tool
-                .input_schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .cloned()
-                .unwrap_or_default();
+            if !has_json_input {
+                subcommand = subcommand.arg(
+                    Arg::new("__harn_json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("__harn_output")
+                        .help("Emit compact JSON (alias for --harn-output json)"),
+                );
+            }
             let mut long_names = BTreeSet::new();
             for (property_name, schema) in properties {
                 let long_name = property_name.replace('_', "-");
@@ -534,6 +555,54 @@ mod tests {
             serde_json::json!({"widget_id": 42, "verbose": false})
         );
         assert_eq!(invocation.output, "pretty");
+    }
+
+    #[test]
+    fn generated_cli_accepts_explicit_json_output_alias() {
+        let tool = catalog_tool(
+            "lookup_widget",
+            &["widgets", "get"],
+            serde_json::json!({"type": "object", "properties": {}}),
+        );
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "get".into(), "--json".into()],
+            None,
+            &[tool],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(invocation.output, "json");
+    }
+
+    #[test]
+    fn generated_cli_preserves_a_json_named_tool_input() {
+        let tool = catalog_tool(
+            "submit_payload",
+            &["payloads", "submit"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"json": {"type": "string"}},
+                "required": ["json"]
+            }),
+        );
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &[
+                "payloads".into(),
+                "submit".into(),
+                "--json".into(),
+                "raw-payload".into(),
+            ],
+            None,
+            &[tool],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(invocation.arguments["json"], "raw-payload");
+        assert_eq!(invocation.output, "json");
     }
 
     #[test]

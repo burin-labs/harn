@@ -151,7 +151,7 @@ pub(super) fn persist_execution_run_record(
             ..harn_vm::orchestration::RunExecutionRecord::default()
         }),
         evidence: harn_vm::orchestration::ExecutionEvidenceRecord {
-            schema_version: 1,
+            schema_version: harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(execution_id),
             trace_spans: harn_vm::tracing::peek_spans()
                 .iter()

@@ -1,0 +1,74 @@
+import { omit } from "std/json"
+import {
+  RuntimeContentFingerprint,
+  runtime_content_fingerprint_value,
+} from "std/runtime/content_fingerprint"
+import { assert_eq, assert_throws } from "std/testing"
+
+fn valid_runtime_content_fingerprint() -> RuntimeContentFingerprint {
+  return {
+    schema: "harn.runtime_content_fingerprint.v1",
+    content_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    harn_version: "0.10.124-dev",
+    embedded_stdlib_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    compatibility: {
+      codegen_fingerprint: "harn-codegen-v1",
+      bytecode_schema_version: 1,
+      linked_program_schema_version: 1,
+      linker_algorithm_version: 1,
+      build_features: {
+        default: true,
+        full: true,
+        llm_bench_internals: false,
+        vm_bench_internals: false,
+        content: true,
+        compression: true,
+        http_compression: true,
+        cloud_aws: true,
+        native_keyring: true,
+        postgres: true,
+        sqlite: true,
+        otel: true,
+        testbench_wasi: false,
+      },
+    },
+    source_revision: nil,
+  }
+}
+
+@test
+pipeline test_runtime_content_fingerprint_accepts_the_exact_wire_shape(
+  harness: Harness,
+  task: unknown,
+) {
+  const fingerprint = valid_runtime_content_fingerprint()
+  assert_eq(runtime_content_fingerprint_value(fingerprint), fingerprint)
+}
+
+@test
+pipeline test_runtime_content_fingerprint_rejects_a_missing_feature(
+  harness: Harness,
+  task: unknown,
+) {
+  const fingerprint = valid_runtime_content_fingerprint()
+  const missing_feature = fingerprint
+    + {
+      compatibility: fingerprint.compatibility
+        + {build_features: omit(fingerprint.compatibility.build_features, ["otel"])},
+    }
+  assert_throws(fn() { runtime_content_fingerprint_value(missing_feature) })
+}
+
+@test
+pipeline test_runtime_content_fingerprint_rejects_an_invalid_feature_type(
+  harness: Harness,
+  task: unknown,
+) {
+  const fingerprint = valid_runtime_content_fingerprint()
+  const invalid_feature = fingerprint
+    + {
+      compatibility: fingerprint.compatibility
+        + {build_features: fingerprint.compatibility.build_features + {otel: "enabled"}},
+    }
+  assert_throws(fn() { runtime_content_fingerprint_value(invalid_feature) })
+}

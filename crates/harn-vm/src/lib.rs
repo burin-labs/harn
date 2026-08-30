@@ -122,7 +122,8 @@ pub mod op_interrupt;
 pub mod orchestration;
 pub mod runtime_content;
 pub use runtime_content::{
-    runtime_content_fingerprint, RuntimeCompatibilityFingerprint, RuntimeContentFingerprint,
+    runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
+    RuntimeContentFingerprint,
 };
 mod persistent_state;
 pub mod personas;
@@ -353,6 +354,7 @@ pub use mcp_server::{
     take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
     take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
     McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
+    McpServerReload,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

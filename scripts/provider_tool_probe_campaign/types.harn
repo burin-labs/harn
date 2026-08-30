@@ -1,3 +1,5 @@
+import { RuntimeContentFingerprint } from "std/runtime/content_fingerprint"
+
 pub type ProviderToolProbeRoute = {
   id: string,
   provider: string,
@@ -21,6 +23,22 @@ pub type ProviderToolProbeBehavior = {
 
 pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
 
+pub type ProviderToolProbeVersionData = {
+  name: "harn-cli",
+  version: string,
+  description: string,
+  source_revision: string?,
+  runtime_content_fingerprint: RuntimeContentFingerprint,
+}
+
+pub type ProviderToolProbeVersionEnvelope = {
+  schemaVersion: 2,
+  ok: bool,
+  data: ProviderToolProbeVersionData,
+  error: nil,
+  warnings: list<unknown>,
+}
+
 pub type ProviderToolProbeRuntimeReceipt = {
   schema_version: "harn.provider_tool_probe_runtime.v1",
   command: list<string>,
@@ -28,6 +46,7 @@ pub type ProviderToolProbeRuntimeReceipt = {
   exit_code: int,
   version: string,
   source_revision: string?,
+  runtime_content_fingerprint: RuntimeContentFingerprint?,
   reason: string,
 }
 

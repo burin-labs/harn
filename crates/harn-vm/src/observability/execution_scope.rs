@@ -21,6 +21,9 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+/// Stable prefix for VM-owned execution identities.
+pub const EXECUTION_ID_PREFIX: &str = "hxe-";
+
 thread_local! {
     static ACTIVE_EXECUTION_SCOPE_STACK: RefCell<Vec<Arc<str>>> = const { RefCell::new(Vec::new()) };
 }
@@ -28,7 +31,7 @@ thread_local! {
 /// Mint a fresh, durable execution id. UUIDv7 keeps identifiers unique across
 /// processes and hosts while preserving useful creation-time ordering.
 pub fn mint_execution_scope() -> Arc<str> {
-    Arc::from(format!("hxe-{}", uuid::Uuid::now_v7()))
+    Arc::from(format!("{EXECUTION_ID_PREFIX}{}", uuid::Uuid::now_v7()))
 }
 
 /// RAII guard returned by [`enter_execution_scope`]. Popping the stack on drop

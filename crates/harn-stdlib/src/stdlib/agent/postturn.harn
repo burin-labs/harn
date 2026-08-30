@@ -1,4 +1,4 @@
-import { agent_completion_adjudicator_declared, agent_judge_config } from "std/agent/judge"
+import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import {
   AgentToolDispatch,
   __dispatch_results_list,
@@ -772,12 +772,28 @@ fn __repair_claimed_result(claimed_tool: string?) -> dict {
   return base + {next_tool_claim: {tool_name: tool_name, source: "missing_tool_call_recovery"}}
 }
 
-fn __completion_result(opts: any, payload: dict, stop_reason: string) {
+/**
+ * __completion_needs_verify decides whether a natural terminal still owes a
+ * verification pass, given the host post-turn verdict for the same turn.
+ *
+ * An explicit `needs_verify` on the verdict is the host answering the exact
+ * question this terminal would otherwise re-ask, so it wins. Omission keeps the
+ * conservative contract: a configured completion gate or turn-end condition
+ * still runs.
+ */
+fn __completion_needs_verify(verdict: dict?) -> bool {
+  if verdict?.needs_verify != nil {
+    return verdict.needs_verify ? true : false
+  }
+  return true
+}
+
+fn __completion_result(opts: any, payload: dict, stop_reason: string, verdict: dict? = nil) {
   const batch_state = opts?._tool_batch_dependency_state
   const deferred = batch_state?.deferred_signatures ?? []
   const pending_tool_batch_effects = len(deferred) > 0
   const verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
-  const done_due = __turn_end_judge_due(opts, payload, true)
+  const turn_end_due = __turn_end_judge_due(opts, payload, true)
   // A deferred proposal remains durable for exact re-proposal, but it is not a
   // second terminal authority. When the host configured a completion gate or
   // judge, that owner has the task facts needed to decide whether a later
@@ -787,15 +803,18 @@ fn __completion_result(opts: any, payload: dict, stop_reason: string) {
   //
   // Without an adjudicator, retain the conservative contract: the model must
   // re-propose the deferred effect before the loop can finish.
-  if pending_tool_batch_effects && !verify_due && !done_due {
+  if pending_tool_batch_effects && !verify_due && !turn_end_due {
     return {kind: "continue", turn_end_judge_due: false, pending_tool_batch_effects: true}
   }
-  if verify_due || done_due {
+  if verify_due || turn_end_due {
+    const needs_verify = __completion_needs_verify(verdict)
     return {
       kind: "break",
       stop_reason: stop_reason,
-      needs_verify: true,
-      turn_end_judge_due: done_due,
+      needs_verify: needs_verify,
+      // A terminal that will never reach the adjudicator cannot leave a judge
+      // "due" behind it for a later reader to act on.
+      turn_end_judge_due: turn_end_due && needs_verify,
       pending_tool_batch_effects: pending_tool_batch_effects,
     }
   }
@@ -974,10 +993,10 @@ fn __arbitrate_stalled_toolless_turn(
   // These contracts already own completion for this turn. A second model call
   // cannot add authority; it can only delay or contradict the terminal owner.
   if has_judge || __native_tool_text_completion(opts, false, text) {
-    return __completion_result(opts, payload, "natural")
+    return __completion_result(opts, payload, "natural", verdict)
   }
   if __required_tools_text_completion(opts, false, text) {
-    return __completion_result(opts, payload, "required_tools_satisfied")
+    return __completion_result(opts, payload, "required_tools_satisfied", verdict)
   }
   // A repair claim only means something if the loop has another turn to give.
   // A single-shot loop ends ON this turn, so claiming it would replace a clean
@@ -998,7 +1017,7 @@ fn __arbitrate_stalled_toolless_turn(
     return verdict_result
   }
   if !loop_until_done && !daemon {
-    return __completion_result(opts, payload, "natural")
+    return __completion_result(opts, payload, "natural", verdict)
   }
   const confirmation_nudged = __maybe_inject_completion_confirmation(
     harness.agent,
@@ -1073,18 +1092,25 @@ pub fn agent_compute_post_turn(
   } else {
     __tool_surface_narrowing_post_turn(harness.agent, session, llm_result, dispatch_results, opts)
   }
+  // The host post-turn callback is consulted before ANY natural terminal is
+  // decided. Deciding a terminal above this line does not merely ignore the
+  // host verdict, it never asks for one, so `needs_verify` is unreachable for
+  // the host on exactly that path and no field it could set would survive.
+  const verdict = __post_turn_callback_verdict(opts, payload)
   // Tool attempts take precedence over a completion marker from the same
   // turn: the next model turn must see the dispatch result before completion.
   if !has_tool_calls && __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
-    return __post_turn_with_narrowing(__completion_result(opts, payload, "sentinel"), narrowing)
-  }
-  if __stop_after_successful_tools(opts, dispatch) {
     return __post_turn_with_narrowing(
-      __completion_result(opts, payload, "natural") + {turn_end_judge_due: false},
+      __completion_result(opts, payload, "sentinel", verdict),
       narrowing,
     )
   }
-  const verdict = __post_turn_callback_verdict(opts, payload)
+  if __stop_after_successful_tools(opts, dispatch) {
+    return __post_turn_with_narrowing(
+      __completion_result(opts, payload, "natural", verdict) + {turn_end_judge_due: false},
+      narrowing,
+    )
+  }
   // Every claimant for a stalled toolless turn is arbitrated in one place, so
   // this shape must not be adjudicated anywhere below.
   if !has_tool_calls && trim(text) != "" {
@@ -1099,7 +1125,10 @@ pub fn agent_compute_post_turn(
   }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
-    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
+    return __post_turn_with_narrowing(
+      __completion_result(opts, payload, "natural", verdict),
+      narrowing,
+    )
   }
   // Only turns that dispatched tools, or emitted nothing at all, reach here —
   // the corrective's own gates require a toolless turn WITH prose, which the

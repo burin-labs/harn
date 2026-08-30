@@ -22,6 +22,32 @@ fn count_ticks(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+fn harn_string_literal(value: &str) -> String {
+    format!("\"{}\"", harn_lexer::escape_string_literal(value))
+}
+
+fn lex_harn_string_literal(literal: &str) -> String {
+    let tokens = harn_lexer::Lexer::new(literal)
+        .tokenize()
+        .expect("generated string literal must lex");
+    let harn_lexer::TokenKind::StringLiteral(value) = &tokens[0].kind else {
+        panic!("expected a string literal token, got {:?}", tokens[0].kind);
+    };
+    value.clone()
+}
+
+#[test]
+fn generated_harn_path_literal_preserves_windows_separators() {
+    let path = r"C:\temp\ticks.txt";
+    let unescaped = format!("\"{path}\"");
+    let literal = harn_string_literal(path);
+
+    assert_ne!(lex_harn_string_literal(&unescaped), path);
+    assert_eq!(literal, r#""C:\\temp\\ticks.txt""#);
+    assert!(!literal.contains('\t'));
+    assert_eq!(lex_harn_string_literal(&literal), path);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_notification_stops_agent_loop() {
     let local = tokio::task::LocalSet::new();
@@ -31,6 +57,7 @@ async fn acp_session_cancel_notification_stops_agent_loop() {
             let tick_path = dir.path().join("ticks.txt");
             std::fs::write(&tick_path, "").expect("seed tick file");
             let pipeline_path = dir.path().join("cancel-loop.harn");
+            let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
 
             let mut mocks = String::new();
             for index in 0..MAX_ITERATIONS {
@@ -51,8 +78,8 @@ fn tick_tools(harness: Harness) {{
     "Record one tick and wait",
     {{
       handler: {{ args ->
-        harness.fs.append("{tick}", "tick\n")
-        harness.clock.sleep_ms({sleep})
+        harness.fs.append({tick_path_literal}, "tick\n")
+        harness.clock.sleep_ms({TICK_SLEEP_MS})
         "ticked"
       }},
       parameters: {{n: {{type: "number", description: "Tick index"}}}},
@@ -74,11 +101,9 @@ pipeline default(harness: Harness, task: unknown) {{
     max_iterations: {MAX_ITERATIONS},
     done_judge: nil,
   }})
-  harness.fs.append("{tick}", "STATUS:" + to_string(result.status) + "\n")
+  harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}
 "#,
-                tick = tick_path.to_string_lossy(),
-                sleep = TICK_SLEEP_MS,
             );
             std::fs::write(&pipeline_path, source).expect("write cancel-loop pipeline");
 

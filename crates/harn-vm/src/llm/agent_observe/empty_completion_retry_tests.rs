@@ -901,7 +901,17 @@ fn budget_exhausted_error(completion_tokens: i64) -> crate::value::VmError {
     crate::llm::api::empty_generation_error(
         "fake",
         "fake-stream",
-        crate::llm::usage::ProviderUsageReceipt::new(None, Some(completion_tokens), None, false),
+        crate::llm::api::ProviderResponseEnvelope::new(
+            None,
+            None,
+            Vec::new(),
+            crate::llm::usage::ProviderUsageReceipt::new(
+                None,
+                Some(completion_tokens),
+                None,
+                false,
+            ),
+        ),
         format!(
             "openai-compatible model fake:fake-stream reported \
              completion_tokens={completion_tokens} but delivered no content, reasoning, \
