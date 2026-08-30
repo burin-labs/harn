@@ -22,6 +22,8 @@ pub(crate) const FINAL_STATUS: &str = "/transcript_event/metadata/final_status";
 /// [`FINAL_STATUS`] and orthogonal to it: a run can stop for a budget reason
 /// and still report a successful final status.
 pub(crate) const STOP_REASON: &str = "/transcript_event/metadata/stop_reason";
+/// VM-owned execution identity stamped on the invocation boundary.
+pub(crate) const EXECUTION_ID: &str = "/transcript_event/metadata/execution_id";
 /// Terminal error text, when the loop ended on one.
 pub(crate) const TERMINAL_ERROR: &str = "/transcript_event/metadata/error";
 /// Coarse terminal classification assigned by
