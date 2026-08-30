@@ -270,6 +270,8 @@ fn __agent_lifecycle_await_enabled(opts: AgentLifecycleToolsOptions) -> bool {
 }
 
 fn __agent_lifecycle_add_await_tool(registry: ToolRegistry) -> ToolRegistry {
+  // Synthesized controls stay agent-only even if a caller later reprojects
+  // this public function's returned registry through another adapter.
   if __agent_tool_registry_has(registry, "agent_await_resumption") {
     return registry
   }
@@ -288,6 +290,7 @@ fn __agent_lifecycle_add_await_tool(registry: ToolRegistry) -> ToolRegistry {
         },
       },
       returns: {type: "object"},
+      governance: {audiences: ["agent"]},
       annotations: {agent_lifecycle: true, structural: true, initiator: "self"},
     },
   )
@@ -319,6 +322,7 @@ fn __agent_lifecycle_add_subagent_tools(
           reason: {type: "string", description: "Why the child should pause."},
         },
         returns: {type: "object"},
+        governance: {audiences: ["agent"]},
         annotations: {agent_lifecycle: true, initiator: "parent"},
       },
     )
@@ -344,6 +348,7 @@ fn __agent_lifecycle_add_subagent_tools(
           },
         },
         returns: {type: "object"},
+        governance: {audiences: ["agent"]},
         annotations: {agent_lifecycle: true, initiator: "parent"},
       },
     )
@@ -365,6 +370,7 @@ fn __agent_lifecycle_add_subagent_tools(
           reason: {type: "string", required: false, description: "Why the child should stop."},
         },
         returns: {type: "object"},
+        governance: {audiences: ["agent"]},
         annotations: {agent_lifecycle: true, initiator: "parent", handoff: true},
       },
     )

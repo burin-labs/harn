@@ -31,19 +31,19 @@ pub fn agent_loop(
   options: any = nil,
 ) -> AgentResult {
   let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
-  opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
   if opts?.tools != nil {
-    // Establish the model-facing exposure boundary once, before session
-    // assembly, prompt guidance, tool search, narrowing, or dispatch can read
-    // the registry. The projection preserves executable closures while the
-    // Rust registry owner validates the closed governance contract.
+    // Establish the model-facing exposure boundary once, before lifecycle
+    // derivation, session assembly, prompt guidance, tool search, narrowing,
+    // or dispatch can read the registry. The projection preserves executable
+    // closures while the Rust registry owner validates the closed contract.
     opts = opts + {tools: tool_project(opts.tools, "agent")}
   }
+  opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {_primary_system: system_prompt}
   }
   const session = agent_session_init(harness.agent, message, system_prompt, opts)
-  if session?.done {
+  if session.done {
     return schema_expect(session.result, schema_of(AgentResult))
   }
   agent_scratchpad_init(harness.agent, session, opts)
