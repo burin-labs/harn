@@ -1,0 +1,16 @@
+pipeline default(harness: Harness, task: unknown) {
+  const result = harness.llm.call_safe(
+    "Reply with exactly PONG.",
+    "Return only the requested word.",
+    {
+      provider: "groq",
+      model: "groq/openai/gpt-oss-20b",
+      stream: true,
+      max_tokens: 8,
+      temperature: 0.0,
+      retries: 0,
+      timeout_ms: 30000,
+    },
+  )
+  harness.stdio.println(json_stringify(result))
+}

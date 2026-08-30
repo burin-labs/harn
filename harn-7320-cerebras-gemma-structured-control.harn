@@ -1,0 +1,23 @@
+pipeline default(harness: Harness, task: unknown) {
+  const schema = {
+    type: "object",
+    properties: {
+      answer: {type: "string", maxLength: 16},
+    },
+    required: ["answer"],
+    additionalProperties: false,
+  }
+  const result = harness.llm.call_structured_result(
+    "Return JSON with answer set to PONG.",
+    schema,
+    {
+      provider: "cerebras",
+      model: "gemma-4-31b",
+      stream: true,
+      max_tokens: 160,
+      retries: 0,
+      timeout_ms: 30000,
+    },
+  )
+  harness.stdio.println(json_stringify(result))
+}

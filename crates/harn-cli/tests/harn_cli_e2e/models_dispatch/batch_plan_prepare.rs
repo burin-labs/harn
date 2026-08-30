@@ -322,7 +322,7 @@ fn models_batch_manifest_and_dry_run_groq_openai_compatible() {
             "--provider",
             "groq",
             "--model",
-            "llama-3.1-8b-instant",
+            "qwen/qwen3.6-27b",
             "--requests",
             requests_path.to_str().expect("utf8 requests path"),
             "--out",
@@ -366,7 +366,7 @@ fn models_batch_manifest_and_dry_run_groq_openai_compatible() {
     assert_eq!(request["custom_id"], "groq-case-1");
     assert_eq!(request["method"], "POST");
     assert_eq!(request["url"], "/v1/chat/completions");
-    assert_eq!(request["body"]["model"], "llama-3.1-8b-instant");
+    assert_eq!(request["body"]["model"], "qwen/qwen3.6-27b");
 
     let receipt_path = report["receipt"].as_str().expect("receipt path");
     let submission_path = tmp.path().join("submission.json");

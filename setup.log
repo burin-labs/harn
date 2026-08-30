@@ -1,0 +1,36 @@
+./scripts/dev_setup.sh
+=== Harn dev setup ===
+Setup profile -> full
+Setup storage root -> /home/ksinder/.cache/harn/dev-setup
+Configured git hooks path -> .githooks
+Configured Harn merge drivers
+Configured Cargo target dir -> /home/ksinder/.cache/harn/dev-setup/harn-target/tmp-harn-7320-openai-sse
+Cargo target seed cold: 6bf42fbf977e18b80405551c89b87764d3fc3c7ce5dfae566602f74473da02a0
+Installing cargo-nextest (build artifacts: /home/ksinder/.cache/harn/cargo-install)...
+    Updating crates.io index
+     Ignored package `cargo-nextest v0.9.143` is already installed, use --force to override
+Installing sccache (build artifacts: /home/ksinder/.cache/harn/cargo-install)...
+    Updating crates.io index
+  Installing sccache v0.17.0
+    Updating crates.io index
+warning: package `iana-time-zone v0.1.59` in Cargo.lock is yanked in registry `crates-io`, consider running without --locked
+warning: package `scc v2.1.0` in Cargo.lock is yanked in registry `crates-io`, consider running without --locked
+warning: package `spin v0.9.8` in Cargo.lock is yanked in registry `crates-io`, consider running without --locked
+    Updating crates.io index
+    Finished `release` profile [optimized] target(s) in 0.82s
+   Replacing /home/ksinder/.cargo/bin/sccache
+    Replaced package `sccache v0.17.0` with `sccache v0.17.0` (executable `sccache`)
+Installing actionlint...
+harn-target GC recently checked.
+Installing repo-local Node tooling up to date.
+Installing portal frontend dependencies up to date.
+Installing tree-sitter-harn dependencies up to date.
+Installing VS Code extension dependencies up to date.
+Building portal frontend up to date.
+Installing harnlang.com site dependencies up to date.
+
+==> Building and proving the canonical Harn CLI
+Cargo lease receipt: /home/ksinder/.harn/host-leases/receipts/01a03bb8-4d49-73d0-9c9d-715566a5f286.json
+Cargo lease receipt: /home/ksinder/.harn/host-leases/receipts/01a03bb8-be5d-7730-b891-21d76bd0af10.json
+error: Harn build freshness identity did not converge after Cargo rebuilt the authoritative dependency graph
+make: *** [Makefile:58: setup] Error 1

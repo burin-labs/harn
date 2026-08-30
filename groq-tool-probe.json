@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "provider": "groq",
+  "model": "openai/gpt-oss-20b",
+  "tool_format": "native",
+  "base_url": "https://api.groq.com/openai/v1",
+  "probe_case": "single_tool_call",
+  "tool_name": "echo_marker",
+  "marker": "harn_tool_probe_marker",
+  "expected_value": "harn_tool_probe_marker",
+  "cases": [
+    {
+      "mode": "streaming",
+      "ok": true,
+      "classification": "structured_native_tool_call",
+      "fallback_mode": "native",
+      "elapsed_ms": 237,
+      "native_tool_call_count": 1,
+      "text_tool_call_count": 0,
+      "usage": {
+        "input_tokens": 153,
+        "output_tokens": 82,
+        "cost_usd": 0.000036074999999999996
+      }
+    }
+  ],
+  "tool_calling": {
+    "native": "unknown",
+    "text": "unknown",
+    "streaming_native": "pass",
+    "fallback_mode": "native"
+  }
+}

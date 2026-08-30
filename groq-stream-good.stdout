@@ -1,0 +1,1 @@
+{"error":{"category":"not_found","kind":"terminal","message":"groq HTTP 404 Not Found [model_unavailable]: The model `llama-3.1-8b-instant` does not exist or you do not have access to it. (type: invalid_request_error, code: model_not_found)","model":"llama-3.1-8b-instant","origin":"provider","provider":"groq","reason":"model_unavailable"},"ok":false,"response":null}

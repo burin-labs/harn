@@ -357,9 +357,13 @@ pub(super) fn validate_reasoning_effort_level_supported(
         return Ok(());
     }
     let supported = caps.reasoning_effort_levels.join(", ");
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "option `{option_name}` level `{raw}` is not supported for provider `{provider}` model `{model}`; supported reasoning_effort values: {supported}"
-    )))))
+    Err(crate::llm::call::invalid_request_error(
+        format!(
+            "option `{option_name}` level `{raw}` is not supported for provider `{provider}` model `{model}`; supported reasoning_effort values: {supported}"
+        ),
+        provider,
+        model,
+    ))
 }
 
 pub(super) fn parse_anthropic_beta_features_option(

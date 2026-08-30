@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "provider": "cerebras",
+  "model": "gemma-4-31b",
+  "tool_format": "native",
+  "base_url": "https://api.cerebras.ai/v1",
+  "probe_case": "single_tool_call",
+  "tool_name": "echo_marker",
+  "marker": "harn_tool_probe_marker",
+  "expected_value": "harn_tool_probe_marker",
+  "cases": [
+    {
+      "mode": "streaming",
+      "ok": true,
+      "classification": "structured_native_tool_call",
+      "fallback_mode": "native",
+      "elapsed_ms": 322,
+      "native_tool_call_count": 1,
+      "text_tool_call_count": 0,
+      "usage": {
+        "input_tokens": 98,
+        "output_tokens": 22,
+        "cost_usd": 0.000050799999999999995
+      }
+    }
+  ],
+  "tool_calling": {
+    "native": "unknown",
+    "text": "unknown",
+    "streaming_native": "pass",
+    "fallback_mode": "native"
+  }
+}

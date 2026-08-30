@@ -81,3 +81,71 @@ thinking_modes = ["enabled"]
     );
     crate::llm::capabilities::clear_user_overrides();
 }
+
+#[test]
+fn unsupported_effort_returns_a_typed_local_safe_error() {
+    crate::llm::capabilities::set_user_overrides_toml(
+        r#"
+[[provider.local]]
+model_match = "effort-level-gated"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+"#,
+    )
+    .expect("capability override");
+
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("local")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("effort-level-gated")),
+        ),
+        (
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from("none")),
+        ),
+    ]);
+    let err = extract_llm_options(&[
+        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::Nil,
+        VmValue::dict(options),
+    ])
+    .expect_err("unsupported effort must fail before dispatch");
+    crate::llm::capabilities::clear_user_overrides();
+
+    let safe = crate::llm::call::llm_safe_envelope_err(&err);
+    let error = safe
+        .as_dict()
+        .and_then(|safe| safe.get("error"))
+        .and_then(VmValue::as_dict)
+        .expect("safe error envelope");
+
+    assert_eq!(
+        error.get("category").map(VmValue::display).as_deref(),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        error.get("kind").map(VmValue::display).as_deref(),
+        Some("terminal")
+    );
+    assert_eq!(
+        error.get("reason").map(VmValue::display).as_deref(),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        error.get("origin").map(VmValue::display).as_deref(),
+        Some("local")
+    );
+    assert_eq!(
+        error.get("provider").map(VmValue::display).as_deref(),
+        Some("local")
+    );
+    assert_eq!(
+        error.get("model").map(VmValue::display).as_deref(),
+        Some("effort-level-gated")
+    );
+}

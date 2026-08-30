@@ -1,0 +1,1 @@
+{"schema_version":4,"event":"run_summary","wall_time_ms":661,"exit_code":0,"llm":{"call_count":1,"provider_call_count":1,"input_tokens":86,"output_tokens":8,"time_ms":160,"cost_usd":8.849999999999998e-6,"known_cost_usd":8.849999999999998e-6,"unpriced_calls":0,"usage_unknown_calls":0}}

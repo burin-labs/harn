@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "provider": "cerebras",
+  "model": "gpt-oss-120b",
+  "tool_format": "native",
+  "base_url": "https://api.cerebras.ai/v1",
+  "probe_case": "single_tool_call",
+  "tool_name": "echo_marker",
+  "marker": "harn_tool_probe_marker",
+  "expected_value": "harn_tool_probe_marker",
+  "cases": [
+    {
+      "mode": "streaming",
+      "ok": true,
+      "classification": "structured_native_tool_call",
+      "fallback_mode": "native",
+      "elapsed_ms": 414,
+      "native_tool_call_count": 1,
+      "text_tool_call_count": 0,
+      "usage": {
+        "input_tokens": 147,
+        "output_tokens": 360,
+        "cost_usd": 0.00032145000000000003
+      }
+    }
+  ],
+  "tool_calling": {
+    "native": "unknown",
+    "text": "unknown",
+    "streaming_native": "pass",
+    "fallback_mode": "native"
+  }
+}

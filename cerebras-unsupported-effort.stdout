@@ -1,0 +1,2 @@
+{"schemaVersion":1,"ok":true,"data":{"event_type":"stdout","seq":1,"payload":"{\"error\":{\"category\":\"generic\",\"kind\":\"terminal\",\"message\":\"option `effort` level `none` is not supported for provider `cerebras` model `gpt-oss-120b`; supported reasoning_effort values: low, medium, high\",\"reason\":\"unknown\"},\"ok\":false,\"response\":null}\n"},"error":null,"warnings":[]}
+{"schemaVersion":1,"ok":true,"data":{"event_type":"result","seq":2,"value":null,"exit_code":0},"error":null,"warnings":[]}
