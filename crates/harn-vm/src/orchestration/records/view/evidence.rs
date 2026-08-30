@@ -50,10 +50,13 @@ mod tests {
     use crate::redact::current_policy;
 
     fn run_with_local_recording() -> RunRecord {
+        const EXECUTION_ID: &str = "hxe-019c13e0-8080-7000-8000-000000000001";
         let mut run = RunRecord::default();
+        run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence.execution_id = Some(EXECUTION_ID.to_string());
         run.evidence.flight_recording = Some(FlightRecordingArtifact {
             schema_version: FLIGHT_RECORDING_SCHEMA_VERSION,
-            execution_id: "hxe-view".to_string(),
+            execution_id: EXECUTION_ID.to_string(),
             format: FLIGHT_RECORDING_FORMAT.to_string(),
             path: Some("/private/workspace/.harn/flight.json".to_string()),
             content_hash: format!("blake3:{}", "a".repeat(64)),
