@@ -73,10 +73,24 @@ denials likewise leave the parent lease executable. Integrity failures still
 invalidate it: an expired lease, a probe outside the fingerprinted lease, or a
 discovery receipt that cannot be persisted.
 
-`request_delta` remains the general typed attenuation interface. An identical
-requirement is already covered. A narrower filesystem root produces a delta
-bound to the parent lease and its expiry. A wider or unrelated requirement is
-blocked and requires a newly prepared run.
+`PreparedSession` is the versioned, replay-safe host protocol around this
+engine. `prepare` emits `needs_approval`, `ready`, or `blocked`; one persisted
+approval decision converts the grouped request into a fingerprinted session
+lease. `attach` binds that lease to the exact session, workspace, runtime
+provenance, and consumer before engine startup. A durable
+`PreparedSessionLeaseStore` atomically rejects replay across server processes.
+Routine turns reuse the attached authority envelope without prompting again,
+and `stop`, `pivot`, and `terminal` all persist terminal accounting. The JSON
+Schema is `schemas/prepared-session-v1.schema.json`; generated Rust,
+TypeScript, Swift, Python, and Go protocol artifacts expose the same states and
+commands.
+
+`PreparedRun::request_delta` remains the typed attenuation interface for a
+single prepared run. `PreparedSession::request_delta` adds the interactive
+session behavior: an identical requirement is already covered, attenuation is
+immediate, and widening produces one fingerprinted semantic approval batch.
+Only the exact approved widening joins the active envelope; a denial leaves
+the existing session usable.
 
 SDK profiles, workload identity, instance metadata, and hosted credentials use
 `ConsumerBoundIdentityBroker`. `RunAuthorityPlan.v1` records only a
@@ -90,7 +104,12 @@ blocks readiness before broker acquisition or provider spend.
 material can be consumed once through the complete fingerprinted requirement;
 the handle rejects a different provider, audience, tenant, consumer, or broker.
 Local and hosted adapters implement the same broker interface while retaining
-custody of their own durable stores.
+custody of their own durable stores. At provider dispatch Harn re-reads broker
+facts, acquires the handle, and marks identity used only after the exact
+consumer successfully opens it. Broker-managed identities get one
+reacquisition when a handle expires. Bedrock and Vertex cannot fall back to
+ambient SDK, profile, metadata, environment, or credential-file chains inside
+a prepared session; calls outside one retain their compatibility resolvers.
 
 Every terminal receipt records requested, granted, used, denied, and unused
 authority, along with its decider and canonical policy-decision evidence. A

@@ -44,7 +44,7 @@ present and local Ollama responds at
 `--yes` to accept that setup without an interactive prompt.
 
 For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
-something like `http://192.168.86.250:8000` and either pass
+something like `http://192.0.2.10:8000` and either pass
 `{provider: "local", model: "qwen2.5-coder-32b"}` or set
 `LOCAL_LLM_MODEL=qwen2.5-coder-32b`.
 

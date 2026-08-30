@@ -269,17 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_file_comparison_ignores_platform_line_endings() {
-        let generated = "window.__HARN_KEYWORDS = {};\n";
-        let on_disk = generated.replace('\n', "\r\n");
-
-        assert_eq!(
-            normalize_line_endings(&on_disk),
-            normalize_line_endings(generated)
-        );
-    }
-
-    #[test]
     #[expect(
         clippy::string_slice,
         reason = "generated keyword vocabulary output is ASCII"

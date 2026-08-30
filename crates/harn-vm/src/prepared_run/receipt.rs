@@ -16,6 +16,7 @@ pub enum AuthorityReceiptStage {
     Startup,
     Discovery,
     NeedsApproval,
+    ApprovalDecision,
     Blocked,
     Ready,
     Terminal,

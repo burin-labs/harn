@@ -332,7 +332,7 @@ pub(crate) fn is_generic_wrapper_name(name: &str) -> bool {
     // Fireworks Harmony demux can lift that tag — or the recipient token `to`
     // from `tool_call to=<name>` — into OpenAI `function.name` even when the
     // route requested text tools. Treat both as framing, never as dispatch
-    // names (burin-labs/burin-code#4809).
+    // names (observed in a downstream host).
     matches!(
         name,
         "tool"
@@ -375,7 +375,7 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
         return Some("run".to_string());
     }
 
-    // Harmony demux fatal shape (burin-code#4809 Face 2): wrapper name is only
+    // Harmony demux fatal shape: wrapper name is only
     // `tool_call`/`to`, and the real tool name is nowhere in the payload — only
     // clean look args (`file`/`path` without an intent, and without
     // edit/search/run discriminators). Recover look rather than dispatching

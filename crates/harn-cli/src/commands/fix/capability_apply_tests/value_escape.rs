@@ -59,7 +59,7 @@ fn capability_apply_wraps_a_handler_referenced_by_value() {
 }
 
 /// The registration usually lives in a different file from the handler —
-/// burin-code defines `web_search_handler` in `lib/tools/web.harn` and
+/// A downstream host defines `web_search_handler` in `lib/tools/web.harn` and
 /// registers it in `lib/tools/surface.harn`. The wrap must land at the
 /// cross-file hand-over, not only when definition and registry share a file.
 #[test]

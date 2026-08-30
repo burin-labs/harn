@@ -1,6 +1,6 @@
 // Run: harn test tests/agent/lanes_test.harn
 //
-// Parity fixtures for `std/agent/lanes` against burin-code's
+// Parity fixtures for `std/agent/lanes` against a downstream host's
 // `agent_lane_for_task` decision table (`lib/runtime/agent-loop.harn`):
 // zero explicit targets -> "general", 1-4 targets -> "explicit_patch",
 // more than 4 targets -> escalate back to "general". Everything here is
@@ -396,7 +396,7 @@ pipeline test_stage_gate_default_prefix_byte_identical(harness: Harness, task: u
 }
 
 pipeline test_stage_gate_custom_prefix_roundtrips(harness: Harness, task: unknown) {
-  // A host prefix (burin-code's existing "[burin_gate ") round-trips through
+  // A legacy host prefix (`[burin_gate `) round-trips through
   // label -> parse when the SAME prefix is supplied to both.
   const opts = {prefix: "[burin_gate "}
   const gate = {

@@ -606,8 +606,30 @@ pub(super) fn mark_cancelled_session(
     let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
         return false;
     };
-    cancellation.cancel();
+    if cancellation.cancel() {
+        cancel_session_command_handles(session_id);
+    }
     true
+}
+
+/// Terminate the long-running command handles this session owns, after a cancel
+/// has been accepted for it.
+///
+/// The long-running command tool lets a backgrounded child outlive the tool
+/// call that started it, which is the point of a background handle — but it also
+/// means unwinding the agent loop does not reach those children. Foreground
+/// children die with the dispatch future through the cancel-on-drop path;
+/// backgrounded ones are exempt from it, so without this a stop leaves the
+/// session's own processes running and their survival depends on the model
+/// choosing to call the kill tool.
+///
+/// Scoped to handles whose `session_id` matches: one session's stop must never
+/// reach into a sibling's children.
+pub(super) fn cancel_session_command_handles(session_id: &str) {
+    #[cfg(feature = "hostlib")]
+    harn_hostlib::tools::long_running::cancel_session_handles(session_id);
+    #[cfg(not(feature = "hostlib"))]
+    let _ = session_id;
 }
 
 pub(super) fn mark_cancelled_session_for_routed_request(
@@ -651,8 +673,15 @@ pub(super) fn preempt_session_interruption(
                 mark_cancelled_session_for_routed_request(cancellations, params);
                 false
             } else {
-                mark_cancelled_session(cancellations, params);
-                true
+                // Consume the frame ONLY when the cancel actually landed on a
+                // registered session. A cancel naming an unknown or missing
+                // sessionId used to be swallowed here regardless, which made a
+                // miss indistinguishable on the wire from a working stop: the
+                // agent loop ran on and nothing was logged, refused, or
+                // answered. Falling through on a miss hands the frame to the
+                // normal dispatch, which records the miss as a rejected
+                // control outcome instead of dropping it.
+                mark_cancelled_session(cancellations, params)
             }
         }
         Some("session/truncate" | "session/close" | "session/stop") => {
@@ -665,7 +694,7 @@ pub(super) fn preempt_session_interruption(
 
 /// Re-arm the live LLM `call_budget` ceilings on the engine thread out-of-band,
 /// so a prompt turn already in flight observes the new cap on its next LLM
-/// dispatch (burin-labs/burin-code#1561). Returns `true` when `msg` was a
+/// dispatch in a downstream host. Returns `true` when `msg` was a
 /// `session/set_budget` control frame (so the router drops it instead of
 /// queueing it behind the active turn).
 ///

@@ -53,8 +53,6 @@ pub const MAX_DEPTH: u32 = 256;
 
 /// Stable version tag participating in the cache key. Bump when any
 /// observable semantic of the const-evaluator changes.
-pub const EVAL_VERSION: u32 = 1;
-
 /// A fully folded compile-time value.
 ///
 /// Mirrors the small subset of runtime `VmValue` shapes that pure

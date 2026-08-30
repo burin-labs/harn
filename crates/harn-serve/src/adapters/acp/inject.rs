@@ -41,6 +41,25 @@ impl AcpServer {
         let Some(cancellation) =
             lookup_session_cancellation(&self.session_cancellations, &session_id)
         else {
+            // A stop the server cannot honor must say so. The notification form
+            // has no response to carry a refusal, and an unregistered session
+            // has no event sink the control outcome is guaranteed to reach, so
+            // the log is the one record that always survives: without it, a
+            // cancel aimed at an unregistered session is indistinguishable from
+            // one that worked, which is exactly how a dead stop control hides.
+            tracing::warn!(
+                session_id = %session_id,
+                "session/cancel names a session this server has not registered; nothing was cancelled"
+            );
+            self.emit_control_outcome(
+                &session_id,
+                "session/cancel",
+                "unknown_session",
+                "rejected",
+                control_actor_from_params(params),
+                serde_json::json!({"sessionId": session_id}),
+                Some("no live session is registered under this id"),
+            );
             if !id.is_null() {
                 self.send_error(id, -32004, &format!("Session not found: {session_id}"));
             }
@@ -53,6 +72,12 @@ impl AcpServer {
         } else {
             cancellation.cancel()
         };
+        if newly_cancelled {
+            // A stop has to reach the processes the session started, not just
+            // its loop. Backgrounded command handles outlive the tool call by
+            // design, so unwinding the loop never reaches them.
+            cancel_session_command_handles(&session_id);
+        }
         let status = if newly_cancelled {
             "cancelled"
         } else {

@@ -7,9 +7,9 @@
  * result reflects the provider + network floor before a binder prompt
  * adds work.
  *
- * Run with `CEREBRAS_API_KEY` exported (e.g. via burin-code/.env):
+ * Run with `CEREBRAS_API_KEY` exported (for example, from a local `.env`):
  *
- *   set -a && source ~/projects/burin-code/.env && set +a
+ *   set -a && source /path/to/project/.env && set +a
  *   cargo run --quiet --bin harn -- run scripts/smoke_cerebras.harn
  */
 pipeline default(harness: Harness, args: unknown) {

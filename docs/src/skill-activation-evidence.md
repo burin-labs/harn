@@ -161,7 +161,7 @@ concerns:
 the Harn release that first carries this schema (`schema_version: 1`). Burin
 should consume the contract only after pinning that `.harn-version`. Until then,
 Burin
-[#3532](https://github.com/burin-labs/burin-code/issues/3532) can keep running
+The downstream host can keep running
 its existing `skill_activation_report` path unchanged — the two produce the same
 shown/omitted decision because both budget on the same card text, so the cutover
 is a swap, not a behavior change.

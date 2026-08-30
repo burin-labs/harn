@@ -88,9 +88,9 @@ and commits to the architecture that ends the whack-a-mole.
 
 The failure signatures below are the ground truth from mining the most recent
 ~50 eval transcript runs (2026-06-18 → 2026-06-24) across the two live
-eval roots: an IDE-host eval corpus (895 run dirs) and
-`/private/tmp/bc-hardcell-harness/.burin-evals`. Counts are from the forensic
-sweep; byte-level excerpts and absolute source paths are in Appendix A. The
+eval roots: an IDE-host eval corpus (895 run dirs) and a second, consumer-side
+corpus (8 run dirs). Counts are from the forensic sweep; byte-level excerpts are
+in Appendix A. The
 single most important empirical finding shapes the whole design:
 
 > **"True vanishing tool_calls" (`stop_reason == tool_calls` with an empty array)
@@ -244,7 +244,7 @@ Where code-mode genuinely wins (and so where the opt-in pays off):
   with every child binding still audited (`composition_execute` reports
   `child_calls`/`child_results`). For a 30+-tool MCP surface this is the
   difference between re-sending 12k tokens of tool docs every turn (see the token
-  forensics in burin memory) and sending a compact binding manifest once.
+  forensics summarized in section 2) and sending a compact binding manifest once.
 
 - **It feeds crystallization.** `composition_crystallization_trace` turns a good
   snippet into durable, replay-gated workflow code. Structured tool-calls have no
@@ -588,12 +588,11 @@ this RFC's companion PR).**
 - 1b. (next) Add the `ToolStreamIntegrity` classifier (b2) and wire the `Ok`-arm
   `VanishedOnNative`/`MarkupInContent` verdicts into the same one-way degrade path.
 
-- **Meter gate:** Phase 1 is a convergence claim (it changes cheap-model agent
-  behavior). Follow `docs/eval/meter-stick.md`: iterate on `meter-tune`, gate on
-  frozen `meter-holdout`, N≥5 for the primary cheap model, paired 95% CI lower
-  bound `> 0` to claim improvement. The mechanism-fitness mini-evals (scripted
-  fixtures) ship FIRST, before any cloud spend, per the AGENTS.md discipline —
-  1a's tests are exactly that.
+- **Quality gate:** Phase 1 changes cheap-model agent behavior, so it is a
+  quality claim rather than a refactor. Consumer evaluation programs gate on
+  their own metrics; Harn's own precondition is that the mechanism-fitness
+  mini-evals (scripted fixtures) ship FIRST, before any cloud spend — 1a's
+  tests are exactly that.
 
 **Phase 2 — Feedback-enrichment tier (NON-breaking).**
 
@@ -718,9 +717,8 @@ Together they make Harn the best hands-off orchestration toolchain on the planet
 
 ## Appendix A — Evidence excerpts (byte-level, from the 2026-06-18 → 06-24 sweep)
 
-Inventory: two live eval roots —
-an IDE-host eval corpus (895 run dirs) and
-`/private/tmp/bc-hardcell-harness/.burin-evals` (8). Layout per eval: base dir +
+Inventory: two live eval roots — an IDE-host eval corpus (895 run dirs) and a
+second, consumer-side corpus (8). Layout per eval: base dir +
 `-llm` (`llm_transcript.jsonl`: `provider_call_request/response/error` records) +
 `-events` (`event_log-*.jsonl`, `topics/agent.transcript.llm.jsonl`); trials roll
 up to `trials-<model>-<ts>.json` with a `transcript_mining_report` pointer.

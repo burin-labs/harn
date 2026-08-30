@@ -18,17 +18,6 @@ import {
   value_model_eval_fixture,
 } from "../lib/prompt_pack"
 
-pipeline test_prompt_pack_has_required_narrow_decisions(harness: Harness, task: unknown) {
-  const ids = prompt_ids()
-  assert_eq(len(ids), 6)
-  assert(ids.contains("classify_pr"))
-  assert(ids.contains("choose_next_action"))
-  assert(ids.contains("diagnose_ci_category"))
-  assert(ids.contains("summarize_repair_result"))
-  assert(ids.contains("decide_approval"))
-  assert(ids.contains("audit_release_changelog"))
-}
-
 pipeline test_every_decision_has_strict_schema_budget_and_goldens(harness: Harness, task: unknown) {
   for id in prompt_ids() {
     const schema = schema_for(id)

@@ -42,6 +42,16 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // loop terminates the child and its grandchild. Extracted from process.rs's
   // inline test mod, which was previously below this lint's file filter.
   "crates/harn-vm/src/stdlib/process_tests.rs",
+  // Stop-control blast radius: spawns two real background commands on two
+  // sessions, cancels one, and polls the OS for that pid to disappear while
+  // asserting the bystander survives. Process death is a syscall-observable
+  // event with no virtual-clock equivalent; same shape as the
+  // `process_tools_e2e.rs` entry above. Bounded by a hard 2 s deadline whose
+  // expiry is a named assertion failure naming the surviving pid, never a
+  // hang.
+  // Second reviewer: claude-main-II (control). Reason: real OS pid death and
+  // a mid-call cancel window have no virtual-clock equivalent.
+  "crates/harn-serve/src/adapters/acp/tests/stop_controls.rs",
 ]
 
 // tokio::time::sleep in test files (outside start_paused = true tests).
@@ -66,6 +76,17 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/agent_sessions_tests.rs",
   "crates/harn-vm/src/flow/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
+  // Stop controls: two distinct real-time needs, neither expressible on a
+  // paused clock. One bounded poll waits on a tick file the *running agent
+  // loop* writes, with no event signal to subscribe to (the
+  // `orchestrator_http/support.rs` case). For the other two: the two
+  // deliberately-slow builtin_call answers are the window under test.
+  // `advance` on a paused clock would move past that window, and the loop
+  // they sit in is iteration-bounded with a named `recv_json` timeout, so an
+  // expiry fails by name rather than hanging.
+  // Second reviewer: claude-main-II (control). Reason: real OS pid death and
+  // a mid-call cancel window have no virtual-clock equivalent.
+  "crates/harn-serve/src/adapters/acp/tests/stop_controls.rs",
 ]
 
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
@@ -75,6 +96,13 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+  // Stop controls: the deadline bounds the wait for a cancelled session's
+  // background child to be reaped. A single immediate reading reports a
+  // working stop as a leak, so the probe has to poll real time. Hard 2 s
+  // bound; expiry is a named assertion failure, never a hang.
+  // Second reviewer: claude-main-II (control). Reason: real OS pid death and
+  // a mid-call cancel window have no virtual-clock equivalent.
+  "crates/harn-serve/src/adapters/acp/tests/stop_controls.rs",
 ]
 
 // SystemTime::now() in test files — use injected clock / MockClock instead.

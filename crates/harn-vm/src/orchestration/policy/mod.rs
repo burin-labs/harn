@@ -621,7 +621,7 @@ pub fn enforce_current_policy_for_capability(
     // Harness methods must honor the same depth, or a PreToolUse handler that
     // migrated from ambient `store_get` / `agent_session_current_id` to
     // `harness.runtime.store_get` / `harness.agent.current_id` silently loses
-    // state:read under the tool's effect ceiling (burin-code#5942).
+    // state:read under the tool's effect ceiling (observed downstream).
     let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
     if trusted {
         return Ok(());

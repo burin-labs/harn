@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.121";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.123-dev";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
@@ -2923,6 +2923,75 @@ pub struct ACPWorkerUpdate {
     pub audit: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "_meta")]
     pub meta: Option<Value>,
+}
+
+pub const HARN_PREPARED_SESSION_SCHEMA: &str = "harn.prepared_session.v1";
+pub const HARN_PREPARED_SESSION_STATES: &[&str] = &[
+    "needs_approval",
+    "ready",
+    "blocked",
+    "active",
+    "delta",
+    "stopped",
+    "pivoted",
+    "terminal",
+];
+pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
+    "approval_decision",
+    "attach",
+    "turn",
+    "request_delta",
+    "stop",
+    "pivot",
+    "finish",
+];
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionApprovalDecision {
+    pub batch_fingerprint: String,
+    pub approved: bool,
+    pub decider: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionBinding {
+    pub session_id: String,
+    pub workspace_fingerprint: String,
+    pub runtime: Value,
+    pub consumer: Value,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedRuntimeAttachment {
+    pub session_id: String,
+    pub workspace_fingerprint: String,
+    pub runtime: Value,
+    pub consumer: Value,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionLease {
+    pub schema: String,
+    pub session_id: String,
+    pub session_fingerprint: String,
+    pub plan_fingerprint: String,
+    pub binding: HarnPreparedSessionBinding,
+    pub intent: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<HarnPreparedSessionApprovalDecision>,
+    pub issued_at_ms: u64,
+    pub expires_at_ms: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPreparedSessionUpdate {
+    pub state: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<HarnPreparedSessionLease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Value>,
 }
 
 pub const HARN_SESSION_RECAP_QUERY_METHOD: &str = "harn.session_recap.query";

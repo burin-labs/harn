@@ -1688,31 +1688,43 @@ mod tests {
     }
 
     #[test]
-    fn sha224_length() {
+    fn sha224_known_vector() {
         let mut vm = vm();
         let result = call(&mut vm, "sha224", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 56);
+        assert_eq!(
+            result.display(),
+            "90a3ed9e32b2aaf4c61c410eb925426119e1a9dc53d4286ade99a809"
+        );
     }
 
     #[test]
-    fn sha384_length() {
+    fn sha384_known_vector() {
         let mut vm = vm();
         let result = call(&mut vm, "sha384", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 96);
+        assert_eq!(
+            result.display(),
+            "768412320f7b0aa5812fce428dc4706b3cae50e02a64caa16a782249bfe8efc4b7ef1ccb126255d196047dfedf17a0a9"
+        );
     }
 
     #[test]
-    fn sha512_length() {
+    fn sha512_known_vector() {
         let mut vm = vm();
         let result = call(&mut vm, "sha512", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 128);
+        assert_eq!(
+            result.display(),
+            "ee26b0dd4af7e749aa1a8ee3c10ae9923f618980772e473f8819a5d4940e0db27ac185f8a0e1d5f84f88bc887fd67b143732c304cc5fa9ad8e6f57f50028a8ff"
+        );
     }
 
     #[test]
-    fn sha512_256_length() {
+    fn sha512_256_known_vector() {
         let mut vm = vm();
         let result = call(&mut vm, "sha512_256", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 64);
+        assert_eq!(
+            result.display(),
+            "3d37fe58435e0d87323dee4a2c1b339ef954de63716ee79f5747f94d974f913f"
+        );
     }
 
     #[test]
@@ -1720,30 +1732,6 @@ mod tests {
         let mut vm = vm();
         let result = call(&mut vm, "md5", vec![s("")]).unwrap();
         assert_eq!(result.display(), "d41d8cd98f00b204e9800998ecf8427e");
-    }
-
-    #[test]
-    fn sha256_deterministic() {
-        let mut vm = vm();
-        let a = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
-        let b = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
-        assert_eq!(a.display(), b.display());
-    }
-
-    #[test]
-    fn sha256_different_inputs_differ() {
-        let mut vm = vm();
-        let a = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
-        let b = call(&mut vm, "sha256", vec![s("world")]).unwrap();
-        assert_ne!(a.display(), b.display());
-    }
-
-    #[test]
-    fn hash_value_deterministic() {
-        let mut vm = vm();
-        let a = call(&mut vm, "hash_value", vec![s("test")]).unwrap();
-        let b = call(&mut vm, "hash_value", vec![s("test")]).unwrap();
-        assert_eq!(a.display(), b.display());
     }
 
     #[test]

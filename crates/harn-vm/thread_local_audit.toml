@@ -263,7 +263,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/cost.rs"
-statics = ["LLM_BUDGET", "LLM_ACCUMULATED_COST", "LLM_TOKEN_BUDGET", "LLM_ACCUMULATED_TOKENS"]
+statics = ["LLM_BUDGET", "LLM_ACCUMULATED_COST", "LLM_TOKEN_BUDGET", "LLM_ACCUMULATED_TOKENS", "LLM_OBSERVED_USAGE"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

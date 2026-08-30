@@ -38,22 +38,22 @@ fn pick_ls_remote_commit_returns_none_on_empty_output() {
 
 #[test]
 fn equivalent_git_repository_sources_fold_only_standard_transport_spelling() {
-    let https = "git+https://github.com/burin-labs/burin-commerce";
+    let https = "git+https://github.com/example-org/example-package";
     assert!(equivalent_git_repository_sources(
         https,
-        "git+ssh://git@github.com/burin-labs/burin-commerce.git"
+        "git+ssh://git@github.com/example-org/example-package.git"
     ));
     assert!(equivalent_git_repository_sources(
         https,
-        "git+git@github.com:burin-labs/burin-commerce.git"
+        "git+git@github.com:example-org/example-package.git"
     ));
 
     for different in [
-        "git+https://git.example.com/burin-labs/burin-commerce",
+        "git+https://git.example.com/example-org/example-package",
         "git+https://github.com/burin-labs/other",
-        "git+ssh://deploy@github.com/burin-labs/burin-commerce.git",
-        "git+ssh://git@github.com:2222/burin-labs/burin-commerce.git",
-        "git+http://github.com/burin-labs/burin-commerce",
+        "git+ssh://deploy@github.com/example-org/example-package.git",
+        "git+ssh://git@github.com:2222/example-org/example-package.git",
+        "git+http://github.com/example-org/example-package",
     ] {
         assert!(
             !equivalent_git_repository_sources(https, different),

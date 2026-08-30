@@ -291,7 +291,7 @@ claims.
 - Harn event-log ordering, idempotency, integrity-chain, SQLite, compaction, and
   replay support in `crates/harn-vm/src/event_log` and `provenance`.
 - Burin experiment adapters under `scripts/lib/experiment` and Harn adoption in
-  [burin-code#5547](https://github.com/burin-labs/burin-code/pull/5547).
+  the downstream host integration.
 - Harn Cloud's existing hosted aggregate was introduced in
   [harn-cloud#117](https://github.com/burin-labs/harn-cloud/pull/117); durable
   hosted execution remains tracked by

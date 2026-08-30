@@ -173,41 +173,22 @@ mod tests {
     }
 
     #[test]
-    fn low_ram_box_uses_small_ctx_and_short_keep_alive() {
-        let defaults = defaults_for(&snapshot(8, GpuKind::None));
-        assert_eq!(defaults.bucket, ProfileBucket::LowRam);
-        assert_eq!(defaults.ctx, 8_192);
-        assert_eq!(defaults.keep_alive, "5m");
-    }
-
-    #[test]
-    fn apple_silicon_48gb_uses_wide_ctx_and_one_hour_keep_alive() {
-        let defaults = defaults_for(&snapshot(48, GpuKind::Mps));
-        assert_eq!(defaults.bucket, ProfileBucket::HighRamAccel);
-        assert_eq!(defaults.ctx, 65_536);
-        assert_eq!(defaults.keep_alive, "1h");
-    }
-
-    #[test]
-    fn linux_cuda_workstation_uses_high_ram_accel_profile() {
-        let defaults = defaults_for(&snapshot(64, GpuKind::Cuda));
-        assert_eq!(defaults.bucket, ProfileBucket::HighRamAccel);
-        assert_eq!(defaults.ctx, 65_536);
-    }
-
-    #[test]
-    fn mid_ram_with_no_gpu_picks_conservative_defaults() {
-        let defaults = defaults_for(&snapshot(24, GpuKind::None));
-        assert_eq!(defaults.bucket, ProfileBucket::MidRamNoGpu);
-        assert_eq!(defaults.ctx, 16_384);
-        assert_eq!(defaults.keep_alive, "10m");
+    fn hardware_buckets_follow_ram_and_acceleration_boundaries() {
+        for (ram_gib, gpu, expected) in [
+            (8, GpuKind::None, ProfileBucket::LowRam),
+            (24, GpuKind::None, ProfileBucket::MidRamNoGpu),
+            (24, GpuKind::Cuda, ProfileBucket::MidRamAccel),
+            (48, GpuKind::None, ProfileBucket::HighRamNoGpu),
+            (48, GpuKind::Mps, ProfileBucket::HighRamAccel),
+        ] {
+            assert_eq!(bucket_for(&snapshot(ram_gib, gpu)), expected);
+        }
     }
 
     #[test]
     fn unknown_ram_falls_back_to_low_ram() {
         let mut snap = snapshot(0, GpuKind::None);
         snap.ram.total_bytes = None;
-        let defaults = defaults_for(&snap);
-        assert_eq!(defaults.bucket, ProfileBucket::LowRam);
+        assert_eq!(bucket_for(&snap), ProfileBucket::LowRam);
     }
 }

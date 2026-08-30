@@ -16,8 +16,9 @@
 // exact-input -> exact-output. This is PURELY fitness-for-purpose: it proves the
 // mechanism ENGAGES in isolation. It does NOT attempt to prove the feature
 // improves convergence or doesn't regress other qualities — that remains the
-// gauntlet's job, and a GREEN contract is a PRECONDITION to starting a meter run,
-// never a replacement for it (see docs/eval/meter-stick.md).
+// gauntlet's job, and a GREEN contract is a PRECONDITION to starting a quality
+// run, never a replacement for it. Consumer evaluation programs gate on their
+// own metrics.
 //
 // REUSE. This is a thin veneer over the established conformance seam:
 //   * `agent_capture_events(harness.agent, session, fn() { agent_loop(harness, ...) })` — drive + capture

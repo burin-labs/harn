@@ -639,6 +639,6 @@ This subcommand is intentionally a one-shot ingest path. It does not:
   [harn-bump-fleet#2](https://github.com/burin-labs/harn-bump-fleet/issues/2)),
 - introduce a new workflow loader or Burin UI mechanism (Burin local
   loading lives in
-  [burin-code#516](https://github.com/burin-labs/burin-code/issues/516)),
+  the downstream host's workflow integration),
 - or host a tenant candidate inbox (that lives in
   [harn-cloud#145](https://github.com/burin-labs/harn-cloud/issues/145)).

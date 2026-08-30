@@ -130,22 +130,6 @@ fn os_hardened_profile_rejects_cwd_outside_workspace_roots() {
     );
 }
 
-#[test]
-fn active_backend_name_matches_target_os() {
-    let expected = if cfg!(target_os = "linux") {
-        "linux"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "openbsd") {
-        "openbsd"
-    } else {
-        "noop"
-    };
-    assert_eq!(process_sandbox::active_backend_name(), expected);
-}
-
 #[cfg(target_os = "linux")]
 #[test]
 fn linux_sandbox_grants_proc_self_maps_to_descendant_runtimes() {

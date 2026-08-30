@@ -1,7 +1,7 @@
 # Lanes and prompt overlays
 
 Two additive stdlib modules generalize hand-rolled orchestration mechanisms
-from burin-code into stdlib: `std/agent/lanes` (tool-surface narrowing keyed
+from a downstream host into stdlib: `std/agent/lanes` (tool-surface narrowing keyed
 off a data-driven task classification) and `std/agent/overlays` (a data-driven
 prompt-nudge overlay). Both are plain data threaded through existing seams —
 neither adds a new host surface or a new hook.
@@ -23,7 +23,7 @@ const opts = lane_policy(
 const result = agent_loop(harness, task, nil, opts)
 ```
 
-`default_lane_rows()` ports burin-code's `agent_lane_for_task` decision table:
+`default_lane_rows()` ports the downstream host's `agent_lane_for_task` decision table:
 a task naming 1-4 explicit file targets (e.g. `src/widget.py`) gets the narrow
 `explicit_patch` lane (`look`, `search`, `edit`, `run`, `poll_command`,
 `wait_command`, `kill_command`, `read_command_output`); everything else —
@@ -100,7 +100,7 @@ agent_loop(
 
 `with_overlay(agent_options, rows, mode, options?)` layers mode-specific
 (and optionally lane-specific) guidance lines onto the outbound system prompt,
-generalizing burin-code's flag-gated `mode_overlay_lines`. Its `agent_options`-first
+generalizing the host's flag-gated `mode_overlay_lines`. Its `agent_options`-first
 arg order matches the rest of the fold family (`with_goal`, `with_governance`);
 `overlay_policy(rows, mode, agent_options?, options?)` remains as a deprecated
 alias with the old `rows`-first order.

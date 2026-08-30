@@ -69,6 +69,7 @@ fn llm_stream_chunk(
     visible_delta: &str,
     partial: &str,
     stop_reason: Option<&str>,
+    usage: Option<VmValue>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("delta", delta);
@@ -83,6 +84,13 @@ fn llm_stream_chunk(
             .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
+    // Accounting rides the terminal chunk only, and it is the very same value
+    // `llm_call` publishes (see `build_usage_value`). Without it a streaming
+    // caller can render tokens but can never report what the turn cost or how
+    // fast the server prefilled and decoded it.
+    if let Some(usage) = usage {
+        dict.insert("usage".to_string(), usage);
+    }
     VmValue::dict(dict)
 }
 
@@ -92,7 +100,7 @@ async fn forward_llm_stream_delta(
     delta: String,
 ) -> Result<String, ()> {
     let (partial, visible_delta) = visible.push(&delta, true);
-    let chunk = llm_stream_chunk(&delta, &visible_delta, &partial, None);
+    let chunk = llm_stream_chunk(&delta, &visible_delta, &partial, None, None);
     stream_tx.send(Ok(chunk)).await.map_err(|_| ())?;
     Ok(partial)
 }
@@ -169,6 +177,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                                 "",
                                 &partial,
                                 result.stop_reason.as_deref(),
+                                Some(super::api::build_usage_value(&result)),
                             );
                             let _ = stream_tx.send(Ok(final_chunk)).await;
                         }

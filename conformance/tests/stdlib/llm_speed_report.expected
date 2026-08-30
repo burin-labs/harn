@@ -1,0 +1,19 @@
+49.31 tok/s · 143 tokens · first token 210ms · 3.1s total
+  total duration:       3.1s
+  load duration:        41ms
+  time to first token:  210ms
+  prompt eval count:    18 token(s)
+  prompt eval duration: 62ms
+  prompt eval rate:     290.32 tok/s
+  eval count:           143 token(s)
+  eval duration:        2.9s
+  eval rate:            49.31 tok/s
+---
+50.0 tok/s · 100 tokens · 2.0s total
+  total duration:       2.0s
+  prompt eval count:    18 token(s)
+  eval count:           100 token(s)
+  eval rate:            50.0 tok/s
+---
+850ms total
+  total duration:       850ms

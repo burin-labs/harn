@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$ROOT_DIR"
 RELEASE_GATE_SCRIPT="${HARN_RELEASE_GATE_SCRIPT:-./scripts/release_gate.sh}"
+source "$SCRIPT_DIR/lib/release_tree_guard.sh"
 
 # ── Timing instrumentation ──────────────────────────────────────────────
 # Every `=== step ===` banner goes through `log_step`, which stamps the
@@ -337,30 +338,6 @@ sync_base_branch() {
   fi
 }
 
-require_existing_release_tag_checkout() {
-  local version="$1"
-  local tag="v$version"
-  local branch
-  branch="$(git branch --show-current)"
-  if [[ -n "$branch" ]]; then
-    echo "error: release_ship.sh --finalize must run from $BASE_BRANCH or detached at $tag; current branch is $branch"
-    exit 1
-  fi
-  if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-    echo "error: release_ship.sh --finalize is detached, but $tag does not exist locally"
-    exit 1
-  fi
-  local tag_commit head_commit
-  tag_commit="$(git rev-list -n 1 "$tag")"
-  head_commit="$(git rev-parse HEAD)"
-  if [[ "$tag_commit" != "$head_commit" ]]; then
-    echo "error: release_ship.sh --finalize is detached at $head_commit, but $tag points to $tag_commit"
-    echo "hint: checkout $BASE_BRANCH for a normal finalize, or checkout $tag for manual tag-publish recovery"
-    exit 1
-  fi
-  echo "Finalize recovery from existing tag $tag at $head_commit"
-}
-
 require_release_branch() {
   local base="$1"
   local branch
@@ -395,79 +372,7 @@ require_changelog_top_matches() {
   release_metadata verify-changelog --version "$expected"
 }
 
-# Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.
-#
-# The fold (fragments -> `## vX.Y.Z` CHANGELOG.md section) lives in the
-# bump-fleet `release_harn.harn prepare` flow (apply_draft_release_notes ->
-# lib/changelog.harn). `release_ship.sh` does NOT fold. So invoking release_ship
-# directly (the recovery/legacy path) with fragments still present would ship a
-# release whose CHANGELOG has no entries for them and whose --finalize renders
-# empty release notes. This guardrail makes that impossible from any mode: every
-# release-producing path routes through run_common_gates, and this runs first —
-# before the ~12-minute audit — so the failure is instant and self-explanatory.
-require_no_unfolded_fragments() {
-  local dir="changelog.d"
-  [[ -d "$dir" ]] || return 0
-  local frags=()
-  local cat f base
-  for cat in breaking added changed deprecated removed fixed security; do
-    for f in "$dir"/*."$cat".md; do
-      [[ -e "$f" ]] || continue
-      base="$(basename "$f")"
-      # Skip the lint config / templates that happen to look like fragments.
-      [[ "$base" == README* || "$base" == _* ]] && continue
-      frags+=("$f")
-    done
-  done
-  if (( ${#frags[@]} > 0 )); then
-    # Recovery: an already-tagged release cannot take remedy (a) or (b).
-    # Finalization publishes from the tag's own tree, so the fragments the
-    # guard is reading are immutable — no commit on any branch changes them,
-    # and moving the branch away from the tag fails the anchoring check
-    # instead. Without an escape, a release that was tagged before its
-    # fragments were folded can never be completed, and the only alternatives
-    # are deleting a published tag or publishing outside this script.
-    #
-    # So the escape records the omission rather than hiding it: it prints the
-    # same list, says plainly what will be missing from the notes, and where
-    # those entries will surface instead. It is deliberately restricted to
-    # finalize, because for any release that has not been tagged yet, remedy
-    # (a) or (b) is still available and still correct.
-    if (( ${ALLOW_UNFOLDED_FRAGMENTS:-0} == 1 )); then
-      {
-        echo "warning: finalizing with ${#frags[@]} unfolded changelog fragment(s):"
-        printf '  - %s\n' "${frags[@]}"
-        echo "These entries are NOT in this release's notes. They remain on the"
-        echo "default branch, so the next release folds them and they appear"
-        echo "under that version instead. This is recovery for a release that"
-        echo "was tagged before its fragments were folded; the tag's tree cannot"
-        echo "be corrected, so the omission is recorded here instead."
-      } >&2
-      return 0
-    fi
-    {
-      echo "error: ${#frags[@]} unfolded changelog fragment(s) remain in $dir/:"
-      printf '  - %s\n' "${frags[@]}"
-      echo "hint: release_ship.sh does not fold changelog fragments — the fold is"
-      echo "      part of the release_harn.harn 'prepare' flow. Either:"
-      echo "        (a) drive the release through 'release_harn.harn ... prepare'"
-      echo "            (recommended — it folds fragments, drafts + repairs notes), or"
-      echo "        (b) fold them into CHANGELOG.md's top '## vX.Y.Z' section by hand"
-      echo "            and 'git rm' the fragment files, then re-run."
-      echo "      Shipping now would omit these entries from the release notes."
-      echo "      If the release is ALREADY TAGGED, neither remedy can reach the"
-      echo "      tag's tree; use --allow-unfolded-fragments with --finalize to"
-      echo "      complete it and record the omission."
-    } >&2
-    exit 1
-  fi
-}
-
 run_common_gates() {
-  # Never ship a release with unfolded changelog fragments (fails fast, before
-  # the expensive audit). See require_no_unfolded_fragments above.
-  require_no_unfolded_fragments
-
   # Build the portal frontend up front so `portal-dist/` exists for every
   # downstream step. The `harn-cli` crate embeds portal-dist via `include_dir!`
   # at compile time and ships it via the crate's `include = [...]` field, so
@@ -901,11 +806,22 @@ if [[ "$MODE" == "prepare-here" ]]; then
   require_release_branch "$BASE_BRANCH"
 elif [[ "$MODE" == "finalize" ]]; then
   require_clean_tree
-  EXPECTED_VERSION="$(current_version)"
   if [[ "$(git branch --show-current)" == "$BASE_BRANCH" ]]; then
+    EXPECTED_VERSION="$(current_version)"
     sync_base_branch "$BASE_BRANCH"
   else
-    require_existing_release_tag_checkout "$EXPECTED_VERSION"
+    # The canonical publish path is already detached at the immutable tag.
+    # Prove that tree identity with Git alone, then reject its fragments before
+    # resolving release metadata can trigger a cold Harn build.
+    require_existing_release_tag_checkout "$BASE_BRANCH"
+  fi
+  require_no_unfolded_fragments
+  if [[ -n "$FINALIZE_TAG" ]]; then
+    EXPECTED_VERSION="$(current_version)"
+    if [[ "$FINALIZE_TAG" != "v$EXPECTED_VERSION" ]]; then
+      echo "error: detached release tag $FINALIZE_TAG does not match Cargo.toml version $EXPECTED_VERSION"
+      exit 1
+    fi
   fi
   # Trust the merge-queue CI by default; opt-in re-audit via env var or
   # --reaudit flag.
@@ -945,6 +861,7 @@ if [[ "$MODE" == "bump-pr" ]]; then
     echo "error: version did not change"
     exit 1
   fi
+  require_no_unfolded_fragments
   run_common_gates
   open_bump_pr "$BASE_BRANCH" "$PREVIOUS_VERSION" "$NEXT_VERSION"
   exit 0

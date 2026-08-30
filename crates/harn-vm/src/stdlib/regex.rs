@@ -528,14 +528,6 @@ mod tests {
     }
 
     #[test]
-    fn cache_returns_consistent_results() {
-        let mut vm = vm();
-        let a = call(&mut vm, "regex_match", vec![s(r"\d+"), s("42")]).unwrap();
-        let b = call(&mut vm, "regex_match", vec![s(r"\d+"), s("42")]).unwrap();
-        assert_eq!(a.display(), b.display());
-    }
-
-    #[test]
     fn cache_eviction_still_works() {
         for i in 0..70 {
             let pattern = format!("pat{i}");

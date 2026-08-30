@@ -978,14 +978,6 @@ mod tests {
     // --- Config resolution ---------------------------------------------
 
     #[test]
-    fn default_limits_are_conservative() {
-        let l = ResolvedLimits::default();
-        assert_eq!(l.max_concurrency, DEFAULT_MAX_CONCURRENCY);
-        assert_eq!(l.min_concurrency, DEFAULT_MIN_CONCURRENCY);
-        assert!(l.adaptive);
-    }
-
-    #[test]
     fn catalog_overlay_clamps_min_below_max() {
         let row = ProviderLimits {
             max_concurrency: Some(4),

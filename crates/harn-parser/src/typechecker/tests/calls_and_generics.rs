@@ -693,7 +693,7 @@ fn test_workflow_and_transcript_builtins_are_known() {
 /// reach inside it.
 ///
 /// `check_pattern_defaults` used to run only `check_binops`, which left calls
-/// inside a default completely unchecked. burin-code shipped a one-argument
+/// inside a default completely unchecked. A downstream host shipped a one-argument
 /// call to a two-argument function in exactly that position; it threw at run
 /// time while `harn check` reported nothing.
 #[test]
