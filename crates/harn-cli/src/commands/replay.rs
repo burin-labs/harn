@@ -31,6 +31,7 @@ pub(crate) fn json_schema() -> JsonValue {
                         "required": ["run_id", "status", "fixture"],
                         "properties": {
                             "run_id": {"type": "string"},
+                            "execution_id": {"type": "string"},
                             "status": {"type": "string"},
                             "fixture": {"type": "object"}
                         }
@@ -87,6 +88,10 @@ pub(crate) fn json_schema() -> JsonValue {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReplayReport {
     pub run_id: String,
+    /// Harn-owned identity of the source execution. Standalone traces and
+    /// legacy run records leave this absent rather than substituting run ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub status: String,
     pub stage_count: usize,
     pub stages: Vec<ReplayStage>,
@@ -510,6 +515,10 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
 fn execute_run_record(path: &Path) -> Result<ReplayExecution, String> {
     let run = harn_vm::orchestration::load_run_record(path)
         .map_err(|error| format!("failed to load run record {}: {error}", path.display()))?;
+    if run.evidence.execution_id.is_some() {
+        harn_vm::orchestration::validate_execution_evidence(&run.evidence)
+            .map_err(|error| format!("run record has invalid execution evidence: {error}"))?;
+    }
     let report = replay_report_from_run(&run);
     let raw_events = event_sequence_from_report(&report);
     let trace_run = ReplayTraceRun {
@@ -622,6 +631,7 @@ fn execute_replay_trace(
     let fixture = trace_fixture_result(trace, &trace_run)?;
     let report = ReplayReport {
         run_id: trace_run.run_id.clone(),
+        execution_id: None,
         status: if fixture.pass { "completed" } else { "failed" }.to_string(),
         stage_count: 0,
         stages: Vec::new(),
@@ -676,6 +686,7 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
 
     ReplayReport {
         run_id: run.id.clone(),
+        execution_id: run.evidence.execution_id.clone(),
         status: run.status.clone(),
         stage_count: run.stages.len(),
         stages,
@@ -710,6 +721,9 @@ fn envelope_for_report(payload: ReplayReport) -> JsonEnvelope<ReplayReport> {
 
 fn print_report_human(report: &ReplayReport) {
     println!("Replay: {}", report.run_id);
+    if let Some(execution_id) = &report.execution_id {
+        println!("Execution: {execution_id}");
+    }
     for stage in &report.stages {
         println!(
             "[{}] status={} outcome={} branch={}",
@@ -950,7 +964,33 @@ fn to_string_pretty<T: Serialize>(value: &T) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::time_travel_keep_count;
+    use super::{execute_run_record, replay_report_from_run, time_travel_keep_count};
+
+    #[test]
+    fn replay_rejects_a_claimed_non_harn_execution_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("run.json");
+        let mut run = harn_vm::orchestration::RunRecord::default();
+        run.evidence.schema_version = harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence.execution_id = Some("external-run-1".to_string());
+        std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+
+        let error = match execute_run_record(&path) {
+            Ok(_) => panic!("a claimed non-Harn execution identity must fail closed"),
+            Err(error) => error,
+        };
+        assert!(error.contains("run record has invalid execution evidence"));
+    }
+
+    #[test]
+    fn replay_report_does_not_synthesize_legacy_execution_identity() {
+        let run = harn_vm::orchestration::RunRecord {
+            id: "legacy-run".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(replay_report_from_run(&run).execution_id, None);
+    }
 
     #[test]
     fn time_travel_keeps_prefix_through_inclusive_cutoff() {
