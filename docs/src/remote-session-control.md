@@ -81,6 +81,10 @@ calls, and which one you want depends on the question.
 `activePrompt` is the running-or-idle bit. `liveState` has exactly two values on
 this surface; there is no `awaiting-input` value here.
 
+`lastEventId` and `title` are present only once the session has them. A session
+that has just been created carries neither, so a control client must treat a
+missing cursor as "no events yet" rather than as a failed read.
+
 `harn.session_view.query` is the richer question: what has this session actually
 done. It returns the `harn.session_view.v1` projection, whose `run.status`
 carries the aggregated session status and whose `pending` block names what the
@@ -128,6 +132,10 @@ after answers `status: "already_cancelled"`. A cancel naming a session the
 server does not hold is rejected with `-32004` and logged, so a stop aimed at a
 dead session cannot be mistaken for one that worked.
 
+Read `status`, not the presence of a result. Both answers are successful
+JSON-RPC results, and only `status` says whether *this* call is the one that
+ended the turn.
+
 Two narrower stops exist. `session/cancel_tool_call` stops one named tool call
 without tearing down the session. `session/close` cancels, flushes the session's
 event sinks, and drops it entirely.
@@ -147,6 +155,16 @@ The result is `{"messageId": "…", "status": "accepted"}`. Accepted means queue
 for delivery, not delivered; the `messageId` is what you would pass to
 `session/revoke_inject` or `session/replace_inject` to pull it back before it
 lands.
+
+**All three inject modes require a turn to be running.** A session that exists
+but is idle answers `-32004 "Session has no active prompt"`, and it answers that
+*before* it validates the mode, so an idle session and a misspelled mode produce
+the same error. There is no way to leave an instruction for a session's next
+turn; a control client that wants that holds the message itself and sends it as
+the next `session/prompt`.
+
+This is the timing constraint remote control has to design around. Steer is a
+control you apply *during* work, not between pieces of work.
 
 A steered message is drained at three seams: the start of an iteration, just
 after a tool batch finishes, and the end of an iteration. It is deliberately
@@ -344,3 +362,23 @@ identically to a session that replayed correctly and had nothing to say.
 live` returns an empty list both when nothing is running and when the server
 lost the session. Read `activePrompt` on a named session rather than inferring
 liveness from an empty list.
+
+## What has been proven against a live server
+
+Four of this page's claims were checked against a running `harn serve acp
+--transport stdio`, not only read from source. They are called out here so a
+reader knows which parts of the page are observed and which are inferred.
+
+- `session/new` succeeds on the served ACP path and returns a live session. This
+  is worth stating because the REST `serve api` path does *not* currently reach
+  a runnable turn.
+- `session/cancel` on a session the server does not hold returns `-32004`.
+- `session/cancel` twice returns `status: "cancelled"` then
+  `status: "already_cancelled"`.
+- `session/inject` on an idle session returns `-32004 "Session has no active
+  prompt"` for every mode, including an invalid one.
+
+Everything else on this page is a reading of the adapter and stdlib source. In
+particular, the claim that a pending tool batch is skipped at cancel is read
+from the bridge's pre-send gate and has not been observed here; that observation
+needs a session running a real tool batch.
