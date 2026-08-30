@@ -105,7 +105,11 @@ pub struct ProviderTelemetry {
     /// from "nobody has researched this provider" — three states that all
     /// look identical on the wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_controls: Option<crate::llm::api::data_controls::DataControlsReceipt>,
+    /// Boxed: `ProviderTelemetry` is embedded by value in futures that the
+    /// MCP command surface already builds close to clippy's stack-frame
+    /// ceiling, and an inline receipt pushes that frame over it. The box is
+    /// serde-transparent, so the wire and VM shapes are unchanged.
+    pub data_controls: Option<Box<crate::llm::api::data_controls::DataControlsReceipt>>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,

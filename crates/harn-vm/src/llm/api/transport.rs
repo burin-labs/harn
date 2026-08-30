@@ -362,7 +362,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // error: "we asked for the strict posture and the call failed" is a
     // different fact from "we never asked".
     if let Ok(result) = result.as_mut() {
-        result.telemetry.data_controls = Some(data_controls_receipt);
+        result.telemetry.data_controls = Some(Box::new(data_controls_receipt));
     }
     let mut result = result?;
     crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
