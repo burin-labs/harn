@@ -881,6 +881,47 @@ async fn script_server_initializes_released_clients_without_stable_request_metad
 }
 
 #[tokio::test]
+async fn reloadable_script_server_advertises_tool_list_changes() {
+    let server = McpServer::new(
+        "reloadable-test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .with_list_changes(true);
+    let mut vm = crate::Vm::new();
+    let initialized = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "reload-client", "version": "1"},
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("initialize response");
+
+    assert_eq!(
+        initialized["result"]["capabilities"]["tools"]["listChanged"],
+        true
+    );
+    assert_eq!(
+        initialized["result"]["capabilities"]["resources"]["listChanged"],
+        true
+    );
+    assert_eq!(
+        initialized["result"]["capabilities"]["prompts"]["listChanged"],
+        true
+    );
+}
+
+#[tokio::test]
 async fn server_stable_resources_read_emits_cache_hint() {
     let server = McpServer::new(
         "stable-test".to_string(),

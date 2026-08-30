@@ -1,7 +1,7 @@
 use super::ndjson::consume_ollama_ndjson_lines;
 use super::sse::reqwest_send_error;
 use super::{append_ollama_tool_calls, non_stream_send_error, telemetry_source};
-use crate::llm::api::response::parse_tool_arguments;
+use crate::llm::api::openai_normalize::parse_tool_arguments;
 use crate::llm::api::DialectContract;
 use crate::llm::api::ProviderResponseEnvelope;
 use crate::llm::capabilities::WireDialect;

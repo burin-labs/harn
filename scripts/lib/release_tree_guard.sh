@@ -62,6 +62,25 @@ require_no_unfolded_fragments() {
     return 0
   fi
 
+  # A tagged merge tree may legitimately carry fragments that landed after
+  # its immutable release candidate. Resolve the candidate by the changelog
+  # blob both trees share, then defer only fragments absent from that candidate.
+  # Failure to resolve exactly one candidate, or any candidate-owned fragment,
+  # keeps the existing fail-closed behavior below.
+  if [[ -n "${FINALIZE_TAG:-}" && ${ALLOW_UNFOLDED_FRAGMENTS:-0} != 1 ]]; then
+    local scope owned_count deferred_count
+    scope="$(bash "$SCRIPT_DIR/lib/release_fragment_scope.sh" \
+      --repo "$ROOT_DIR" --tree HEAD --version "${FINALIZE_TAG#v}")"
+    owned_count="$(jq -er '.owned | length' <<< "$scope")"
+    deferred_count="$(jq -er '.deferred | length' <<< "$scope")"
+    if [[ "$(jq -r '.resolved' <<< "$scope")" == "true" \
+      && "$owned_count" -eq 0 && "$deferred_count" -eq "${#frags[@]}" ]]; then
+      echo "warning: deferring ${deferred_count} post-candidate changelog fragment(s) to the next release:" >&2
+      jq -r '.deferred[] | "  - " + .' <<< "$scope" >&2
+      return 0
+    fi
+  fi
+
   # An already-tagged release cannot be corrected on a branch. The recovery
   # escape records the immutable omission rather than hiding it and is limited
   # by release_ship.sh to finalize mode.
