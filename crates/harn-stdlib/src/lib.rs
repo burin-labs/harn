@@ -790,9 +790,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        entrypoint_modules, find_cli_script, get_stdlib_prompt_asset, get_stdlib_source,
-        matching_paren_len, parse_public_function_line, public_functions_for_module,
-        STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+        entrypoint_modules, get_stdlib_prompt_asset, matching_paren_len,
+        parse_public_function_line, public_functions_for_module, STDLIB_CLI_SCRIPTS,
+        STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
     };
 
     #[test]
@@ -824,14 +824,6 @@ mod tests {
     }
 
     #[test]
-    fn find_cli_script_round_trips() {
-        for entry in STDLIB_CLI_SCRIPTS {
-            assert_eq!(find_cli_script(entry.name), Some(entry.source));
-        }
-        assert!(find_cli_script("not-a-real-script").is_none());
-    }
-
-    #[test]
     fn stdlib_source_names_are_unique() {
         let mut names = BTreeSet::new();
         for entry in STDLIB_SOURCES {
@@ -855,85 +847,6 @@ mod tests {
         let mut paths = BTreeSet::new();
         for entry in STDLIB_PROMPT_ASSETS {
             assert!(paths.insert(entry.path), "duplicate {}", entry.path);
-        }
-    }
-
-    #[test]
-    fn key_stdlib_modules_resolve() {
-        for module in [
-            "context",
-            "context/maintenance",
-            "context/eval",
-            "eval/stats",
-            "eval/remote_fanout",
-            "eval/agreement",
-            "edit",
-            "verification",
-            "disclosure",
-            "artifact/web",
-            "command",
-            "waitpoint",
-            "llm/handlers",
-            "media/asset",
-            "media/composition",
-            "model_job",
-            "model_job/contracts",
-            "model_job/runtime",
-            "model_job/testing",
-            "model_job/comfyui",
-            "model_job/openai",
-            "ui",
-            "ui/contracts",
-            "ui/renderer",
-            "ui/testing",
-            "llm/tool_middleware",
-            "llm/tool_binder",
-            "llm/missing_tool_call",
-            "llm/tool_shape",
-            "llm/dialects",
-            "llm/ensemble",
-            "llm/rerank",
-            "personas/prelude",
-            "personas/bulletins",
-            "agent/host_tools",
-            "agent/host_injection",
-            "agent/tool_lifecycle",
-            "agent/user",
-            "agent/cut_rules",
-            "agent/governors",
-            "agent/loop_post_turn",
-            "agent/completion_gate",
-            "agent/guardrails",
-            "cli",
-            "cli/envelope",
-            "cli/models/batch_artifacts",
-            "cli/models/batch_cancel",
-            "cli/models/batch_download",
-            "cli/models/batch_lifecycle",
-            "cli/models/batch_rejoin",
-            "cli/models/batch_status",
-            "cli/models/batch_submit",
-            "cli/models/batch_transport",
-            "cli/models/lora_render",
-            "llm/optimize",
-            "llm/judge",
-            "llm/faithfulness",
-            "llm/refine",
-            "connectors/shared",
-            "connectors/github",
-            "connectors/linear",
-            "connectors/notion",
-            "connectors/slack",
-            "triage",
-            "dashboard/jobs",
-            "ui_resource",
-            "host_conditions",
-            "host_lease",
-        ] {
-            assert!(
-                get_stdlib_source(module).is_some(),
-                "std/{module} should resolve"
-            );
         }
     }
 

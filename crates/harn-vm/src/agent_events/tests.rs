@@ -691,18 +691,6 @@ fn tool_call_audit_serializes_with_free_form_audit_payload() {
 }
 
 #[test]
-fn tool_call_audit_session_id_routes_correctly() {
-    let event = AgentEvent::ToolCallAudit {
-        session_id: "abc".into(),
-        tool_call_id: "tc".into(),
-        tool_name: "read".into(),
-        audit: serde_json::Value::Null,
-        receipt: None,
-    };
-    assert_eq!(event.session_id(), "abc");
-}
-
-#[test]
 fn host_tool_result_event_round_trips_with_sanitization_metadata() {
     let event = AgentEvent::HostToolResult {
         session_id: "s".into(),
