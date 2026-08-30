@@ -745,7 +745,7 @@ impl LlmCallOptions {
     /// otherwise the catalog's `[data_controls_policy] default_posture`.
     pub(crate) fn resolved_data_posture(&self) -> DataPosture {
         self.data_controls
-            .unwrap_or_else(|| crate::llm_config::data_controls_default_posture())
+            .unwrap_or_else(crate::llm_config::data_controls_default_posture)
     }
 
     pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {

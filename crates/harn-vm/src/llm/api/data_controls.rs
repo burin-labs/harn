@@ -151,7 +151,7 @@ pub(crate) fn resolve(
     .to_string();
 
     let declaration = crate::llm_config::provider_config(provider)
-        .and_then(|definition| definition.data_controls.clone());
+        .and_then(|definition| definition.data_controls);
 
     if posture == DataPosture::Default {
         return DataControlsPlan {
@@ -218,7 +218,7 @@ pub(crate) fn resolve(
             provider: provider.to_string(),
             control_scope: Some(declaration.control_scope),
             applied,
-            note: declaration.note.clone(),
+            note: declaration.note,
         },
     }
 }
@@ -272,7 +272,7 @@ fn set_body_path(body: &mut serde_json::Value, path: &str, value: serde_json::Va
 /// Declared posture for a provider, for consumers that want the fact without
 /// making a request.
 pub fn declaration_for(provider: &str) -> Option<DataControlsDef> {
-    crate::llm_config::provider_config(provider).and_then(|entry| entry.data_controls.clone())
+    crate::llm_config::provider_config(provider).and_then(|entry| entry.data_controls)
 }
 
 #[cfg(test)]
