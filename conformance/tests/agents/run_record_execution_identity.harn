@@ -1,0 +1,12 @@
+fn main(harness: Harness) {
+  const first = harness.obs.run_record({task: "first"})
+  const second = harness.obs.run_record({task: "second"})
+  const execution_id = first.evidence.execution_id ?? ""
+  const legacy_identity_gaps = first.evidence.gaps.filter(
+    { gap -> gap?.component == "execution_identity" && gap?.code == "legacy_missing" },
+  )
+    .to_list()
+  harness.stdio.println(execution_id.starts_with("hxe-"))
+  harness.stdio.println(second.evidence.execution_id == execution_id)
+  harness.stdio.println(len(legacy_identity_gaps) == 0)
+}

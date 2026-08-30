@@ -2922,10 +2922,10 @@ These builtins expose Harn's typed orchestration runtime.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `workflow_execute(task, graph, artifacts?, options?)` | task, graph, artifacts, options | dict | Execute a workflow and persist a run record |
-| `run_record(payload)` | payload: dict | run record | Normalize a run record |
-| `run_record_save(run, path?)` | run, path | dict | Persist a run record |
-| `run_record_load(path)` | path: string | run record | Load a run record from disk |
-| `load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
+| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record; newly constructed records inherit the active VM execution identity |
+| `harness.fs.run_record_save(run, path?)` | run, path | dict | Persist a run record |
+| `harness.fs.run_record_load(path)` | path: string | run record | Load a run record from disk |
+| `harness.fs.load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
 | `run_record_fixture(run)` | run | replay fixture | Derive a replay/eval fixture from a saved run |
 | `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
 | `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |

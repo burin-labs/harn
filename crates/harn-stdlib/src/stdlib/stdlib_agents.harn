@@ -335,7 +335,7 @@ pub fn workflow_result_transcript(
 /**
  * workflow_result_run.
  *
- * @effects: []
+ * @effects: [state.read@harness.obs]
  * @errors: []
  */
 pub fn workflow_result_run(
@@ -364,7 +364,7 @@ pub fn workflow_result_run(
     text,
     workflow_name,
   )
-  return run_record(
+  return obs.run_record(
     base_run
       + {
         workflow_id: base_run?.workflow_id ?? workflow_name,
@@ -382,7 +382,7 @@ pub fn workflow_result_run(
 /**
  * workflow_result_persist.
  *
- * @effects: []
+ * @effects: [state.read@harness.obs, fs.write@harness.fs]
  * @errors: []
  */
 pub fn workflow_result_persist(
@@ -412,7 +412,7 @@ pub fn workflow_result_persist(
     text,
     workflow_name,
   )
-  const run = run_record(
+  const run = obs.run_record(
     base_run
       + {
         workflow_id: base_run?.workflow_id ?? workflow_name,
