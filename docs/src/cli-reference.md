@@ -1742,7 +1742,7 @@ generated CLI, or inspect its canonical catalog.
 harn tool new acme-echo
 harn tool new acme-echo --dir packages/acme-echo
 harn tool new acme-echo --description "Echo text for tests."
-harn tool run server.harn widgets get --widget-id 42
+harn tool run server.harn widgets get --widget-id 42 # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
 harn tool schema server.harn --pretty
 ```

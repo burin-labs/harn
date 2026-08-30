@@ -59,7 +59,7 @@ the same published registry and invoke the same closures in the same VM.
 ## CLI projection
 
 ```bash
-harn tool run server.harn widgets get --widget-id 42 --verbose false
+harn tool run server.harn widgets get --widget-id 42 --verbose false # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
 ```
 
