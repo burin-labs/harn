@@ -21,6 +21,7 @@ mod eval_source;
 mod evidence;
 mod explain_cost;
 pub mod harnpack;
+mod import_failure;
 mod interrupts;
 pub mod json_events;
 mod lifecycle;
