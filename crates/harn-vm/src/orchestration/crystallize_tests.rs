@@ -90,7 +90,14 @@ fn composition_trace(id: &str, run_id: &str, path: &str, output: &str) -> Crysta
         "sha256:composition-snippet",
         "sha256:composition-manifest",
     );
-    run.execution_id = Some(format!("hxe-{id}"));
+    run.execution_id = Some(
+        match id {
+            "composition_a" => "hxe-019c13e0-8080-7000-8000-000000000001",
+            "composition_b" => "hxe-019c13e0-8080-7000-8000-000000000002",
+            _ => "hxe-019c13e0-8080-7000-8000-000000000003",
+        }
+        .to_string(),
+    );
     run.result = Some(json!({"text": output}));
     run.stdout = Some(String::new());
     let report = CompositionExecutionReport {
@@ -183,7 +190,10 @@ fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
             .iter()
             .map(|trace| trace.execution_id.as_deref())
             .collect::<Vec<_>>(),
-        vec![Some("hxe-composition_a"), Some("hxe-composition_b")],
+        vec![
+            Some("hxe-019c13e0-8080-7000-8000-000000000001"),
+            Some("hxe-019c13e0-8080-7000-8000-000000000002"),
+        ],
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -213,11 +223,14 @@ fn run_record_crystallization_preserves_execution_identity_without_inventing_leg
         workflow_id: "execution-source".to_string(),
         ..crate::orchestration::RunRecord::default()
     };
-    run.evidence.execution_id = Some("hxe-run-crystal".to_string());
+    run.evidence.execution_id = Some("hxe-019c13e0-8080-7000-8000-000000000004".to_string());
     std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
 
     let trace = load_crystallization_trace(&path).unwrap();
-    assert_eq!(trace.execution_id.as_deref(), Some("hxe-run-crystal"));
+    assert_eq!(
+        trace.execution_id.as_deref(),
+        Some("hxe-019c13e0-8080-7000-8000-000000000004")
+    );
 
     run.evidence.execution_id = None;
     std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();

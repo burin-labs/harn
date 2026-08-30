@@ -366,7 +366,6 @@ pub async fn execute_harn_composition(
         snippet_hash,
         manifest_hash,
     );
-    run.execution_id = request.execution_id.clone();
     let session_id = request.session_id.clone();
     run.requested_side_effect_ceiling = request.requested_side_effect_ceiling;
     run.metadata = request.metadata.clone();

@@ -1351,7 +1351,7 @@ fn composition_report_can_be_projected_to_crystallization_trace() {
         "sha256:snippet",
         "sha256:manifest",
     );
-    run.execution_id = Some("hxe-composition-crystal".to_string());
+    run.execution_id = Some("hxe-019c13e0-8080-7000-8000-000000000005".to_string());
     let report = CompositionExecutionReport {
         schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
         ok: true,
@@ -1384,7 +1384,10 @@ fn composition_report_can_be_projected_to_crystallization_trace() {
         summary: "ok".into(),
     };
     let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
-    assert_eq!(trace["execution_id"], "hxe-composition-crystal");
+    assert_eq!(
+        trace["execution_id"],
+        "hxe-019c13e0-8080-7000-8000-000000000005"
+    );
     assert_eq!(trace["source"], "composition_run");
     assert_eq!(trace["actions"][0]["name"], "execute_composition");
     assert_eq!(trace["actions"][1]["name"], "read_file");

@@ -270,8 +270,6 @@ pub struct CompositionMcpPolicy {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompositionExecutionRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
     pub session_id: Option<String>,
     pub run_id: String,
     pub language: String,
@@ -286,7 +284,6 @@ pub struct CompositionExecutionRequest {
 impl Default for CompositionExecutionRequest {
     fn default() -> Self {
         Self {
-            execution_id: None,
             session_id: None,
             run_id: String::new(),
             language: "harn".to_string(),
