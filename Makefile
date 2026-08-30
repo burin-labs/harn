@@ -634,6 +634,7 @@ test-pr-gate-scripts:
 	./scripts/tests/check_release_warm_build_budget_test.sh
 	./scripts/tests/ci_wait_for_run_artifacts_test.sh
 	./scripts/tests/ci_write_walltime_report_test.sh
+	./scripts/tests/sprint_fast_ci_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh

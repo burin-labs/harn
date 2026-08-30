@@ -100,8 +100,24 @@ jobs:
       setup_action: ${{ steps.surface_filter.outputs.setup_action }}
       release_contract: ${{ steps.surface_filter.outputs.release_contract }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
+      # One typed decision owns the reversible sprint exception. Named slow
+      # jobs consume it directly; the aggregate reads the same value rather
+      # than inferring policy from skipped jobs.
+      run_slow_ci: ${{ steps.sprint_fast_ci.outputs.run_slow_ci }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve sprint fast-CI policy
+        id: sprint_fast_ci
+        shell: bash
+        env:
+          SPRINT_FAST_CI: ${{ vars.SPRINT_FAST_CI }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          run_slow_ci="$(./scripts/ci_sprint_fast_ci.sh resolve "$SPRINT_FAST_CI" "$EVENT_NAME" "$EVENT_REF")"
+          echo "run_slow_ci=$run_slow_ci" >> "$GITHUB_OUTPUT"
+          echo "sprint fast CI: run_slow_ci=$run_slow_ci"
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -993,12 +1009,15 @@ jobs:
 
   rust-security:
     name: Run Linux sandbox tests
+    # SPRINT_FAST_CI defers this proof from PR/merge-group feedback to the
+    # integrated main push. Unset or change the variable to restore this lane.
     # Start from exact-commit artifact readiness rather than producer
     # completion. ci-status still requires the producer and this proof
     # independently, so the overlap cannot hide a failed workspace test.
     needs: [changes, security-tests-ready]
     if: >-
-      needs.changes.outputs.rust == 'true'
+      needs.changes.outputs.run_slow_ci == 'true'
+      && needs.changes.outputs.rust == 'true'
       && needs.security-tests-ready.result == 'success'
     runs-on: ubuntu-latest
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
@@ -1050,10 +1069,14 @@ jobs:
 
   harn-audit:
     name: ${{ matrix.name }}
+    # Both full conformance and the source/generated audit move together so a
+    # partial matrix cannot masquerade as the deferred policy.
     # Start CLI-independent setup immediately. Each worker waits for and
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: >-
+      needs.changes.outputs.run_slow_ci == 'true'
+      && needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # The immutable CLI producer is shared, but conformance and the independent
     # source/grammar/generated audits use separate free hosted workers. Putting
@@ -1748,12 +1771,16 @@ jobs:
   windows-cross-check:
     name: Windows cross-compile check
     needs: changes
-    # Also consumes the `rust` gate: skip when the `changes` job proved the diff
+    # Also consumes the sprint and `rust` gates: skip when sprint feedback is
+    # deferred, or when the `changes` job proved the diff
     # is docs/website/editors-vscode/markdown-only (no Rust surface -> no missing-cfg
     # break class possible). merge_group and non-metadata pushes keep it on: the
     # `force` step pins `rust=true` on merge_group, and `merge_group_proven` is
     # push-only, so both operands are true there and the lane always runs.
-    if: needs.changes.outputs.merge_group_proven != 'true' && needs.changes.outputs.rust == 'true'
+    if: >-
+      needs.changes.outputs.run_slow_ci == 'true'
+      && needs.changes.outputs.merge_group_proven != 'true'
+      && needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1877,7 +1904,7 @@ jobs:
     # runners rather than probing a self-hosted pool.
     runs-on: macos-latest
     timeout-minutes: 60
-    needs: macos-plan
+    needs: [changes, macos-plan]
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -1887,8 +1914,11 @@ jobs:
     # build one `-D warnings` error at a time. It compiles + clippy-lints every
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
-    # execute the live-Keychain tests (that's the nightly's job).
-    if: needs.macos-plan.outputs.run_macos == 'true'
+    # execute the live-Keychain tests (that's the nightly's job). The sprint
+    # gate additionally defers relevant PRs to their integrated main push.
+    if: >-
+      needs.changes.outputs.run_slow_ci == 'true'
+      && needs.macos-plan.outputs.run_macos == 'true'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2194,7 +2224,14 @@ jobs:
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
+          RUN_SLOW_CI: ${{ needs.changes.outputs.run_slow_ci }}
         run: |
+          ./scripts/ci_sprint_fast_ci.sh verify "$RUN_SLOW_CI" \
+            "Linux sandbox tests=${{ needs['rust-security'].result }}" \
+            "Harn proof workers=${{ needs['harn-audit'].result }}" \
+            "Windows cross-compile check=${{ needs['windows-cross-check'].result }}" \
+            "Rust on macOS=${{ needs.macos.result }}"
+
           # Hard-required lanes: a hard failure here must fail the aggregate,
           # because the lanes that `needs` them would all skip and skips are
           # otherwise tolerated below — without this the aggregate could go
@@ -2352,7 +2389,8 @@ jobs:
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
           if [ "$rust_security_result" != "success" ]; then
-            if [ "$rust_security_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+            if [ "$rust_security_result" = "skipped" ] \
+              && { [ "$RUN_SLOW_CI" = "false" ] || [ "${{ needs.changes.outputs.rust }}" != "true" ]; }; then
               :
             else
               echo "::error::Linux sandbox tests failed or skipped while Rust checks were required."
@@ -2363,7 +2401,8 @@ jobs:
           harn_audit_result="${{ needs['harn-audit'].result }}"
           echo "Harn proof workers: $harn_audit_result"
           if [ "$harn_audit_result" != "success" ]; then
-            if [ "$harn_audit_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+            if [ "$harn_audit_result" = "skipped" ] \
+              && { [ "$RUN_SLOW_CI" = "false" ] || [ "${{ needs.changes.outputs.rust }}" != "true" ]; }; then
               :
             else
               echo "::error::Harn proof workers failed or skipped while Rust proof was required."
@@ -2417,7 +2456,8 @@ jobs:
           echo "Windows cross-compile check: $windows_cross_result"
           if [ "$windows_cross_result" != "success" ]; then
             if [ "$windows_cross_result" = "skipped" ] \
-              && { [ "$merge_group_proven" = "true" ] || [ "${{ needs.changes.outputs.rust }}" != "true" ]; }; then
+              && { [ "$RUN_SLOW_CI" = "false" ] || [ "$merge_group_proven" = "true" ] \
+                || [ "${{ needs.changes.outputs.rust }}" != "true" ]; }; then
               :
             else
               echo "::error::Windows cross-compile check failed or skipped while it was required."
