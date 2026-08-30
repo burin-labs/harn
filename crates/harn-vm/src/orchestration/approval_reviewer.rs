@@ -396,3 +396,47 @@ mod tests {
         assert!(!counts.tripped());
     }
 }
+
+/// Offer one refused decision to the reviewer, rewriting it in place on a grant.
+///
+/// Returns whether the decision was granted, so the caller can record the
+/// approval status. Lives here rather than at the dispatch site because the
+/// decision of *when* a refusal may be reconsidered belongs to this module, and
+/// because the dispatch function is under a file-length ratchet that a body
+/// this size would push past its ceiling.
+///
+/// Only `Ask` and `Deny` are offered. An `Allow` is not a refusal and there is
+/// nothing to reconsider; passing one here would let the seam widen a decision
+/// nobody had objected to.
+pub async fn maybe_grant_by_auto_review(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    decision: Option<&mut crate::orchestration::PolicyEvaluation>,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    session_id: &str,
+) -> bool {
+    if !approval_reviewer_active() {
+        return false;
+    }
+    let Some(decision) = decision else {
+        return false;
+    };
+    if !decision.is_deny() && !decision.is_ask() {
+        return false;
+    }
+    let request = serde_json::json!({
+        "tool": tool_name,
+        "arguments": tool_args,
+        "session_id": session_id,
+        "action": decision.action,
+        "reason": decision.reason,
+        "risk_labels": decision.risk_labels,
+        "policy_decision": decision.receipt,
+    });
+    let outcome = run_approval_review(ctx, request, session_id).await;
+    if !outcome.approved {
+        return false;
+    }
+    decision.grant_by_auto_review(&outcome.rationale);
+    true
+}
