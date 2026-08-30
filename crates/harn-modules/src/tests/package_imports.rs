@@ -13,7 +13,7 @@ fn graph_classifies_only_reachable_nonlocal_imports_as_package_aliases() {
     let entry = write_file(
         root,
         "entry.harn",
-        "import \"std/runtime\"\nimport \"./relative\"\nimport \"direct_dep/api\"\n",
+        "import \"std/runtime\"\nimport \"./relative\"\nimport \"./missing\"\nimport \"direct_dep/api\"\n",
     );
 
     let graph = build(std::slice::from_ref(&entry));
@@ -161,6 +161,17 @@ fn stdlib_and_relative_imports_never_probe_for_a_package() {
     assert_eq!(
         probes, 0,
         "a relative import probed the filesystem for a package"
+    );
+
+    let (resolved, probes) =
+        probe_counter::count_probes(|| resolve_import_path(&entry, "./missing"));
+    assert!(
+        resolved.is_none(),
+        "a missing relative import must not resolve"
+    );
+    assert_eq!(
+        probes, 0,
+        "a missing relative import fell through to package resolution"
     );
 }
 
