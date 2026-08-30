@@ -14,9 +14,12 @@ use super::{
     RunTraceSpanRecord,
 };
 
+mod evidence;
 mod usage;
 mod visible_transcript;
 
+use evidence::project_evidence;
+pub use evidence::ArtifactPathVisibility;
 pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
@@ -287,14 +290,6 @@ pub struct RunViewOptions {
     pub artifact_paths: ArtifactPathVisibility,
 }
 
-/// Whether a run projection may expose host-local artifact locators.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ArtifactPathVisibility {
-    #[default]
-    Hidden,
-    Local,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct SessionViewOptions {
     pub producer: ViewProducer,
@@ -466,33 +461,6 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     };
     finalize_run_projection(&mut view);
     view
-}
-
-fn project_evidence(
-    run: &RunRecord,
-    policy: &RedactionPolicy,
-    artifact_paths: ArtifactPathVisibility,
-) -> super::ExecutionEvidenceRecord {
-    let mut evidence = run.evidence.clone();
-    for span in &mut evidence.trace_spans {
-        span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
-        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
-        policy.redact_json_in_place(&mut metadata);
-        if let Value::Object(metadata) = metadata {
-            span.metadata = metadata.into_iter().collect();
-        }
-    }
-    if let Some(recording) = &mut evidence.flight_recording {
-        if artifact_paths == ArtifactPathVisibility::Hidden {
-            recording.path = None;
-        } else if let Some(path) = &mut recording.path {
-            *path = redact_bounded(path, policy, PREVIEW_LIMIT);
-        }
-    }
-    for gap in &mut evidence.gaps {
-        gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
-    }
-    evidence
 }
 
 pub fn build_session_view_from_run_views(
@@ -1365,50 +1333,6 @@ mod tests {
         assert_eq!(view.providers.len(), 1);
         assert!(view.projection.projection_id.starts_with("run_view:run_1:"));
         assert!(view.projection.projection_hash.is_some());
-    }
-
-    #[test]
-    fn public_view_hides_local_flight_path_while_local_view_can_open_it() {
-        let mut run = sample_run();
-        run.evidence.flight_recording = Some(crate::flight_recorder::FlightRecordingArtifact {
-            schema_version: crate::flight_recorder::FLIGHT_RECORDING_SCHEMA_VERSION,
-            execution_id: "hxe-view".to_string(),
-            format: crate::flight_recorder::FLIGHT_RECORDING_FORMAT.to_string(),
-            path: Some("/private/workspace/.harn/flight.json".to_string()),
-            content_hash: format!("blake3:{}", "a".repeat(64)),
-            byte_length: 10,
-            retained_events: 1,
-            dropped_events: 0,
-            value_policy: crate::flight_recorder::FlightValuePolicy::Omitted,
-        });
-
-        let public = build_run_view(&run);
-        assert_eq!(
-            public
-                .evidence
-                .flight_recording
-                .as_ref()
-                .and_then(|recording| recording.path.as_deref()),
-            None
-        );
-        assert_eq!(
-            run.evidence
-                .flight_recording
-                .as_ref()
-                .and_then(|recording| recording.path.as_deref()),
-            Some("/private/workspace/.harn/flight.json"),
-            "projection must not mutate the durable evidence record"
-        );
-
-        let local = build_run_view_with_path(&run, Some("runs/run_1.json"));
-        assert_eq!(
-            local
-                .evidence
-                .flight_recording
-                .as_ref()
-                .and_then(|recording| recording.path.as_deref()),
-            Some("/private/workspace/.harn/flight.json")
-        );
     }
 
     #[test]
