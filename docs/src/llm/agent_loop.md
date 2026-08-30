@@ -735,7 +735,7 @@ loop_control: { state ->
   if state.progress.changed
     && !state.progress.no_net_advance
     && !state.progress.no_information_gain {
-    return {action: "extend", by: 2, reason: "recent turn made progress"}
+    return {action: "extend", by: 2, reason: "progress within window"}
   }
   return nil
 }

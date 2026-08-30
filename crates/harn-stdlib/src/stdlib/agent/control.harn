@@ -202,7 +202,19 @@ fn __agent_loop_progress_window(budget: AgentLoopBudget) -> int {
  * (`__agent_apply_extension` clamps to it).
  */
 fn __agent_loop_progressed_within_window(state: AgentLoopState, budget: AgentLoopBudget) -> bool {
-  return (state.progress?.turns_since_progressing ?? 0) < __agent_loop_progress_window(budget)
+  if agent_loop_is_progressing(state) {
+    return true
+  }
+  const since = state.progress?.turns_since_progressing ?? 0
+  // A state whose own turn is NOT progressing but whose counter still reads 0
+  // has never been advanced — a hand-built state, or a caller that did not
+  // thread the count through `agent_loop_snapshot_state`. Absence of window
+  // evidence must not read as the strongest possible evidence, so fall back to
+  // the boundary-turn-only answer instead of extending on a missing field.
+  if since <= 0 {
+    return false
+  }
+  return since < __agent_loop_progress_window(budget)
 }
 
 /**
