@@ -24,6 +24,11 @@ fi
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
+global_git_config="$tmp_root/global.gitconfig"
+git config --file "$global_git_config" tag.gpgSign true
+export GIT_CONFIG_GLOBAL="$global_git_config"
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_EDITOR=false
 
 run_guard() {
   # Run the guardrail in a subshell cd'd into $1, capture exit + stderr.
@@ -134,11 +139,16 @@ run_finalize_tag_fixture() {
   git -C "$fixture" config user.name "Release guard fixture"
   git -C "$fixture" config user.email "release-guard@example.invalid"
   git -C "$fixture" config commit.gpgSign false
+  git -C "$fixture" config tag.gpgSign false
   printf '[workspace.package]\nversion = "0.10.999"\n' > "$fixture/Cargo.toml"
   printf -- '- must be folded before release\n' > "$fixture/changelog.d/7605.fixed.md"
   git -C "$fixture" add Cargo.toml changelog.d/7605.fixed.md
   git -C "$fixture" commit -q -m "tagged release fixture"
+  local tagged_commit
+  tagged_commit=$(git -C "$fixture" rev-parse HEAD)
   git -C "$fixture" tag v0.10.999
+  [[ "$(git -C "$fixture" rev-parse 'v0.10.999^{commit}')" == "$tagged_commit" ]] \
+    || { echo "FAIL: fixture tag does not resolve to its tagged commit" >&2; exit 1; }
 
   if [[ "$fold_on_main" == "true" ]]; then
     git -C "$fixture" rm -q changelog.d/7605.fixed.md
@@ -194,6 +204,7 @@ git -C "$scoped" init -q -b main
 git -C "$scoped" config user.name "Release guard fixture"
 git -C "$scoped" config user.email "release-guard@example.invalid"
 git -C "$scoped" config commit.gpgSign false
+git -C "$scoped" config tag.gpgSign false
 printf '[workspace.package]\nversion = "0.10.999"\n' > "$scoped/Cargo.toml"
 printf '# Changelog\n\n## v0.10.999\n\n- Candidate note.\n' > "$scoped/CHANGELOG.md"
 git -C "$scoped" add Cargo.toml CHANGELOG.md
@@ -203,7 +214,10 @@ git -C "$scoped" branch "release-attempt/v0.10.999/$candidate" "$candidate"
 printf -- '- Arrived after candidate.\n' > "$scoped/changelog.d/later.fixed.md"
 git -C "$scoped" add changelog.d/later.fixed.md
 git -C "$scoped" commit -q -m "post-candidate fragment"
+scoped_tagged_commit=$(git -C "$scoped" rev-parse HEAD)
 git -C "$scoped" tag v0.10.999
+[[ "$(git -C "$scoped" rev-parse 'v0.10.999^{commit}')" == "$scoped_tagged_commit" ]] \
+  || { echo "FAIL: scoped fixture tag does not resolve to its tagged commit" >&2; exit 1; }
 git -C "$scoped" switch -q --detach v0.10.999
 
 scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
