@@ -439,7 +439,8 @@ async fn host_agent_session_finalize(
         &stop_reason,
         terminal_class,
         terminal_error.is_some(),
-    );
+    )
+    .with_error(terminal_error.as_ref());
     if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
         bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
     }

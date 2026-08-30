@@ -696,6 +696,7 @@ public enum HarnToolPermissionDecider: String, Codable, Sendable, CaseIterable {
     case managedPolicy = "managed_policy"
     case runtimePolicy = "runtime_policy"
     case hostUnavailable = "host_unavailable"
+    case autoReviewer = "auto_reviewer"
 
     public static let allCases: [Self] = [
         "person",
@@ -704,6 +705,7 @@ public enum HarnToolPermissionDecider: String, Codable, Sendable, CaseIterable {
         "managed_policy",
         "runtime_policy",
         "host_unavailable",
+        "auto_reviewer",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -1685,6 +1687,8 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
     public var reason: String
     public var owner: HarnAgentTerminalOwner
     public var terminalClass: HarnAgentTerminalClass?
+    public var message: String?
+    public var detail: String?
 }
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {

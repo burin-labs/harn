@@ -23,6 +23,7 @@ use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
 
+use super::approval_reviewer::{swap_approval_reviewer_depth, swap_approval_reviewer_stack};
 use super::command_policy::{
     swap_command_policy_hook_depth, swap_command_policy_stack, CommandPolicy,
 };
@@ -142,6 +143,13 @@ pub(crate) struct AmbientExecutionScope {
     /// fresh for a new logical call stack.
     precheck: Vec<std::sync::Arc<crate::value::VmClosure>>,
     precheck_depth: usize,
+    /// The `AutoReview` answerer. Inherited for the same reason the precheck
+    /// is: a spawned worker that inherited a policy it cannot satisfy, but not
+    /// the reviewer that could answer for it, would refuse work its parent
+    /// would have been allowed to do. The re-entrancy depth begins fresh,
+    /// because the child is a new logical call stack.
+    approval_reviewer: Vec<std::sync::Arc<crate::value::VmClosure>>,
+    approval_reviewer_depth: usize,
     /// State whose inheritance is specific to child-interpreter subtasks.
     /// Grouping it makes capture and per-poll restoration one typed contract.
     subtask: SubtaskAmbientState,
@@ -190,6 +198,8 @@ impl AmbientExecutionScope {
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
+            approval_reviewer: clone_via_swap(swap_approval_reviewer_stack),
+            approval_reviewer_depth: 0,
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
@@ -282,6 +292,8 @@ impl AmbientExecutionScope {
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
             precheck: clone_via_swap(swap_tool_precheck_stack),
             precheck_depth: clone_via_swap(swap_tool_precheck_depth),
+            approval_reviewer: clone_via_swap(swap_approval_reviewer_stack),
+            approval_reviewer_depth: clone_via_swap(swap_approval_reviewer_depth),
             subtask: SubtaskAmbientState::capture(),
         }
     }
@@ -351,6 +363,11 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.command_hook_depth, swap_command_policy_hook_depth);
         swap_slot(&mut self.precheck, swap_tool_precheck_stack);
         swap_slot(&mut self.precheck_depth, swap_tool_precheck_depth);
+        swap_slot(&mut self.approval_reviewer, swap_approval_reviewer_stack);
+        swap_slot(
+            &mut self.approval_reviewer_depth,
+            swap_approval_reviewer_depth,
+        );
         self.subtask.swap_in_place();
     }
 }

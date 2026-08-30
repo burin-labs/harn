@@ -33,6 +33,8 @@ captured = [
   "COMMAND_POLICY_HOOK_DEPTH",
   "TOOL_PRECHECK_STACK",
   "TOOL_PRECHECK_DEPTH",
+  "APPROVAL_REVIEWER_STACK",
+  "APPROVAL_REVIEWER_DEPTH",
   "VM_EXECUTION_CONTEXT",
   "VM_SOURCE_DIR",
   "CURRENT_MUTATION_SESSION",
@@ -457,6 +459,16 @@ plan = "task_local_or_explicit"
 [[thread_local]]
 path = "src/orchestration/tool_precheck.rs"
 statics = ["TOOL_PRECHECK_STACK", "TOOL_PRECHECK_DEPTH"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/approval_reviewer.rs"
+statics = [
+  "APPROVAL_REVIEWER_STACK",
+  "APPROVAL_REVIEWER_DEPTH",
+  "APPROVAL_REVIEWER_DENIALS",
+]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

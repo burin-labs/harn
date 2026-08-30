@@ -46,7 +46,9 @@ fn tool_new_and_skill_new_share_the_same_shape() {
     let Command::Tool(args) = cli.command.unwrap() else {
         panic!("expected tool command");
     };
-    let ToolCommand::New(tool) = args.command;
+    let ToolCommand::New(tool) = args.command else {
+        panic!("expected tool new command");
+    };
 
     let cli = Cli::parse_from(["harn", "skill", "new", "deploy"]);
     let Command::Skill(args) = cli.command.unwrap() else {

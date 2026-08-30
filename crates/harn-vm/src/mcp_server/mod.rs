@@ -7,7 +7,7 @@
 //! surface and starts this server, making them callable by Claude
 //! Desktop, Cursor, or any MCP client.
 
-mod convert;
+pub(crate) mod convert;
 mod defs;
 mod register;
 mod server;

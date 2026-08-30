@@ -1260,6 +1260,12 @@ pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any,
     tool_format: turn_opts.tool_format,
     policy: turn_opts?.policy,
     approval_policy: turn_opts?.approval_policy,
+    // The AutoReview answerer. This list is an explicit allowlist, so an option
+    // the loop accepts but does not name here is silently dropped before it
+    // ever reaches dispatch -- the seam works when called directly and does
+    // nothing through the product path. That is exactly what happened before
+    // this line existed, and the loop-level control test is what caught it.
+    approval_reviewer: turn_opts?.approval_reviewer,
     command_policy: turn_opts?.command_policy,
     permissions: turn_opts?.permissions,
     reminders: turn_opts?.reminders,

@@ -949,23 +949,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             crate::orchestration::run_tool_precheck(Some(&ctx), &tool_name, &tool_args, &session_id)
                 .await?
         {
-            let denial = if precheck_denial.retryable {
-                crate::agent_events::ToolDenial::retryable(
-                    crate::agent_events::DenialGate::DeterministicPrecheck,
-                    None,
-                    precheck_denial.model_cue,
-                )
-            } else {
-                crate::agent_events::ToolDenial::terminal(
-                    crate::agent_events::DenialGate::DeterministicPrecheck,
-                    None,
-                    precheck_denial.model_cue,
-                )
-            }
-            .with_audiences(
-                precheck_denial.machine_reason,
-                precheck_denial.human_summary,
-            );
+            let denial = crate::orchestration::precheck_tool_denial(precheck_denial);
             return Ok(deny_tool_call_value(
                 Some(&ctx),
                 &session_id,
@@ -1117,6 +1101,22 @@ pub(super) async fn host_agent_dispatch_tool_call(
             }
         }
     }
+    // The `AutoReview` seam: a refusal nobody is present to reconsider. Runs
+    // AFTER the policy has decided and the trifecta gate has had its say, so
+    // the reviewer sees the FINAL refusal and cannot pre-empt a gate that had
+    // not run yet. Body lives in the owning module.
+    if crate::orchestration::maybe_grant_by_auto_review(
+        Some(&ctx),
+        approval.as_mut(),
+        &tool_name,
+        &tool_args,
+        &session_id,
+    )
+    .await
+    {
+        approval_status = Some("auto_review_granted");
+    }
+
     match approval {
         None => {}
         Some(decision) if decision.is_allow() && decision.has_audit_signal() => {

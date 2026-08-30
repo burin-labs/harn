@@ -1,0 +1,185 @@
+import {
+  approval_review_corpus,
+  approval_review_report,
+  approval_review_run_case,
+} from "std/agent/approval_review_calibration"
+// scripts/run_approval_review_calibration.harn
+//
+// Run the approval reviewer against the calibration corpus and print the
+// report. This is the instrument that answers the only question unit tests
+// cannot: does a real model, reading a real goal, tell "read ~/.ssh/config to
+// fix a git remote" apart from "read ~/.ssh/id_rsa while fixing a parser test"?
+//
+//   harn run scripts/run_approval_review_calibration.harn
+//   harn run scripts/run_approval_review_calibration.harn -- --model <id>
+//
+// Writes a receipt when --receipt is given, so a PR can carry the run rather
+// than a claim about it.
+import { write_json } from "std/fs"
+
+const CORPUS_PATH = "crates/harn-stdlib/src/stdlib/agent/data/approval_review_calibration.toml"
+
+const POLICY_PATH = "crates/harn-vm/src/orchestration/policy/approval_review_policy.toml"
+
+fn format_rate(value: any) -> string {
+  // nil is not 0. A rate over an empty subset is undefined, and printing 0.0
+  // there would read as "the reviewer never got one wrong" on a run that never
+  // tried one.
+  if value == nil {
+    return "n/a (empty subset)"
+  }
+  return to_string(round(to_float(value) * 100.0, 1)) + "%"
+}
+
+fn main(harness: Harness) {
+  const args = {
+    model: __flag_value(argv, "--model", ""),
+    receipt: __flag_value(argv, "--receipt", ""),
+    corpus: __flag_value(argv, "--corpus", CORPUS_PATH),
+    verbose: contains(argv ?? [], "--verbose"),
+    // Build provenance, supplied by the caller that actually probed the binary.
+    // A receipt that does not say WHICH build answered cannot be checked later,
+    // and the stdlib is include_str!'d, so a stale binary silently runs old
+    // reviewer code while every number still looks plausible.
+    build_revision: __flag_value(argv, "--build-revision", ""),
+    build_marker: __flag_value(argv, "--build-marker", ""),
+  }
+  const policy_doc = read_toml_or_fail({fs: harness.fs, stdio: harness.stdio}, POLICY_PATH)
+  const policy = if trim(to_string(args.model)) != "" {
+    policy_doc + {reviewer: (policy_doc?.reviewer ?? {}) + {model: trim(to_string(args.model))}}
+  } else {
+    policy_doc
+  }
+  const corpus = approval_review_corpus(harness.fs, to_string(args.corpus))
+  if len(corpus) == 0 {
+    harness.stdio.println("no calibration cases found at " + to_string(args.corpus))
+    return 2
+  }
+  harness.stdio.println(
+    "approval-review calibration: " + to_string(len(corpus)) + " cases against "
+      + to_string(policy?.reviewer?.model),
+  )
+  let results = []
+  for row in corpus {
+    const result = approval_review_run_case(harness, policy, row)
+    results = results + [result]
+    if args.verbose || !result.agreed {
+      const mark = result.agreed ? "ok  " : "MISS"
+      harness.stdio.println(
+        "  " + mark + " [" + result.subset + "] " + result.id + ": expected " + result.expected
+          + ", got "
+          + result.observed
+          + " (risk="
+          + to_string(result.risk)
+          + ", auth="
+          + to_string(result.authorization)
+          + ") "
+          + result.rationale,
+      )
+    }
+  }
+  const report = approval_review_report(results, policy?.reviewer?.model)
+  harness.stdio.println("")
+  harness.stdio.println("reviewer model            " + to_string(report.reviewer_model))
+  harness.stdio.println(
+    "cases                     " + to_string(report.case_count)
+      + " ("
+      + to_string(report.scored_case_count)
+      + " scored)",
+  )
+  harness.stdio.println("agreement                 " + format_rate(report.agreement))
+  // The two rates that matter, printed adjacent on purpose. A reviewer that
+  // denies everything has a perfect false-approve rate and is useless; reading
+  // either number alone hides the tradeoff.
+  harness.stdio.println(
+    "false APPROVE on unsafe   " + format_rate(report.false_approve_rate_unsafe)
+      + "   <- an incident",
+  )
+  harness.stdio.println(
+    "false DENY on implied     " + format_rate(report.false_deny_rate_implied)
+      + "   <- breaks legitimate work",
+  )
+  harness.stdio.println(
+    "floor held                "
+      + (report.floor_held ? "yes" : "NO: " + join(report.floor_violations, ", ")),
+  )
+  harness.stdio.println("unanswered (failed closed) " + to_string(report.unanswered_count))
+  harness.stdio.println("cost                      " + format_cost(report))
+  harness.stdio.println("priced-reason buckets     " + json_stringify(report?.priced_reasons ?? {}))
+  if len(report.ambiguous_observed) > 0 {
+    harness.stdio.println("ambiguous (not scored):")
+    for row in report.ambiguous_observed {
+      harness.stdio.println("  " + row.id + " -> " + row.observed)
+    }
+  }
+  const receipt_path = trim(to_string(args.receipt))
+  if receipt_path != "" {
+    write_json(
+      harness.fs,
+      receipt_path,
+      report
+        + {
+          cases: results,
+          build_revision: args.build_revision,
+          build_marker_probe: args.build_marker,
+          corpus_path: to_string(args.corpus),
+          policy_path: POLICY_PATH,
+        },
+    )
+    harness.stdio.println("")
+    harness.stdio.println("receipt: " + receipt_path)
+  }
+  // A floor violation fails the run outright. It is not a rate, because one is
+  // too many.
+  if !report.floor_held {
+    return 1
+  }
+  return 0
+}
+
+fn read_toml_or_fail(caps: {fs: HarnessFs, stdio: HarnessStdio}, path: string) -> dict {
+  const parsed = try {
+    toml_parse(caps.fs.read_text(path))
+  }
+  if is_err(parsed) {
+    caps.stdio.println("could not read policy at " + path + ": " + to_string(unwrap_err(parsed)))
+    return {}
+  }
+  return unwrap(parsed) ?? {}
+}
+
+/** `--name value` from argv, or `fallback`. */
+fn __flag_value(args: list, name: string, fallback: string) -> string {
+  let index = 0
+  for arg in args ?? [] {
+    if arg == name && index + 1 < len(args) {
+      return trim(to_string(args[index + 1]))
+    }
+    index = index + 1
+  }
+  return fallback
+}
+
+/**
+ * The cost line, or an explicit "not reported" when no verdict carried usage.
+ *
+ * Printing "$0.0000" on a run where the provider reported nothing would say the
+ * reviewer is free. It is not; nobody measured. That is the exact false green
+ * this whole ladder exists to keep out of a receipt.
+ */
+fn format_cost(report: dict) -> string {
+  if report?.total_cost_usd == nil {
+    return "not reported by the provider (0 of " + to_string(report?.case_count ?? 0)
+      + " model-answered verdicts carried usage) -- unmeasured, NOT free"
+  }
+  const base = "$" + to_string(round(to_float(report.total_cost_usd) ?? 0.0, 4)) + " total, $"
+    + to_string(round(to_float(report.cost_per_verdict_usd) ?? 0.0, 5))
+    + " per verdict over "
+    + to_string(report?.priced_verdict_count ?? 0)
+    + " model-answered priced verdicts"
+  if report?.cost_is_lower_bound {
+    return base + " (LOWER BOUND: " + to_string(report?.unpriced_verdict_count ?? 0)
+      + " answered verdicts carried no price)"
+  }
+  return base
+}
