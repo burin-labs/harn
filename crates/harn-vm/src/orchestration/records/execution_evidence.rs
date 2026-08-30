@@ -1,5 +1,6 @@
 use super::ExecutionEvidenceRecord;
 use crate::flight_recorder::{FLIGHT_RECORDING_FORMAT, FLIGHT_RECORDING_SCHEMA_VERSION};
+use crate::observability::execution_scope::EXECUTION_ID_PREFIX;
 
 pub const EXECUTION_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
@@ -56,7 +57,7 @@ pub fn validate_execution_evidence(
 
 fn is_valid_execution_id(candidate: &str) -> bool {
     candidate
-        .strip_prefix("hxe-")
+        .strip_prefix(EXECUTION_ID_PREFIX)
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .is_some_and(|value| {
             value.get_version_num() == 7 && value.get_variant() == uuid::Variant::RFC4122

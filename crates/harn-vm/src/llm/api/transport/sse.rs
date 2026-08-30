@@ -625,6 +625,8 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut blocks: Vec<serde_json::Value> = Vec::new();
     let mut telemetry = ProviderTelemetry::default();
     let mut anth_request_id: Option<String> = None;
+    let mut response_id: Option<String> = None;
+    let mut provider_content_block_types: Vec<String> = Vec::new();
     // Set once the provider echoes the fast-mode knob (`speed` /
     // `service_tier`) on a streamed event; drives premium-tier billing.
     let mut served_fast = false;
@@ -743,6 +745,17 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         }
         liveness.mark_partial_output();
         liveness.mark_first_frame();
+        if let Some(id) = json
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                json.pointer("/message/id")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .filter(|value| !value.is_empty())
+        {
+            response_id = Some(id.to_string());
+        }
         let managed_receipt_frame = managed_transport
             && json
                 .get(crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY)
@@ -796,6 +809,14 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 }
                 Some("content_block_start") => {
                     let block = &json["content_block"];
+                    provider_content_block_types.push(
+                        block
+                            .get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or("object")
+                            .to_string(),
+                    );
                     match block["type"].as_str() {
                         Some("tool_use") => {
                             let id = block["id"].as_str().unwrap_or("").to_string();
@@ -992,6 +1013,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             let choice = &json["choices"][0];
             let delta = &choice["delta"];
 
+            if delta.get("content").is_some() {
+                push_distinct_block_type(&mut provider_content_block_types, "text");
+            }
             if let Some(content) = delta["content"].as_str() {
                 let visible = oai_thinking_splitter.push(content);
                 if !visible.is_empty() {
@@ -1022,8 +1046,12 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 &["reasoning", "reasoning_content", "reasoning_details"],
             );
             if !reasoning_delta.is_empty() {
+                push_distinct_block_type(&mut provider_content_block_types, "reasoning");
                 thinking_text.push_str(reasoning_delta);
                 append_coalesced_text_block(&mut blocks, "reasoning", reasoning_delta, "private");
+            }
+            if delta.get("refusal").is_some_and(|value| !value.is_null()) {
+                push_distinct_block_type(&mut provider_content_block_types, "refusal");
             }
 
             // Only capture finish_reason once; OpenRouter can send
@@ -1373,7 +1401,15 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         return Err(empty_generation_error(
             provider,
             model,
-            provider_usage,
+            ProviderResponseEnvelope::new(
+                response_id
+                    .as_deref()
+                    .or(anth_request_id.as_deref())
+                    .or(provider_request_id),
+                stop_reason.as_deref(),
+                provider_content_block_types,
+                provider_usage,
+            ),
             format!(
                 "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
             ),
@@ -1454,4 +1490,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         logprobs: Vec::new(),
         telemetry,
     })
+}
+
+fn push_distinct_block_type(types: &mut Vec<String>, block_type: &str) {
+    if !types.iter().any(|existing| existing == block_type) {
+        types.push(block_type.to_string());
+    }
 }

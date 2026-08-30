@@ -273,6 +273,36 @@ message_wire_format = "openai"
         assert_eq!(retry["input_tokens"], 13);
         assert_eq!(retry["cost_usd"], 0.00000585);
         assert_eq!(retry["usage_unknown_calls"], 0);
+        let responses: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["type"] == "provider_call_response")
+            .collect();
+        assert_eq!(responses.len(), 2, "one response receipt per physical call");
+        for (attempt, response) in responses.iter().enumerate() {
+            assert_eq!(
+                response["response_id"],
+                format!("paid-empty-{attempt}"),
+                "the parser response id must survive call correlation"
+            );
+            assert_eq!(response["stop_reason"], "stop");
+            assert_eq!(response["content_blocks"]["count"], 1);
+            assert_eq!(response["content_blocks"]["types"], serde_json::json!(["text"]));
+            assert_eq!(response["input_tokens"], [13, 17][attempt]);
+            assert_eq!(response["output_tokens"], 0);
+            assert_eq!(response["provider_call_count"], 1);
+        }
+        let paired_response_errors = events
+            .windows(2)
+            .filter(|pair| {
+                pair[0]["type"] == "provider_call_response"
+                    && pair[1]["type"] == "provider_call_error"
+                    && pair[0]["call_id"] == pair[1]["call_id"]
+            })
+            .count();
+        assert_eq!(
+            paired_response_errors, 2,
+            "each typed response must be retained immediately before its paired raise"
+        );
         let errors: Vec<&serde_json::Value> = events
             .iter()
             .filter(|event| event["type"] == "provider_call_error")
