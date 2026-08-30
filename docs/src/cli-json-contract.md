@@ -103,8 +103,8 @@ versions.
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
-| `harn session export --json`   | Portable session bundle export                           |
-| `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
+| `harn session export`          | Portable session bundle export. Prints JSON to stdout when `--out` is omitted; there is no `--json` flag |
+| `harn provider catalog show`   | Resolved provider/model catalog snapshot. Always prints JSON; there is no `--json` flag |
 | `harn models batch plan --json` | Provider Batch API candidates plus `batch.harn_live_adapter` support |
 | `harn models batch manifest --json` | Durable offline batch manifest summary and request groups |
 | `harn models batch prepare --json` | Provider-native batch request files, deterministic prepare receipt, and normalized `lifecycle` state |

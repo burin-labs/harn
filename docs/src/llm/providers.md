@@ -681,7 +681,7 @@ fallback as if it were a finding (#5885). The catalog now publishes
 Neither is a measurement. A forced-format sweep is separate evidence and
 lands in `tool_support.empirical_parity`, which carries the verdict together
 with native/text pass rates, a sample size, a confidence, and when it was
-run. `harn check --provider-matrix --empirical <overlay>` fills it. A guard
+run. `harn provider catalog matrix --empirical <overlay>` fills it. A guard
 that needs empirical grounding should read `empirical_parity`, not `parity`.
 
 Self-hosted rows that set `native_tools` or `preferred_tool_format` must
