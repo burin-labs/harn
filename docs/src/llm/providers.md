@@ -1192,6 +1192,72 @@ respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
   records the unavailable `/props` probe and keeps the fenced-JSON fallback for
   an unknown model.
 
+## Provider data controls
+
+Providers differ in what they let a caller decide per request about whether the
+request is retained and whether it is trained on. OpenAI takes `store: false`
+on the request body; OpenRouter takes routing restrictions; Anthropic decides
+it per organization with no request field at all. Harn keeps that per-provider
+fact in the provider registry so every embedding host reads one answer instead
+of deriving its own.
+
+Ask for a posture in provider-neutral terms:
+
+```harn
+harness.llm.call({
+  model: "gpt-5.6",
+  messages: messages,
+  data_controls: "strictest_available",
+})
+```
+
+`"default"` (the shipped default) sends nothing and lets the provider's own
+server-side default apply. `"strictest_available"` applies every per-request
+control the resolved provider declares.
+
+### Reading the receipt
+
+Asking is not the same as getting. Every response carries
+`telemetry.data_controls` with one of four outcomes:
+
+| `outcome` | Meaning |
+|---|---|
+| `not_requested` | The posture was `default`. Harn set nothing. |
+| `applied` | At least one declared control was written onto this request; `applied` lists them. |
+| `no_control_available` | The provider is researched and exposes no per-request control on this wire. **The strict posture was not achieved.** |
+| `provider_unresearched` | No declaration exists for this provider yet. Nobody has checked; this is not a claim that it offers nothing. |
+
+Read the outcome rather than inferring one from an unchanged request body —
+all four look identical on the wire.
+
+### Generating the per-provider table
+
+The declarations are projected into the provider catalog, so the accurate table
+comes from the binary rather than from prose that drifts:
+
+```sh
+harn provider catalog show --json \
+  | jq -r '.providers[] | select(.data_controls) |
+      [.id, .data_controls.control_scope, .data_controls.retention_default,
+       .data_controls.training_default] | @tsv'
+```
+
+Each row carries `checked_on` and the `sources` URLs backing it. A provider
+absent from that output is queued as unresearched in the registry's audit
+block, which expires; it is not a provider that offers nothing.
+
+### Changing the default
+
+The strictest posture is deliberately **not** the runtime default: that is a
+product decision for each embedder, and choosing it silently inside the runtime
+is the same mistake as leaving a retention flag unset by omission. An embedder
+that wants it everywhere sets it once in provider config:
+
+```toml
+[data_controls_policy]
+default_posture = "strictest_available"
+```
+
 ## Provider resolution order
 
 When you call `harness.llm.call()` or start an `agent_loop(harness, ...)`, Harn resolves the

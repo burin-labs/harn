@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 9
+  schema_version: 10
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -54,6 +54,7 @@ export interface HarnCatalogProvider {
   extra_headers?: Record<string, string>
   healthcheck?: HarnProviderHealthcheck
   cache_usage_accounting?: boolean
+  data_controls?: HarnProviderDataControls
   stream_usage_accounting?: boolean
   protocols: string[]
   features: string[]
@@ -123,6 +124,25 @@ export interface HarnProviderAuth {
   header?: string
   env: string[]
   required: boolean
+}
+
+export interface HarnProviderDataControls {
+  control_scope: "per_request" | "account" | "none"
+  retention_default: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  training_default: "trains" | "does_not_train" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+  request_controls?: HarnProviderDataControl[]
+}
+
+export interface HarnProviderDataControl {
+  location: "body" | "header"
+  name: string
+  value: boolean | string
+  effect: "retention" | "training"
+  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  caveat?: string
 }
 
 export interface HarnProviderHealthcheck {
@@ -475,6 +495,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
     private let encodedStreamUsageAccounting: Bool?
     public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
+    public let dataControls: HarnProviderDataControls?
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -495,6 +516,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case healthcheck
         case encodedCacheUsageAccounting = "cache_usage_accounting"
         case encodedStreamUsageAccounting = "stream_usage_accounting"
+        case dataControls = "data_controls"
         case protocols
         case features
         case caveats
@@ -503,6 +525,68 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
         case performance
+    }
+}
+
+public struct HarnProviderDataControls: Codable, Sendable, Equatable {
+    public let controlScope: String
+    public let retentionDefault: String
+    public let trainingDefault: String
+    public let checkedOn: String
+    public let sources: [String]
+    public let note: String?
+    public let requestControls: [HarnProviderDataControl]?
+
+    enum CodingKeys: String, CodingKey {
+        case controlScope = "control_scope"
+        case retentionDefault = "retention_default"
+        case trainingDefault = "training_default"
+        case checkedOn = "checked_on"
+        case sources
+        case note
+        case requestControls = "request_controls"
+    }
+}
+
+public struct HarnProviderDataControl: Codable, Sendable, Equatable {
+    public let location: String
+    public let name: String
+    public let value: HarnProviderDataControlValue
+    public let effect: String
+    public let appliesTo: [String]?
+    public let caveat: String?
+
+    enum CodingKeys: String, CodingKey {
+        case location
+        case name
+        case value
+        case effect
+        case appliesTo = "applies_to"
+        case caveat
+    }
+}
+
+/// A control value is a bool on one provider and a string on another; the
+/// registry keeps the distinction so the wire spelling stays exact.
+public enum HarnProviderDataControlValue: Codable, Sendable, Equatable {
+    case bool(Bool)
+    case text(String)
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+            return
+        }
+        self = .text(try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .bool(let value): try container.encode(value)
+        case .text(let value): try container.encode(value)
+        }
     }
 }
 

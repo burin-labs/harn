@@ -47,6 +47,15 @@ pub struct CatalogProvider {
     pub cache_usage_accounting: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_usage_accounting: Option<bool>,
+    /// Researched retention/training posture: what this provider lets a caller
+    /// decide per request, what happens when Harn sets nothing, and the
+    /// documentation behind both. Absent means the provider sits in the
+    /// registry's expiring unresearched queue — which is not the same claim as
+    /// a declared `control_scope: "none"`. Projecting it here lets a consumer
+    /// generate an accurate "what Harn sets per provider" table from the
+    /// binary instead of restating prose that drifts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<llm_config::DataControlsDef>,
     pub protocols: Vec<String>,
     pub features: Vec<String>,
     pub caveats: Vec<String>,
