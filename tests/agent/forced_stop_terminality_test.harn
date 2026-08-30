@@ -1,0 +1,162 @@
+// Run: harn test tests/agent/forced_stop_terminality_test.harn
+//
+// Regression coverage for #7618. Loop recovery is bounded, and a forced stop is
+// terminal.
+//
+// The stall detector gives a hard-stopped turn one bounded recovery. When the
+// model burns that rescue and thrash-hard-stops again, the loop forces a stop.
+// That forced stop must stay stopped: a terminal callback returning `continue`
+// may rescue a soft stall or a max-iteration exit, but it must not re-open a
+// decision the loop already made under a bound that fired.
+//
+// Deterministic: mock LLM script, no sleeps, no API calls.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { _args -> "same capped listing" },
+      parameters: {command: {type: "string", description: "Command to run"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn run_call(id: string) {
+  return {text: "", tool_calls: [{id: id, name: "run", arguments: {command: "ls -R"}}]}
+}
+
+fn events_of(events: any, kind: string) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn recovery_receipts(events: any) {
+  return events_of(events, "typed_checkpoint").filter(
+    { event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" },
+  )
+}
+
+/**
+ * A forced stop after the recovery bound has fired must not be converted back
+ * into `continue` by a terminal callback.
+ */
+pipeline test_forced_stop_after_recovery_is_terminal(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      run_call("r1"),
+      run_call("r2"),
+      run_call("r3"),
+      run_call("r4"),
+      // Only reachable if the forced stop was wrongly re-opened.
+      llm_text("Rescued after a forced stop. ##DONE##"),
+      llm_text("Rescued after a forced stop. ##DONE##"),
+    ],
+    { ->
+      let session = "forced-stop-terminal-" + harness.random.uuid()
+      let opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        turn_end_condition: nil,
+        max_iterations: 8,
+        final_wrapup: false,
+        session_id: session,
+        iteration_budget: {mode: "fixed", initial: 8, max: 8, extend_by: 0, expose_decisions: true},
+        stall_diagnostics: {
+          enabled: true,
+          repeat_same_observation: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 4,
+        },
+        terminal_callback: { _info -> return {message: "Try once more."} },
+      }
+      let captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the target model.", nil, opts) },
+      )
+      let result = captured.result
+      assert_eq(result.status, "stuck")
+      assert_eq(result.stop_reason, "thrash_hard_stop")
+      let rescued = events_of(captured.events, "loop_control_decision").filter(
+        { event -> event.reason == "terminal_callback_continue" },
+      )
+      assert_eq(len(rescued), 0, "a forced stop must not be re-opened by the terminal callback")
+    },
+  )
+}
+
+/**
+ * Repeated recovery on unchanged evidence is bounded, and the receipt says which
+ * bound fired and how many consecutive recoveries preceded it.
+ */
+pipeline test_repeated_unchanged_evidence_is_bounded(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [run_call("r1"), run_call("r2"), run_call("r3"), run_call("r4"), run_call("r5")],
+    { ->
+      let session = "recovery-bound-" + harness.random.uuid()
+      let opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        turn_end_condition: nil,
+        max_iterations: 8,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          repeat_same_observation: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 4,
+        },
+      }
+      let captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the target model.", nil, opts) },
+      )
+      let receipts = recovery_receipts(captured.events)
+      assert(len(receipts) >= 2, "the bound must be recorded, not just the rescue")
+      let fired = receipts.filter({ event -> event.checkpoint.status == "fired" })
+      assert_eq(len(fired), 1, "unchanged evidence earns exactly one recovery")
+      assert_eq(fired[0].checkpoint.consecutive_recoveries, 1)
+      assert_eq(fired[0].checkpoint.bound, "")
+      let skipped = receipts.filter({ event -> event.checkpoint.status == "skipped" })
+      assert(len(skipped) >= 1, "the refused recovery must leave a receipt")
+      assert_eq(skipped[0].checkpoint.bound, "unchanged_evidence")
+      assert_eq(skipped[0].checkpoint.consecutive_recoveries, 1)
+      assert(
+        skipped[0].checkpoint.evidence_revision != "",
+        "the receipt names the evidence revision the decision considered",
+      )
+    },
+  )
+}
