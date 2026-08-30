@@ -237,7 +237,7 @@ fn _assert_agent_loop_budget_guard(
             && event.action
               == "extend"
             && event.reason
-              == "recent turn made progress"
+              == "progress within window"
         },
       )
       assert_eq(len(extensions), 0, "the repeated-only turn must not buy an extension")

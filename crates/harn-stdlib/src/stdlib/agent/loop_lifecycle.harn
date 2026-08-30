@@ -39,6 +39,7 @@ pub fn agent_loop_run_settings(
       initial: opts?.max_iterations ?? 50,
       max: opts?.max_iterations ?? 50,
       extend_by: 0,
+      progress_window: 0,
       expose_decisions: false,
       wall_clock_ms: nil,
       total_cost_usd: nil,

@@ -48,6 +48,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let last_turn_parse_dropped = false
     let consecutive_text_only = 0
     let turns_since_progress = 0
+    let turns_since_loop_progress = 0
     let fallback_index = 0
     let successful_tools_seen = []
     let rejected_tools_seen = []
@@ -1310,6 +1311,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             stall_state: stall_state,
             stop_reason: stop_reason,
             terminal_write_unverified: terminal_write_unverified,
+            turns_since_loop_progress: turns_since_loop_progress,
             turns_since_progress: turns_since_progress,
             verify_attempts: verify_attempts,
             verify_completion_judge_invocations: verify_completion_judge_invocations,
@@ -1332,6 +1334,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         stall_state = post_turn_state.stall_state
         stop_reason = post_turn_state.stop_reason
         terminal_write_unverified = post_turn_state.terminal_write_unverified
+        turns_since_loop_progress = post_turn_state.turns_since_loop_progress
         turns_since_progress = post_turn_state.turns_since_progress
         verify_attempts = post_turn_state.verify_attempts
         verify_completion_judge_invocations = post_turn_state.verify_completion_judge_invocations
