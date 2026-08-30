@@ -933,6 +933,7 @@ pub(crate) async fn observed_llm_call(
                     let message = error.to_string();
                     let classified = super::api::classify_llm_error(category.clone(), &message);
                     let status = "retries_exhausted";
+                    let usage = result.usage();
                     annotate_current_span(&[
                         ("status", serde_json::json!(status)),
                         ("error", serde_json::json!(message.as_str())),
@@ -940,6 +941,7 @@ pub(crate) async fn observed_llm_call(
                         ("failover_eligible", serde_json::json!(true)),
                         ("attempt", serde_json::json!(attempt)),
                     ]);
+                    annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
                     dump_llm_response(
                         iteration.unwrap_or(0),
                         &call_id,
@@ -958,6 +960,7 @@ pub(crate) async fn observed_llm_call(
                         classified: &classified,
                         message: &message,
                         stream_failure: None,
+                        usage: Some(&usage),
                         retryable: false,
                         failover_eligible: true,
                         attempt_count: Some(attempt_count),
@@ -986,9 +989,14 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
-                        let usage = result.usage();
                         metrics.record_llm_call(&result.provider, &result.model, status, &usage);
                     }
+                    trace_llm_call(LlmTraceEntry {
+                        model: result.model.clone(),
+                        provider: result.provider.clone(),
+                        usage,
+                        duration_ms,
+                    });
                     return Err(error);
                 }
                 let usage = result.usage();
@@ -1235,6 +1243,7 @@ pub(crate) async fn observed_llm_call(
                     classified: &classified,
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
+                    usage: None,
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,

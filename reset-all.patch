@@ -1,0 +1,237 @@
+diff --git a/crates/harn-vm/src/llm/agent_observe.rs b/crates/harn-vm/src/llm/agent_observe.rs
+index a227adda02..99b83b2e66 100644
+--- a/crates/harn-vm/src/llm/agent_observe.rs
++++ b/crates/harn-vm/src/llm/agent_observe.rs
+@@ -933,6 +933,7 @@ pub(crate) async fn observed_llm_call(
+                     let message = error.to_string();
+                     let classified = super::api::classify_llm_error(category.clone(), &message);
+                     let status = "retries_exhausted";
++                    let usage = result.usage();
+                     annotate_current_span(&[
+                         ("status", serde_json::json!(status)),
+                         ("error", serde_json::json!(message.as_str())),
+@@ -940,6 +941,7 @@ pub(crate) async fn observed_llm_call(
+                         ("failover_eligible", serde_json::json!(true)),
+                         ("attempt", serde_json::json!(attempt)),
+                     ]);
++                    annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
+                     dump_llm_response(
+                         iteration.unwrap_or(0),
+                         &call_id,
+@@ -958,6 +960,7 @@ pub(crate) async fn observed_llm_call(
+                         classified: &classified,
+                         message: &message,
+                         stream_failure: None,
++                        usage: Some(&usage),
+                         retryable: false,
+                         failover_eligible: true,
+                         attempt_count: Some(attempt_count),
+@@ -986,9 +989,14 @@ pub(crate) async fn observed_llm_call(
+                         );
+                     }
+                     if let Some(metrics) = crate::active_metrics_registry() {
+-                        let usage = result.usage();
+                         metrics.record_llm_call(&result.provider, &result.model, status, &usage);
+                     }
++                    trace_llm_call(LlmTraceEntry {
++                        model: result.model.clone(),
++                        provider: result.provider.clone(),
++                        usage,
++                        duration_ms,
++                    });
+                     return Err(error);
+                 }
+                 let usage = result.usage();
+@@ -1235,6 +1243,7 @@ pub(crate) async fn observed_llm_call(
+                     classified: &classified,
+                     message: &message,
+                     stream_failure: error.provider_stream_failure(),
++                    usage: None,
+                     retryable: event_retryable,
+                     failover_eligible: false,
+                     attempt_count: None,
+diff --git a/crates/harn-vm/src/llm/agent_observe/provider_errors.rs b/crates/harn-vm/src/llm/agent_observe/provider_errors.rs
+index 80b0309446..2b519e3442 100644
+--- a/crates/harn-vm/src/llm/agent_observe/provider_errors.rs
++++ b/crates/harn-vm/src/llm/agent_observe/provider_errors.rs
+@@ -722,6 +722,9 @@ pub(super) struct ProviderCallErrorObservation<'a> {
+     pub(super) classified: &'a super::api::LlmErrorInfo,
+     pub(super) message: &'a str,
+     pub(super) stream_failure: Option<&'a crate::value::ProviderStreamFailure>,
++    /// Usage from a completed response that the caller must still surface as
++    /// terminally unusable. Transport and parser failures pass `None`.
++    pub(super) usage: Option<&'a crate::llm::usage::LlmUsage>,
+     pub(super) retryable: bool,
+     pub(super) failover_eligible: bool,
+     pub(super) attempt_count: Option<usize>,
+@@ -740,6 +743,7 @@ pub(super) fn append_provider_call_error_observability(
+         classified,
+         message,
+         stream_failure,
++        usage,
+         retryable,
+         failover_eligible,
+         attempt_count,
+@@ -763,11 +767,14 @@ pub(super) fn append_provider_call_error_observability(
+         ("message".to_string(), serde_json::json!(message)),
+         ("retryable".to_string(), serde_json::json!(retryable)),
+     ]);
+-    // Error responses have no authoritative usage object. Their economic
+-    // effect therefore remains explicitly unknown in the durable receipt;
+-    // callers may add a provider-side billed receipt later, but must never
+-    // reinterpret this missing ledger as zero.
+-    crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
++    if let Some(usage) = usage {
++        usage.project_onto_fields(&mut fields);
++    } else {
++        // A thrown completion may have reached a billable provider boundary
++        // without yielding a trustworthy ledger. Preserve that uncertainty
++        // explicitly instead of presenting a free retry.
++        crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
++    }
+     if let Some(stage) = opts
+         .call_stage
+         .as_deref()
+@@ -837,6 +844,7 @@ mod stream_failure_observability_tests {
+             classified: &classified,
+             message: "idle deadline elapsed",
+             stream_failure: Some(&failure),
++            usage: None,
+             retryable: true,
+             failover_eligible: false,
+             attempt_count: None,
+diff --git a/crates/harn-vm/src/llm/api/transport_stub_tests.rs b/crates/harn-vm/src/llm/api/transport_stub_tests.rs
+index 0758a2e87f..103016b53f 100644
+--- a/crates/harn-vm/src/llm/api/transport_stub_tests.rs
++++ b/crates/harn-vm/src/llm/api/transport_stub_tests.rs
+@@ -200,6 +200,35 @@ fn spawn_ollama_empty_then_success_stub(
+     })
+ }
+ 
++fn spawn_ollama_empty_stub_many(
++    request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
++    max_requests: usize,
++) -> LlmStub {
++    spawn_llm_stub_many(
++        "ollama empty stub",
++        max_requests,
++        move |_attempt, stream| {
++            use std::io::{Read, Write};
++            request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
++            let mut buf = vec![0u8; 8192];
++            let n = stream.read(&mut buf).expect("read request");
++            let request = String::from_utf8_lossy(&buf[..n]);
++            assert!(request.starts_with("POST /api/chat HTTP/1.1\r\n"));
++
++            let body =
++                "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":5,\"eval_count\":0}\n";
++            let response = format!(
++                "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
++                body.len(),
++                body
++            );
++            stream
++                .write_all(response.as_bytes())
++                .expect("write response");
++        },
++    )
++}
++
+ fn spawn_openai_empty_stub(
+     request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+ ) -> LlmStub {
+@@ -674,6 +703,94 @@ fn ollama_empty_content_done_frame_retries_once() {
+     });
+ }
+ 
++#[test]
++fn ollama_empty_content_done_frame_keeps_terminal_usage() {
++    let _guard = env_guard();
++    let _allow_llm_transport = allow_stubbed_llm_transport();
++    crate::llm::trace::reset_trace_state();
++    crate::llm::trace::enable_tracing();
++    let runtime = tokio::runtime::Builder::new_multi_thread()
++        .enable_all()
++        .worker_threads(2)
++        .build()
++        .expect("runtime");
++
++    runtime.block_on(async {
++        let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
++        let server = spawn_ollama_empty_stub_many(request_count.clone(), 2);
++        let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
++        unsafe {
++            std::env::set_var("OLLAMA_HOST", format!("http://{}", server.addr()));
++        }
++        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
++        crate::llm::agent_observe::push_llm_transcript_dir(
++            transcript_dir
++                .path()
++                .to_str()
++                .expect("utf8 transcript path"),
++        );
++
++        let local = tokio::task::LocalSet::new();
++        let error = local
++            .run_until(async {
++                crate::llm::agent_observe::observed_llm_call(
++                    &base_opts("ollama"),
++                    None,
++                    None,
++                    None,
++                    false,
++                    false,
++                    None,
++                    None,
++                )
++                .await
++            })
++            .await
++            .expect_err("two empty responses must exhaust the route");
++        crate::llm::agent_observe::pop_llm_transcript_dir();
++        match prev_ollama_host {
++            Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
++            None => unsafe { std::env::remove_var("OLLAMA_HOST") },
++        }
++
++        assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
++        let receipt: serde_json::Value =
++            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
++                .expect("provider error transcript")
++                .lines()
++                .map(|line| serde_json::from_str(line).expect("valid transcript JSON"))
++                .find(|event: &serde_json::Value| event["type"] == "provider_call_error")
++                .expect("terminal provider error receipt");
++        assert_eq!(receipt["input_tokens"], 10);
++        assert_eq!(receipt["output_tokens"], 0);
++        assert_eq!(receipt["cost_usd"], 0.0);
++        assert_eq!(receipt["known_cost_usd"], 0.0);
++        assert_eq!(receipt["provider_call_count"], 2);
++        assert_eq!(receipt["unpriced_calls"], 0);
++        assert_eq!(receipt["usage_unknown_calls"], 0);
++        assert_eq!(receipt["accounting_status"], "reported");
++        let trace = crate::llm::trace::take_trace();
++        assert_eq!(trace.len(), 1, "terminal usage must reach the run summary");
++        assert_eq!(trace[0].usage.input_tokens, 10);
++        assert_eq!(trace[0].usage.cost_usd, Some(0.0));
++        assert_eq!(trace[0].usage.provider_call_count, 2);
++        let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
++            panic!("expected a typed provider-exhausted error");
++        };
++        assert_eq!(
++            fields.get("code").map(crate::value::VmValue::display),
++            Some("provider_exhausted".to_string())
++        );
++        assert_eq!(
++            fields.get("reason").map(crate::value::VmValue::display),
++            Some("empty_generation".to_string())
++        );
++        crate::llm::trace::reset_trace_state();
++
++        drop(server);
++    });
++}
++
+ #[test]
+ fn empty_generation_exhausts_primary_then_recovers_on_routed_backup() {
+     use crate::llm::fake::{
