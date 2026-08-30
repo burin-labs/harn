@@ -233,6 +233,27 @@ fn __engine_compaction_fields(compact_result: dict) {
   }
 }
 
+fn __apply_pre_compact_modify(compact_opts: dict, control: dict) {
+  if control.control != "modify" || type_of(control.modify) != "dict" {
+    return {options: compact_opts, threshold_modified: false}
+  }
+  const modify = control.modify
+  let options = compact_opts
+  let threshold_modified = false
+  if type_of(modify.keep_last) == "int" {
+    options = options + {keep_last: modify.keep_last}
+  }
+  if type_of(modify.target_tokens) == "int" {
+    options = options + {token_threshold: modify.target_tokens}
+    threshold_modified = true
+  }
+  const strategy = modify.strategy ?? modify.engine_strategy
+  if type_of(strategy) == "string" && strategy != "" {
+    options = options + {compact_strategy: strategy}
+  }
+  return {options: options, threshold_modified: threshold_modified}
+}
+
 fn __compaction_enabled(opts: dict) {
   const auto_cfg = opts?.auto_compact
   const policy_cfg = opts?.compaction
@@ -447,7 +468,8 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   if pre_control?.control == "block" {
     return nil
   }
-  const compact_result = agent.transcript_auto_compact(messages, compact_opts)
+  const effective = __apply_pre_compact_modify(compact_opts, pre_control)
+  const compact_result = agent.transcript_auto_compact(messages, effective.options)
   const compacted = compact_result.messages
   // Trust the engine's archived count, not a length delta: when exactly one
   // message is archived and one summary is inserted, len(before) == len(after),
@@ -458,7 +480,11 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    const engine_fields = __engine_compaction_fields(compact_result)
+    let engine_fields = __engine_compaction_fields(compact_result)
+      + {requested_strategy: requested_strategy}
+    if effective.threshold_modified {
+      engine_fields = engine_fields + {threshold_source: "pre_compact_modify"}
+    }
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "auto",

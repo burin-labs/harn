@@ -19,7 +19,7 @@ pipeline default(harness: Harness) {
       if harness.runtime.atomic_get(pre_seen) == 1 {
         return {block: true, reason: "first compact intentionally vetoed"}
       }
-      return nil
+      return {modify: {strategy: "truncate"}}
     },
   )
   // First call: block. Second call: allow.
@@ -54,6 +54,10 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.status)
       harness.stdio.println(harness.runtime.atomic_get(pre_seen))
       harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      const compactions = transcript_events_by_kind(result.transcript, "compaction")
+      const receipt = compactions[0].metadata.receipt
+      harness.stdio.println(receipt.requested_strategy == "observation_mask")
+      harness.stdio.println(receipt.engine_strategy == "truncate")
       harness.agent.clear_session_hooks()
     },
   )

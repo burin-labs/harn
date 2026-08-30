@@ -420,10 +420,20 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         reason: lifecycle.trigger.as_str().to_string(),
         strategy: config.policy_strategy.clone(),
         engine_strategy: compact_strategy_name(&engine_strategy).to_string(),
-        requested_strategy: lifecycle.requested_strategy.map(str::to_string),
+        requested_strategy: Some(
+            lifecycle
+                .requested_strategy
+                .unwrap_or(config.policy_strategy.as_str())
+                .to_string(),
+        ),
         resolved_threshold_tokens: (lifecycle.trigger == CompactionTrigger::Threshold)
             .then_some(config.token_threshold),
-        threshold_source: lifecycle.threshold_source.map(str::to_string),
+        threshold_source: (lifecycle.trigger == CompactionTrigger::Threshold).then(|| {
+            lifecycle
+                .threshold_source
+                .unwrap_or("runtime_config")
+                .to_string()
+        }),
         hard_limit_tokens: config.hard_limit_tokens,
         archived_messages,
         estimated_tokens_before,
