@@ -536,6 +536,13 @@ List endpoints are cursor-paginated. `tools/list`, `resources/list`,
 default and include `nextCursor` when another page is available. Set
 `HARN_MCP_LIST_PAGE_SIZE` to a positive integer to change the per-page limit.
 
+For a server built from `pub fn` exports, Harn prepares and validates one
+immutable source generation before announcing readiness. Each call gets fresh
+runtime and module state from that generation. Calls overlap only when the
+export declares both `@annotations(readOnly: true, idempotent: true)`; an
+unannotated, partially annotated, or mutating export stays ordered with all
+calls before and after it.
+
 ### MCP server support matrix
 
 Harn's MCP servers implement the stable tool/resource/prompt path and explicitly

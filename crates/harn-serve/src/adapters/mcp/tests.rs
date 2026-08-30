@@ -1,7 +1,8 @@
 use super::auth::should_stream_post_response;
 use super::*;
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, DispatchCoreConfig};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct McpMutationConfigurator {
@@ -21,13 +22,47 @@ impl crate::VmConfigurator for McpMutationConfigurator {
     }
 }
 
+struct McpRendezvousConfigurator {
+    entered: tokio::sync::mpsc::UnboundedSender<String>,
+    releases: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
+}
+
+impl crate::VmConfigurator for McpRendezvousConfigurator {
+    fn configure(&self, vm: &mut harn_vm::Vm) -> Result<(), DispatchError> {
+        let entered = self.entered.clone();
+        let releases = Arc::clone(&self.releases);
+        vm.register_async_builtin("test_rendezvous", move |_ctx, args| {
+            let entered = entered.clone();
+            let releases = Arc::clone(&releases);
+            let value = args.first().cloned().unwrap_or(harn_vm::VmValue::Nil);
+            async move {
+                let key = value.display();
+                let release = releases
+                    .lock()
+                    .expect("release map poisoned")
+                    .get(&key)
+                    .cloned()
+                    .expect("release registered");
+                let _ = entered.send(key);
+                release
+                    .acquire()
+                    .await
+                    .expect("release stays open")
+                    .forget();
+                Ok(value)
+            }
+        });
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn tools_list_exposes_public_functions() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r"
+        r#"
 pub fn greet(name: string) -> string {
   return name
 }
@@ -83,7 +118,7 @@ async fn advertised_nominal_output_schema_validates_structured_tool_result() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub struct Greeting {
   message: string
   tags: list<string>
@@ -775,6 +810,130 @@ pub fn observe_execution() -> int {
         [json!("1"), json!("2")]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn safe_calls_complete_out_of_order_by_id_and_cancellation_stays_request_scoped() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+@annotations(readOnly: true, idempotent: true)
+pub fn rendezvous(value: string) -> string {
+  return test_rendezvous(value)
+}
+",
+    )
+    .expect("write script");
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
+    let releases = Arc::new(std::sync::Mutex::new(HashMap::from([
+        (
+            "first".to_string(),
+            Arc::new(tokio::sync::Semaphore::new(0)),
+        ),
+        (
+            "second".to_string(),
+            Arc::new(tokio::sync::Semaphore::new(0)),
+        ),
+        (
+            "cancel".to_string(),
+            Arc::new(tokio::sync::Semaphore::new(0)),
+        ),
+    ])));
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.max_dispatch_workers = NonZeroUsize::new(2).expect("two workers");
+    config.vm_configurator = Arc::new(McpRendezvousConfigurator {
+        entered: entered_tx,
+        releases: Arc::clone(&releases),
+    });
+    let server = Arc::new(McpServer::new(McpServerConfig::new(
+        DispatchCore::new(config).expect("core"),
+    )));
+    let session = SharedSession::new();
+
+    async fn job(
+        server: &McpServer,
+        session: SharedSession,
+        id: u64,
+        value: &str,
+    ) -> Box<StreamJob> {
+        match server
+            .process_message(
+                stable_request(harn_vm::jsonrpc::request(
+                    id,
+                    "tools/call",
+                    json!({"name": "rendezvous", "arguments": {"value": value}}),
+                )),
+                session,
+                AuthRequest::default(),
+            )
+            .await
+        {
+            ImmediateResult::Stream(job) => job,
+            _ => panic!("tools/call must produce a stream job"),
+        }
+    }
+
+    let first_job = job(&server, session.clone(), 41, "first").await;
+    let second_job = job(&server, session.clone(), 42, "second").await;
+    let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel();
+    let notifier = notify_channel(move |message| {
+        let _ = response_tx.send(message);
+    });
+    let first_server = Arc::clone(&server);
+    let first_notify = Arc::clone(&notifier);
+    let first = tokio::spawn(async move {
+        first_server
+            .execute_streaming_job(*first_job, first_notify)
+            .await;
+    });
+    let second_server = Arc::clone(&server);
+    let second_notify = Arc::clone(&notifier);
+    let second = tokio::spawn(async move {
+        second_server
+            .execute_streaming_job(*second_job, second_notify)
+            .await;
+    });
+
+    let entered_a = entered_rx.recv().await.expect("first safe call entered");
+    let entered_b = entered_rx.recv().await.expect("second safe call entered");
+    assert_ne!(entered_a, entered_b);
+    releases
+        .lock()
+        .expect("release map")
+        .get("second")
+        .expect("second release")
+        .add_permits(1);
+    assert_eq!(response_rx.recv().await.expect("second response")["id"], 42);
+    releases
+        .lock()
+        .expect("release map")
+        .get("first")
+        .expect("first release")
+        .add_permits(1);
+    assert_eq!(response_rx.recv().await.expect("first response")["id"], 41);
+    first.await.expect("first execution task");
+    second.await.expect("second execution task");
+
+    let cancelled_job = job(&server, session.clone(), 43, "cancel").await;
+    let cancelled_server = Arc::clone(&server);
+    let cancelled_notify = Arc::clone(&notifier);
+    let cancelled = tokio::spawn(async move {
+        cancelled_server
+            .execute_streaming_job(*cancelled_job, cancelled_notify)
+            .await;
+    });
+    assert_eq!(entered_rx.recv().await.as_deref(), Some("cancel"));
+    server.handle_cancel_notification(&session, &json!({"requestId": 43}));
+    releases
+        .lock()
+        .expect("release map")
+        .get("cancel")
+        .expect("cancel release")
+        .add_permits(1);
+    cancelled.await.expect("cancelled execution task");
+    assert!(response_rx.try_recv().is_err());
 }
 
 #[tokio::test]

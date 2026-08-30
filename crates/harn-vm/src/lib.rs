@@ -264,7 +264,9 @@ pub use persistent_state::{
     register_persistent_state_builtins_at_root, scope_persistent_state_root, PersistentStateRoot,
     ScopedPersistentStateRoot,
 };
-pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
+pub use prepared_module::{
+    PreparedModuleCache, PreparedModuleCacheStats, PreparedModuleGenerationStats,
+};
 
 pub use actor_chain::{
     ActorChain, ActorChainEntry, ActorChainError, Principal, ScopeAttenuationMode,

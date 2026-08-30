@@ -23,7 +23,10 @@ use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKe
 use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
 
 mod config;
+mod prepared_generation;
 pub use config::DispatchCoreConfig;
+use prepared_generation::PreparedDispatchGeneration;
+pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
 
 struct ActiveEventLogGuard {
     previous: Option<Arc<AnyEventLog>>,
@@ -278,6 +281,7 @@ pub struct CallResponse {
     pub trace_id: TraceId,
     pub cached: bool,
     pub duration_ms: u128,
+    pub dispatch: DispatchCallReceipt,
 }
 
 #[async_trait(?Send)]
@@ -297,6 +301,7 @@ pub struct DispatchCore {
     config: DispatchCoreConfig,
     catalog: ExportCatalog,
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    generation: PreparedDispatchGeneration,
 }
 
 impl DispatchCore {
@@ -308,10 +313,12 @@ impl DispatchCore {
                 config.base_dir.display()
             ))
         })?;
+        let generation = PreparedDispatchGeneration::prepare(&config)?;
         Ok(Self {
             config,
             catalog,
             event_log,
+            generation,
         })
     }
 
@@ -429,6 +436,7 @@ impl DispatchCore {
                     trace_id,
                     cached: true,
                     duration_ms: 0,
+                    dispatch: DispatchCallReceipt::default(),
                 });
             }
         }
@@ -498,6 +506,11 @@ impl DispatchCore {
                     trace_id,
                     cached: false,
                     duration_ms,
+                    dispatch: DispatchCallReceipt {
+                        generation_cache_hit: Some(true),
+                        queue_ms: None,
+                        execution_ms: Some(duration_ms as u64),
+                    },
                 })
             }
             Err(error) => {
@@ -550,14 +563,6 @@ impl DispatchCore {
         request: &CallRequest,
         function: &crate::ExportedFunction,
     ) -> Result<(serde_json::Value, String), DispatchError> {
-        let source = tokio::fs::read_to_string(&self.config.script_path)
-            .await
-            .map_err(|error| {
-                DispatchError::Io(format!(
-                    "failed to read {}: {error}",
-                    self.config.script_path.display()
-                ))
-            })?;
         let script_path = self.config.script_path.clone();
         let cancel_token = request
             .cancel_token
@@ -591,16 +596,14 @@ impl DispatchCore {
                     let _auth_context_guard = auth_context.map(crate::enter_auth_context);
                     let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
-                    let mut vm = Vm::new();
-                    if self.config.trusted_host_dispatch {
-                        vm.enable_trusted_host_dispatch()
-                            .map_err(classify_vm_error)?;
-                    }
-                    install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
+                    let mut vm = self.generation.instantiate(cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
 
                     let exports = vm
-                        .load_module_exports(&script_path)
+                        .load_prepared_module_exports_from_source(
+                            &script_path,
+                            self.generation.source(),
+                        )
                         .await
                         .map_err(|error| DispatchError::Execution(error.to_string()))?;
                     let Some(closure) = exports.get(&request.function) else {
@@ -636,14 +639,7 @@ impl DispatchCore {
         request: &CallRequest,
         function: &crate::ExportedFunction,
     ) -> Result<(serde_json::Value, String), DispatchError> {
-        let source = tokio::fs::read_to_string(&self.config.script_path)
-            .await
-            .map_err(|error| {
-                DispatchError::Io(format!(
-                    "failed to read {}: {error}",
-                    self.config.script_path.display()
-                ))
-            })?;
+        let source = self.generation.source();
         let arguments = request.arguments.clone();
         let function = function.clone();
         let script_path = self.config.script_path.clone();
@@ -679,15 +675,10 @@ impl DispatchCore {
                     let _auth_context_guard = auth_context.map(crate::enter_auth_context);
                     let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
-                    let mut vm = Vm::new();
-                    if self.config.trusted_host_dispatch {
-                        vm.enable_trusted_host_dispatch()
-                            .map_err(classify_vm_error)?;
-                    }
-                    install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
+                    let mut vm = self.generation.instantiate(cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
                     let closure = vm
-                        .load_module_callable_from_source(&script_path, &source, &function.name)
+                        .load_module_callable_from_source(&script_path, source, &function.name)
                         .await
                         .map_err(classify_vm_error)?;
                     let closure = closure
@@ -1667,6 +1658,8 @@ pub fn whoami(harness: Harness) -> string {
 
     #[path = "dispatch_error_tests.rs"]
     mod dispatch_error_tests;
+    #[path = "prepared_generation_tests.rs"]
+    mod prepared_generation_tests;
     #[path = "trusted_host_dispatch_tests.rs"]
     mod trusted_host_dispatch_tests;
     #[path = "typed_pipeline_tests.rs"]
