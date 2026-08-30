@@ -384,7 +384,7 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let defer_loading =
         optional_bool(entry, "defer_loading", &format!("tool {name:?}"))?.unwrap_or(false);
     let input_schema = params_to_json_schema(entry.get("parameters"))?;
-    let output_schema = optional_object(entry, "outputSchema", &format!("tool {name:?}"))?;
+    let output_schema = optional_json_schema(entry, "outputSchema", &format!("tool {name:?}"))?;
     validate_json_schema(&input_schema, &format!("tool {name:?} input schema"))?;
     if let Some(output_schema) = output_schema.as_ref() {
         validate_json_schema(output_schema, &format!("tool {name:?} output schema"))?;
@@ -393,7 +393,25 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let icons = optional_array(entry, "icons", &format!("tool {name:?}"))?;
     let execution = optional_object(entry, "execution", &format!("tool {name:?}"))?;
     let meta = optional_object(entry, "meta", &format!("tool {name:?}"))?;
+    let explicit_governance = entry
+        .get("governance")
+        .is_some_and(|value| !matches!(value, VmValue::Nil));
+    if is_operator_tool_name(&name) && !explicit_governance {
+        return Err(VmError::Runtime(format!(
+            "operator tool {name:?} must declare explicit governance.audiences; compatibility-default exposure is forbidden"
+        )));
+    }
     let governance = governance_spec(entry.get("governance"), &name)?;
+    if is_operator_tool_name(&name)
+        && governance
+            .audiences
+            .iter()
+            .any(|audience| matches!(audience, ToolAudience::Agent | ToolAudience::Mcp))
+    {
+        return Err(VmError::Runtime(format!(
+            "operator tool {name:?} cannot be exposed to agent or mcp audiences"
+        )));
+    }
     let cli = cli_spec(entry.get("cli"), &name, namespace.as_deref())?;
     let source = source_spec(entry.get("source"), &name)?;
     let policy = policy_spec(
@@ -418,6 +436,14 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
         policy,
         meta,
     })
+}
+
+/// `operator` is a reserved tool-name namespace. This is an exact namespace
+/// parse, not a prose or substring classifier: every name below `operator.`
+/// receives the operator exposure invariants.
+fn is_operator_tool_name(name: &str) -> bool {
+    name.strip_prefix("operator.")
+        .is_some_and(|operation| !operation.is_empty())
 }
 
 fn governance_spec(value: Option<&VmValue>, name: &str) -> Result<ToolGovernance, VmError> {
@@ -734,6 +760,23 @@ fn optional_object(
     }
 }
 
+fn optional_json_schema(
+    fields: &crate::value::DictMap,
+    key: &str,
+    owner: &str,
+) -> Result<Option<JsonValue>, VmError> {
+    match fields.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(value @ VmValue::Dict(_)) => {
+            let projected = crate::schema::schema_to_json_schema_value(value)?;
+            Ok(Some(portable_json(&projected, owner)?))
+        }
+        _ => Err(VmError::Runtime(format!(
+            "{owner} field {key:?} must be an object"
+        ))),
+    }
+}
+
 fn optional_array(
     fields: &crate::value::DictMap,
     key: &str,
@@ -754,6 +797,13 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
         Some(VmValue::Dict(params)) => params,
         _ => return Ok(serde_json::json!({"type": "object", "properties": {}})),
     };
+    if matches!(params.get("type"), Some(VmValue::String(kind)) if kind.as_str() == "dict" || kind.as_str() == "object")
+        && matches!(params.get("properties"), Some(VmValue::Dict(_)))
+    {
+        let schema =
+            crate::schema::schema_to_json_schema_value(&VmValue::dict((**params).clone()))?;
+        return portable_json(&schema, "tool parameter object schema");
+    }
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for (name, definition) in params.iter() {
@@ -934,6 +984,33 @@ mod tests {
     }
 
     #[test]
+    fn operator_namespace_requires_explicit_safe_audiences() {
+        let missing = validate_tool_entry(&entry("operator.inspect", None)).unwrap_err();
+        assert!(missing
+            .to_string()
+            .contains("compatibility-default exposure is forbidden"));
+
+        for unsafe_audience in ["agent", "mcp"] {
+            let error = validate_tool_entry(&governed_entry(
+                "operator.inspect",
+                &["cli", unsafe_audience],
+            ))
+            .unwrap_err();
+            assert!(error.to_string().contains("cannot be exposed"));
+        }
+
+        let safe = tool_registry_catalog(&registry(vec![governed_entry(
+            "operator.inspect",
+            &["cli", "catalog"],
+        )]))
+        .unwrap();
+        assert_eq!(
+            safe.tools[0].governance.audiences,
+            [ToolAudience::Cli, ToolAudience::Catalog]
+        );
+    }
+
+    #[test]
     fn filters_each_projection_and_serializes_normalized_governance() {
         let registry = registry(vec![governed_entry(
             "operator_inspect",
@@ -1022,6 +1099,25 @@ mod tests {
         );
         assert_eq!(schema["properties"]["context"], serde_json::json!({}));
         validate_json_schema(&schema, "test schema").unwrap();
+    }
+
+    #[test]
+    fn preserves_a_strict_full_parameter_schema() {
+        let mut id = DictMap::new();
+        id.insert("type".into(), string("string"));
+        let mut properties = DictMap::new();
+        properties.insert("id".into(), VmValue::dict(id));
+        let mut parameters = DictMap::new();
+        parameters.insert("type".into(), string("dict"));
+        parameters.insert("properties".into(), VmValue::dict(properties));
+        parameters.insert("additional_properties".into(), VmValue::Bool(false));
+        parameters.insert("required".into(), VmValue::List(vec![string("id")].into()));
+
+        let schema = params_to_json_schema(Some(&VmValue::dict(parameters))).unwrap();
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], serde_json::json!(["id"]));
+        assert_eq!(schema["properties"]["id"]["type"], "string");
     }
 
     #[test]

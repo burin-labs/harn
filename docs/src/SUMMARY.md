@@ -159,6 +159,7 @@
 - [Response compaction](./stdlib/response-compaction.md)
 - [Calendar stdlib](./stdlib/calendar.md)
 - [External actions](./stdlib/external-action.md)
+- [Operator tools](./stdlib/operator.md)
 - [Execution decisions](./stdlib/execution.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)

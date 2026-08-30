@@ -1,0 +1,495 @@
+/**
+ * std/operator owns the transport-neutral contract for private operator tools.
+ *
+ * Adapter audiences control exposure only. The effect-owning host still
+ * authenticates the operator, supplies the actor identity from trusted
+ * context, authorizes the operation, persists a canonical `harn.receipt.v1`,
+ * and couples its domain audit row to the effect.
+ */
+import {
+  schema_enum,
+  schema_field,
+  schema_int,
+  schema_literal,
+  schema_strict_object,
+  schema_string,
+} from "std/schema"
+import { ToolAudience, ToolCliSpec, ToolDefinitionSpec } from "std/tools"
+
+pub type OperatorMode = "read" | "reveal" | "mutate"
+
+pub type OperatorDataClassification = "id_only" | "internal" | "personal" | "secret_reference"
+
+pub type OperatorEnvironment = "mock" | "test" | "live"
+
+pub type OperatorTarget = {kind: string, id: string}
+
+pub type OperatorExpectedState = {version?: int, digest?: string}
+
+pub type OperatorConfirmation = {
+  operation: string,
+  target_id: string,
+  environment: OperatorEnvironment,
+}
+
+pub type OperatorReadInvocation<Args> = {
+  schema: "harn.operator-invocation.v1",
+  mode: "read",
+  args: Args,
+}
+
+pub type OperatorRevealInvocation<Args> = {
+  schema: "harn.operator-invocation.v1",
+  mode: "reveal",
+  environment: OperatorEnvironment,
+  target: OperatorTarget,
+  reason: string,
+  args: Args,
+}
+
+pub type OperatorMutateInvocation<Args> = {
+  schema: "harn.operator-invocation.v1",
+  mode: "mutate",
+  environment: OperatorEnvironment,
+  target: OperatorTarget,
+  reason: string,
+  idempotency_key: string,
+  expected_state: OperatorExpectedState,
+  confirmation: OperatorConfirmation,
+  args: Args,
+}
+
+pub type OperatorInvocation<Args> = OperatorReadInvocation<Args> \
+  | OperatorRevealInvocation<Args> \
+  | OperatorMutateInvocation<Args>
+
+pub type OperatorOutcome = "read" | "revealed" | "applied" | "no_op" | "refused"
+
+pub type OperatorToolMetadata = {
+  schema: "harn.operator-tool.v1",
+  mode: OperatorMode,
+  input_classification: OperatorDataClassification,
+  output_classification: OperatorDataClassification,
+  target_kind?: string,
+}
+
+/**
+ * A transport result links to, but does not redefine, the persisted canonical
+ * `harn.receipt.v1` envelope. Personal material belongs only in a focused,
+ * typed reveal result; secret material is represented only by a restricted
+ * artifact reference. Neither belongs in a receipt.
+ */
+pub type OperatorResult<Data> = {
+  schema: "harn.operator-result.v1",
+  operation: string,
+  target?: OperatorTarget,
+  outcome: OperatorOutcome,
+  replayed: bool,
+  data_classification: OperatorDataClassification,
+  data?: Data,
+  receipt_id: string,
+  activity_id?: string,
+  before_digest?: string,
+  after_digest?: string,
+  restricted_artifact_ref?: string,
+}
+
+type OperatorToolBase<Args, Data> = {
+  operation: string,
+  description: string,
+  audiences: list<ToolAudience>,
+  input_classification: OperatorDataClassification,
+  output_classification: OperatorDataClassification,
+  args_schema: Schema<Args>,
+  data_schema: Schema<Data>,
+  title?: string,
+  cli?: ToolCliSpec,
+}
+
+pub type OperatorToolSpec<Args, Data> = OperatorToolBase<Args, Data> \
+  & {mode: "read", handler: fn(OperatorReadInvocation<Args>) -> OperatorResult<Data>} \
+  | OperatorToolBase<Args, Data> \
+  & {
+  mode: "reveal",
+  target_kind: string,
+  handler: fn(OperatorRevealInvocation<Args>) -> OperatorResult<Data>,
+} \
+  | OperatorToolBase<Args, Data> \
+  & {
+  mode: "mutate",
+  target_kind: string,
+  handler: fn(OperatorMutateInvocation<Args>) -> OperatorResult<Data>,
+}
+
+fn __operator_error(code: string, message: string) -> nil {
+  throw "std/operator [" + code + "]: " + message
+}
+
+fn __bounded_string_schema(min_length: int = 1, max_length: int = 256) -> dict {
+  return schema_string() + {min_length: min_length, max_length: max_length}
+}
+
+fn __opaque_id_schema(min_length: int = 1, max_length: int = 256) -> dict {
+  return __bounded_string_schema(min_length, max_length)
+    + {pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"}
+}
+
+fn __digest_schema() -> dict {
+  return __bounded_string_schema(71, 71) + {pattern: "^sha256:[0-9a-f]{64}$"}
+}
+
+fn __target_schema(target_kind: string) -> dict {
+  return schema_strict_object({kind: schema_literal(target_kind), id: __opaque_id_schema()})
+}
+
+fn __expected_state_schema() -> dict {
+  return schema_strict_object(
+    {
+      version: schema_field(schema_int() + {minimum: 0}, false),
+      digest: schema_field(__digest_schema(), false),
+    },
+  )
+}
+
+fn __confirmation_schema(operation: string) -> dict {
+  return schema_strict_object(
+    {
+      operation: schema_literal(operation),
+      target_id: __opaque_id_schema(),
+      environment: schema_enum(["mock", "test", "live"]),
+    },
+  )
+}
+
+fn __is_strict_object_schema(schema: dict) -> bool {
+  if schema.type == "dict"
+    && type_of(schema.properties) == "dict"
+    && schema.additional_properties == false {
+    return true
+  }
+  if type_of(schema.all_of) == "list" {
+    for branch in schema.all_of {
+      if type_of(branch) == "dict" {
+        const branch_schema: any = branch
+        if __is_strict_object_schema(branch_schema) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+fn __require_strict_schema(schema: dict, owner: string) -> nil {
+  if !__is_strict_object_schema(schema) {
+    __operator_error(
+      "schema_not_strict",
+      owner + " must be a canonical Harn object schema that rejects unknown fields",
+    )
+  }
+}
+
+fn __invocation_schema<Args>(
+  operation: string,
+  mode: OperatorMode,
+  target_kind: string?,
+  args_schema: Schema<Args>,
+) -> dict {
+  const common = {
+    schema: schema_literal("harn.operator-invocation.v1"),
+    mode: schema_literal(mode),
+    args: args_schema,
+  }
+  if mode == "read" {
+    return schema_strict_object(common)
+  }
+  if target_kind == nil {
+    __operator_error("missing_target_kind", "reveal and mutate tools require target_kind")
+  }
+  const exact_target_kind: string = target_kind ?? ""
+  const reasoned = common
+    + {
+      environment: schema_enum(["mock", "test", "live"]),
+      target: __target_schema(exact_target_kind),
+      reason: __bounded_string_schema(1, 512),
+    }
+  if mode == "reveal" {
+    return schema_strict_object(reasoned)
+  }
+  return schema_strict_object(
+    reasoned
+      + {
+        idempotency_key: __opaque_id_schema(8, 256),
+        expected_state: __expected_state_schema(),
+        confirmation: __confirmation_schema(operation),
+      },
+  )
+}
+
+fn __result_schema<Data>(
+  operation: string,
+  data_schema: Schema<Data>,
+  target_kind: string?,
+) -> dict {
+  return schema_strict_object(
+    {
+      schema: schema_literal("harn.operator-result.v1"),
+      operation: schema_literal(operation),
+      target: schema_field(
+        if target_kind == nil {
+          schema_strict_object({kind: __bounded_string_schema(), id: __opaque_id_schema()})
+        } else {
+          __target_schema(target_kind)
+        },
+        false,
+      ),
+      outcome: schema_enum(["read", "revealed", "applied", "no_op", "refused"]),
+      replayed: {type: "bool"},
+      data_classification: schema_enum(["id_only", "internal", "personal", "secret_reference"]),
+      data: schema_field(data_schema, false),
+      receipt_id: __opaque_id_schema(),
+      activity_id: schema_field(__opaque_id_schema(), false),
+      before_digest: schema_field(__digest_schema(), false),
+      after_digest: schema_field(__digest_schema(), false),
+      restricted_artifact_ref: schema_field(__bounded_string_schema(1, 1024), false),
+    },
+  )
+}
+
+fn __validate_audiences(audiences: list<ToolAudience>) -> nil {
+  if len(audiences) == 0 {
+    __operator_error("missing_audiences", "operator tools require explicit non-empty audiences")
+  }
+  for audience in audiences {
+    if audience == "agent" || audience == "mcp" {
+      __operator_error(
+        "unsafe_audience",
+        "first-wave operator tools cannot be exposed to agent or MCP adapters",
+      )
+    }
+  }
+}
+
+fn __validate_invocation<Args>(invocation: OperatorInvocation<Args>, operation: string) -> nil {
+  if invocation.mode == "read" {
+    return nil
+  }
+  if trim(invocation.reason) == "" {
+    __operator_error("missing_reason", "reason must contain non-whitespace text")
+  }
+  if invocation.mode == "reveal" {
+    return nil
+  }
+  if trim(invocation.idempotency_key) == "" {
+    __operator_error("missing_idempotency_key", "idempotency_key is required")
+  }
+  if invocation.expected_state.version == nil && invocation.expected_state.digest == nil {
+    __operator_error(
+      "missing_expected_state",
+      "expected_state requires a version, a sha256 digest, or both",
+    )
+  }
+  if invocation.confirmation.operation != operation {
+    __operator_error(
+      "confirmation_operation_mismatch",
+      "confirmation.operation must match operation",
+    )
+  }
+  if invocation.confirmation.target_id != invocation.target.id {
+    __operator_error("confirmation_target_mismatch", "confirmation.target_id must match target.id")
+  }
+  if invocation.confirmation.environment != invocation.environment {
+    __operator_error(
+      "confirmation_environment_mismatch",
+      "confirmation.environment must match invocation.environment",
+    )
+  }
+}
+
+fn __validate_result<Args, Data>(
+  result: OperatorResult<Data>,
+  invocation: OperatorInvocation<Args>,
+  operation: string,
+  output_classification: OperatorDataClassification,
+) -> nil {
+  if result.operation != operation {
+    __operator_error("result_operation_mismatch", "result.operation must match operation")
+  }
+  if result.data_classification != output_classification {
+    __operator_error(
+      "result_classification_mismatch",
+      "result.data_classification must match the declared output classification",
+    )
+  }
+  if invocation.mode != "read" {
+    if result.target == nil {
+      __operator_error("result_target_missing", "reveal and mutate results require a target")
+    }
+    const exact_result_target: OperatorTarget = result.target ?? invocation.target
+    if exact_result_target.kind != invocation.target.kind
+      || exact_result_target.id != invocation.target.id {
+      __operator_error("result_target_mismatch", "result.target must match invocation.target")
+    }
+  }
+  const allowed = if invocation.mode == "read" {
+    ["read", "refused"]
+  } else if invocation.mode == "reveal" {
+    ["revealed", "refused"]
+  } else {
+    ["applied", "no_op", "refused"]
+  }
+  if !contains(allowed, result.outcome) {
+    __operator_error("result_outcome_mismatch", "result.outcome does not match the tool mode")
+  }
+  if output_classification == "secret_reference"
+    && result.outcome != "refused"
+    && result.restricted_artifact_ref == nil {
+    __operator_error(
+      "restricted_artifact_missing",
+      "successful secret-reference results require restricted_artifact_ref",
+    )
+  }
+  if output_classification == "secret_reference" && result.data != nil {
+    __operator_error(
+      "secret_data_forbidden",
+      "secret-reference results cannot place material in the generic data field",
+    )
+  }
+  if result.outcome == "refused" && (result.data != nil || result.restricted_artifact_ref != nil) {
+    __operator_error(
+      "refused_payload_forbidden",
+      "refused results cannot return data or restricted artifact references",
+    )
+  }
+}
+
+/**
+ * Dynamic schemas are composed from the caller's generic Args/Data witnesses.
+ * Validate first, then adopt the declared closed type at this one owning seam.
+ */
+fn __read_invocation<Args>(raw: unknown, schema: dict) -> OperatorReadInvocation<Args> {
+  const validated: any = schema_expect(raw, schema)
+  return validated
+}
+
+fn __reveal_invocation<Args>(raw: unknown, schema: dict) -> OperatorRevealInvocation<Args> {
+  const validated: any = schema_expect(raw, schema)
+  return validated
+}
+
+fn __mutate_invocation<Args>(raw: unknown, schema: dict) -> OperatorMutateInvocation<Args> {
+  const validated: any = schema_expect(raw, schema)
+  return validated
+}
+
+fn __checked_result<Args, Data>(
+  raw_result: OperatorResult<Data>,
+  invocation: OperatorInvocation<Args>,
+  output_schema: dict,
+  operation: string,
+  output_classification: OperatorDataClassification,
+) -> OperatorResult<Data> {
+  const result: any = schema_expect(raw_result, output_schema)
+  __validate_result(result, invocation, operation, output_classification)
+  return result
+}
+
+/**
+ * Construct one private operator tool definition with a strict invocation and
+ * result contract. The returned spec can be passed to `tool_registry_from`.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn operator_tool<Args, Data>(spec: OperatorToolSpec<Args, Data>) -> ToolDefinitionSpec {
+  const operation = trim(spec.operation)
+  if regex_match("^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", operation) == nil {
+    __operator_error("invalid_operation", "operation must be a lowercase portable name")
+  }
+  if trim(spec.description) == "" {
+    __operator_error("missing_description", "description is required")
+  }
+  __validate_audiences(spec.audiences)
+  __require_strict_schema(spec.args_schema, "args_schema")
+  __require_strict_schema(spec.data_schema, "data_schema")
+  if spec.input_classification == "personal" && spec.mode != "reveal" {
+    __operator_error("personal_input_mode", "personal input is allowed only for reveal tools")
+  }
+  if spec.input_classification == "secret_reference" {
+    __operator_error(
+      "secret_input_forbidden",
+      "secret inputs must be injected capabilities, not generic operator arguments",
+    )
+  }
+  if spec.output_classification == "personal" && spec.mode != "reveal" {
+    __operator_error("personal_output_mode", "personal output is allowed only for reveal tools")
+  }
+  let target_kind: string? = nil
+  if spec.mode != "read" {
+    const normalized_target_kind = trim(spec.target_kind)
+    if regex_match("^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", normalized_target_kind) == nil {
+      __operator_error("invalid_target_kind", "target_kind must be a lowercase portable name")
+    }
+    target_kind = normalized_target_kind
+  }
+  const input_schema = __invocation_schema(operation, spec.mode, target_kind, spec.args_schema)
+  const output_schema = __result_schema(operation, spec.data_schema, target_kind)
+  const output_classification = spec.output_classification
+  const handler = { raw ->
+    if spec.mode == "read" {
+      const read = __read_invocation(raw, input_schema)
+      __validate_invocation(read, operation)
+      return __checked_result(
+        spec.handler(read),
+        read,
+        output_schema,
+        operation,
+        output_classification,
+      )
+    } else if spec.mode == "reveal" {
+      const reveal = __reveal_invocation(raw, input_schema)
+      __validate_invocation(reveal, operation)
+      return __checked_result(
+        spec.handler(reveal),
+        reveal,
+        output_schema,
+        operation,
+        output_classification,
+      )
+    }
+    const mutate = __mutate_invocation(raw, input_schema)
+    __validate_invocation(mutate, operation)
+    return __checked_result(
+      spec.handler(mutate),
+      mutate,
+      output_schema,
+      operation,
+      output_classification,
+    )
+  }
+  let operator_meta: OperatorToolMetadata = {
+    schema: "harn.operator-tool.v1",
+    mode: spec.mode,
+    input_classification: spec.input_classification,
+    output_classification: spec.output_classification,
+  }
+  if target_kind != nil {
+    operator_meta = operator_meta + {target_kind: target_kind}
+  }
+  let definition: ToolDefinitionSpec = {
+    name: "operator." + operation,
+    description: spec.description,
+    parameters: input_schema,
+    returns: output_schema,
+    handler: handler,
+    governance: {audiences: spec.audiences},
+    meta: {operator: operator_meta},
+  }
+  if spec.title != nil {
+    definition = definition + {title: spec.title}
+  }
+  if spec.cli != nil {
+    definition = definition + {cli: spec.cli}
+  }
+  return definition
+}

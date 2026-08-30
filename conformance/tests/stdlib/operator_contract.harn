@@ -1,0 +1,487 @@
+import { omit } from "std/json"
+import {
+  OperatorMutateInvocation,
+  OperatorResult,
+  OperatorToolSpec,
+  operator_tool,
+} from "std/operator"
+import { schema_refine, schema_strict_object } from "std/schema"
+import { tool_registry_from } from "std/tools"
+
+type MutateArgs = {note: string}
+
+type MutateData = {updated: bool}
+
+fn expect_failure(label: string, body: fn(nil) -> unknown, text: string) -> nil {
+  const caught = try {
+    body(nil)
+  }
+  require !is_ok(caught), label + " must fail"
+  require contains(to_string(unwrap_err(caught)), text),
+    label + " must name " + text + ": "
+    + to_string(unwrap_err(caught))
+}
+
+fn mutation_result(
+  invocation: OperatorMutateInvocation<MutateArgs>,
+  classification: "internal" | "personal" = "internal",
+) -> OperatorResult<MutateData> {
+  return {
+    schema: "harn.operator-result.v1",
+    operation: "account.disable",
+    target: invocation.target,
+    outcome: "applied",
+    replayed: false,
+    data_classification: classification,
+    data: {updated: true},
+    receipt_id: "receipt-1",
+    before_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    after_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  }
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  const raw_args_schema = schema_of(MutateArgs)
+  const raw_data_schema = schema_of(MutateData)
+  const args_schema = schema_refine(
+    raw_args_schema,
+    schema_strict_object(raw_args_schema.properties),
+  )
+  const data_schema = schema_refine(
+    raw_data_schema,
+    schema_strict_object(raw_data_schema.properties),
+  )
+  const mutation_spec: OperatorToolSpec<MutateArgs, MutateData> = {
+    operation: "account.disable",
+    description: "Disable one account by opaque identifier.",
+    audiences: ["cli", "catalog", "dashboard"],
+    mode: "mutate",
+    target_kind: "account",
+    input_classification: "internal",
+    output_classification: "internal",
+    args_schema: args_schema,
+    data_schema: data_schema,
+    handler: { invocation -> mutation_result(invocation) },
+  }
+  const definition = operator_tool<MutateArgs, MutateData>(mutation_spec)
+  const registry = tool_registry_from([definition])
+  const registered = tool_find(registry, "operator.account.disable")
+  assert(registered != nil, "constructor uses the reserved operator namespace")
+  assert(
+    registered.governance.audiences == ["cli", "catalog", "dashboard"],
+    "constructor retains explicit safe audiences",
+  )
+  assert(registered.parameters.additional_properties == false, "input schema is strict")
+  assert(registered.outputSchema.additional_properties == false, "output schema is strict")
+  const catalog = tool_schema(registry)
+  assert(
+    catalog.tools[0]?.inputSchema?.additionalProperties == false,
+    "provider projection preserves the strict input boundary",
+  )
+  assert(
+    catalog.tools[0]?.outputSchema?.additionalProperties == false,
+    "provider projection preserves the strict output boundary",
+  )
+  expect_failure(
+    "open args schema",
+    { _ ->
+      operator_tool<MutateArgs, MutateData>(mutation_spec + {args_schema: schema_of(MutateArgs)})
+    },
+    "schema_not_strict",
+  )
+  expect_failure(
+    "open data schema",
+    { _ ->
+      operator_tool<MutateArgs, MutateData>(mutation_spec + {data_schema: schema_of(MutateData)})
+    },
+    "schema_not_strict",
+  )
+  const valid: OperatorMutateInvocation<MutateArgs> = {
+    schema: "harn.operator-invocation.v1",
+    mode: "mutate",
+    environment: "test",
+    target: {kind: "account", id: "acct_123"},
+    reason: "Requested by the account owner",
+    idempotency_key: "disable-acct-123-1",
+    expected_state: {version: 7},
+    confirmation: {operation: "account.disable", target_id: "acct_123", environment: "test"},
+    args: {note: "scheduled closure"},
+  }
+  const applied = registered.handler(valid)
+  assert(applied.outcome == "applied", "valid mutation reaches the handler")
+  assert(applied.data_classification == "internal", "result keeps the declared classification")
+  expect_failure("missing reason", { _ -> registered.handler(omit(valid, ["reason"])) }, "reason")
+  expect_failure(
+    "blank reason",
+    { _ -> registered.handler(valid + {reason: "   "}) },
+    "missing_reason",
+  )
+  expect_failure(
+    "missing idempotency",
+    { _ -> registered.handler(omit(valid, ["idempotency_key"])) },
+    "idempotency_key",
+  )
+  expect_failure(
+    "missing expected state",
+    { _ -> registered.handler(omit(valid, ["expected_state"])) },
+    "expected_state",
+  )
+  expect_failure(
+    "empty expected state",
+    { _ -> registered.handler(valid + {expected_state: {}}) },
+    "missing_expected_state",
+  )
+  expect_failure(
+    "missing confirmation",
+    { _ -> registered.handler(omit(valid, ["confirmation"])) },
+    "confirmation",
+  )
+  expect_failure(
+    "caller-supplied actor",
+    { _ -> registered.handler(valid + {actor: {kind: "operator", id: "actor_1"}}) },
+    "actor",
+  )
+  expect_failure(
+    "wrong confirmation operation",
+    { _ ->
+      registered.handler(valid + {confirmation: valid.confirmation + {operation: "account.enable"}})
+    },
+    "account.disable",
+  )
+  expect_failure(
+    "wrong target kind",
+    { _ -> registered.handler(valid + {target: {kind: "workspace", id: "acct_123"}}) },
+    "account",
+  )
+  expect_failure(
+    "wrong confirmation target",
+    { _ ->
+      registered.handler(valid + {confirmation: valid.confirmation + {target_id: "acct_999"}})
+    },
+    "confirmation_target_mismatch",
+  )
+  expect_failure(
+    "wrong confirmation environment",
+    { _ -> registered.handler(valid + {confirmation: valid.confirmation + {environment: "live"}}) },
+    "confirmation_environment_mismatch",
+  )
+  expect_failure(
+    "missing audiences",
+    { _ ->
+      operator_tool<MutateArgs, MutateData>(
+        {
+          operation: "account.status",
+          description: "Read status.",
+          audiences: [],
+          mode: "read",
+          input_classification: "id_only",
+          output_classification: "id_only",
+          args_schema: args_schema,
+          data_schema: data_schema,
+          handler: { _ ->
+            {
+              schema: "harn.operator-result.v1",
+              operation: "account.status",
+              outcome: "read",
+              replayed: false,
+              data_classification: "id_only",
+              data: {updated: false},
+              receipt_id: "receipt-2",
+            }
+          },
+        },
+      )
+    },
+    "missing_audiences",
+  )
+  for audience in ["agent", "mcp"] {
+    expect_failure(
+      "unsafe audience " + audience,
+      { _ ->
+        operator_tool<MutateArgs, MutateData>(
+          {
+            operation: "account.status",
+            description: "Read status.",
+            audiences: ["cli", audience],
+            mode: "read",
+            input_classification: "id_only",
+            output_classification: "id_only",
+            args_schema: args_schema,
+            data_schema: data_schema,
+            handler: { _ ->
+              {
+                schema: "harn.operator-result.v1",
+                operation: "account.status",
+                outcome: "read",
+                replayed: false,
+                data_classification: "id_only",
+                data: {updated: false},
+                receipt_id: "receipt-3",
+              }
+            },
+          },
+        )
+      },
+      "unsafe_audience",
+    )
+  }
+  expect_failure(
+    "personal input on a read",
+    { _ ->
+      operator_tool<MutateArgs, MutateData>(
+        {
+          operation: "account.status",
+          description: "Read status.",
+          audiences: ["cli"],
+          mode: "read",
+          input_classification: "personal",
+          output_classification: "id_only",
+          args_schema: args_schema,
+          data_schema: data_schema,
+          handler: { _ ->
+            {
+              schema: "harn.operator-result.v1",
+              operation: "account.status",
+              outcome: "read",
+              replayed: false,
+              data_classification: "id_only",
+              data: {updated: false},
+              receipt_id: "receipt-4",
+            }
+          },
+        },
+      )
+    },
+    "personal_input_mode",
+  )
+  const personal_reveal = operator_tool<MutateArgs, MutateData>(
+    {
+      operation: "account.lookup",
+      description: "Resolve focused personal input to an opaque account.",
+      audiences: ["cli"],
+      mode: "reveal",
+      target_kind: "account",
+      input_classification: "personal",
+      output_classification: "personal",
+      args_schema: args_schema,
+      data_schema: data_schema,
+      handler: { invocation ->
+        {
+          schema: "harn.operator-result.v1",
+          operation: "account.lookup",
+          target: invocation.target,
+          outcome: "revealed",
+          replayed: false,
+          data_classification: "personal",
+          data: {updated: false},
+          receipt_id: "receipt-personal-1",
+        }
+      },
+    },
+  )
+  const revealed = personal_reveal.handler(
+    {
+      schema: "harn.operator-invocation.v1",
+      mode: "reveal",
+      environment: "test",
+      target: {kind: "account", id: "acct_123"},
+      reason: "Resolve one focused account lookup",
+      args: {note: "focused lookup"},
+    },
+  )
+  assert(
+    revealed.outcome == "revealed" && revealed.data_classification == "personal",
+    "personal input and output are accepted only through a focused reveal",
+  )
+  expect_failure(
+    "secret reference input",
+    { _ ->
+      operator_tool<MutateArgs, MutateData>(
+        {
+          operation: "account.status",
+          description: "Read status.",
+          audiences: ["cli"],
+          mode: "read",
+          input_classification: "secret_reference",
+          output_classification: "id_only",
+          args_schema: args_schema,
+          data_schema: data_schema,
+          handler: { _ ->
+            {
+              schema: "harn.operator-result.v1",
+              operation: "account.status",
+              outcome: "read",
+              replayed: false,
+              data_classification: "id_only",
+              data: {updated: false},
+              receipt_id: "receipt-5",
+            }
+          },
+        },
+      )
+    },
+    "secret_input_forbidden",
+  )
+  const wrong_classification = operator_tool<MutateArgs, MutateData>(
+    {
+      operation: "account.disable",
+      description: "Return a deliberately misclassified test result.",
+      audiences: ["cli"],
+      mode: "mutate",
+      target_kind: "account",
+      input_classification: "internal",
+      output_classification: "internal",
+      args_schema: args_schema,
+      data_schema: data_schema,
+      handler: { invocation -> mutation_result(invocation, "personal") },
+    },
+  )
+  expect_failure(
+    "misclassified result",
+    { _ -> wrong_classification.handler(valid) },
+    "result_classification_mismatch",
+  )
+  const secret_result = operator_tool<MutateArgs, MutateData>(
+    {
+      operation: "account.recovery_artifact",
+      description: "Return a restricted recovery artifact reference.",
+      audiences: ["cli"],
+      mode: "read",
+      input_classification: "id_only",
+      output_classification: "secret_reference",
+      args_schema: args_schema,
+      data_schema: data_schema,
+      handler: { invocation ->
+        let result: OperatorResult<MutateData> = {
+          schema: "harn.operator-result.v1",
+          operation: "account.recovery_artifact",
+          outcome: "read",
+          replayed: false,
+          data_classification: "secret_reference",
+          receipt_id: "receipt-6",
+        }
+        if invocation.args.note == "refused" {
+          result = result + {outcome: "refused"}
+        } else if invocation.args.note == "data" {
+          result = result
+            + {data: {updated: true}, restricted_artifact_ref: "restricted/recovery-1"}
+        } else if invocation.args.note != "missing" {
+          result = result + {restricted_artifact_ref: "restricted/recovery-1"}
+        }
+        return result
+      },
+    },
+  )
+  const safe_secret_reference = secret_result.handler(
+    {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "valid"}},
+  )
+  assert(
+    safe_secret_reference.data == nil
+      && safe_secret_reference.restricted_artifact_ref == "restricted/recovery-1",
+    "secret-reference output carries only a restricted artifact reference",
+  )
+  const refused_secret_reference = secret_result.handler(
+    {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "refused"}},
+  )
+  assert(
+    refused_secret_reference.outcome == "refused"
+      && refused_secret_reference.restricted_artifact_ref == nil,
+    "secret-reference refusal carries no artifact",
+  )
+  expect_failure(
+    "secret in generic data",
+    { _ ->
+      secret_result.handler(
+        {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "data"}},
+      )
+    },
+    "secret_data_forbidden",
+  )
+  expect_failure(
+    "secret result missing restricted artifact",
+    { _ ->
+      secret_result.handler(
+        {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "missing"}},
+      )
+    },
+    "restricted_artifact_missing",
+  )
+  const refused_result = operator_tool<MutateArgs, MutateData>(
+    {
+      operation: "account.status",
+      description: "Return a refusal without echoing input.",
+      audiences: ["cli"],
+      mode: "read",
+      input_classification: "id_only",
+      output_classification: "internal",
+      args_schema: args_schema,
+      data_schema: data_schema,
+      handler: { invocation ->
+        let result: OperatorResult<MutateData> = {
+          schema: "harn.operator-result.v1",
+          operation: "account.status",
+          outcome: "refused",
+          replayed: false,
+          data_classification: "internal",
+          receipt_id: "receipt-7",
+        }
+        if invocation.args.note == "data" {
+          result = result + {data: {updated: false}}
+        }
+        return result
+      },
+    },
+  )
+  const clean_refusal = refused_result.handler(
+    {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "clean"}},
+  )
+  assert(clean_refusal.data == nil, "refused result carries no data")
+  expect_failure(
+    "refusal with data",
+    { _ ->
+      refused_result.handler(
+        {schema: "harn.operator-invocation.v1", mode: "read", args: {note: "data"}},
+      )
+    },
+    "refused_payload_forbidden",
+  )
+  const default_exposure = try {
+    tool_define(
+      tool_registry(),
+      "operator.legacy",
+      "Legacy unsafe operator tool",
+      {parameters: {}, handler: { _ -> "unsafe" }},
+    )
+  }
+  assert(!is_ok(default_exposure), "operator namespace cannot use compatibility exposure")
+  assert(
+    contains(to_string(unwrap_err(default_exposure)), "compatibility-default exposure"),
+    "registry names the forbidden compatibility default",
+  )
+  for audience in ["agent", "mcp"] {
+    const forged_exposure = try {
+      tool_define(
+        tool_registry(),
+        "operator.forged",
+        "Hand-built unsafe operator tool",
+        {parameters: {}, handler: { _ -> "unsafe" }, governance: {audiences: ["cli", audience]}},
+      )
+    }
+    assert(!is_ok(forged_exposure), "hand-built operator tool cannot reach " + audience)
+    assert(
+      contains(to_string(unwrap_err(forged_exposure)), "cannot be exposed"),
+      "registry rejects hand-built " + audience + " exposure",
+    )
+  }
+  const compatible_non_operator = tool_define(
+    tool_registry(),
+    "legacy.inspect",
+    "Non-operator compatibility tool",
+    {parameters: {}, handler: { _ -> "compatible" }},
+  )
+  assert(
+    tool_find(compatible_non_operator, "legacy.inspect") != nil,
+    "non-operator tools retain compatibility-default exposure",
+  )
+  harness.stdio.log("operator contract tests passed")
+}
