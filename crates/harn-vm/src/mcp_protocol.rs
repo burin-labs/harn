@@ -200,6 +200,10 @@ impl McpServerSession {
         &self.client_identity
     }
 
+    pub fn is_initialized(&self) -> bool {
+        self.initialized_protocol_version.is_some()
+    }
+
     pub fn initialize(
         &mut self,
         params: &JsonValue,

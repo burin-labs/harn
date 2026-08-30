@@ -341,6 +341,15 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     {
         return Err("HTTP auth flags require `harn serve mcp --transport http`".to_string());
     }
+    if args.watch && args.transport != McpServeTransport::Stdio {
+        return Err("`harn serve mcp --watch` currently requires `--transport stdio`".to_string());
+    }
+    if args.watch && args.surface == crate::cli::McpServeSurface::Exports {
+        return Err(
+            "`harn serve mcp --watch` requires a script-published registry; pass `--surface script`"
+                .to_string(),
+        );
+    }
 
     // Scripts that author the MCP surface explicitly through
     // `mcp_tools(registry)` / `mcp_resource(...)` / `mcp_prompt(...)`
@@ -364,9 +373,18 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
         crate::cli::McpServeSurface::Exports => false,
     };
 
+    if args.watch && !use_script_surface {
+        return Err(
+            "`harn serve mcp --watch` requires a script-published registry; pass `--surface script`"
+                .to_string(),
+        );
+    }
+
     if use_script_surface {
         let mode = match args.transport {
-            McpServeTransport::Stdio => crate::commands::run::RunFileMcpServeMode::Stdio,
+            McpServeTransport::Stdio => {
+                crate::commands::run::RunFileMcpServeMode::Stdio { watch: args.watch }
+            }
             McpServeTransport::Http => {
                 let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
                 let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
@@ -816,6 +834,46 @@ pub fn on_tick(_event) -> nil {
             error,
             "`harn serve mcp --transport stdio` cannot use `--obs stdout`: stdout is reserved for \
              JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or `--obs off`"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_watch_rejects_http_before_loading_script() {
+        let ServeCommand::Mcp(args) = parse_serve_command(&[
+            "harn",
+            "serve",
+            "mcp",
+            "--watch",
+            "--transport",
+            "http",
+            "missing.harn",
+        ]) else {
+            panic!("expected serve mcp");
+        };
+
+        assert_eq!(
+            run_mcp_server(&args).await.unwrap_err(),
+            "`harn serve mcp --watch` currently requires `--transport stdio`"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_watch_rejects_export_surface_before_loading_script() {
+        let ServeCommand::Mcp(args) = parse_serve_command(&[
+            "harn",
+            "serve",
+            "mcp",
+            "--watch",
+            "--surface",
+            "exports",
+            "missing.harn",
+        ]) else {
+            panic!("expected serve mcp");
+        };
+
+        assert_eq!(
+            run_mcp_server(&args).await.unwrap_err(),
+            "`harn serve mcp --watch` requires a script-published registry; pass `--surface script`"
         );
     }
 

@@ -34,11 +34,28 @@ pub struct McpServer {
     /// Populated by `harn serve mcp --card path/to/card.json`.
     server_card: Option<serde_json::Value>,
     instructions: Option<String>,
+    list_changes: bool,
     connection: Mutex<mcp_protocol::McpServerSession>,
     /// Tasks this server has handed out. Shared lifecycle with the
     /// orchestrator server (`harn_vm::mcp_tasks`), so `tasks/get` answers the
     /// same way on both.
     tasks: crate::mcp_tasks::McpTaskStore,
+}
+
+/// One fully validated replacement for a live script-backed MCP server.
+///
+/// `anchor` retains adapter-owned resources, such as connector clients, for
+/// exactly as long as the VM whose handlers use them.
+pub struct McpServerReload<A> {
+    server: McpServer,
+    vm: Vm,
+    anchor: A,
+}
+
+impl<A> McpServerReload<A> {
+    pub fn new(server: McpServer, vm: Vm, anchor: A) -> Self {
+        Self { server, vm, anchor }
+    }
 }
 
 impl McpServer {
@@ -58,6 +75,7 @@ impl McpServer {
             prompts,
             server_card: None,
             instructions: None,
+            list_changes: false,
             connection: Mutex::new(mcp_protocol::McpServerSession::default()),
             tasks: crate::mcp_tasks::McpTaskStore::new(),
         }
@@ -83,10 +101,46 @@ impl McpServer {
         self
     }
 
+    /// Advertise and emit standard capability-list change notifications.
+    pub fn with_list_changes(mut self, enabled: bool) -> Self {
+        self.list_changes = enabled;
+        self
+    }
+
     /// Run the stable MCP server loop over newline-delimited stdio.
     /// Client input is handled by `input_required` response/retry rounds,
     /// so the transport never has to demultiplex server-initiated requests.
-    pub async fn run(&self, vm: &mut Vm) -> Result<(), VmError> {
+    pub async fn run(&mut self, vm: &mut Vm) -> Result<(), VmError> {
+        let (_reload_tx, mut reload_rx) = mpsc::unbounded_channel();
+        let mut anchor = ();
+        self.run_loop(vm, &mut anchor, &mut reload_rx, false).await
+    }
+
+    /// Run one stdio connection while applying complete validated runtime
+    /// replacements supplied by the owning adapter.
+    pub async fn run_reloadable<A>(
+        mut self,
+        mut vm: Vm,
+        mut anchor: A,
+        mut reload_rx: mpsc::UnboundedReceiver<Result<McpServerReload<A>, String>>,
+    ) -> Result<(), VmError> {
+        let result = self
+            .run_loop(&mut vm, &mut anchor, &mut reload_rx, true)
+            .await;
+        // Handlers may retain connector-backed values, so destroy the VM before
+        // releasing the adapter resource that keeps those connectors alive.
+        drop(vm);
+        drop(anchor);
+        result
+    }
+
+    async fn run_loop<A>(
+        &mut self,
+        vm: &mut Vm,
+        anchor: &mut A,
+        reload_rx: &mut mpsc::UnboundedReceiver<Result<McpServerReload<A>, String>>,
+        mut reload_enabled: bool,
+    ) -> Result<(), VmError> {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<serde_json::Value>();
         let progress_bus = ProgressBus::from_mpsc(out_tx.clone());
 
@@ -110,22 +164,73 @@ impl McpServer {
         let previous_progress = install_active_progress_bus(Some(progress_bus));
         let stdin = BufReader::new(tokio::io::stdin());
         let mut lines = stdin.lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let Ok(msg) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-                continue;
-            };
-            // Stable MCP stdio is request/response. Stray responses have no
-            // server-initiated request to match and are ignored.
-            if msg.get("method").is_none() {
-                continue;
-            }
-            if let Some(response) = self.handle_json_rpc(msg, vm).await {
-                if out_tx.send(response).is_err() {
-                    break;
+        loop {
+            tokio::select! {
+                line = lines.next_line() => {
+                    let Ok(Some(line)) = line else {
+                        break;
+                    };
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let Ok(msg) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                        continue;
+                    };
+                    // Stable MCP stdio is request/response. Stray responses have no
+                    // server-initiated request to match and are ignored.
+                    if msg.get("method").is_none() {
+                        continue;
+                    }
+                    if let Some(response) = self.handle_json_rpc(msg, vm).await {
+                        if out_tx.send(response).is_err() {
+                            break;
+                        }
+                    }
+                }
+                replacement = reload_rx.recv(), if reload_enabled => {
+                    match replacement {
+                        Some(Ok(replacement)) => {
+                            let McpServerReload {
+                                server,
+                                vm: next_vm,
+                                anchor: next_anchor,
+                            } = replacement;
+                            self.apply_reload(server);
+                            let previous_vm = std::mem::replace(vm, next_vm);
+                            let previous_anchor = std::mem::replace(anchor, next_anchor);
+                            drop(previous_vm);
+                            drop(previous_anchor);
+                            if self
+                                .connection
+                                .lock()
+                                .expect("MCP session lock poisoned")
+                                .is_initialized()
+                            {
+                                let _ = out_tx.send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "notifications/tools/list_changed",
+                                    "params": {},
+                                }));
+                                let _ = out_tx.send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "notifications/resources/list_changed",
+                                    "params": {},
+                                }));
+                                let _ = out_tx.send(serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "notifications/prompts/list_changed",
+                                    "params": {},
+                                }));
+                            }
+                        }
+                        Some(Err(error)) => {
+                            eprintln!(
+                                "[harn] serve mcp: reload failed; keeping previous registry: {error}"
+                            );
+                        }
+                        None => reload_enabled = false,
+                    }
                 }
             }
         }
@@ -138,6 +243,17 @@ impl McpServer {
         // before the function returns.
         let _ = writer.await;
         Ok(())
+    }
+
+    fn apply_reload(&mut self, replacement: McpServer) {
+        self.server_name = replacement.server_name;
+        self.server_version = replacement.server_version;
+        self.tools = replacement.tools;
+        self.resources = replacement.resources;
+        self.resource_templates = replacement.resource_templates;
+        self.prompts = replacement.prompts;
+        self.server_card = replacement.server_card;
+        self.instructions = replacement.instructions;
     }
 
     /// Handle one MCP JSON-RPC message. Notifications return `None`.
@@ -227,17 +343,39 @@ impl McpServer {
 
     fn server_capabilities(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut capabilities = serde_json::Map::new();
-        if !self.tools.is_empty() {
-            capabilities.insert("tools".into(), serde_json::json!({}));
+        if !self.tools.is_empty() || self.list_changes {
+            capabilities.insert(
+                "tools".into(),
+                if self.list_changes {
+                    serde_json::json!({"listChanged": true})
+                } else {
+                    serde_json::json!({})
+                },
+            );
         }
         if !self.resources.is_empty()
             || !self.resource_templates.is_empty()
             || self.server_card.is_some()
+            || self.list_changes
         {
-            capabilities.insert("resources".into(), serde_json::json!({}));
+            capabilities.insert(
+                "resources".into(),
+                if self.list_changes {
+                    serde_json::json!({"listChanged": true})
+                } else {
+                    serde_json::json!({})
+                },
+            );
         }
-        if !self.prompts.is_empty() {
-            capabilities.insert("prompts".into(), serde_json::json!({}));
+        if !self.prompts.is_empty() || self.list_changes {
+            capabilities.insert(
+                "prompts".into(),
+                if self.list_changes {
+                    serde_json::json!({"listChanged": true})
+                } else {
+                    serde_json::json!({})
+                },
+            );
         }
         let mut extensions = mcp_protocol::tasks_capability();
         capabilities.insert("completions".into(), mcp_protocol::completions_capability());

@@ -249,10 +249,13 @@ fn parse_registry_invocation(
     Ok(Some(RegistryInvocation {
         tool_name: tool.name.clone(),
         arguments: input,
-        output: leaf
-            .get_one::<String>("__harn_output")
-            .cloned()
-            .unwrap_or_else(|| "json".to_string()),
+        output: if leaf.get_flag("__harn_json") {
+            "json".to_string()
+        } else {
+            leaf.get_one::<String>("__harn_output")
+                .cloned()
+                .unwrap_or_else(|| "json".to_string())
+        },
     }))
 }
 
@@ -311,6 +314,13 @@ fn clap_command(
                         .value_parser(["json", "pretty", "text"])
                         .default_value("json")
                         .help("Output encoding"),
+                )
+                .arg(
+                    Arg::new("__harn_json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("__harn_output")
+                        .help("Emit compact JSON (alias for --harn-output json)"),
                 );
             let properties = tool
                 .input_schema
@@ -332,7 +342,7 @@ fn clap_command(
                         tool.name
                     ));
                 }
-                if matches!(long_name.as_str(), "harn-input" | "harn-output")
+                if matches!(long_name.as_str(), "harn-input" | "harn-output" | "json")
                     || !long_names.insert(long_name.clone())
                 {
                     return Err(format!(
@@ -534,6 +544,25 @@ mod tests {
             serde_json::json!({"widget_id": 42, "verbose": false})
         );
         assert_eq!(invocation.output, "pretty");
+    }
+
+    #[test]
+    fn generated_cli_accepts_explicit_json_output_alias() {
+        let tool = catalog_tool(
+            "lookup_widget",
+            &["widgets", "get"],
+            serde_json::json!({"type": "object", "properties": {}}),
+        );
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "get".into(), "--json".into()],
+            None,
+            &[tool],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(invocation.output, "json");
     }
 
     #[test]

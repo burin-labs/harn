@@ -76,6 +76,36 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
+fn write_reload_registry_fixture(temp: &TempDir, tool_name: &str, value: &str) {
+    fs::write(
+        temp.path().join("server.harn"),
+        format!(
+            r#"
+import {{ tool_registry_from }} from "std/tools"
+
+fn main(harness: Harness) {{
+  const tools = tool_registry_from([
+    {{
+      name: "{tool_name}",
+      description: "Return the active fixture value.",
+      parameters: {{}},
+      returns: {{
+        type: "object",
+        properties: {{value: {{type: "string"}}}},
+        required: ["value"],
+        additionalProperties: false,
+      }},
+      handler: {{_args -> {{value: "{value}"}}}},
+    }},
+  ], {{name: "reload-fixture"}})
+  harness.tools.mcp_tools(tools)
+}}
+"#
+        ),
+    )
+    .unwrap();
+}
+
 fn write_authority_export_fixture(temp: &TempDir) {
     fs::create_dir_all(temp.path().join("nested")).unwrap();
     fs::write(
@@ -381,6 +411,93 @@ fn serve_mcp_uses_registry_identity_when_transport_metadata_is_absent() {
     assert_eq!(initialized["result"]["serverInfo"]["name"], "widgets");
     assert_eq!(initialized["result"]["serverInfo"]["version"], "1.2.3");
     assert_eq!(initialized["result"]["instructions"], "Widget integration");
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_watch_keeps_one_client_across_valid_and_invalid_registry_edits() {
+    let temp = TempDir::new().unwrap();
+    write_reload_registry_fixture(&temp, "before_reload", "v1");
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--surface")
+        .arg("script")
+        .arg("--watch")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp --watch", command);
+
+    let initialized = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "reload-client", "version": "1"}
+        }
+    }));
+    assert_eq!(
+        initialized["result"]["capabilities"]["tools"]["listChanged"],
+        true
+    );
+    client.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    }));
+
+    let before = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "before_reload", "arguments": {}}
+    }));
+    assert_eq!(before["result"]["structuredContent"]["value"], "v1");
+
+    fs::write(temp.path().join("server.harn"), "fn main(").unwrap();
+    client.wait_for_stderr("reload failed; keeping previous registry");
+    let after_rejected_reload = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "before_reload", "arguments": {}}
+    }));
+    assert_eq!(
+        after_rejected_reload["result"]["structuredContent"]["value"],
+        "v1"
+    );
+
+    write_reload_registry_fixture(&temp, "after_reload", "v2");
+    let notification = client.recv_until(
+        |_| {},
+        |message| message["method"] == "notifications/tools/list_changed",
+    );
+    assert_eq!(notification["params"], json!({}));
+    for method in [
+        "notifications/resources/list_changed",
+        "notifications/prompts/list_changed",
+    ] {
+        let notification = client.recv_until(|_| {}, |message| message["method"] == method);
+        assert_eq!(notification["params"], json!({}));
+    }
+
+    let tools = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/list",
+        "params": {}
+    }));
+    assert_eq!(tools["result"]["tools"][0]["name"], "after_reload");
+    let after = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {"name": "after_reload", "arguments": {}}
+    }));
+    assert_eq!(after["result"]["structuredContent"]["value"], "v2");
     client.shutdown_expect_success();
 }
 
