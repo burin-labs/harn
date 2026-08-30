@@ -22,8 +22,8 @@ pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_to
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
-    openai_responses_content_block_types, provider_content_block_types, CompletionContractSignals,
-    ProviderResponseEnvelope,
+    openai_reasoning_field_present, openai_responses_content_block_types,
+    provider_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
 };
 use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
 
@@ -626,13 +626,14 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.cache_accounting_declared,
         true,
     );
-    let stop_reason = json["status"]
-        .as_str()
-        .or_else(|| {
-            json.get("incomplete_details")
-                .and_then(|value| value.get("reason"))
-                .and_then(|value| value.as_str())
-        })
+    // `status: "incomplete"` says only that generation stopped early. The
+    // nested reason owns why, so preserve it when present and retain status as
+    // the fallback for completed responses.
+    let stop_reason = json
+        .get("incomplete_details")
+        .and_then(|value| value.get("reason"))
+        .and_then(|value| value.as_str())
+        .or_else(|| json["status"].as_str())
         .map(str::to_string);
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
