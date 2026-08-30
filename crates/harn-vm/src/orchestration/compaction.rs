@@ -789,10 +789,81 @@ fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
     }
 }
 
+/// A compaction summary plus the size of the scaffold the summarizer generated
+/// around it (headers, budget notices, drop markers).
+///
+/// `text.len() - scaffold_bytes` is `carried_source_bytes`: how many bytes of
+/// the archived source window actually survived into the summary. A summary can
+/// be hundreds of bytes long and still carry nothing — a bare
+/// `[auto-compacted N older messages]` header is the shape that silently
+/// destroys context — so the byte length of the summary is not a usable
+/// measurement on its own.
+#[derive(Debug)]
+pub(crate) struct CompactionSummary {
+    pub text: String,
+    pub scaffold_bytes: usize,
+}
+
+impl CompactionSummary {
+    fn new(text: String, scaffold_bytes: usize) -> Self {
+        let scaffold_bytes = scaffold_bytes.min(text.len());
+        Self {
+            text,
+            scaffold_bytes,
+        }
+    }
+
+    pub(crate) fn carried_source_bytes(&self) -> usize {
+        self.text.len().saturating_sub(self.scaffold_bytes)
+    }
+}
+
+/// Typed measurement of one compaction's source window against the summary that
+/// replaced it.
+///
+/// Every field is `Option` on purpose: `None` means the measurement was not
+/// taken on this path, `Some(0)` means it was taken and read zero. Collapsing
+/// the two would make an unmeasured compaction indistinguishable from one that
+/// provably carried nothing forward.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct CompactionSourceMeasurement {
+    /// Messages drained from the live transcript.
+    pub source_message_count: Option<usize>,
+    /// Plain-text content bytes in those messages, flattened across the string
+    /// and block-array `content` shapes.
+    pub source_bytes: Option<usize>,
+    /// Bytes of the summary that replaced them.
+    pub summary_bytes: Option<usize>,
+    /// Bytes of that summary that came from the source window rather than from
+    /// generated scaffold.
+    pub carried_source_bytes: Option<usize>,
+}
+
+impl CompactionSourceMeasurement {
+    /// A non-empty source window whose summary carried nothing forward is a
+    /// failed compaction, never a successful one.
+    pub fn discarded_source_context(&self) -> bool {
+        matches!(
+            (self.source_bytes, self.carried_source_bytes),
+            (Some(source), Some(0)) if source > 0
+        )
+    }
+}
+
+/// Plain-text content bytes of one message, across the string `content` shape
+/// and the block-array shape real agent transcripts carry.
+fn message_content_bytes(message: &serde_json::Value) -> usize {
+    message
+        .get("content")
+        .map(|content| super::repair_ledger::value_text(content).len())
+        .unwrap_or(0)
+}
+
 fn truncate_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
-) -> String {
+) -> CompactionSummary {
     truncate_compaction_summary_with_context(old_messages, archived_count, false)
 }
 
@@ -800,13 +871,18 @@ fn truncate_compaction_summary_with_context(
     old_messages: &[serde_json::Value],
     archived_count: usize,
     is_llm_fallback: bool,
-) -> String {
+) -> CompactionSummary {
     let per_msg_limit = 500_usize;
+    // Flatten `content` through `value_text` rather than `as_str`: a real agent
+    // transcript carries tool results and multi-part turns as a block array, and
+    // reading only the string shape drops every one of them — leaving a bare
+    // header as the "summary" of a window that is being deleted.
+    let mut carried = 0_usize;
     let summary_parts: Vec<String> = old_messages
         .iter()
         .filter_map(|m| {
             let role = m.get("role")?.as_str()?;
-            let content = m.get("content")?.as_str()?;
+            let content = super::repair_ledger::value_text(m.get("content")?);
             if content.is_empty() {
                 return None;
             }
@@ -821,8 +897,9 @@ fn truncate_compaction_summary_with_context(
                     content.len()
                 )
             } else {
-                content.to_string()
+                content.clone()
             };
+            carried += truncated.len();
             Some(format!("[{role}] {truncated}"))
         })
         .take(15)
@@ -834,7 +911,7 @@ fn truncate_compaction_summary_with_context(
     } else {
         format!("[auto-compacted {archived_count} older messages via truncate strategy]")
     };
-    format!(
+    let text = format!(
         "{header}\n{}{}",
         summary_parts.join("\n"),
         if archived_count > 15 {
@@ -842,7 +919,12 @@ fn truncate_compaction_summary_with_context(
         } else {
             String::new()
         }
-    )
+    );
+    // `take(15)` can drop parts that `carried` already counted; clamp so the
+    // scaffold size can never be reported as negative work.
+    let carried = carried.min(text.len());
+    let scaffold_bytes = text.len() - carried;
+    CompactionSummary::new(text, scaffold_bytes)
 }
 
 fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
@@ -866,7 +948,7 @@ async fn llm_compaction_summary(
     llm_opts: &crate::llm::api::LlmCallOptions,
     summarize_prompt: Option<&str>,
     policy: &CompactionPolicy,
-) -> Result<String, VmError> {
+) -> Result<CompactionSummary, VmError> {
     let mut compact_opts = llm_opts.clone();
     compact_opts.system = None;
     compact_opts.transcript_summary = None;
@@ -891,14 +973,19 @@ async fn llm_compaction_summary(
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {
+        // Bounded retry: one deterministic pass over the same source window.
+        // The boundary still checks what that pass carried forward.
         Ok(truncate_compaction_summary_with_context(
             old_messages,
             archived_count,
             true,
         ))
     } else {
-        Ok(format!(
-            "[auto-compacted {archived_count} older messages]\n{summary}"
+        let header = format!("[auto-compacted {archived_count} older messages]\n");
+        let scaffold_bytes = header.len();
+        Ok(CompactionSummary::new(
+            format!("{header}{summary}"),
+            scaffold_bytes,
         ))
     }
 }
@@ -910,7 +997,7 @@ async fn custom_compaction_summary(
     callback: &VmValue,
     reminders: &[VmValue],
     policy: &CompactionPolicy,
-) -> Result<String, VmError> {
+) -> Result<CompactionSummary, VmError> {
     let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
         return Err(VmError::Runtime(
             "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
@@ -945,10 +1032,14 @@ async fn custom_compaction_summary(
     let summary = compact_summary_text_from_value(&result?)?;
     ctx.forward_output(&vm.take_output());
     if summary.trim().is_empty() {
+        // Bounded retry, same contract as the LLM strategy.
         Ok(truncate_compaction_summary(old_messages, archived_count))
     } else {
-        Ok(format!(
-            "[auto-compacted {archived_count} older messages]\n{summary}"
+        let header = format!("[auto-compacted {archived_count} older messages]\n");
+        let scaffold_bytes = header.len();
+        Ok(CompactionSummary::new(
+            format!("{header}{summary}"),
+            scaffold_bytes,
         ))
     }
 }
@@ -1129,6 +1220,7 @@ pub(crate) fn observation_mask_compaction(
         DEFAULT_RECAP_BUDGET_BYTES,
     )
     .0
+    .text
 }
 
 /// Test-only accessor exposing the recap body together with its
@@ -1139,7 +1231,9 @@ pub(crate) fn observation_mask_compaction_for_test(
     archived_count: usize,
     budget_bytes: usize,
 ) -> (String, RecapMetrics) {
-    observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes)
+    let (summary, metrics) =
+        observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes);
+    (summary.text, metrics)
 }
 
 /// Build the observation-mask recap body under `budget_bytes`.
@@ -1162,7 +1256,7 @@ fn observation_mask_compaction_with_callback(
     archived_count: usize,
     mask_results: Option<&[Option<String>]>,
     budget_bytes: usize,
-) -> (String, RecapMetrics) {
+) -> (CompactionSummary, RecapMetrics) {
     let header =
         format!("[auto-compacted {archived_count} older messages via observation masking]");
     let pinned = latest_pinned_indices(old_messages.iter(), |msg| {
@@ -1236,6 +1330,7 @@ fn observation_mask_compaction_with_callback(
 
     let mut body: Vec<String> = rendered_rev.into_iter().rev().collect();
     body = collapse_repeats(body);
+    let carried: usize = body.iter().map(String::len).sum();
     let mut parts = vec![header];
     parts.append(&mut body);
     if metrics.dropped_count > 0 {
@@ -1246,7 +1341,9 @@ fn observation_mask_compaction_with_callback(
     }
     let summary = parts.join("\n");
     metrics.recap_bytes = summary.len();
-    (summary, metrics)
+    let carried = carried.min(summary.len());
+    let scaffold_bytes = summary.len() - carried;
+    (CompactionSummary::new(summary, scaffold_bytes), metrics)
 }
 
 /// Invoke the mask_callback to get per-message custom masks.
@@ -1388,7 +1485,7 @@ struct CompactionStrategyInputs<'a> {
 /// `None`.
 async fn apply_compaction_strategy(
     input: CompactionStrategyInputs<'_>,
-) -> Result<(String, Option<RecapMetrics>), VmError> {
+) -> Result<(CompactionSummary, Option<RecapMetrics>), VmError> {
     let CompactionStrategyInputs {
         strategy,
         old_messages,
@@ -1456,7 +1553,7 @@ async fn apply_compaction_strategy(
 async fn apply_compaction_strategy_with_fallback(
     input: CompactionStrategyInputs<'_>,
     fallback_strategy: Option<&CompactStrategy>,
-) -> Result<(String, CompactStrategy, Option<RecapMetrics>), VmError> {
+) -> Result<(CompactionSummary, CompactStrategy, Option<RecapMetrics>), VmError> {
     match apply_compaction_strategy(input).await {
         Ok((summary, metrics)) => Ok((summary, input.strategy.clone(), metrics)),
         Err(primary_error) => {
@@ -1475,10 +1572,15 @@ async fn apply_compaction_strategy_with_fallback(
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct AutoCompactResult {
     pub summary: String,
     pub strategy: CompactStrategy,
     pub recap_metrics: Option<RecapMetrics>,
+    /// Typed source-window/summary measurement for this compaction. Always
+    /// populated on this path, so a `None` field downstream means the
+    /// measurement did not travel, never that it read zero.
+    pub measurement: CompactionSourceMeasurement,
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
@@ -1576,14 +1678,14 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     .await?;
 
     if let Some(hard_limit) = config.hard_limit_tokens {
-        let summary_msg = serde_json::json!({"role": "user", "content": &summary});
+        let summary_msg = serde_json::json!({"role": "user", "content": &summary.text});
         let mut estimate_msgs = vec![summary_msg];
         estimate_msgs.extend_from_slice(messages.as_slice());
         let estimated = estimate_message_tokens(&estimate_msgs);
         if estimated > hard_limit {
             let tier1_as_messages = vec![serde_json::json!({
                 "role": "user",
-                "content": summary,
+                "content": summary.text,
             })];
             let (hard_limit_summary, hard_limit_strategy, hard_limit_metrics) =
                 apply_compaction_strategy_with_fallback(
@@ -1612,8 +1714,36 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
         }
     }
 
-    summary = super::repair_ledger::append_repair_ledger_to_summary(
-        apply_model_visible_policy(summary, &config.policy),
+    // Measure the source window against what the summary actually carried,
+    // BEFORE the model-visible directives and the repair ledger are appended:
+    // both are generated scaffold, and counting them would let a summary that
+    // preserved nothing look substantial.
+    let source_bytes: usize = old_messages.iter().map(message_content_bytes).sum();
+    let measurement = CompactionSourceMeasurement {
+        source_message_count: Some(archived_count),
+        source_bytes: Some(source_bytes),
+        summary_bytes: Some(summary.text.len()),
+        carried_source_bytes: Some(summary.carried_source_bytes()),
+    };
+
+    // A non-empty source window whose summary carried zero source bytes is a
+    // failed compaction, not a small one. Every summarizer has already taken its
+    // one bounded deterministic retry by this point, so this is the terminal
+    // path: put the source window back exactly as it was drained and refuse,
+    // rather than replacing real context with a bare header.
+    if measurement.discarded_source_context() {
+        let restored = old_messages;
+        messages.splice(compact_start..compact_start, restored);
+        return Err(VmError::Runtime(format!(
+            "transcript compaction refused: the summary carried 0 of {source_bytes} source \
+             bytes across {archived_count} archived messages (summary was {} bytes, all \
+             generated scaffold); the source context was preserved",
+            summary.text.len()
+        )));
+    }
+
+    let summary = super::repair_ledger::append_repair_ledger_to_summary(
+        apply_model_visible_policy(summary.text, &config.policy),
         &old_messages,
     );
 
@@ -1628,6 +1758,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
         summary,
         strategy,
         recap_metrics,
+        measurement,
     }))
 }
 

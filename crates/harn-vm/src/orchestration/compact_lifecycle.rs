@@ -252,6 +252,8 @@ pub struct CompactionOutcome {
     pub receipt: CompactionReceipt,
     /// Observation-mask recap receipt, `None` for non-masking strategies.
     pub recap_metrics: Option<super::RecapMetrics>,
+    /// Typed source-window/summary measurement taken by the engine.
+    pub source_measurement: super::CompactionSourceMeasurement,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -360,6 +362,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
     let engine_strategy = compact_result.strategy;
     let raw_summary = compact_result.summary;
     let recap_metrics = compact_result.recap_metrics;
+    let source_measurement = compact_result.measurement;
     let summary = lifecycle.summary_override.clone().unwrap_or(raw_summary);
 
     if fires_hooks {
@@ -407,6 +410,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         instruction_source: config.policy.instruction_source().map(str::to_string),
         compaction_policy: config.policy.metadata_json(),
         recap: recap_metrics,
+        source_measurement: Some(source_measurement),
     };
 
     let event_metadata = build_event_metadata(
@@ -465,6 +469,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         event_metadata,
         receipt,
         recap_metrics,
+        source_measurement,
     }))
 }
 
