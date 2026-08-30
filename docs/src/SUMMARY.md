@@ -303,6 +303,7 @@
 - [Linked-program reachability](./dev/linked-program-reachability.md)
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
+- [Tool registry adapters](./tool-registry-adapters.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
 - [`std/cli/envelope`](./cli-envelope-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)

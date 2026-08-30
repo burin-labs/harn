@@ -168,7 +168,7 @@ pub(super) fn vm_value_to_content(value: &VmValue) -> Vec<serde_json::Value> {
 }
 
 /// Convert a VmValue to a serde_json::Value.
-pub(super) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Nil => serde_json::Value::Null,
         VmValue::Bool(b) => serde_json::json!(b),
@@ -200,7 +200,7 @@ pub(super) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
 
 /// Convert a VmValue annotations dict to a serde_json::Value with only the
 /// recognized MCP annotation fields.
-pub(super) fn annotations_to_json(annotations: &VmValue) -> Option<serde_json::Value> {
+pub(crate) fn annotations_to_json(annotations: &VmValue) -> Option<serde_json::Value> {
     let dict = match annotations {
         VmValue::Dict(d) => d,
         _ => return None,

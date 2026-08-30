@@ -951,6 +951,18 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(1);
                 }
             }
+            ToolCommand::Run(run_args) => {
+                if let Err(error) = commands::tool::run_registry(&run_args).await {
+                    eprintln!("error: {error}");
+                    process::exit(error.exit_code);
+                }
+            }
+            ToolCommand::Schema(schema_args) => {
+                if let Err(error) = commands::tool::print_registry_schema(&schema_args).await {
+                    eprintln!("error: {error}");
+                    process::exit(error.exit_code);
+                }
+            }
         },
         // Hidden dev-only generators; see commands::generate.
         Command::DumpHighlightKeywords(_)
