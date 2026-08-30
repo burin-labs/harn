@@ -19,8 +19,8 @@ fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
         .cloned()
         .map(|(key, value)| (key.to_string(), value))
         .collect();
-    let policy = policy_from_config(&map).expect("policy parses");
-    install_policy(policy, "test").expect("policy installs");
+    let (policy, declared) = policy_from_config(&map).expect("policy parses");
+    install_policy(policy, declared, "test").expect("policy installs");
     guard
 }
 
@@ -593,10 +593,8 @@ fn policy(config: &[(&str, VmValue)]) -> ConfiguredPolicy {
         .cloned()
         .map(|(key, value)| (key.to_string(), value))
         .collect();
-    ConfiguredPolicy {
-        source: "test",
-        policy: policy_from_config(&map).expect("policy parses"),
-    }
+    let (policy, _declared) = policy_from_config(&map).expect("policy parses");
+    ConfiguredPolicy::single("test", policy)
 }
 
 fn ips(values: &[&str]) -> Vec<IpAddr> {
@@ -880,4 +878,138 @@ fn current_resolved_ip_rules_reflects_installed_policy() {
     let _guard = install(&[("deny", strings(&["203.0.113.0/24"]))]);
     let rules = current_resolved_ip_rules();
     assert_eq!(rules.deny, vec!["203.0.113.0/24".parse().unwrap()]);
+}
+
+/// harn#7613. Environment-configured and script-configured egress policy compose
+/// under one rule instead of the second attempt failing.
+#[test]
+fn environment_and_script_policies_compose_instead_of_refusing() {
+    let guard = test_env_guard();
+    guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
+    guard.set(HARN_EGRESS_DENY_ENV, "blocked-by-operator.example.test");
+
+    let script = [(
+        "allow".to_string(),
+        strings(&["allowed-by-script.example.test"]),
+    )]
+    .into_iter()
+    .collect();
+    let (policy, declared) = policy_from_config(&script).expect("script policy parses");
+    install_policy(policy, declared, "stdlib").expect("a script policy composes onto the env one");
+
+    // The script's exception applies...
+    assert!(
+        check_url("connector", "https://allowed-by-script.example.test")
+            .unwrap()
+            .is_none()
+    );
+    // ...the operator's denial still wins...
+    assert!(
+        check_url("connector", "https://blocked-by-operator.example.test")
+            .unwrap()
+            .is_some()
+    );
+    // ...and the operator's deny-by-default is not loosened by the script.
+    assert!(check_url("connector", "https://unlisted.example.test")
+        .unwrap()
+        .is_some());
+}
+
+/// Composition is tighten-only: no contribution can weaken a restriction another
+/// one declared. Without this the "compose" contract would be a silent way for a
+/// script to switch an operator's confinement off.
+#[test]
+fn composition_cannot_loosen_a_restriction_another_source_declared() {
+    let guard = test_env_guard();
+    guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
+    guard.set(HARN_EGRESS_BLOCK_PRIVATE_ENV, "private");
+    guard.set(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "true");
+
+    let script = [
+        (
+            "default".to_string(),
+            VmValue::String(arcstr::ArcStr::from("allow")),
+        ),
+        (
+            "block_private".to_string(),
+            VmValue::String(arcstr::ArcStr::from("off")),
+        ),
+        ("allow_loopback".to_string(), VmValue::Bool(false)),
+    ]
+    .into_iter()
+    .collect();
+    let (policy, declared) = policy_from_config(&script).expect("script policy parses");
+    install_policy(policy, declared, "stdlib").expect("composes");
+
+    let configured = configured_policy().expect("a policy is configured");
+    assert_eq!(configured.policy.default, DefaultAction::Deny);
+    assert_eq!(
+        configured.policy.block_private,
+        Some(SsrfMode::BlockPrivate)
+    );
+    // Loopback is a permission, so it survives only while every declaring
+    // contribution grants it. The script refused, so it is off.
+    assert!(!configured.policy.allow_loopback);
+    assert_eq!(configured.sources, vec!["environment", "stdlib"]);
+}
+
+/// An axis the script did not mention must not overwrite the environment's with
+/// a type default. This is the measured-zero trap in policy form: "allow_loopback
+/// is false" and "the script said nothing about loopback" are different facts.
+#[test]
+fn an_undeclared_script_axis_leaves_the_environment_axis_intact() {
+    let guard = test_env_guard();
+    guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
+    guard.set(HARN_EGRESS_ALLOW_LOOPBACK_ENV, "true");
+
+    // Declares `allow` only.
+    let script = [("allow".to_string(), strings(&["api.example.test"]))]
+        .into_iter()
+        .collect();
+    let (policy, declared) = policy_from_config(&script).expect("script policy parses");
+    install_policy(policy, declared, "stdlib").expect("composes");
+
+    let configured = configured_policy().expect("a policy is configured");
+    assert_eq!(configured.policy.default, DefaultAction::Deny);
+    assert!(
+        configured.policy.allow_loopback,
+        "the script never mentioned loopback, so the environment's grant stands"
+    );
+    assert_eq!(configured.axis_sources.allow, vec!["stdlib"]);
+    assert_eq!(configured.axis_sources.default, vec!["environment"]);
+    assert_eq!(configured.axis_sources.allow_loopback, vec!["environment"]);
+}
+
+/// The receipt names every contribution. A composed policy that reported one
+/// source would leave a script author unable to see why their `default: "allow"`
+/// did not take effect.
+#[test]
+fn the_policy_receipt_names_every_contributing_source() {
+    let guard = test_env_guard();
+    guard.set(HARN_EGRESS_DEFAULT_ENV, "deny");
+
+    let script = [("allow".to_string(), strings(&["api.example.test"]))]
+        .into_iter()
+        .collect();
+    let (policy, declared) = policy_from_config(&script).expect("script policy parses");
+    install_policy(policy, declared, "stdlib").expect("composes");
+
+    let summary = policy_summary();
+    let dict = summary.as_dict().expect("summary is a dict");
+    assert_eq!(
+        dict.get("configured").map(VmValue::display).as_deref(),
+        Some("true")
+    );
+    let sources = dict
+        .get("sources")
+        .expect("receipt carries sources")
+        .display();
+    assert!(sources.contains("environment"), "sources: {sources}");
+    assert!(sources.contains("stdlib"), "sources: {sources}");
+    let axis_sources = dict
+        .get("axis_sources")
+        .expect("receipt carries per-axis provenance")
+        .display();
+    assert!(axis_sources.contains("environment"), "axis: {axis_sources}");
+    assert!(axis_sources.contains("stdlib"), "axis: {axis_sources}");
 }
