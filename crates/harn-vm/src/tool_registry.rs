@@ -33,7 +33,7 @@ pub struct ToolCliSpec {
 }
 
 /// Origin binding retained for diagnostics and generated projections.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ToolSource {
     /// Stable source vocabulary such as `openapi` or `harn`.
     pub kind: String,
@@ -80,7 +80,7 @@ pub struct ToolPolicy {
 }
 
 /// One normalized tool entry shared by every presentation adapter.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCatalogEntry {
     pub name: String,
@@ -109,7 +109,7 @@ pub struct ToolCatalogEntry {
 }
 
 /// Versioned, serializable projection of a tool registry.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ToolCatalog {
     pub schema_version: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
