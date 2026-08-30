@@ -32,6 +32,32 @@ pub type ToolExecution = {taskSupport: "forbidden" | "optional" | "required"}
 /** Portable icon metadata used by MCP and future presentation adapters. */
 pub type ToolIcon = {src: string, mimeType?: string, sizes?: list<string>, theme?: "light" | "dark"}
 
+/** Static, handler-free projection of one executable registry entry. */
+pub type ToolCatalogEntry = {
+  name: string,
+  title?: string,
+  description: string,
+  inputSchema: dict,
+  outputSchema?: dict,
+  annotations?: dict,
+  icons?: list<ToolIcon>,
+  execution?: ToolExecution,
+  cli: ToolCliSpec,
+  namespace?: string,
+  deferLoading: bool,
+  source?: ToolSource,
+  policy?: ToolPolicy,
+  _meta?: dict,
+}
+
+/** Versioned static projection shared by generated presentation adapters. */
+pub type ToolCatalog = {
+  schema_version: "harn-tools/1.0",
+  info?: ToolRegistryInfo,
+  tools: list<ToolCatalogEntry>,
+  components?: dict,
+}
+
 type ToolDefinitionConfig = {
   parameters?: dict,
   returns?: dict,

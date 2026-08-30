@@ -35,6 +35,12 @@ pub(crate) struct ToolRegistryLoadError {
     pub(crate) exit_code: i32,
 }
 
+// Registry publication still enters through VM thread-local slots. Serialize
+// script initialization until the VM can return a publication bundle directly;
+// otherwise two in-process adapters scheduled on one runtime thread could
+// clear or consume each other's registry between await points.
+static TOOL_REGISTRY_LOAD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Compile and execute a script until it publishes its tool registry.
 /// Presentation adapters call this once and then consume the same VM-owned
 /// handlers; no adapter is allowed to rebuild or proxy the dispatch table.
@@ -48,6 +54,8 @@ pub(crate) async fn load_file_tool_registry(
     };
 
     use super::{compile_or_load_chunk_for_run, entry_source_dir, LoadedChunk};
+
+    let _load_guard = TOOL_REGISTRY_LOAD.lock().await;
 
     let mut diagnostics = String::new();
     let LoadedChunk {

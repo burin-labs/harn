@@ -493,7 +493,7 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> dict",
+    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> ToolCatalog",
     category = "tools"
 )]
 fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
