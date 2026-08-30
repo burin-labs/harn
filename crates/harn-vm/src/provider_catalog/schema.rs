@@ -70,11 +70,12 @@ pub fn schema_value() -> Value {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "required": ["location", "name", "value", "effect"],
+                            "required": ["location", "name", "value_kind", "value", "effect"],
                             "properties": {
                                 "location": {"enum": ["body", "header"]},
                                 "name": {"type": "string", "minLength": 1},
-                                "value": {"type": ["boolean", "string"]},
+                                "value_kind": {"enum": ["bool", "string"]},
+                                "value": {"type": "string"},
                                 "effect": {"enum": ["retention", "training"]},
                                 "applies_to": {
                                     "type": "array",

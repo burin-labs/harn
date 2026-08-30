@@ -139,7 +139,8 @@ export interface HarnProviderDataControls {
 export interface HarnProviderDataControl {
   location: "body" | "header"
   name: string
-  value: boolean | string
+  value_kind: "bool" | "string"
+  value: string
   effect: "retention" | "training"
   applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
   caveat?: string
@@ -551,7 +552,8 @@ public struct HarnProviderDataControls: Codable, Sendable, Equatable {
 public struct HarnProviderDataControl: Codable, Sendable, Equatable {
     public let location: String
     public let name: String
-    public let value: HarnProviderDataControlValue
+    public let valueKind: String
+    public let value: String
     public let effect: String
     public let appliesTo: [String]?
     public let caveat: String?
@@ -559,34 +561,11 @@ public struct HarnProviderDataControl: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case location
         case name
+        case valueKind = "value_kind"
         case value
         case effect
         case appliesTo = "applies_to"
         case caveat
-    }
-}
-
-/// A control value is a bool on one provider and a string on another; the
-/// registry keeps the distinction so the wire spelling stays exact.
-public enum HarnProviderDataControlValue: Codable, Sendable, Equatable {
-    case bool(Bool)
-    case text(String)
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let value = try? container.decode(Bool.self) {
-            self = .bool(value)
-            return
-        }
-        self = .text(try container.decode(String.self))
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .bool(let value): try container.encode(value)
-        case .text(let value): try container.encode(value)
-        }
     }
 }
 
