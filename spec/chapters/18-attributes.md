@@ -175,7 +175,7 @@ pipeline review_branch(harness: Harness, task) { ... }
 ```
 
 Marks a top-level pipeline as an ACP slash-command. The Harn ACP adapter
-(`harn serve --pipeline ...`) discovers `@command`-tagged pipelines from
+(`harn serve acp <file.harn>`) discovers `@command`-tagged pipelines from
 the loaded source and advertises them to clients via the
 `available_commands_update` session notification. When a client invokes
 `/<name> args`, the named pipeline is compiled as the entry point and

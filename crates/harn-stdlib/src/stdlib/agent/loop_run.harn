@@ -57,6 +57,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let stall_enabled_seen = false
     let stall_prev_dispatch = nil
     let stall_hard_stop_rescues = 0
+    // Evidence revision the last recovery acted on. Repeating `proceed` on the
+    // identical revision is the same evidence seen twice, not new information.
+    let stall_recovery_evidence_revision = ""
     const max_verify_attempts = opts?.max_verify_attempts ?? 20
     const budget = opts.iteration_budget
     let current_max = budget.initial
@@ -764,9 +767,16 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           }
         }
         if stall_observation.hard_stop {
-          if stall_hard_stop_rescues == 0
-            && __agent_loop_thrash_recovery_allowed(stall_warning, tool_calls) {
+          if __agent_loop_thrash_recovery_allowed(
+            stall_warning,
+            tool_calls,
+            stall_hard_stop_rescues,
+            stall_recovery_evidence_revision,
+          ) {
             stall_hard_stop_rescues = stall_hard_stop_rescues + 1
+            stall_recovery_evidence_revision = __agent_loop_recovery_evidence_revision(
+              stall_warning,
+            )
             const old_limit = current_max
             current_max = max(current_max, iteration + 1)
             if len(tool_calls) > 0 {
@@ -838,6 +848,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               "fired",
               "thrash_rescue",
               recovery_reason,
+              nil,
+              stall_hard_stop_rescues,
+              "",
             )
             continue
           }
@@ -935,10 +948,16 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               break
             }
           }
+          const recovery_bound_fired = __agent_loop_recovery_bound_fired(
+            stall_warning,
+            stall_hard_stop_rescues,
+            stall_recovery_evidence_revision,
+          )
           const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(
             stall_warning,
             tool_calls,
             stall_hard_stop_rescues,
+            stall_recovery_evidence_revision,
           )
           __agent_loop_emit_thrash_recovery_checkpoint(
             harness.agent,
@@ -952,6 +971,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             "stop",
             recovery_skip_outcome,
             recovery_skip_outcome,
+            stall_hard_stop_rescues,
+            recovery_bound_fired,
           )
           agent_emit_event(
             harness.agent,
