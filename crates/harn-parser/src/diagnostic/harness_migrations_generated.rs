@@ -310,6 +310,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("request_approval", "harness.interaction.request_approval"),
     ("rng_seed", "harness.random.seed"),
     ("routing_policy", "harness.llm.routing_policy"),
+    ("run_record", "harness.obs.run_record"),
     ("run_record_load", "harness.fs.run_record_load"),
     ("run_record_save", "harness.fs.run_record_save"),
     ("runtime_introspection", "harness.runtime.introspection"),

@@ -1,7 +1,7 @@
 pipeline main(harness: Harness) {
   const dir = path_join(harness.fs.workspace_temp_dir(), "harn_eval_pack_declaration")
   harness.fs.mkdir(dir)
-  const run = run_record(
+  const run = harness.obs.run_record(
     {
       _type: "run_record",
       id: "candidate",
