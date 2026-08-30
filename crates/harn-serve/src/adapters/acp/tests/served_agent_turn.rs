@@ -12,9 +12,11 @@
 //! ```
 //!
 //! `harn run` never saw it — it installs no ceiling at all, so the run path
-//! granted what the served path withheld. The fix is one typed authority
-//! declaration on the contract (`effects_authorized_by = "llm.call"`), not a
-//! served-only exception; see
+//! granted what the served path withheld. The fix is one typed declaration on
+//! the contract — `runtime_infrastructure`, meaning the agent runtime
+//! performed the operation on its own behalf, which exempts its effects from
+//! the tool-invasiveness ladder and nothing else — not a served-only
+//! exception; see
 //! `crates/harn-vm/src/orchestration/tests/side_effect_ceiling.rs` for the
 //! registry-wide guard and the exact-text negative control.
 //!
@@ -53,9 +55,9 @@ fn answer_host_capabilities(
 /// The narrow falsifier: the exact call the served path died on, driven over
 /// the real ACP wire in the real default mode, with no `session/set_mode`.
 ///
-/// Disarm by deleting the `"llm.call"` authorization from
-/// `harness.agent.open` in `crates/harn-capability-contracts/src/ai.rs`; this
-/// test then fails with the ceiling rejection quoted in the module docs.
+/// Disarm by deleting `runtime_infrastructure` from `harness.agent.open` in
+/// `crates/harn-capability-contracts/src/ai.rs`; this test then fails with the
+/// ceiling rejection quoted in the module docs.
 #[tokio::test(flavor = "current_thread")]
 async fn default_mode_prompt_opens_an_agent_session_and_calls_the_model() {
     let local = tokio::task::LocalSet::new();

@@ -165,15 +165,15 @@ pub(crate) const OPERATOR_STEER_TAG: &str = "operator_steer";
 ///   * A dedupe key per message id. Two steers both stand; deduping them
 ///     against a shared key would let a second steer erase the first, and a
 ///     dropped steer reads exactly like an obeyed one.
-///   * `audit_only` is excluded by construction — it is the one mode whose
-///     contract is "never rendered into a model prompt" (harn#2212) — which
-///     is why this is keyed on the delivery checkpoint rather than on the
-///     queue entry.
-fn operator_steer_directive(
-    checkpoint: crate::bridge::DeliveryCheckpoint,
-    message: &crate::bridge::QueuedUserMessage,
-) -> Option<SystemReminder> {
-    if checkpoint == crate::bridge::DeliveryCheckpoint::EndOfInteraction {
+///   * `audit_only` is excluded. It is the one mode whose contract is "lands
+///     in the transcript, never rendered into a model prompt" (harn#2212), so
+///     minting a directive from it would put text in front of a model that
+///     was promised not to see it. This reads the mode the queue entry
+///     carries rather than the checkpoint it drained at: the two are a
+///     bijection today, but the checkpoint is a delivery detail and a future
+///     mapping change would silently stop arming steers.
+fn operator_steer_directive(message: &crate::bridge::QueuedUserMessage) -> Option<SystemReminder> {
+    if message.mode == crate::bridge::QueuedUserMessageMode::AuditOnly {
         return None;
     }
     let mut reminder = SystemReminder::new(
@@ -220,7 +220,7 @@ async fn drain_bridge_injections_for_checkpoint(
                     })),
                 )
                 .map_err(VmError::Runtime)?;
-                if let Some(directive) = operator_steer_directive(checkpoint, &message) {
+                if let Some(directive) = operator_steer_directive(&message) {
                     crate::agent_sessions::inject_reminder(session_id, directive)
                         .map_err(VmError::Runtime)?;
                 }
@@ -601,7 +601,7 @@ pub(super) fn register_daemon_bridge_primitives(vm: &mut Vm) {
 #[cfg(test)]
 mod operator_steer_tests {
     use super::*;
-    use crate::bridge::{DeliveryCheckpoint, QueuedUserMessage, QueuedUserMessageMode};
+    use crate::bridge::{QueuedUserMessage, QueuedUserMessageMode};
 
     fn queued(mode: QueuedUserMessageMode) -> QueuedUserMessage {
         QueuedUserMessage {
@@ -618,11 +618,8 @@ mod operator_steer_tests {
     /// feedback, so it is registered at the authority the operator holds.
     #[test]
     fn a_delivered_steer_becomes_a_standing_contract_directive() {
-        let directive = operator_steer_directive(
-            DeliveryCheckpoint::AfterCurrentOperation,
-            &queued(QueuedUserMessageMode::FinishStep),
-        )
-        .expect("a steer delivered mid-turn registers a directive");
+        let directive = operator_steer_directive(&queued(QueuedUserMessageMode::FinishStep))
+            .expect("a steer delivered mid-turn registers a directive");
 
         assert_eq!(directive.authority, DirectiveAuthority::Contract);
         assert!(directive.body.contains("BRAVO"));
@@ -647,11 +644,9 @@ mod operator_steer_tests {
     /// The interrupt sibling is the same control event delivered sooner.
     #[test]
     fn an_interrupt_carries_the_same_authority_as_a_steer() {
-        let directive = operator_steer_directive(
-            DeliveryCheckpoint::InterruptImmediate,
-            &queued(QueuedUserMessageMode::InterruptImmediate),
-        )
-        .expect("an interrupt delivered mid-turn registers a directive");
+        let directive =
+            operator_steer_directive(&queued(QueuedUserMessageMode::InterruptImmediate))
+                .expect("an interrupt delivered mid-turn registers a directive");
         assert_eq!(directive.authority, DirectiveAuthority::Contract);
     }
 
@@ -661,10 +656,6 @@ mod operator_steer_tests {
     /// model that was explicitly promised not to see it.
     #[test]
     fn an_audit_only_message_never_becomes_a_directive() {
-        assert!(operator_steer_directive(
-            DeliveryCheckpoint::EndOfInteraction,
-            &queued(QueuedUserMessageMode::AuditOnly),
-        )
-        .is_none());
+        assert!(operator_steer_directive(&queued(QueuedUserMessageMode::AuditOnly)).is_none());
     }
 }
