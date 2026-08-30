@@ -249,7 +249,13 @@ fn parse_registry_invocation(
     Ok(Some(RegistryInvocation {
         tool_name: tool.name.clone(),
         arguments: input,
-        output: if leaf.get_flag("__harn_json") {
+        output: if leaf
+            .try_get_one::<bool>("__harn_json")
+            .ok()
+            .flatten()
+            .copied()
+            .unwrap_or(false)
+        {
             "json".to_string()
         } else {
             leaf.get_one::<String>("__harn_output")
@@ -298,6 +304,15 @@ fn clap_command(
             if let Some(description) = tool.description.as_ref() {
                 subcommand = subcommand.about(description.clone());
             }
+            let properties = tool
+                .input_schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let has_json_input = properties
+                .keys()
+                .any(|property_name| property_name.replace('_', "-") == "json");
             subcommand = subcommand
                 .hide(tool.cli.hidden)
                 .subcommand_required(false)
@@ -314,20 +329,16 @@ fn clap_command(
                         .value_parser(["json", "pretty", "text"])
                         .default_value("json")
                         .help("Output encoding"),
-                )
-                .arg(
+                );
+            if !has_json_input {
+                subcommand = subcommand.arg(
                     Arg::new("__harn_json")
                         .long("json")
                         .action(ArgAction::SetTrue)
                         .conflicts_with("__harn_output")
                         .help("Emit compact JSON (alias for --harn-output json)"),
                 );
-            let properties = tool
-                .input_schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .cloned()
-                .unwrap_or_default();
+            }
             let mut long_names = BTreeSet::new();
             for (property_name, schema) in properties {
                 let long_name = property_name.replace('_', "-");
@@ -342,7 +353,7 @@ fn clap_command(
                         tool.name
                     ));
                 }
-                if matches!(long_name.as_str(), "harn-input" | "harn-output" | "json")
+                if matches!(long_name.as_str(), "harn-input" | "harn-output")
                     || !long_names.insert(long_name.clone())
                 {
                     return Err(format!(
@@ -562,6 +573,35 @@ mod tests {
         .unwrap()
         .unwrap();
 
+        assert_eq!(invocation.output, "json");
+    }
+
+    #[test]
+    fn generated_cli_preserves_a_json_named_tool_input() {
+        let tool = catalog_tool(
+            "submit_payload",
+            &["payloads", "submit"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"json": {"type": "string"}},
+                "required": ["json"]
+            }),
+        );
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &[
+                "payloads".into(),
+                "submit".into(),
+                "--json".into(),
+                "raw-payload".into(),
+            ],
+            None,
+            &[tool],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(invocation.arguments["json"], "raw-payload");
         assert_eq!(invocation.output, "json");
     }
 

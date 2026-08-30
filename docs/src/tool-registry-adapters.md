@@ -78,12 +78,16 @@ Every leaf also accepts:
 - `--harn-input @path.json` to read that object from a file
 - `--harn-input -` to read it from standard input
 - `--harn-output json|pretty|text` to select output encoding
-- `--json` as an explicit alias for compact JSON output
+- `--json` as an explicit alias for compact JSON output when the tool does not
+  declare a `json` input property
 
 Individual flags override properties supplied through `--harn-input`. The
 merged object is validated against the registry's complete JSON Schema before
 the handler runs. Invalid required fields, enums, ranges, nested shapes, and
 additional properties fail at the CLI boundary.
+
+A tool with a `json` input keeps `--json` for that input. Use
+`--harn-output json` to select compact output in that case.
 
 `cli.command` must be a non-empty list of command names. A tool with no `cli`
 field defaults to `[namespace, name]` when `namespace` is present and `[name]`
