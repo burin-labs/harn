@@ -29,6 +29,7 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
+mod response_envelope;
 mod sse;
 
 pub(crate) use liveness::premature_eof;
