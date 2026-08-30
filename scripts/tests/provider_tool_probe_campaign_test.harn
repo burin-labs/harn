@@ -142,7 +142,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(
       exit_code: 0,
       stdout: json_stringify(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           ok: true,
           data: {
             name: "harn-cli",
@@ -237,7 +237,12 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
   )
   const wrong_contract = provider_tool_probe_campaign_runtime_receipt(
     "harn",
-    {exit_code: 0, stdout: json_stringify({ok: true, data: {name: "harn-cli", version: "1.0.0"}})},
+    {
+      exit_code: 0,
+      stdout: json_stringify(
+        {schemaVersion: 1, ok: true, data: {name: "harn-cli", version: "1.0.0"}},
+      ),
+    },
   )
   assert_eq(
     wrong_contract,
