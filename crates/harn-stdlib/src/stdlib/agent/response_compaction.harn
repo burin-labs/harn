@@ -6,9 +6,18 @@
 // the caller's schema-validated deterministic fallback; it never weakens exact
 // retention.
 import { cache_get, cache_put, fs_cache } from "std/cache"
+import { coord_acquire_dir_lock, coord_release_dir_lock } from "std/coordination"
 import { get_typed_result, get_typed_value, schema_json } from "std/schema"
 
-pub type ResponseCompactionCapabilities = {fs: HarnessFs, llm: HarnessLlm}
+pub type ResponseCompactionReadCapabilities = {fs: HarnessFs, llm: HarnessLlm}
+
+pub type ResponseCompactionCapabilities = {
+  fs: HarnessFs,
+  llm: HarnessLlm,
+  runtime: HarnessRuntime,
+  clock: HarnessClock,
+  random: HarnessRandom,
+}
 
 pub type ResponseCompactionOptions<S> = {
   summarize_above_bytes: int,
@@ -46,6 +55,8 @@ pub type ResponseCompactionReceipt = {
   summary_cache_key: string,
   summary_cache_hit: bool,
   summary_call_count: int,
+  summary_waited?: bool,
+  summary_wait_ms?: int,
   summary_timeout_ms: int,
   summary_usage?: ResponseCompactionUsage,
   route: ResponseCompactionRoute,
@@ -82,6 +93,39 @@ type ResponseSummaryAttempt<S> = {
 
 type ResponseSummaryCaller<S> = fn(string, Schema<S>, string, int, int) -> unknown
 
+type ResponseSummaryWaitObserver = fn() -> nil
+
+type ResponseSummaryTerminal<S> = {
+  kind: "summarized",
+  summary: S,
+  route: ResponseCompactionRoute,
+  usage?: ResponseCompactionUsage,
+} \
+  | {
+  kind: "fallback",
+  cause: ResponseCompactionFallbackCause,
+  error_category: string,
+  route: ResponseCompactionRoute,
+  usage?: ResponseCompactionUsage,
+}
+
+type ResponseSummaryCacheLookup = {hit: bool, value?: unknown}
+
+type ResponseSummaryCacheRecord = {
+  schema: "harn.response_compaction.summary_cache.v1",
+  summary_key: string,
+  exact_sha256: string,
+  outcome: "summarized" | "fallback",
+  summary?: unknown,
+  route: ResponseCompactionRoute,
+  usage?: ResponseCompactionUsage,
+  fallback_cause?: ResponseCompactionFallbackCause,
+  error_category?: string,
+  failure_expires_at_ms?: int,
+}
+
+type ResponseSummaryLease = {acquired: bool, lock_path: string, token: string}
+
 type ResponseCompactionConfig<S> = {
   summarize_above_bytes: int,
   instructions: string,
@@ -95,6 +139,10 @@ type ResponseCompactionConfig<S> = {
 }
 
 const __RESPONSE_COMPACTION_VERSION = "harn.response_compaction.v1"
+
+const __RESPONSE_COMPACTION_EXACT_REF_SCHEMA = "harn.response_compaction.exact_ref.v1"
+
+const __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA = "harn.response_compaction.summary_cache.v1"
 
 fn __response_compaction_config<S>(
   summary_schema: Schema<S>,
@@ -160,7 +208,7 @@ fn __response_compaction_exact_ref(
   config: ResponseCompactionConfig<unknown>,
 ) -> ResponseCompactionExactRef {
   return {
-    schema: "harn.response_compaction.exact_ref.v1",
+    schema: __RESPONSE_COMPACTION_EXACT_REF_SCHEMA,
     storage: "workspace_temp",
     key: __RESPONSE_COMPACTION_VERSION + ":exact:" + digest,
     namespace: config.namespace + "-exact",
@@ -177,23 +225,29 @@ fn __response_compaction_exact_ref(
  * @errors: [cache]
  */
 pub fn response_compaction_read_exact<T>(
-  capabilities: ResponseCompactionCapabilities,
-  ref: ResponseCompactionExactRef,
+  capabilities: ResponseCompactionReadCapabilities,
+  ref: unknown,
   schema: Schema<T>,
 ) -> ResponseCompactionExactRead<T> {
-  if ref.storage != "workspace_temp"
-    || !ref.key.starts_with(__RESPONSE_COMPACTION_VERSION + ":exact:")
-    || ref.namespace == ""
-    || contains(ref.namespace, "..")
-    || regex_match("[^A-Za-z0-9._-]", ref.namespace) != nil
-    || ref.ttl_seconds <= 0
-    || ref.max_entries <= 0 {
+  const validated_ref = get_typed_result(ref, schema_of(ResponseCompactionExactRef))
+  if !is_ok(validated_ref) {
+    return {state: "broken", detail: "exact reference failed validation"}
+  }
+  const exact_ref = unwrap(validated_ref)
+  if exact_ref.schema != __RESPONSE_COMPACTION_EXACT_REF_SCHEMA
+    || exact_ref.storage != "workspace_temp"
+    || !exact_ref.key.starts_with(__RESPONSE_COMPACTION_VERSION + ":exact:")
+    || exact_ref.namespace == ""
+    || contains(exact_ref.namespace, "..")
+    || regex_match("[^A-Za-z0-9._-]", exact_ref.namespace) != nil
+    || exact_ref.ttl_seconds <= 0
+    || exact_ref.max_entries <= 0 {
     return {state: "broken", detail: "exact reference failed validation"}
   }
   const cached = cache_get(
     capabilities.llm,
-    ref.key,
-    {store: __response_compaction_store(capabilities.fs, ref)},
+    exact_ref.key,
+    {store: __response_compaction_store(capabilities.fs, exact_ref)},
   )
   if !cached.hit {
     return {state: "missing"}
@@ -204,7 +258,7 @@ pub fn response_compaction_read_exact<T>(
   }
   const value = unwrap(validated)
   const expected_key = __RESPONSE_COMPACTION_VERSION + ":exact:" + sha256(json_stringify(value))
-  if ref.key != expected_key {
+  if exact_ref.key != expected_key {
     return {state: "broken", detail: "exact retained content failed digest verification"}
   }
   return {state: "found", value: value}
@@ -242,8 +296,12 @@ fn __response_summary_prompt(exact_json: string, instructions: string) -> string
     + instructions
     + "\n</instructions>\n\n"
     + "<exact_response>\n"
-    + exact_json
+    + __response_summary_xml_text(exact_json)
     + "\n</exact_response>"
+}
+
+fn __response_summary_xml_text(value: string) -> string {
+  return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
 
 fn __response_summary_call<S>(
@@ -357,6 +415,8 @@ fn __response_compaction_receipt(
   summary_cache_key: string,
   cache_hit: bool,
   call_count: int,
+  waited: bool,
+  wait_ms: int,
   timeout_ms: int,
   route: ResponseCompactionRoute,
   usage: ResponseCompactionUsage? = nil,
@@ -372,6 +432,8 @@ fn __response_compaction_receipt(
     summary_cache_key: summary_cache_key,
     summary_cache_hit: cache_hit,
     summary_call_count: call_count,
+    summary_waited: waited,
+    summary_wait_ms: wait_ms,
     summary_timeout_ms: timeout_ms,
     route: route,
   }
@@ -387,10 +449,165 @@ fn __response_compaction_receipt(
   return receipt
 }
 
+fn __response_summary_usage_valid(usage: ResponseCompactionUsage?) -> bool {
+  return (usage?.input_tokens == nil || usage.input_tokens >= 0)
+    && (usage?.output_tokens == nil || usage.output_tokens >= 0)
+}
+
+fn __response_summary_record_bound(
+  record: ResponseSummaryCacheRecord,
+  summary_key: string,
+  exact_digest: string,
+  ladder: string,
+) -> bool {
+  return record.schema == __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA
+    && record.summary_key == summary_key
+    && record.exact_sha256 == exact_digest
+    && record.route.ladder == ladder
+    && (record.route.provider == nil || trim(record.route.provider) != "")
+    && (record.route.model == nil || trim(record.route.model) != "")
+    && __response_summary_usage_valid(record.usage)
+}
+
+fn __response_summary_terminal<S>(
+  record: ResponseSummaryCacheRecord,
+  summary_schema: Schema<S>,
+  now_ms: int,
+) -> ResponseSummaryTerminal<S>? {
+  if record.outcome == "summarized" {
+    if record.fallback_cause != nil
+      || record.error_category != nil
+      || record.failure_expires_at_ms != nil {
+      return nil
+    }
+    const summary = get_typed_result(record.summary, summary_schema)
+    if !is_ok(summary) {
+      return nil
+    }
+    let terminal: ResponseSummaryTerminal<S> = {
+      kind: "summarized",
+      summary: unwrap(summary),
+      route: record.route,
+    }
+    if record.usage != nil {
+      terminal = terminal + {usage: record.usage}
+    }
+    return terminal
+  }
+  if record.outcome != "fallback"
+    || record.summary != nil
+    || record.fallback_cause == nil
+    || record.error_category == nil
+    || record.failure_expires_at_ms == nil
+    || record.failure_expires_at_ms <= now_ms {
+    return nil
+  }
+  let terminal: ResponseSummaryTerminal<S> = {
+    kind: "fallback",
+    cause: record.fallback_cause,
+    error_category: record.error_category,
+    route: record.route,
+  }
+  if record.usage != nil {
+    terminal = terminal + {usage: record.usage}
+  }
+  return terminal
+}
+
+fn __response_summary_cache_read<S>(
+  capabilities: ResponseCompactionCapabilities,
+  key: string,
+  exact_digest: string,
+  store: dict,
+  summary_schema: Schema<S>,
+  ladder: string,
+) -> ResponseSummaryTerminal<S>? {
+  const raw_lookup = cache_get(capabilities.llm, key, {store: store})
+  let projected_lookup = {hit: raw_lookup?.hit}
+  if raw_lookup?.value != nil {
+    projected_lookup = projected_lookup + {value: raw_lookup.value}
+  }
+  const lookup = get_typed_value(projected_lookup, schema_of(ResponseSummaryCacheLookup))
+  if !lookup.hit {
+    return nil
+  }
+  const validated_record = get_typed_result(lookup.value, schema_of(ResponseSummaryCacheRecord))
+  if !is_ok(validated_record) {
+    return nil
+  }
+  const record = unwrap(validated_record)
+  if !__response_summary_record_bound(record, key, exact_digest, ladder) {
+    return nil
+  }
+  return __response_summary_terminal(record, summary_schema, capabilities.clock.now_ms())
+}
+
+fn __response_summary_terminal_result<T, S>(
+  terminal: ResponseSummaryTerminal<S>,
+  fallback: S,
+  _retained: T,
+  exact_ref: ResponseCompactionExactRef,
+  exact_digest: string,
+  exact_bytes: int,
+  summary_key: string,
+  waited: bool,
+  wait_ms: int,
+  timeout_ms: int,
+) -> ResponseCompactionResult<T, S> {
+  match terminal.kind {
+    "summarized" -> { return {
+      output: {kind: "summarized", value: terminal.summary},
+      receipt: __response_compaction_receipt(
+        "summarized",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        true,
+        0,
+        waited,
+        wait_ms,
+        timeout_ms,
+        terminal.route,
+        terminal.usage,
+      ),
+    } }
+    "fallback" -> { return {
+      output: {kind: "fallback", value: fallback, cause: terminal.cause},
+      receipt: __response_compaction_receipt(
+        "fallback",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        true,
+        0,
+        waited,
+        wait_ms,
+        timeout_ms,
+        terminal.route,
+        terminal.usage,
+        terminal.cause,
+        terminal.error_category,
+      ),
+    } }
+  }
+}
+
+fn __response_summary_lock_path(fs: HarnessFs, namespace: string, summary_key: string) -> string {
+  return path_join(
+    fs.workspace_temp_dir(),
+    "harn-response-compaction",
+    namespace + "-summary-flight",
+    sha256(summary_key),
+  )
+}
+
 /**
  * Internal deterministic seam used by the conformance suite. Production
  * callers use `response_compact`, which always routes through a named catalog
- * ladder.
+ * ladder. `observe_wait` fires once after a lease conflict so deterministic
+ * tests can prove the follower path without timing guesses.
  *
  * @effects: [store.read, store.write, llm]
  * @errors: [validation, cache, llm]
@@ -402,6 +619,7 @@ pub fn __response_compact_with_caller<T, S>(
   summary_schema: Schema<S>,
   options: ResponseCompactionOptions<S>,
   summarize: ResponseSummaryCaller<S>,
+  observe_wait: ResponseSummaryWaitObserver? = nil,
 ) -> ResponseCompactionResult<T, S> {
   const config = __response_compaction_config(summary_schema, options)
   const exact_json = json_stringify(get_typed_value(exact, exact_schema))
@@ -422,6 +640,8 @@ pub fn __response_compact_with_caller<T, S>(
         summary_key,
         false,
         0,
+        false,
+        0,
         config.timeout_ms,
         route,
       ),
@@ -435,96 +655,231 @@ pub fn __response_compact_with_caller<T, S>(
       max_entries: config.max_entries,
     },
   )
-  const cached = cache_get(capabilities.llm, summary_key, {store: summary_store})
-  if cached.hit && type_of(cached.value) == "dict" {
-    const cached_summary = get_typed_result(cached.value?.summary, summary_schema)
-    if is_ok(cached_summary) {
-      let cached_route: ResponseCompactionRoute = {ladder: config.ladder}
-      if type_of(cached.value?.provider) == "string" && cached.value.provider != "" {
-        cached_route = cached_route + {provider: cached.value.provider}
-      }
-      if type_of(cached.value?.model) == "string" && cached.value.model != "" {
-        cached_route = cached_route + {model: cached.value.model}
-      }
-      const cached_usage = __response_compaction_usage(cached.value?.usage)
-      return {
-        output: {kind: "summarized", value: unwrap(cached_summary)},
-        receipt: __response_compaction_receipt(
-          "summarized",
-          exact_ref,
-          exact_digest,
-          exact_bytes,
-          summary_key,
-          true,
-          0,
-          config.timeout_ms,
-          cached_route,
-          cached_usage,
-        ),
-      }
-    }
+  const initial_terminal = __response_summary_cache_read(
+    capabilities,
+    summary_key,
+    exact_digest,
+    summary_store,
+    summary_schema,
+    config.ladder,
+  )
+  if initial_terminal != nil {
+    return __response_summary_terminal_result(
+      initial_terminal,
+      config.fallback,
+      retained,
+      exact_ref,
+      exact_digest,
+      exact_bytes,
+      summary_key,
+      false,
+      0,
+      config.timeout_ms,
+    )
   }
-  const attempt = __response_summary_attempt_normalize(
-    summarize(
-      __response_summary_prompt(exact_json, config.instructions),
+  const lock_path = __response_summary_lock_path(capabilities.fs, config.namespace, summary_key)
+  const wait_started_ms = capabilities.clock.monotonic_ms()
+  let waited = false
+  let lock: ResponseSummaryLease? = nil
+  while lock == nil {
+    const acquired = coord_acquire_dir_lock(
+      capabilities.runtime,
+      capabilities.fs,
+      capabilities.clock,
+      capabilities.random,
+      lock_path,
+      {kind: "response_summary", summary_key: summary_key},
+      {ttl_ms: config.timeout_ms + 1000, throw_on_conflict: false},
+    )
+    if acquired?.acquired ?? false {
+      const validated_lease = get_typed_result(
+        {acquired: acquired.acquired, lock_path: acquired?.lock_path, token: acquired?.token},
+        schema_of(ResponseSummaryLease),
+      )
+      if !is_ok(validated_lease) {
+        const _ = try {
+          coord_release_dir_lock(capabilities.fs, capabilities.clock, acquired)
+        } catch (_release_error) {
+          nil
+        }
+        throw "response_compact: acquired summary lease failed validation"
+      }
+      lock = unwrap(validated_lease)
+      break
+    }
+    if !waited && observe_wait != nil {
+      observe_wait()
+    }
+    waited = true
+    const refreshed_terminal = __response_summary_cache_read(
+      capabilities,
+      summary_key,
+      exact_digest,
+      summary_store,
       summary_schema,
       config.ladder,
-      config.max_tokens,
-      config.timeout_ms,
-    ),
-    summary_schema,
-  )
-  match attempt.kind {
-    "success" -> {
-      let cache_record = {summary: attempt.data}
-      let resolved_route: ResponseCompactionRoute = {ladder: config.ladder}
-      if attempt.provider != nil {
-        cache_record = cache_record + {provider: attempt.provider}
-        resolved_route = resolved_route + {provider: attempt.provider}
-      }
-      if attempt.model != nil {
-        cache_record = cache_record + {model: attempt.model}
-        resolved_route = resolved_route + {model: attempt.model}
-      }
-      if attempt.usage != nil {
-        cache_record = cache_record + {usage: attempt.usage}
-      }
-      cache_put(capabilities.llm, summary_key, cache_record, {store: summary_store})
+    )
+    const elapsed_ms = capabilities.clock.monotonic_ms() - wait_started_ms
+    if refreshed_terminal != nil {
+      return __response_summary_terminal_result(
+        refreshed_terminal,
+        config.fallback,
+        retained,
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        true,
+        elapsed_ms,
+        config.timeout_ms,
+      )
+    }
+    if elapsed_ms >= config.timeout_ms {
       return {
-        output: {kind: "summarized", value: attempt.data},
+        output: {kind: "fallback", value: config.fallback, cause: "model_error"},
         receipt: __response_compaction_receipt(
-          "summarized",
+          "fallback",
           exact_ref,
           exact_digest,
           exact_bytes,
           summary_key,
           false,
-          1,
+          0,
+          true,
+          elapsed_ms,
           config.timeout_ms,
-          resolved_route,
-          attempt.usage,
+          route,
+          nil,
+          "model_error",
+          "single_flight_timeout",
         ),
       }
     }
-    "failure" -> { return {
-      output: {kind: "fallback", value: config.fallback, cause: attempt.cause},
-      receipt: __response_compaction_receipt(
-        "fallback",
+    capabilities.clock.sleep_ms(min(25, config.timeout_ms - elapsed_ms))
+  }
+  const wait_ms = waited ? capabilities.clock.monotonic_ms() - wait_started_ms : 0
+  try {
+    const refreshed_terminal = __response_summary_cache_read(
+      capabilities,
+      summary_key,
+      exact_digest,
+      summary_store,
+      summary_schema,
+      config.ladder,
+    )
+    if refreshed_terminal != nil {
+      coord_release_dir_lock(capabilities.fs, capabilities.clock, lock)
+      return __response_summary_terminal_result(
+        refreshed_terminal,
+        config.fallback,
+        retained,
         exact_ref,
         exact_digest,
         exact_bytes,
         summary_key,
-        false,
-        1,
+        waited,
+        wait_ms,
         config.timeout_ms,
-        route,
-        attempt.usage,
-        attempt.cause,
-        attempt.error_category,
+      )
+    }
+    const attempt = __response_summary_attempt_normalize(
+      summarize(
+        __response_summary_prompt(exact_json, config.instructions),
+        summary_schema,
+        config.ladder,
+        config.max_tokens,
+        config.timeout_ms,
       ),
-    } }
+      summary_schema,
+    )
+    match attempt.kind {
+      "success" -> {
+        let resolved_route: ResponseCompactionRoute = {ladder: config.ladder}
+        if attempt.provider != nil {
+          resolved_route = resolved_route + {provider: attempt.provider}
+        }
+        if attempt.model != nil {
+          resolved_route = resolved_route + {model: attempt.model}
+        }
+        let cache_record: ResponseSummaryCacheRecord = {
+          schema: __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA,
+          summary_key: summary_key,
+          exact_sha256: exact_digest,
+          outcome: "summarized",
+          summary: attempt.data,
+          route: resolved_route,
+        }
+        if attempt.usage != nil {
+          cache_record = cache_record + {usage: attempt.usage}
+        }
+        cache_put(capabilities.llm, summary_key, cache_record, {store: summary_store})
+        const result: ResponseCompactionResult<T, S> = {
+          output: {kind: "summarized", value: attempt.data},
+          receipt: __response_compaction_receipt(
+            "summarized",
+            exact_ref,
+            exact_digest,
+            exact_bytes,
+            summary_key,
+            false,
+            1,
+            waited,
+            wait_ms,
+            config.timeout_ms,
+            resolved_route,
+            attempt.usage,
+          ),
+        }
+        coord_release_dir_lock(capabilities.fs, capabilities.clock, lock)
+        return result
+      }
+      "failure" -> {
+        let cache_record: ResponseSummaryCacheRecord = {
+          schema: __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA,
+          summary_key: summary_key,
+          exact_sha256: exact_digest,
+          outcome: "fallback",
+          route: route,
+          fallback_cause: attempt.cause,
+          error_category: attempt.error_category,
+          failure_expires_at_ms: capabilities.clock.now_ms() + config.timeout_ms,
+        }
+        if attempt.usage != nil {
+          cache_record = cache_record + {usage: attempt.usage}
+        }
+        cache_put(capabilities.llm, summary_key, cache_record, {store: summary_store})
+        const result: ResponseCompactionResult<T, S> = {
+          output: {kind: "fallback", value: config.fallback, cause: attempt.cause},
+          receipt: __response_compaction_receipt(
+            "fallback",
+            exact_ref,
+            exact_digest,
+            exact_bytes,
+            summary_key,
+            false,
+            1,
+            waited,
+            wait_ms,
+            config.timeout_ms,
+            route,
+            attempt.usage,
+            attempt.cause,
+            attempt.error_category,
+          ),
+        }
+        coord_release_dir_lock(capabilities.fs, capabilities.clock, lock)
+        return result
+      }
+    }
+    unreachable("response_compact: summary attempt must be success or failure")
+  } catch (e) {
+    const _ = try {
+      coord_release_dir_lock(capabilities.fs, capabilities.clock, lock)
+    } catch (_release_error) {
+      nil
+    }
+    throw e
   }
-  unreachable("response_compact: summary attempt must be success or failure")
 }
 
 /**
