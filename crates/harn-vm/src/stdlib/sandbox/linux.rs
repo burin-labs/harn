@@ -495,7 +495,28 @@ fn push_rule_exact(
 ) -> Result<(), VmError> {
     let file = match std::fs::File::open(&path) {
         Ok(file) => file,
-        Err(error) if optional && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        // An OPTIONAL root we cannot open is skipped, not fatal. Missing and
+        // unreadable are the same answer here: we cannot grant it, and not
+        // granting it is strictly narrower than the alternative.
+        //
+        // Only NotFound was tolerated before, and that turned an unreadable
+        // preset root into a refusal of the entire spawn. It is reachable
+        // whenever the runtime's `$HOME` is not its own: with `HOME=/root`
+        // under a non-root uid, the `~/.asdf` preset root exists, cannot be
+        // opened, and killed every confined command.
+        //
+        // A NON-optional root still fails closed: something explicitly asked
+        // for it, so silently dropping it would be a grant the caller believes
+        // it has.
+        Err(error)
+            if optional
+                && matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                ) =>
+        {
+            return Ok(())
+        }
         Err(error) => {
             return Err(sandbox_rejection(format!(
                 "failed to open sandbox path '{}': {error}",

@@ -804,3 +804,49 @@ fn an_unexpected_enumeration_error_still_refuses_the_spawn() {
              got {result:?}"
     );
 }
+
+/// An optional preset root that EXISTS but cannot be opened must be skipped,
+/// not fatal.
+///
+/// This took down every confined command when the runtime's `$HOME` was not
+/// its own: `HOME=/root` under a non-root uid makes `~/.asdf` (and friends)
+/// exist, unreadable, and previously fatal. Reproduced on Linux before the fix.
+#[test]
+fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::TempDir::new().expect("temp");
+    let root = temp.path().canonicalize().expect("canonical");
+    let locked = root.join("locked");
+    std::fs::create_dir_all(&locked).expect("mkdir");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("lock");
+
+    let mut profile = LandlockProfile {
+        ruleset_fd: -1,
+        rules: Vec::new(),
+        handled_access_fs: 0,
+        read_deny_roots: Vec::new(),
+    };
+    let optional = push_rule_exact(
+        &mut profile,
+        locked.clone(),
+        LANDLOCK_ACCESS_FS_READ_FILE,
+        true,
+    );
+    let required = push_rule_exact(
+        &mut profile,
+        locked.clone(),
+        LANDLOCK_ACCESS_FS_READ_FILE,
+        false,
+    );
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+
+    assert!(
+        optional.is_ok(),
+        "an unreadable OPTIONAL root must be skipped, not refuse the spawn: {optional:?}"
+    );
+    assert!(
+        required.is_err(),
+        "an unreadable REQUIRED root must still fail closed; something asked for it by name"
+    );
+}
