@@ -54,8 +54,8 @@ use self::lifecycle::{RunExecution, TerminalRun};
 pub use self::llm_mock::*;
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 pub(crate) use self::mcp_serve::{
-    resolve_card_source, run_file_mcp_serve, RunFileAppServe, RunFileMcpServeHttp,
-    RunFileMcpServeMode,
+    load_file_tool_registry, resolve_card_source, run_file_mcp_serve, LoadedToolRegistry,
+    RunFileAppServe, RunFileMcpServeHttp, RunFileMcpServeMode,
 };
 use self::reporting::{
     append_run_provenance_event, emit_run_attestation, emit_run_aux_for_exit,

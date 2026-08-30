@@ -5,7 +5,58 @@
  * should import this alias from `std/tools` instead of `dict` or a local
  * structural copy.
  */
-pub type ToolRegistry = {_type: "tool_registry", tools: list}
+pub type ToolRegistryInfo = {name: string, version?: string, description?: string}
+
+pub type ToolRegistry = {_type: "tool_registry", tools: list, info?: ToolRegistryInfo}
+
+/** Deterministic command path projected by `harn tool run`. */
+pub type ToolCliSpec = {command: list<string>, hidden?: bool}
+
+/** Origin coordinates retained across generated adapters. */
+pub type ToolSource = {kind: string, id?: string, binding?: dict}
+
+/** Harn-owned execution classification used by approval and scheduling policy. */
+pub type ToolPolicy = {
+  kind: "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "other",
+  side_effect_level: "none" \
+    | "read_only" \
+    | "workspace_write" \
+    | "process_exec" \
+    | "network" \
+    | "desktop_control",
+}
+
+/** MCP task execution contract retained by the shared tool catalog. */
+pub type ToolExecution = {taskSupport: "forbidden" | "optional" | "required"}
+
+/** Portable icon metadata used by MCP and future presentation adapters. */
+pub type ToolIcon = {src: string, mimeType?: string, sizes?: list<string>, theme?: "light" | "dark"}
+
+/** Static, handler-free projection of one executable registry entry. */
+pub type ToolCatalogEntry = {
+  name: string,
+  title?: string,
+  description: string,
+  inputSchema: dict,
+  outputSchema?: dict,
+  annotations?: dict,
+  icons?: list<ToolIcon>,
+  execution?: ToolExecution,
+  cli: ToolCliSpec,
+  namespace?: string,
+  deferLoading: bool,
+  source?: ToolSource,
+  policy?: ToolPolicy,
+  _meta?: dict,
+}
+
+/** Versioned static projection shared by generated presentation adapters. */
+pub type ToolCatalog = {
+  schema_version: "harn-tools/1.0",
+  info?: ToolRegistryInfo,
+  tools: list<ToolCatalogEntry>,
+  components?: dict,
+}
 
 type ToolDefinitionConfig = {
   parameters?: dict,
@@ -17,7 +68,13 @@ type ToolDefinitionConfig = {
   mcp_server?: string,
   defer_loading?: bool,
   namespace?: string,
+  title?: string,
   annotations?: dict,
+  cli?: ToolCliSpec,
+  source?: ToolSource,
+  policy?: ToolPolicy,
+  execution?: ToolExecution,
+  icons?: list<ToolIcon>,
   meta?: dict,
   guidance?: string,
 }
@@ -45,7 +102,13 @@ pub type ToolDefinitionSpec = {
   mcp_server?: string,
   defer_loading?: bool,
   namespace?: string,
+  title?: string,
   annotations?: dict,
+  cli?: ToolCliSpec,
+  source?: ToolSource,
+  policy?: ToolPolicy,
+  execution?: ToolExecution,
+  icons?: list<ToolIcon>,
   meta?: dict,
   guidance?: string,
 }
@@ -128,6 +191,9 @@ pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>)
  * @effects: []
  * @errors: []
  */
-pub fn tool_registry_from(specs: list<ToolDefinitionSpec>) -> ToolRegistry {
-  return tool_define_many(tool_registry(), specs)
+pub fn tool_registry_from(
+  specs: list<ToolDefinitionSpec>,
+  info: ToolRegistryInfo? = nil,
+) -> ToolRegistry {
+  return tool_define_many(tool_registry(info), specs)
 }
