@@ -56,6 +56,8 @@ fi
 
 matching_count=0
 remediation_count=0
+open_count=0
+merged_count=0
 remediations=()
 while IFS=$'\t' read -r head state merged_at url; do
   [[ -n "$head" ]] || continue
@@ -79,6 +81,12 @@ while IFS=$'\t' read -r head state merged_at url; do
     exit 2
   fi
   matching_count=$((matching_count + 1))
+  if [[ "$state" == "OPEN" ]]; then
+    open_count=$((open_count + 1))
+  fi
+  if [[ "$merged_at" != "-" ]]; then
+    merged_count=$((merged_count + 1))
+  fi
   if [[ "$state" == "OPEN" || "$merged_at" != "-" ]]; then
     remediation_count=$((remediation_count + 1))
     remediations+=("$state:${url:-<no-url>}")
@@ -92,15 +100,17 @@ echo "expected_development_version=$expected_version"
 echo "expected_branch=$expected_branch"
 echo "matching_pr_count=$matching_count"
 echo "remediation_pr_count=$remediation_count"
+echo "open_pr_count=$open_count"
+echo "merged_pr_count=$merged_count"
 if (( remediation_count > 0 )); then
   printf 'remediation_prs=%s\n' "${remediations[*]}"
 else
   echo "remediation_prs=<none>"
 fi
 
-description="current: main $workspace_version, latest $latest_tag, remediation PRs $remediation_count"
-if [[ "$workspace_version" == "${latest_tag#v}" && "$remediation_count" -eq 0 ]]; then
-  description="owed: main $workspace_version, no open or merged $expected_branch PR"
+description="current: main $workspace_version, expected $expected_version, open PRs $open_count"
+if [[ "$workspace_version" != "$expected_version" && "$open_count" -eq 0 ]]; then
+  description="owed: main $workspace_version, expected $expected_version, no open $expected_branch PR"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "description=$description" >> "$GITHUB_OUTPUT"
   fi
