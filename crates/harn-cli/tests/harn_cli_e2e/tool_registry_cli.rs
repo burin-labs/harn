@@ -28,7 +28,7 @@ fn registry() -> ToolRegistry {
         additionalProperties: false,
       },
       annotations: {readOnlyHint: true, destructiveHint: false},
-      policy: {kind: "fetch", side_effect_level: "network"},
+      execution_policy: {kind: "fetch", side_effect_level: "network"},
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",

@@ -775,7 +775,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         tool_entry.insert(crate::value::intern_key("outputSchema"), output_schema);
     }
 
-    if let Some(policy @ VmValue::Dict(_)) = config.get("policy") {
+    if let Some(policy @ VmValue::Dict(_)) = config.get("execution_policy") {
         let mut merged = match policy {
             VmValue::Dict(policy) => (**policy).clone(),
             _ => unreachable!(),

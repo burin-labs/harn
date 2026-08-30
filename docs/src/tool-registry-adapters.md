@@ -35,7 +35,7 @@ fn widget_tools() -> ToolRegistry {
         idempotentHint: true,
         openWorldHint: true,
       },
-      policy: {kind: "fetch", side_effect_level: "network"},
+      execution_policy: {kind: "fetch", side_effect_level: "network"},
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",
@@ -131,6 +131,11 @@ and compatibility checks. Use the live registry for execution.
 - `ToolPolicy`: canonical `kind` and `side_effect_level` literals
 - `ToolExecution`: `{taskSupport: "forbidden" | "optional" | "required"}`
 - `ToolIcon`: `{src, mimeType?, sizes?, theme?}`
+
+Set a tool definition's typed classification with `execution_policy`. The
+static catalog exposes that classification as `policy`. The older `policy`
+definition field remains the runtime's routing and argument policy and is not
+mistaken for an execution classification.
 
 `source.binding` is the protocol-specific escape hatch. `_meta` remains the
 namespaced extension point for presentation protocols. Put behavior and policy

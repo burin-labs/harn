@@ -280,7 +280,11 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let meta = optional_object(entry, "meta", &format!("tool {name:?}"))?;
     let cli = cli_spec(entry.get("cli"), &name, namespace.as_deref())?;
     let source = source_spec(entry.get("source"), &name)?;
-    let policy = policy_spec(entry.get("policy"), entry.get("annotations"), &name)?;
+    let policy = policy_spec(
+        entry.get("execution_policy"),
+        entry.get("annotations"),
+        &name,
+    )?;
     Ok(ToolCatalogEntry {
         name,
         title,
@@ -401,7 +405,7 @@ fn policy_spec(
             VmValue::Dict(fields) => fields,
             _ => {
                 return Err(VmError::Runtime(format!(
-                    "tool {name:?} field 'policy' must be an object"
+                    "tool {name:?} field 'execution_policy' must be an object"
                 )));
             }
         };
@@ -409,24 +413,28 @@ fn policy_spec(
         for key in fields.keys() {
             if !allowed.contains(key.as_str()) {
                 return Err(VmError::Runtime(format!(
-                    "tool {name:?} field 'policy' contains unknown key {key:?}"
+                    "tool {name:?} field 'execution_policy' contains unknown key {key:?}"
                 )));
             }
         }
-        let kind = required_string(fields, "kind", &format!("tool {name:?} field 'policy'"))?;
+        let kind = required_string(
+            fields,
+            "kind",
+            &format!("tool {name:?} field 'execution_policy'"),
+        )?;
         let side_effect_level = required_string(
             fields,
             "side_effect_level",
-            &format!("tool {name:?} field 'policy'"),
+            &format!("tool {name:?} field 'execution_policy'"),
         )?;
         let Some(kind) = policy_kind(&kind) else {
             return Err(VmError::Runtime(format!(
-                "tool {name:?} field 'policy.kind' has unknown value {kind:?}"
+                "tool {name:?} field 'execution_policy.kind' has unknown value {kind:?}"
             )));
         };
         let Some(side_effect_level) = parse_side_effect_level(&side_effect_level) else {
             return Err(VmError::Runtime(format!(
-                "tool {name:?} field 'policy.side_effect_level' has unknown value {side_effect_level:?}"
+                "tool {name:?} field 'execution_policy.side_effect_level' has unknown value {side_effect_level:?}"
             )));
         };
         return Ok(Some(ToolPolicy {
@@ -722,7 +730,7 @@ mod tests {
         let mut policy = DictMap::new();
         policy.insert("kind".into(), string("fetch"));
         policy.insert("side_effect_level".into(), string("network"));
-        tool.insert("policy".into(), VmValue::dict(policy));
+        tool.insert("execution_policy".into(), VmValue::dict(policy));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(
             catalog.tools[0].policy,
@@ -745,6 +753,23 @@ mod tests {
         tool.insert("meta".into(), VmValue::dict(meta));
         let error = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap_err();
         assert!(error.to_string().contains("not portable JSON"));
+    }
+
+    #[test]
+    fn leaves_existing_runtime_policy_objects_out_of_execution_classification() {
+        let mut tool = match entry("search", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut runtime_policy = DictMap::new();
+        runtime_policy.insert("kind".into(), string("search"));
+        runtime_policy.insert(
+            "path_params".into(),
+            VmValue::List(vec![string("path")].into()),
+        );
+        tool.insert("policy".into(), VmValue::dict(runtime_policy));
+        let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
+        assert_eq!(catalog.tools[0].policy, None);
     }
 
     #[test]
