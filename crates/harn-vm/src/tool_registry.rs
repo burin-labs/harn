@@ -40,10 +40,17 @@ pub enum ToolAudience {
     Mcp,
     Catalog,
     Dashboard,
+    Agent,
 }
 
 impl ToolAudience {
-    const ALL: [Self; 4] = [Self::Cli, Self::Mcp, Self::Catalog, Self::Dashboard];
+    const ALL: [Self; 5] = [
+        Self::Cli,
+        Self::Mcp,
+        Self::Catalog,
+        Self::Dashboard,
+        Self::Agent,
+    ];
 
     fn parse(value: &str) -> Option<Self> {
         Some(match value {
@@ -51,6 +58,7 @@ impl ToolAudience {
             "mcp" => Self::Mcp,
             "catalog" => Self::Catalog,
             "dashboard" => Self::Dashboard,
+            "agent" => Self::Agent,
             _ => return None,
         })
     }
@@ -235,43 +243,48 @@ pub fn tool_registry_schema(
 
 /// Normalize a registry and require one local Harn closure per tool.
 pub fn executable_tools(registry: &VmValue) -> Result<Vec<ExecutableTool>, VmError> {
-    let registry_dict = registry_dict(registry)?;
-    let entries = registry_entries(registry_dict)?;
-    let catalog = tool_registry_catalog(registry)?;
-    entries
-        .iter()
-        .zip(catalog.tools)
-        .map(|(entry, catalog)| {
-            let entry = match entry {
-                VmValue::Dict(entry) => entry,
-                _ => {
-                    return Err(VmError::Runtime(
-                        "tool registry entries must be objects".into(),
-                    ));
-                }
-            };
-            let handler = match entry.get("handler") {
-                Some(VmValue::Closure(handler)) => handler.as_ref().clone(),
-                _ => {
-                    return Err(VmError::Runtime(format!(
-                        "tool registry entry {:?} has no local Harn handler closure",
-                        catalog.name
-                    )));
-                }
-            };
-            Ok(ExecutableTool { catalog, handler })
-        })
-        .collect()
+    executable_tools_matching(registry, None)
 }
 
-/// Normalize executable tools and retain only one adapter's allowed entries.
+/// Normalize executable tools, then require handlers only for entries exposed
+/// to the requested adapter. An excluded alternate-executor entry must not
+/// prevent an adapter from loading the tools it can actually invoke.
 pub fn executable_tools_for_audience(
     registry: &VmValue,
     audience: ToolAudience,
 ) -> Result<Vec<ExecutableTool>, VmError> {
-    let mut tools = executable_tools(registry)?;
-    tools.retain(|tool| tool.catalog.governance.allows(audience));
-    Ok(tools)
+    executable_tools_matching(registry, Some(audience))
+}
+
+fn executable_tools_matching(
+    registry: &VmValue,
+    audience: Option<ToolAudience>,
+) -> Result<Vec<ExecutableTool>, VmError> {
+    let registry_dict = registry_dict(registry)?;
+    let entries = registry_entries(registry_dict)?;
+    let catalog = tool_registry_catalog(registry)?;
+    let mut executable = Vec::with_capacity(entries.len());
+    for (entry, catalog) in entries.iter().zip(catalog.tools) {
+        if audience.is_some_and(|audience| !catalog.governance.allows(audience)) {
+            continue;
+        }
+        let VmValue::Dict(entry) = entry else {
+            return Err(VmError::Runtime(
+                "tool registry entries must be objects".into(),
+            ));
+        };
+        let Some(VmValue::Closure(handler)) = entry.get("handler") else {
+            return Err(VmError::Runtime(format!(
+                "tool registry entry {:?} has no local Harn handler closure",
+                catalog.name
+            )));
+        };
+        executable.push(ExecutableTool {
+            catalog,
+            handler: handler.as_ref().clone(),
+        });
+    }
+    Ok(executable)
 }
 
 /// Convert a handler result to portable JSON without stringifying unsupported
@@ -284,6 +297,21 @@ pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
 /// checked once when the registry is published or projected.
 pub(crate) fn validate_tool_entry(entry: &VmValue) -> Result<(), VmError> {
     catalog_entry(entry).map(|_| ())
+}
+
+/// Read one entry's normalized audience decision. Registry construction and
+/// adapter publication perform the full structural validation; model-facing
+/// discovery and dispatch also use this parser so malformed raw registries
+/// fail closed instead of bypassing governance.
+pub(crate) fn tool_entry_allows_audience(
+    entry: &crate::value::DictMap,
+    audience: ToolAudience,
+) -> Result<bool, VmError> {
+    let name = entry
+        .get("name")
+        .map(VmValue::display)
+        .unwrap_or_else(|| "<unnamed>".to_string());
+    governance_spec(entry.get("governance"), &name).map(|policy| policy.allows(audience))
 }
 
 fn registry_dict(registry: &VmValue) -> Result<&crate::value::DictMap, VmError> {
@@ -900,6 +928,7 @@ mod tests {
                 ToolAudience::Mcp,
                 ToolAudience::Catalog,
                 ToolAudience::Dashboard,
+                ToolAudience::Agent,
             ]
         );
     }
@@ -914,7 +943,11 @@ mod tests {
             let catalog = tool_registry_catalog_for_audience(&registry, audience).unwrap();
             assert_eq!(catalog.tools.len(), 1);
         }
-        for audience in [ToolAudience::Mcp, ToolAudience::Dashboard] {
+        for audience in [
+            ToolAudience::Mcp,
+            ToolAudience::Dashboard,
+            ToolAudience::Agent,
+        ] {
             let catalog = tool_registry_catalog_for_audience(&registry, audience).unwrap();
             assert!(catalog.tools.is_empty());
         }
@@ -954,6 +987,24 @@ mod tests {
         tool.insert("governance".into(), VmValue::dict(governance));
         let open = validate_tool_entry(&VmValue::dict(tool)).unwrap_err();
         assert!(open.to_string().contains("unknown key"));
+    }
+
+    #[test]
+    fn excluded_handlerless_tool_does_not_block_an_adapter_projection() {
+        let mut remote_only = match governed_entry("remote_only", &["agent"]) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        remote_only.insert("executor".into(), string("provider_native"));
+        let registry = registry(vec![VmValue::dict(remote_only)]);
+        let tools = executable_tools_for_audience(&registry, ToolAudience::Cli).unwrap();
+        assert!(tools.is_empty());
+
+        let error = match executable_tools_for_audience(&registry, ToolAudience::Agent) {
+            Err(error) => error,
+            Ok(_) => panic!("agent projection must require the included local handler"),
+        };
+        assert!(error.to_string().contains("no local Harn handler closure"));
     }
 
     #[test]

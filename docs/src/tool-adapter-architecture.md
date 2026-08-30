@@ -43,9 +43,9 @@ publishes or projects the registry. The normalized entry contains:
 
 - stable name, title, and description;
 - input and output JSON Schemas;
-- one local handler closure;
+- one declared execution backend, with a local handler closure for in-VM tools;
 - Harn execution policy and protocol annotations;
-- closed CLI, MCP, catalog, and dashboard audiences;
+- closed CLI, MCP, catalog, dashboard, and agent/model audiences;
 - CLI path and visibility;
 - typed source coordinates with a protocol-specific binding object;
 - deferred-loading, icon, execution, and namespaced extension metadata.
@@ -69,6 +69,10 @@ The static catalog applies its own audience through the same normalization
 without carrying runtime-only values. A future dashboard adapter consumes the
 same normalized governance field rather than maintaining another exposure
 list.
+
+The agent loop is also an adapter. It filters the model-facing schema and the
+direct dispatch path with the same `agent` audience, so a model cannot invoke a
+tool that was intentionally reserved for an operator surface.
 
 ## Language bridges
 

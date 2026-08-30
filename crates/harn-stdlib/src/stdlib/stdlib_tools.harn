@@ -13,7 +13,7 @@ pub type ToolRegistry = {_type: "tool_registry", tools: list, info?: ToolRegistr
 pub type ToolCliSpec = {command: list<string>, hidden?: bool}
 
 /** Closed set of adapters that may discover and invoke a tool. */
-pub type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard"
+pub type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent"
 
 /** Adapter exposure policy projected with the tool catalog. */
 pub type ToolGovernance = {audiences: list<ToolAudience>}

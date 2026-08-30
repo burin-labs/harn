@@ -36,7 +36,7 @@ fn widget_tools() -> ToolRegistry {
         openWorldHint: true,
       },
       execution_policy: {kind: "fetch", side_effect_level: "network"},
-      governance: {audiences: ["cli", "mcp", "catalog", "dashboard"]},
+      governance: {audiences: ["cli", "mcp", "catalog", "dashboard", "agent"]},
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",
@@ -143,7 +143,7 @@ and compatibility checks. Use the live registry for execution.
 `std/tools` exports these closed presentation records:
 
 - `ToolCliSpec`: `{command: list<string>, hidden?: bool}`
-- `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard"`
+- `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard" | "agent"`
 - `ToolGovernance`: `{audiences: list<ToolAudience>}`
 - `ToolSource`: `{kind: string, id?: string, binding?: dict}`
 - `ToolPolicy`: canonical `kind` and `side_effect_level` literals
@@ -162,17 +162,18 @@ in typed registry fields rather than `_meta`.
 ## Adapter governance
 
 `governance.audiences` is the closed adapter exposure contract for one tool.
-Its allowed values are `cli`, `mcp`, `catalog`, and `dashboard`. Each adapter
-filters discovery and invocation from the same normalized registry entry, so a
-tool omitted from MCP cannot be called by sending its name directly to
-`tools/call`. The generated CLI applies the same rule before building its
-command tree.
+Its allowed values are `cli`, `mcp`, `catalog`, `dashboard`, and `agent`.
+`agent` is the model-facing agent-loop projection. Each adapter filters
+discovery and invocation from the same normalized registry entry, so a tool
+omitted from MCP cannot be called by sending its name directly to `tools/call`,
+and a tool omitted from `agent` cannot be recovered by a forged model tool
+call. The generated CLI applies the same rule before building its command tree.
 
 The list must be non-empty and contains no duplicates. Unknown audiences and
 unknown governance fields fail registry registration. Harn sorts the list into
 canonical order in the static catalog, which lets generators and dashboards
 consume the policy without copying it. Registries that omit `governance`
-remain visible to all four adapters for compatibility.
+remain visible to all five adapters for compatibility.
 
 Use a narrow list for operator-only projections. For example,
 `{audiences: ["cli", "catalog"]}` keeps a command available to local operators
