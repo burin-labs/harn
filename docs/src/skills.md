@@ -379,9 +379,10 @@ CI can pipe through `jq`.
 
 ```text
 $ harn skill list
-Embedded canonical skills (15):
+Embedded canonical skills (16):
   harn-agent            Agent runtime, lifecycle, capabilities, and supervision.
   harn-apps             Build Harn apps with typed views, event handlers, and model jobs.
+  harn-control-events   Stop, steer, and queue as events a session must answer, not requests it…
   harn-de-slop          Remove duplicated policy, shallow seams, and weak contracts.
   harn-diagnostics      Diagnostics, the HARN-* error-code index, explain output, repair plans,…
   harn-docs             Write task-shaped developer documentation in plain language.

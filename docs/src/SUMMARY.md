@@ -11,6 +11,7 @@
 - [Choosing an agent abstraction](./concepts/abstraction-ladder.md)
 - [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
 - [Steering seams](./concepts/steering-seams.md)
+- [Stop, steer, and queue as control events](./concepts/control-events.md)
 - [Cross-session pattern knowledge](./concepts/cross-session-pattern-knowledge.md)
 - [Why Harn has model jobs](./concepts/model-jobs.md)
 - [Why Harn apps separate behavior from pixels](./concepts/interactive-apps.md)
