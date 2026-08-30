@@ -113,7 +113,7 @@ pipeline test(harness: Harness, task: unknown) {
       )
         .filter({ message -> message.content == "LIVE_COMPACTION_EVENT" })
       harness.stdio.println(len(live_compaction_messages) == 1)
-      const run = run_record(
+      const run = harness.obs.run_record(
         {
           _type: "run_record",
           id: "compact-run",

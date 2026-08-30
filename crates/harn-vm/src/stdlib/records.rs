@@ -1,5 +1,8 @@
 //! Artifact and run-record builtins.
 
+#[path = "records/execution_identity.rs"]
+mod execution_identity;
+
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -818,19 +821,6 @@ fn artifact_apply_intent_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "run_record(payload: dict) -> dict", category = "records"
-)]
-fn run_record_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let run = normalize_run_record(
-        args.first()
-            .ok_or_else(|| VmError::Runtime("run_record: missing payload".to_string()))?,
-    )?;
-    to_vm(&run)
-}
-
-#[harn_builtin(
     exposure = "harness.fs.load_run_tree",
     effects = ["fs.read@arg0"],
     sig = "load_run_tree(path: string?) -> dict", category = "records"
@@ -1545,7 +1535,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &ARTIFACT_PATCH_PROPOSAL_IMPL_DEF,
     &ARTIFACT_VERIFICATION_BUNDLE_IMPL_DEF,
     &ARTIFACT_APPLY_INTENT_IMPL_DEF,
-    &RUN_RECORD_IMPL_DEF,
+    &execution_identity::RUN_RECORD_IMPL_DEF,
     &LOAD_RUN_TREE_IMPL_DEF,
     &RUN_RECORD_SAVE_IMPL_DEF,
     &RUN_RECORD_LOAD_IMPL_DEF,
@@ -1571,6 +1561,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVAL_METRIC_IMPL_DEF,
     &EVAL_METRICS_IMPL_DEF,
 ];
+
+#[cfg(test)]
+#[path = "records/execution_identity_tests.rs"]
+mod execution_identity_tests;
 
 #[cfg(test)]
 mod tests {

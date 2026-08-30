@@ -84,7 +84,7 @@ fn main(harness: Harness) -> int {
     },
   )
   const persisted = harness.fs.run_record_save(
-    run_record(
+    harness.obs.run_record(
       {
         id: run_id,
         task: "read main.rs and report",
