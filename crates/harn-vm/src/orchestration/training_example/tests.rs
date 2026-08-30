@@ -245,6 +245,7 @@ fn projects_a_text_channel_run_into_canonical_messages() {
     assert_eq!(example.provenance.provider, "llamacpp");
     assert_eq!(example.provenance.model, "qwen3.6-35b");
     assert_eq!(example.provenance.session_id, "sess-1");
+    assert_eq!(example.provenance.execution_id, None);
     assert_eq!(example.provenance.tool_catalog_hash, "schema-hash-1");
     assert_eq!(example.provenance.terminal_status.as_str(), "completed");
     assert_eq!(example.provenance.usage.provider_calls, 2);

@@ -148,6 +148,10 @@ pub struct TrainingSource {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrainingProvenance {
     pub run_id: String,
+    /// Harn-owned execution identity from the source run's evidence envelope.
+    /// Legacy run records leave this absent rather than synthesizing identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_id: Option<String>,
