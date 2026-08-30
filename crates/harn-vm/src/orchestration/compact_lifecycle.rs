@@ -337,10 +337,10 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         .requested_strategy
         .clone()
         .unwrap_or_else(|| config.policy_strategy.clone());
-    let mut threshold_source = config
-        .request_provenance
-        .threshold_source
-        .unwrap_or(CompactionThresholdSource::RuntimeConfig);
+    let mut threshold_source = config.request_provenance.threshold_source.or_else(|| {
+        (lifecycle.trigger == CompactionTrigger::Threshold)
+            .then_some(CompactionThresholdSource::RuntimeConfig)
+    });
 
     let fires_hooks = lifecycle.fire_hooks;
 
@@ -360,7 +360,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
             HookControl::Block { .. } => return Ok(None),
             HookControl::Modify { payload } => {
                 if apply_pre_modify_overrides(config, &payload)? {
-                    threshold_source = CompactionThresholdSource::PreCompactModify;
+                    threshold_source = Some(CompactionThresholdSource::PreCompactModify);
                 }
             }
             HookControl::Allow | HookControl::Decision { .. } => {}
@@ -419,10 +419,8 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         strategy: config.policy_strategy.clone(),
         engine_strategy: compact_strategy_name(&engine_strategy).to_string(),
         requested_strategy: Some(requested_strategy),
-        resolved_threshold_tokens: (lifecycle.trigger == CompactionTrigger::Threshold)
-            .then_some(config.token_threshold),
-        threshold_source: (lifecycle.trigger == CompactionTrigger::Threshold)
-            .then(|| threshold_source.as_str().to_string()),
+        resolved_threshold_tokens: threshold_source.map(|_| config.token_threshold),
+        threshold_source: threshold_source.map(|source| source.as_str().to_string()),
         hard_limit_tokens: config.hard_limit_tokens,
         archived_messages,
         estimated_tokens_before,
