@@ -36,7 +36,9 @@ fn widget_tools() -> ToolRegistry {
         openWorldHint: true,
       },
       execution_policy: {kind: "fetch", side_effect_level: "network"},
-      governance: {audiences: ["cli", "mcp", "catalog", "dashboard", "agent"]},
+      governance: {
+        audiences: ["cli", "mcp", "catalog", "dashboard", "agent"],
+      },
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",

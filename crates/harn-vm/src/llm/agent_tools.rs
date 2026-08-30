@@ -455,14 +455,8 @@ fn ok_result_failure_category_object(value: &serde_json::Value) -> Option<&'stat
     None
 }
 
-pub(super) fn next_call_id() -> String {
-    uuid::Uuid::now_v7().to_string()
-}
-
 /// Outcome of a single tool dispatch — pairs the result with the
-/// backend that actually ran it (harn#691). The agent loop reads the
-/// `executor` value when emitting `AgentEvent::ToolCallUpdate` so
-/// clients can render "via mcp:linear" / "via host bridge" badges.
+/// backend that ran it for projection through `AgentEvent::ToolCallUpdate`.
 pub(super) struct ToolDispatchOutcome {
     pub result: Result<serde_json::Value, VmError>,
     pub executor: Option<ToolExecutor>,
@@ -508,14 +502,10 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
 ) -> ToolDispatchOutcome {
     use super::tools::handle_tool_locally;
 
-    if let Err(message) = require_agent_registry_membership(tools_val, tool_name) {
-        return ToolDispatchOutcome {
-            result: Err(VmError::CategorizedError {
-                message,
-                category: ErrorCategory::ToolRejected,
-            }),
-            executor: None,
-        };
+    if let Some(outcome) =
+        super::agent_tool_governance::registry_dispatch_rejection(tools_val, tool_name)
+    {
+        return outcome;
     }
 
     // Honor the declared executor (harn#743) ahead of the historic
@@ -835,51 +825,6 @@ pub(super) fn declared_executor_for_tool(
         return None;
     }
     None
-}
-
-fn require_agent_registry_membership(
-    tools_val: Option<&VmValue>,
-    tool_name: &str,
-) -> Result<(), String> {
-    let Some(tools_val) = tools_val else {
-        // Legacy ambient dispatch is intentional only when no explicit tool
-        // registry was supplied. Once a registry exists, it is the complete
-        // callable model surface and missing names must not fall through to a
-        // local short-circuit or connected host bridge.
-        return Ok(());
-    };
-    let Some(dict) = tools_val.as_dict() else {
-        return Err(format!(
-            "tool '{tool_name}' cannot be dispatched because the active agent tool registry is malformed"
-        ));
-    };
-    let Some(VmValue::List(tools)) = dict.get("tools") else {
-        return Err(format!(
-            "tool '{tool_name}' cannot be dispatched because the active agent tool registry is malformed"
-        ));
-    };
-    let Some(entry) = tools.iter().find_map(|tool| {
-        let VmValue::Dict(entry) = tool else {
-            return None;
-        };
-        (entry.get("name").map(VmValue::display).as_deref() == Some(tool_name)).then_some(entry)
-    }) else {
-        return Err(format!(
-            "tool '{tool_name}' is not present in the active agent tool registry"
-        ));
-    };
-    match crate::tool_registry::tool_entry_allows_audience(
-        entry,
-        crate::tool_registry::ToolAudience::Agent,
-    ) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(format!(
-            "tool '{tool_name}' is not exposed to the agent/model adapter"
-        )),
-        Err(error) => Err(format!(
-            "tool '{tool_name}' has invalid agent/model governance: {error}"
-        )),
-    }
 }
 
 /// Return the configured `mcp_server` name on `tool_name`'s entry, set
@@ -1519,93 +1464,6 @@ mod tests {
         // reflects the path that was attempted.
         assert!(outcome.result.is_err());
         assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn projected_registry_blocks_excluded_host_bridge_fallthrough() {
-        let bridge_called = Arc::new(AtomicBool::new(false));
-        let writer_called = Arc::clone(&bridge_called);
-        let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
-            Arc::new(Mutex::new(std::collections::HashMap::new())),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(move |_| {
-                writer_called.store(true, std::sync::atomic::Ordering::SeqCst);
-                Err("excluded tool reached host bridge".to_string())
-            }),
-            1,
-        ));
-        let mut governance = crate::value::DictMap::new();
-        governance.insert(
-            crate::value::intern_key("audiences"),
-            VmValue::List(Arc::new(vec![VmValue::String("cli".into())])),
-        );
-        let mut entry = crate::value::DictMap::new();
-        entry.put_str("executor", "host_bridge");
-        entry.put_str("host_capability", "operator.inspect");
-        entry.insert(
-            crate::value::intern_key("governance"),
-            VmValue::dict(governance),
-        );
-        let raw_tools = tools_dict(vec![("operator_inspect", entry)]);
-        let tools = crate::tool_registry::project_tools_for_audience(
-            &raw_tools,
-            crate::tool_registry::ToolAudience::Agent,
-        )
-        .expect("project registry");
-
-        let outcome = dispatch_tool_execution(
-            "operator_inspect",
-            &serde_json::json!({}),
-            Some(&tools),
-            Some(&bridge),
-            0,
-            0,
-        )
-        .await;
-
-        assert!(!bridge_called.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(outcome.executor.is_none());
-        let error = outcome.result.unwrap_err().to_string();
-        assert!(error.contains("not present in the active agent tool registry"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn projected_registry_blocks_excluded_local_short_circuit_fallthrough() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("private.txt");
-        std::fs::write(&path, "LOCAL_SHORT_CIRCUIT_RAN").expect("write fixture");
-
-        let mut governance = crate::value::DictMap::new();
-        governance.insert(
-            crate::value::intern_key("audiences"),
-            VmValue::List(Arc::new(vec![VmValue::String("cli".into())])),
-        );
-        let mut entry = crate::value::DictMap::new();
-        entry.insert(
-            crate::value::intern_key("governance"),
-            VmValue::dict(governance),
-        );
-        let raw_tools = tools_dict(vec![("read_file", entry)]);
-        let tools = crate::tool_registry::project_tools_for_audience(
-            &raw_tools,
-            crate::tool_registry::ToolAudience::Agent,
-        )
-        .expect("project registry");
-
-        let outcome = dispatch_tool_execution(
-            "read_file",
-            &serde_json::json!({"path": path}),
-            Some(&tools),
-            None,
-            0,
-            0,
-        )
-        .await;
-
-        assert!(outcome.executor.is_none());
-        let error = outcome.result.unwrap_err().to_string();
-        assert!(error.contains("not present in the active agent tool registry"));
-        assert!(!error.contains("LOCAL_SHORT_CIRCUIT_RAN"));
     }
 
     #[tokio::test(flavor = "current_thread")]

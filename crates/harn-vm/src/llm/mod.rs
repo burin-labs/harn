@@ -35,6 +35,7 @@ mod agent_terminal_class;
 /// and this is the owner of what those status strings mean.
 pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
+mod agent_tool_governance;
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
