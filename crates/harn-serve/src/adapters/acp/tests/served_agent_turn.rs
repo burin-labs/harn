@@ -104,7 +104,7 @@ async fn prompt(
 /// with the ceiling rejection quoted in the module docs, while the refuse half
 /// keeps passing.
 #[tokio::test(flavor = "current_thread")]
-async fn default_mode_admits_the_session_control_plane_and_still_refuses_durable_state() {
+async fn default_mode_admits_the_session_control_plane_and_still_refuses_an_unmarked_write() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
