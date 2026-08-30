@@ -22,6 +22,17 @@ async fn run_composition_dispatcher_source(
     source: &str,
     configure: impl FnOnce(&mut crate::Vm),
 ) -> Result<Value, VmError> {
+    Ok(
+        run_composition_dispatcher_source_with_execution_id(source, configure)
+            .await?
+            .0,
+    )
+}
+
+async fn run_composition_dispatcher_source_with_execution_id(
+    source: &str,
+    configure: impl FnOnce(&mut crate::Vm),
+) -> Result<(Value, String), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -39,7 +50,8 @@ async fn run_composition_dispatcher_source(
     vm.set_harness(crate::Harness::real());
     configure(&mut vm);
     let value = vm.execute(&chunk).await?;
-    Ok(crate::llm::vm_value_to_json(&value))
+    let execution_id = vm.execution_id().to_string();
+    Ok((crate::llm::vm_value_to_json(&value), execution_id))
 }
 
 #[test]
@@ -586,12 +598,9 @@ pipeline default(harness: Harness, task: unknown) {
 
 #[tokio::test(flavor = "current_thread")]
 async fn composition_report_preserves_the_owning_vm_execution_id() {
-    let outer_execution_id = Arc::new(std::sync::Mutex::new(None));
-    let captured_execution_id = Arc::clone(&outer_execution_id);
-    let report = run_composition_dispatcher_source(
+    let (report, expected) = run_composition_dispatcher_source_with_execution_id(
         r#"
 pipeline default(harness: Harness, task: unknown) {
-  __capture_execution_id()
   return harness.tools.composition_execute(
     "return 42",
     composition_binding_manifest([]),
@@ -599,23 +608,10 @@ pipeline default(harness: Harness, task: unknown) {
   )
 }
 "#,
-        move |vm| {
-            vm.register_async_builtin("__capture_execution_id", move |ctx, _args| {
-                let captured_execution_id = Arc::clone(&captured_execution_id);
-                async move {
-                    *captured_execution_id.lock().unwrap() = Some(ctx.execution_id());
-                    Ok(VmValue::Null)
-                }
-            });
-        },
+        |_| {},
     )
     .await
     .expect("composition builtin should execute");
-    let expected = outer_execution_id
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("outer VM execution identity should be captured");
 
     assert!(expected.starts_with("hxe-"));
     assert_eq!(report["run"]["execution_id"], expected);
