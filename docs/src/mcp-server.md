@@ -366,8 +366,8 @@ error when a client sends one as a top-level server request.
 ## Elicitation
 
 Script-driven MCP servers (those built with `harness.tools.mcp_tools(...)` /
-`harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` and started with `harn run --serve mcp`
-or `harn serve mcp`) can request structured user input during a handler with
+`harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` and started
+with `harn serve mcp`) can request structured user input during a handler with
 the `mcp_elicit(...)` builtin:
 
 ```harn
