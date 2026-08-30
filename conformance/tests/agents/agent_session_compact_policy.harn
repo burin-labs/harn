@@ -19,6 +19,7 @@ pipeline test(harness: Harness, task: unknown) {
       keep_last: 1,
       token_threshold: 1,
       compact_strategy: "custom",
+      hard_limit_strategy: "truncate",
       custom_compactor: { archived, _reminders, policy ->
         {
           summary: "host compact " + policy.mode + " " + policy.author + " "
