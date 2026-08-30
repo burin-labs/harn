@@ -1,0 +1,135 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+// The `AutoReview` seam: an approval nobody is present to give.
+//
+// A run with no host bridge used to have exactly one answer to "this tool call
+// needs approval" — refuse it, at `approval_unavailable`. That refusal is
+// correct and useless: the work stops for want of a decision nobody was there
+// to make. An embedder-registered `approval_reviewer` answers instead.
+//
+// Every case here is a MATCHED PAIR against the same policy and the same call.
+// A single case would prove nothing: "the call succeeded" is equally consistent
+// with "the reviewer granted it" and "the policy never refused it in the first
+// place", and only the control tells those apart.
+fn run_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a shell command",
+    {
+      handler: { _ -> {status: "completed", stdout: "ran", exit_code: 0} },
+      parameters: {command: {type: "string", description: "The command to run"}},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+/** A reviewer that grants, in the decision-record shape the seam requires. */
+fn granting_reviewer() {
+  return { _ -> {approved: true, reviewer_answered: true, rationale: "the goal names this file"} }
+}
+
+/** A reviewer that considers the call and refuses it. */
+fn denying_reviewer() {
+  return { _ ->
+    {approved: false, reviewer_answered: true, rationale: "unrelated to the stated goal"}
+  }
+}
+
+/** A reviewer that returns a bare `true` rather than a decision record. */
+fn sloppy_reviewer() {
+  return { _ -> true }
+}
+
+/** A reviewer that raises. */
+fn raising_reviewer() {
+  return { _ ->
+    throw "reviewer exploded"
+  }
+}
+
+pipeline default(harness: Harness) {
+  const tools = run_tools()
+  // Asks for `run`. With no host bridge in this context, an ask that reaches
+  // the prompt comes back `approval_unavailable`.
+  const asking_policy = {require_approval: ["run"]}
+  // CONTROL. Same policy, same call, NO reviewer. This must fail, or every
+  // assertion below passes vacuously.
+  const unreviewed = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c1", name: "run", arguments: {command: "cat .env"}},
+    tools,
+    {approval_policy: asking_policy},
+  )
+  assert(
+    unreviewed.ok == false,
+    "CONTROL: with no reviewer the ask must die unanswered, or this whole test is vacuous",
+  )
+  // The exact gate is the runtime's business and differs by posture: an ask
+  // with no bridge lands on `approval_unavailable`, while a posture that
+  // already collapsed the ask lands on `approval_policy`. Both are "refused
+  // with nobody to ask", which is what the seam answers. Pinning one would make
+  // this test fail on a posture change that broke nothing.
+  assert(
+    unreviewed.denial.gate == "approval_unavailable"
+      || unreviewed.denial.gate == "approval_policy",
+    "CONTROL: refusal must come from an approval gate, got: ${unreviewed.denial.gate}",
+  )
+  // 1. The same call, the same policy, WITH a granting reviewer: it proceeds.
+  //    Paired against the control above, this isolates the reviewer as the only
+  //    thing that changed.
+  const granted = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c2", name: "run", arguments: {command: "cat .env"}},
+    tools,
+    {approval_policy: asking_policy, approval_reviewer: granting_reviewer()},
+  )
+  assert(
+    granted.ok == true,
+    "a granted review must let the call run, got denial: ${granted?.denial?.gate}",
+  )
+  // 2. A reviewer that considers it and says no leaves the call refused.
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c3", name: "run", arguments: {command: "cat ~/.ssh/id_rsa"}},
+    tools,
+    {approval_policy: asking_policy, approval_reviewer: denying_reviewer()},
+  )
+  assert(denied.ok == false, "a reviewer denial must not let the call run")
+  // 3. FAIL CLOSED: a bare `true` is not a decision record and must not grant.
+  //    This is the falsifier for the whole security posture of the seam. If it
+  //    ever passes, every buggy reviewer in the fleet became a rubber stamp.
+  const sloppy = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c4", name: "run", arguments: {command: "cat .env"}},
+    tools,
+    {approval_policy: asking_policy, approval_reviewer: sloppy_reviewer()},
+  )
+  assert(
+    sloppy.ok == false,
+    "a bare `true` is not an approval; accepting it would make any truthy return a grant",
+  )
+  // 4. FAIL CLOSED: a reviewer that raises refuses the call rather than
+  //    aborting the run. A failed optional rescue must not be worse than never
+  //    having attempted one.
+  const raised = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c5", name: "run", arguments: {command: "cat .env"}},
+    tools,
+    {approval_policy: asking_policy, approval_reviewer: raising_reviewer()},
+  )
+  assert(raised.ok == false, "a raising reviewer denies rather than granting")
+  // 5. A reviewer must not widen a policy that ALLOWS nothing to review. With
+  //    no ask and no deny there is nothing for the seam to act on, and the call
+  //    behaves exactly as it would without one.
+  const untouched = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c6", name: "run", arguments: {command: "echo hi"}},
+    tools,
+    {approval_reviewer: granting_reviewer()},
+  )
+  assert(untouched.ok == true, "a reviewer must not disturb a call nothing refused")
+  harness.stdio.println("approval_reviewer_ok")
+}

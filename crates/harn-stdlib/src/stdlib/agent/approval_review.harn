@@ -347,3 +347,66 @@ fn __approval_review_usage(checkpoint: any) {
 fn __approval_review_cost(checkpoint: any) {
   return to_float(__approval_review_usage(checkpoint)?.cost_usd)
 }
+
+/**
+ * Build the closure `agent_loop` expects for its `approval_reviewer` option.
+ *
+ * The VM hands the closure one record describing the refusal
+ * (`{tool, arguments, session_id, action, reason, risk_labels,
+ * policy_decision}`) and reads back a decision record. This adapts between the
+ * two shapes so a caller writes one line:
+ *
+ *     agent_loop(harness, {
+ *       approval_reviewer: approval_reviewer_for(harness, policy, goal),
+ *     })
+ *
+ * `goal` is the whole point. The reviewer's question is never "is this command
+ * dangerous" in the abstract -- it is "does THIS goal authorize THIS action" --
+ * so a caller that passes no goal gets a reviewer that can only reason from the
+ * command, which is the weaker instrument. It is a required parameter rather
+ * than an option for that reason.
+ *
+ * @effects: [agent, llm]
+ * @errors: []
+ */
+pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> any {
+  return { request ->
+    approval_review_decide(
+      harness,
+      policy,
+      {
+        goal: goal,
+        task: goal,
+        site: "agent_loop",
+        capability: request?.tool,
+        category: __reviewer_category(request),
+        command: __reviewer_command(request),
+        cwd: request?.cwd ?? "",
+        reason: request?.reason ?? "a permission gate refused this action",
+        refused_paths: request?.refused_paths ?? [],
+        observability: request?.observability ?? "inferred",
+        untrusted_context: request?.untrusted_context,
+      },
+    )
+  }
+}
+
+/** The refusal's category, never blank -- the floor is matched by category. */
+fn __reviewer_category(request: any) -> string {
+  const declared = trim(to_string(request?.category ?? ""))
+  if declared != "" {
+    return declared
+  }
+  return trim(to_string(request?.tool ?? "unclassified"))
+}
+
+/** A human-readable rendering of the refused call for the reviewer prompt. */
+fn __reviewer_command(request: any) -> string {
+  // `tool` is a reserved keyword in Harn, hence the name.
+  const tool_name = trim(to_string(request?.tool ?? ""))
+  const args = request?.arguments
+  if args == nil {
+    return tool_name
+  }
+  return tool_name + " " + json_stringify(args)
+}
