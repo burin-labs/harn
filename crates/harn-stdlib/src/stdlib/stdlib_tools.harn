@@ -36,7 +36,7 @@ pub type ToolIcon = {src: string, mimeType?: string, sizes?: list<string>, theme
 pub type ToolCatalogEntry = {
   name: string,
   title?: string,
-  description: string,
+  description?: string,
   inputSchema: dict,
   outputSchema?: dict,
   annotations?: dict,

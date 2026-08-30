@@ -18,7 +18,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
             Ok(McpToolDef {
                 name: tool.catalog.name,
                 title: tool.catalog.title,
-                description: tool.catalog.description,
+                description: tool.catalog.description.unwrap_or_default(),
                 input_schema: tool.catalog.input_schema,
                 output_schema: tool.catalog.output_schema,
                 annotations: tool.catalog.annotations,

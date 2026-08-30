@@ -112,7 +112,7 @@ Registry `info` supplies the default MCP server name/version/instructions and
 the generated CLI name/version/description. Explicit transport metadata wins.
 Each tool retains:
 
-- `name`, `title`, and `description`
+- `name` plus optional `title` and `description`
 - `inputSchema` and optional `outputSchema`
 - MCP `annotations` and Harn execution `policy`
 - `cli`, `namespace`, and `deferLoading`

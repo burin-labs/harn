@@ -292,8 +292,10 @@ fn clap_command(
         let mut subcommand = clap_command(child_name.clone(), child, tools)?;
         if let Some(index) = child.tool_index {
             let tool = &tools[index];
+            if let Some(description) = tool.description.as_ref() {
+                subcommand = subcommand.about(description.clone());
+            }
             subcommand = subcommand
-                .about(tool.description.clone())
                 .hide(tool.cli.hidden)
                 .subcommand_required(false)
                 .arg_required_else_help(false)
@@ -476,7 +478,7 @@ mod tests {
         harn_vm::tool_registry::ToolCatalogEntry {
             name: name.to_string(),
             title: None,
-            description: format!("Run {name}"),
+            description: Some(format!("Run {name}")),
             input_schema,
             output_schema: None,
             annotations: None,

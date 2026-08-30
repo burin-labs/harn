@@ -86,7 +86,8 @@ pub struct ToolCatalogEntry {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub input_schema: JsonValue,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<JsonValue>,
@@ -263,7 +264,7 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
         }
     };
     let name = required_string(entry, "name", "tool registry entry")?;
-    let description = required_string(entry, "description", &format!("tool {name:?}"))?;
+    let description = optional_description(entry, &format!("tool {name:?}"))?;
     let title = optional_string(entry, "title", &format!("tool {name:?}"))?;
     let namespace = optional_string(entry, "namespace", &format!("tool {name:?}"))?;
     let defer_loading =
@@ -522,6 +523,20 @@ fn optional_string(
     }
 }
 
+fn optional_description(
+    fields: &crate::value::DictMap,
+    owner: &str,
+) -> Result<Option<String>, VmError> {
+    match fields.get("description") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) if value.is_empty() => Ok(None),
+        Some(VmValue::String(value)) => Ok(Some(value.to_string())),
+        _ => Err(VmError::Runtime(format!(
+            "{owner} field \"description\" must be a string"
+        ))),
+    }
+}
+
 fn optional_bool(
     fields: &crate::value::DictMap,
     key: &str,
@@ -676,6 +691,17 @@ mod tests {
         tool.insert("namespace".into(), string("widgets"));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(catalog.tools[0].cli.command, ["widgets", "get_widget"]);
+    }
+
+    #[test]
+    fn treats_an_empty_description_as_absent() {
+        let mut tool = match entry("undocumented", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        tool.insert("description".into(), string(""));
+        let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
+        assert_eq!(catalog.tools[0].description, None);
     }
 
     #[test]
