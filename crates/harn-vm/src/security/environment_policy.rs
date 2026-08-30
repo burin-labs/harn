@@ -108,6 +108,11 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "CC",
     "CXX",
     "LD",
+    // ccache: the object cache and its scratch dir. CCACHE_TEMPDIR is the one
+    // that breaks builds when unset, because it defaults to XDG_RUNTIME_DIR
+    // (`/run/user/<uid>`), which no workspace write root covers.
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
 ];
 
 /// The filesystem-path-valued subset of [`TOOLCHAIN_ENV_ALLOWLIST`]: toolchain
@@ -140,6 +145,11 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     "GOMODCACHE",
     "GOPATH",
     "GOROOT",
+    // C/C++ compiler cache. ccache defaults its tempdir to XDG_RUNTIME_DIR
+    // (`/run/user/<uid>`), which is outside every workspace write root, so a
+    // cgo or C build fails "Permission denied" before it compiles anything.
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
     // JVM
     "JAVA_HOME",
 ];
@@ -154,6 +164,8 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
     "GOCACHE",
     "GOMODCACHE",
     "GOPATH",

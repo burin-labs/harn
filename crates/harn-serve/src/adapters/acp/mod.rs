@@ -723,6 +723,15 @@ pub struct AcpServerConfig {
 pub struct AcpSandboxConfig {
     pub read_only_roots: Vec<String>,
     pub process: harn_vm::orchestration::ProcessSandboxPolicy,
+    /// An embedder's explicit confinement choice, overriding what the
+    /// configured roots would otherwise imply.
+    ///
+    /// Without this an embedder could only ever ARM confinement, never decline
+    /// it: `policy_for_mode` inferred `Worktree` from the presence of process
+    /// config, so a host that wanted a deliberately unconfined run had no way
+    /// to say so and would silently get a confined one. `None` keeps the
+    /// historical inference exactly as it was.
+    pub requested_profile: Option<harn_vm::orchestration::SandboxProfile>,
 }
 
 impl AcpServerConfig {
@@ -840,7 +849,9 @@ impl AcpSandboxConfig {
     /// per-turn policy use this method, while callers arming an OS or network
     /// sandbox use the narrower predicate.
     pub fn is_configured(&self) -> bool {
-        !self.read_only_roots.is_empty() || self.has_process_confinement()
+        !self.read_only_roots.is_empty()
+            || self.has_process_confinement()
+            || self.requested_profile.is_some()
     }
 
     /// Whether the embedder opted into process-level OS confinement.
@@ -855,6 +866,7 @@ impl AcpSandboxConfig {
         Self {
             read_only_roots: canonicalize_sandbox_roots(roots),
             process: harn_vm::orchestration::ProcessSandboxPolicy::default(),
+            requested_profile: None,
         }
     }
 
@@ -862,6 +874,7 @@ impl AcpSandboxConfig {
         Self {
             read_only_roots: Vec::new(),
             process,
+            requested_profile: None,
         }
     }
 

@@ -285,3 +285,113 @@ fn broad_authority_write_covers_scoped_delegation_and_flattening() {
         .expect_err("a scoped grant must not authorize a sibling authority kind");
     assert!(scoped.assert_within_ceiling(&sibling).is_err());
 }
+
+// ---- the default denylist is data, and the data is actually there ----------
+
+/// A non-null control on the parse.
+///
+/// `default_read_deny_home_paths()` reads a TOML file. Every failure mode of
+/// that read — a renamed table, a retyped array, a file that stopped being
+/// included — produces an EMPTY list, and an empty denylist denies nothing
+/// while every other signature of a working feature stays intact: the field
+/// exists, the profile renders, the policy composes, and every test that does
+/// not inspect the contents still passes. So the list is asserted to be
+/// non-empty, to clear a floor, and to contain specific known members. A parse
+/// that silently produced nothing would fail here instead of shipping.
+#[test]
+fn the_default_denylist_parses_to_real_entries() {
+    let defaults = super::default_read_deny_home_paths();
+
+    assert!(
+        defaults.len() >= 12,
+        "the default denylist parsed to {} entries; a shrunken or empty parse denies \
+         credentials nothing and looks exactly like a working one: {defaults:?}",
+        defaults.len()
+    );
+    for required in [
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".netrc",
+        ".docker/config.json",
+        ".config/gh/hosts.yml",
+        ".config/gcloud",
+    ] {
+        assert!(
+            defaults.iter().any(|entry| entry == required),
+            "`{required}` must be denied by default: {defaults:?}"
+        );
+    }
+    assert!(
+        defaults.iter().all(|entry| !entry.starts_with('/')),
+        "entries are home-relative; an absolute path here would be resolved against the wrong \
+         root: {defaults:?}"
+    );
+}
+
+/// The denial term is the one field that must UNION as it nests. Every other
+/// axis narrows, and narrowing a denial would widen the resulting authority.
+#[test]
+fn a_nested_policy_may_add_a_denial_and_may_never_drop_one() {
+    let outer = ProcessSandboxPolicy {
+        read_deny_roots: vec!["/outer-secret".to_string()],
+        ..ProcessSandboxPolicy::default()
+    };
+    let inner = ProcessSandboxPolicy {
+        read_deny_roots: vec!["/inner-secret".to_string()],
+        ..ProcessSandboxPolicy::default()
+    };
+
+    let nested = outer.intersect(&inner);
+
+    assert!(
+        nested
+            .read_deny_roots
+            .contains(&"/outer-secret".to_string()),
+        "a nested request must not be able to drop an outer denial: {nested:?}"
+    );
+    assert!(
+        nested
+            .read_deny_roots
+            .contains(&"/inner-secret".to_string()),
+        "a nested request may add its own denial: {nested:?}"
+    );
+}
+
+/// Adding a field to `ProcessSandboxPolicy` changes every workflow graph
+/// digest, and that is not obvious from either file.
+///
+/// `WorkflowGraph` embeds `CapabilityPolicy`, and `workflow_graph_digest` is a
+/// SHA-256 over the canonical graph's JSON. None of these fields carry
+/// `skip_serializing_if`, so an empty `read_deny_roots` still serializes and
+/// still moves the digest. That is why `read_deny_roots` repinned the
+/// quickstart digest in `docs/src/workflow-authoring-quickstart.md`.
+///
+/// This test exists so the next person who adds a field here learns the
+/// consequence from a failing assertion rather than from a docs gate.
+#[test]
+fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
+    let json = serde_json::to_value(ProcessSandboxPolicy::default()).expect("serialize");
+    let object = json.as_object().expect("object");
+    for field in [
+        "presets",
+        "read_roots",
+        "write_roots",
+        "read_deny_roots",
+        "allow_tcp_loopback",
+    ] {
+        assert!(
+            object.contains_key(field),
+            "`{field}` must appear even at its default, because workflow graph \
+             digests are taken over this serialization; adding a field here \
+             repins every pinned digest"
+        );
+    }
+    assert_eq!(
+        object.len(),
+        5,
+        "a field was added or removed: repin the quickstart graph_digest in \
+         docs/src/workflow-authoring-quickstart.md and \
+         scripts/check_docs_workflow_quickstart.harn"
+    );
+}
