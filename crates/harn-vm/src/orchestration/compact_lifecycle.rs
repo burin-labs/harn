@@ -127,6 +127,12 @@ pub struct CompactLifecycle<'a> {
     pub transcript_id: Option<&'a str>,
     pub mode: CompactMode,
     pub trigger: CompactionTrigger,
+    /// Normalized strategy requested before hooks or fallback changed the
+    /// applied engine. Kept separate from `config.policy_strategy`, which may
+    /// be rewritten by `PreCompact`.
+    pub requested_strategy: Option<&'a str>,
+    /// Boundary field that supplied the tier-1 threshold.
+    pub threshold_source: Option<&'a str>,
     pub fire_hooks: bool,
     /// Reminder events from the source transcript that should pass through
     /// the `preserve_on_compact` / `ttl_turns` / `dedupe_key` lifecycle
@@ -165,6 +171,8 @@ impl<'a> CompactLifecycle<'a> {
             transcript_id: None,
             mode,
             trigger,
+            requested_strategy: None,
+            threshold_source: None,
             fire_hooks: mode.fires_hooks(),
             reminder_events: Vec::new(),
             summary_override: None,
@@ -186,6 +194,16 @@ impl<'a> CompactLifecycle<'a> {
 
     pub fn with_trigger(mut self, trigger: CompactionTrigger) -> Self {
         self.trigger = trigger;
+        self
+    }
+
+    pub fn with_request_provenance(
+        mut self,
+        requested_strategy: Option<&'a str>,
+        threshold_source: Option<&'a str>,
+    ) -> Self {
+        self.requested_strategy = requested_strategy;
+        self.threshold_source = threshold_source;
         self
     }
 
@@ -402,6 +420,11 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         reason: lifecycle.trigger.as_str().to_string(),
         strategy: config.policy_strategy.clone(),
         engine_strategy: compact_strategy_name(&engine_strategy).to_string(),
+        requested_strategy: lifecycle.requested_strategy.map(str::to_string),
+        resolved_threshold_tokens: (lifecycle.trigger == CompactionTrigger::Threshold)
+            .then_some(config.token_threshold),
+        threshold_source: lifecycle.threshold_source.map(str::to_string),
+        hard_limit_tokens: config.hard_limit_tokens,
         archived_messages,
         estimated_tokens_before,
         estimated_tokens_after,

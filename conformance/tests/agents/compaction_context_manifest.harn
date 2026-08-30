@@ -42,10 +42,10 @@ fn main(harness: Harness) {
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 2,
-        auto_compact: true,
-        compact_threshold: 1,
-        compact_keep_last: 1,
-        compact_strategy: "llm",
+        // Keep the request nested, as production hosts do. The outer option
+        // bag intentionally has no compact_strategy: reconstructing the
+        // receipt from that bag used to misreport this LLM run as masking.
+        auto_compact: {enabled: true, token_threshold: 1, keep_last: 1, compact_strategy: "llm"},
         llm_transcript_dir: transcript_dir,
       }
       const result = agent_loop(
@@ -69,7 +69,15 @@ fn main(harness: Harness) {
         },
       )
       require result.status == "done"
-      require len(transcript_events_by_kind(result.transcript, "compaction")) > 0
+      const compactions = transcript_events_by_kind(result.transcript, "compaction")
+      require len(compactions) > 0
+      const receipt = compactions[0].metadata.receipt
+      require receipt.requested_strategy == "llm"
+      require receipt.engine_strategy == "llm"
+      require receipt.resolved_threshold_tokens == 1
+      require receipt.threshold_source == "token_threshold"
+      require receipt.source_measurement.summary_bytes > 0
+      require compactions[0].metadata.summary_bytes == receipt.source_measurement.summary_bytes
       require len(compaction_calls) == 1
       require len(requests) == len(calls)
       require len(compaction_requests) == 1
