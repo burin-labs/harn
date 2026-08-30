@@ -150,15 +150,19 @@
       }
     ]
   },
-  "trace_spans": [
-    {
-      "span_id": 1,
-      "kind": "stage",
-      "name": "answer",
-      "start_ms": 0,
-      "duration_ms": 1200
-    }
-  ],
+  "evidence": {
+    "schema_version": 1,
+    "execution_id": "run_fixture_session_bundle",
+    "trace_spans": [
+      {
+        "span_id": 1,
+        "kind": "stage",
+        "name": "answer",
+        "start_ms": 0,
+        "duration_ms": 1200
+      }
+    ]
+  },
   "tool_recordings": [
     {
       "tool_name": "read_file",

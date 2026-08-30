@@ -70,6 +70,40 @@ fn redacts_tool_payloads_before_append() {
 }
 
 #[test]
+fn event_log_sink_binds_payload_and_headers_to_the_active_execution() {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), "s");
+    let execution_id = crate::mint_execution_scope();
+    let _scope = crate::enter_execution_scope(execution_id.clone());
+    sink.handle_event(&AgentEvent::IterationStart {
+        session_id: "s".into(),
+        iteration: 1,
+        provider: String::new(),
+        model: String::new(),
+    });
+
+    let topic = Topic::new("observability.agent_events.s").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].1.headers.get("execution_id").map(String::as_str),
+        Some(execution_id.as_ref())
+    );
+    assert_eq!(
+        events[0].1.payload["execution_id"],
+        serde_json::json!(execution_id.as_ref())
+    );
+    let replay = futures::executor::block_on(
+        crate::orchestration::load_agent_session_replay_events_from_log(log.as_ref(), "s"),
+    )
+    .unwrap();
+    assert_eq!(
+        replay[0].execution_id.as_deref(),
+        Some(execution_id.as_ref())
+    );
+}
+
+#[test]
 fn persists_typed_repair_claim_without_feedback_prose_matching() {
     let session_id = "repair-claim";
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));

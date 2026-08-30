@@ -214,35 +214,7 @@ async fn acp_session_timeline_query_and_subscribe_use_event_log() {
             save_run_record(
                 &RunRecord {
                     id: "timeline-run".to_string(),
-                    trace_spans: vec![
-                        RunTraceSpanRecord {
-                            trace_id: "trace-acp".to_string(),
-                            span_id: 1,
-                            kind: "pipeline".to_string(),
-                            name: "root".to_string(),
-                            start_ms: 1,
-                            duration_ms: 2,
-                            metadata: BTreeMap::from([(
-                                "session_id".to_string(),
-                                serde_json::json!(session_id.clone()),
-                            )]),
-                            ..RunTraceSpanRecord::default()
-                        },
-                        RunTraceSpanRecord {
-                            trace_id: "trace-acp".to_string(),
-                            span_id: 2,
-                            parent_id: Some(1),
-                            kind: "tool_call".to_string(),
-                            name: "child".to_string(),
-                            start_ms: 2,
-                            duration_ms: 3,
-                            metadata: BTreeMap::from([(
-                                "session_id".to_string(),
-                                serde_json::json!(session_id.clone()),
-                            )]),
-                            ..RunTraceSpanRecord::default()
-                        },
-                    ],
+                    evidence: typed_observability::timeline_evidence(&session_id),
                     ..RunRecord::default()
                 },
                 Some(run_path.to_str().unwrap()),

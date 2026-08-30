@@ -168,6 +168,7 @@ fn replay_event_from_stored(
         event_id: stored.event_id,
         kind: stored_kind_label(&stored.kind),
         occurred_at_ms: stored.ts_ms,
+        execution_id: None,
         event,
     })
 }

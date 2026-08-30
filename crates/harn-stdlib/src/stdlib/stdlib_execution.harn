@@ -1,0 +1,204 @@
+/**
+ * std/execution — compact, durable execution decisions and evidence pointers.
+ *
+ * A decision carries references, never the referenced values. Committing the
+ * same decision id again returns the first durable decision, which makes replay
+ * reuse the recorded answer instead of silently deciding twice.
+ */
+import { filter_nil } from "std/collections"
+
+pub type ExecutionEvidenceKind = "artifact" | "event" | "receipt" | "run" | "source" | "trace"
+
+pub type ExecutionEvidenceRef = {
+  kind: ExecutionEvidenceKind,
+  ref: string,
+  label?: string,
+  hash?: string,
+}
+
+pub type ExecutionDecision = {
+  schema: "harn.execution_decision.v1",
+  id: string,
+  outcome: "proceed",
+  reason_code: string,
+  evidence: list<ExecutionEvidenceRef>,
+} \
+  | {
+  schema: "harn.execution_decision.v1",
+  id: string,
+  outcome: "abstain",
+  reason_code: string,
+  evidence: list<ExecutionEvidenceRef>,
+  missing: list<string>,
+} \
+  | {
+  schema: "harn.execution_decision.v1",
+  id: string,
+  outcome: "escalate",
+  reason_code: string,
+  evidence: list<ExecutionEvidenceRef>,
+  target: string,
+}
+
+pub type ExecutionDecisionRecordOptions = {
+  channel?: string,
+  scope?: "session" | "pipeline" | "tenant",
+  session_id?: string,
+  pipeline_id?: string,
+  tenant_id?: string,
+}
+
+pub type ExecutionDecisionReceipt = {
+  schema: "harn.execution_decision_receipt.v1",
+  decision: ExecutionDecision,
+  event_id: string,
+  duplicate: bool,
+  channel: string,
+  execution_id?: string,
+}
+
+pub type ExecutionEvidenceRefOptions = {label?: string, hash?: string}
+
+fn __nonempty(value: string, field: string) -> string {
+  const normalized = trim(value)
+  if normalized == "" {
+    throw "std/execution: " + field + " must not be empty"
+  }
+  return normalized
+}
+
+fn __required_evidence(evidence: list<ExecutionEvidenceRef>) -> list<ExecutionEvidenceRef> {
+  if len(evidence) == 0 {
+    throw "std/execution: proceed requires at least one evidence ref"
+  }
+  return evidence
+}
+
+/**
+ * Build a value-free pointer to evidence owned by another durable artifact.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn evidence_ref(
+  kind: ExecutionEvidenceKind,
+  ref: string,
+  options: ExecutionEvidenceRefOptions = {},
+) -> ExecutionEvidenceRef {
+  return filter_nil(
+    {kind: kind, ref: __nonempty(ref, "evidence ref"), label: options.label, hash: options.hash},
+  )
+}
+
+/**
+ * Record an affirmative decision whose basis is explicitly cited.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn proceed(
+  id: string,
+  reason_code: string,
+  evidence: list<ExecutionEvidenceRef> = [],
+) -> ExecutionDecision {
+  return {
+    schema: "harn.execution_decision.v1",
+    id: __nonempty(id, "decision id"),
+    outcome: "proceed",
+    reason_code: __nonempty(reason_code, "reason code"),
+    evidence: __required_evidence(evidence),
+  }
+}
+
+/**
+ * Abstain when named evidence is missing instead of inventing certainty.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn abstain(
+  id: string,
+  reason_code: string,
+  missing: list<string>,
+  evidence: list<ExecutionEvidenceRef> = [],
+) -> ExecutionDecision {
+  if len(missing) == 0 {
+    throw "std/execution: abstain requires at least one missing evidence name"
+  }
+  return {
+    schema: "harn.execution_decision.v1",
+    id: __nonempty(id, "decision id"),
+    outcome: "abstain",
+    reason_code: __nonempty(reason_code, "reason code"),
+    evidence: evidence,
+    missing: missing.map({ item -> return __nonempty(item, "missing evidence") }),
+  }
+}
+
+/**
+ * Escalate a decision to a named host-owned reviewer or role.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn escalate(
+  id: string,
+  reason_code: string,
+  target: string,
+  evidence: list<ExecutionEvidenceRef> = [],
+) -> ExecutionDecision {
+  return {
+    schema: "harn.execution_decision.v1",
+    id: __nonempty(id, "decision id"),
+    outcome: "escalate",
+    reason_code: __nonempty(reason_code, "reason code"),
+    evidence: evidence,
+    target: __nonempty(target, "escalation target"),
+  }
+}
+
+fn __channel_options(decision: ExecutionDecision, options: ExecutionDecisionRecordOptions) -> dict {
+  return filter_nil(
+    {
+      id: decision.id,
+      scope: options.scope,
+      session_id: options.session_id,
+      pipeline_id: options.pipeline_id,
+      tenant_id: options.tenant_id,
+    },
+  )
+}
+
+/**
+ * Commit one decision to Harn's durable channel ledger.
+ *
+ * The decision id is the channel idempotency key. On replay, `decision` is the
+ * original stored payload and `duplicate` is true, even when the caller offers
+ * a different candidate.
+ *
+ * @effects: [transcript.write]
+ * @errors: [invalid_argument, runtime]
+ */
+pub fn decision_commit(
+  channels: HarnessChannels,
+  decision: ExecutionDecision,
+  options: ExecutionDecisionRecordOptions = {},
+) -> ExecutionDecisionReceipt {
+  const canonical: ExecutionDecision = schema_expect(decision, schema_of(ExecutionDecision))
+  const receipt = channels.append(
+    options.channel ?? "execution.decisions",
+    canonical,
+    __channel_options(canonical, options),
+  )
+  const stored: ExecutionDecision = schema_expect(receipt.payload, schema_of(ExecutionDecision))
+  return filter_nil(
+    {
+      schema: "harn.execution_decision_receipt.v1",
+      decision: stored,
+      event_id: receipt.event_id,
+      duplicate: receipt.duplicate,
+      channel: receipt.name_resolved,
+      execution_id: receipt?.execution_id,
+    },
+  )
+}

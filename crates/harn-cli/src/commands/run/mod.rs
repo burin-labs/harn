@@ -18,6 +18,7 @@ use harn_parser::DiagnosticSeverity;
 mod chunk_loading;
 pub(crate) mod environment;
 mod eval_source;
+mod evidence;
 mod explain_cost;
 pub mod harnpack;
 mod interrupts;
@@ -28,6 +29,7 @@ mod manifest_runtime;
 mod mcp_serve;
 mod outcome;
 mod reporting;
+mod watch;
 
 use outcome::{
     finalize_harnpack_dry_run, finalize_harnpack_error, finalize_run_error,
@@ -44,6 +46,7 @@ use self::eval_source::create_eval_temp_file;
 pub(crate) use self::eval_source::prepare_eval_temp_file;
 #[cfg(test)]
 use self::eval_source::{eval_source_for_code, split_eval_header};
+use self::evidence::persist_execution_evidence;
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::interrupts::{
     install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
@@ -66,9 +69,9 @@ pub(crate) use self::reporting::{
     render_trace_summary, run_aux_options_from_args, run_control_options_from_args,
 };
 pub use self::reporting::{
-    RunAuxOptions, RunControlOptions, RunJsonOptions, RunJsonSink, RunJsonSinkTarget,
-    RunPhaseOptions, RunRusageOptions, RunSummaryOptions, RUN_PHASE_SCHEMA_VERSION,
-    RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
+    FlightRecorderOptions, RunAuxOptions, RunControlOptions, RunJsonOptions, RunJsonSink,
+    RunJsonSinkTarget, RunPhaseOptions, RunRusageOptions, RunSummaryOptions,
+    RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION,
 };
 #[cfg(test)]
 use self::sandbox::default_run_capability_policy;
@@ -76,6 +79,7 @@ pub use self::sandbox::RunSandboxOptions;
 use self::sandbox::{
     default_run_workspace_root, install_run_sandbox_scope, run_sandbox_attestation,
 };
+pub(crate) use self::watch::run_watch;
 
 /// Core builtins that are never denied, even when using `--allow`.
 const CORE_BUILTINS: &[&str] = &[
@@ -213,6 +217,7 @@ struct ExecuteRunInputs<'a> {
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
     project_runtime: ProjectRuntimeMode,
+    flight_recorder: FlightRecorderOptions,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -308,6 +313,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         timing: None,
         harnpack,
         project_runtime: control.project_runtime,
+        flight_recorder: control.flight_recorder,
     })
     .await;
     if let Some(guard) = &deadline_guard {
@@ -590,6 +596,7 @@ pub struct RunExecutionOptions {
     pub sandbox: RunSandboxOptions,
     pub harnpack: HarnpackRunOptions,
     pub project_runtime: ProjectRuntimeMode,
+    pub flight_recorder: FlightRecorderOptions,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -609,6 +616,7 @@ pub async fn execute_run_with_options(
         sandbox,
         harnpack,
         project_runtime,
+        flight_recorder,
     } = options;
     execute_run_inner(ExecuteRunInputs {
         path,
@@ -626,6 +634,7 @@ pub async fn execute_run_with_options(
         timing: None,
         harnpack,
         project_runtime,
+        flight_recorder,
     })
     .await
 }
@@ -683,6 +692,7 @@ pub async fn execute_run_json_with_options(
         sandbox,
         harnpack,
         project_runtime,
+        flight_recorder,
     } = execution_options;
     execute_run_inner(ExecuteRunInputs {
         path,
@@ -700,6 +710,7 @@ pub async fn execute_run_json_with_options(
         timing: None,
         harnpack,
         project_runtime,
+        flight_recorder,
     })
     .await
 }
@@ -730,6 +741,7 @@ pub(crate) async fn execute_run_with_timing(
         timing,
         harnpack: HarnpackRunOptions::default(),
         project_runtime,
+        flight_recorder: FlightRecorderOptions::default(),
     })
     .await
 }
@@ -758,7 +770,7 @@ fn entry_source_dir(path: &str) -> std::path::PathBuf {
 // the intentional reborrow pattern here.
 #[allow(clippy::needless_option_as_deref)]
 async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
-    harn_vm::orchestration::scope_fresh_trigger_registry(execute_run_inner_isolated(inputs)).await
+    harn_vm::orchestration::scope_fresh_run_runtime(execute_run_inner_isolated(inputs)).await
 }
 
 async fn execute_run_inner_isolated(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
@@ -791,6 +803,7 @@ async fn execute_run_inner_scoped(
         timing,
         harnpack,
         project_runtime,
+        flight_recorder,
     } = inputs;
     let eager_project_handlers = project_runtime.eager_handlers();
     let project_triggers = project_runtime.project_triggers();
@@ -942,9 +955,9 @@ async fn execute_run_inner_scoped(
     if trace || summary.is_some() {
         harn_vm::llm::enable_tracing();
     }
-    if profile.is_enabled() || phase.is_some() {
-        harn_vm::tracing::set_tracing_enabled(true);
-    }
+    // Every canonical execution keeps the same local span tree that its run
+    // record, OTel exporter, portal, and IDE project. Rendering remains opt-in.
+    harn_vm::tracing::set_tracing_enabled(true);
     // Per-builtin recording is only paid for when a profile is asked for: the
     // categorical buckets fold every non-LLM, non-tool builtin into
     // `residual`, which cannot name what a slow run is waiting on. The guard
@@ -1078,6 +1091,9 @@ async fn execute_run_inner_scoped(
         .unwrap_or("default");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
+    if flight_recorder.enabled {
+        vm.enable_flight_recorder(flight_recorder.max_events);
+    }
     let handler_initialization = if eager_project_handlers {
         package::ManifestHandlerInitialization::Eager
     } else {
@@ -1202,6 +1218,7 @@ async fn execute_run_inner_scoped(
     // a dependency generation would otherwise leave the entry pipeline's first
     // `render("@alias/...")` resolving against the dependency's `harn.toml`.
     vm.set_source_dir(&entry_source_dir(path));
+    let execution_started_at = harn_vm::clock::system_now_rfc3339();
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
@@ -1213,6 +1230,46 @@ async fn execute_run_inner_scoped(
             }
         })
         .await;
+    let execution_finished_at = harn_vm::clock::system_now_rfc3339();
+    let evidence_status = match &execution {
+        RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => "completed",
+        RunExecution::Terminal(_) | RunExecution::Failed(_) => "failed",
+    };
+    let persisted_evidence = match persist_execution_evidence(
+        &vm,
+        &flight_recorder,
+        path,
+        store_base,
+        evidence_status,
+        execution_started_at,
+        execution_finished_at,
+    ) {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            for diagnostic in &error.diagnostics {
+                stderr.push_str(&format!("error: {diagnostic}\n"));
+            }
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                harn_vm::tracing::peek_spans().len() as u64,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                crate::exit::RunFailure::Program,
+                error.stage,
+                error.summary,
+            );
+        }
+    };
+    if let Some(recording) = persisted_evidence.flight_recording.as_ref() {
+        stderr.push_str(&format!("[harn] flight recording: {}\n", recording.path));
+    }
     let output = vm.output();
     if let Some(t) = timing.as_deref_mut() {
         t.run_main = main_start.elapsed();
@@ -1396,85 +1453,6 @@ async fn execute_run_inner_scoped(
                 exit_code: aux_emission.exit_code,
             }
         }
-    }
-}
-
-pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
-    use notify::{Event, EventKind, RecursiveMode, Watcher};
-
-    let abs_path = std::fs::canonicalize(path).unwrap_or_else(|e| {
-        eprintln!("Error: {e}");
-        process::exit(1);
-    });
-    let watch_dir = abs_path.parent().unwrap_or(Path::new("."));
-
-    eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
-    run_file(
-        path,
-        false,
-        denied_builtins.clone(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-    )
-    .await;
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
-    let _watcher = {
-        let tx = tx.clone();
-        let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
-            if let Ok(event) = res {
-                if matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                ) {
-                    let has_harn = event
-                        .paths
-                        .iter()
-                        .any(|p| p.extension().is_some_and(|ext| ext == "harn"));
-                    if has_harn {
-                        let _ = tx.blocking_send(());
-                    }
-                }
-            }
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("Error setting up file watcher: {e}");
-            process::exit(1);
-        });
-        watcher
-            .watch(watch_dir, RecursiveMode::Recursive)
-            .unwrap_or_else(|e| {
-                eprintln!("Error watching directory: {e}");
-                process::exit(1);
-            });
-        watcher // keep alive
-    };
-
-    eprintln!(
-        "\x1b[2m[watch] watching {} for .harn changes (ctrl-c to stop)\x1b[0m",
-        watch_dir.display()
-    );
-
-    loop {
-        rx.recv().await;
-        // Debounce: let bursts of events settle for 200ms before re-running.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        while rx.try_recv().is_ok() {}
-
-        eprintln!();
-        eprintln!("\x1b[2m[watch] change detected, re-running {path}...\x1b[0m");
-        run_file(
-            path,
-            false,
-            denied_builtins.clone(),
-            Vec::new(),
-            CliLlmMockMode::Off,
-            None,
-            RunProfileOptions::default(),
-        )
-        .await;
     }
 }
 

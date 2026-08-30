@@ -105,6 +105,9 @@ impl SpanKind {
 /// token flame graphs and tool-selection events, so they are defined once
 /// here rather than retyped at each emission site.
 pub mod meta {
+    /// Durable Harn execution identity shared by records and trace projections.
+    pub const EXECUTION_ID: &str = "harn.execution.id";
+
     // llm_call token + cost attribution.
     pub const MODEL: &str = "model";
     pub const PROVIDER: &str = "provider";
@@ -343,7 +346,14 @@ impl SpanCollector {
         let started_at_mock_mono_ms = mock_monotonic_ms();
         let start_unix_ms = wall_clock_ms();
 
+        let execution_id = crate::current_execution_scope();
         let mut event_metadata = BTreeMap::new();
+        if let Some(execution_id) = execution_id.as_ref() {
+            event_metadata.insert(
+                meta::EXECUTION_ID.to_string(),
+                serde_json::json!(execution_id),
+            );
+        }
         if !links.is_empty() {
             event_metadata.insert("links".to_string(), serde_json::json!(links));
         }
@@ -360,7 +370,14 @@ impl SpanCollector {
                 started_at: now,
                 started_at_mock_mono_ms,
                 start_unix_ms,
-                metadata: BTreeMap::new(),
+                metadata: execution_id
+                    .map(|execution_id| {
+                        BTreeMap::from([(
+                            meta::EXECUTION_ID.to_string(),
+                            serde_json::json!(execution_id),
+                        )])
+                    })
+                    .unwrap_or_default(),
                 links,
                 events: Vec::new(),
             },

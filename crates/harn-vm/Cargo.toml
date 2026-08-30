@@ -272,6 +272,10 @@ harness = false
 name = "vm_name_resolution"
 harness = false
 
+[[bench]]
+name = "vm_flight_recorder"
+harness = false
+
 [lints]
 workspace = true
 

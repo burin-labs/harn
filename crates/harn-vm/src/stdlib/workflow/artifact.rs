@@ -46,7 +46,7 @@ pub(super) fn checkpoint_run(
 ) -> Result<(), VmError> {
     run.pending_nodes = ready_nodes.iter().cloned().collect();
     run.completed_nodes = completed_nodes.iter().cloned().collect();
-    run.trace_spans = snapshot_trace_spans();
+    run.evidence.trace_spans = snapshot_trace_spans();
     run.checkpoints.push(RunCheckpointRecord {
         id: uuid::Uuid::now_v7().to_string(),
         ready_nodes: run.pending_nodes.clone(),

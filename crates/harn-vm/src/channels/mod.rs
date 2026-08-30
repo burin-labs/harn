@@ -405,6 +405,12 @@ pub(crate) async fn emit_channel_from_vm(
     );
     headers.insert(SCOPE_ID_HEADER.to_string(), resolved.scope_id.clone());
     headers.insert(EMITTED_BY_HEADER.to_string(), emitted_by.clone());
+    if let Some(execution_id) = crate::current_execution_scope() {
+        headers.insert(
+            crate::tracing::meta::EXECUTION_ID.to_string(),
+            execution_id.to_string(),
+        );
+    }
 
     let log = log_for_scope(resolved.scope);
     let mut log_event = LogEvent::new(
@@ -1240,6 +1246,7 @@ fn receipt_value(
     inserted: bool,
 ) -> Result<serde_json::Value, VmError> {
     let record = stored_record(event)?;
+    let execution_id = event.headers.get(crate::tracing::meta::EXECUTION_ID);
     Ok(serde_json::json!({
         "event_id": event_id,
         "cursor": event_id,
@@ -1259,6 +1266,7 @@ fn receipt_value(
         "topic": topic.as_str(),
         "inserted": inserted,
         "duplicate": !inserted,
+        "execution_id": execution_id,
     }))
 }
 
@@ -1268,6 +1276,10 @@ fn event_value(
     event: LogEvent,
 ) -> Result<serde_json::Value, VmError> {
     let record = stored_record(&event)?;
+    let execution_id = event
+        .headers
+        .get(crate::tracing::meta::EXECUTION_ID)
+        .cloned();
     Ok(serde_json::json!({
         "event_id": event_id,
         "cursor": event_id,
@@ -1283,6 +1295,7 @@ fn event_value(
         "payload": record.payload,
         "emitted_at": record.emitted_at,
         "emitted_by": record.emitted_by,
+        "execution_id": execution_id,
         "pipeline_id": record.pipeline_id,
         "session_id": record.session_id,
         "tenant_id": record.tenant_id,

@@ -358,10 +358,14 @@ pub(super) fn prepare_workflow_state(
     let parent_run_id = optional_string_option(options, "parent_run_id");
     let root_run_id =
         optional_string_option(options, "root_run_id").or_else(|| parent_run_id.clone());
+    let new_run_id = crate::orchestration::new_id("run");
+    let execution_id = crate::current_execution_scope()
+        .unwrap_or_else(crate::mint_execution_scope)
+        .to_string();
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {
         type_name: "run_record".to_string(),
-        id: uuid::Uuid::now_v7().to_string(),
+        id: new_run_id.clone(),
         workflow_id: graph.id.clone(),
         workflow_name: graph.name.clone(),
         task: task.clone(),
@@ -384,7 +388,11 @@ pub(super) fn prepare_workflow_state(
         usage: None,
         replay_fixture: None,
         observability: None,
-        trace_spans: Vec::new(),
+        evidence: crate::orchestration::ExecutionEvidenceRecord {
+            schema_version: 1,
+            execution_id: Some(execution_id),
+            ..Default::default()
+        },
         tool_recordings: Vec::new(),
         hitl_questions: Vec::new(),
         persona_runtime: Vec::new(),
@@ -1310,7 +1318,7 @@ pub(super) fn finalize_workflow_state(mut state: WorkflowRunState) -> Result<VmV
     ));
     state.run.replay_fixture = Some(crate::orchestration::replay_fixture_from_run(&state.run));
     crate::tracing::span_end(state.workflow_span_id);
-    state.run.trace_spans = snapshot_trace_spans();
+    state.run.evidence.trace_spans = snapshot_trace_spans();
     state.run.tool_recordings = crate::llm::mock::drain_tool_recordings();
     checkpoint_workflow_state(&mut state, None, "finalize")?;
 

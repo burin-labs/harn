@@ -43,7 +43,10 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::json;
 
-use super::types::{LlmUsageRecord, RunChildRecord, RunRecord, RunTraceSpanRecord, ToolCallRecord};
+use super::types::{
+    ExecutionEvidenceRecord, LlmUsageRecord, RunChildRecord, RunRecord, RunTraceSpanRecord,
+    ToolCallRecord,
+};
 use crate::agent_sessions::event_facts as facts;
 use crate::value::VmError;
 
@@ -60,7 +63,7 @@ pub const AGENT_SESSION_WORKFLOW_ID: &str = "agent-session";
 
 /// Dotted `RunRecord` field paths a session projection cannot source.
 ///
-/// - `usage.total_duration_ms` and `trace_spans[].duration_ms`: `llm_call`
+/// - `usage.total_duration_ms` and `evidence.trace_spans[].duration_ms`: `llm_call`
 ///   session events carry tokens, cost, model, and provider, but no per-call
 ///   latency. `harn runs report --events-db` already joins the event log, which
 ///   does record it; that is the seam for latency rather than a guess made
@@ -72,7 +75,7 @@ pub const AGENT_SESSION_WORKFLOW_ID: &str = "agent-session";
 ///   so a projection has nothing of its own to contribute.
 pub const UNRECOVERABLE_FIELDS: [&str; 4] = [
     "usage.total_duration_ms",
-    "trace_spans[].duration_ms",
+    "evidence.trace_spans[].duration_ms",
     "policy",
     "replay_fixture",
 ];
@@ -736,7 +739,17 @@ fn assemble(
         child_runs: children,
         transcript: projected_transcript(&meta.id, &fold.messages)?,
         usage: (usage.call_count > 0).then_some(usage),
-        trace_spans: llm_call_spans(&meta.id, run_clock.started_at_ms, &fold.llm_calls),
+        evidence: ExecutionEvidenceRecord {
+            schema_version: 1,
+            trace_spans: llm_call_spans(&meta.id, run_clock.started_at_ms, &fold.llm_calls),
+            gaps: vec![super::types::RunEvidenceGapRecord {
+                component: "execution_identity".to_string(),
+                code: "session_projection_unavailable".to_string(),
+                message: "the session event stream does not carry a VM execution identity"
+                    .to_string(),
+            }],
+            ..ExecutionEvidenceRecord::default()
+        },
         tool_recordings: fold.tools,
         execution: None,
         metadata,
