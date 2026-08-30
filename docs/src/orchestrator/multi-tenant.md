@@ -3,9 +3,15 @@
 Harn can run the orchestrator listener in a tenant-aware mode:
 
 ```bash
-harn orchestrator tenant create acme --state-dir .harn/orchestrator
+harn orchestrator tenant create acme
 harn orchestrator serve --role multi-tenant --state-dir .harn/orchestrator
 ```
+
+The tenant subcommands read the state directory from the
+`HARN_ORCHESTRATOR_STATE_DIR` environment variable, defaulting to
+`.harn/orchestrator`. Only `harn orchestrator serve` takes `--state-dir` on the
+command line; set the environment variable to point the tenant subcommands at a
+different root.
 
 Tenant records live under `<state-dir>/tenants/registry.json`. Each tenant gets:
 
@@ -68,9 +74,9 @@ Tracked in [harn#6792](https://github.com/burin-labs/harn/issues/6792).
 ## Tenant lifecycle
 
 ```bash
-harn orchestrator tenant ls --state-dir .harn/orchestrator
-harn orchestrator tenant suspend acme --state-dir .harn/orchestrator
-harn orchestrator tenant delete acme --confirm --state-dir .harn/orchestrator
+harn orchestrator tenant ls
+harn orchestrator tenant suspend acme
+harn orchestrator tenant delete acme --confirm
 ```
 
 `delete` removes the tenant registry entry and its state directory. `suspend` keeps state intact and

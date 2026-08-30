@@ -81,10 +81,10 @@ impl ProcessEgressProxy {
             block_private: Some(SsrfMode::Off),
             allow_loopback: true,
         };
-        Self::start(ProcessPolicySource::Fixed(ConfiguredPolicy {
-            source: "process_network",
+        Self::start(ProcessPolicySource::Fixed(ConfiguredPolicy::single(
+            "process_network",
             policy,
-        }))
+        )))
     }
 
     fn start(policy: ProcessPolicySource) -> Result<Self, String> {
@@ -696,18 +696,18 @@ mod tests {
             "no egress policy configured"
         );
 
-        context.0.write().unwrap().policy = Some(ConfiguredPolicy {
-            source: "stdlib",
-            policy: EgressPolicy {
+        context.0.write().unwrap().policy = Some(ConfiguredPolicy::single(
+            "stdlib",
+            EgressPolicy {
                 allow: parse_rule_list("api.example.com:443").unwrap(),
                 deny: Vec::new(),
                 default: DefaultAction::Deny,
                 block_private: None,
                 allow_loopback: false,
             },
-        });
+        ));
         let configured = source.configured().unwrap();
-        assert_eq!(configured.source, "stdlib");
+        assert_eq!(configured.sources, vec!["stdlib"]);
         assert_eq!(
             configured.policy.block_private,
             Some(SsrfMode::BlockPrivate)
@@ -843,31 +843,31 @@ mod tests {
 
     #[test]
     fn exact_allowed_denied_and_missing_decisions_share_egress_rules() {
-        let configured = ConfiguredPolicy {
-            source: "test",
-            policy: EgressPolicy {
+        let configured = ConfiguredPolicy::single(
+            "test",
+            EgressPolicy {
                 allow: parse_rule_list("127.0.0.1:443,*.trusted.example").unwrap(),
                 deny: parse_rule_list("blocked.trusted.example").unwrap(),
                 default: DefaultAction::Deny,
                 block_private: Some(SsrfMode::Off),
                 allow_loopback: true,
             },
-        };
+        );
         assert!(resolve_allowed("127.0.0.1", 443, &configured).is_ok());
         assert_eq!(
             resolve_allowed("127.0.0.1", 80, &configured).unwrap_err(),
             "no allow rule matched"
         );
-        let missing_policy = ConfiguredPolicy {
-            source: "test",
-            policy: EgressPolicy {
+        let missing_policy = ConfiguredPolicy::single(
+            "test",
+            EgressPolicy {
                 allow: parse_rule_list("*.trusted.example").unwrap(),
                 deny: Vec::new(),
                 default: DefaultAction::Deny,
                 block_private: Some(SsrfMode::Off),
                 allow_loopback: true,
             },
-        };
+        );
         assert_eq!(
             resolve_allowed("missing.example.invalid", 443, &missing_policy).unwrap_err(),
             "no allow rule matched"
@@ -880,16 +880,16 @@ mod tests {
 
     #[test]
     fn private_address_guard_still_precedes_allowlist() {
-        let configured = ConfiguredPolicy {
-            source: "test",
-            policy: EgressPolicy {
+        let configured = ConfiguredPolicy::single(
+            "test",
+            EgressPolicy {
                 allow: parse_rule_list("127.0.0.1:443").unwrap(),
                 deny: Vec::new(),
                 default: DefaultAction::Deny,
                 block_private: Some(SsrfMode::BlockPrivate),
                 allow_loopback: false,
             },
-        };
+        );
         let error = resolve_allowed("127.0.0.1", 443, &configured).unwrap_err();
         assert!(error.contains("disallowed address"), "{error}");
     }

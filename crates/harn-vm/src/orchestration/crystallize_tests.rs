@@ -90,6 +90,14 @@ fn composition_trace(id: &str, run_id: &str, path: &str, output: &str) -> Crysta
         "sha256:composition-snippet",
         "sha256:composition-manifest",
     );
+    run.execution_id = Some(
+        match id {
+            "composition_a" => "hxe-019c13e0-8080-7000-8000-000000000001",
+            "composition_b" => "hxe-019c13e0-8080-7000-8000-000000000002",
+            _ => "hxe-019c13e0-8080-7000-8000-000000000003",
+        }
+        .to_string(),
+    );
     run.result = Some(json!({"text": output}));
     run.stdout = Some(String::new());
     let report = CompositionExecutionReport {
@@ -175,6 +183,18 @@ fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
         .source_traces
         .iter()
         .all(|trace| trace.source_url.as_deref() == Some("composition_run")));
+    assert_eq!(
+        bundle
+            .manifest
+            .source_traces
+            .iter()
+            .map(|trace| trace.execution_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![
+            Some("hxe-019c13e0-8080-7000-8000-000000000001"),
+            Some("hxe-019c13e0-8080-7000-8000-000000000002"),
+        ],
+    );
 
     let dir = tempfile::tempdir().unwrap();
     write_crystallization_bundle(&bundle, dir.path()).unwrap();
@@ -191,6 +211,69 @@ fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
         .traces
         .iter()
         .all(|trace| trace.compared_receipts >= 2));
+}
+
+#[test]
+fn run_record_crystallization_preserves_execution_identity_without_inventing_legacy_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run.json");
+    let mut run = crate::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "run-execution-source".to_string(),
+        workflow_id: "execution-source".to_string(),
+        ..crate::orchestration::RunRecord::default()
+    };
+    run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+    run.evidence.execution_id = Some("hxe-019c13e0-8080-7000-8000-000000000004".to_string());
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+
+    let trace = load_crystallization_trace(&path).unwrap();
+    assert_eq!(
+        trace.execution_id.as_deref(),
+        Some("hxe-019c13e0-8080-7000-8000-000000000004")
+    );
+
+    run.evidence.execution_id = None;
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+    let legacy = load_crystallization_trace(&path).unwrap();
+    assert_eq!(legacy.execution_id, None);
+    assert!(serde_json::to_value(legacy)
+        .unwrap()
+        .get("execution_id")
+        .is_none());
+}
+
+#[test]
+fn crystallization_rejects_claimed_non_harn_execution_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("trace.json");
+    std::fs::write(
+        &trace_path,
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "id": "invalid-trace",
+            "execution_id": "external-run-1",
+            "actions": [],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let trace_error = load_crystallization_trace(&trace_path).unwrap_err();
+    assert!(trace_error
+        .to_string()
+        .contains("invalid execution identity"));
+
+    let run_path = dir.path().join("run.json");
+    let mut run = crate::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "invalid-run".to_string(),
+        ..crate::orchestration::RunRecord::default()
+    };
+    run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+    run.evidence.execution_id = Some("external-run-1".to_string());
+    std::fs::write(&run_path, serde_json::to_vec(&run).unwrap()).unwrap();
+    let run_error = load_crystallization_trace(&run_path).unwrap_err();
+    assert!(run_error.to_string().contains("invalid execution evidence"));
 }
 
 #[test]

@@ -148,6 +148,10 @@ pub struct TrainingSource {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrainingProvenance {
     pub run_id: String,
+    /// Harn-owned execution identity from the source run's evidence envelope.
+    /// Legacy run records leave this absent rather than synthesizing identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_id: Option<String>,
@@ -214,6 +218,14 @@ pub fn project_agent_training_example(
 ) -> Result<AgentTrainingExample, TrainingExampleError> {
     let run_record_path = request.run_record_path.as_path();
     let run = load_run(run_record_path)?;
+    if run.evidence.execution_id.is_some() {
+        crate::orchestration::validate_execution_evidence(&run.evidence).map_err(|error| {
+            TrainingExampleError::new(
+                "invalid_execution_evidence",
+                format!("source run has invalid execution evidence: {error}"),
+            )
+        })?;
+    }
     if let Some(expected) = request.run_id.as_deref() {
         if run.id != expected {
             return Err(TrainingExampleError::new(

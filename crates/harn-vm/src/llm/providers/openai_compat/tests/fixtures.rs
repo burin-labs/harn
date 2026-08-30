@@ -5,6 +5,7 @@ use serde_json::json;
 
 pub(super) fn base_request_payload() -> LlmRequestPayload {
     LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: "openrouter".to_string(),
         model: "google/gemini-2.5-pro".to_string(),
         region: None,

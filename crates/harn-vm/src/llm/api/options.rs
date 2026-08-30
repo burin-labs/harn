@@ -2,6 +2,7 @@
 //! `LlmRequestPayload`, plus the `tool_search` / `thinking` sub-configs.
 
 use crate::llm::providers::schema_compat::project_output_schema_for_provider;
+use crate::llm_config::DataPosture;
 use crate::value::VmValue;
 
 /// Sender for streaming text deltas from an in-flight LLM call.
@@ -559,6 +560,11 @@ pub(crate) struct LlmCallOptions {
     pub previous_response_id: Option<String>,
     /// OpenAI Responses persistence flag.
     pub store: Option<bool>,
+    /// Requested provider retention/training posture, in provider-neutral
+    /// terms. `None` resolves to the catalog's `[data_controls_policy]`
+    /// default so an embedder chooses the default once, in config, instead of
+    /// it being chosen by omission inside the runtime.
+    pub data_controls: Option<DataPosture>,
     /// OpenAI Responses background execution flag.
     pub background: Option<bool>,
     /// OpenAI Responses truncation/compaction policy.
@@ -666,6 +672,7 @@ impl Default for LlmCallOptions {
             provider_overrides: None,
             previous_response_id: None,
             store: None,
+            data_controls: None,
             background: None,
             truncation: None,
             compact: None,
@@ -732,6 +739,13 @@ impl LlmCallOptions {
 
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout, &self.model)
+    }
+
+    /// The posture this request will carry: the caller's when they named one,
+    /// otherwise the catalog's `[data_controls_policy] default_posture`.
+    pub(crate) fn resolved_data_posture(&self) -> DataPosture {
+        self.data_controls
+            .unwrap_or_else(crate::llm_config::data_controls_default_posture)
     }
 
     pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {
@@ -861,6 +875,9 @@ pub(crate) struct LlmRequestPayload {
     pub provider_overrides: Option<serde_json::Value>,
     pub previous_response_id: Option<String>,
     pub store: Option<bool>,
+    /// Resolved posture for this request. Already merged with the catalog
+    /// policy default, so the transport never re-resolves it.
+    pub data_controls: DataPosture,
     pub background: Option<bool>,
     pub truncation: Option<String>,
     pub compact: Option<bool>,
@@ -1019,6 +1036,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider_overrides: opts.provider_overrides.clone(),
             previous_response_id: opts.previous_response_id.clone(),
             store: opts.store,
+            data_controls: opts.resolved_data_posture(),
             background: opts.background,
             truncation: opts.truncation.clone(),
             compact: opts.compact,

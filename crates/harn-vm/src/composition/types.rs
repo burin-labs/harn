@@ -64,6 +64,9 @@ impl CompositionFailureCategory {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompositionRunEnvelope {
+    /// Harn-owned identity of the VM execution containing this composition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     /// Runtime-unique id used to correlate child calls and terminal events.
     pub run_id: String,
     /// Snippet frontend (`harn`, `typescript`, `javascript`, ...).
@@ -95,6 +98,7 @@ pub struct CompositionRunEnvelope {
 impl Default for CompositionRunEnvelope {
     fn default() -> Self {
         Self {
+            execution_id: None,
             run_id: String::new(),
             language: String::new(),
             snippet_hash: String::new(),

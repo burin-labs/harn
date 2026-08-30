@@ -83,6 +83,7 @@ chmod +x "$fake_bin/python3"
 # admission. Opt out explicitly so a developer's installed harn cannot change
 # their path through the fixture.
 export HARN_CARGO_LEASE_MODE=off
+export HARN_ALLOW_TOOLCHAIN_MISMATCH=1
 # This fixture supplies its own lease runners below. Isolate it from CI's warmed
 # production HARN_BIN so automatic-runner assertions cannot accidentally launch
 # a real lease and its fake Cargo child.

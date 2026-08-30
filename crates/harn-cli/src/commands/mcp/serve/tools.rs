@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -308,14 +306,14 @@ impl McpOrchestratorService {
         trace_id: &str,
         arguments: JsonValue,
     ) -> Result<JsonValue, String> {
-        // Each arm is boxed so this future holds one pointer instead of the
-        // union of every tool future. Inlined, the frame is the size of the
-        // LARGEST arm and grows with every tool added, which is how it crossed
-        // the 512 KiB `large_stack_frames` ceiling at 512457 bytes on a change
-        // that added no tool at all. Boxing decouples the frame from the arm
-        // count, so the next tool cannot reintroduce this.
-        type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<JsonValue, String>> + Send + 'a>>;
-        let call: ToolFuture<'_> = match name {
+        // Each arm is boxed rather than awaited inline. An inline `.await`
+        // embeds every arm's future in this one future, so the frame is the
+        // *sum* of all eleven — several hundred kilobytes that grows whenever
+        // any tool's call graph gains a field, with a stack overflow as the
+        // failure mode. Boxing makes the frame the size of a pointer per arm,
+        // at one allocation on a path that is already doing I/O.
+        let future: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> = match name
+        {
             "harn.secret_scan" | "harn::secret_scan" => Box::pin(self.tool_secret_scan(arguments)),
             "harn.trigger.fire" => Box::pin(self.tool_trigger_fire(session, trace_id, arguments)),
             "harn.trigger.list" => Box::pin(self.tool_trigger_list(arguments)),
@@ -329,7 +327,7 @@ impl McpOrchestratorService {
             "harn.trust.query" => Box::pin(self.tool_trust_query(arguments)),
             _ => return Err(format!("unknown tool '{name}'")),
         };
-        call.await
+        future.await
     }
 
     pub(super) fn create_tool_task(

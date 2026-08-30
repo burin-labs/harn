@@ -118,6 +118,13 @@ pub type LlmCallOptions = {
   capabilities?: any,
   prefill?: string,
   previous_response_id?: string,
+  // Requested provider retention/training posture. "default" sends nothing
+  // and lets the provider's own server-side default apply; "strictest_
+  // available" applies every per-request control the resolved provider
+  // declares. The per-request receipt on telemetry.data_controls says which
+  // of applied / no_control_available / provider_unresearched actually
+  // happened, because all three look identical on the wire.
+  data_controls?: "default" | "strictest_available",
   // Generation.
   max_tokens?: int,
   temperature?: float,
