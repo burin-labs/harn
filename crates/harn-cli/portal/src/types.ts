@@ -1,5 +1,5 @@
 export type RunSummary = {
-  path: string | null
+  path: string
   id: string
   workflow_name: string
   status: string
@@ -625,7 +625,7 @@ export type PortalFlightRecording = {
   schema_version: number
   execution_id: string
   format: string
-  path: string
+  path: string | null
   content_hash: string
   byte_length: number
   retained_events: number
