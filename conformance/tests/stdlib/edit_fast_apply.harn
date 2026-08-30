@@ -19,9 +19,15 @@ pipeline default(harness: Harness) {
     harness.llm,
     [
       llm_text("{\"content\":\"fn answer() -> i32 {\\n    2\\n}\\n\",\"summary\":\"bump answer\"}"),
-      llm_text("{\"content\":\"fn answer() -> i32 {\\n    3\\n}\\n\",\"summary\":\"bump answer again\"}"),
-      llm_text("{\"content\":\"def answer():\\n    return 4\\n\",\"summary\":\"bump Python answer\"}"),
-      llm_text("{\"content\":\"export function answer(): number {\\n  return 5;\\n}\\n\",\"summary\":\"bump TypeScript answer\"}"),
+      llm_text(
+        "{\"content\":\"fn answer() -> i32 {\\n    3\\n}\\n\",\"summary\":\"bump answer again\"}",
+      ),
+      llm_text(
+        "{\"content\":\"def answer():\\n    return 4\\n\",\"summary\":\"bump Python answer\"}",
+      ),
+      llm_text(
+        "{\"content\":\"export function answer(): number {\\n  return 5;\\n}\\n\",\"summary\":\"bump TypeScript answer\"}",
+      ),
       llm_text("{\"content\":\"fn broken( {\\n\",\"summary\":\"invalid Rust\"}"),
       llm_text("{\"content\":\"updated but unsupported\\n\",\"summary\":\"unsupported syntax\"}"),
       llm_text("{\"content\":123,\"summary\":\"wrong content type\"}"),
