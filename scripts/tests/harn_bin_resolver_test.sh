@@ -376,6 +376,7 @@ fake_lease_waiting="$tmp_root/fake-rust-heavy.waiting"
 fake_lease_timeout_record="$tmp_root/fake-rust-heavy.workload-timeout-ms"
 mkdir "$fake_lease_lock"
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  -u HARN_BIN_CARGO_TIMEOUT_SECONDS \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_CARGO_LEASE_LOCK="$fake_lease_lock" \
