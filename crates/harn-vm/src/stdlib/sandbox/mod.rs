@@ -1651,7 +1651,7 @@ impl ProcessSandboxRefusal {
     pub fn inferred(command: Vec<String>, cwd: String, evidence: &str) -> Self {
         let mut stderr_excerpt: String = evidence.chars().take(Self::MAX_EXCERPT).collect();
         if evidence.chars().count() > Self::MAX_EXCERPT {
-            stderr_excerpt.push_str("…");
+            stderr_excerpt.push('…');
         }
         Self {
             schema: Self::SCHEMA.to_string(),

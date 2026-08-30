@@ -375,19 +375,38 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
         })?;
         let mut cursor = root.to_path_buf();
         for component in relative.components() {
-            // A MISSING directory is not a failure to enumerate: if an
-            // ancestor of the denied path does not exist, nothing below it
-            // exists either, so there is nothing to subtract and the walk is
-            // finished. Treating this as an error refused every spawn on any
-            // host that simply had no `~/.kube` (measured on cattrick, where it
-            // would have blocked the whole eval fleet).
+            // An ancestor we cannot enumerate ends the walk, and the walk
+            // ending grants NOTHING below that directory. That is the safe
+            // direction on an allow-only backend: the denial is expressed by
+            // the absence of a grant, so stopping early is strictly narrower
+            // than continuing, never wider.
             //
-            // Every OTHER error still fails closed: a directory we are not
-            // permitted to list is one whose contents we cannot prove exclude
-            // the denial.
+            // Two shapes reach here, and both must end the walk rather than
+            // refuse the spawn:
+            //
+            // * NOT FOUND. Nothing below a missing directory exists, so there
+            //   is nothing to subtract. Refusing here blocked every spawn on
+            //   any host that simply had no `~/.kube` (measured on cattrick,
+            //   where it would have taken the eval fleet down).
+            // * PERMISSION DENIED. We cannot list it, so we cannot grant its
+            //   children; granting nothing is exactly right. Refusing here
+            //   broke every run whose `$HOME` was not readable by the runtime
+            //   (`/root` under the hardened conformance profile), turning an
+            //   unreadable home into a total outage for no authority gained.
+            //
+            // The failure mode this must never become is granting `cursor`
+            // itself, which would expose the denied path. Ending the walk does
+            // not do that: nothing is pushed to `granted` on this iteration.
             let entries = match std::fs::read_dir(&cursor) {
                 Ok(entries) => entries,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    break
+                }
                 Err(error) => {
                     return Err(sandbox_rejection(format!(
                         "cannot enumerate '{}' to exclude denied path '{}': {error}; refusing \
@@ -1652,15 +1671,20 @@ mod tests {
         );
     }
 
-    /// Fail closed. If a directory on the path to a denial cannot be listed we
-    /// cannot prove the subtraction, so the spawn is refused rather than
-    /// granting the root unsubtracted.
+    /// An unreadable ancestor must not be GRANTED, which is the only unsafe
+    /// outcome here. Ending the walk grants nothing beneath it, which is
+    /// strictly narrower than continuing.
+    ///
+    /// This used to refuse the spawn. That was over-strict in the one direction
+    /// that matters operationally: under the hardened conformance profile
+    /// `$HOME` is `/root`, unreadable to the runtime, so every spawn failed
+    /// while no authority was gained by failing.
     #[test]
-    fn an_unreadable_ancestor_refuses_the_spawn_instead_of_granting_the_root() {
+    fn an_unreadable_ancestor_grants_nothing_beneath_it_and_never_itself() {
         use std::os::unix::fs::PermissionsExt;
         let temp = tempfile::TempDir::new().expect("temp");
         let root = temp.path().canonicalize().expect("canonical");
-        tree(&root, &["locked/.ssh"]);
+        tree(&root, &["locked/.ssh", "visible/keep"]);
         let locked = root.join("locked");
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
             .expect("lock dir");
@@ -1669,10 +1693,21 @@ mod tests {
 
         // Restore before asserting so a failure cannot leave an unremovable dir.
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+        let granted = result.expect("an unreadable ancestor must not refuse the spawn");
+
         assert!(
-            result.is_err(),
-            "an unreadable ancestor must refuse the spawn; granting the root here would \
-             expose the very subtree we could not enumerate around"
+            !granted
+                .iter()
+                .any(|path| path == &locked || locked.starts_with(path)),
+            "granting the unreadable ancestor (or anything above it) would expose the \
+             subtree we could not enumerate around: {granted:?}"
+        );
+        // Control: expansion still happened. Without this the assertion above
+        // would also pass on an empty result produced by giving up entirely,
+        // which would be a silent loss of every legitimate grant.
+        assert!(
+            granted.contains(&root.join("visible")),
+            "a sibling outside the unreadable subtree must still be granted: {granted:?}"
         );
     }
 
@@ -1775,25 +1810,25 @@ mod tests {
         );
     }
 
-    /// The other half: an ancestor that exists but cannot be listed still fails
-    /// closed. Without this, the NotFound relaxation above could be widened
-    /// into "any error means nothing to exclude", which is the failure it was
-    /// introduced to avoid.
+    /// The relaxation above is bounded: only NotFound and PermissionDenied end
+    /// the walk. Any OTHER enumeration error still refuses the spawn, because
+    /// "any error means nothing to exclude" is exactly the widening this term
+    /// must never acquire.
+    ///
+    /// A file where a directory is expected reproduces that third shape
+    /// (`NotADirectory`) without needing an exotic filesystem.
     #[test]
-    fn an_unlistable_ancestor_still_refuses_the_spawn() {
-        use std::os::unix::fs::PermissionsExt;
+    fn an_unexpected_enumeration_error_still_refuses_the_spawn() {
         let temp = tempfile::TempDir::new().expect("temp");
         let root = temp.path().canonicalize().expect("canonical");
-        tree(&root, &["locked/inner"]);
-        let locked = root.join("locked");
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("lock");
+        std::fs::write(root.join("notadir"), b"x").expect("write file");
 
-        let result = expand_around_denied(&root, &[locked.join("inner/secret")]);
+        let result = expand_around_denied(&root, &[root.join("notadir/inner/secret")]);
 
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
         assert!(
             result.is_err(),
-            "an ancestor that exists but cannot be listed must still fail closed"
+            "an enumeration error that is neither missing nor forbidden must fail closed, \
+             got {result:?}"
         );
     }
 }
