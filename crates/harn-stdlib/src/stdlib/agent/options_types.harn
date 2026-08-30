@@ -294,6 +294,9 @@ pub type AgentModelSpec = {
   provider_options?: dict,
   max_tool_calls?: int,
   previous_response_id?: string,
+  // Requested provider retention/training posture. See LlmCallOptions; every
+  // turn's telemetry.data_controls receipt reports what actually happened.
+  data_controls?: "default" | "strictest_available",
   store?: bool | dict,
   background?: bool,
   truncation?: string,

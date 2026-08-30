@@ -797,6 +797,7 @@ pub(crate) fn extract_llm_options(
     let previous_response_id =
         opt_str(&options, "previous_response_id").filter(|value| !value.trim().is_empty());
     let store = opt_responses_store_field(options.as_ref())?;
+    let data_controls = opt_data_posture_field(options.as_ref())?;
     let background = opt_bool_field(options.as_ref(), "background")?;
     let truncation = opt_str(&options, "truncation").filter(|value| !value.trim().is_empty());
     let compact = opt_bool_field(options.as_ref(), "compact")?;
@@ -958,6 +959,7 @@ pub(crate) fn extract_llm_options(
         stream,
         provider_overrides,
         previous_response_id,
+        data_controls,
         store,
         background,
         truncation,

@@ -1,0 +1,299 @@
+# ── Provider data controls (retention / training) ────────────────────────────
+#
+# One owner for a per-provider fact hosts otherwise re-derive: what a provider
+# lets a caller decide per request about retention and training, what happens
+# when Harn sets nothing, and the documentation backing both.
+#
+# `control_scope`:
+#   per_request — a documented header or body field Harn can set per call.
+#   account     — the posture exists but is selected on the account, project,
+#                 organization, or contract. Harn must not pretend a request
+#                 can change it.
+#   none        — the provider documents no control at either level.
+#
+# `retention_default` / `training_default` describe the provider's behavior
+# with NOTHING set. `unspecified` means the provider publishes no answer; it is
+# deliberately not the same claim as `not_retained` / `does_not_train`.
+#
+# Harn applies `request_controls` only when a caller asks for the
+# `strictest_available` posture, and records a receipt on every request saying
+# which of applied / no_control_available / provider_unresearched / not_
+# requested occurred. See `llm/api/data_controls.rs`.
+#
+# Every provider in the catalog is either declared here or named in
+# `[data_controls_audit].unverified`. Absence is not a classification.
+
+[data_controls_audit]
+reviewed_on = "2026-08-30"
+expires_on = "2026-11-30"
+tracking_issue = 7674
+unverified = [
+  "atlas",
+  "baseten",
+  "cloudflare_ai_gateway",
+  "dashscope",
+  "deepinfra",
+  "flexai",
+  "friendli",
+  "github_models",
+  "huggingface",
+  "hunyuan",
+  "hyperbolic",
+  "inception",
+  "minimax",
+  "moonshot",
+  "nebius",
+  "nvidia",
+  "parasail",
+  "qianfan",
+  "sambanova",
+  "siliconflow",
+  "vercel_ai_gateway",
+  "volcengine_ark",
+  "zai",
+]
+
+# ── Per-request controls ─────────────────────────────────────────────────────
+
+# `store` is documented for both the Responses API and Chat Completions. The
+# Responses API defaults to storing 30 days of application state; Chat
+# Completions stores none by default. Setting `store: false` does not end the
+# separate 30-day abuse-monitoring retention, which is an account-level (ZDR)
+# concern with no request header.
+[providers.openai.data_controls]
+control_scope = "per_request"
+retention_default = "retained"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://developers.openai.com/api/docs/guides/your-data"]
+note = "store: false ends application-state retention only; the 30-day abuse-monitoring store is ended by an approved org/project ZDR configuration, which has no per-request form."
+
+[[providers.openai.data_controls.request_controls]]
+location = "body"
+name = "store"
+value = false
+effect = "retention"
+caveat = "Abuse-monitoring retention continues regardless; a ZDR organization forces store to false server-side."
+
+# Azure exposes OpenAI's `store` as the stored-completions opt-in. The 30-day
+# abuse-monitoring store is separate and is disabled only via the Modified
+# Abuse Monitoring application.
+[providers.azure_openai.data_controls]
+control_scope = "per_request"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = [
+  "https://learn.microsoft.com/en-us/azure/foundry-classic/openai/how-to/stored-completions",
+  "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/concepts/abuse-monitoring",
+]
+note = "Stored completions are off unless store is true; the separate abuse-monitoring store is an account-level application, not a request field."
+
+[[providers.azure_openai.data_controls.request_controls]]
+location = "body"
+name = "store"
+value = false
+effect = "retention"
+
+# OpenRouter is the only catalog provider with a per-request control over
+# training as well as retention: `provider.data_collection` selects providers
+# by their data policy, and `provider.zdr` restricts routing to zero-retention
+# endpoints. Both are routing restrictions, so the effective posture still
+# depends on the upstream provider actually serving the call.
+[providers.openrouter.data_controls]
+control_scope = "per_request"
+retention_default = "unspecified"
+training_default = "unspecified"
+checked_on = "2026-08-30"
+sources = [
+  "https://openrouter.ai/docs/features/provider-routing",
+  "https://openrouter.ai/docs/features/privacy-and-logging",
+]
+note = "Both controls restrict which upstream providers may serve the call; retention and training behavior is otherwise the routed provider's."
+
+[[providers.openrouter.data_controls.request_controls]]
+location = "body"
+name = "provider.data_collection"
+value = "deny"
+effect = "training"
+caveat = "Defaults to allow. Restricts routing to providers that do not collect prompts; it does not retroactively bind one that does."
+
+[[providers.openrouter.data_controls.request_controls]]
+location = "body"
+name = "provider.zdr"
+value = true
+effect = "retention"
+
+# Gemini's `store` is an Interactions API field. `generateContent` documents no
+# equivalent, so the control is scoped to the Interactions dialect rather than
+# invented on the sibling wire.
+[providers.gemini.data_controls]
+control_scope = "per_request"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = [
+  "https://ai.google.dev/gemini-api/docs/zdr",
+  "https://ai.google.dev/gemini-api/docs/logs-policy",
+]
+note = "Paid tier only. Full zero-data-retention is a per-project approval; Search grounding retains for 30 days regardless."
+
+[[providers.gemini.data_controls.request_controls]]
+location = "body"
+name = "store"
+value = false
+effect = "retention"
+applies_to = ["gemini_interactions_sse"]
+
+# ── Account- or contract-scoped providers ────────────────────────────────────
+
+[providers.anthropic.data_controls]
+control_scope = "account"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = [
+  "https://platform.claude.com/docs/en/api/messages",
+  "https://platform.claude.com/docs/en/manage-claude/api-and-data-retention",
+]
+note = "The Messages API documents no retention parameter and no retention-related anthropic-beta value; zero data retention is enabled per organization by the account team. Some models require 30-day retention and reject ZDR organizations."
+
+[providers.vertex.data_controls]
+control_scope = "account"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://cloud.google.com/vertex-ai/generative-ai/docs/data-governance"]
+note = "Governed by project configuration; implicit context caching is on by default in the serving region."
+
+[providers.bedrock.data_controls]
+control_scope = "account"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html"]
+note = "Retention is set by the account/project data_retention mode, not by the Converse request Harn sends. AWS documents store: false on its Responses surface as insufficient for guaranteed zero retention."
+
+[providers.mistral.data_controls]
+control_scope = "account"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = [
+  "https://docs.mistral.ai/admin/monitor-comply/privacy-data-controls",
+  "https://docs.mistral.ai/admin/monitor-comply/zero-data-retention",
+]
+note = "Paid API traffic is excluded from training by default; free-tier training is opted out in the Admin Console. ZDR is a contract."
+
+[providers.groq.data_controls]
+control_scope = "account"
+retention_default = "abuse_monitoring_only"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://console.groq.com/docs/your-data"]
+note = "Inference content is not retained by default; troubleshooting and abuse logs are kept up to 30 days."
+
+[providers.xai.data_controls]
+control_scope = "account"
+retention_default = "retained"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://docs.x.ai/developers/faq/security"]
+note = "30-day encrypted retention. Zero data retention is a team-level arrangement; xAI documents no way to enable it for a specific API key."
+
+[providers.cohere.data_controls]
+control_scope = "account"
+retention_default = "abuse_monitoring_only"
+training_default = "trains"
+checked_on = "2026-08-30"
+sources = ["https://cohere.com/enterprise-data-commitments"]
+note = "Training is opted in by default and is turned off in the dashboard under Settings, Data Controls; there is no request field."
+
+[providers.together.data_controls]
+control_scope = "account"
+retention_default = "not_retained"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://docs.together.ai/docs/privacy-and-security"]
+note = "Inputs and outputs are not stored by default; training is opt-in."
+
+[providers.fireworks.data_controls]
+control_scope = "account"
+retention_default = "not_retained"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://docs.fireworks.ai/guides/security_compliance/data_handling"]
+note = "Zero retention by default on the chat-completions surface Harn dials. Fireworks documents store on its Responses API, which this route does not use."
+
+[providers.cerebras.data_controls]
+control_scope = "none"
+retention_default = "not_retained"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://support.cerebras.net/articles/1811589793-does-cerebras-retain-my-data"]
+note = "Cerebras documents that it retains no prompts, requests, responses, or logs, so there is nothing to opt out of."
+
+[providers.deepseek.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "trains"
+checked_on = "2026-08-30"
+sources = [
+  "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html",
+  "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html",
+]
+note = "The privacy policy asserts a general opt-out right but publishes no API mechanism, and does not separate API traffic from consumer chat. Treat as training by default."
+
+# ── Local and self-hosted endpoints ──────────────────────────────────────────
+#
+# No third party receives the request. Retention is whatever the operator's own
+# server does, which is why these declare `unspecified` rather than
+# `not_retained`: Harn is not in a position to assert the operator's behavior.
+
+[providers.ollama.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://github.com/ollama/ollama/blob/main/docs/api.md"]
+note = "Local endpoint. The API documents no retention or training control because no third party receives the request."
+
+[providers.llamacpp.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"]
+note = "Self-hosted endpoint. Retention is the operator's server behavior."
+
+[providers.vllm.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"]
+note = "Self-hosted endpoint. Retention is the operator's server behavior."
+
+[providers.tgi.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://huggingface.co/docs/text-generation-inference/en/reference/api_reference"]
+note = "Self-hosted endpoint. Retention is the operator's server behavior."
+
+[providers.mlx.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md"]
+note = "Self-hosted endpoint. Retention is the operator's server behavior."
+
+[providers.local.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-08-30"
+sources = ["https://platform.openai.com/docs/api-reference/chat"]
+note = "Generic user-configured OpenAI-compatible endpoint. The wire contract it speaks documents no retention control beyond store, which a local server is not required to honor."
