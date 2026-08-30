@@ -11,6 +11,13 @@ if ! "$script"; then
   exit 1
 fi
 
+# Explicit text mode is the public metadata seam. A clean title/body passes.
+if ! printf 'Improve parser diagnostics\nNo host-specific details.\n' \
+  | "$script" --stdin-label pull-request-metadata; then
+  echo "error: clean public metadata must pass the scan" >&2
+  exit 1
+fi
+
 # The real denylist must carry hashes and no plaintext. A hash-shaped line is
 # the only payload; anything else is a comment.
 if [[ "$(grep -c '^[0-9a-f]\{64\}$' "$denylist")" -lt 1 ]]; then
@@ -42,9 +49,37 @@ git -C "$fixture_root" init -q
 # That is the rule the gate enforces, applied to the gate's own test.
 fixture_token="fixture-denylisted-host.invalid"
 printf '%s' "$fixture_token" | sha256_of_stdin >"$fixture_root/scripts/consumer-host-denylist.sha256"
+product="burin"
+
+# The metadata mode must reject both policy arms and reveal neither match.
+metadata_capture="$fixture_root/metadata-captured.txt"
+if printf 'Ship %s-code support\n' "$product" \
+  | "$fixture_root/scripts/check_public_product_names.sh" --stdin-label pull-request-metadata \
+    >"$metadata_capture" 2>&1; then
+  echo "error: a downstream product name in metadata must fail the scan" >&2
+  exit 1
+fi
+if grep -qiF "$product" "$metadata_capture"; then
+  echo "error: the metadata scan echoed the matched product name" >&2
+  exit 1
+fi
+if ! grep -q '^pull-request-metadata:1: sha256:' "$metadata_capture"; then
+  echo "error: the metadata scan must report a safe line location" >&2
+  exit 1
+fi
+
+if printf 'Internal runner: %s\n' "$fixture_token" \
+  | "$fixture_root/scripts/check_public_product_names.sh" --stdin-label pull-request-metadata \
+    >"$metadata_capture" 2>&1; then
+  echo "error: denylisted infrastructure in metadata must fail the scan" >&2
+  exit 1
+fi
+if grep -qF "$fixture_token" "$metadata_capture"; then
+  echo "error: the metadata scan echoed the denylisted token" >&2
+  exit 1
+fi
 
 # --- Arm 1: a planted downstream product name must fail ----------------------
-product="burin"
 printf 'see %s-code#1\n' "$product" >"$fixture_root/docs/public.md"
 git -C "$fixture_root" add docs/public.md scripts/
 if "$fixture_root/scripts/check_public_product_names.sh"; then
