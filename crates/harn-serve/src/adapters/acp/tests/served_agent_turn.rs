@@ -135,18 +135,25 @@ async fn default_mode_admits_the_session_control_plane_and_still_refuses_durable
                 admitted["result"]
             );
 
-            // The control. `harness.agent.state_write` is the sharpest possible
-            // sibling: same capability handle, same `state` effect kind, same
-            // `write` access, same ceiling, same session. It carries no marker
-            // because its first argument is an fs-backed durable handle rather
-            // than a session id. If this is ever admitted, the ceiling has
-            // stopped meaning anything and the turn above proves nothing.
+            // The control: an unmarked write, on the same live session, that
+            // the ladder must still refuse. If this is ever admitted, the
+            // ceiling has stopped meaning anything and the turn above proves
+            // nothing.
+            //
+            // `harness.fs.write_text` rather than the sharper same-kind
+            // sibling `harness.agent.state_write`, because the latter's first
+            // parameter is a `resource` handle: passing a string literal to it
+            // over the wire risks failing the type check before enforcement is
+            // reached, which would leave this control asserting a rejection it
+            // never actually measured. The same-kind sibling is covered
+            // in-process, against the enforcement function directly, by
+            // `the_marker_does_not_open_durable_agent_state`.
             let durable = prompt(
                 &request_tx,
                 &mut response_rx,
                 &session_id,
                 3,
-                "harness.agent.state_write(\"durable-handle\", \"k\", \"v\")\n",
+                "harness.fs.write_text(\"ceiling-probe.txt\", \"nope\")\n",
             )
             .await;
             let rejection = format!(
@@ -156,8 +163,8 @@ async fn default_mode_admits_the_session_control_plane_and_still_refuses_durable
             );
             assert!(
                 rejection.contains("exceeds the active effect ceiling"),
-                "`runtime_infrastructure` must not become a durable-state write grant, \
-                 and this session must really be carrying the ceiling; got error={} \
+                "this session must really be carrying the `read_only` ceiling, or the \
+                 admitted control-plane turn above proves nothing; got error={} \
                  result={}",
                 durable["error"],
                 durable["result"]
