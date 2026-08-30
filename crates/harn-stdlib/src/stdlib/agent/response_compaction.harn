@@ -598,10 +598,19 @@ pub fn __response_compact_with_caller<T, S>(
       {ttl_ms: config.timeout_ms + 1000, throw_on_conflict: false},
     )
     if acquired?.acquired ?? false {
-      lock = get_typed_value(
+      const validated_lease = get_typed_result(
         {acquired: acquired.acquired, lock_path: acquired?.lock_path, token: acquired?.token},
         schema_of(ResponseSummaryLease),
       )
+      if !is_ok(validated_lease) {
+        const _ = try {
+          coord_release_dir_lock(capabilities.fs, capabilities.clock, acquired)
+        } catch (_release_error) {
+          nil
+        }
+        throw "response_compact: acquired summary lease failed validation"
+      }
+      lock = unwrap(validated_lease)
       break
     }
     if !waited && observe_wait != nil {
