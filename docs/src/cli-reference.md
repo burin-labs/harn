@@ -1735,18 +1735,27 @@ channels, sandbox policy, and schedules.
 
 ## harn tool
 
-Scaffold Harn-native custom tool packages.
+Scaffold Harn-native custom tool packages, execute a published registry as a
+generated CLI, or inspect its canonical catalog.
 
 ```bash
 harn tool new acme-echo
 harn tool new acme-echo --dir packages/acme-echo
 harn tool new acme-echo --description "Echo text for tests."
+harn tool run server.harn widgets get --widget-id 42 # harn-doc-cli: allow-stale
+harn tool run server.harn widgets get --help
+harn tool schema server.harn --pretty
 ```
 
 The generated package includes `[[package.tools]]` metadata, a stable
 `tools` export, an MCP entrypoint for lazy agent discovery, package-local
 dispatch tests, API docs, and a CI call to the canonical `harn package verify`
 contract. Run the entrypoint with `harn serve mcp server.harn`.
+
+`harn tool run` and `harn serve mcp --surface script` consume the same
+`ToolRegistry` and invoke the same handler closures. See
+[Tool registry adapters](./tool-registry-adapters.md) for metadata, coercion,
+validation, and catalog details.
 
 ## harn skill
 
