@@ -134,7 +134,8 @@
           "required": [
             "presets",
             "read_roots",
-            "write_roots"
+            "write_roots",
+            "read_deny_roots"
           ],
           "properties": {
             "presets": {
@@ -156,6 +157,9 @@
               "$ref": "#/$defs/stringArray"
             },
             "write_roots": {
+              "$ref": "#/$defs/stringArray"
+            },
+            "read_deny_roots": {
               "$ref": "#/$defs/stringArray"
             },
             "allow_tcp_loopback": {

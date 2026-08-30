@@ -108,6 +108,11 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "CC",
     "CXX",
     "LD",
+    // ccache: the object cache and its scratch dir. CCACHE_TEMPDIR is the one
+    // that breaks builds when unset, because it defaults to XDG_RUNTIME_DIR
+    // (`/run/user/<uid>`), which no workspace write root covers.
+    "CCACHE_DIR",
+    "CCACHE_TEMPDIR",
 ];
 
 /// The filesystem-path-valued subset of [`TOOLCHAIN_ENV_ALLOWLIST`]: toolchain
