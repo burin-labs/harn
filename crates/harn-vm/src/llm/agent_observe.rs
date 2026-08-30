@@ -67,7 +67,10 @@
 //!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,
 //!   cache_hit_ratio, cache_savings_usd,
 //!   cache_hit), thinking, thinking_summary, provider_telemetry,
-//!   structural_experiment}`.
+//!   structural_experiment}`. A completed response rejected as an empty
+//!   generation is retained before its paired `provider_call_error`, with
+//!   `response_id`, explicit nullable `stop_reason`, and a typed
+//!   `content_blocks: {count, types}` summary from the provider parser.
 //! - `interpreted_response` `{call_id, iteration, tool_format, prose,
 //!   tool_calls, tool_parse_errors}` — post-parse view of the last
 //!   assistant turn.
@@ -1072,6 +1075,18 @@ pub(crate) async fn observed_llm_call(
                     ("retryable", serde_json::json!(event_retryable)),
                     ("attempt", serde_json::json!(attempt)),
                 ]);
+                if let Some(response) = super::api::ProviderResponseEnvelope::from_error(&error) {
+                    dump_empty_generation_response(
+                        iteration.unwrap_or(0),
+                        &call_id,
+                        &opts.provider,
+                        &opts.model,
+                        &response,
+                        duration_ms,
+                        opts.applied_structural_experiment.as_ref(),
+                        opts.call_stage.as_deref(),
+                    );
+                }
                 append_provider_call_error_observability(ProviderCallErrorObservation {
                     iteration: iteration.unwrap_or(0),
                     call_id: &call_id,
