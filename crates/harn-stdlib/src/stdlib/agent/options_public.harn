@@ -53,6 +53,7 @@ pub fn __normalize_iteration_budget(opts: dict) {
       initial: 50,
       max: 50,
       extend_by: 0,
+      progress_window: 0,
       expose_decisions: false,
       wall_clock_ms: nil,
       total_cost_usd: nil,
@@ -71,6 +72,7 @@ pub fn __normalize_iteration_budget(opts: dict) {
       initial: cap,
       max: cap,
       extend_by: 0,
+      progress_window: 0,
       expose_decisions: false,
       wall_clock_ms: nil,
       total_cost_usd: nil,
@@ -126,6 +128,18 @@ pub fn __normalize_iteration_budget(opts: dict) {
   } else {
     0
   }
+  // Extension looks back over a window of recent turns, not the single turn the
+  // budget boundary lands on. Defaulting the window to `extend_by` keeps one
+  // knob for "how much slack an extension is worth" in the common case.
+  const progress_window = if mode == "adaptive" {
+    __positive_int_budget_field(
+      user_budget?.progress_window,
+      extend_by,
+      "iteration_budget.progress_window",
+    )
+  } else {
+    0
+  }
   const expose_decisions = if user_budget?.expose_decisions != nil {
     if type_of(user_budget.expose_decisions) != "bool" {
       throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
@@ -140,6 +154,7 @@ pub fn __normalize_iteration_budget(opts: dict) {
     initial: initial,
     max: max_cap,
     extend_by: extend_by,
+    progress_window: progress_window,
     expose_decisions: expose_decisions,
     wall_clock_ms: __positive_int_budget_field(
       user_budget?.wall_clock_ms,

@@ -15,6 +15,7 @@ pub type AgentLoopBudget = {
   initial: int,
   max: int,
   extend_by: int,
+  progress_window: int,
   expose_decisions: bool,
   wall_clock_ms: int?,
   total_cost_usd: float?,
@@ -95,6 +96,7 @@ fn __agent_loop_state(args: dict) -> AgentLoopState {
       summary: args.progress_summary,
       no_net_advance: args.progress_no_net_advance ?? false,
       no_information_gain: args.progress_no_information_gain ?? false,
+      turns_since_progressing: args.progress_turns_since_progressing ?? 0,
     },
   }
 }
@@ -140,6 +142,70 @@ fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
 }
 
 /**
+ * Advance the extension window counter: how many turns have elapsed since the
+ * last turn that satisfied `agent_loop_is_progressing`. Zero means the turn
+ * just observed satisfied it.
+ *
+ * This exists so the extension rule reads a WINDOW of recent turns rather than
+ * the single turn the budget boundary happens to land on. It deliberately
+ * re-uses `agent_loop_is_progressing` instead of recomputing the three progress
+ * facts, so there remains exactly one definition of "advancing the task".
+ */
+fn __agent_loop_advance_progress_window(state: AgentLoopState, previous: int) -> AgentLoopState {
+  const count = if agent_loop_is_progressing(state) {
+    0
+  } else {
+    previous + 1
+  }
+  return state + {progress: state.progress + {turns_since_progressing: count}}
+}
+
+/**
+ * How far back the extension rule looks for a progressing turn, in turns.
+ * Defaults to `budget.extend_by` — the loop is willing to look back over as
+ * many turns as one extension would buy — and `iteration_budget.progress_window`
+ * overrides it. Falls back to 1 (the boundary turn alone, i.e. the pre-window
+ * behavior) when neither is positive, so a fixed-mode or misconfigured budget
+ * cannot silently widen the window.
+ */
+fn __agent_loop_progress_window(budget: AgentLoopBudget) -> int {
+  const configured = budget.progress_window
+  const window = if configured > 0 {
+    configured
+  } else {
+    budget.extend_by
+  }
+  if window > 0 {
+    return window
+  }
+  return 1
+}
+
+/**
+ * Did the agent progress anywhere inside the recent window?
+ *
+ * Deciding extension from the boundary turn ALONE reads one sample of a noisy
+ * signal: a run that had made nine edits and one failed verification, then
+ * spent its last turns reading files back to repair, was stopped at exactly its
+ * initial cap because that one boundary turn was suppressed by
+ * `no_information_gain`. The repair was in flight and the evidence for it was
+ * three turns old.
+ *
+ * The window does not weaken the thrash bound that
+ * `no_net_advance`/`no_information_gain` exist to enforce. A run that fails the
+ * predicate on EVERY turn drives the counter monotonically upward, so each
+ * granted extension moves the next boundary `extend_by` turns further into a
+ * counter that has grown by the same amount. At the default window
+ * (`progress_window == extend_by`) that means a sustained thrash buys at most
+ * one extension and then stops; a deliberately wider window buys proportionally
+ * more, never unbounded. `budget.max` remains the outer bound in every case
+ * (`__agent_apply_extension` clamps to it).
+ */
+fn __agent_loop_progressed_within_window(state: AgentLoopState, budget: AgentLoopBudget) -> bool {
+  return (state.progress?.turns_since_progressing ?? 0) < __agent_loop_progress_window(budget)
+}
+
+/**
  * Ordered extension policy for the default loop control: each entry pairs a
  * named, eagerly-evaluated condition with the reason recorded on the resulting
  * budget decision, and the first satisfied entry wins. Expressing the policy as
@@ -148,20 +214,20 @@ fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
  * single definition (there is nowhere to silently AND an extra condition onto a
  * rule, which is exactly the class of bug this replaced).
  */
-fn __agent_loop_extension_rules(state: AgentLoopState) {
+fn __agent_loop_extension_rules(state: AgentLoopState, budget: AgentLoopBudget) {
   return [
     {when: state.completion.vetoed, reason: "completion gate vetoed"},
     {when: !state.session.required_tools_satisfied, reason: "required tools missing"},
-    {when: agent_loop_is_progressing(state), reason: "recent turn made progress"},
+    {when: __agent_loop_progressed_within_window(state, budget), reason: "progress within window"},
   ]
 }
 
-fn __agent_default_loop_control(state: AgentLoopState) {
+fn __agent_default_loop_control(state: AgentLoopState, budget: AgentLoopBudget) {
   // Only decide at the budget boundary; below it, keep looping untouched.
   if state.budget.remaining > 0 {
     return nil
   }
-  for rule in __agent_loop_extension_rules(state) {
+  for rule in __agent_loop_extension_rules(state, budget) {
     if rule.when {
       return {action: "extend", reason: rule.reason}
     }
@@ -216,7 +282,7 @@ pub fn agent_loop_control_invoke(
     return __agent_interpret_loop_command(policy(state))
   }
   if budget.mode == "adaptive" {
-    return __agent_interpret_loop_command(__agent_default_loop_control(state))
+    return __agent_interpret_loop_command(__agent_default_loop_control(state, budget))
   }
   return __agent_interpret_loop_command(nil)
 }
@@ -295,6 +361,11 @@ fn __agent_progress_summary_text(
 /**
  * agent_loop_snapshot_state builds the loop-control state callback payload.
  *
+ * `progress.turns_since_progressing` is returned ADVANCED for the turn being
+ * snapshotted: pass the caller's previous count as
+ * `progress_turns_since_progressing` and store the returned value back. Zero
+ * means this turn satisfied `agent_loop_is_progressing`.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
@@ -332,7 +403,8 @@ pub fn agent_loop_snapshot_state(args: dict) -> AgentLoopState {
     no_net_advance,
     no_information_gain,
   )
-  return __agent_loop_state(
+  const previous_turns_since_progressing = args.progress_turns_since_progressing ?? 0
+  const base = __agent_loop_state(
     {
       iteration: args.iteration,
       current_limit: args.current_limit,
@@ -360,8 +432,10 @@ pub fn agent_loop_snapshot_state(args: dict) -> AgentLoopState {
       progress_no_net_advance: no_net_advance,
       progress_no_information_gain: no_information_gain,
       progress_summary: progress_summary,
+      progress_turns_since_progressing: previous_turns_since_progressing,
     },
   )
+  return __agent_loop_advance_progress_window(base, previous_turns_since_progressing)
 }
 
 /**

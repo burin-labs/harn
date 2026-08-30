@@ -92,6 +92,7 @@ pub type IterationBudget = {
   initial?: int,
   max?: int,
   extend_by?: int,
+  progress_window?: int,
   expose_decisions?: bool,
   wall_clock_ms?: int,
   total_cost_usd?: float | int,
