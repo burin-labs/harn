@@ -515,6 +515,10 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
 fn execute_run_record(path: &Path) -> Result<ReplayExecution, String> {
     let run = harn_vm::orchestration::load_run_record(path)
         .map_err(|error| format!("failed to load run record {}: {error}", path.display()))?;
+    if run.evidence.execution_id.is_some() {
+        harn_vm::orchestration::validate_execution_evidence(&run.evidence)
+            .map_err(|error| format!("run record has invalid execution evidence: {error}"))?;
+    }
     let report = replay_report_from_run(&run);
     let raw_events = event_sequence_from_report(&report);
     let trace_run = ReplayTraceRun {
@@ -960,7 +964,20 @@ fn to_string_pretty<T: Serialize>(value: &T) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{replay_report_from_run, time_travel_keep_count};
+    use super::{execute_run_record, replay_report_from_run, time_travel_keep_count};
+
+    #[test]
+    fn replay_rejects_a_claimed_non_harn_execution_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("run.json");
+        let mut run = harn_vm::orchestration::RunRecord::default();
+        run.evidence.schema_version = harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence.execution_id = Some("external-run-1".to_string());
+        std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+
+        let error = execute_run_record(&path).unwrap_err();
+        assert!(error.contains("run record has invalid execution evidence"));
+    }
 
     #[test]
     fn replay_report_does_not_synthesize_legacy_execution_identity() {
