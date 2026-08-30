@@ -62,6 +62,24 @@ pub type HarnProviderCatalogCompletionReview = {
   scrutiny?: "standard" | "light",
 }
 
+pub type HarnProviderCatalogDataControls = {
+  checked_on: string,
+  control_scope: "per_request" | "account" | "none",
+  note?: string,
+  request_controls?: list<{
+    applies_to?: list<"anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse">,
+    caveat?: string,
+    effect: "retention" | "training",
+    location: "body" | "header",
+    name: string,
+    value: string,
+    value_kind: "bool" | "string",
+  }>,
+  retention_default: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified",
+  sources: list<string>,
+  training_default: "trains" | "does_not_train" | "unspecified",
+}
+
 pub type HarnProviderCatalogDeprecation = {
   note?: string,
   status: "active" | "deprecated",
@@ -308,6 +326,7 @@ pub type HarnProviderCatalogProvider = {
   cache_usage_accounting?: bool,
   caveats: list<string>,
   classification: "hosted" | "local",
+  data_controls?: HarnProviderCatalogDataControls,
   display_name: string,
   endpoint: HarnProviderCatalogEndpoint,
   extra_headers?: dict<string, string>,

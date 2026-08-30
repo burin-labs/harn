@@ -537,6 +537,7 @@ mod tests {
 
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
+            data_controls: crate::llm_config::DataPosture::Default,
             provider: "vertex".to_string(),
             model: "gemini-1.5-pro-002".to_string(),
             region: None,

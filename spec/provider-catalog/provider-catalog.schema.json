@@ -168,6 +168,112 @@
       ],
       "type": "object"
     },
+    "data_controls": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_on": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "control_scope": {
+          "enum": [
+            "per_request",
+            "account",
+            "none"
+          ]
+        },
+        "note": {
+          "type": "string"
+        },
+        "request_controls": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "applies_to": {
+                "items": {
+                  "enum": [
+                    "anthropic_sse",
+                    "open_ai_sse",
+                    "ollama_ndjson",
+                    "gemini_json",
+                    "gemini_interactions_sse"
+                  ]
+                },
+                "type": "array"
+              },
+              "caveat": {
+                "type": "string"
+              },
+              "effect": {
+                "enum": [
+                  "retention",
+                  "training"
+                ]
+              },
+              "location": {
+                "enum": [
+                  "body",
+                  "header"
+                ]
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "value_kind": {
+                "enum": [
+                  "bool",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "location",
+              "name",
+              "value_kind",
+              "value",
+              "effect"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "retention_default": {
+          "enum": [
+            "retained",
+            "not_retained",
+            "abuse_monitoring_only",
+            "unspecified"
+          ]
+        },
+        "sources": {
+          "items": {
+            "pattern": "^https://",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "training_default": {
+          "enum": [
+            "trains",
+            "does_not_train",
+            "unspecified"
+          ]
+        }
+      },
+      "required": [
+        "control_scope",
+        "retention_default",
+        "training_default",
+        "checked_on",
+        "sources"
+      ],
+      "type": "object"
+    },
     "deprecation": {
       "additionalProperties": false,
       "properties": {
@@ -1237,6 +1343,9 @@
             "hosted",
             "local"
           ]
+        },
+        "data_controls": {
+          "$ref": "#/$defs/data_controls"
         },
         "display_name": {
           "minLength": 1,
