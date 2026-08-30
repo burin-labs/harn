@@ -142,6 +142,7 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: if stderr != "" {
         stderr
       } else {
@@ -162,12 +163,14 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: "target Harn runtime produced invalid version JSON",
     }
   }
   const name = trim(to_string(parsed?.data?.name ?? ""))
   const version = trim(to_string(parsed?.data?.version ?? ""))
   const raw_revision = parsed?.data?.source_revision
+  const raw_fingerprint = parsed?.data?.runtime_content_fingerprint
   const revision_valid = raw_revision == nil
     || (type_of(raw_revision) == "string"
       && trim(raw_revision)
@@ -181,7 +184,44 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  if !schema_is(raw_fingerprint, schema_of(ProviderToolProbeRuntimeContentFingerprint)) {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      source_revision: nil,
+      runtime_content_fingerprint: nil,
+      reason:
+        "target Harn runtime version JSON did not include a valid runtime content fingerprint",
+    }
+  }
+  const fingerprint: ProviderToolProbeRuntimeContentFingerprint = raw_fingerprint
+  const source_revision: string? = if raw_revision == nil {
+    nil
+  } else {
+    trim(raw_revision)
+  }
+  const fingerprint_valid = regex_match("^[0-9a-f]{64}$", fingerprint.content_sha256) != nil
+    && regex_match("^[0-9a-f]{64}$", fingerprint.embedded_stdlib_sha256) != nil
+    && trim(fingerprint.compatibility.codegen_fingerprint) != ""
+    && fingerprint.harn_version == version
+    && fingerprint.source_revision == source_revision
+  if !fingerprint_valid {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      source_revision: nil,
+      runtime_content_fingerprint: nil,
+      reason: "target Harn runtime content fingerprint did not match the version contract",
     }
   }
   return {
@@ -190,11 +230,8 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
     status: "verified",
     exit_code: exit_code,
     version: version,
-    source_revision: if raw_revision == nil {
-      nil
-    } else {
-      trim(raw_revision)
-    },
+    source_revision: source_revision,
+    runtime_content_fingerprint: fingerprint,
     reason: "target Harn runtime identified",
   }
 }
@@ -220,7 +257,9 @@ pub fn provider_tool_probe_campaign_runtime_revision_requirement_error(
 pub fn provider_tool_probe_campaign_runtime_allows_live(
   runtime: ProviderToolProbeRuntimeReceipt,
 ) -> bool {
-  return runtime.status == "verified" && runtime.version != ""
+  return runtime.status == "verified"
+    && runtime.version != ""
+    && runtime.runtime_content_fingerprint != nil
 }
 
 pub fn __provider_tool_probe_campaign_runtime(
