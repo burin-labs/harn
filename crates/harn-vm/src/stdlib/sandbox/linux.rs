@@ -386,8 +386,8 @@ fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>,
             //
             // * NOT FOUND. Nothing below a missing directory exists, so there
             //   is nothing to subtract. Refusing here blocked every spawn on
-            //   any host that simply had no `~/.kube` (measured on cattrick,
-            //   where it would have taken the eval fleet down).
+            //   any host that simply had no `~/.kube` (measured on a downstream
+            //   host's CI fleet, where it would have taken every run down).
             // * PERMISSION DENIED. We cannot list it, so we cannot grant its
             //   children; granting nothing is exactly right. Refusing here
             //   broke every run whose `$HOME` was not readable by the runtime

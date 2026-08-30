@@ -760,7 +760,7 @@ fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
     eprintln!("[landlock-live] denied refused, sibling readable, revert readable");
 }
 
-/// The defect the cost measurement caught on cattrick: a denied path whose
+/// The defect the cost measurement caught on a real host: a denied path whose
 /// ancestor does not exist must cost nothing, not refuse the spawn.
 ///
 /// `~/.kube/config` is on the default denylist and `~/.kube` is absent on
