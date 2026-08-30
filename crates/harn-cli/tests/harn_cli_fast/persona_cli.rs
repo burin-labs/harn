@@ -868,11 +868,9 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
 
-    // Drive `drive_tail` in-process so the test can deterministically
-    // wait for the tail to arm its filesystem watcher (via `ready_tx`)
-    // before writing the next event. The previous subprocess+stdout race
-    // was inherently flaky because there is no observable signal for
-    // "subprocess has reached the wait loop" without a sentinel line.
+    // Drive `drive_tail` in-process and append through the exact log it is
+    // following. Opening a second SQLite connection here can deadlock on
+    // Windows before Tokio gets a chance to enforce the test timeout.
     let writer = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let options = persona_supervision::PersonaSupervisionTailOptions {
@@ -900,21 +898,24 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     // `ready_rx` fires only after the tail has flushed its initial read
     // (empty, here) and is about to wait for changes — so any event we
     // append now must traverse the follow path.
-    tokio::time::timeout(Duration::from_secs(5), ready_rx)
+    let log = tokio::time::timeout(Duration::from_secs(5), ready_rx)
         .await
         .expect("tail signalled ready")
         .expect("ready oneshot delivered");
 
-    let _ = persona::tick_payload(
-        Some(&manifest),
-        &state_dir,
-        "merge_captain",
-        Some("2026-05-10T15:00:00Z"),
-        0.0,
-        0,
-    )
-    .await
-    .expect("append followed event");
+    let topic = harn_vm::event_log::Topic::new(harn_vm::PERSONA_RUNTIME_TOPIC).unwrap();
+    let mut event = harn_vm::event_log::LogEvent::new(
+        "persona.control.paused",
+        serde_json::json!({"reason": "maintenance"}),
+    );
+    event
+        .headers
+        .insert("persona".to_string(), "merge_captain".to_string());
+    event.occurred_at_ms = 1_778_425_200_000;
+    log.append(&topic, event)
+        .await
+        .expect("append followed event");
+    log.flush().await.expect("flush followed event");
 
     let result = tokio::time::timeout(Duration::from_secs(5), task)
         .await
@@ -929,8 +930,8 @@ async fn persona_supervision_tail_follow_streams_new_events() {
         .to_string();
     let frame: serde_json::Value = serde_json::from_str(&line).expect("follow JSON");
     assert_eq!(frame["persona_id"], "merge_captain");
-    assert_eq!(frame["update_kind"], "receipt");
-    assert_eq!(frame["payload"]["status"], "completed");
+    assert_eq!(frame["update_kind"], "control");
+    assert_eq!(frame["payload"]["action"], "pause");
     assert_eq!(frame["occurred_at"], "2026-05-10T15:00:00Z");
 }
 
