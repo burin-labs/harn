@@ -14,9 +14,9 @@ path = "src/main.rs"
 
 [dependencies]
 arcstr = { version = "1", features = ["serde", "std"] }
-harn-modules = { path = "../harn-modules", version = "=0.10.124-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.124-dev" }
-harn-vm = { path = "../harn-vm", version = "=0.10.124-dev", default-features = false }
+harn-modules = { path = "../harn-modules", version = "=0.10.124" }
+harn-parser = { path = "../harn-parser", version = "=0.10.124" }
+harn-vm = { path = "../harn-vm", version = "=0.10.124", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
